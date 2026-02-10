@@ -4,6 +4,11 @@
 
 :root {
     --primary: #22c55e;
+    --navbar-height: 56px;
+    --location-consent-offset: 0px;
+    --location-banner-offset: 0px;
+    --top-banner-offset: 0px;
+    --app-top-offset: calc(var(--navbar-height) + var(--top-banner-offset));
     --primary-dark: #16a34a;
     --primary-light: #dcfce7;
     --accent: #6366f1;
@@ -27,7 +32,7 @@ a:hover { text-decoration: underline; }
 /* ── Navbar ────────────────────────────────────── */
 #navbar {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0 16px; height: 56px;
+    padding: 0 16px; height: var(--navbar-height);
     background: var(--bg-card); border-bottom: 1px solid var(--border);
     position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
 }
@@ -57,7 +62,7 @@ a:hover { text-decoration: underline; }
 .badge { position: absolute; top: 2px; right: 2px; background: var(--danger); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; }
 
 .location-consent-banner {
-    position: fixed; top: 56px; left: 0; right: 0; z-index: 980;
+    position: fixed; top: var(--navbar-height); left: 0; right: 0; z-index: 980;
     background: #ecfeff; color: #155e75; border-bottom: 1px solid #bae6fd;
     display: flex; align-items: center; justify-content: space-between;
     gap: 10px; padding: 8px 16px; font-size: 13px; font-weight: 500;
@@ -67,7 +72,7 @@ a:hover { text-decoration: underline; }
 }
 
 /* ── Map ───────────────────────────────────────── */
-#map-container { position: fixed; top: 56px; bottom: 0; left: 0; right: 0; }
+#map-container { position: fixed; top: var(--app-top-offset); bottom: 0; left: 0; right: 0; }
 #map { width: 100%; height: 100%; }
 #map-filters {
     position: absolute; top: 10px; left: 10px; z-index: 800;
@@ -155,7 +160,7 @@ a:hover { text-decoration: underline; }
 
 /* ── Side Panel (Court Detail) ────────────────── */
 .side-panel {
-    position: fixed; top: 56px; right: 0; bottom: 0; width: 460px;
+    position: fixed; top: var(--app-top-offset); right: 0; bottom: 0; width: 460px;
     background: var(--bg-card); z-index: 900; overflow-y: auto;
     box-shadow: -4px 0 16px rgba(0,0,0,.1); display: none;
 }
@@ -294,7 +299,7 @@ a:hover { text-decoration: underline; }
 .busy-cell { width: 20px; height: 18px; border-radius: 3px; border: 1px solid rgba(0,0,0,.04); }
 
 /* ── Profile Page ──────────────────────────────── */
-.view { padding: 72px 20px 40px; max-width: 900px; margin: 0 auto; }
+.view { padding: calc(var(--app-top-offset) + 16px) 20px 40px; max-width: 900px; margin: 0 auto; }
 .profile-empty { text-align: center; padding: 60px 20px; }
 .profile-empty h2 { margin-bottom: 8px; }
 .profile-empty p { color: var(--text-muted); margin-bottom: 16px; }
@@ -458,7 +463,7 @@ a:hover { text-decoration: underline; }
 
 /* ── Dropdown ──────────────────────────────────── */
 .dropdown {
-    position: fixed; top: 56px; right: 16px;
+    position: fixed; top: var(--app-top-offset); right: 16px;
     width: 320px; max-height: 400px;
     background: var(--bg-card); border-radius: var(--radius);
     box-shadow: var(--shadow-lg); z-index: 1100; overflow-y: auto;
@@ -560,7 +565,7 @@ a:hover { text-decoration: underline; }
 
 /* ── Location Banner ──────────────────────────── */
 #location-banner {
-    position: fixed; top: 56px; left: 0; right: 0; z-index: 950;
+    position: fixed; top: calc(var(--navbar-height) + var(--location-consent-offset)); left: 0; right: 0; z-index: 950;
     background: var(--primary); color: white;
     display: none;
 }
@@ -750,7 +755,7 @@ a:hover { text-decoration: underline; }
 .match-winner { font-weight: 600; color: var(--primary-dark); }
 
 /* ── Full-Page Court View (cfp) ───────────────── */
-.court-fullpage { padding-top: 56px; }
+.court-fullpage { padding-top: var(--app-top-offset); }
 .cfp { max-width: 1200px; margin: 0 auto; padding: 16px 20px 60px; }
 
 .cfp-topbar {

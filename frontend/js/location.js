@@ -173,11 +173,17 @@ const LocationService = {
             </div>
         `;
         banner.style.display = 'block';
+        if (typeof App !== 'undefined' && typeof App.updateTopLayoutOffset === 'function') {
+            App.updateTopLayoutOffset();
+        }
     },
 
     _hideLocationBanner() {
         const banner = document.getElementById('location-banner');
         if (banner) banner.style.display = 'none';
+        if (typeof App !== 'undefined' && typeof App.updateTopLayoutOffset === 'function') {
+            App.updateTopLayoutOffset();
+        }
     },
 
     _updateStatusBar(lat, lng) {

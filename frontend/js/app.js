@@ -59,6 +59,7 @@ const App = {
 
         MapView.init();
         Chat.init();
+        window.addEventListener('resize', () => App.updateTopLayoutOffset());
 
         // Check auth (async) — validates token, clears stale sessions
         Auth.checkAuth();
@@ -66,6 +67,7 @@ const App = {
 
         // Location tracking is opt-in; do not auto-request geolocation on app load.
         App.initLocationPrompt();
+        App.updateTopLayoutOffset();
 
         // Mobile search handler (shown on small screens when nav search is hidden)
         const mobileSearchInput = document.getElementById('mobile-search-input');
@@ -96,19 +98,23 @@ const App = {
         if (pref === 'enabled') {
             banner.style.display = 'none';
             LocationService.start();
+            App.updateTopLayoutOffset();
             return;
         }
         if (pref === 'disabled') {
             banner.style.display = 'none';
+            App.updateTopLayoutOffset();
             return;
         }
         banner.style.display = 'flex';
+        App.updateTopLayoutOffset();
     },
 
     enableLocationTracking() {
         localStorage.setItem(App.locationPrefKey, 'enabled');
         const banner = document.getElementById('location-consent-banner');
         if (banner) banner.style.display = 'none';
+        App.updateTopLayoutOffset();
         LocationService.start();
         App.toast('Location enabled. Nearby court and auto check-in are now active.');
     },
@@ -117,6 +123,34 @@ const App = {
         localStorage.setItem(App.locationPrefKey, 'disabled');
         const banner = document.getElementById('location-consent-banner');
         if (banner) banner.style.display = 'none';
+        App.updateTopLayoutOffset();
+    },
+
+
+    _visibleHeight(el) {
+        if (!el) return 0;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return 0;
+        return Math.ceil(el.getBoundingClientRect().height || 0);
+    },
+
+    updateTopLayoutOffset() {
+        window.requestAnimationFrame(() => {
+            const consentBanner = document.getElementById('location-consent-banner');
+            const locationBanner = document.getElementById('location-banner');
+            const consentHeight = App._visibleHeight(consentBanner);
+            const locationHeight = App._visibleHeight(locationBanner);
+            const total = consentHeight + locationHeight;
+
+            const root = document.documentElement;
+            root.style.setProperty('--location-consent-offset', `${consentHeight}px`);
+            root.style.setProperty('--location-banner-offset', `${locationHeight}px`);
+            root.style.setProperty('--top-banner-offset', `${total}px`);
+
+            if (App.currentView === 'map' && typeof MapView !== 'undefined' && MapView.map) {
+                MapView.map.invalidateSize();
+            }
+        });
     },
 
     showView(view) {
