@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from backend.app import db
 from backend.models import CourtCommunityInfo, CourtEvent, CourtImage
+from backend.time_utils import utcnow_naive
 
 
 _SPAM_TERMS = {
@@ -104,8 +105,8 @@ def _parse_iso_datetime(raw_value):
         dt = datetime.fromisoformat(value)
     except ValueError:
         return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
 
@@ -447,7 +448,7 @@ def apply_payload_to_court(court, payload, submitted_by_user_id=None, source_sub
             setattr(community, field, value)
     if hours.get('hours_notes'):
         community.hours_notes = hours['hours_notes']
-    community.last_updated_at = datetime.now(timezone.utc)
+    community.last_updated_at = utcnow_naive()
 
     for image in payload.get('images', []):
         image_url = image.get('image_url')

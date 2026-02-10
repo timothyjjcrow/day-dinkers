@@ -1,6 +1,6 @@
 import json
-from datetime import datetime, timezone
 from backend.app import db
+from backend.time_utils import utcnow_naive
 
 
 def _safe_json(raw_value, fallback=None):
@@ -31,7 +31,7 @@ class User(db.Model):
     losses = db.Column(db.Integer, default=0)
     games_played = db.Column(db.Integer, default=0)
     elo_rating = db.Column(db.Float, default=1200.0)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     def to_dict(self):
         return {
@@ -79,7 +79,7 @@ class Court(db.Model):
     skill_levels = db.Column(db.String(100), default='all')
     court_type = db.Column(db.String(50), default='dedicated')
     verified = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     def to_dict(self):
         return {
@@ -107,7 +107,7 @@ class Friendship(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     friend_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     status = db.Column(db.String(20), default='pending')
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     user = db.relationship('User', foreign_keys=[user_id], backref='sent_requests')
     friend = db.relationship('User', foreign_keys=[friend_id], backref='received_requests')
@@ -129,7 +129,7 @@ class Game(db.Model):
     is_open = db.Column(db.Boolean, default=True)
     recurring = db.Column(db.String(50), default='')
     status = db.Column(db.String(20), default='upcoming')  # upcoming, in_progress, completed
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     court = db.relationship('Court', backref='games')
     creator = db.relationship('User', backref='games_created')
@@ -162,7 +162,7 @@ class GamePlayer(db.Model):
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     rsvp_status = db.Column(db.String(20), default='yes')  # yes, no, maybe, invited
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     user = db.relationship('User', backref='legacy_game_participations')
 
@@ -193,7 +193,7 @@ class PlaySession(db.Model):
     visibility = db.Column(db.String(20), default='all')  # 'all' or 'friends'
     notes = db.Column(db.Text, default='')
     status = db.Column(db.String(20), default='active')  # active, completed, cancelled
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     creator = db.relationship('User', backref='play_sessions')
     court = db.relationship('Court', backref='play_sessions')
@@ -222,7 +222,7 @@ class PlaySessionPlayer(db.Model):
     session_id = db.Column(db.Integer, db.ForeignKey('play_session.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     status = db.Column(db.String(20), default='joined')  # joined, invited, waitlisted
-    joined_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    joined_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     user = db.relationship('User', backref='session_participations')
 
@@ -242,7 +242,7 @@ class RecurringSessionSeries(db.Model):
     recurrence = db.Column(db.String(20), default='weekly')  # weekly, biweekly
     interval_weeks = db.Column(db.Integer, default=1)
     occurrences = db.Column(db.Integer, default=1)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     creator = db.relationship('User', backref='session_series')
     items = db.relationship('RecurringSessionSeriesItem', backref='series', lazy='joined',
@@ -265,7 +265,7 @@ class RecurringSessionSeriesItem(db.Model):
     series_id = db.Column(db.Integer, db.ForeignKey('recurring_session_series.id'), nullable=False)
     session_id = db.Column(db.Integer, db.ForeignKey('play_session.id'), nullable=False)
     sequence = db.Column(db.Integer, default=1)  # 1-based order in series
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     session = db.relationship('PlaySession', backref='series_items')
 
@@ -288,7 +288,7 @@ class Message(db.Model):
     recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     content = db.Column(db.Text, nullable=False)
     msg_type = db.Column(db.String(20), default='court')  # court, direct
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
 
@@ -309,7 +309,7 @@ class CheckIn(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False)
-    checked_in_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    checked_in_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
     checked_out_at = db.Column(db.DateTime, nullable=True)
     looking_for_game = db.Column(db.Boolean, default=False)
 
@@ -338,7 +338,7 @@ class Notification(db.Model):
     content = db.Column(db.Text, nullable=False)
     reference_id = db.Column(db.Integer, nullable=True)
     read = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     user = db.relationship('User', backref='notifications')
 
@@ -358,7 +358,7 @@ class CourtReport(db.Model):
     reason = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, default='')
     status = db.Column(db.String(20), default='pending')
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
 
 # ── Community Court Data (user contributions + review queue) ─────────
@@ -374,7 +374,7 @@ class CourtCommunityInfo(db.Model):
     closure_notes = db.Column(db.Text, default='')
     hours_notes = db.Column(db.Text, default='')
     additional_info = db.Column(db.Text, default='')
-    last_updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    last_updated_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     court = db.relationship('Court', backref=db.backref('community_info', uselist=False))
 
@@ -400,7 +400,7 @@ class CourtImage(db.Model):
     image_url = db.Column(db.Text, nullable=False)
     caption = db.Column(db.String(200), default='')
     approved = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     court = db.relationship('Court', backref='images')
     submitted_by = db.relationship('User', foreign_keys=[submitted_by_user_id])
@@ -431,7 +431,7 @@ class CourtEvent(db.Model):
     link = db.Column(db.String(500), default='')
     recurring = db.Column(db.String(80), default='')
     approved = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     court = db.relationship('Court', backref='events')
     submitted_by = db.relationship('User', foreign_keys=[submitted_by_user_id])
@@ -466,7 +466,7 @@ class CourtUpdateSubmission(db.Model):
     reviewer_notes = db.Column(db.Text, default='')
     reviewed_at = db.Column(db.DateTime, nullable=True)
     auto_applied = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     court = db.relationship('Court', backref='update_submissions')
     user = db.relationship('User', foreign_keys=[user_id], backref='court_update_submissions')
@@ -509,7 +509,7 @@ class Match(db.Model):
     team2_score = db.Column(db.Integer, nullable=True)
     winner_team = db.Column(db.Integer, nullable=True)
     submitted_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
     completed_at = db.Column(db.DateTime, nullable=True)
 
     court = db.relationship('Court', backref='matches')
@@ -560,7 +560,7 @@ class RankedQueue(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False)
     match_type = db.Column(db.String(20), default='doubles')
-    joined_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    joined_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     user = db.relationship('User', backref='queue_entries')
     court = db.relationship('Court', backref='queue_entries')

@@ -1,5 +1,4 @@
 """Ranked competitive play — queue, matchmaking, scoring with confirmation, leaderboards."""
-from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 from backend.app import db
 from backend.models import (
@@ -7,6 +6,7 @@ from backend.models import (
 )
 from backend.auth_utils import login_required
 from backend.services.elo import calculate_elo_changes
+from backend.time_utils import utcnow_naive
 
 ranked_bp = Blueprint('ranked', __name__)
 _ALLOWED_MATCH_TYPES = {'singles', 'doubles'}
@@ -228,7 +228,7 @@ def submit_score(match_id):
     if all(p.confirmed for p in match.players):
         _apply_elo(match)
         match.status = 'completed'
-        match.completed_at = datetime.now(timezone.utc)
+        match.completed_at = utcnow_naive()
         db.session.commit()
 
     return jsonify({
@@ -260,7 +260,7 @@ def confirm_match(match_id):
     if all_confirmed:
         _apply_elo(match)
         match.status = 'completed'
-        match.completed_at = datetime.now(timezone.utc)
+        match.completed_at = utcnow_naive()
 
         # Notify all players of final results
         for p in match.players:

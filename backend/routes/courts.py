@@ -1,6 +1,6 @@
 import json
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from flask import Blueprint, current_app, request, jsonify
 from backend.app import db
 from backend.models import (
@@ -8,6 +8,7 @@ from backend.models import (
     CourtCommunityInfo, CourtImage, CourtEvent, CourtUpdateSubmission
 )
 from backend.auth_utils import login_required, admin_required
+from backend.time_utils import utcnow_naive
 from backend.services.court_updates import (
     analyze_submission, apply_payload_to_court,
     normalize_submission_payload, safe_json_loads, should_auto_apply,
@@ -137,7 +138,7 @@ def _review_submission(submission, action, reviewer, reviewer_notes=''):
 
     submission.reviewer_id = reviewer.id
     submission.reviewer_notes = str(reviewer_notes or '').strip()[:2000]
-    submission.reviewed_at = datetime.now(timezone.utc)
+    submission.reviewed_at = utcnow_naive()
 
     status_word = 'approved' if submission.status == 'approved' else 'rejected'
     court_name = submission.court.name if submission.court else 'this court'
@@ -254,7 +255,7 @@ def get_court(court_id):
     court_dict['busyness'] = _get_busyness(court_id)
 
     # Recent activity
-    day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+    day_ago = utcnow_naive() - timedelta(hours=24)
     recent = CheckIn.query.filter(
         CheckIn.court_id == court_id,
         CheckIn.checked_in_at >= day_ago
@@ -273,7 +274,7 @@ def get_court(court_id):
     if not court_dict.get('photo_url') and approved_images:
         court_dict['photo_url'] = approved_images[0].image_url
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = utcnow_naive()
     upcoming_events = CourtEvent.query.filter(
         CourtEvent.court_id == court_id,
         CourtEvent.approved.is_(True),
@@ -393,7 +394,7 @@ def submit_court_update(court_id):
         submission.auto_applied = True
         submission.reviewer_id = request.current_user.id
         submission.reviewer_notes = 'Auto-applied by configured policy.'
-        submission.reviewed_at = datetime.now(timezone.utc)
+        submission.reviewed_at = utcnow_naive()
     else:
         _notify_reviewers_of_submission(submission)
 
@@ -691,19 +692,19 @@ def get_court_busyness(court_id):
 
 
 def _cleanup_stale_checkins():
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=4)
+    cutoff = utcnow_naive() - timedelta(hours=4)
     stale = CheckIn.query.filter(
         CheckIn.checked_out_at.is_(None),
         CheckIn.checked_in_at < cutoff
     ).all()
     for ci in stale:
-        ci.checked_out_at = datetime.now(timezone.utc)
+        ci.checked_out_at = utcnow_naive()
     if stale:
         db.session.commit()
 
 
 def _get_busyness(court_id):
-    thirty_days_ago = datetime.now(timezone.utc).date() - timedelta(days=30)
+    thirty_days_ago = utcnow_naive().date() - timedelta(days=30)
     logs = ActivityLog.query.filter(
         ActivityLog.court_id == court_id,
         ActivityLog.date >= thirty_days_ago,

@@ -1,8 +1,8 @@
-from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 from backend.app import db, socketio
 from backend.models import CheckIn, Notification, Friendship, PlaySession, Court
 from backend.auth_utils import login_required
+from backend.time_utils import utcnow_naive
 
 presence_bp = Blueprint('presence', __name__)
 
@@ -30,7 +30,7 @@ def check_in():
         user_id=request.current_user.id, checked_out_at=None
     ).all()
     for ci in active:
-        ci.checked_out_at = datetime.now(timezone.utc)
+        ci.checked_out_at = utcnow_naive()
 
     # Also end any active "now" sessions at old courts
     old_sessions = PlaySession.query.filter_by(
@@ -73,7 +73,7 @@ def check_out():
         return jsonify({'error': 'No active check-in'}), 400
 
     court_id = active.court_id
-    active.checked_out_at = datetime.now(timezone.utc)
+    active.checked_out_at = utcnow_naive()
 
     # Auto-end any active "now" sessions by this user
     now_sessions = PlaySession.query.filter_by(

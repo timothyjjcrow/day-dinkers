@@ -1,8 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from flask import Blueprint, request, jsonify
 from backend.app import db
 from backend.models import Game, GamePlayer, Court, Notification
 from backend.auth_utils import login_required
+from backend.time_utils import utcnow_naive
 
 games_bp = Blueprint('games', __name__)
 
@@ -14,7 +15,7 @@ def get_games():
     skill = request.args.get('skill_level', '')
     open_only = request.args.get('open_only', 'false')
 
-    query = Game.query.filter(Game.date_time >= datetime.now(timezone.utc))
+    query = Game.query.filter(Game.date_time >= utcnow_naive())
     if court_id:
         query = query.filter_by(court_id=court_id)
     if skill and skill != 'all':
@@ -44,7 +45,7 @@ def get_my_games():
 
     games = Game.query.filter(
         Game.id.in_(my_game_ids),
-        Game.date_time >= datetime.now(timezone.utc)
+        Game.date_time >= utcnow_naive()
     ).order_by(Game.date_time.asc()).limit(10).all()
 
     results = []

@@ -1,5 +1,5 @@
 """Open-to-Play sessions — create, join, schedule, invite."""
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 from backend.app import db
 from backend.models import (
@@ -7,6 +7,7 @@ from backend.models import (
     RecurringSessionSeries, RecurringSessionSeriesItem,
 )
 from backend.auth_utils import login_required
+from backend.time_utils import utcnow_naive
 
 sessions_bp = Blueprint('sessions', __name__)
 
@@ -407,7 +408,7 @@ def join_session(session_id):
             waitlisted = True
         else:
             existing.status = 'joined'
-            existing.joined_at = datetime.now(timezone.utc)
+            existing.joined_at = utcnow_naive()
     else:
         psp = PlaySessionPlayer(
             session_id=session_id,
@@ -459,7 +460,7 @@ def leave_session(session_id):
             ).order_by(PlaySessionPlayer.joined_at.asc()).first()
             if next_waitlisted:
                 next_waitlisted.status = 'joined'
-                next_waitlisted.joined_at = datetime.now(timezone.utc)
+                next_waitlisted.joined_at = utcnow_naive()
                 promoted_user_id = next_waitlisted.user_id
                 notif = Notification(
                     user_id=next_waitlisted.user_id,
