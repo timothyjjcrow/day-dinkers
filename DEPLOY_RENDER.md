@@ -34,7 +34,7 @@ In the `pickleplay-app` service settings, set/update these values:
 
 Trigger deploy (or let auto-deploy run). The start command is:
 
-`gunicorn --worker-class eventlet --workers 1 --bind 0.0.0.0:$PORT backend.wsgi:app`
+`gunicorn --workers 1 --threads 8 --bind 0.0.0.0:$PORT backend.wsgi:app`
 
 ## 5) After first successful deploy
 

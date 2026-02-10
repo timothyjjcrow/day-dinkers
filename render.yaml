@@ -5,7 +5,7 @@ services:
     plan: free
     autoDeploy: true
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --worker-class eventlet --workers 1 --bind 0.0.0.0:$PORT backend.wsgi:app
+    startCommand: gunicorn --workers 1 --threads 8 --bind 0.0.0.0:$PORT backend.wsgi:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11
@@ -21,6 +21,8 @@ services:
         value: "true"
       - key: CORS_ALLOWED_ORIGINS
         value: "*"
+      - key: SOCKETIO_ASYNC_MODE
+        value: threading
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: ADMIN_EMAILS

@@ -56,7 +56,11 @@ def create_app(config_name='development'):
     allowed_origins = _parse_allowed_origins(app.config.get('CORS_ALLOWED_ORIGINS', '*'))
 
     db.init_app(app)
-    socketio.init_app(app, cors_allowed_origins=allowed_origins)
+    socketio.init_app(
+        app,
+        cors_allowed_origins=allowed_origins,
+        async_mode=app.config.get('SOCKETIO_ASYNC_MODE', 'threading'),
+    )
     CORS(app, resources={r'/api/*': {'origins': allowed_origins}})
 
     from backend.routes.auth import auth_bp

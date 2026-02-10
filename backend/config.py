@@ -52,6 +52,7 @@ class BaseConfig:
     COURT_UPDATE_MAX_EVENTS = _env_int('COURT_UPDATE_MAX_EVENTS', 6)
     COURT_UPDATE_MAX_IMAGE_BYTES = _env_int('COURT_UPDATE_MAX_IMAGE_BYTES', 2 * 1024 * 1024)
     CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', '*')
+    SOCKETIO_ASYNC_MODE = os.environ.get('SOCKETIO_ASYNC_MODE', 'threading')
 
 
 class DevelopmentConfig(BaseConfig):
