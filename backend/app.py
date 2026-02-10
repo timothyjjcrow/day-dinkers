@@ -1,0 +1,91 @@
+import os
+from flask import Flask, send_from_directory
+from flask_sqlalchemy import SQLAlchemy
+from flask_socketio import SocketIO
+from flask_cors import CORS
+from sqlalchemy import inspect, text
+from backend.config import config
+
+db = SQLAlchemy()
+socketio = SocketIO()
+
+FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend')
+
+
+def _parse_allowed_origins(raw_origins):
+    if not raw_origins:
+        return '*'
+
+    if isinstance(raw_origins, (list, tuple, set)):
+        cleaned = [origin for origin in raw_origins if origin]
+        return cleaned or '*'
+
+    raw_text = str(raw_origins).strip()
+    if not raw_text or raw_text == '*':
+        return '*'
+
+    origins = [origin.strip() for origin in raw_text.split(',') if origin.strip()]
+    return origins or '*'
+
+
+def _run_lightweight_migrations():
+    """Apply small schema updates for local/dev databases without Alembic."""
+    inspector = inspect(db.engine)
+    if 'user' not in inspector.get_table_names():
+        return
+
+    existing_columns = {col['name'] for col in inspector.get_columns('user')}
+    with db.engine.begin() as connection:
+        if 'is_admin' not in existing_columns:
+            connection.execute(text(
+                'ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0'
+            ))
+        if 'google_sub' not in existing_columns:
+            connection.execute(text(
+                'ALTER TABLE "user" ADD COLUMN google_sub VARCHAR(255)'
+            ))
+            connection.execute(text(
+                'CREATE UNIQUE INDEX IF NOT EXISTS ix_user_google_sub ON "user" (google_sub)'
+            ))
+
+
+def create_app(config_name='development'):
+    app = Flask(__name__)
+    app.config.from_object(config[config_name])
+
+    allowed_origins = _parse_allowed_origins(app.config.get('CORS_ALLOWED_ORIGINS', '*'))
+
+    db.init_app(app)
+    socketio.init_app(app, cors_allowed_origins=allowed_origins)
+    CORS(app, resources={r'/api/*': {'origins': allowed_origins}})
+
+    from backend.routes.auth import auth_bp
+    from backend.routes.courts import courts_bp
+    from backend.routes.games import games_bp
+    from backend.routes.sessions import sessions_bp
+    from backend.routes.chat import chat_bp
+    from backend.routes.presence import presence_bp
+    from backend.routes.ranked import ranked_bp
+
+    app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    app.register_blueprint(courts_bp, url_prefix='/api/courts')
+    app.register_blueprint(games_bp, url_prefix='/api/games')
+    app.register_blueprint(sessions_bp, url_prefix='/api/sessions')
+    app.register_blueprint(chat_bp, url_prefix='/api/chat')
+    app.register_blueprint(presence_bp, url_prefix='/api/presence')
+    app.register_blueprint(ranked_bp, url_prefix='/api/ranked')
+
+    @app.route('/')
+    def index():
+        return send_from_directory(FRONTEND_DIR, 'index.html')
+
+    @app.route('/<path:filename>')
+    def frontend_files(filename):
+        return send_from_directory(FRONTEND_DIR, filename)
+
+    with app.app_context():
+        from backend import models  # noqa: F401
+        db.create_all()
+        _run_lightweight_migrations()
+
+    return app

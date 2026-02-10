@@ -1,0 +1,858 @@
+/**
+ * Sessions module — Open-to-Play system replacing Games.
+ * Handles creating, joining, listing play sessions (now or scheduled),
+ * session detail with chat, and invite friends.
+ */
+const Sessions = {
+    currentSessionId: null,
+    currentSessionCourtId: null,
+    sessionsById: {},
+
+    async load() {
+        const list = document.getElementById('sessions-list');
+        if (!list) return;
+        list.innerHTML = '<div class="loading">Loading sessions...</div>';
+
+        const typeFilter = document.getElementById('sessions-type-filter')?.value || 'all';
+        const visibilityFilter = document.getElementById('sessions-visibility-filter')?.value || 'all';
+        const skillFilter = document.getElementById('sessions-skill-filter')?.value || 'all';
+        const token = localStorage.getItem('token');
+
+        if (visibilityFilter === 'friends' && !token) {
+            list.innerHTML = `
+                <div class="empty-state">
+                    <h3>Sign in to view friends-only sessions</h3>
+                    <p>Friends-only sessions are visible after you sign in.</p>
+                    <button class="btn-primary" onclick="Auth.showModal()">Sign In / Sign Up</button>
+                </div>`;
+            return;
+        }
+
+        const params = new URLSearchParams();
+        if (typeFilter !== 'all') params.set('type', typeFilter);
+        if (visibilityFilter !== 'all') params.set('visibility', visibilityFilter);
+        if (skillFilter !== 'all') params.set('skill_level', skillFilter);
+        const url = params.toString() ? `/api/sessions?${params.toString()}` : '/api/sessions';
+
+        try {
+            const res = await API.get(url);
+            const sessions = res.sessions || [];
+            Sessions.sessionsById = Object.fromEntries(sessions.map(s => [s.id, s]));
+            const now = sessions.filter(s => s.session_type === 'now');
+            const scheduled = sessions.filter(s => s.session_type === 'scheduled');
+
+            if (!sessions.length) {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No open sessions</h3>
+                        <p>${typeFilter !== 'all' || visibilityFilter !== 'all' || skillFilter !== 'all'
+                            ? 'Try different filters or create a new session.'
+                            : 'Check in at a court and set yourself as open to play, or schedule a session!'}</p>
+                        <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule a Session</button>
+                    </div>`;
+                return;
+            }
+
+            let html = '';
+            const suggestions = token ? Sessions._getSuggestedSessions(sessions).slice(0, 3) : [];
+            if (suggestions.length > 0) {
+                html += '<h3 class="session-section-title">⭐ Suggested For You</h3>';
+                html += '<div class="session-card-grid">';
+                html += suggestions.map(s => Sessions._renderCard(s)).join('');
+                html += '</div>';
+            }
+            if (now.length > 0) {
+                html += '<h3 class="session-section-title">🟢 Active Now</h3>';
+                html += '<div class="session-card-grid">';
+                html += now.map(s => Sessions._renderCard(s)).join('');
+                html += '</div>';
+            }
+            if (scheduled.length > 0) {
+                html += '<h3 class="session-section-title">📅 Upcoming</h3>';
+                html += '<div class="session-card-grid">';
+                html += scheduled.map(s => Sessions._renderCard(s)).join('');
+                html += '</div>';
+            }
+            list.innerHTML = html;
+        } catch {
+            list.innerHTML = '<p class="error">Failed to load sessions</p>';
+        }
+    },
+
+    _renderCard(session) {
+        const court = session.court || {};
+        const creator = session.creator || {};
+        const players = session.players || [];
+        const series = session.series || null;
+        const joined = players.filter(p => p.status === 'joined').length;
+        const waitlisted = players.filter(p => p.status === 'waitlisted').length;
+        const isNow = session.session_type === 'now';
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const isMine = session.creator_id === currentUser.id;
+        const amJoined = players.some(p => p.user_id === currentUser.id && p.status === 'joined');
+        const amWaitlisted = players.some(p => p.user_id === currentUser.id && p.status === 'waitlisted');
+        const isFull = joined + 1 >= session.max_players;
+        const safeCourtName = Sessions._e(court.name || 'Unknown');
+        const safeCourtCity = Sessions._e(court.city || '');
+        const safeCreatorName = Sessions._e(creator.name || creator.username || 'Unknown');
+        const safeGameType = Sessions._e((session.game_type || 'open').replace(/_/g, ' '));
+        const safeSkillLevel = Sessions._e(session.skill_level || 'All levels');
+        const safeNotes = Sessions._e(session.notes || '');
+
+        let timeStr = 'Active now';
+        if (!isNow && session.start_time) {
+            const dt = new Date(session.start_time);
+            const dateStr = dt.toLocaleDateString('en-US', {
+                weekday: 'short', month: 'short', day: 'numeric',
+            });
+            const tStr = dt.toLocaleTimeString('en-US', {
+                hour: 'numeric', minute: '2-digit',
+            });
+            timeStr = `${dateStr} at ${tStr}`;
+            if (session.end_time) {
+                const end = new Date(session.end_time);
+                timeStr += ` – ${end.toLocaleTimeString('en-US', {
+                    hour: 'numeric', minute: '2-digit',
+                })}`;
+            }
+        }
+
+        const typeIcon = session.game_type === 'doubles' ? '👥' :
+                         session.game_type === 'singles' ? '👤' : '🎯';
+        const skillColor = session.skill_level === 'beginner' ? '#22c55e' :
+                           session.skill_level === 'intermediate' ? '#f59e0b' :
+                           session.skill_level === 'advanced' ? '#ef4444' : '#6b7280';
+
+        let actionBtn = '';
+        if (isMine) {
+            actionBtn = `<button class="btn-danger btn-sm" onclick="event.stopPropagation(); Sessions.endSession(${session.id})">End Session</button>`;
+        } else if (amJoined || amWaitlisted) {
+            actionBtn = `<button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.leaveSession(${session.id})">Leave</button>`;
+        } else {
+            actionBtn = `<button class="btn-primary btn-sm" onclick="event.stopPropagation(); Sessions.joinSession(${session.id})">${isFull ? 'Join Waitlist' : 'Join'}</button>`;
+        }
+        const calendarBtn = !isNow
+            ? `<button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.downloadCalendar(${session.id})">🗓 Calendar</button>`
+            : '';
+
+        return `
+        <div class="session-card ${isNow ? 'session-active' : ''}" onclick="Sessions.openDetail(${session.id})">
+            <div class="session-card-header">
+                <div class="session-time-badge ${isNow ? 'active' : ''}">
+                    ${isNow ? '<span class="live-dot"></span>' : '📅'}
+                    <span>${timeStr}</span>
+                </div>
+                <span class="session-visibility-tag">${session.visibility === 'friends' ? '👥 Friends' : '🌐 Open'}</span>
+                ${series ? `<span class="session-visibility-tag">🔁 ${series.sequence}/${series.occurrences}</span>` : ''}
+            </div>
+            <div class="session-card-court">📍 ${safeCourtName}${court.city ? `, ${safeCourtCity}` : ''}</div>
+            <div class="session-card-meta">
+                <span>${typeIcon} ${safeGameType}</span>
+                <span style="color:${skillColor}">⭐ ${safeSkillLevel}</span>
+                <span>👥 ${joined + 1}/${session.max_players}</span>
+                ${waitlisted > 0 ? `<span>⏳ ${waitlisted} waiting</span>` : ''}
+            </div>
+            <div class="session-card-creator">
+                <span class="session-creator-avatar">${(creator.name || creator.username || '?')[0].toUpperCase()}</span>
+                ${safeCreatorName}
+                ${isMine ? '<span class="session-mine-badge">You</span>' : ''}
+                ${amWaitlisted ? '<span class="session-mine-badge">Waitlisted</span>' : ''}
+            </div>
+            ${session.notes ? `<p class="session-notes">${safeNotes}</p>` : ''}
+            <div class="session-card-actions" onclick="event.stopPropagation()">
+                ${actionBtn}
+                <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); MapView.openCourtDetail(${session.court_id}); App.showView('map');">View Court</button>
+                <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.inviteFriends(${session.id})">👥 Invite</button>
+                ${calendarBtn}
+            </div>
+        </div>`;
+    },
+
+    // ── Session Detail Page ─────────────────────────────────────
+    async openDetail(sessionId) {
+        Sessions.currentSessionId = sessionId;
+        const container = document.getElementById('sessions-list');
+        container.innerHTML = '<div class="loading">Loading session details...</div>';
+
+        try {
+            const res = await API.get(`/api/sessions/${sessionId}`);
+            const session = res.session;
+            Sessions.sessionsById[session.id] = session;
+            Sessions.currentSessionCourtId = session.court_id;
+            document.getElementById('sessions-view').querySelector('.view-header').innerHTML = `
+                <button class="btn-secondary" onclick="Sessions._backToList()">← Back to Sessions</button>
+                <h2>Session Details</h2>
+            `;
+            container.innerHTML = Sessions._renderDetail(session);
+
+            // Load chat
+            Sessions._loadSessionChat(sessionId, session.court_id);
+
+            // Join the court room so chat updates stream into the detail view.
+            if (typeof Chat !== 'undefined' && typeof Chat.joinRoom === 'function') {
+                Chat.joinRoom(`court_${session.court_id}`);
+            }
+        } catch {
+            container.innerHTML = '<p class="error">Failed to load session details</p>';
+        }
+    },
+
+    _renderDetail(session) {
+        const court = session.court || {};
+        const creator = session.creator || {};
+        const players = session.players || [];
+        const series = session.series || null;
+        const isNow = session.session_type === 'now';
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const isMine = session.creator_id === currentUser.id;
+        const amJoined = players.some(p => p.user_id === currentUser.id && p.status === 'joined');
+        const amWaitlisted = players.some(p => p.user_id === currentUser.id && p.status === 'waitlisted');
+        const joinedPlayers = players.filter(p => p.status === 'joined');
+        const invitedPlayers = players.filter(p => p.status === 'invited');
+        const waitlistedPlayers = players.filter(p => p.status === 'waitlisted');
+        const isFull = joinedPlayers.length + 1 >= session.max_players;
+        const safeCourtName = Sessions._e(court.name || 'Unknown');
+        const safeCourtAddress = Sessions._e(court.address || '');
+        const safeCourtCity = Sessions._e(court.city || '');
+        const safeCreatorName = Sessions._e(creator.name || creator.username || '');
+        const safeSessionNotes = Sessions._e(session.notes || '');
+        const safeGameType = Sessions._e(session.game_type || 'Open Play');
+        const safeSkillLevel = Sessions._e(session.skill_level || 'All');
+        const safeVisibility = Sessions._e(session.visibility === 'friends' ? '👥 Friends Only' : '🌐 Open to All');
+        const directionsUrl = Sessions._directionsUrl(court);
+
+        let timeStr = '';
+        if (isNow) {
+            timeStr = 'Active Now — Open to Play';
+        } else if (session.start_time) {
+            const dt = new Date(session.start_time);
+            timeStr = dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+            timeStr += ' at ' + dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            if (session.end_time) {
+                const end = new Date(session.end_time);
+                timeStr += ` – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+            }
+        }
+
+        const playersHTML = joinedPlayers.length > 0
+            ? joinedPlayers.map(p => {
+                const u = p.user || {};
+                const initials = (u.name || u.username || '?')[0].toUpperCase();
+                const safeName = Sessions._e(u.name || u.username || '');
+                return `<div class="player-chip">
+                    <span class="player-avatar">${initials}</span>
+                    <span>${safeName}${u.skill_level ? ` (${u.skill_level})` : ''}</span>
+                </div>`;
+            }).join('')
+            : '<p class="muted">No players have joined yet. Be the first!</p>';
+
+        const invitedHTML = invitedPlayers.length > 0
+            ? `<div class="invited-players"><strong>Invited:</strong> ${invitedPlayers.map(p => Sessions._e(p.user?.name || p.user?.username)).join(', ')}</div>`
+            : '';
+
+        const waitlistedHTML = waitlistedPlayers.length > 0
+            ? `<div class="invited-players"><strong>Waitlist:</strong> ${waitlistedPlayers.map(p => Sessions._e(p.user?.name || p.user?.username)).join(', ')}</div>`
+            : '';
+
+        let actionBtns = '';
+        if (isMine) {
+            actionBtns = `
+                <button class="btn-danger" onclick="Sessions.endSession(${session.id})">🛑 End Session</button>
+                <button class="btn-secondary" onclick="Sessions.inviteFriends(${session.id})">👥 Invite Friends</button>`;
+        } else if (amJoined || amWaitlisted) {
+            actionBtns = `
+                <button class="btn-danger" onclick="Sessions.leaveSession(${session.id})">${amWaitlisted ? 'Leave Waitlist' : 'Leave Session'}</button>
+                <button class="btn-secondary" onclick="Sessions.inviteFriends(${session.id})">👥 Invite Friends</button>`;
+        } else {
+            actionBtns = `
+                <button class="btn-primary" onclick="Sessions.joinSession(${session.id})">✅ ${isFull ? 'Join Waitlist' : 'Join Session'}</button>
+                <button class="btn-secondary" onclick="Sessions.inviteFriends(${session.id})">👥 Invite Friends</button>`;
+        }
+        if (!isNow) {
+            actionBtns += `
+                <button class="btn-secondary" onclick="Sessions.downloadCalendar(${session.id})">🗓 Add to Calendar</button>`;
+        }
+        if (isMine && series) {
+            actionBtns += `
+                <button class="btn-danger" onclick="Sessions.cancelSeries(${series.id}, ${session.id})">🔁 Cancel Future Sessions</button>`;
+        }
+
+        return `
+        <div class="session-detail">
+            <div class="session-detail-hero">
+                <div class="session-detail-time">
+                    <div class="hero-date">${isNow ? '🟢 Active Now' : '📅 Scheduled'}</div>
+                    <div class="hero-time">${timeStr}</div>
+                </div>
+                <div class="session-status-badge ${isNow ? 'active' : 'scheduled'}">${isNow ? 'Live' : 'Scheduled'}</div>
+            </div>
+
+            <div class="game-detail-grid">
+                <div class="game-detail-info">
+                    <div class="detail-section">
+                        <h4>Court</h4>
+                        <div class="detail-court-card" onclick="MapView.openCourtDetail(${court.id}); App.showView('map');">
+                            <strong>${safeCourtName}</strong>
+                            <span>${safeCourtAddress}, ${safeCourtCity}</span>
+                            <span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'} · ${court.num_courts || '?'} courts</span>
+                            <a href="${directionsUrl}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm" onclick="event.stopPropagation()">🗺 Directions</a>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4>Session Info</h4>
+                        <div class="detail-meta-grid">
+                            <div><span class="detail-label">Type</span><span>${safeGameType}</span></div>
+                            <div><span class="detail-label">Skill</span><span>${safeSkillLevel}</span></div>
+                            <div><span class="detail-label">Players</span><span>${joinedPlayers.length + 1}/${session.max_players}</span></div>
+                            <div><span class="detail-label">Visibility</span><span>${safeVisibility}</span></div>
+                            ${series ? `<div><span class="detail-label">Series</span><span>🔁 ${series.sequence}/${series.occurrences}</span></div>` : ''}
+                            ${waitlistedPlayers.length > 0 ? `<div><span class="detail-label">Waitlist</span><span>⏳ ${waitlistedPlayers.length}</span></div>` : ''}
+                        </div>
+                    </div>
+
+                    ${session.notes ? `<div class="detail-section"><h4>Notes</h4><p>${safeSessionNotes}</p></div>` : ''}
+
+                    <div class="detail-section">
+                        <h4>Created by</h4>
+                        <div class="player-chip">
+                            <span class="player-avatar">${(creator.name || creator.username || '?')[0].toUpperCase()}</span>
+                            <span>${safeCreatorName}</span>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4>Joined Players (${joinedPlayers.length + 1}/${session.max_players})</h4>
+                        <div class="players-list">
+                            <div class="player-chip">
+                                <span class="player-avatar" style="background:var(--primary)">${(creator.name || creator.username || '?')[0].toUpperCase()}</span>
+                                <span>${safeCreatorName} <span class="muted">(organizer)</span></span>
+                            </div>
+                            ${playersHTML}
+                        </div>
+                        ${invitedHTML}
+                        ${waitlistedHTML}
+                    </div>
+
+                    <div class="detail-actions">
+                        ${actionBtns}
+                    </div>
+                </div>
+
+                <div class="game-detail-chat">
+                    <div class="game-chat-container">
+                        <h4>💬 Session Chat</h4>
+                        <div id="session-chat-messages" class="game-chat-messages"></div>
+                        <form class="game-chat-input" onsubmit="Sessions.sendChat(event, ${session.id}, ${court.id})">
+                            <input type="text" id="session-chat-text" placeholder="Message the group..." autocomplete="off">
+                            <button type="submit" class="btn-primary btn-sm">Send</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    },
+
+    async _loadSessionChat(sessionId, courtId) {
+        const container = document.getElementById('session-chat-messages');
+        if (!container) return;
+        const token = localStorage.getItem('token');
+        if (!token) {
+            container.innerHTML = '<p class="muted">Sign in to view and send messages</p>';
+            return;
+        }
+        if (!courtId) {
+            container.innerHTML = '<p class="muted">Chat unavailable for this session</p>';
+            return;
+        }
+        try {
+            const res = await API.get(`/api/chat/court/${courtId}`);
+            const msgs = res.messages || [];
+            if (!msgs.length) {
+                container.innerHTML = '<p class="muted">No messages yet. Say hello!</p>';
+                return;
+            }
+            container.innerHTML = msgs.map(m => Sessions._renderChatMsg(m)).join('');
+            container.scrollTop = container.scrollHeight;
+        } catch {
+            container.innerHTML = '<p class="muted">Chat not available yet</p>';
+        }
+    },
+
+    _renderChatMsg(msg) {
+        const sender = msg.sender || {};
+        const time = new Date(msg.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const isMe = sender.id === currentUser.id;
+        const safeSender = Sessions._e(isMe ? 'You' : (sender.name || sender.username));
+        const safeContent = Sessions._e(msg.content || '');
+        return `
+        <div class="chat-msg ${isMe ? 'chat-msg-me' : ''}">
+            <div class="chat-msg-header">
+                <strong>${safeSender}</strong>
+                <span class="chat-msg-time">${time}</span>
+            </div>
+            <div class="chat-msg-body">${safeContent}</div>
+        </div>`;
+    },
+
+    async sendChat(e, sessionId, courtId) {
+        e.preventDefault();
+        const input = document.getElementById('session-chat-text');
+        const content = input.value.trim();
+        if (!content) return;
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+        if (!courtId) { App.toast('Chat unavailable for this session', 'error'); return; }
+
+        try {
+            await API.post('/api/chat/send', {
+                content, court_id: courtId, msg_type: 'court',
+            });
+            input.value = '';
+            Sessions._loadSessionChat(sessionId, courtId);
+        } catch { App.toast('Failed to send message', 'error'); }
+    },
+
+    _backToList() {
+        document.getElementById('sessions-view').querySelector('.view-header').innerHTML = `
+            <h2>Open to Play</h2>
+            <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule Session</button>
+        `;
+        Sessions.currentSessionId = null;
+        Sessions.currentSessionCourtId = null;
+        Sessions.load();
+    },
+
+    // ── Create Session Modal ──────────────────────────────────
+    async showCreateModal(preselectedCourtId) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+
+        const modal = document.getElementById('session-modal');
+        modal.style.display = 'flex';
+
+        const select = document.getElementById('session-court-select');
+        try {
+            const res = await API.get('/api/courts');
+            select.innerHTML = (res.courts || []).map(c =>
+                `<option value="${c.id}" ${c.id === preselectedCourtId ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
+            ).join('');
+        } catch { select.innerHTML = '<option>Error loading courts</option>'; }
+
+        // Populate friend invite section
+        const inviteSection = document.getElementById('session-invite-section');
+        const inviteList = document.getElementById('session-invite-friends');
+        if (App.friendsList.length > 0) {
+            inviteSection.style.display = 'block';
+            inviteList.innerHTML = App.friendsList.map(f => `
+                <label class="friend-pick-item">
+                    <input type="checkbox" value="${f.id}" name="invite_friends">
+                    <span class="friend-pick-avatar">${Sessions._e((f.name || f.username || '?')[0].toUpperCase())}</span>
+                    <span class="friend-pick-name">${Sessions._e(f.name || f.username)}</span>
+                </label>
+            `).join('');
+        } else {
+            inviteSection.style.display = 'none';
+        }
+
+        // Reset type toggle
+        document.getElementById('session-type-toggle').value = 'scheduled';
+        const recurrenceSelect = document.getElementById('session-recurrence-select');
+        const recurrenceCount = document.getElementById('session-recurrence-count');
+        if (recurrenceSelect) recurrenceSelect.value = 'none';
+        if (recurrenceCount) recurrenceCount.value = '4';
+        Sessions._toggleScheduleFields();
+    },
+
+    hideCreateModal() {
+        document.getElementById('session-modal').style.display = 'none';
+    },
+
+    _toggleScheduleFields() {
+        const type = document.getElementById('session-type-toggle').value;
+        const fields = document.getElementById('session-schedule-fields');
+        fields.style.display = type === 'scheduled' ? 'block' : 'none';
+        Sessions._toggleRecurrenceFields();
+    },
+
+    _toggleRecurrenceFields() {
+        const type = document.getElementById('session-type-toggle')?.value;
+        const recurrence = document.getElementById('session-recurrence-select')?.value || 'none';
+        const group = document.getElementById('session-recurrence-count-group');
+        if (!group) return;
+        group.style.display = (type === 'scheduled' && recurrence !== 'none') ? 'block' : 'none';
+    },
+
+    async create(e) {
+        e.preventDefault();
+        const form = e.target;
+        const sessionType = form.session_type.value;
+
+        const data = {
+            court_id: parseInt(form.court_id.value),
+            session_type: sessionType,
+            game_type: form.game_type.value,
+            skill_level: form.skill_level.value,
+            max_players: parseInt(form.max_players.value),
+            visibility: form.visibility.value,
+            notes: form.notes.value,
+        };
+
+        if (sessionType === 'scheduled') {
+            if (!form.start_time.value) {
+                App.toast('Start time is required for scheduled sessions', 'error');
+                return;
+            }
+            data.start_time = form.start_time.value;
+            if (form.end_time.value) data.end_time = form.end_time.value;
+
+            const recurrence = form.recurrence?.value || 'none';
+            const parsedCount = parseInt(form.recurrence_count?.value || '1', 10);
+            const recurrenceCount = Number.isFinite(parsedCount) ? Math.max(1, parsedCount) : 1;
+            data.recurrence = recurrence;
+            data.recurrence_count = recurrenceCount;
+        }
+
+        // Collect invited friends
+        const selectedFriends = Array.from(
+            form.querySelectorAll('input[name="invite_friends"]:checked')
+        ).map(cb => parseInt(cb.value));
+        if (selectedFriends.length > 0) data.invite_friends = selectedFriends;
+
+        try {
+            const res = await API.post('/api/sessions', data);
+            if (res?.session?.id) Sessions.sessionsById[res.session.id] = res.session;
+            if (Array.isArray(res.sessions)) {
+                res.sessions.forEach(s => {
+                    if (s?.id) Sessions.sessionsById[s.id] = s;
+                });
+            }
+            if (sessionType === 'now') {
+                App.toast("You're open to play! Others can see and join.");
+            } else if ((res.created_count || 1) > 1) {
+                App.toast(`Scheduled ${res.created_count} recurring sessions.`);
+            } else {
+                App.toast('Session scheduled!');
+            }
+            Sessions.hideCreateModal();
+            Sessions.load();
+            // Refresh map if visible
+            if (App.currentView === 'map') MapView.loadCourts();
+        } catch (err) {
+            App.toast(err.message || 'Failed to create session', 'error');
+        }
+    },
+
+    // ── Open to Play Now (quick action from court) ────────────
+    async openToPlayNow(courtId) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+
+        // Quick create a "now" session at this court
+        const modal = document.getElementById('session-modal');
+        modal.style.display = 'flex';
+
+        const select = document.getElementById('session-court-select');
+        try {
+            const res = await API.get('/api/courts');
+            select.innerHTML = (res.courts || []).map(c =>
+                `<option value="${c.id}" ${c.id === courtId ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
+            ).join('');
+        } catch { select.innerHTML = '<option>Error loading courts</option>'; }
+
+        // Set to "now" type
+        document.getElementById('session-type-toggle').value = 'now';
+        const recurrenceSelect = document.getElementById('session-recurrence-select');
+        const recurrenceCount = document.getElementById('session-recurrence-count');
+        if (recurrenceSelect) recurrenceSelect.value = 'none';
+        if (recurrenceCount) recurrenceCount.value = '4';
+        Sessions._toggleScheduleFields();
+
+        // Populate friend invite section
+        const inviteSection = document.getElementById('session-invite-section');
+        const inviteList = document.getElementById('session-invite-friends');
+        if (App.friendsList.length > 0) {
+            inviteSection.style.display = 'block';
+            inviteList.innerHTML = App.friendsList.map(f => `
+                <label class="friend-pick-item">
+                    <input type="checkbox" value="${f.id}" name="invite_friends">
+                    <span class="friend-pick-avatar">${Sessions._e((f.name || f.username || '?')[0].toUpperCase())}</span>
+                    <span class="friend-pick-name">${Sessions._e(f.name || f.username)}</span>
+                </label>
+            `).join('');
+        } else {
+            inviteSection.style.display = 'none';
+        }
+    },
+
+    // ── Join / Leave Sessions ─────────────────────────────────
+    async joinSession(sessionId) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+        try {
+            const res = await API.post(`/api/sessions/${sessionId}/join`, {});
+            if (res.waitlisted) App.toast('Session is full. You were added to the waitlist.');
+            else App.toast("You've joined the session!");
+            Sessions.load();
+            if (App.currentView === 'map') MapView.loadCourts();
+            if (Sessions.currentSessionId === sessionId) {
+                Sessions.openDetail(sessionId);
+            }
+        } catch (err) {
+            App.toast(err.message || 'Failed to join session', 'error');
+        }
+    },
+
+    async leaveSession(sessionId) {
+        try {
+            const res = await API.post(`/api/sessions/${sessionId}/leave`, {});
+            App.toast('Left session');
+            if (res.promoted_user_id) {
+                App.toast('A waitlisted player was moved into the open spot.');
+            }
+            Sessions.load();
+            if (Sessions.currentSessionId === sessionId) {
+                Sessions.openDetail(sessionId);
+            }
+            if (App.currentView === 'map') MapView.loadCourts();
+        } catch { App.toast('Failed to leave session', 'error'); }
+    },
+
+    async endSession(sessionId) {
+        try {
+            await API.post(`/api/sessions/${sessionId}/end`, {});
+            App.toast('Session ended');
+            Sessions.load();
+            if (App.currentView === 'map') MapView.loadCourts();
+        } catch { App.toast('Failed to end session', 'error'); }
+    },
+
+    // ── Invite Friends to Session ────────────────────────────
+    inviteFriends(sessionId) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+        App.showInviteModal('Invite Friends to Session', async (friendIds) => {
+            try {
+                const res = await API.post(`/api/sessions/${sessionId}/invite`, {
+                    friend_ids: friendIds,
+                });
+                App.toast(res.message || 'Invites sent!');
+                App.hideInviteModal();
+            } catch (err) {
+                App.toast(err.message || 'Failed to send invites', 'error');
+            }
+        });
+    },
+
+    async cancelSeries(seriesId, sessionId) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+        if (!confirm('Cancel all upcoming sessions in this recurring series?')) return;
+        try {
+            const res = await API.post(`/api/sessions/series/${seriesId}/cancel`, {});
+            if ((res.cancelled_count || 0) > 0) {
+                App.toast(`Cancelled ${res.cancelled_count} future session(s).`);
+            } else {
+                App.toast('No upcoming sessions were cancelled.');
+            }
+            Sessions.load();
+            if (Sessions.currentSessionId === sessionId) {
+                Sessions.openDetail(sessionId);
+            }
+            if (App.currentView === 'map') MapView.loadCourts();
+        } catch (err) {
+            App.toast(err.message || 'Failed to cancel recurring sessions', 'error');
+        }
+    },
+
+    _getSuggestedSessions(sessions) {
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const userId = currentUser.id;
+        if (!userId) return [];
+        const friendIds = App.friendIds || [];
+        const userSkill = Sessions._userSkillCategory(currentUser.skill_level);
+
+        return sessions
+            .filter(s => s.creator_id !== userId)
+            .filter(s => {
+                const me = (s.players || []).find(p => p.user_id === userId);
+                return !me || !['joined', 'waitlisted'].includes(me.status);
+            })
+            .map(s => ({ session: s, score: Sessions._scoreSession(s, userSkill, friendIds) }))
+            .filter(entry => entry.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .map(entry => entry.session);
+    },
+
+    _scoreSession(session, userSkill, friendIds) {
+        const players = session.players || [];
+        const joined = players.filter(p => p.status === 'joined').length;
+        const available = (joined + 1) < session.max_players;
+        if (!available) return -100;
+
+        let score = 0;
+        if (session.session_type === 'now') score += 26;
+        else score += 8;
+
+        if (friendIds.includes(session.creator_id)) score += 36;
+        const friendParticipants = players.filter(p => friendIds.includes(p.user_id)).length;
+        score += Math.min(friendParticipants, 3) * 14;
+
+        if (session.skill_level === 'all') score += 10;
+        else if (userSkill && session.skill_level === userSkill) score += 24;
+        else if (!userSkill) score += 4;
+
+        if (session.visibility === 'friends' && friendIds.includes(session.creator_id)) score += 8;
+        if (session.game_type === 'open') score += 6;
+        return score;
+    },
+
+    _userSkillCategory(level) {
+        const parsed = parseFloat(level);
+        if (!Number.isFinite(parsed)) return null;
+        if (parsed <= 2.5) return 'beginner';
+        if (parsed <= 3.5) return 'intermediate';
+        return 'advanced';
+    },
+
+    async downloadCalendar(sessionId) {
+        let session = Sessions.sessionsById[sessionId];
+        if (!session) {
+            try {
+                const res = await API.get(`/api/sessions/${sessionId}`);
+                session = res.session;
+                if (session?.id) Sessions.sessionsById[session.id] = session;
+            } catch {
+                App.toast('Unable to load session details for calendar export', 'error');
+                return;
+            }
+        }
+        if (!session || session.session_type !== 'scheduled' || !session.start_time) {
+            App.toast('Only scheduled sessions can be added to calendar', 'error');
+            return;
+        }
+
+        const start = new Date(session.start_time);
+        if (Number.isNaN(start.getTime())) {
+            App.toast('Session start time is invalid', 'error');
+            return;
+        }
+        const end = session.end_time
+            ? new Date(session.end_time)
+            : new Date(start.getTime() + 90 * 60000);
+        const court = session.court || {};
+        const summary = `PicklePlay: ${(session.game_type || 'open').replace(/_/g, ' ')} at ${court.name || 'Court'}`;
+        const description = [
+            session.notes || 'Open to Play session',
+            `Skill: ${session.skill_level || 'all'}`,
+            `Visibility: ${session.visibility || 'all'}`,
+        ].filter(Boolean).join('\n');
+        const location = [court.name, court.address, court.city].filter(Boolean).join(', ');
+        const ics = Sessions._buildICS({
+            uid: `pickleplay-session-${session.id}@local`,
+            summary,
+            description,
+            location,
+            start,
+            end,
+        });
+
+        const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const safeName = (court.name || 'session').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        link.download = `pickleplay-${safeName}-${session.id}.ics`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        App.toast('Calendar file downloaded');
+    },
+
+    _buildICS({ uid, summary, description, location, start, end }) {
+        const now = new Date();
+        return [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//PicklePlay//Sessions//EN',
+            'CALSCALE:GREGORIAN',
+            'BEGIN:VEVENT',
+            `UID:${uid}`,
+            `DTSTAMP:${Sessions._icsDate(now)}`,
+            `DTSTART:${Sessions._icsDate(start)}`,
+            `DTEND:${Sessions._icsDate(end)}`,
+            `SUMMARY:${Sessions._icsEscape(summary)}`,
+            `DESCRIPTION:${Sessions._icsEscape(description)}`,
+            `LOCATION:${Sessions._icsEscape(location)}`,
+            'END:VEVENT',
+            'END:VCALENDAR',
+            '',
+        ].join('\r\n');
+    },
+
+    _icsDate(date) {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}`
+            + `T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+    },
+
+    _icsEscape(text) {
+        return String(text || '')
+            .replace(/\\/g, '\\\\')
+            .replace(/\n/g, '\\n')
+            .replace(/,/g, '\\,')
+            .replace(/;/g, '\\;');
+    },
+
+    // ── Render mini cards for court detail / profile ──────────
+    renderMiniCards(sessions) {
+        if (!sessions || !sessions.length) {
+            return '<p class="muted">No open sessions at this court</p>';
+        }
+        return sessions.map(s => {
+            const isNow = s.session_type === 'now';
+            const creator = s.creator || {};
+            const players = s.players || [];
+            const joined = players.filter(p => p.status === 'joined').length;
+
+            let timeStr = 'Now';
+            if (!isNow && s.start_time) {
+                const dt = new Date(s.start_time);
+                timeStr = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                    + ' ' + dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            }
+
+            return `
+            <div class="session-mini-card ${isNow ? 'session-mini-active' : ''}" onclick="App.showView('sessions'); setTimeout(() => Sessions.openDetail(${s.id}), 200)">
+                <div class="session-mini-top">
+                    <span class="session-mini-time">${isNow ? '<span class="live-dot"></span> Open Now' : `📅 ${timeStr}`}</span>
+                    <span class="session-mini-visibility">${s.visibility === 'friends' ? '👥' : '🌐'}</span>
+                </div>
+                <div class="session-mini-info">
+                    <span>${Sessions._e(creator.name || creator.username || '?')}</span>
+                    <span class="muted">· ${Sessions._e(s.game_type || 'open')} · 👥 ${joined + 1}/${s.max_players}</span>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    _e(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    _directionsUrl(court) {
+        const lat = Number(court?.latitude);
+        const lng = Number(court?.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return 'https://www.google.com/maps';
+        }
+        return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+    },
+};
