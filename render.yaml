@@ -22,7 +22,7 @@ services:
       - key: AUTO_SYNC_COURTS
         value: "true"
       - key: COURT_SYNC_COUNTIES
-        value: "humboldt"
+        value: "all"
       - key: CORS_ALLOWED_ORIGINS
         value: "*"
       - key: SOCKETIO_ASYNC_MODE
