@@ -53,6 +53,7 @@ class Court(db.Model):
     city = db.Column(db.String(100), default='')
     state = db.Column(db.String(2), default='CA')
     zip_code = db.Column(db.String(10), default='')
+    county_slug = db.Column(db.String(80), default='humboldt', nullable=False)
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
     indoor = db.Column(db.Boolean, default=False)
@@ -85,7 +86,7 @@ class Court(db.Model):
         return {
             'id': self.id, 'name': self.name, 'description': self.description,
             'address': self.address, 'city': self.city, 'state': self.state,
-            'zip_code': self.zip_code,
+            'zip_code': self.zip_code, 'county_slug': self.county_slug,
             'latitude': self.latitude, 'longitude': self.longitude,
             'indoor': self.indoor, 'lighted': self.lighted,
             'num_courts': self.num_courts, 'surface_type': self.surface_type,

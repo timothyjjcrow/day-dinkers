@@ -1,5 +1,5 @@
 /**
- * Map integration — Leaflet.js with Humboldt County focus, court markers,
+ * Map integration — Leaflet.js with county-focused loading, court markers,
  * busyness indicators, open-to-play sessions, and direction links.
  */
 const MapView = {
@@ -15,7 +15,7 @@ const MapView = {
     friendMarkers: [],
 
     init() {
-        // Center on Humboldt County (Eureka/Arcata area)
+        // Initial California north-coast view; county selection adjusts loaded data.
         MapView.map = L.map('map', {
             zoomControl: true,
         }).setView([40.83, -124.08], 11);
@@ -90,9 +90,13 @@ const MapView = {
         return MapView.friendsPresence.filter(fp => fp.court_id === courtId);
     },
 
-    async loadCourts() {
+    async loadCourts(options = {}) {
+        const fitToCourts = !!options.fitToCourts;
         try {
-            const res = await API.get('/api/courts');
+            const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
+                ? App.buildCourtsQuery()
+                : '/api/courts';
+            const res = await API.get(courtsUrl);
             MapView.courts = res.courts || [];
             MapView.renderMarkers();
             MapView.renderCourtList();
@@ -100,6 +104,10 @@ const MapView = {
             // Re-render so popups/list can include friend indicators once presence arrives.
             MapView.renderMarkers();
             MapView.renderCourtList();
+            if (fitToCourts && MapView.courts.length) {
+                const bounds = L.latLngBounds(MapView.courts.map(c => [c.latitude, c.longitude]));
+                MapView.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+            }
             MapView._setLastUpdated();
         } catch (err) {
             console.error('Failed to load courts:', err);
@@ -301,7 +309,10 @@ const MapView = {
             return;
         }
         try {
-            const res = await API.get(`/api/courts?search=${encodeURIComponent(query)}`);
+            const url = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
+                ? App.buildCourtsQuery({ search: query })
+                : `/api/courts?search=${encodeURIComponent(query)}`;
+            const res = await API.get(url);
             MapView.courts = res.courts || [];
             MapView.renderMarkers();
             MapView.renderCourtList();

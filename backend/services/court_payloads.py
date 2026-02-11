@@ -1,11 +1,14 @@
 """Shared payload helpers for creating and updating Court records."""
 
+import re
+
 _BOOL_TRUE = {'true', '1', 'yes', 'on'}
 _BOOL_FALSE = {'false', '0', 'no', 'off'}
 ALLOWED_COURT_TYPES = {'dedicated', 'converted', 'shared'}
+DEFAULT_COUNTY_SLUG = 'humboldt'
 
 COURT_WRITABLE_FIELDS = [
-    'name', 'description', 'address', 'city', 'state', 'zip_code',
+    'name', 'description', 'address', 'city', 'state', 'zip_code', 'county_slug',
     'latitude', 'longitude', 'indoor', 'lighted', 'num_courts',
     'surface_type', 'hours', 'open_play_schedule', 'fees', 'phone',
     'website', 'email', 'photo_url',
@@ -21,6 +24,7 @@ _STRING_LIMITS = {
     'city': 100,
     'state': 2,
     'zip_code': 10,
+    'county_slug': 80,
     'surface_type': 50,
     'hours': 2000,
     'open_play_schedule': 2000,
@@ -49,6 +53,18 @@ def _clean_text(value, max_len):
     if len(text) > max_len:
         return text[:max_len]
     return text
+
+
+def normalize_county_slug(value, fallback=''):
+    text = _clean_text(value, max_len=80).lower()
+    if not text:
+        return fallback
+    text = text.replace('_', '-').replace(' ', '-')
+    text = re.sub(r'[^a-z0-9-]+', '-', text)
+    text = re.sub(r'-{2,}', '-', text).strip('-')
+    if text.endswith('-county'):
+        text = text[:-7].strip('-')
+    return text or fallback
 
 
 def _parse_float(value):
@@ -99,6 +115,11 @@ def normalize_court_payload(raw_data, partial=False):
             cleaned = _clean_text(value, _STRING_LIMITS[field])
             if field == 'state':
                 cleaned = cleaned.upper()[:2]
+            if field == 'county_slug':
+                cleaned = normalize_county_slug(cleaned)
+                if not cleaned:
+                    errors.append('county_slug cannot be empty.')
+                    continue
             if field == 'court_type':
                 cleaned = cleaned.lower()
                 if cleaned and cleaned not in ALLOWED_COURT_TYPES:
@@ -147,6 +168,8 @@ def normalize_court_payload(raw_data, partial=False):
     if not partial:
         if not court_data.get('name') or 'latitude' not in court_data or 'longitude' not in court_data:
             errors.append('Name, latitude, and longitude are required')
+        if 'county_slug' not in court_data:
+            court_data['county_slug'] = DEFAULT_COUNTY_SLUG
 
     return court_data, errors
 

@@ -31,21 +31,35 @@ def _parse_allowed_origins(raw_origins):
 def _run_lightweight_migrations():
     """Apply small schema updates for local/dev databases without Alembic."""
     inspector = inspect(db.engine)
-    if 'user' not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if 'user' not in table_names:
         return
 
-    existing_columns = {col['name'] for col in inspector.get_columns('user')}
+    user_columns = {col['name'] for col in inspector.get_columns('user')}
+    court_columns = {col['name'] for col in inspector.get_columns('court')} if 'court' in table_names else set()
     with db.engine.begin() as connection:
-        if 'is_admin' not in existing_columns:
+        if 'is_admin' not in user_columns:
             connection.execute(text(
                 'ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0'
             ))
-        if 'google_sub' not in existing_columns:
+        if 'google_sub' not in user_columns:
             connection.execute(text(
                 'ALTER TABLE "user" ADD COLUMN google_sub VARCHAR(255)'
             ))
             connection.execute(text(
                 'CREATE UNIQUE INDEX IF NOT EXISTS ix_user_google_sub ON "user" (google_sub)'
+            ))
+
+        if 'court' in table_names:
+            if 'county_slug' not in court_columns:
+                connection.execute(text(
+                    "ALTER TABLE court ADD COLUMN county_slug VARCHAR(80) NOT NULL DEFAULT 'humboldt'"
+                ))
+            connection.execute(text(
+                "UPDATE court SET county_slug = 'humboldt' WHERE county_slug IS NULL OR TRIM(county_slug) = ''"
+            ))
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_court_county_slug ON court (county_slug)'
             ))
 
 

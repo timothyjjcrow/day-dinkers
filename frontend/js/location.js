@@ -49,7 +49,10 @@ const LocationService = {
 
     async _refreshCourts() {
         try {
-            const res = await API.get('/api/courts');
+            const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
+                ? App.buildCourtsQuery()
+                : '/api/courts';
+            const res = await API.get(courtsUrl);
             LocationService.courts = res.courts || [];
             if (LocationService.lastCheckInCourtId !== null) {
                 const activeCourt = LocationService.courts.find(
@@ -206,7 +209,10 @@ const LocationService = {
             regionEl.textContent = `📍 ${distStr} from ${nearest.name}`;
             regionEl.classList.add('near-court');
         } else {
-            regionEl.textContent = 'Humboldt County';
+            const countyName = (typeof App !== 'undefined' && typeof App.getSelectedCountyName === 'function')
+                ? App.getSelectedCountyName()
+                : 'Humboldt';
+            regionEl.textContent = `${countyName} County`;
             regionEl.classList.remove('near-court');
         }
     },

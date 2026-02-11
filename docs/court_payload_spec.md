@@ -21,6 +21,7 @@ If a field is not listed here, it is ignored by the backend.
   "city": "Arcata",
   "state": "CA",
   "zip_code": "95521",
+  "county_slug": "humboldt",
   "latitude": 40.8665,
   "longitude": -124.0813,
   "indoor": false,
@@ -61,6 +62,7 @@ If a field is not listed here, it is ignored by the backend.
 - `city`: max 100
 - `state`: uppercased and trimmed to 2 chars
 - `zip_code`: max 10
+- `county_slug`: max 80, normalized to lowercase slug (letters/numbers/hyphens). Example: `los-angeles`
 - `surface_type`: max 50
 - `hours`: max 2000
 - `open_play_schedule`: max 2000
@@ -240,8 +242,18 @@ Accepted bool inputs:
 
 ## 3) Safe defaults to avoid breakage
 
+- Always set `county_slug` explicitly for imports (example: `humboldt`, `alameda`, `los-angeles`)
 - Always use lowercase `court_type`: `dedicated`, `converted`, or `shared`
 - Keep `skill_levels` as a comma-separated string (example: `all,beginner,intermediate`)
 - Send real JSON booleans (`true`/`false`) when possible
 - Send numeric `latitude`/`longitude` (not text)
 - For updates, only send fields you actually want to change
+
+## 4) County-aware endpoints
+
+- `GET /api/courts?county_slug=<slug>` returns only courts in one county
+- `GET /api/courts/counties` returns available counties and court counts
+- `GET /api/courts/resolve-county?lat=<lat>&lng=<lng>` returns the nearest county with known courts
+
+For county import/upsert workflow, see:
+- `docs/county_import_workflow.md`

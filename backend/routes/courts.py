@@ -2,6 +2,7 @@ import json
 import math
 from datetime import timedelta
 from flask import Blueprint, current_app, request, jsonify
+from sqlalchemy import func
 from backend.app import db
 from backend.models import (
     User, Court, CourtReport, CheckIn, ActivityLog, Notification, PlaySession,
@@ -9,7 +10,11 @@ from backend.models import (
 )
 from backend.auth_utils import login_required, admin_required
 from backend.time_utils import utcnow_naive
-from backend.services.court_payloads import normalize_court_payload, apply_court_changes
+from backend.services.california_counties import CALIFORNIA_COUNTIES
+from backend.services.court_payloads import (
+    normalize_court_payload, apply_court_changes,
+    normalize_county_slug, DEFAULT_COUNTY_SLUG,
+)
 from backend.services.court_updates import (
     analyze_submission, apply_payload_to_court,
     normalize_submission_payload, safe_json_loads, should_auto_apply,
@@ -42,6 +47,11 @@ def _serialize_submission(submission, include_payload=False, redact_data_urls=Fa
 
 def _is_admin_user(user):
     return bool(getattr(user, 'is_admin', False))
+
+
+def _county_name_from_slug(slug):
+    cleaned = normalize_county_slug(slug, fallback=DEFAULT_COUNTY_SLUG)
+    return ' '.join(part.capitalize() for part in cleaned.split('-') if part) or 'Unknown'
 
 
 def _serialize_report(report):
@@ -181,8 +191,14 @@ def get_courts():
     lighted = request.args.get('lighted', type=str)
     search = request.args.get('search', '')
     city = request.args.get('city', '')
+    raw_county = (request.args.get('county_slug') or '').strip()
+    county_slug = normalize_county_slug(raw_county, fallback=DEFAULT_COUNTY_SLUG)
+    if raw_county.lower() == 'all':
+        county_slug = ''
 
     query = Court.query
+    if county_slug:
+        query = query.filter(Court.county_slug == county_slug)
     if search:
         query = query.filter(
             Court.name.ilike(f'%{search}%') | Court.address.ilike(f'%{search}%')
@@ -223,7 +239,97 @@ def get_courts():
 
     if lat is not None:
         results.sort(key=lambda c: c.get('distance', 9999))
-    return jsonify({'courts': results})
+    return jsonify({
+        'courts': results,
+        'county_slug': county_slug or 'all',
+    })
+
+
+@courts_bp.route('/counties', methods=['GET'])
+def get_counties():
+    rows = (
+        db.session.query(
+            Court.county_slug.label('county_slug'),
+            func.count(Court.id).label('court_count'),
+        )
+        .filter(Court.county_slug.isnot(None))
+        .group_by(Court.county_slug)
+        .order_by(Court.county_slug.asc())
+        .all()
+    )
+    counts_by_slug = {}
+    for row in rows:
+        slug = normalize_county_slug(row.county_slug, fallback='')
+        if not slug:
+            continue
+        counts_by_slug[slug] = int(row.court_count or 0)
+
+    counties = []
+    seen = set()
+    for county in CALIFORNIA_COUNTIES:
+        slug = county['slug']
+        count = counts_by_slug.get(slug, 0)
+        counties.append({
+            'slug': slug,
+            'name': county['name'],
+            'court_count': count,
+            'has_courts': count > 0,
+        })
+        seen.add(slug)
+
+    for slug in sorted(counts_by_slug):
+        if slug in seen:
+            continue
+        count = counts_by_slug.get(slug, 0)
+        counties.append({
+            'slug': slug,
+            'name': _county_name_from_slug(slug),
+            'court_count': count,
+            'has_courts': count > 0,
+        })
+
+    return jsonify({
+        'counties': counties,
+        'default_county_slug': DEFAULT_COUNTY_SLUG,
+    })
+
+
+@courts_bp.route('/resolve-county', methods=['GET'])
+def resolve_county():
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    if lat is None or lng is None:
+        return jsonify({'error': 'lat and lng query parameters are required'}), 400
+
+    candidates = (
+        db.session.query(
+            Court.id,
+            Court.name,
+            Court.county_slug,
+            Court.latitude,
+            Court.longitude,
+        )
+        .all()
+    )
+    if not candidates:
+        return jsonify({'error': 'No courts available to resolve county'}), 404
+
+    nearest = None
+    nearest_dist = None
+    for court in candidates:
+        dist = haversine_distance(lat, lng, court.latitude, court.longitude)
+        if nearest is None or dist < nearest_dist:
+            nearest = court
+            nearest_dist = dist
+
+    county_slug = normalize_county_slug(getattr(nearest, 'county_slug', ''), fallback=DEFAULT_COUNTY_SLUG)
+    return jsonify({
+        'county_slug': county_slug,
+        'county_name': _county_name_from_slug(county_slug),
+        'nearest_court_id': nearest.id,
+        'nearest_court_name': nearest.name,
+        'distance_miles': round(nearest_dist or 0, 1),
+    })
 
 
 @courts_bp.route('/<int:court_id>', methods=['GET'])

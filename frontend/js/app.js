@@ -6,8 +6,170 @@ const App = {
     friendIds: [],
     friendsList: [],
     locationPrefKey: 'location_tracking_pref',
+    countyPrefKey: 'selected_county_slug',
+    selectedCountySlug: 'humboldt',
+    counties: [],
     // Legacy name retained to avoid broader refactors; this now means admin access.
     isReviewer: false,
+
+    _normalizeCountySlug(value) {
+        return String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/_/g, '-')
+            .replace(/\s+/g, '-')
+            .replace(/[^a-z0-9-]/g, '')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+    },
+
+    _countyNameFromSlug(slug) {
+        const cleaned = App._normalizeCountySlug(slug) || 'humboldt';
+        return cleaned
+            .split('-')
+            .filter(Boolean)
+            .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(' ');
+    },
+
+    getSelectedCountySlug() {
+        return App.selectedCountySlug || 'humboldt';
+    },
+
+    getSelectedCountyName() {
+        const slug = App.getSelectedCountySlug();
+        const match = App.counties.find(c => c.slug === slug);
+        return match?.name || App._countyNameFromSlug(slug);
+    },
+
+    _updateRegionLabel() {
+        const regionEl = document.querySelector('.nav-region');
+        if (!regionEl || regionEl.classList.contains('near-court')) return;
+        regionEl.textContent = `${App.getSelectedCountyName()} County`;
+    },
+
+    buildCourtsQuery(extraParams = {}) {
+        const params = new URLSearchParams();
+        const countySlug = App.getSelectedCountySlug();
+        if (countySlug) params.set('county_slug', countySlug);
+        Object.entries(extraParams || {}).forEach(([key, value]) => {
+            if (value === undefined || value === null) return;
+            const str = String(value);
+            if (!str.trim()) return;
+            params.set(key, str);
+        });
+        const query = params.toString();
+        return query ? `/api/courts?${query}` : '/api/courts';
+    },
+
+    async initCountyPicker() {
+        const select = document.getElementById('county-select');
+        if (!select) return;
+        select.innerHTML = '<option value="">Loading counties...</option>';
+
+        let counties = [];
+        try {
+            const res = await API.get('/api/courts/counties');
+            counties = res.counties || [];
+            if (!App._normalizeCountySlug(localStorage.getItem(App.countyPrefKey))) {
+                const defaultSlug = App._normalizeCountySlug(res.default_county_slug);
+                if (defaultSlug) App.selectedCountySlug = defaultSlug;
+            }
+        } catch {
+            counties = [];
+        }
+
+        if (!counties.length) {
+            const fallbackSlug = App.getSelectedCountySlug();
+            counties = [{ slug: fallbackSlug, name: App._countyNameFromSlug(fallbackSlug), court_count: 0 }];
+        }
+
+        App.counties = counties;
+        select.innerHTML = counties.map(c =>
+            `<option value="${c.slug}">${c.name} County (${c.court_count})</option>`
+        ).join('');
+
+        let selected = App.getSelectedCountySlug();
+        if (!counties.some(c => c.slug === selected)) {
+            selected = counties[0].slug;
+        }
+        App.setSelectedCounty(selected, {
+            persist: true,
+            reloadCourts: selected !== App.getSelectedCountySlug(),
+            fitMap: true,
+            showToast: false,
+        });
+        select.value = selected;
+    },
+
+    setSelectedCounty(rawSlug, { persist = true, reloadCourts = true, fitMap = false, showToast = false } = {}) {
+        const normalized = App._normalizeCountySlug(rawSlug) || 'humboldt';
+        const changed = normalized !== App.selectedCountySlug;
+        App.selectedCountySlug = normalized;
+        if (persist) localStorage.setItem(App.countyPrefKey, normalized);
+
+        const select = document.getElementById('county-select');
+        if (select && select.value !== normalized) select.value = normalized;
+        App._updateRegionLabel();
+
+        if (!changed) return;
+        if (reloadCourts) {
+            if (typeof MapView !== 'undefined' && typeof MapView.loadCourts === 'function') {
+                MapView.loadCourts({ fitToCourts: fitMap });
+            }
+            if (typeof LocationService !== 'undefined' && typeof LocationService._refreshCourts === 'function') {
+                LocationService._refreshCourts();
+            }
+            App._populateRankedCourtFilter(true);
+        }
+        if (showToast) {
+            App.toast(`Switched to ${App.getSelectedCountyName()} County`);
+        }
+    },
+
+    onCountyChange(countySlug) {
+        App.setSelectedCounty(countySlug, {
+            persist: true,
+            reloadCourts: true,
+            fitMap: true,
+            showToast: true,
+        });
+    },
+
+    useLocationCounty(options = {}) {
+        const showToast = options.showToast !== false;
+        const fitMap = options.fitMap !== false;
+        const reloadCourts = options.reloadCourts !== false;
+
+        if (!navigator.geolocation) {
+            if (showToast) App.toast('Geolocation is not supported on this device.', 'error');
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(async (position) => {
+            try {
+                const { latitude, longitude } = position.coords;
+                const res = await API.get(`/api/courts/resolve-county?lat=${latitude}&lng=${longitude}`);
+                if (!res?.county_slug) {
+                    if (showToast) App.toast('Could not determine your county from location.', 'error');
+                    return;
+                }
+                App.setSelectedCounty(res.county_slug, {
+                    persist: true,
+                    reloadCourts,
+                    fitMap,
+                    showToast,
+                });
+            } catch (err) {
+                if (showToast) App.toast(err.message || 'Could not determine county from location.', 'error');
+            }
+        }, () => {
+            if (showToast) App.toast('Location permission denied. Please choose a county manually.', 'error');
+        }, {
+            enableHighAccuracy: false,
+            timeout: 10000,
+            maximumAge: 60000,
+        });
+    },
 
     async loadFriendsCache() {
         const token = localStorage.getItem('token');
@@ -54,10 +216,15 @@ const App = {
     },
 
     init() {
+        const savedCounty = App._normalizeCountySlug(localStorage.getItem(App.countyPrefKey));
+        if (savedCounty) App.selectedCountySlug = savedCounty;
+        App._updateRegionLabel();
+
         // Always start on the map view
         App.showView('map');
 
         MapView.init();
+        App.initCountyPicker();
         Chat.init();
         window.addEventListener('resize', () => App.updateTopLayoutOffset());
 
@@ -98,6 +265,7 @@ const App = {
         if (pref === 'enabled') {
             banner.style.display = 'none';
             LocationService.start();
+            App.useLocationCounty({ showToast: false, fitMap: false, reloadCourts: true });
             App.updateTopLayoutOffset();
             return;
         }
@@ -116,6 +284,7 @@ const App = {
         if (banner) banner.style.display = 'none';
         App.updateTopLayoutOffset();
         LocationService.start();
+        App.useLocationCounty({ showToast: false, fitMap: false, reloadCourts: true });
         App.toast('Location enabled. Nearby court and auto check-in are now active.');
     },
 
@@ -229,11 +398,16 @@ const App = {
         if (!App.isReviewer && App.currentView === 'admin') App.showView('map');
     },
 
-    async _populateRankedCourtFilter() {
+    async _populateRankedCourtFilter(force = false) {
         const select = document.getElementById('ranked-court-filter');
-        if (!select || select.options.length > 1) return;
+        if (!select) return;
+        if (force) {
+            while (select.options.length > 1) select.remove(1);
+        } else if (select.options.length > 1) {
+            return;
+        }
         try {
-            const res = await API.get('/api/courts');
+            const res = await API.get(App.buildCourtsQuery());
             (res.courts || []).forEach(c => {
                 const opt = document.createElement('option');
                 opt.value = c.id;

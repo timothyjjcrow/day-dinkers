@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PicklePlay - Humboldt County Pickleball</title>
+    <title>PicklePlay - California Pickleball</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -15,6 +15,12 @@
     <nav id="navbar">
         <div class="nav-left">
             <div class="logo" onclick="App.showView('map')">🏓 <span>PicklePlay</span></div>
+            <div class="county-switcher">
+                <select id="county-select" onchange="App.onCountyChange(this.value)" aria-label="Select county">
+                    <option value="humboldt">Humboldt County</option>
+                </select>
+                <button class="county-location-btn" onclick="App.useLocationCounty()" title="Use my location to set county">Use my location</button>
+            </div>
             <span class="nav-region">Humboldt County</span>
         </div>
         <div class="nav-center">

@@ -751,7 +751,10 @@ const Sessions = {
 
         const select = document.getElementById('session-court-select');
         try {
-            const res = await API.get('/api/courts');
+            const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
+                ? App.buildCourtsQuery()
+                : '/api/courts';
+            const res = await API.get(courtsUrl);
             select.innerHTML = (res.courts || []).map(c =>
                 `<option value="${c.id}" ${c.id === preselectedCourtId ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
             ).join('');
@@ -872,7 +875,10 @@ const Sessions = {
 
         const select = document.getElementById('session-court-select');
         try {
-            const res = await API.get('/api/courts');
+            const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
+                ? App.buildCourtsQuery()
+                : '/api/courts';
+            const res = await API.get(courtsUrl);
             select.innerHTML = (res.courts || []).map(c =>
                 `<option value="${c.id}" ${c.id === courtId ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
             ).join('');

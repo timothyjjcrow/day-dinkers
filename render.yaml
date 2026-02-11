@@ -19,6 +19,10 @@ services:
         generateValue: true
       - key: AUTO_SEED_COURTS
         value: "true"
+      - key: AUTO_SYNC_COURTS
+        value: "true"
+      - key: COURT_SYNC_COUNTIES
+        value: "humboldt"
       - key: CORS_ALLOWED_ORIGINS
         value: "*"
       - key: SOCKETIO_ASYNC_MODE

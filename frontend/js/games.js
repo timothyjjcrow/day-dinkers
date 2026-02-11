@@ -294,7 +294,10 @@ const Games = {
         document.getElementById('game-modal').style.display = 'flex';
         const select = document.getElementById('game-court-select');
         try {
-            const res = await API.get('/api/courts');
+            const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
+                ? App.buildCourtsQuery()
+                : '/api/courts';
+            const res = await API.get(courtsUrl);
             select.innerHTML = (res.courts || []).map(c =>
                 `<option value="${c.id}" ${c.id === preselectedCourtId ? 'selected' : ''}>${c.name} — ${c.city}</option>`
             ).join('');

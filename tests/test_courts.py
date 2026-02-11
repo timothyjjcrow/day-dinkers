@@ -51,6 +51,7 @@ def test_add_court(client):
     court = _seed_court(client, token)
     assert court['name'] == 'Test Court'
     assert court['city'] == 'Eureka'
+    assert court['county_slug'] == 'humboldt'
     assert court['has_restrooms'] is True
     assert court['court_type'] == 'dedicated'
 
@@ -70,6 +71,23 @@ def test_add_court_validates_coordinates(client):
     data = json.loads(res.data)
     assert 'errors' in data
     assert 'Latitude must be between -90 and 90.' in data['errors']
+
+
+def test_add_court_normalizes_county_slug(client):
+    token = _auth(client)
+    res = client.post(
+        '/api/courts',
+        json={
+            'name': 'County Normalization Court',
+            'latitude': 40.81,
+            'longitude': -124.16,
+            'county_slug': 'Los Angeles',
+        },
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 201
+    court = json.loads(res.data)['court']
+    assert court['county_slug'] == 'los-angeles'
 
 
 def test_add_court_rejects_invalid_court_type(client):
@@ -125,6 +143,83 @@ def test_filter_by_city(client):
     data = json.loads(res.data)
     assert len(data['courts']) == 1
     assert data['courts'][0]['city'] == 'Arcata'
+
+
+def test_filter_by_county_slug(client):
+    token = _auth(client)
+    _seed_court(client, token, name='Humboldt Court')
+    _seed_court(
+        client, token,
+        name='Alameda Court',
+        city='Oakland',
+        county_slug='alameda',
+        latitude=37.8044,
+        longitude=-122.2712,
+    )
+
+    res = client.get('/api/courts?county_slug=alameda')
+    assert res.status_code == 200
+    data = json.loads(res.data)
+    assert len(data['courts']) == 1
+    assert data['courts'][0]['name'] == 'Alameda Court'
+    assert data['county_slug'] == 'alameda'
+
+
+def test_get_counties_summary(client):
+    token = _auth(client)
+    _seed_court(client, token, name='County Court Humboldt')
+    _seed_court(
+        client, token,
+        name='County Court Alameda 1',
+        county_slug='alameda',
+        city='Oakland',
+        latitude=37.80,
+        longitude=-122.26,
+    )
+    _seed_court(
+        client, token,
+        name='County Court Alameda 2',
+        county_slug='alameda',
+        city='Berkeley',
+        latitude=37.87,
+        longitude=-122.27,
+    )
+
+    res = client.get('/api/courts/counties')
+    assert res.status_code == 200
+    payload = json.loads(res.data)
+    assert payload['default_county_slug'] == 'humboldt'
+
+    by_slug = {item['slug']: item for item in payload['counties']}
+    assert by_slug['humboldt']['court_count'] == 1
+    assert by_slug['alameda']['court_count'] == 2
+    assert by_slug['ventura']['court_count'] == 0
+    assert by_slug['ventura']['has_courts'] is False
+
+
+def test_resolve_county_by_location(client):
+    token = _auth(client)
+    _seed_court(
+        client, token,
+        name='Arcata Court County Resolve',
+        county_slug='humboldt',
+        latitude=40.8665,
+        longitude=-124.0813,
+    )
+    _seed_court(
+        client, token,
+        name='Oakland Court County Resolve',
+        county_slug='alameda',
+        city='Oakland',
+        latitude=37.8044,
+        longitude=-122.2712,
+    )
+
+    res = client.get('/api/courts/resolve-county?lat=37.8040&lng=-122.2700')
+    assert res.status_code == 200
+    payload = json.loads(res.data)
+    assert payload['county_slug'] == 'alameda'
+    assert payload['county_name'] == 'Alameda'
 
 
 def test_filter_indoor(client):
