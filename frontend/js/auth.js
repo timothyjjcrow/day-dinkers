@@ -141,7 +141,7 @@ const Auth = {
         document.getElementById('register-error').textContent = '';
         try {
             const res = await API.post('/api/auth/register', data);
-            Auth._finishAuth(res, `Welcome to PicklePlay, ${res.user.name || res.user.username}!`);
+            Auth._finishAuth(res, `Welcome to Third Shot, ${res.user.name || res.user.username}!`);
         } catch (err) {
             document.getElementById('register-error').textContent = err.message || 'Registration failed';
         }

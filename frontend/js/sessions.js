@@ -1567,7 +1567,7 @@ const Sessions = {
             ? new Date(session.end_time)
             : new Date(start.getTime() + 90 * 60000);
         const court = session.court || {};
-        const summary = `PicklePlay: ${(session.game_type || 'open').replace(/_/g, ' ')} at ${court.name || 'Court'}`;
+        const summary = `Third Shot: ${(session.game_type || 'open').replace(/_/g, ' ')} at ${court.name || 'Court'}`;
         const description = [
             session.notes || 'Open to Play session',
             `Skill: ${session.skill_level || 'all'}`,
@@ -1575,7 +1575,7 @@ const Sessions = {
         ].filter(Boolean).join('\n');
         const location = [court.name, court.address, court.city].filter(Boolean).join(', ');
         const ics = Sessions._buildICS({
-            uid: `pickleplay-session-${session.id}@local`,
+            uid: `third-shot-session-${session.id}@local`,
             summary,
             description,
             location,
@@ -1588,7 +1588,7 @@ const Sessions = {
         const link = document.createElement('a');
         link.href = url;
         const safeName = (court.name || 'session').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        link.download = `pickleplay-${safeName}-${session.id}.ics`;
+        link.download = `third-shot-${safeName}-${session.id}.ics`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -1601,7 +1601,7 @@ const Sessions = {
         return [
             'BEGIN:VCALENDAR',
             'VERSION:2.0',
-            'PRODID:-//PicklePlay//Sessions//EN',
+            'PRODID:-//Third Shot//Sessions//EN',
             'CALSCALE:GREGORIAN',
             'BEGIN:VEVENT',
             `UID:${uid}`,

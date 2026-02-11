@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point for the PicklePlay application."""
+"""Entry point for the Third Shot application."""
 import os
 from backend.app import create_app, socketio, db
 
@@ -15,7 +15,7 @@ with app.app_context():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
-    print(f"🏓 PicklePlay starting on http://localhost:{port}")
+    print(f"🏓 Third Shot starting on http://localhost:{port}")
     socketio.run(
         app, host='0.0.0.0', port=port,
         debug=(config_name == 'development'),

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════
-   PicklePlay — California Pickleball
+   Third Shot — California Pickleball
    ═══════════════════════════════════════════════════ */
 
 :root {
@@ -37,8 +37,25 @@ a:hover { text-decoration: underline; }
     position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
 }
 .nav-left { display: flex; align-items: center; gap: 12px; }
-.logo { font-size: 20px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; }
-.logo span { color: var(--primary-dark); }
+.logo {
+    font-size: 20px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.logo-mark {
+    width: 30px;
+    height: 30px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+.logo span {
+    color: var(--primary-dark);
+    line-height: 1;
+    white-space: nowrap;
+}
 .nav-region { font-size: 12px; color: var(--text-muted); background: var(--primary-light); padding: 2px 8px; border-radius: 10px; font-weight: 500; }
 .county-switcher { display: flex; align-items: center; gap: 6px; }
 .county-switcher select {
@@ -1772,6 +1789,14 @@ a:hover { text-decoration: underline; }
 @media (max-width: 768px) {
     .side-panel { width: 100%; }
     .nav-center { display: none; }
+    .logo {
+        font-size: 18px;
+        gap: 6px;
+    }
+    .logo-mark {
+        width: 26px;
+        height: 26px;
+    }
     .county-location-btn { display: none; }
     .county-switcher select {
         max-width: 130px;
@@ -1839,4 +1864,16 @@ a:hover { text-decoration: underline; }
     .cfp-topbar-info h1 { font-size: 18px; }
     .cfp-actions-grid { grid-template-columns: repeat(2, 1fr); }
     .quick-actions-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 560px) {
+    .nav-left { gap: 8px; }
+    .logo { font-size: 16px; }
+    .logo-mark {
+        width: 24px;
+        height: 24px;
+    }
+    .county-switcher select {
+        max-width: 112px;
+    }
 }

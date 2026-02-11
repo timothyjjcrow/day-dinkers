@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: pickleplay-app
+    name: third-shot-app
     env: python
     plan: free
     autoDeploy: true
@@ -13,7 +13,7 @@ services:
         value: production
       - key: DATABASE_URL
         fromDatabase:
-          name: pickleplay-db
+          name: third-shot-db
           property: connectionString
       - key: SECRET_KEY
         generateValue: true
@@ -37,5 +37,5 @@ services:
         sync: false
 
 databases:
-  - name: pickleplay-db
+  - name: third-shot-db
     plan: free
