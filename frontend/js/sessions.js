@@ -7,6 +7,9 @@ const Sessions = {
     currentSessionId: null,
     currentSessionCourtId: null,
     sessionsById: {},
+    cachedListSessions: [],
+    calendarMonthKey: null,
+    calendarSelectedDayKey: null,
 
     async load() {
         const list = document.getElementById('sessions-list');
@@ -37,46 +40,360 @@ const Sessions = {
         try {
             const res = await API.get(url);
             const sessions = res.sessions || [];
+            Sessions.cachedListSessions = sessions;
             Sessions.sessionsById = Object.fromEntries(sessions.map(s => [s.id, s]));
-            const now = sessions.filter(s => s.session_type === 'now');
-            const scheduled = sessions.filter(s => s.session_type === 'scheduled');
-
-            if (!sessions.length) {
-                list.innerHTML = `
-                    <div class="empty-state">
-                        <h3>No open sessions</h3>
-                        <p>${typeFilter !== 'all' || visibilityFilter !== 'all' || skillFilter !== 'all'
-                            ? 'Try different filters or create a new session.'
-                            : 'Check in at a court and set yourself as open to play, or schedule a session!'}</p>
-                        <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule a Session</button>
-                    </div>`;
-                return;
-            }
-
-            let html = '';
-            const suggestions = token ? Sessions._getSuggestedSessions(sessions).slice(0, 3) : [];
-            if (suggestions.length > 0) {
-                html += '<h3 class="session-section-title">⭐ Suggested For You</h3>';
-                html += '<div class="session-card-grid">';
-                html += suggestions.map(s => Sessions._renderCard(s)).join('');
-                html += '</div>';
-            }
-            if (now.length > 0) {
-                html += '<h3 class="session-section-title">🟢 Active Now</h3>';
-                html += '<div class="session-card-grid">';
-                html += now.map(s => Sessions._renderCard(s)).join('');
-                html += '</div>';
-            }
-            if (scheduled.length > 0) {
-                html += '<h3 class="session-section-title">📅 Upcoming</h3>';
-                html += '<div class="session-card-grid">';
-                html += scheduled.map(s => Sessions._renderCard(s)).join('');
-                html += '</div>';
-            }
-            list.innerHTML = html;
+            Sessions._renderList(list, sessions, {
+                typeFilter,
+                visibilityFilter,
+                skillFilter,
+                token,
+            });
         } catch {
             list.innerHTML = '<p class="error">Failed to load sessions</p>';
         }
+    },
+
+    _renderList(list, sessions, { typeFilter, visibilityFilter, skillFilter, token }) {
+        const nowSessions = sessions.filter(s => s.session_type === 'now');
+        const scheduledFuture = Sessions._getFutureScheduledSessions(sessions);
+        const isScheduledView = typeFilter === 'scheduled';
+
+        if (!sessions.length) {
+            list.innerHTML = `
+                <div class="empty-state">
+                    <h3>No open sessions</h3>
+                    <p>${typeFilter !== 'all' || visibilityFilter !== 'all' || skillFilter !== 'all'
+                        ? 'Try different filters or create a new session.'
+                        : 'Check in at a court and set yourself as open to play, or schedule a session!'}</p>
+                    <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule a Session</button>
+                </div>`;
+            return;
+        }
+
+        let html = '';
+        const suggestions = (!isScheduledView && token)
+            ? Sessions._getSuggestedSessions(sessions).slice(0, 3)
+            : [];
+        if (suggestions.length > 0) {
+            html += '<h3 class="session-section-title">⭐ Suggested For You</h3>';
+            html += '<div class="session-card-grid">';
+            html += suggestions.map(s => Sessions._renderCard(s)).join('');
+            html += '</div>';
+        }
+        if (!isScheduledView && nowSessions.length > 0) {
+            html += '<h3 class="session-section-title">🟢 Active Now</h3>';
+            html += '<div class="session-card-grid">';
+            html += nowSessions.map(s => Sessions._renderCard(s)).join('');
+            html += '</div>';
+        }
+        if (scheduledFuture.length > 0) {
+            html += `<h3 class="session-section-title">${isScheduledView ? '🗓 Scheduled Games Calendar' : '🗓 Session Calendar'}</h3>`;
+            html += Sessions._renderScheduledCalendar(scheduledFuture);
+            if (isScheduledView) {
+                html += '<h3 class="session-section-title">📋 All Scheduled Games</h3>';
+                html += Sessions._renderScheduledByDay(scheduledFuture);
+            } else {
+                html += '<h3 class="session-section-title">📅 Upcoming</h3>';
+                html += '<div class="session-card-grid">';
+                html += scheduledFuture.map(s => Sessions._renderCard(s)).join('');
+                html += '</div>';
+            }
+        }
+
+        if (!html) {
+            html = `
+                <div class="empty-state">
+                    <h3>No active or future sessions</h3>
+                    <p>Try a different filter, or create a new session.</p>
+                    <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule a Session</button>
+                </div>`;
+        }
+
+        list.innerHTML = html;
+    },
+
+    _rerenderFromCache() {
+        const list = document.getElementById('sessions-list');
+        if (!list || Sessions.currentSessionId) return;
+        const typeFilter = document.getElementById('sessions-type-filter')?.value || 'all';
+        const visibilityFilter = document.getElementById('sessions-visibility-filter')?.value || 'all';
+        const skillFilter = document.getElementById('sessions-skill-filter')?.value || 'all';
+        const token = localStorage.getItem('token');
+        Sessions._renderList(list, Sessions.cachedListSessions || [], {
+            typeFilter,
+            visibilityFilter,
+            skillFilter,
+            token,
+        });
+    },
+
+    changeCalendarMonth(step) {
+        const monthStart = Sessions._monthStartFromKey(Sessions.calendarMonthKey) || Sessions._startOfMonth(new Date());
+        monthStart.setMonth(monthStart.getMonth() + step);
+        Sessions.calendarMonthKey = Sessions._monthKey(monthStart);
+        Sessions.calendarSelectedDayKey = null;
+        Sessions._rerenderFromCache();
+    },
+
+    jumpCalendarToCurrentMonth() {
+        Sessions.calendarMonthKey = Sessions._monthKey(new Date());
+        Sessions.calendarSelectedDayKey = null;
+        Sessions._rerenderFromCache();
+    },
+
+    selectCalendarDate(dayKey) {
+        const day = Sessions._dateFromKey(dayKey);
+        if (!day) return;
+        Sessions.calendarMonthKey = Sessions._monthKey(day);
+        Sessions.calendarSelectedDayKey = dayKey;
+        Sessions._rerenderFromCache();
+    },
+
+    _renderScheduledCalendar(sessions) {
+        if (!sessions.length) return '';
+
+        const grouped = Sessions._groupSessionsByDay(sessions);
+        const today = new Date();
+        const monthStart = Sessions._resolveCalendarMonthStart(sessions);
+        const monthKey = Sessions._monthKey(monthStart);
+        const sessionCount = sessions.length;
+        const daysCount = Object.keys(grouped).length;
+        const monthDayKeys = Object.keys(grouped)
+            .filter(key => key.startsWith(`${monthKey}-`))
+            .sort();
+
+        let selectedDayKey = Sessions.calendarSelectedDayKey;
+        if (!selectedDayKey || !selectedDayKey.startsWith(`${monthKey}-`)) {
+            const todayKey = Sessions._dateKey(today);
+            if (todayKey.startsWith(`${monthKey}-`)) {
+                selectedDayKey = todayKey;
+            } else if (monthDayKeys.length > 0) {
+                selectedDayKey = monthDayKeys[0];
+            } else {
+                selectedDayKey = `${monthKey}-01`;
+            }
+            Sessions.calendarSelectedDayKey = selectedDayKey;
+        }
+
+        const todayKey = Sessions._dateKey(today);
+        const monthLabel = monthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+        const weekdayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+            .map(day => `<div class="sessions-calendar-weekday">${day}</div>`)
+            .join('');
+
+        const gridStart = new Date(monthStart);
+        gridStart.setDate(1 - monthStart.getDay());
+        const dayButtons = [];
+        for (let i = 0; i < 42; i += 1) {
+            const date = new Date(gridStart);
+            date.setDate(gridStart.getDate() + i);
+            const key = Sessions._dateKey(date);
+            const count = grouped[key]?.length || 0;
+            const isCurrentMonth = date.getMonth() === monthStart.getMonth()
+                && date.getFullYear() === monthStart.getFullYear();
+            const classes = ['sessions-calendar-day'];
+            if (!isCurrentMonth) classes.push('other-month');
+            if (count > 0) classes.push('has-session');
+            if (key === todayKey) classes.push('today');
+            if (key === selectedDayKey) classes.push('selected');
+            dayButtons.push(`
+                <button
+                    type="button"
+                    class="${classes.join(' ')}"
+                    onclick="Sessions.selectCalendarDate('${key}')"
+                    aria-label="${date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}${count ? `, ${count} session${count > 1 ? 's' : ''}` : ''}"
+                >
+                    <span class="sessions-calendar-day-number">${date.getDate()}</span>
+                    ${count > 0 ? `<span class="sessions-calendar-day-count">${count}</span>` : ''}
+                </button>
+            `);
+        }
+
+        let selectedSection = '';
+        if (selectedDayKey) {
+            const selectedDate = Sessions._dateFromKey(selectedDayKey);
+            const selectedLabel = selectedDate
+                ? selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+                : selectedDayKey;
+            const selectedSessions = grouped[selectedDayKey] || [];
+            if (selectedSessions.length > 0) {
+                selectedSection = `
+                    <div class="sessions-calendar-selected">
+                        <h4>
+                            <span>Scheduled for ${Sessions._e(selectedLabel)}</span>
+                            <span class="sessions-calendar-selected-count">${selectedSessions.length} session${selectedSessions.length > 1 ? 's' : ''}</span>
+                        </h4>
+                        <div class="session-card-grid">
+                            ${selectedSessions.map(s => Sessions._renderCard(s)).join('')}
+                        </div>
+                    </div>`;
+            } else {
+                selectedSection = `
+                    <div class="sessions-calendar-selected">
+                        <h4>
+                            <span>${Sessions._e(selectedLabel)}</span>
+                            <span class="sessions-calendar-selected-count">No games</span>
+                        </h4>
+                        <p class="muted">No scheduled games on this day. Pick a highlighted date to see game details.</p>
+                    </div>`;
+            }
+        } else {
+            selectedSection = `
+                <div class="sessions-calendar-selected">
+                    <p class="muted">No sessions are scheduled in ${Sessions._e(monthLabel)}.</p>
+                </div>`;
+        }
+
+        return `
+            <div class="sessions-calendar">
+                <div class="sessions-calendar-header">
+                    <div class="sessions-calendar-month">${Sessions._e(monthLabel)}</div>
+                    <div class="sessions-calendar-nav">
+                        <button type="button" class="btn-secondary btn-sm" onclick="Sessions.changeCalendarMonth(-1)" aria-label="View previous month">←</button>
+                        <button type="button" class="btn-secondary btn-sm" onclick="Sessions.jumpCalendarToCurrentMonth()">Today</button>
+                        <button type="button" class="btn-secondary btn-sm" onclick="Sessions.changeCalendarMonth(1)" aria-label="View next month">→</button>
+                    </div>
+                </div>
+                <div class="sessions-calendar-meta">${sessionCount} future game${sessionCount > 1 ? 's' : ''} across ${daysCount} day${daysCount !== 1 ? 's' : ''}</div>
+                <div class="sessions-calendar-weekdays">${weekdayHeaders}</div>
+                <div class="sessions-calendar-grid">${dayButtons.join('')}</div>
+                <div class="sessions-calendar-legend">Highlighted days include future scheduled sessions.</div>
+                ${selectedSection}
+            </div>`;
+    },
+
+    _renderScheduledByDay(sessions) {
+        const grouped = Sessions._groupSessionsByDay(sessions);
+        const dayKeys = Object.keys(grouped).sort();
+        if (!dayKeys.length) {
+            return '<p class="muted">No future scheduled games.</p>';
+        }
+
+        return `
+            <div class="sessions-schedule-groups">
+                ${dayKeys.map(key => {
+                    const dayDate = Sessions._dateFromKey(key);
+                    const dayLabel = dayDate
+                        ? dayDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                        : key;
+                    const daySessions = grouped[key];
+                    return `
+                        <section class="sessions-schedule-group">
+                            <div class="sessions-schedule-group-header">
+                                <h4>${Sessions._e(dayLabel)}</h4>
+                                <span class="sessions-schedule-group-count">${daySessions.length} game${daySessions.length > 1 ? 's' : ''}</span>
+                            </div>
+                            <div class="session-card-grid">
+                                ${daySessions.map(s => Sessions._renderCard(s)).join('')}
+                            </div>
+                        </section>`;
+                }).join('')}
+            </div>`;
+    },
+
+    _resolveCalendarMonthStart(sessions) {
+        const firstSessionDate = Sessions._sessionStartDate(sessions[0]) || new Date();
+        const currentMonthStart = Sessions._monthStartFromKey(Sessions.calendarMonthKey);
+        if (currentMonthStart) return currentMonthStart;
+        const now = new Date();
+        const currentMonthKey = Sessions._monthKey(now);
+        const hasCurrentMonthSessions = sessions.some(s => {
+            const start = Sessions._sessionStartDate(s);
+            return start && Sessions._monthKey(start) === currentMonthKey;
+        });
+        if (hasCurrentMonthSessions) {
+            const thisMonth = Sessions._startOfMonth(now);
+            Sessions.calendarMonthKey = Sessions._monthKey(thisMonth);
+            return thisMonth;
+        }
+        const fallback = Sessions._startOfMonth(firstSessionDate);
+        Sessions.calendarMonthKey = Sessions._monthKey(fallback);
+        return fallback;
+    },
+
+    _getFutureScheduledSessions(sessions) {
+        const nowMs = Date.now();
+        return (sessions || [])
+            .filter(s => s.session_type === 'scheduled' && s.start_time)
+            .map(s => ({ session: s, start: Sessions._sessionStartDate(s) }))
+            .filter(entry => entry.start && entry.start.getTime() >= nowMs)
+            .sort((a, b) => a.start.getTime() - b.start.getTime())
+            .map(entry => entry.session);
+    },
+
+    _groupSessionsByDay(sessions) {
+        const grouped = {};
+        (sessions || []).forEach(session => {
+            const start = Sessions._sessionStartDate(session);
+            if (!start) return;
+            const key = Sessions._dateKey(start);
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(session);
+        });
+        Object.keys(grouped).forEach(key => {
+            grouped[key].sort((a, b) => {
+                const aStart = Sessions._sessionStartDate(a);
+                const bStart = Sessions._sessionStartDate(b);
+                if (!aStart || !bStart) return 0;
+                return aStart.getTime() - bStart.getTime();
+            });
+        });
+        return grouped;
+    },
+
+    _sessionStartDate(session) {
+        if (!session?.start_time) return null;
+        const date = new Date(session.start_time);
+        if (Number.isNaN(date.getTime())) return null;
+        return date;
+    },
+
+    _startOfMonth(date) {
+        return new Date(date.getFullYear(), date.getMonth(), 1);
+    },
+
+    _monthKey(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        return `${y}-${m}`;
+    },
+
+    _monthStartFromKey(key) {
+        if (!key) return null;
+        const match = /^(\d{4})-(\d{2})$/.exec(String(key));
+        if (!match) return null;
+        const year = Number(match[1]);
+        const monthIndex = Number(match[2]) - 1;
+        if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+            return null;
+        }
+        return new Date(year, monthIndex, 1);
+    },
+
+    _dateKey(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    },
+
+    _dateFromKey(key) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key));
+        if (!match) return null;
+        const year = Number(match[1]);
+        const monthIndex = Number(match[2]) - 1;
+        const day = Number(match[3]);
+        if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || !Number.isFinite(day)) return null;
+        const date = new Date(year, monthIndex, day);
+        if (
+            date.getFullYear() !== year
+            || date.getMonth() !== monthIndex
+            || date.getDate() !== day
+        ) {
+            return null;
+        }
+        return date;
     },
 
     _renderCard(session) {
