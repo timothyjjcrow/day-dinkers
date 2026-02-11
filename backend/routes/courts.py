@@ -9,6 +9,7 @@ from backend.models import (
 )
 from backend.auth_utils import login_required, admin_required
 from backend.time_utils import utcnow_naive
+from backend.services.court_payloads import normalize_court_payload, apply_court_changes
 from backend.services.court_updates import (
     analyze_submission, apply_payload_to_court,
     normalize_submission_payload, safe_json_loads, should_auto_apply,
@@ -295,19 +296,11 @@ def get_court(court_id):
 @courts_bp.route('', methods=['POST'])
 @login_required
 def add_court():
-    data = request.get_json()
-    required = ['name', 'latitude', 'longitude']
-    if not all(data.get(f) for f in required):
-        return jsonify({'error': 'Name, latitude, and longitude are required'}), 400
+    data = request.get_json(silent=True) or {}
+    court_data, errors = normalize_court_payload(data, partial=False)
+    if errors:
+        return jsonify({'error': errors[0], 'errors': errors}), 400
 
-    fields = [
-        'name', 'description', 'address', 'city', 'zip_code',
-        'latitude', 'longitude', 'indoor', 'lighted', 'num_courts',
-        'surface_type', 'hours', 'open_play_schedule', 'fees', 'phone',
-        'website', 'email', 'has_restrooms', 'has_parking', 'has_water',
-        'nets_provided', 'paddle_rental', 'court_type', 'skill_levels',
-    ]
-    court_data = {f: data[f] for f in fields if f in data}
     court = Court(**court_data)
     db.session.add(court)
     db.session.commit()
@@ -321,15 +314,13 @@ def update_court(court_id):
     if not court:
         return jsonify({'error': 'Court not found'}), 404
     data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
-        return jsonify({'error': 'Invalid JSON payload'}), 400
-    updatable = [
-        'name', 'description', 'address', 'city', 'hours',
-        'open_play_schedule', 'fees', 'phone', 'website',
-    ]
-    for field in updatable:
-        if field in data:
-            setattr(court, field, data[field])
+    court_data, errors = normalize_court_payload(data, partial=True)
+    if errors:
+        return jsonify({'error': errors[0], 'errors': errors}), 400
+    if not court_data:
+        return jsonify({'error': 'No valid court fields were provided'}), 400
+
+    apply_court_changes(court, court_data)
     db.session.commit()
     return jsonify({'court': court.to_dict()})
 

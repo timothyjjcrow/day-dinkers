@@ -55,6 +55,41 @@ def test_add_court(client):
     assert court['court_type'] == 'dedicated'
 
 
+def test_add_court_validates_coordinates(client):
+    token = _auth(client)
+    res = client.post(
+        '/api/courts',
+        json={
+            'name': 'Invalid Coordinate Court',
+            'latitude': 95,
+            'longitude': -124.1,
+        },
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 400
+    data = json.loads(res.data)
+    assert 'errors' in data
+    assert 'Latitude must be between -90 and 90.' in data['errors']
+
+
+def test_add_court_rejects_invalid_court_type(client):
+    token = _auth(client)
+    res = client.post(
+        '/api/courts',
+        json={
+            'name': 'Invalid Type Court',
+            'latitude': 40.81,
+            'longitude': -124.16,
+            'court_type': 'members_only',
+        },
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 400
+    data = json.loads(res.data)
+    assert 'errors' in data
+    assert 'court_type must be one of: converted, dedicated, shared.' in data['errors']
+
+
 def test_get_court_detail(client):
     token = _auth(client)
     court = _seed_court(client, token)
@@ -130,6 +165,60 @@ def test_update_court(client):
     assert data['hours'] == '9am-5pm'
 
 
+def test_update_court_supports_location_and_amenities(client):
+    token = _auth(client)
+    _set_admin(client, 'court@test.com')
+    court = _seed_court(client, token)
+    res = client.put(
+        f'/api/courts/{court["id"]}',
+        json={
+            'latitude': 40.91,
+            'longitude': -124.05,
+            'has_ball_machine': True,
+            'verified': True,
+            'num_courts': 6,
+        },
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 200
+    updated = json.loads(res.data)['court']
+    assert updated['latitude'] == 40.91
+    assert updated['longitude'] == -124.05
+    assert updated['has_ball_machine'] is True
+    assert updated['verified'] is True
+    assert updated['num_courts'] == 6
+
+
+def test_update_court_rejects_invalid_field_values(client):
+    token = _auth(client)
+    _set_admin(client, 'court@test.com')
+    court = _seed_court(client, token)
+    res = client.put(
+        f'/api/courts/{court["id"]}',
+        json={'latitude': 'not-a-number'},
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 400
+    payload = json.loads(res.data)
+    assert 'errors' in payload
+    assert 'latitude must be a number.' in payload['errors']
+
+
+def test_update_court_rejects_invalid_court_type(client):
+    token = _auth(client)
+    _set_admin(client, 'court@test.com')
+    court = _seed_court(client, token)
+    res = client.put(
+        f'/api/courts/{court["id"]}',
+        json={'court_type': 'members_only'},
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 400
+    payload = json.loads(res.data)
+    assert 'errors' in payload
+    assert 'court_type must be one of: converted, dedicated, shared.' in payload['errors']
+
+
 def test_non_admin_cannot_update_court(client):
     owner_token = _auth_user(client, username='court_owner', email='court_owner@test.com')
     other_token = _auth_user(client, username='court_other', email='court_other@test.com')
@@ -198,6 +287,26 @@ def test_submit_court_update_for_review(client):
     mine_items = json.loads(mine.data)['submissions']
     assert len(mine_items) == 1
     assert mine_items[0]['summary'] == payload['summary']
+
+
+def test_submit_court_update_rejects_invalid_court_type(client):
+    token = _auth(client)
+    court = _seed_court(client, token)
+    payload = {
+        'summary': 'Court type correction from on-site check',
+        'court_info': {
+            'court_type': 'members_only',
+        },
+    }
+    res = client.post(
+        f'/api/courts/{court["id"]}/updates',
+        json=payload,
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 400
+    body = json.loads(res.data)
+    assert 'errors' in body
+    assert 'court_type must be one of: converted, dedicated, shared.' in body['errors']
 
 
 def test_reviewer_approves_submission_and_updates_court_details(client):

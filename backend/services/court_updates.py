@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from backend.app import db
 from backend.models import CourtCommunityInfo, CourtEvent, CourtImage
+from backend.services.court_payloads import ALLOWED_COURT_TYPES
 from backend.time_utils import utcnow_naive
 
 
@@ -188,6 +189,13 @@ def normalize_submission_payload(raw_data, max_images=8, max_events=6, max_image
         value = _clean_text(court_info.get(field), max_len=max_len)
         if value:
             normalized_court_info[field] = value
+
+    if 'court_type' in normalized_court_info:
+        normalized_court_info['court_type'] = normalized_court_info['court_type'].lower()
+        if normalized_court_info['court_type'] not in ALLOWED_COURT_TYPES:
+            allowed = ', '.join(sorted(ALLOWED_COURT_TYPES))
+            errors.append(f'court_type must be one of: {allowed}.')
+            normalized_court_info.pop('court_type', None)
 
     num_courts = _parse_int(court_info.get('num_courts'))
     if num_courts is not None:

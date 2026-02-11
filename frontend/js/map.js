@@ -328,6 +328,17 @@ const MapView = {
         });
     },
 
+    async _fetchCourtBundle(courtId) {
+        const [courtRes, sessionsRes] = await Promise.all([
+            API.get(`/api/courts/${courtId}`),
+            API.get(`/api/sessions?court_id=${courtId}`),
+        ]);
+        return {
+            court: courtRes.court,
+            sessions: sessionsRes.sessions || [],
+        };
+    },
+
     async openCourtDetail(courtId) {
         MapView.currentCourtId = courtId;
         const panel = document.getElementById('court-panel');
@@ -339,14 +350,7 @@ const MapView = {
         await MapView.refreshMyStatus();
 
         try {
-            const [courtRes, sessionsRes] = await Promise.all([
-                API.get(`/api/courts/${courtId}`),
-                API.get(`/api/sessions?court_id=${courtId}`),
-            ]);
-            const court = courtRes.court;
-            const sessions = sessionsRes.sessions || [];
-            MapView._currentCourtData = court;
-            MapView._currentCourtSessions = sessions;
+            const { court, sessions } = await MapView._fetchCourtBundle(courtId);
             detail.innerHTML = MapView._courtDetailHTML(court, sessions);
 
             // NOW load competitive play data (after HTML is in DOM)
@@ -366,14 +370,7 @@ const MapView = {
         await MapView.refreshMyStatus();
 
         try {
-            const [courtRes, sessionsRes] = await Promise.all([
-                API.get(`/api/courts/${courtId}`),
-                API.get(`/api/sessions?court_id=${courtId}`),
-            ]);
-            const court = courtRes.court;
-            const sessions = sessionsRes.sessions || [];
-            MapView._currentCourtData = court;
-            MapView._currentCourtSessions = sessions;
+            const { court, sessions } = await MapView._fetchCourtBundle(courtId);
             container.innerHTML = MapView._courtFullPageHTML(court, sessions);
 
             // Load competitive play into the full-page section
@@ -396,14 +393,7 @@ const MapView = {
         if (App.currentView !== 'court-detail') return;
         await MapView.refreshMyStatus();
         try {
-            const [courtRes, sessionsRes] = await Promise.all([
-                API.get(`/api/courts/${courtId}`),
-                API.get(`/api/sessions?court_id=${courtId}`),
-            ]);
-            const court = courtRes.court;
-            const sessions = sessionsRes.sessions || [];
-            MapView._currentCourtData = court;
-            MapView._currentCourtSessions = sessions;
+            const { court, sessions } = await MapView._fetchCourtBundle(courtId);
             const container = document.getElementById('court-fullpage-content');
             container.innerHTML = MapView._courtFullPageHTML(court, sessions);
             Ranked.loadCourtRanked(court.id);
