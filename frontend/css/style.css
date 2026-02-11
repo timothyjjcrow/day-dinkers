@@ -41,10 +41,13 @@ a:hover { text-decoration: underline; }
     cursor: pointer;
     display: inline-flex;
     align-items: center;
+    height: calc(var(--navbar-height) - 8px);
 }
 .logo-wordmark {
-    width: 132px;
-    height: auto;
+    height: 100%;
+    max-height: 100%;
+    width: auto;
+    max-width: 100%;
     display: block;
 }
 .nav-region { font-size: 12px; color: var(--text-muted); background: var(--primary-light); padding: 2px 8px; border-radius: 10px; font-weight: 500; }
@@ -1780,7 +1783,7 @@ a:hover { text-decoration: underline; }
 @media (max-width: 768px) {
     .side-panel { width: 100%; }
     .nav-center { display: none; }
-    .logo-wordmark { width: 108px; }
+    .logo { height: calc(var(--navbar-height) - 12px); }
     .county-location-btn { display: none; }
     .county-switcher select {
         max-width: 130px;
@@ -1852,7 +1855,7 @@ a:hover { text-decoration: underline; }
 
 @media (max-width: 560px) {
     .nav-left { gap: 8px; }
-    .logo-wordmark { width: 94px; }
+    .logo { height: calc(var(--navbar-height) - 16px); }
     .county-switcher select {
         max-width: 112px;
     }
