@@ -10,6 +10,7 @@ const Sessions = {
     cachedListSessions: [],
     calendarMonthKey: null,
     calendarSelectedDayKey: null,
+    scheduleControlsBound: false,
 
     async load() {
         const list = document.getElementById('sessions-list');
@@ -748,21 +749,55 @@ const Sessions = {
 
         const modal = document.getElementById('session-modal');
         modal.style.display = 'flex';
+        const form = document.getElementById('create-session-form');
+        if (form && typeof form.reset === 'function') {
+            form.reset();
+        }
 
+        await Sessions._populateCourtSelect(preselectedCourtId);
+        Sessions._populateInviteFriendOptions();
+
+        // Reset type toggle
+        document.getElementById('session-type-toggle').value = 'scheduled';
+        const recurrenceSelect = document.getElementById('session-recurrence-select');
+        const recurrenceCount = document.getElementById('session-recurrence-count');
+        const durationSelect = document.getElementById('session-duration-select');
+        if (recurrenceSelect) recurrenceSelect.value = 'none';
+        if (recurrenceCount) recurrenceCount.value = '4';
+        if (durationSelect) durationSelect.value = '90';
+        Sessions._toggleScheduleFields();
+        Sessions._initializeScheduleInputs('tomorrow');
+    },
+
+    hideCreateModal() {
+        document.getElementById('session-modal').style.display = 'none';
+    },
+
+    async _populateCourtSelect(preselectedCourtId) {
         const select = document.getElementById('session-court-select');
+        if (!select) return;
         try {
             const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
                 ? App.buildCourtsQuery()
                 : '/api/courts';
             const res = await API.get(courtsUrl);
-            select.innerHTML = (res.courts || []).map(c =>
-                `<option value="${c.id}" ${c.id === preselectedCourtId ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
+            const courts = res.courts || [];
+            if (!courts.length) {
+                select.innerHTML = '<option value="">No courts available</option>';
+                return;
+            }
+            select.innerHTML = courts.map(c =>
+                `<option value="${c.id}" ${String(c.id) === String(preselectedCourtId) ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
             ).join('');
-        } catch { select.innerHTML = '<option>Error loading courts</option>'; }
+        } catch {
+            select.innerHTML = '<option value="">Error loading courts</option>';
+        }
+    },
 
-        // Populate friend invite section
+    _populateInviteFriendOptions() {
         const inviteSection = document.getElementById('session-invite-section');
         const inviteList = document.getElementById('session-invite-friends');
+        if (!inviteSection || !inviteList) return;
         if (App.friendsList.length > 0) {
             inviteSection.style.display = 'block';
             inviteList.innerHTML = App.friendsList.map(f => `
@@ -775,24 +810,486 @@ const Sessions = {
         } else {
             inviteSection.style.display = 'none';
         }
-
-        // Reset type toggle
-        document.getElementById('session-type-toggle').value = 'scheduled';
-        const recurrenceSelect = document.getElementById('session-recurrence-select');
-        const recurrenceCount = document.getElementById('session-recurrence-count');
-        if (recurrenceSelect) recurrenceSelect.value = 'none';
-        if (recurrenceCount) recurrenceCount.value = '4';
-        Sessions._toggleScheduleFields();
     },
 
-    hideCreateModal() {
-        document.getElementById('session-modal').style.display = 'none';
+    _bindScheduleControls() {
+        if (Sessions.scheduleControlsBound) return;
+        const dayButtons = document.getElementById('session-quick-buttons');
+        const timeButtons = document.getElementById('session-time-buttons');
+        const durationButtons = document.getElementById('session-duration-buttons');
+        const startInput = document.getElementById('session-start-time');
+        const endInput = document.getElementById('session-end-time');
+        const durationSelect = document.getElementById('session-duration-select');
+        if (!startInput || !endInput || !durationSelect) return;
+
+        const onStartInput = () => {
+            if (!startInput.value) {
+                endInput.min = '';
+                Sessions._setQuickPresetActive('custom');
+                Sessions._setQuickTimeActive('custom');
+                Sessions._renderScheduleSummary();
+                return;
+            }
+            endInput.min = startInput.value;
+            if (durationSelect.value !== 'custom') {
+                Sessions._syncEndFromDuration();
+            }
+            Sessions._syncQuickSelectorsFromStart();
+            Sessions._renderScheduleSummary();
+        };
+        startInput.addEventListener('input', onStartInput);
+        startInput.addEventListener('change', onStartInput);
+
+        const onEndInput = () => {
+            if (!endInput.value || !startInput.value) return;
+            const start = Sessions._parseDateTimeLocal(startInput.value);
+            const end = Sessions._parseDateTimeLocal(endInput.value);
+            if (!start || !end || end <= start) {
+                durationSelect.value = 'custom';
+                Sessions._syncDurationButtonsFromValue('custom');
+                Sessions._renderScheduleSummary();
+                return;
+            }
+            const diffMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+            const presetDurations = ['60', '90', '120', '150', '180'];
+            if (presetDurations.includes(String(diffMinutes))) {
+                durationSelect.value = String(diffMinutes);
+            } else {
+                durationSelect.value = 'custom';
+            }
+            Sessions._syncDurationButtonsFromValue(durationSelect.value);
+            Sessions._renderScheduleSummary();
+        };
+        endInput.addEventListener('input', onEndInput);
+        endInput.addEventListener('change', onEndInput);
+
+        if (dayButtons) {
+            dayButtons.addEventListener('click', (event) => {
+                const btn = event.target.closest('.session-quick-btn');
+                if (!btn) return;
+                event.preventDefault();
+                Sessions._applyQuickPreset(btn.dataset.preset || 'custom');
+            });
+        }
+        if (timeButtons) {
+            timeButtons.addEventListener('click', (event) => {
+                const btn = event.target.closest('.session-quick-btn');
+                if (!btn) return;
+                event.preventDefault();
+                Sessions._applyQuickTime(btn.dataset.timeSlot || 'custom');
+            });
+        }
+        if (durationButtons) {
+            durationButtons.addEventListener('click', (event) => {
+                const btn = event.target.closest('.session-quick-btn');
+                if (!btn) return;
+                event.preventDefault();
+                Sessions._applyDurationSelection(btn.dataset.duration || '90');
+            });
+        }
+
+        Sessions.scheduleControlsBound = true;
+    },
+
+    _initializeScheduleInputs(defaultPreset = 'tomorrow', preserveExisting = false) {
+        Sessions._bindScheduleControls();
+        const startInput = document.getElementById('session-start-time');
+        const endInput = document.getElementById('session-end-time');
+        const durationSelect = document.getElementById('session-duration-select');
+        if (!startInput || !endInput || !durationSelect) return;
+
+        const minStart = Sessions._roundUpToMinutes(new Date(Date.now() + 5 * 60000), 15);
+        const minValue = Sessions._formatDateTimeLocal(minStart);
+        startInput.min = minValue;
+        endInput.min = minValue;
+
+        if (preserveExisting && startInput.value) {
+            endInput.min = startInput.value;
+            if (durationSelect.value !== 'custom') {
+                Sessions._syncEndFromDuration();
+            }
+            Sessions._syncQuickSelectorsFromStart();
+            Sessions._syncDurationButtonsFromValue(durationSelect.value);
+            Sessions._renderScheduleSummary();
+            return;
+        }
+
+        if (!durationSelect.value || durationSelect.value === 'custom') {
+            durationSelect.value = '90';
+        }
+        Sessions._syncDurationButtonsFromValue(durationSelect.value);
+        Sessions._applyQuickPreset(defaultPreset);
+        Sessions._applyQuickTime('18:30');
+        Sessions._renderScheduleSummary();
+    },
+
+    _setQuickPresetActive(preset) {
+        const buttons = document.querySelectorAll('#session-quick-buttons .session-quick-btn');
+        buttons.forEach(button => {
+            button.classList.toggle('active', button.dataset.preset === preset);
+        });
+    },
+
+    _setQuickTimeActive(slot) {
+        const buttons = document.querySelectorAll('#session-time-buttons .session-quick-btn');
+        buttons.forEach(button => {
+            button.classList.toggle('active', button.dataset.timeSlot === slot);
+        });
+    },
+
+    _syncDurationButtonsFromValue(duration) {
+        const buttons = document.querySelectorAll('#session-duration-buttons .session-quick-btn');
+        buttons.forEach(button => {
+            button.classList.toggle('active', button.dataset.duration === String(duration));
+        });
+    },
+
+    _activeQuickDayPreset() {
+        const active = document.querySelector('#session-quick-buttons .session-quick-btn.active');
+        return active?.dataset?.preset || null;
+    },
+
+    _activeQuickTimeSlot() {
+        const active = document.querySelector('#session-time-buttons .session-quick-btn.active');
+        return active?.dataset?.timeSlot || null;
+    },
+
+    _syncQuickSelectorsFromStart() {
+        const startInput = document.getElementById('session-start-time');
+        const start = Sessions._parseDateTimeLocal(startInput?.value || '');
+        if (!start) {
+            Sessions._setQuickPresetActive('custom');
+            Sessions._setQuickTimeActive('custom');
+            return;
+        }
+        Sessions._setQuickPresetActive(Sessions._quickDayPresetForDate(start));
+        Sessions._setQuickTimeActive(Sessions._quickTimeSlotForDate(start));
+    },
+
+    _quickDayPresetForDate(date) {
+        const toStartOfDay = (rawDate) => new Date(rawDate.getFullYear(), rawDate.getMonth(), rawDate.getDate());
+        const target = toStartOfDay(date);
+        const today = toStartOfDay(new Date());
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const weekend = Sessions._nextWeekendDate(today);
+        const nextWeek = new Date(today);
+        nextWeek.setDate(nextWeek.getDate() + 7);
+
+        const targetKey = Sessions._dateKey(target);
+        if (targetKey === Sessions._dateKey(today)) return 'today';
+        if (targetKey === Sessions._dateKey(tomorrow)) return 'tomorrow';
+        if (targetKey === Sessions._dateKey(weekend)) return 'weekend';
+        if (targetKey === Sessions._dateKey(nextWeek)) return 'next_week';
+        return 'custom';
+    },
+
+    _quickTimeSlotForDate(date) {
+        const pad = (n) => String(n).padStart(2, '0');
+        const slot = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        const allowed = Sessions._quickTimeSlots();
+        return allowed.includes(slot) ? slot : 'custom';
+    },
+
+    _quickTimeSlots() {
+        return ['07:00', '09:00', '12:00', '17:30', '18:30', '19:30'];
+    },
+
+    _timeSlotToMinutes(slot) {
+        const match = /^(\d{2}):(\d{2})$/.exec(String(slot || ''));
+        if (!match) return null;
+        const hours = Number(match[1]);
+        const minutes = Number(match[2]);
+        if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+        if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+        return hours * 60 + minutes;
+    },
+
+    _resolveNextAvailableStart(dayPreset, currentStart) {
+        const minStart = Sessions._roundUpToMinutes(new Date(Date.now() + 5 * 60000), 15);
+        const slots = Sessions._quickTimeSlots();
+        let baseDate;
+        if (dayPreset && dayPreset !== 'custom') {
+            baseDate = Sessions._resolveQuickPresetStart(dayPreset) || new Date(minStart);
+        } else if (currentStart) {
+            baseDate = new Date(currentStart);
+        } else {
+            baseDate = new Date(minStart);
+        }
+        const startDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+
+        for (let dayOffset = 0; dayOffset < 14; dayOffset += 1) {
+            const day = new Date(startDay);
+            day.setDate(startDay.getDate() + dayOffset);
+            for (const slot of slots) {
+                const slotMinutes = Sessions._timeSlotToMinutes(slot);
+                if (slotMinutes === null) continue;
+                const candidate = new Date(day);
+                candidate.setHours(Math.floor(slotMinutes / 60), slotMinutes % 60, 0, 0);
+                if (candidate >= minStart) {
+                    return candidate;
+                }
+            }
+        }
+        return minStart;
+    },
+
+    _applyQuickPreset(preset) {
+        const startInput = document.getElementById('session-start-time');
+        if (!startInput) return;
+
+        Sessions._setQuickPresetActive(preset);
+        if (preset === 'custom') {
+            startInput.focus();
+            Sessions._renderScheduleSummary();
+            return;
+        }
+
+        let quickStart = Sessions._resolveQuickPresetStart(preset);
+        if (!quickStart) return;
+
+        const existingStart = Sessions._parseDateTimeLocal(startInput.value);
+        const activeSlot = Sessions._activeQuickTimeSlot();
+        let minutes = existingStart
+            ? (existingStart.getHours() * 60 + existingStart.getMinutes())
+            : Sessions._timeSlotToMinutes(activeSlot);
+        if (minutes === null) minutes = 18 * 60 + 30;
+        quickStart.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+
+        const minStart = Sessions._roundUpToMinutes(new Date(Date.now() + 5 * 60000), 15);
+        if (quickStart < minStart) quickStart = minStart;
+
+        startInput.value = Sessions._formatDateTimeLocal(quickStart);
+        Sessions._syncEndFromDuration();
+        Sessions._syncQuickSelectorsFromStart();
+        Sessions._renderScheduleSummary();
+    },
+
+    _resolveQuickPresetStart(preset) {
+        const today = new Date();
+        const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        switch (preset) {
+            case 'today':
+                return new Date(startOfToday);
+            case 'tomorrow': {
+                const tomorrow = new Date(startOfToday);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                return tomorrow;
+            }
+            case 'weekend':
+                return Sessions._nextWeekendDate(startOfToday);
+            case 'next_week': {
+                const nextWeek = new Date(startOfToday);
+                nextWeek.setDate(nextWeek.getDate() + 7);
+                return nextWeek;
+            }
+            default:
+                return null;
+        }
+    },
+
+    _nextWeekendDate(baseDate) {
+        const startOfDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+        const day = startOfDay.getDay();
+        if (day === 6 || day === 0) return startOfDay;
+        const daysUntilSaturday = 6 - day;
+        startOfDay.setDate(startOfDay.getDate() + daysUntilSaturday);
+        return startOfDay;
+    },
+
+    _applyQuickTime(slot) {
+        const startInput = document.getElementById('session-start-time');
+        if (!startInput) return;
+
+        Sessions._setQuickTimeActive(slot);
+        if (slot === 'next') {
+            const dayPreset = Sessions._activeQuickDayPreset();
+            const currentStart = Sessions._parseDateTimeLocal(startInput.value);
+            const nextStart = Sessions._resolveNextAvailableStart(dayPreset, currentStart);
+            startInput.value = Sessions._formatDateTimeLocal(nextStart);
+            Sessions._syncEndFromDuration();
+            Sessions._syncQuickSelectorsFromStart();
+            Sessions._renderScheduleSummary();
+            return;
+        }
+        if (slot === 'custom') {
+            startInput.focus();
+            Sessions._renderScheduleSummary();
+            return;
+        }
+
+        const minutes = Sessions._timeSlotToMinutes(slot);
+        if (minutes === null) return;
+
+        let start = Sessions._parseDateTimeLocal(startInput.value);
+        if (!start) {
+            const dayPreset = Sessions._activeQuickDayPreset();
+            start = Sessions._resolveQuickPresetStart(
+                dayPreset && dayPreset !== 'custom' ? dayPreset : 'tomorrow'
+            ) || new Date();
+        }
+
+        start = new Date(start);
+        start.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+
+        const minStart = Sessions._roundUpToMinutes(new Date(Date.now() + 5 * 60000), 15);
+        if (start < minStart) {
+            if (Sessions._activeQuickDayPreset() === 'today') {
+                const tomorrow = Sessions._resolveQuickPresetStart('tomorrow') || new Date(minStart);
+                tomorrow.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+                start = tomorrow;
+            } else {
+                start = minStart;
+            }
+        }
+
+        startInput.value = Sessions._formatDateTimeLocal(start);
+        Sessions._syncEndFromDuration();
+        Sessions._syncQuickSelectorsFromStart();
+        Sessions._renderScheduleSummary();
+    },
+
+    _applyDurationSelection(selectedDuration) {
+        const durationSelect = document.getElementById('session-duration-select');
+        const endInput = document.getElementById('session-end-time');
+        if (!durationSelect) return;
+        if (selectedDuration !== undefined && selectedDuration !== null) {
+            durationSelect.value = String(selectedDuration);
+        }
+        Sessions._syncDurationButtonsFromValue(durationSelect.value);
+        if (durationSelect.value === 'custom') {
+            if (endInput) endInput.focus();
+            Sessions._renderScheduleSummary();
+            return;
+        }
+        Sessions._syncEndFromDuration();
+        Sessions._renderScheduleSummary();
+    },
+
+    _syncEndFromDuration() {
+        const startInput = document.getElementById('session-start-time');
+        const endInput = document.getElementById('session-end-time');
+        const durationSelect = document.getElementById('session-duration-select');
+        if (!startInput || !endInput || !durationSelect || !startInput.value) return;
+
+        endInput.min = startInput.value;
+        if (durationSelect.value === 'custom') return;
+
+        const minutes = parseInt(durationSelect.value, 10);
+        if (!Number.isFinite(minutes) || minutes <= 0) return;
+        const start = Sessions._parseDateTimeLocal(startInput.value);
+        if (!start) return;
+        const end = new Date(start.getTime() + minutes * 60000);
+        endInput.value = Sessions._formatDateTimeLocal(end);
+    },
+
+    _renderScheduleSummary() {
+        const summaryEl = document.getElementById('session-schedule-summary');
+        const startInput = document.getElementById('session-start-time');
+        const endInput = document.getElementById('session-end-time');
+        const durationSelect = document.getElementById('session-duration-select');
+        if (!summaryEl || !startInput || !endInput || !durationSelect) return;
+
+        const start = Sessions._parseDateTimeLocal(startInput.value);
+        if (!start) {
+            summaryEl.textContent = 'Choose a day and time to schedule your session.';
+            return;
+        }
+
+        let end = Sessions._parseDateTimeLocal(endInput.value);
+        const durationValue = String(durationSelect.value || 'custom');
+        let durationLabel = 'Custom length';
+        if (durationValue !== 'custom') {
+            const minutes = parseInt(durationValue, 10);
+            if (Number.isFinite(minutes) && minutes > 0) {
+                durationLabel = Sessions._formatDurationLabel(minutes);
+                if (!end || end <= start) {
+                    end = new Date(start.getTime() + minutes * 60000);
+                }
+            }
+        } else if (end && end > start) {
+            const customMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+            durationLabel = Sessions._formatDurationLabel(customMinutes);
+        }
+
+        const startDateLabel = start.toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+        });
+        const startTimeLabel = start.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+
+        let summary = `Scheduling ${startDateLabel} at ${startTimeLabel} • ${durationLabel}`;
+        if (end && end > start) {
+            const endTimeLabel = end.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+            });
+            summary += ` • Ends ${endTimeLabel}`;
+        }
+        const sessionType = document.getElementById('session-type-toggle')?.value || 'scheduled';
+        if (sessionType === 'scheduled') {
+            const recurrence = document.getElementById('session-recurrence-select')?.value || 'none';
+            if (recurrence === 'none') {
+                summary += ' • One-time';
+            } else {
+                const recurrenceCountRaw = parseInt(
+                    document.getElementById('session-recurrence-count')?.value || '4',
+                    10
+                );
+                const recurrenceCount = Number.isFinite(recurrenceCountRaw)
+                    ? Math.max(2, recurrenceCountRaw)
+                    : 4;
+                const recurrenceLabel = recurrence === 'biweekly' ? 'Every 2 weeks' : 'Weekly';
+                summary += ` • ${recurrenceLabel} (${recurrenceCount} sessions)`;
+            }
+        }
+        summaryEl.textContent = summary;
+    },
+
+    _formatDurationLabel(totalMinutes) {
+        const minutes = Number(totalMinutes);
+        if (!Number.isFinite(minutes) || minutes <= 0) return 'Custom length';
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        if (!hours) return `${mins} min`;
+        if (!mins) return `${hours}h`;
+        return `${hours}h ${mins}m`;
+    },
+
+    _roundUpToMinutes(date, intervalMinutes) {
+        const rounded = new Date(date);
+        rounded.setSeconds(0, 0);
+        const remainder = rounded.getMinutes() % intervalMinutes;
+        if (remainder !== 0) {
+            rounded.setMinutes(rounded.getMinutes() + intervalMinutes - remainder);
+        }
+        return rounded;
+    },
+
+    _formatDateTimeLocal(date) {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T`
+            + `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    },
+
+    _parseDateTimeLocal(value) {
+        if (!value) return null;
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return null;
+        return parsed;
     },
 
     _toggleScheduleFields() {
         const type = document.getElementById('session-type-toggle').value;
         const fields = document.getElementById('session-schedule-fields');
         fields.style.display = type === 'scheduled' ? 'block' : 'none';
+        if (type === 'scheduled') {
+            Sessions._initializeScheduleInputs('tomorrow', true);
+        }
         Sessions._toggleRecurrenceFields();
     },
 
@@ -802,6 +1299,7 @@ const Sessions = {
         const group = document.getElementById('session-recurrence-count-group');
         if (!group) return;
         group.style.display = (type === 'scheduled' && recurrence !== 'none') ? 'block' : 'none';
+        Sessions._renderScheduleSummary();
     },
 
     async create(e) {
@@ -824,8 +1322,29 @@ const Sessions = {
                 App.toast('Start time is required for scheduled sessions', 'error');
                 return;
             }
-            data.start_time = form.start_time.value;
-            if (form.end_time.value) data.end_time = form.end_time.value;
+            const startAt = Sessions._parseDateTimeLocal(form.start_time.value);
+            if (!startAt) {
+                App.toast('Start time is invalid', 'error');
+                return;
+            }
+            if (startAt.getTime() < (Date.now() - 60000)) {
+                App.toast('Start time must be in the future', 'error');
+                return;
+            }
+            data.start_time = Sessions._formatDateTimeLocal(startAt);
+
+            if (form.end_time.value) {
+                const endAt = Sessions._parseDateTimeLocal(form.end_time.value);
+                if (!endAt) {
+                    App.toast('End time is invalid', 'error');
+                    return;
+                }
+                if (endAt <= startAt) {
+                    App.toast('End time must be after start time', 'error');
+                    return;
+                }
+                data.end_time = Sessions._formatDateTimeLocal(endAt);
+            }
 
             const recurrence = form.recurrence?.value || 'none';
             const parsedCount = parseInt(form.recurrence_count?.value || '1', 10);
@@ -872,41 +1391,24 @@ const Sessions = {
         // Quick create a "now" session at this court
         const modal = document.getElementById('session-modal');
         modal.style.display = 'flex';
+        const form = document.getElementById('create-session-form');
+        if (form && typeof form.reset === 'function') {
+            form.reset();
+        }
 
-        const select = document.getElementById('session-court-select');
-        try {
-            const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
-                ? App.buildCourtsQuery()
-                : '/api/courts';
-            const res = await API.get(courtsUrl);
-            select.innerHTML = (res.courts || []).map(c =>
-                `<option value="${c.id}" ${c.id === courtId ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
-            ).join('');
-        } catch { select.innerHTML = '<option>Error loading courts</option>'; }
+        await Sessions._populateCourtSelect(courtId);
+        Sessions._populateInviteFriendOptions();
 
         // Set to "now" type
         document.getElementById('session-type-toggle').value = 'now';
         const recurrenceSelect = document.getElementById('session-recurrence-select');
         const recurrenceCount = document.getElementById('session-recurrence-count');
+        const durationSelect = document.getElementById('session-duration-select');
         if (recurrenceSelect) recurrenceSelect.value = 'none';
         if (recurrenceCount) recurrenceCount.value = '4';
+        if (durationSelect) durationSelect.value = '90';
         Sessions._toggleScheduleFields();
-
-        // Populate friend invite section
-        const inviteSection = document.getElementById('session-invite-section');
-        const inviteList = document.getElementById('session-invite-friends');
-        if (App.friendsList.length > 0) {
-            inviteSection.style.display = 'block';
-            inviteList.innerHTML = App.friendsList.map(f => `
-                <label class="friend-pick-item">
-                    <input type="checkbox" value="${f.id}" name="invite_friends">
-                    <span class="friend-pick-avatar">${Sessions._e((f.name || f.username || '?')[0].toUpperCase())}</span>
-                    <span class="friend-pick-name">${Sessions._e(f.name || f.username)}</span>
-                </label>
-            `).join('');
-        } else {
-            inviteSection.style.display = 'none';
-        }
+        Sessions._initializeScheduleInputs('tomorrow');
     },
 
     // ── Join / Leave Sessions ─────────────────────────────────

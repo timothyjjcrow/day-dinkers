@@ -1436,6 +1436,51 @@ a:hover { text-decoration: underline; }
    ═══════════════════════════════════════════════════ */
 .sessions-filters { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .sessions-filters select { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.session-quick-buttons,
+.session-time-buttons,
+.session-duration-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.session-duration-buttons .session-quick-btn { min-width: 62px; text-align: center; }
+.session-time-buttons .session-quick-btn[data-time-slot="next"] {
+    border-style: dashed;
+}
+.session-quick-btn {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+}
+.session-quick-btn:hover {
+    border-color: #cbd5e1;
+    background: #f1f5f9;
+}
+.session-quick-btn.active {
+    border-color: rgba(34, 197, 94, .55);
+    background: #ecfdf5;
+    color: var(--primary-dark);
+}
+.session-quick-help {
+    margin-top: 6px;
+    margin-bottom: 0;
+}
+.session-schedule-summary {
+    border: 1px solid rgba(34, 197, 94, .35);
+    background: #f0fdf4;
+    color: #166534;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
 
 .session-section-title { font-size: 16px; margin: 20px 0 10px; }
 .session-card-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
@@ -1755,6 +1800,13 @@ a:hover { text-decoration: underline; }
     .profile-header-card { flex-direction: column; text-align: center; }
     .profile-stats-grid { grid-template-columns: repeat(3, 1fr); }
     .form-row { grid-template-columns: 1fr; }
+    .session-quick-buttons,
+    .session-time-buttons,
+    .session-duration-buttons {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .session-quick-btn { text-align: center; }
     .court-update-image-row { grid-template-columns: 1fr; }
     .court-update-checkbox-grid { grid-template-columns: 1fr; }
     .sessions-calendar { padding: 10px; }
