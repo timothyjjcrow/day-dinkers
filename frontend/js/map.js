@@ -71,15 +71,16 @@ const MapView = {
 
             const friends = MapView._friendsAtCourt(fp.court_id);
             const names = friends.map(f => f.user.name || f.user.username).join(', ');
-            const marker = L.marker([court.latitude + 0.0003, court.longitude + 0.0003], {
+            const marker = L.marker([court.latitude, court.longitude], {
                 icon: L.divIcon({
                     className: 'friend-marker-icon',
                     html: `<div class="friend-marker">${friends.length > 1 ? friends.length : ''}👥</div>`,
-                    iconSize: [28, 28],
-                    iconAnchor: [14, 28],
-                    popupAnchor: [0, -24],
+                    iconSize: [24, 24],
+                    // Offset badge up/right from the court pin so it never covers the pin.
+                    iconAnchor: [-12, 50],
+                    popupAnchor: [18, -40],
                 }),
-                zIndexOffset: 500,
+                zIndexOffset: 300,
             }).addTo(MapView.map);
             marker.bindPopup(`<strong>Friends here:</strong><br>${names}`);
             MapView.friendMarkers.push(marker);

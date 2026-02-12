@@ -284,12 +284,21 @@ const Ranked = {
         }
 
         try {
-            const [queueRes, activeRes, lbRes, lobbyRes] = await Promise.all([
+            const token = localStorage.getItem('token');
+            const pendingPromise = token
+                ? API.get('/api/ranked/pending').catch(() => ({ matches: [] }))
+                : Promise.resolve({ matches: [] });
+
+            const [queueRes, activeRes, lbRes, lobbyRes, pendingRes] = await Promise.all([
                 API.get(`/api/ranked/queue/${courtId}`),
                 API.get(`/api/ranked/active/${courtId}`),
                 API.get(`/api/ranked/leaderboard?court_id=${courtId}&limit=10`),
                 API.get(`/api/ranked/court/${courtId}/lobbies`),
+                pendingPromise,
             ]);
+            const myPendingMatches = (pendingRes.matches || []).filter(m =>
+                Number(m.court_id) === Number(courtId)
+            );
 
             container.innerHTML = Ranked._renderCourtRanked(
                 queueRes.queue || [],
@@ -297,6 +306,7 @@ const Ranked = {
                 lbRes.leaderboard || [],
                 courtId,
                 lobbyRes || {},
+                myPendingMatches,
             );
         } catch (err) {
             console.error('Failed to load ranked data:', err);
@@ -308,7 +318,7 @@ const Ranked = {
         }
     },
 
-    _renderCourtRanked(queue, activeMatches, leaderboard, courtId, lobbyData = {}) {
+    _renderCourtRanked(queue, activeMatches, leaderboard, courtId, lobbyData = {}, myPendingMatches = []) {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const inQueue = queue.some(q => q.user_id === currentUser.id);
         const readyLobbies = lobbyData.ready_lobbies || [];
@@ -320,6 +330,13 @@ const Ranked = {
         // Separate in-progress from pending-confirmation matches
         const inProgressMatches = activeMatches.filter(m => m.status === 'in_progress');
         const pendingMatches = activeMatches.filter(m => m.status === 'pending_confirmation');
+        const myPendingById = new Set((myPendingMatches || []).map(m => m.id));
+        const myPendingFromActive = pendingMatches.filter(m => myPendingById.has(m.id));
+        const myPendingOnly = (myPendingMatches || []).filter(m =>
+            !pendingMatches.some(pm => pm.id === m.id)
+        );
+        const myPendingCourtMatches = [...myPendingFromActive, ...myPendingOnly];
+        const otherPendingMatches = pendingMatches.filter(m => !myPendingById.has(m.id));
 
         // Queue section
         const queueHTML = queue.length > 0
@@ -344,8 +361,11 @@ const Ranked = {
             : '';
 
         // Pending confirmation matches
-        const pendingHTML = pendingMatches.length > 0
-            ? pendingMatches.map(m => Ranked._renderPendingCourtMatch(m)).join('')
+        const myPendingHTML = myPendingCourtMatches.length > 0
+            ? myPendingCourtMatches.map(m => Ranked._renderPendingCourtMatch(m)).join('')
+            : '';
+        const pendingHTML = otherPendingMatches.length > 0
+            ? otherPendingMatches.map(m => Ranked._renderPendingCourtMatch(m)).join('')
             : '';
 
         // Mini leaderboard
@@ -394,6 +414,13 @@ const Ranked = {
             <div class="ranked-header">
                 <h4>⚔️ Competitive Play</h4>
             </div>
+
+            ${myPendingHTML ? `
+            <div class="ranked-sub-section">
+                <h5>✅ Needs Your Score Confirmation</h5>
+                <p class="muted">Confirm or reject submitted scores directly from this court page.</p>
+                ${myPendingHTML}
+            </div>` : ''}
 
             ${pendingHTML ? `
             <div class="ranked-sub-section">
