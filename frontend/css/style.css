@@ -92,13 +92,28 @@ a:hover { text-decoration: underline; }
 .nav-btn {
     background: none; border: none; padding: 8px; cursor: pointer;
     border-radius: 8px; color: var(--text); display: inline-flex; align-items: center;
+    position: relative;
 }
 .nav-btn:hover { background: var(--bg); }
 .nav-btn.active { color: var(--primary); background: var(--primary-light); }
 .nav-btn svg { width: 20px; height: 20px; }
 .auth-btn { font-size: 13px; font-weight: 600; color: var(--primary-dark); padding: 6px 14px; border: 1px solid var(--primary); border-radius: 8px; }
 .auth-btn:hover { background: var(--primary-light); }
-.badge { position: absolute; top: 2px; right: 2px; background: var(--danger); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; }
+.badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: var(--danger);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 10px;
+    min-width: 16px;
+    line-height: 1.1;
+    text-align: center;
+    pointer-events: none;
+}
 
 .location-consent-banner {
     position: fixed; top: var(--navbar-height); left: 0; right: 0; z-index: 980;

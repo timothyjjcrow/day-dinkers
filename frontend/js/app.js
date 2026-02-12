@@ -298,7 +298,13 @@ const App = {
         MapView.init();
         App.initCountyPicker();
         Chat.init();
-        window.addEventListener('resize', () => App.updateTopLayoutOffset());
+        window.addEventListener('resize', () => {
+            App.updateTopLayoutOffset();
+            const dd = document.getElementById('notifications-dropdown');
+            if (dd && dd.style.display === 'block') {
+                App._positionNotificationsDropdown();
+            }
+        });
 
         // Check auth (async) — validates token, clears stale sessions
         Auth.checkAuth();
@@ -499,8 +505,31 @@ const App = {
 
     toggleNotifications() {
         const dd = document.getElementById('notifications-dropdown');
-        dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
-        if (dd.style.display === 'block') App._loadNotifications();
+        const open = dd.style.display === 'block';
+        if (open) {
+            dd.style.display = 'none';
+            return;
+        }
+        dd.style.display = 'block';
+        App._positionNotificationsDropdown();
+        App._loadNotifications();
+    },
+
+    _positionNotificationsDropdown() {
+        const dd = document.getElementById('notifications-dropdown');
+        const bellBtn = document.getElementById('btn-notifications');
+        if (!dd || !bellBtn) return;
+
+        const btnRect = bellBtn.getBoundingClientRect();
+        const menuWidth = dd.offsetWidth || 320;
+        const margin = 12;
+        let left = btnRect.right - menuWidth;
+        left = Math.max(margin, Math.min(left, window.innerWidth - menuWidth - margin));
+        const top = btnRect.bottom + 8;
+
+        dd.style.left = `${Math.round(left)}px`;
+        dd.style.right = 'auto';
+        dd.style.top = `${Math.round(top)}px`;
     },
 
     async _loadNotifications() {
