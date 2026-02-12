@@ -704,6 +704,7 @@ a:hover { text-decoration: underline; }
 .leaderboard-table thead { background: var(--text); color: white; }
 .leaderboard-table th { padding: 10px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; text-align: left; }
 .leaderboard-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.leaderboard-table td:last-child { white-space: nowrap; }
 .lb-row { cursor: pointer; transition: background .15s; }
 .lb-row:hover { background: var(--bg); }
 .lb-top3 { font-weight: 600; }
@@ -730,6 +731,7 @@ a:hover { text-decoration: underline; }
 .queue-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .queue-header h5 { font-size: 14px; font-weight: 600; margin: 0; }
 .create-match-actions { margin-top: 10px; display: flex; gap: 8px; }
+.queue-header .create-match-actions { margin-top: 0; }
 
 .ranked-sub-section { margin-bottom: 14px; }
 .ranked-sub-section h5 { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; }

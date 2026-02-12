@@ -40,6 +40,10 @@ const Ranked = {
                              p.elo_rating >= 1200 ? 'elo-mid' : 'elo-low';
             const safeName = Ranked._e(p.name);
             const safeUsername = Ranked._e(p.username);
+            const challengeBtn = `
+                <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Ranked.openScheduledChallengeModal(${p.user_id}, 'leaderboard_challenge')">
+                    ⚔️ Schedule
+                </button>`;
             return `
             <tr class="lb-row ${i < 3 ? 'lb-top3' : ''}" onclick="Ranked.viewPlayer(${p.user_id})">
                 <td class="lb-rank">${medal}</td>
@@ -51,6 +55,7 @@ const Ranked = {
                 <td class="lb-record">${p.wins}W-${p.losses}L</td>
                 <td class="lb-winrate">${p.win_rate}%</td>
                 <td class="lb-games">${p.games_played}</td>
+                <td>${challengeBtn}</td>
             </tr>`;
         }).join('');
 
@@ -58,7 +63,7 @@ const Ranked = {
         <table class="leaderboard-table">
             <thead><tr>
                 <th>Rank</th><th>Player</th><th>ELO</th>
-                <th>Record</th><th>Win%</th><th>Games</th>
+                <th>Record</th><th>Win%</th><th>Games</th><th>Challenge</th>
             </tr></thead>
             <tbody>${rows}</tbody>
         </table>`;
@@ -73,19 +78,31 @@ const Ranked = {
         if (!token) { container.style.display = 'none'; return; }
 
         try {
-            const res = await API.get('/api/ranked/pending');
-            const matches = res.matches || [];
-            if (!matches.length) {
+            const [scoreRes, challengeRes] = await Promise.all([
+                API.get('/api/ranked/pending'),
+                API.get('/api/ranked/challenges/pending'),
+            ]);
+            const matches = scoreRes.matches || [];
+            const lobbies = challengeRes.lobbies || [];
+
+            if (!matches.length && !lobbies.length) {
                 container.style.display = 'none';
                 return;
             }
             container.style.display = 'block';
-            container.innerHTML = `
+            const challengeHTML = lobbies.length ? `
+                <div class="pending-confirm-section">
+                    <h3>⚔️ Ranked Challenge Invites</h3>
+                    <p class="muted">Accept challenges to move them into the ranked lobby.</p>
+                    ${lobbies.map(l => Ranked._renderPendingLobby(l)).join('')}
+                </div>` : '';
+            const scoreHTML = matches.length ? `
                 <div class="pending-confirm-section">
                     <h3>⏳ Pending Score Confirmations</h3>
                     <p class="muted">These matches need your confirmation before rankings update.</p>
                     ${matches.map(m => Ranked._renderPendingMatch(m, focusMatchId)).join('')}
-                </div>`;
+                </div>` : '';
+            container.innerHTML = `${challengeHTML}${scoreHTML}`;
 
             if (focusMatchId) {
                 const card = document.getElementById(`pending-match-${focusMatchId}`);
@@ -98,6 +115,43 @@ const Ranked = {
         } catch {
             container.style.display = 'none';
         }
+    },
+
+    _renderPendingLobby(lobby) {
+        const t1 = Ranked._e((lobby.team1 || []).map(p => p.user?.name || p.user?.username).join(' & '));
+        const t2 = Ranked._e((lobby.team2 || []).map(p => p.user?.name || p.user?.username).join(' & '));
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const myEntry = (lobby.players || []).find(p => p.user_id === currentUser.id);
+        const accepts = (lobby.players || []).map(p => {
+            const label = Ranked._e(p.user?.name || p.user?.username || '?');
+            return `<span class="confirm-player ${p.acceptance_status === 'accepted' ? 'confirmed' : 'pending'}">
+                ${p.acceptance_status === 'accepted' ? '✅' : '⏳'} ${label}
+            </span>`;
+        }).join('');
+        const scheduledText = lobby.scheduled_for
+            ? ` · ${new Date(lobby.scheduled_for).toLocaleString()}`
+            : '';
+
+        return `
+        <div class="pending-match-card">
+            <div class="pending-match-score">
+                <div class="pending-team"><span class="pending-team-name">${t1}</span></div>
+                <span class="match-vs">VS</span>
+                <div class="pending-team"><span class="pending-team-name">${t2}</span></div>
+            </div>
+            <div class="pending-match-confirmations">
+                <span class="confirm-progress">${lobby.accepted_count || 0}/${lobby.total_players || 0} accepted${scheduledText}</span>
+                <div class="confirm-players-list">${accepts}</div>
+            </div>
+            ${myEntry && myEntry.acceptance_status === 'pending' ? `
+            <div class="pending-match-actions">
+                <button class="btn-primary btn-sm" onclick="Ranked.respondToLobby(${lobby.id}, 'accept')">✅ Accept</button>
+                <button class="btn-danger btn-sm" onclick="Ranked.respondToLobby(${lobby.id}, 'decline')">❌ Decline</button>
+            </div>` : `
+            <div class="pending-match-actions">
+                <span class="muted">Waiting for player responses...</span>
+            </div>`}
+        </div>`;
     },
 
     _renderPendingMatch(match, focusMatchId = null) {
@@ -227,10 +281,11 @@ const Ranked = {
         container.innerHTML = '<div class="loading">Loading competitive play...</div>';
 
         try {
-            const [queueRes, activeRes, lbRes] = await Promise.all([
+            const [queueRes, activeRes, lbRes, lobbyRes] = await Promise.all([
                 API.get(`/api/ranked/queue/${courtId}`),
                 API.get(`/api/ranked/active/${courtId}`),
                 API.get(`/api/ranked/leaderboard?court_id=${courtId}&limit=10`),
+                API.get(`/api/ranked/court/${courtId}/lobbies`),
             ]);
 
             container.innerHTML = Ranked._renderCourtRanked(
@@ -238,20 +293,23 @@ const Ranked = {
                 activeRes.matches || [],
                 lbRes.leaderboard || [],
                 courtId,
+                lobbyRes || {},
             );
         } catch (err) {
             console.error('Failed to load ranked data:', err);
             container.innerHTML = `
                 <div class="ranked-header"><h4>⚔️ Competitive Play</h4></div>
                 <p class="muted">No competitive data yet. Check in and join the queue to get started!</p>
-                <button class="btn-primary btn-sm" onclick="Ranked.joinQueue(${courtId})" style="margin-top:8px">⚔️ Join Ranked Queue</button>
+                <button class="btn-primary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'doubles')" style="margin-top:8px">⚔️ Join Ranked Queue</button>
             `;
         }
     },
 
-    _renderCourtRanked(queue, activeMatches, leaderboard, courtId) {
+    _renderCourtRanked(queue, activeMatches, leaderboard, courtId, lobbyData = {}) {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const inQueue = queue.some(q => q.user_id === currentUser.id);
+        const readyLobbies = lobbyData.ready_lobbies || [];
+        const scheduledLobbies = lobbyData.scheduled_lobbies || [];
 
         // Separate in-progress from pending-confirmation matches
         const inProgressMatches = activeMatches.filter(m => m.status === 'in_progress');
@@ -297,11 +355,12 @@ const Ranked = {
             }).join('')
             : '<p class="muted">No ranked players at this court yet. Play a match to start!</p>';
 
-        const queueBtnText = inQueue ? '🔴 Leave Queue' : '⚔️ Join Ranked Queue';
-        const queueBtnClass = inQueue ? 'btn-danger' : 'btn-primary';
-        const queueAction = inQueue
-            ? `Ranked.leaveQueue(${courtId})`
-            : `Ranked.joinQueue(${courtId})`;
+        const queueActions = inQueue
+            ? `<button class="btn-danger btn-sm" onclick="Ranked.leaveQueue(${courtId})">🔴 Leave Queue</button>`
+            : `<div class="create-match-actions">
+                    <button class="btn-secondary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'singles')">🎾 Join Singles Queue</button>
+                    <button class="btn-primary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'doubles')">⚔️ Join Doubles Queue</button>
+               </div>`;
 
         // How many for a match?
         const neededForDoubles = Math.max(0, 4 - queue.length);
@@ -313,6 +372,13 @@ const Ranked = {
         } else if (queue.length === 1) {
             matchReadyMsg = '<p class="muted">Waiting for 1 more player for singles, 3 more for doubles...</p>';
         }
+
+        const readyLobbyHTML = readyLobbies.length
+            ? readyLobbies.map(l => Ranked._renderLobbyCard(l)).join('')
+            : '<p class="muted">No ranked lobbies ready yet.</p>';
+        const scheduledLobbyHTML = scheduledLobbies.length
+            ? scheduledLobbies.map(l => Ranked._renderLobbyCard(l, true)).join('')
+            : '<p class="muted">No accepted scheduled ranked games yet.</p>';
 
         return `
         <div class="court-ranked">
@@ -326,10 +392,20 @@ const Ranked = {
                 ${pendingHTML}
             </div>` : ''}
 
+            <div class="ranked-sub-section">
+                <h5>🎮 Ready Ranked Lobbies</h5>
+                ${readyLobbyHTML}
+            </div>
+
+            <div class="ranked-sub-section">
+                <h5>📅 Scheduled Ranked Games</h5>
+                ${scheduledLobbyHTML}
+            </div>
+
             <div class="ranked-queue-section">
                 <div class="queue-header">
                     <h5>Players Waiting (${queue.length})</h5>
-                    <button class="${queueBtnClass} btn-sm" onclick="${queueAction}">${queueBtnText}</button>
+                    ${queueActions}
                 </div>
                 <div class="queue-list">${queueHTML}</div>
                 ${matchReadyMsg}
@@ -406,16 +482,42 @@ const Ranked = {
         </div>`;
     },
 
+    _renderLobbyCard(lobby, scheduled = false) {
+        const t1 = Ranked._e((lobby.team1 || []).map(p => p.user?.name || p.user?.username).join(' & '));
+        const t2 = Ranked._e((lobby.team2 || []).map(p => p.user?.name || p.user?.username).join(' & '));
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const myEntry = (lobby.players || []).find(p => p.user_id === currentUser.id);
+        const canStart = myEntry && myEntry.acceptance_status === 'accepted';
+        const scheduledTime = lobby.scheduled_for
+            ? new Date(lobby.scheduled_for).toLocaleString()
+            : null;
+
+        return `
+        <div class="active-match-card ${scheduled ? 'pending-confirmation-card' : ''}">
+            <div class="match-teams">
+                <div class="match-team-name">${t1}</div>
+                <span class="match-vs">VS</span>
+                <div class="match-team-name">${t2}</div>
+            </div>
+            <div class="match-meta-row">
+                <span class="match-type-badge">${lobby.match_type}${scheduledTime ? ` · ${Ranked._e(scheduledTime)}` : ''}</span>
+                ${canStart
+                    ? `<button class="btn-primary btn-sm" onclick="Ranked.startLobbyMatch(${lobby.id})">▶️ Start Game</button>`
+                    : '<span class="muted">Participants can start once checked in</span>'}
+            </div>
+        </div>`;
+    },
+
     // ── Queue Actions ────────────────────────────────────────────────
 
-    async joinQueue(courtId) {
+    async joinQueue(courtId, matchType = 'doubles') {
         const token = localStorage.getItem('token');
         if (!token) { Auth.showModal(); return; }
         try {
             await API.post('/api/ranked/queue/join', {
-                court_id: courtId, match_type: 'doubles'
+                court_id: courtId, match_type: matchType
             });
-            App.toast('Joined the ranked queue! Waiting for opponents...');
+            App.toast(`Joined the ${matchType} ranked queue!`);
             Ranked.loadCourtRanked(courtId);
         } catch (err) {
             App.toast(err.message || 'Failed to join queue', 'error');
@@ -428,6 +530,248 @@ const Ranked = {
             App.toast('Left the queue');
             Ranked.loadCourtRanked(courtId);
         } catch { App.toast('Failed to leave queue', 'error'); }
+    },
+
+    async respondToLobby(lobbyId, action) {
+        try {
+            const res = await API.post(`/api/ranked/lobby/${lobbyId}/respond`, { action });
+            App.toast(action === 'accept'
+                ? (res.all_accepted ? 'Challenge accepted. Lobby is ready to start.' : 'Challenge accepted.')
+                : 'Challenge declined.');
+            Ranked.loadPendingConfirmations();
+            if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
+        } catch (err) {
+            App.toast(err.message || 'Failed to respond to challenge', 'error');
+        }
+    },
+
+    async startLobbyMatch(lobbyId) {
+        try {
+            const res = await API.post(`/api/ranked/lobby/${lobbyId}/start`, {});
+            App.toast('Ranked game started! Enter score when the game ends.');
+            if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
+            if (res.match?.id) Ranked.showScoreModal(res.match.id);
+        } catch (err) {
+            App.toast(err.message || 'Could not start ranked game', 'error');
+        }
+    },
+
+    async challengeCheckedInPlayer(courtId, targetUserId) {
+        await Ranked.openCourtChallengeModal(courtId, targetUserId);
+    },
+
+    async openCourtChallengeModal(courtId, targetUserId) {
+        try {
+            const courtRes = await API.get(`/api/courts/${courtId}`);
+            const checkedIn = courtRes.court?.checked_in_users || [];
+            const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+            const me = checkedIn.find(u => u.id === currentUser.id);
+            const target = checkedIn.find(u => u.id === targetUserId);
+            if (!me) {
+                App.toast('Check in at this court before challenging players.', 'error');
+                return;
+            }
+            if (!target) {
+                App.toast('That player is no longer checked in here.', 'error');
+                return;
+            }
+
+            const extraOptions = checkedIn
+                .filter(u => u.id !== currentUser.id && u.id !== targetUserId)
+                .map(u => `<option value="${u.id}">${Ranked._e(u.name || u.username)}</option>`)
+                .join('');
+
+            const modal = document.getElementById('match-modal');
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+            <div class="modal-content">
+                <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
+                <h2>⚔️ Challenge Player</h2>
+                <form onsubmit="Ranked.createCourtChallenge(event, ${courtId}, ${targetUserId})">
+                    <div class="form-group">
+                        <label>Match Type</label>
+                        <select id="court-challenge-type" onchange="document.getElementById('court-challenge-doubles').style.display = this.value === 'doubles' ? 'block' : 'none'">
+                            <option value="singles">Singles (1v1)</option>
+                            <option value="doubles"${extraOptions ? '' : ' disabled'}>Doubles (2v2)</option>
+                        </select>
+                    </div>
+                    <p class="muted">You: <strong>${Ranked._e(me.name || me.username)}</strong></p>
+                    <p class="muted">Opponent: <strong>${Ranked._e(target.name || target.username)}</strong></p>
+                    <div id="court-challenge-doubles" style="display:none">
+                        <div class="form-group">
+                            <label>Your Partner</label>
+                            <select id="court-challenge-partner">
+                                <option value="">Select partner...</option>
+                                ${extraOptions}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Opponent Partner</label>
+                            <select id="court-challenge-opponent2">
+                                <option value="">Select opponent partner...</option>
+                                ${extraOptions}
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-primary btn-full">Send Challenge</button>
+                </form>
+            </div>`;
+        } catch {
+            App.toast('Unable to load challenge setup', 'error');
+        }
+    },
+
+    async createCourtChallenge(e, courtId, targetUserId) {
+        e.preventDefault();
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const matchType = document.getElementById('court-challenge-type').value;
+        let team1 = [currentUser.id];
+        let team2 = [targetUserId];
+
+        if (matchType === 'doubles') {
+            const partnerId = parseInt(document.getElementById('court-challenge-partner').value, 10);
+            const opponent2Id = parseInt(document.getElementById('court-challenge-opponent2').value, 10);
+            if (!partnerId || !opponent2Id) {
+                App.toast('Select both doubles partners.', 'error');
+                return;
+            }
+            const all = [currentUser.id, targetUserId, partnerId, opponent2Id];
+            if (new Set(all).size !== all.length) {
+                App.toast('Doubles players must all be unique.', 'error');
+                return;
+            }
+            team1 = [currentUser.id, partnerId];
+            team2 = [targetUserId, opponent2Id];
+        }
+
+        try {
+            await API.post('/api/ranked/challenge/court', {
+                court_id: courtId,
+                match_type: matchType,
+                team1,
+                team2,
+            });
+            document.getElementById('match-modal').style.display = 'none';
+            App.toast('Challenge sent.');
+            Ranked.loadPendingConfirmations();
+            Ranked.loadCourtRanked(courtId);
+        } catch (err) {
+            App.toast(err.message || 'Failed to send challenge', 'error');
+        }
+    },
+
+    async openScheduledChallengeModal(targetUserId, source = 'scheduled_challenge') {
+        try {
+            const [courtsRes, targetProfile] = await Promise.all([
+                API.get(App.buildCourtsQuery()),
+                API.get(`/api/auth/profile/${targetUserId}`),
+            ]);
+            const courts = courtsRes.courts || [];
+            const target = targetProfile.user || {};
+            const friends = App.friendsList || [];
+            const extraOptions = friends
+                .filter(f => f.id !== targetUserId)
+                .map(f => `<option value="${f.id}">${Ranked._e(f.name || f.username)}</option>`)
+                .join('');
+            const courtsOptions = courts.map(c =>
+                `<option value="${c.id}">${Ranked._e(c.name)} — ${Ranked._e(c.city)}</option>`
+            ).join('');
+            const defaultTime = (() => {
+                const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+                d.setMinutes(0, 0, 0);
+                return d.toISOString().slice(0, 16);
+            })();
+
+            const modal = document.getElementById('match-modal');
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+            <div class="modal-content">
+                <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
+                <h2>📅 Schedule Ranked Challenge</h2>
+                <form onsubmit="Ranked.createScheduledChallenge(event, ${targetUserId}, '${source}')">
+                    <div class="form-group">
+                        <label>Court</label>
+                        <select id="scheduled-challenge-court" required>
+                            ${courtsOptions}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Scheduled Time</label>
+                        <input type="datetime-local" id="scheduled-challenge-time" value="${defaultTime}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Match Type</label>
+                        <select id="scheduled-challenge-type" onchange="document.getElementById('scheduled-challenge-doubles').style.display = this.value === 'doubles' ? 'block' : 'none'">
+                            <option value="singles">Singles (1v1)</option>
+                            <option value="doubles"${extraOptions ? '' : ' disabled'}>Doubles (2v2)</option>
+                        </select>
+                    </div>
+                    <p class="muted">Opponent: <strong>${Ranked._e(target.name || target.username || 'Player')}</strong></p>
+                    <div id="scheduled-challenge-doubles" style="display:none">
+                        <div class="form-group">
+                            <label>Your Partner</label>
+                            <select id="scheduled-challenge-partner1">
+                                <option value="">Select partner...</option>
+                                ${extraOptions}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Opponent Partner</label>
+                            <select id="scheduled-challenge-partner2">
+                                <option value="">Select opponent partner...</option>
+                                ${extraOptions}
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-primary btn-full">Send Scheduled Challenge</button>
+                </form>
+            </div>`;
+        } catch {
+            App.toast('Unable to open scheduled challenge', 'error');
+        }
+    },
+
+    async createScheduledChallenge(e, targetUserId, source = 'scheduled_challenge') {
+        e.preventDefault();
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const courtId = parseInt(document.getElementById('scheduled-challenge-court').value, 10);
+        const matchType = document.getElementById('scheduled-challenge-type').value;
+        const scheduledFor = document.getElementById('scheduled-challenge-time').value;
+
+        let team1 = [currentUser.id];
+        let team2 = [targetUserId];
+        if (matchType === 'doubles') {
+            const p1 = parseInt(document.getElementById('scheduled-challenge-partner1').value, 10);
+            const p2 = parseInt(document.getElementById('scheduled-challenge-partner2').value, 10);
+            if (!p1 || !p2) {
+                App.toast('Pick both doubles partners.', 'error');
+                return;
+            }
+            const all = [currentUser.id, targetUserId, p1, p2];
+            if (new Set(all).size !== all.length) {
+                App.toast('Doubles players must all be unique.', 'error');
+                return;
+            }
+            team1 = [currentUser.id, p1];
+            team2 = [targetUserId, p2];
+        }
+
+        try {
+            await API.post('/api/ranked/challenge/scheduled', {
+                court_id: courtId,
+                match_type: matchType,
+                team1,
+                team2,
+                scheduled_for: scheduledFor,
+                source,
+            });
+            document.getElementById('match-modal').style.display = 'none';
+            App.toast('Scheduled ranked challenge sent.');
+            Ranked.loadPendingConfirmations();
+            if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
+        } catch (err) {
+            App.toast(err.message || 'Failed to schedule challenge', 'error');
+        }
     },
 
     // ── Match Creation Modal ─────────────────────────────────────────
@@ -544,13 +888,14 @@ const Ranked = {
         }
 
         try {
-            await API.post('/api/ranked/match', {
+            await API.post('/api/ranked/lobby/queue', {
                 court_id: courtId, match_type: matchType,
                 team1, team2,
             });
             document.getElementById('match-modal').style.display = 'none';
-            App.toast('Match started! Play your game, then enter the score. All players must confirm.');
+            App.toast('Ranked lobby created. Start the game from the court ranked section.');
             Ranked.loadCourtRanked(courtId);
+            Ranked.loadPendingConfirmations();
         } catch (err) {
             App.toast(err.message || 'Failed to create match', 'error');
         }

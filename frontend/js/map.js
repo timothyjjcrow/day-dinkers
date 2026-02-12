@@ -537,12 +537,16 @@ const MapView = {
         } else {
             if (lookingToPlayPlayers.length > 0) {
                 playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
-                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(u, true, currentUser.id)).join('');
+                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(
+                    u, true, currentUser.id, court.id, amCheckedInHere
+                )).join('');
                 playersHTML += '</div>';
             }
             if (otherPlayers.length > 0) {
                 playersHTML += `<div class="players-group"><h5>🏓 At the Court (${otherPlayers.length})</h5>`;
-                playersHTML += otherPlayers.map(u => MapView._playerCard(u, false, currentUser.id)).join('');
+                playersHTML += otherPlayers.map(u => MapView._playerCard(
+                    u, false, currentUser.id, court.id, amCheckedInHere
+                )).join('');
                 playersHTML += '</div>';
             }
         }
@@ -684,7 +688,7 @@ const MapView = {
         </div>`;
     },
 
-    _playerCard(user, isLookingToPlay, currentUserId) {
+    _playerCard(user, isLookingToPlay, currentUserId, courtId, amCheckedInHere) {
         const isMe = user.id === currentUserId;
         const isFriend = App.friendIds.includes(user.id);
         const initials = (user.name || user.username || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -705,6 +709,9 @@ const MapView = {
                 actionBtn = `<button class="btn-add-friend" onclick="event.stopPropagation(); MapView.sendFriendRequest(${user.id})" title="Add Friend">➕ Add</button>`;
             }
         }
+        const challengeBtn = (!isMe && currentUserId && amCheckedInHere)
+            ? `<button class="btn-add-friend" onclick="event.stopPropagation(); Ranked.challengeCheckedInPlayer(${courtId}, ${user.id})" title="Challenge this player">⚔️ Challenge</button>`
+            : '';
 
         return `
         <div class="player-card ${isLookingToPlay ? 'player-lfg' : ''} ${isMe ? 'player-me' : ''}">
@@ -718,6 +725,7 @@ const MapView = {
                 </div>
             </div>
             ${isLookingToPlay ? '<span class="lfg-badge">🎯 Looking to Play</span>' : ''}
+            ${challengeBtn}
             ${actionBtn}
         </div>`;
     },
@@ -1184,12 +1192,16 @@ const MapView = {
         } else {
             if (lookingToPlayPlayers.length > 0) {
                 playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
-                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(u, true, currentUser.id)).join('');
+                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(
+                    u, true, currentUser.id, court.id, amCheckedInHere
+                )).join('');
                 playersHTML += '</div>';
             }
             if (otherPlayers.length > 0) {
                 playersHTML += `<div class="players-group"><h5>🏓 At the Court (${otherPlayers.length})</h5>`;
-                playersHTML += otherPlayers.map(u => MapView._playerCard(u, false, currentUser.id)).join('');
+                playersHTML += otherPlayers.map(u => MapView._playerCard(
+                    u, false, currentUser.id, court.id, amCheckedInHere
+                )).join('');
                 playersHTML += '</div>';
             }
         }

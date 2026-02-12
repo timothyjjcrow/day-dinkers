@@ -446,6 +446,7 @@ const App = {
                 const isCourtNotif = n.notif_type === 'court_invite' && n.reference_id;
                 const isFriendNotif = n.notif_type === 'friend_request' && n.reference_id;
                 const isMatchNotif = ['match_confirm', 'match_rejected', 'match_result', 'elo_change'].includes(n.notif_type) && n.reference_id;
+                const isChallengeNotif = ['ranked_challenge_invite', 'ranked_challenge_ready', 'ranked_challenge_declined'].includes(n.notif_type);
                 const isAdminNotif = ['court_update_review', 'court_report_review'].includes(n.notif_type);
                 let onclick = '';
                 if (isSessionNotif) {
@@ -459,6 +460,9 @@ const App = {
                     } else {
                         onclick = `onclick="App.showView('ranked'); document.getElementById('notifications-dropdown').style.display='none';"`;
                     }
+                }
+                else if (isChallengeNotif) {
+                    onclick = `onclick="App.showView('ranked'); document.getElementById('notifications-dropdown').style.display='none'; setTimeout(() => Ranked.loadPendingConfirmations(), 200);"`;
                 }
                 else if (isAdminNotif) {
                     onclick = `onclick="App.showView('admin'); document.getElementById('notifications-dropdown').style.display='none';"`;

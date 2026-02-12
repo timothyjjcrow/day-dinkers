@@ -252,6 +252,7 @@ const Profile = {
                         <span class="muted">@${Profile._e(f.username)}</span>
                     </div>
                     ${f.skill_level ? `<span class="tag tag-skill">${f.skill_level}</span>` : ''}
+                    <button class="btn-secondary btn-sm" onclick="Ranked.openScheduledChallengeModal(${f.id}, 'friends_challenge')">⚔️ Ranked</button>
                 </div>
             `).join('');
         } catch { el.innerHTML = '<p class="muted">Sign in to see friends</p>'; }

@@ -574,3 +574,74 @@ class RankedQueue(db.Model):
             'joined_at': self.joined_at.isoformat() if self.joined_at else None,
             'user': self.user.to_dict() if self.user else None,
         }
+
+
+class RankedLobby(db.Model):
+    """Pre-match ranked lobby for queue/challenge/scheduled flows."""
+    id = db.Column(db.Integer, primary_key=True)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    match_type = db.Column(db.String(20), nullable=False)  # singles, doubles
+    source = db.Column(db.String(30), default='manual')  # queue, court_challenge, scheduled_challenge
+    scheduled_for = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(30), default='pending_acceptance')
+    # pending_acceptance, ready, started, cancelled, declined
+    started_match_id = db.Column(db.Integer, db.ForeignKey('match.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+
+    court = db.relationship('Court', backref='ranked_lobbies')
+    created_by = db.relationship('User', foreign_keys=[created_by_id], backref='created_ranked_lobbies')
+    started_match = db.relationship('Match', foreign_keys=[started_match_id])
+    players = db.relationship(
+        'RankedLobbyPlayer',
+        backref='lobby',
+        lazy='joined',
+        cascade='all, delete-orphan',
+    )
+
+    def to_dict(self):
+        players_list = [p.to_dict() for p in self.players]
+        return {
+            'id': self.id,
+            'court_id': self.court_id,
+            'created_by_id': self.created_by_id,
+            'match_type': self.match_type,
+            'source': self.source,
+            'scheduled_for': self.scheduled_for.isoformat() if self.scheduled_for else None,
+            'status': self.status,
+            'started_match_id': self.started_match_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'players': players_list,
+            'team1': [p for p in players_list if p['team'] == 1],
+            'team2': [p for p in players_list if p['team'] == 2],
+            'court': self.court.to_dict() if self.court else None,
+            'created_by': self.created_by.to_dict() if self.created_by else None,
+        }
+
+
+class RankedLobbyPlayer(db.Model):
+    """Participant + acceptance state for a ranked lobby."""
+    id = db.Column(db.Integer, primary_key=True)
+    lobby_id = db.Column(db.Integer, db.ForeignKey('ranked_lobby.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    team = db.Column(db.Integer, nullable=False)
+    acceptance_status = db.Column(db.String(20), default='pending')
+    # pending, accepted, declined
+    responded_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('lobby_id', 'user_id', name='uq_ranked_lobby_player_unique'),
+    )
+
+    user = db.relationship('User', backref='ranked_lobby_participations')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'lobby_id': self.lobby_id,
+            'user_id': self.user_id,
+            'team': self.team,
+            'acceptance_status': self.acceptance_status,
+            'responded_at': self.responded_at.isoformat() if self.responded_at else None,
+            'user': self.user.to_dict() if self.user else None,
+        }
