@@ -274,11 +274,14 @@ const Ranked = {
 
     // ── Court Competitive Play Section ────────────────────────────────
 
-    async loadCourtRanked(courtId) {
+    async loadCourtRanked(courtId, options = {}) {
         Ranked.currentCourtId = courtId;
         const container = document.getElementById('court-ranked-section');
         if (!container) return;
-        container.innerHTML = '<div class="loading">Loading competitive play...</div>';
+        const silent = !!options.silent;
+        if (!silent || !container.innerHTML.trim()) {
+            container.innerHTML = '<div class="loading">Loading competitive play...</div>';
+        }
 
         try {
             const [queueRes, activeRes, lbRes, lobbyRes] = await Promise.all([
@@ -310,6 +313,9 @@ const Ranked = {
         const inQueue = queue.some(q => q.user_id === currentUser.id);
         const readyLobbies = lobbyData.ready_lobbies || [];
         const scheduledLobbies = lobbyData.scheduled_lobbies || [];
+        const pendingLobbies = (lobbyData.pending_lobbies || []).filter(l =>
+            (l.players || []).some(p => p.user_id === currentUser.id)
+        );
 
         // Separate in-progress from pending-confirmation matches
         const inProgressMatches = activeMatches.filter(m => m.status === 'in_progress');
@@ -379,6 +385,9 @@ const Ranked = {
         const scheduledLobbyHTML = scheduledLobbies.length
             ? scheduledLobbies.map(l => Ranked._renderLobbyCard(l, true)).join('')
             : '<p class="muted">No accepted scheduled ranked games yet.</p>';
+        const pendingLobbyHTML = pendingLobbies.length
+            ? pendingLobbies.map(l => Ranked._renderPendingLobby(l)).join('')
+            : '<p class="muted">No pending ranked challenge invites.</p>';
 
         return `
         <div class="court-ranked">
@@ -391,6 +400,11 @@ const Ranked = {
                 <h5>⏳ Awaiting Confirmation</h5>
                 ${pendingHTML}
             </div>` : ''}
+
+            <div class="ranked-sub-section">
+                <h5>📨 Pending Ranked Challenges</h5>
+                ${pendingLobbyHTML}
+            </div>
 
             <div class="ranked-sub-section">
                 <h5>🎮 Ready Ranked Lobbies</h5>
@@ -409,6 +423,9 @@ const Ranked = {
                 </div>
                 <div class="queue-list">${queueHTML}</div>
                 ${matchReadyMsg}
+                <div class="create-match-actions">
+                    <button class="btn-secondary btn-sm" onclick="Ranked.openCourtScheduledChallenge(${courtId})">📅 Schedule Ranked Challenge</button>
+                </div>
                 ${queue.length >= 2 ? `
                     <div class="create-match-actions">
                         <button class="btn-primary btn-sm" onclick="Ranked.showCreateMatch(${courtId})">🎮 Create Match from Queue</button>
@@ -657,6 +674,124 @@ const Ranked = {
             Ranked.loadCourtRanked(courtId);
         } catch (err) {
             App.toast(err.message || 'Failed to send challenge', 'error');
+        }
+    },
+
+    async openCourtScheduledChallenge(courtId) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+        if (!App.friendsList || !App.friendsList.length) {
+            await App.loadFriendsCache();
+        }
+
+        const friends = App.friendsList || [];
+        if (!friends.length) {
+            App.toast('Add friends first to schedule ranked challenges.', 'error');
+            return;
+        }
+
+        const opponentOptions = friends.map(f =>
+            `<option value="${f.id}">${Ranked._e(f.name || f.username)}</option>`
+        ).join('');
+        const partnerOptions = friends.map(f =>
+            `<option value="${f.id}">${Ranked._e(f.name || f.username)}</option>`
+        ).join('');
+        const defaultTime = (() => {
+            const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            d.setMinutes(0, 0, 0);
+            return d.toISOString().slice(0, 16);
+        })();
+
+        const modal = document.getElementById('match-modal');
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+        <div class="modal-content">
+            <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
+            <h2>📅 Schedule Ranked Challenge</h2>
+            <form onsubmit="Ranked.createCourtScheduledChallenge(event, ${courtId})">
+                <div class="form-group">
+                    <label>Opponent</label>
+                    <select id="court-scheduled-opponent" required>
+                        <option value="">Select opponent...</option>
+                        ${opponentOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Scheduled Time</label>
+                    <input type="datetime-local" id="court-scheduled-time" value="${defaultTime}" required>
+                </div>
+                <div class="form-group">
+                    <label>Match Type</label>
+                    <select id="court-scheduled-type" onchange="document.getElementById('court-scheduled-doubles').style.display = this.value === 'doubles' ? 'block' : 'none'">
+                        <option value="singles">Singles (1v1)</option>
+                        <option value="doubles">Doubles (2v2)</option>
+                    </select>
+                </div>
+                <div id="court-scheduled-doubles" style="display:none">
+                    <div class="form-group">
+                        <label>Your Partner</label>
+                        <select id="court-scheduled-partner1">
+                            <option value="">Select partner...</option>
+                            ${partnerOptions}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Opponent Partner</label>
+                        <select id="court-scheduled-partner2">
+                            <option value="">Select opponent partner...</option>
+                            ${partnerOptions}
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary btn-full">Send Scheduled Challenge</button>
+            </form>
+        </div>`;
+    },
+
+    async createCourtScheduledChallenge(e, courtId) {
+        e.preventDefault();
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const targetUserId = parseInt(document.getElementById('court-scheduled-opponent').value, 10);
+        const matchType = document.getElementById('court-scheduled-type').value;
+        const scheduledFor = document.getElementById('court-scheduled-time').value;
+        if (!targetUserId) {
+            App.toast('Pick an opponent.', 'error');
+            return;
+        }
+
+        let team1 = [currentUser.id];
+        let team2 = [targetUserId];
+        if (matchType === 'doubles') {
+            const p1 = parseInt(document.getElementById('court-scheduled-partner1').value, 10);
+            const p2 = parseInt(document.getElementById('court-scheduled-partner2').value, 10);
+            if (!p1 || !p2) {
+                App.toast('Pick both doubles partners.', 'error');
+                return;
+            }
+            const all = [currentUser.id, targetUserId, p1, p2];
+            if (new Set(all).size !== all.length) {
+                App.toast('Doubles players must all be unique.', 'error');
+                return;
+            }
+            team1 = [currentUser.id, p1];
+            team2 = [targetUserId, p2];
+        }
+
+        try {
+            await API.post('/api/ranked/challenge/scheduled', {
+                court_id: courtId,
+                match_type: matchType,
+                team1,
+                team2,
+                scheduled_for: scheduledFor,
+                source: 'friends_challenge',
+            });
+            document.getElementById('match-modal').style.display = 'none';
+            App.toast('Scheduled ranked challenge sent.');
+            Ranked.loadPendingConfirmations();
+            Ranked.loadCourtRanked(courtId);
+        } catch (err) {
+            App.toast(err.message || 'Failed to schedule ranked challenge', 'error');
         }
     },
 

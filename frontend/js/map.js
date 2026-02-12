@@ -412,6 +412,48 @@ const MapView = {
         } catch {}
     },
 
+    async refreshCurrentCourtLiveData(courtId) {
+        const targetCourtId = Number(courtId || MapView.currentCourtId);
+        if (!targetCourtId) return;
+        const currentView = (typeof App !== 'undefined' && App.currentView) ? App.currentView : '';
+        const fullPageOpen = currentView === 'court-detail' && MapView.currentCourtId === targetCourtId;
+        const panel = document.getElementById('court-panel');
+        const panelOpen = !!(panel && panel.style.display !== 'none' && MapView.currentCourtId === targetCourtId);
+        if (!fullPageOpen && !panelOpen) return;
+
+        const suffix = fullPageOpen ? 'full' : 'panel';
+        const sessionsEl = document.getElementById(`court-sessions-live-${suffix}`);
+        const playersEl = document.getElementById(`court-players-live-${suffix}`);
+        const countEl = document.getElementById(`court-player-count-${suffix}`);
+        const statusEl = document.getElementById(`court-live-status-${suffix}`);
+        const bannerEl = document.getElementById(`court-match-banner-${suffix}`);
+
+        if (!sessionsEl && !playersEl && !countEl && !statusEl && !bannerEl) return;
+
+        try {
+            await MapView.refreshMyStatus();
+            const { court, sessions } = await MapView._fetchCourtBundle(targetCourtId);
+            const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+            const myStatus = MapView.myCheckinStatus || {};
+            const amCheckedInHere = myStatus.checked_in && myStatus.court_id === targetCourtId;
+            const liveSections = MapView._buildLiveCourtSections(
+                court,
+                sessions,
+                currentUser.id,
+                amCheckedInHere,
+            );
+
+            if (sessionsEl) sessionsEl.innerHTML = liveSections.sessionsHTML;
+            if (playersEl) playersEl.innerHTML = liveSections.playersHTML;
+            if (countEl) countEl.textContent = String(liveSections.checkedInCount);
+            if (statusEl) {
+                statusEl.classList.toggle('active', liveSections.activePlayers > 0);
+                statusEl.innerHTML = MapView._liveStatusInnerHTML(court, liveSections.activePlayers);
+            }
+            if (bannerEl) bannerEl.innerHTML = liveSections.matchBannerHTML;
+        } catch {}
+    },
+
     async _loadFullPageChat(courtId) {
         const container = document.getElementById('fullpage-chat-messages');
         if (!container) return;
@@ -469,7 +511,6 @@ const MapView = {
 
     _courtDetailHTML(court, sessions) {
         sessions = sessions || [];
-        const players = court.active_players || 0;
         const checkedIn = court.checked_in_users || [];
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myStatus = MapView.myCheckinStatus || {};
@@ -511,45 +552,16 @@ const MapView = {
         const typeLabel = court.court_type === 'dedicated' ? 'Dedicated Pickleball' :
                           court.court_type === 'converted' ? 'Converted (tennis lines)' : 'Shared Facility';
 
-        // Sessions at this court
-        const nowSessions = sessions.filter(s => s.session_type === 'now');
-        const scheduledSessions = sessions.filter(s => s.session_type === 'scheduled');
-        const playerBuckets = MapView._splitPlayersByLookingToPlay(checkedIn, nowSessions);
-        const lookingToPlayPlayers = playerBuckets.lookingToPlayPlayers;
-        const otherPlayers = playerBuckets.otherPlayers;
-        let sessionsHTML = '';
-        if (nowSessions.length > 0) {
-            sessionsHTML += '<h5 class="session-sub-heading">🎯 Looking to Play Now</h5>';
-            sessionsHTML += Sessions.renderMiniCards(nowSessions);
-        }
-        if (scheduledSessions.length > 0) {
-            sessionsHTML += '<h5 class="session-sub-heading" style="margin-top:10px">📅 Scheduled</h5>';
-            sessionsHTML += Sessions.renderMiniCards(scheduledSessions);
-        }
-        if (!sessions.length) {
-            sessionsHTML = '<p class="muted">No looking-to-play sessions yet. Be the first to start one!</p>';
-        }
-
-        // Players section
-        let playersHTML = '';
-        if (checkedIn.length === 0) {
-            playersHTML = '<p class="muted">No one checked in right now. Be the first!</p>';
-        } else {
-            if (lookingToPlayPlayers.length > 0) {
-                playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
-                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(
-                    u, true, currentUser.id, court.id, amCheckedInHere
-                )).join('');
-                playersHTML += '</div>';
-            }
-            if (otherPlayers.length > 0) {
-                playersHTML += `<div class="players-group"><h5>🏓 At the Court (${otherPlayers.length})</h5>`;
-                playersHTML += otherPlayers.map(u => MapView._playerCard(
-                    u, false, currentUser.id, court.id, amCheckedInHere
-                )).join('');
-                playersHTML += '</div>';
-            }
-        }
+        const liveSections = MapView._buildLiveCourtSections(
+            court,
+            sessions,
+            currentUser.id,
+            amCheckedInHere,
+        );
+        const nowSessions = liveSections.nowSessions;
+        const sessionsHTML = liveSections.sessionsHTML;
+        const playersHTML = liveSections.playersHTML;
+        const players = liveSections.activePlayers;
 
         const checkinBtnHTML = MapView._checkinBarHTML({
             courtId: court.id,
@@ -573,10 +585,8 @@ const MapView = {
 
             ${checkinBtnHTML}
 
-            <div class="court-live-status ${players > 0 ? 'active' : ''}">
-                <div class="live-dot"></div>
-                <span>${players > 0 ? `${players} player${players > 1 ? 's' : ''} here now` : 'No active players'}</span>
-                ${court.recent_visitors ? `<span class="muted">(${court.recent_visitors} visited today)</span>` : ''}
+            <div id="court-live-status-panel" class="court-live-status ${players > 0 ? 'active' : ''}">
+                ${MapView._liveStatusInnerHTML(court, players)}
             </div>
 
             ${court.description ? `<p class="court-desc">${safeDescription}</p>` : ''}
@@ -587,16 +597,16 @@ const MapView = {
                     <h4>🎯 Looking to Play</h4>
                     <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">📅 Schedule</button>
                 </div>
-                ${sessionsHTML}
+                <div id="court-sessions-live-panel">${sessionsHTML}</div>
             </div>
 
             <!-- Who's Here — Players Section (prominent) -->
             <div class="court-section players-section">
                 <div class="section-header">
                     <h4>Who's Here</h4>
-                    <span class="player-count-badge">${checkedIn.length}</span>
+                    <span id="court-player-count-panel" class="player-count-badge">${checkedIn.length}</span>
                 </div>
-                ${playersHTML}
+                <div id="court-players-live-panel">${playersHTML}</div>
             </div>
 
             <!-- Competitive Play Section (loads dynamically) -->
@@ -736,6 +746,77 @@ const MapView = {
             lookingToPlayPlayers: (checkedInUsers || []).filter(user => nowCreatorIds.has(user.id)),
             otherPlayers: (checkedInUsers || []).filter(user => !nowCreatorIds.has(user.id)),
         };
+    },
+
+    _buildLiveCourtSections(court, sessions, currentUserId, amCheckedInHere) {
+        const allSessions = sessions || [];
+        const checkedIn = court.checked_in_users || [];
+        const nowSessions = allSessions.filter(s => s.session_type === 'now');
+        const scheduledSessions = allSessions.filter(s => s.session_type === 'scheduled');
+        const playerBuckets = MapView._splitPlayersByLookingToPlay(checkedIn, nowSessions);
+        const lookingToPlayPlayers = playerBuckets.lookingToPlayPlayers;
+        const otherPlayers = playerBuckets.otherPlayers;
+
+        let sessionsHTML = '';
+        if (nowSessions.length > 0) {
+            sessionsHTML += '<h5 class="session-sub-heading">🎯 Looking to Play Now</h5>';
+            sessionsHTML += Sessions.renderMiniCards(nowSessions);
+        }
+        if (scheduledSessions.length > 0) {
+            sessionsHTML += '<h5 class="session-sub-heading" style="margin-top:10px">📅 Scheduled</h5>';
+            sessionsHTML += Sessions.renderMiniCards(scheduledSessions);
+        }
+        if (!allSessions.length) {
+            sessionsHTML = '<p class="muted">No looking-to-play sessions yet. Be the first to start one!</p>';
+        }
+
+        let playersHTML = '';
+        if (checkedIn.length === 0) {
+            playersHTML = '<p class="muted">No one checked in right now. Be the first!</p>';
+        } else {
+            if (lookingToPlayPlayers.length > 0) {
+                playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
+                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(
+                    u, true, currentUserId, court.id, amCheckedInHere
+                )).join('');
+                playersHTML += '</div>';
+            }
+            if (otherPlayers.length > 0) {
+                playersHTML += `<div class="players-group"><h5>🏓 At the Court (${otherPlayers.length})</h5>`;
+                playersHTML += otherPlayers.map(u => MapView._playerCard(
+                    u, false, currentUserId, court.id, amCheckedInHere
+                )).join('');
+                playersHTML += '</div>';
+            }
+        }
+
+        let matchBannerHTML = '';
+        if (lookingToPlayPlayers.length >= 4) {
+            matchBannerHTML = '<div class="match-ready-banner">🎉 4+ players looking to play now! Start a doubles match!</div>';
+        } else if (lookingToPlayPlayers.length >= 2) {
+            matchBannerHTML = `<div class="match-ready-banner singles">🎾 ${lookingToPlayPlayers.length} players looking to play now — enough for singles!</div>`;
+        }
+
+        return {
+            nowSessions,
+            sessionsHTML,
+            playersHTML,
+            checkedInCount: checkedIn.length,
+            activePlayers: court.active_players || checkedIn.length,
+            matchBannerHTML,
+        };
+    },
+
+    _liveStatusInnerHTML(court, activePlayers) {
+        const players = Number(activePlayers) || 0;
+        const visitors = court.recent_visitors
+            ? `<span class="muted">(${court.recent_visitors} visited today)</span>`
+            : '';
+        return `
+            <div class="live-dot"></div>
+            <span>${players > 0 ? `${players} player${players > 1 ? 's' : ''} here now` : 'No active players'}</span>
+            ${visitors}
+        `;
     },
 
     _quickPlayDurations() {
@@ -1125,7 +1206,6 @@ const MapView = {
     /** ── Full-Page Court View HTML ────────────────────────────── */
     _courtFullPageHTML(court, sessions) {
         sessions = sessions || [];
-        const players = court.active_players || 0;
         const checkedIn = court.checked_in_users || [];
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myStatus = MapView.myCheckinStatus || {};
@@ -1166,53 +1246,17 @@ const MapView = {
         const typeLabel = court.court_type === 'dedicated' ? 'Dedicated Pickleball' :
                           court.court_type === 'converted' ? 'Converted (tennis lines)' : 'Shared Facility';
 
-        // Sessions at this court
-        const nowSessions = sessions.filter(s => s.session_type === 'now');
-        const scheduledSessions = sessions.filter(s => s.session_type === 'scheduled');
-        const playerBuckets = MapView._splitPlayersByLookingToPlay(checkedIn, nowSessions);
-        const lookingToPlayPlayers = playerBuckets.lookingToPlayPlayers;
-        const otherPlayers = playerBuckets.otherPlayers;
-        let sessionsHTML = '';
-        if (nowSessions.length > 0) {
-            sessionsHTML += '<h5 class="session-sub-heading">🎯 Looking to Play Now</h5>';
-            sessionsHTML += Sessions.renderMiniCards(nowSessions);
-        }
-        if (scheduledSessions.length > 0) {
-            sessionsHTML += '<h5 class="session-sub-heading" style="margin-top:10px">📅 Scheduled</h5>';
-            sessionsHTML += Sessions.renderMiniCards(scheduledSessions);
-        }
-        if (!sessions.length) {
-            sessionsHTML = '<p class="muted">No looking-to-play sessions yet. Be the first to start one!</p>';
-        }
-
-        // Players section
-        let playersHTML = '';
-        if (checkedIn.length === 0) {
-            playersHTML = '<p class="muted">No one checked in right now. Be the first!</p>';
-        } else {
-            if (lookingToPlayPlayers.length > 0) {
-                playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
-                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(
-                    u, true, currentUser.id, court.id, amCheckedInHere
-                )).join('');
-                playersHTML += '</div>';
-            }
-            if (otherPlayers.length > 0) {
-                playersHTML += `<div class="players-group"><h5>🏓 At the Court (${otherPlayers.length})</h5>`;
-                playersHTML += otherPlayers.map(u => MapView._playerCard(
-                    u, false, currentUser.id, court.id, amCheckedInHere
-                )).join('');
-                playersHTML += '</div>';
-            }
-        }
-
-        // Match ready banner based on players currently looking to play
-        let matchBanner = '';
-        if (lookingToPlayPlayers.length >= 4) {
-            matchBanner = '<div class="match-ready-banner">🎉 4+ players looking to play now! Start a doubles match!</div>';
-        } else if (lookingToPlayPlayers.length >= 2) {
-            matchBanner = `<div class="match-ready-banner singles">🎾 ${lookingToPlayPlayers.length} players looking to play now — enough for singles!</div>`;
-        }
+        const liveSections = MapView._buildLiveCourtSections(
+            court,
+            sessions,
+            currentUser.id,
+            amCheckedInHere,
+        );
+        const nowSessions = liveSections.nowSessions;
+        const sessionsHTML = liveSections.sessionsHTML;
+        const playersHTML = liveSections.playersHTML;
+        const matchBanner = liveSections.matchBannerHTML;
+        const players = liveSections.activePlayers;
 
         const checkinBtnHTML = MapView._checkinBarHTML({
             courtId: court.id,
@@ -1246,13 +1290,11 @@ const MapView = {
 
             ${checkinBtnHTML}
 
-            <div class="cfp-live-bar ${players > 0 ? 'active' : ''}">
-                <div class="live-dot"></div>
-                <span>${players > 0 ? `${players} player${players > 1 ? 's' : ''} here now` : 'No active players'}</span>
-                ${court.recent_visitors ? `<span class="muted">(${court.recent_visitors} visited today)</span>` : ''}
+            <div id="court-live-status-full" class="cfp-live-bar ${players > 0 ? 'active' : ''}">
+                ${MapView._liveStatusInnerHTML(court, players)}
             </div>
 
-            ${matchBanner}
+            <div id="court-match-banner-full">${matchBanner}</div>
 
             <!-- Two-column layout -->
             <div class="cfp-grid">
@@ -1264,16 +1306,16 @@ const MapView = {
                             <h3>🎯 Looking to Play</h3>
                             <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">📅 Schedule</button>
                         </div>
-                        ${sessionsHTML}
+                        <div id="court-sessions-live-full">${sessionsHTML}</div>
                     </div>
 
                     <!-- Who's Here -->
                     <div class="cfp-card">
                         <div class="section-header">
                             <h3>Who's Here</h3>
-                            <span class="player-count-badge">${checkedIn.length}</span>
+                            <span id="court-player-count-full" class="player-count-badge">${checkedIn.length}</span>
                         </div>
-                        <div class="players-section-inner">
+                        <div id="court-players-live-full" class="players-section-inner">
                             ${playersHTML}
                         </div>
                     </div>

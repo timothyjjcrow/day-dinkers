@@ -68,17 +68,18 @@ const Chat = {
                 const fullPageOpen = currentView === 'court-detail' && MapView.currentCourtId;
                 const shouldRefreshCurrentCourt = !courtId || courtId === MapView.currentCourtId;
 
-                if (fullPageOpen && shouldRefreshCurrentCourt && typeof MapView._refreshFullPage === 'function') {
-                    MapView._refreshFullPage(MapView.currentCourtId);
-                } else if (panelOpen && shouldRefreshCurrentCourt && typeof MapView.openCourtDetail === 'function') {
-                    MapView.openCourtDetail(MapView.currentCourtId);
+                if ((fullPageOpen || panelOpen)
+                    && shouldRefreshCurrentCourt
+                    && typeof MapView.refreshCurrentCourtLiveData === 'function'
+                ) {
+                    MapView.refreshCurrentCourtLiveData(MapView.currentCourtId);
                 }
             }
             if (typeof Ranked !== 'undefined'
                 && Ranked.currentCourtId
                 && (!courtId || courtId === Ranked.currentCourtId)
             ) {
-                Ranked.loadCourtRanked(Ranked.currentCourtId);
+                Ranked.loadCourtRanked(Ranked.currentCourtId, { silent: true });
             }
         }, 250);
     },
@@ -90,7 +91,7 @@ const Chat = {
             const currentView = (typeof App !== 'undefined' && App.currentView) ? App.currentView : '';
             if (typeof Ranked !== 'undefined') {
                 if (Ranked.currentCourtId && (!courtId || Ranked.currentCourtId === courtId)) {
-                    Ranked.loadCourtRanked(Ranked.currentCourtId);
+                    Ranked.loadCourtRanked(Ranked.currentCourtId, { silent: true });
                 }
 
                 if (currentView === 'ranked') {
@@ -109,10 +110,11 @@ const Chat = {
                 const panelOpen = !!(panel && panel.style.display !== 'none' && MapView.currentCourtId);
                 const fullPageOpen = currentView === 'court-detail' && MapView.currentCourtId;
                 const shouldRefreshCurrentCourt = !courtId || courtId === MapView.currentCourtId;
-                if (fullPageOpen && shouldRefreshCurrentCourt && typeof MapView._refreshFullPage === 'function') {
-                    MapView._refreshFullPage(MapView.currentCourtId);
-                } else if (panelOpen && shouldRefreshCurrentCourt && typeof MapView.openCourtDetail === 'function') {
-                    MapView.openCourtDetail(MapView.currentCourtId);
+                if ((fullPageOpen || panelOpen)
+                    && shouldRefreshCurrentCourt
+                    && typeof MapView.refreshCurrentCourtLiveData === 'function'
+                ) {
+                    MapView.refreshCurrentCourtLiveData(MapView.currentCourtId);
                 }
             }
 

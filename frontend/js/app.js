@@ -274,15 +274,15 @@ const App = {
                 Ranked.loadMatchHistory(null, selectedCourtId || null);
             }
             if ((panelOpen || fullPageOpen) && Ranked.currentCourtId) {
-                Ranked.loadCourtRanked(Ranked.currentCourtId);
+                Ranked.loadCourtRanked(Ranked.currentCourtId, { silent: true });
             }
         }
 
         if (typeof MapView !== 'undefined' && MapView.currentCourtId) {
-            if (App.currentView === 'court-detail' && typeof MapView._refreshFullPage === 'function') {
-                MapView._refreshFullPage(MapView.currentCourtId);
-            } else if (panelOpen && typeof MapView.openCourtDetail === 'function') {
-                MapView.openCourtDetail(MapView.currentCourtId);
+            if ((App.currentView === 'court-detail' || panelOpen)
+                && typeof MapView.refreshCurrentCourtLiveData === 'function'
+            ) {
+                MapView.refreshCurrentCourtLiveData(MapView.currentCourtId);
             }
         }
     },
