@@ -200,20 +200,13 @@
     <div id="session-modal" class="modal" style="display:none">
         <div class="modal-content">
             <button class="modal-close" onclick="Sessions.hideCreateModal()" aria-label="Close create session dialog">&times;</button>
-            <h2>🟢 Open to Play</h2>
+            <h2>📅 Schedule Looking to Play</h2>
             <form id="create-session-form" onsubmit="Sessions.create(event)">
-                <div class="form-group">
-                    <label>Session Type</label>
-                    <select name="session_type" id="session-type-toggle" onchange="Sessions._toggleScheduleFields()">
-                        <option value="now">🟢 Open Now — I'm at the court</option>
-                        <option value="scheduled">📅 Schedule Ahead</option>
-                    </select>
-                </div>
                 <div class="form-group">
                     <label>Court</label>
                     <select name="court_id" id="session-court-select" required></select>
                 </div>
-                <div id="session-schedule-fields" style="display:none">
+                <div>
                     <div class="form-group">
                         <label>Quick Day</label>
                         <div class="session-quick-buttons" id="session-quick-buttons">
@@ -319,7 +312,7 @@
                     <label>Invite Friends <span class="muted">(optional)</span></label>
                     <div id="session-invite-friends" class="friend-picker"></div>
                 </div>
-                <button type="submit" class="btn-primary btn-full">Create Session</button>
+                <button type="submit" class="btn-primary btn-full">Schedule Session</button>
             </form>
         </div>
     </div>

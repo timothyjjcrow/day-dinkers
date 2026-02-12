@@ -604,10 +604,6 @@ const MapView = {
             <div class="court-section">
                 <h4>Quick Actions</h4>
                 <div class="quick-actions-grid">
-                    <button class="quick-action-btn" onclick="MapView.startLookingToPlayNow(${court.id}, 120)">
-                        <span class="quick-action-icon">🎯</span>
-                        <span>Looking to Play Now</span>
-                    </button>
                     <button class="quick-action-btn" onclick="Sessions.showCreateModal(${court.id})">
                         <span class="quick-action-icon">📅</span>
                         <span>Schedule</span>
@@ -1279,10 +1275,6 @@ const MapView = {
                     <div class="cfp-card">
                         <h3>Quick Actions</h3>
                         <div class="quick-actions-grid cfp-actions-grid">
-                            <button class="quick-action-btn" onclick="MapView.fullPageStartLookingToPlayNow(${court.id}, 120)">
-                                <span class="quick-action-icon">🎯</span>
-                                <span>Looking to Play Now</span>
-                            </button>
                             <button class="quick-action-btn" onclick="Ranked.joinQueue(${court.id})">
                                 <span class="quick-action-icon">⚔️</span>
                                 <span>Join Queue</span>

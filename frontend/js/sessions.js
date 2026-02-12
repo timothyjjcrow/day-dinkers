@@ -757,15 +757,13 @@ const Sessions = {
         await Sessions._populateCourtSelect(preselectedCourtId);
         Sessions._populateInviteFriendOptions();
 
-        // Reset type toggle
-        document.getElementById('session-type-toggle').value = 'scheduled';
         const recurrenceSelect = document.getElementById('session-recurrence-select');
         const recurrenceCount = document.getElementById('session-recurrence-count');
         const durationSelect = document.getElementById('session-duration-select');
         if (recurrenceSelect) recurrenceSelect.value = 'none';
         if (recurrenceCount) recurrenceCount.value = '4';
         if (durationSelect) durationSelect.value = '90';
-        Sessions._toggleScheduleFields();
+        Sessions._toggleRecurrenceFields();
         Sessions._initializeScheduleInputs('tomorrow');
     },
 
@@ -1230,22 +1228,19 @@ const Sessions = {
             });
             summary += ` • Ends ${endTimeLabel}`;
         }
-        const sessionType = document.getElementById('session-type-toggle')?.value || 'scheduled';
-        if (sessionType === 'scheduled') {
-            const recurrence = document.getElementById('session-recurrence-select')?.value || 'none';
-            if (recurrence === 'none') {
-                summary += ' • One-time';
-            } else {
-                const recurrenceCountRaw = parseInt(
-                    document.getElementById('session-recurrence-count')?.value || '4',
-                    10
-                );
-                const recurrenceCount = Number.isFinite(recurrenceCountRaw)
-                    ? Math.max(2, recurrenceCountRaw)
-                    : 4;
-                const recurrenceLabel = recurrence === 'biweekly' ? 'Every 2 weeks' : 'Weekly';
-                summary += ` • ${recurrenceLabel} (${recurrenceCount} sessions)`;
-            }
+        const recurrence = document.getElementById('session-recurrence-select')?.value || 'none';
+        if (recurrence === 'none') {
+            summary += ' • One-time';
+        } else {
+            const recurrenceCountRaw = parseInt(
+                document.getElementById('session-recurrence-count')?.value || '4',
+                10
+            );
+            const recurrenceCount = Number.isFinite(recurrenceCountRaw)
+                ? Math.max(2, recurrenceCountRaw)
+                : 4;
+            const recurrenceLabel = recurrence === 'biweekly' ? 'Every 2 weeks' : 'Weekly';
+            summary += ` • ${recurrenceLabel} (${recurrenceCount} sessions)`;
         }
         summaryEl.textContent = summary;
     },
@@ -1283,33 +1278,21 @@ const Sessions = {
         return parsed;
     },
 
-    _toggleScheduleFields() {
-        const type = document.getElementById('session-type-toggle').value;
-        const fields = document.getElementById('session-schedule-fields');
-        fields.style.display = type === 'scheduled' ? 'block' : 'none';
-        if (type === 'scheduled') {
-            Sessions._initializeScheduleInputs('tomorrow', true);
-        }
-        Sessions._toggleRecurrenceFields();
-    },
-
     _toggleRecurrenceFields() {
-        const type = document.getElementById('session-type-toggle')?.value;
         const recurrence = document.getElementById('session-recurrence-select')?.value || 'none';
         const group = document.getElementById('session-recurrence-count-group');
         if (!group) return;
-        group.style.display = (type === 'scheduled' && recurrence !== 'none') ? 'block' : 'none';
+        group.style.display = recurrence !== 'none' ? 'block' : 'none';
         Sessions._renderScheduleSummary();
     },
 
     async create(e) {
         e.preventDefault();
         const form = e.target;
-        const sessionType = form.session_type.value;
 
         const data = {
             court_id: parseInt(form.court_id.value),
-            session_type: sessionType,
+            session_type: 'scheduled',
             game_type: form.game_type.value,
             skill_level: form.skill_level.value,
             max_players: parseInt(form.max_players.value),
@@ -1317,47 +1300,39 @@ const Sessions = {
             notes: form.notes.value,
         };
 
-        if (sessionType === 'scheduled') {
-            if (!form.start_time.value) {
-                App.toast('Start time is required for scheduled sessions', 'error');
-                return;
-            }
-            const startAt = Sessions._parseDateTimeLocal(form.start_time.value);
-            if (!startAt) {
-                App.toast('Start time is invalid', 'error');
-                return;
-            }
-            if (startAt.getTime() < (Date.now() - 60000)) {
-                App.toast('Start time must be in the future', 'error');
-                return;
-            }
-            data.start_time = Sessions._formatDateTimeLocal(startAt);
-
-            if (form.end_time.value) {
-                const endAt = Sessions._parseDateTimeLocal(form.end_time.value);
-                if (!endAt) {
-                    App.toast('End time is invalid', 'error');
-                    return;
-                }
-                if (endAt <= startAt) {
-                    App.toast('End time must be after start time', 'error');
-                    return;
-                }
-                data.end_time = Sessions._formatDateTimeLocal(endAt);
-            }
-
-            const recurrence = form.recurrence?.value || 'none';
-            const parsedCount = parseInt(form.recurrence_count?.value || '1', 10);
-            const recurrenceCount = Number.isFinite(parsedCount) ? Math.max(1, parsedCount) : 1;
-            data.recurrence = recurrence;
-            data.recurrence_count = recurrenceCount;
-        } else {
-            const durationInput = form.querySelector('input[name="duration_minutes"]');
-            const parsedDuration = parseInt(durationInput?.value || '90', 10);
-            if (Number.isFinite(parsedDuration) && parsedDuration > 0) {
-                data.duration_minutes = parsedDuration;
-            }
+        if (!form.start_time.value) {
+            App.toast('Start time is required for scheduled sessions', 'error');
+            return;
         }
+        const startAt = Sessions._parseDateTimeLocal(form.start_time.value);
+        if (!startAt) {
+            App.toast('Start time is invalid', 'error');
+            return;
+        }
+        if (startAt.getTime() < (Date.now() - 60000)) {
+            App.toast('Start time must be in the future', 'error');
+            return;
+        }
+        data.start_time = Sessions._formatDateTimeLocal(startAt);
+
+        if (form.end_time.value) {
+            const endAt = Sessions._parseDateTimeLocal(form.end_time.value);
+            if (!endAt) {
+                App.toast('End time is invalid', 'error');
+                return;
+            }
+            if (endAt <= startAt) {
+                App.toast('End time must be after start time', 'error');
+                return;
+            }
+            data.end_time = Sessions._formatDateTimeLocal(endAt);
+        }
+
+        const recurrence = form.recurrence?.value || 'none';
+        const parsedCount = parseInt(form.recurrence_count?.value || '1', 10);
+        const recurrenceCount = Number.isFinite(parsedCount) ? Math.max(1, parsedCount) : 1;
+        data.recurrence = recurrence;
+        data.recurrence_count = recurrenceCount;
 
         // Collect invited friends
         const selectedFriends = Array.from(
@@ -1373,9 +1348,7 @@ const Sessions = {
                     if (s?.id) Sessions.sessionsById[s.id] = s;
                 });
             }
-            if (sessionType === 'now') {
-                App.toast("You're looking to play now! Others can see and join.");
-            } else if ((res.created_count || 1) > 1) {
+            if ((res.created_count || 1) > 1) {
                 App.toast(`Scheduled ${res.created_count} recurring sessions.`);
             } else {
                 App.toast('Session scheduled!');
@@ -1387,34 +1360,6 @@ const Sessions = {
         } catch (err) {
             App.toast(err.message || 'Failed to create session', 'error');
         }
-    },
-
-    // ── Open to Play Now (quick action from court) ────────────
-    async openToPlayNow(courtId) {
-        const token = localStorage.getItem('token');
-        if (!token) { Auth.showModal(); return; }
-
-        // Quick create a "now" session at this court
-        const modal = document.getElementById('session-modal');
-        modal.style.display = 'flex';
-        const form = document.getElementById('create-session-form');
-        if (form && typeof form.reset === 'function') {
-            form.reset();
-        }
-
-        await Sessions._populateCourtSelect(courtId);
-        Sessions._populateInviteFriendOptions();
-
-        // Set to "now" type
-        document.getElementById('session-type-toggle').value = 'now';
-        const recurrenceSelect = document.getElementById('session-recurrence-select');
-        const recurrenceCount = document.getElementById('session-recurrence-count');
-        const durationSelect = document.getElementById('session-duration-select');
-        if (recurrenceSelect) recurrenceSelect.value = 'none';
-        if (recurrenceCount) recurrenceCount.value = '4';
-        if (durationSelect) durationSelect.value = '90';
-        Sessions._toggleScheduleFields();
-        Sessions._initializeScheduleInputs('tomorrow');
     },
 
     // ── Join / Leave Sessions ─────────────────────────────────
