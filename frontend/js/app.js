@@ -270,8 +270,8 @@ const App = {
                     ? parseInt(select.value, 10)
                     : null;
                 Ranked.loadPendingConfirmations();
-                Ranked.loadLeaderboard(selectedCourtId || null);
-                Ranked.loadMatchHistory(null, selectedCourtId || null);
+                Ranked.loadLeaderboard(selectedCourtId || null, { silent: true });
+                Ranked.loadMatchHistory(null, selectedCourtId || null, { silent: true });
             }
             if ((panelOpen || fullPageOpen) && Ranked.currentCourtId) {
                 Ranked.loadCourtRanked(Ranked.currentCourtId, { silent: true });

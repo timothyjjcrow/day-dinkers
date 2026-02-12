@@ -7,10 +7,13 @@ const Ranked = {
 
     // ── Leaderboard View ─────────────────────────────────────────────
 
-    async loadLeaderboard(courtId) {
+    async loadLeaderboard(courtId, options = {}) {
         const container = document.getElementById('leaderboard-content');
         if (!container) return;
-        container.innerHTML = '<div class="loading">Loading leaderboard...</div>';
+        const silent = !!options.silent;
+        if (!silent || !container.innerHTML.trim()) {
+            container.innerHTML = '<div class="loading">Loading leaderboard...</div>';
+        }
 
         const url = courtId
             ? `/api/ranked/leaderboard?court_id=${courtId}`
@@ -20,16 +23,19 @@ const Ranked = {
             const res = await API.get(url);
             const lb = res.leaderboard || [];
             if (!lb.length) {
-                container.innerHTML = `
+                const emptyHtml = `
                     <div class="empty-state">
                         <h3>No ranked players yet</h3>
                         <p>Play competitive matches to appear on the leaderboard!</p>
                     </div>`;
+                Ranked._setHtmlIfChanged(container, emptyHtml);
                 return;
             }
-            container.innerHTML = Ranked._renderLeaderboard(lb);
+            Ranked._setHtmlIfChanged(container, Ranked._renderLeaderboard(lb));
         } catch {
-            container.innerHTML = '<p class="error">Failed to load leaderboard</p>';
+            if (!silent || !container.innerHTML.trim()) {
+                container.innerHTML = '<p class="error">Failed to load leaderboard</p>';
+            }
         }
     },
 
@@ -1149,10 +1155,13 @@ const Ranked = {
 
     // ── Match History View ───────────────────────────────────────────
 
-    async loadMatchHistory(userId, courtId) {
+    async loadMatchHistory(userId, courtId, options = {}) {
         const container = document.getElementById('match-history-content');
         if (!container) return;
-        container.innerHTML = '<div class="loading">Loading match history...</div>';
+        const silent = !!options.silent;
+        if (!silent || !container.innerHTML.trim()) {
+            container.innerHTML = '<div class="loading">Loading match history...</div>';
+        }
 
         let url = '/api/ranked/history?';
         if (userId) url += `user_id=${userId}&`;
@@ -1162,12 +1171,14 @@ const Ranked = {
             const res = await API.get(url);
             const matches = res.matches || [];
             if (!matches.length) {
-                container.innerHTML = '<p class="muted">No match history yet</p>';
+                Ranked._setHtmlIfChanged(container, '<p class="muted">No match history yet</p>');
                 return;
             }
-            container.innerHTML = matches.map(m => Ranked._renderMatchHistory(m)).join('');
+            Ranked._setHtmlIfChanged(container, matches.map(m => Ranked._renderMatchHistory(m)).join(''));
         } catch {
-            container.innerHTML = '<p class="error">Failed to load history</p>';
+            if (!silent || !container.innerHTML.trim()) {
+                container.innerHTML = '<p class="error">Failed to load history</p>';
+            }
         }
     },
 
@@ -1204,5 +1215,12 @@ const Ranked = {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    },
+
+    _setHtmlIfChanged(element, html) {
+        if (!element) return;
+        if (element.innerHTML !== html) {
+            element.innerHTML = html;
+        }
     },
 };
