@@ -134,6 +134,13 @@ def test_profile_upcoming_games_excludes_completed_sessions(client):
     }, headers={'Authorization': f'Bearer {host_token}'})
     court_id = json.loads(court.data)['court']['id']
 
+    checkin = client.post(
+        '/api/presence/checkin',
+        json={'court_id': court_id},
+        headers={'Authorization': f'Bearer {host_token}'},
+    )
+    assert checkin.status_code == 201
+
     session = client.post('/api/sessions', json={
         'court_id': court_id,
         'session_type': 'now',

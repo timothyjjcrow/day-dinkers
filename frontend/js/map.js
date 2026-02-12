@@ -10,7 +10,7 @@ const MapView = {
     activeFilter: 'all',
     courtListOpen: false,
     currentCourtId: null,
-    myCheckinStatus: null, // { checked_in: bool, court_id, looking_for_game }
+    myCheckinStatus: null, // { checked_in: bool, court_id }
     friendsPresence: [],  // [{user, court_id, checked_in_at}]
     friendMarkers: [],
 
@@ -399,7 +399,7 @@ const MapView = {
         }
     },
 
-    /** Refresh the full-page court view (after check-in, LFG toggle, etc.) */
+    /** Refresh the full-page court view (after check-in/session changes). */
     async _refreshFullPage(courtId) {
         if (App.currentView !== 'court-detail') return;
         await MapView.refreshMyStatus();
@@ -474,7 +474,6 @@ const MapView = {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myStatus = MapView.myCheckinStatus || {};
         const amCheckedInHere = myStatus.checked_in && myStatus.court_id === court.id;
-        const amLFG = amCheckedInHere && myStatus.looking_for_game;
         const events = court.upcoming_events || [];
         const images = court.images || [];
         const communityInfo = court.community_info || {};
@@ -515,9 +514,12 @@ const MapView = {
         // Sessions at this court
         const nowSessions = sessions.filter(s => s.session_type === 'now');
         const scheduledSessions = sessions.filter(s => s.session_type === 'scheduled');
+        const playerBuckets = MapView._splitPlayersByLookingToPlay(checkedIn, nowSessions);
+        const lookingToPlayPlayers = playerBuckets.lookingToPlayPlayers;
+        const otherPlayers = playerBuckets.otherPlayers;
         let sessionsHTML = '';
         if (nowSessions.length > 0) {
-            sessionsHTML += '<h5 class="session-sub-heading">🟢 Open to Play Now</h5>';
+            sessionsHTML += '<h5 class="session-sub-heading">🎯 Looking to Play Now</h5>';
             sessionsHTML += Sessions.renderMiniCards(nowSessions);
         }
         if (scheduledSessions.length > 0) {
@@ -525,20 +527,17 @@ const MapView = {
             sessionsHTML += Sessions.renderMiniCards(scheduledSessions);
         }
         if (!sessions.length) {
-            sessionsHTML = '<p class="muted">No open sessions. Be the first to start one!</p>';
+            sessionsHTML = '<p class="muted">No looking-to-play sessions yet. Be the first to start one!</p>';
         }
 
         // Players section
-        const lfgPlayers = checkedIn.filter(u => u.looking_for_game);
-        const otherPlayers = checkedIn.filter(u => !u.looking_for_game);
-
         let playersHTML = '';
         if (checkedIn.length === 0) {
             playersHTML = '<p class="muted">No one checked in right now. Be the first!</p>';
         } else {
-            if (lfgPlayers.length > 0) {
-                playersHTML += `<div class="lfg-group"><h5>🎯 Looking for a Game (${lfgPlayers.length})</h5>`;
-                playersHTML += lfgPlayers.map(u => MapView._playerCard(u, true, currentUser.id)).join('');
+            if (lookingToPlayPlayers.length > 0) {
+                playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
+                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(u, true, currentUser.id)).join('');
                 playersHTML += '</div>';
             }
             if (otherPlayers.length > 0) {
@@ -548,28 +547,14 @@ const MapView = {
             }
         }
 
-        // Check-in/Check-out buttons
-        let checkinBtnHTML = '';
-        if (amCheckedInHere) {
-            checkinBtnHTML = `
-                <div class="checkin-status-bar checked-in">
-                    <div class="checkin-status-info">
-                        <span class="checkin-dot"></span>
-                        <span>You're checked in here</span>
-                    </div>
-                    <div class="checkin-actions">
-                        <button class="btn-sm ${amLFG ? 'btn-danger' : 'btn-primary'}" onclick="MapView.toggleLFG(${court.id})">
-                            ${amLFG ? '🔴 Stop Looking' : '🎯 Looking for Game'}
-                        </button>
-                        <button class="btn-sm btn-secondary" onclick="MapView.checkOut(${court.id})">Check Out</button>
-                    </div>
-                </div>`;
-        } else {
-            checkinBtnHTML = `
-                <div class="checkin-status-bar">
-                    <button class="btn-primary btn-full" onclick="MapView.checkIn(${court.id})">📍 Check In at ${safeCourtName}</button>
-                </div>`;
-        }
+        const checkinBtnHTML = MapView._checkinBarHTML({
+            courtId: court.id,
+            safeCourtName,
+            amCheckedInHere,
+            currentUserId: currentUser.id,
+            nowSessions,
+            fullPage: false,
+        });
 
         return `
         <div class="court-detail-page">
@@ -595,8 +580,8 @@ const MapView = {
             <!-- Open to Play Sessions -->
             <div class="court-section">
                 <div class="section-header">
-                    <h4>🟢 Open to Play</h4>
-                    <button class="btn-primary btn-sm" onclick="Sessions.openToPlayNow(${court.id})">+ Open to Play</button>
+                    <h4>🎯 Looking to Play</h4>
+                    <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">📅 Schedule</button>
                 </div>
                 ${sessionsHTML}
             </div>
@@ -619,9 +604,9 @@ const MapView = {
             <div class="court-section">
                 <h4>Quick Actions</h4>
                 <div class="quick-actions-grid">
-                    <button class="quick-action-btn" onclick="Sessions.openToPlayNow(${court.id})">
-                        <span class="quick-action-icon">🟢</span>
-                        <span>Open to Play</span>
+                    <button class="quick-action-btn" onclick="MapView.startLookingToPlayNow(${court.id}, 120)">
+                        <span class="quick-action-icon">🎯</span>
+                        <span>Looking to Play Now</span>
                     </button>
                     <button class="quick-action-btn" onclick="Sessions.showCreateModal(${court.id})">
                         <span class="quick-action-icon">📅</span>
@@ -703,7 +688,7 @@ const MapView = {
         </div>`;
     },
 
-    _playerCard(user, isLFG, currentUserId) {
+    _playerCard(user, isLookingToPlay, currentUserId) {
         const isMe = user.id === currentUserId;
         const isFriend = App.friendIds.includes(user.id);
         const initials = (user.name || user.username || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -726,8 +711,8 @@ const MapView = {
         }
 
         return `
-        <div class="player-card ${isLFG ? 'player-lfg' : ''} ${isMe ? 'player-me' : ''}">
-            <div class="player-card-avatar ${isLFG ? 'avatar-lfg' : ''}">${safeInitials}</div>
+        <div class="player-card ${isLookingToPlay ? 'player-lfg' : ''} ${isMe ? 'player-me' : ''}">
+            <div class="player-card-avatar ${isLookingToPlay ? 'avatar-lfg' : ''}">${safeInitials}</div>
             <div class="player-card-info">
                 <div class="player-card-name">${safeName}${isMe ? ' (You)' : ''}</div>
                 <div class="player-card-meta">
@@ -736,9 +721,104 @@ const MapView = {
                     ${timeAgo ? `<span class="player-since">· ${safeTimeAgo}</span>` : ''}
                 </div>
             </div>
-            ${isLFG ? '<span class="lfg-badge">🎯 LFG</span>' : ''}
+            ${isLookingToPlay ? '<span class="lfg-badge">🎯 Looking to Play</span>' : ''}
             ${actionBtn}
         </div>`;
+    },
+
+    _splitPlayersByLookingToPlay(checkedInUsers, nowSessions) {
+        const nowCreatorIds = new Set((nowSessions || []).map(session => session.creator_id));
+        return {
+            lookingToPlayPlayers: (checkedInUsers || []).filter(user => nowCreatorIds.has(user.id)),
+            otherPlayers: (checkedInUsers || []).filter(user => !nowCreatorIds.has(user.id)),
+        };
+    },
+
+    _quickPlayDurations() {
+        return [60, 90, 120, 180];
+    },
+
+    _formatQuickDuration(minutes) {
+        const mins = Number(minutes);
+        if (!Number.isFinite(mins) || mins <= 0) return 'Custom';
+        const hours = Math.floor(mins / 60);
+        const remaining = mins % 60;
+        if (!remaining) return `${hours}h`;
+        if (remaining === 30) return `${hours}.5h`;
+        return `${hours}h ${remaining}m`;
+    },
+
+    _nowSessionByCreator(nowSessions, creatorId) {
+        if (!creatorId) return null;
+        return (nowSessions || []).find(session => session.creator_id === creatorId) || null;
+    },
+
+    _nowSessionDurationMinutes(session) {
+        if (!session || !session.end_time) return null;
+        const startRaw = session.start_time || session.created_at;
+        if (!startRaw) return null;
+        const startAt = new Date(startRaw);
+        const endAt = new Date(session.end_time);
+        if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {
+            return null;
+        }
+        return Math.round((endAt.getTime() - startAt.getTime()) / 60000);
+    },
+
+    _nowSessionEndsText(session) {
+        if (!session || !session.end_time) return '';
+        const endAt = new Date(session.end_time);
+        if (Number.isNaN(endAt.getTime())) return '';
+        const endLabel = endAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        return ` until ${endLabel}`;
+    },
+
+    _checkinBarHTML({ courtId, safeCourtName, amCheckedInHere, currentUserId, nowSessions, fullPage }) {
+        if (!amCheckedInHere) {
+            const checkInAction = fullPage ? 'MapView.fullPageCheckIn' : 'MapView.checkIn';
+            return `
+                <div class="checkin-status-bar">
+                    <button class="btn-primary btn-full" onclick="${checkInAction}(${courtId})">📍 Check In at ${safeCourtName}</button>
+                    <p class="checkin-hint">Check in first, then choose how many hours you're looking to play now.</p>
+                </div>`;
+        }
+
+        const checkOutAction = fullPage ? 'MapView.fullPageCheckOut' : 'MapView.checkOut';
+        const createAction = fullPage ? 'MapView.fullPageStartLookingToPlayNow' : 'MapView.startLookingToPlayNow';
+        const myNowSession = MapView._nowSessionByCreator(nowSessions, currentUserId);
+        const activeDuration = MapView._nowSessionDurationMinutes(myNowSession);
+        const durationButtons = MapView._quickPlayDurations()
+            .map(minutes => `
+                <button
+                    class="session-quick-btn ${activeDuration === minutes ? 'active' : ''}"
+                    onclick="${createAction}(${courtId}, ${minutes})"
+                >${MapView._formatQuickDuration(minutes)}</button>
+            `)
+            .join('');
+        const helpText = myNowSession
+            ? `You're looking to play now${MapView._nowSessionEndsText(myNowSession)}. Tap a duration to update.`
+            : 'Start a Looking to Play session now:';
+
+        return `
+            <div class="checkin-status-bar checked-in">
+                <div class="checkin-status-info">
+                    <span class="checkin-dot"></span>
+                    <span>You're checked in here</span>
+                </div>
+                <div class="checkin-actions">
+                    <button class="btn-sm btn-secondary" onclick="${checkOutAction}(${courtId})">Check Out</button>
+                </div>
+                <div class="checkin-play-controls">
+                    <div class="checkin-play-header">
+                        <span>🎯 Looking to Play</span>
+                        <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${courtId})">📅 Schedule</button>
+                    </div>
+                    <p class="checkin-play-help">${helpText}</p>
+                    <div class="session-duration-buttons checkin-duration-buttons">
+                        ${durationButtons}
+                    </div>
+                </div>
+            </div>`;
     },
 
     async sendFriendRequest(userId) {
@@ -980,17 +1060,50 @@ const MapView = {
         }
     },
 
-    async toggleLFG(courtId) {
+    async startLookingToPlayNow(courtId, durationMinutes = 120) {
+        await MapView._createLookingToPlaySession(courtId, durationMinutes, false);
+    },
+
+    async fullPageStartLookingToPlayNow(courtId, durationMinutes = 120) {
+        await MapView._createLookingToPlaySession(courtId, durationMinutes, true);
+    },
+
+    async _createLookingToPlaySession(courtId, durationMinutes, fullPage) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+
+        const parsedDuration = parseInt(durationMinutes, 10);
+        if (!Number.isFinite(parsedDuration) || parsedDuration <= 0) {
+            App.toast('Pick a valid play duration', 'error');
+            return;
+        }
+
+        await MapView.refreshMyStatus();
+        const myStatus = MapView.myCheckinStatus || {};
+        if (!myStatus.checked_in || myStatus.court_id !== courtId) {
+            App.toast('Check in at this court first, then choose your play duration.', 'error');
+            return;
+        }
+
         try {
-            const res = await API.post('/api/presence/lfg', {});
-            const msg = res.looking_for_game
-                ? '🎯 You\'re now looking for a game! Others at this court can see.'
-                : 'No longer looking for a game.';
-            App.toast(msg);
-            await MapView.refreshMyStatus();
-            MapView.openCourtDetail(courtId);
+            await API.post('/api/sessions', {
+                court_id: courtId,
+                session_type: 'now',
+                game_type: 'open',
+                skill_level: 'all',
+                max_players: 4,
+                visibility: 'all',
+                duration_minutes: parsedDuration,
+            });
+            App.toast(`Looking to Play now for ${MapView._formatQuickDuration(parsedDuration)}.`);
+            if (fullPage) {
+                await MapView._refreshFullPage(courtId);
+            } else {
+                MapView.openCourtDetail(courtId);
+            }
+            MapView.loadCourts();
         } catch (err) {
-            App.toast(err.message || 'Failed to update status', 'error');
+            App.toast(err.message || 'Failed to create looking-to-play session', 'error');
         }
     },
 
@@ -1013,7 +1126,6 @@ const MapView = {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myStatus = MapView.myCheckinStatus || {};
         const amCheckedInHere = myStatus.checked_in && myStatus.court_id === court.id;
-        const amLFG = amCheckedInHere && myStatus.looking_for_game;
         const events = court.upcoming_events || [];
         const images = court.images || [];
         const communityInfo = court.community_info || {};
@@ -1053,9 +1165,12 @@ const MapView = {
         // Sessions at this court
         const nowSessions = sessions.filter(s => s.session_type === 'now');
         const scheduledSessions = sessions.filter(s => s.session_type === 'scheduled');
+        const playerBuckets = MapView._splitPlayersByLookingToPlay(checkedIn, nowSessions);
+        const lookingToPlayPlayers = playerBuckets.lookingToPlayPlayers;
+        const otherPlayers = playerBuckets.otherPlayers;
         let sessionsHTML = '';
         if (nowSessions.length > 0) {
-            sessionsHTML += '<h5 class="session-sub-heading">🟢 Open to Play Now</h5>';
+            sessionsHTML += '<h5 class="session-sub-heading">🎯 Looking to Play Now</h5>';
             sessionsHTML += Sessions.renderMiniCards(nowSessions);
         }
         if (scheduledSessions.length > 0) {
@@ -1063,20 +1178,17 @@ const MapView = {
             sessionsHTML += Sessions.renderMiniCards(scheduledSessions);
         }
         if (!sessions.length) {
-            sessionsHTML = '<p class="muted">No open sessions. Be the first to start one!</p>';
+            sessionsHTML = '<p class="muted">No looking-to-play sessions yet. Be the first to start one!</p>';
         }
 
         // Players section
-        const lfgPlayers = checkedIn.filter(u => u.looking_for_game);
-        const otherPlayers = checkedIn.filter(u => !u.looking_for_game);
-
         let playersHTML = '';
         if (checkedIn.length === 0) {
             playersHTML = '<p class="muted">No one checked in right now. Be the first!</p>';
         } else {
-            if (lfgPlayers.length > 0) {
-                playersHTML += `<div class="lfg-group"><h5>🎯 Looking for a Game (${lfgPlayers.length})</h5>`;
-                playersHTML += lfgPlayers.map(u => MapView._playerCard(u, true, currentUser.id)).join('');
+            if (lookingToPlayPlayers.length > 0) {
+                playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
+                playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(u, true, currentUser.id)).join('');
                 playersHTML += '</div>';
             }
             if (otherPlayers.length > 0) {
@@ -1086,36 +1198,22 @@ const MapView = {
             }
         }
 
-        // Match ready banner based on LFG count
+        // Match ready banner based on players currently looking to play
         let matchBanner = '';
-        if (lfgPlayers.length >= 4) {
-            matchBanner = '<div class="match-ready-banner">🎉 4+ players looking for a game! Start a doubles match!</div>';
-        } else if (lfgPlayers.length >= 2) {
-            matchBanner = `<div class="match-ready-banner singles">🎾 ${lfgPlayers.length} players looking — enough for singles!</div>`;
+        if (lookingToPlayPlayers.length >= 4) {
+            matchBanner = '<div class="match-ready-banner">🎉 4+ players looking to play now! Start a doubles match!</div>';
+        } else if (lookingToPlayPlayers.length >= 2) {
+            matchBanner = `<div class="match-ready-banner singles">🎾 ${lookingToPlayPlayers.length} players looking to play now — enough for singles!</div>`;
         }
 
-        // Check-in bar
-        let checkinBtnHTML = '';
-        if (amCheckedInHere) {
-            checkinBtnHTML = `
-                <div class="checkin-status-bar checked-in">
-                    <div class="checkin-status-info">
-                        <span class="checkin-dot"></span>
-                        <span>You're checked in at ${safeCourtName}</span>
-                    </div>
-                    <div class="checkin-actions">
-                        <button class="btn-sm ${amLFG ? 'btn-danger' : 'btn-primary'}" onclick="MapView.fullPageToggleLFG(${court.id})">
-                            ${amLFG ? '🔴 Stop Looking' : '🎯 Looking for Game'}
-                        </button>
-                        <button class="btn-sm btn-secondary" onclick="MapView.fullPageCheckOut(${court.id})">Check Out</button>
-                    </div>
-                </div>`;
-        } else {
-            checkinBtnHTML = `
-                <div class="checkin-status-bar">
-                    <button class="btn-primary btn-full" onclick="MapView.fullPageCheckIn(${court.id})">📍 Check In at ${safeCourtName}</button>
-                </div>`;
-        }
+        const checkinBtnHTML = MapView._checkinBarHTML({
+            courtId: court.id,
+            safeCourtName,
+            amCheckedInHere,
+            currentUserId: currentUser.id,
+            nowSessions,
+            fullPage: true,
+        });
 
         return `
         <div class="cfp">
@@ -1155,13 +1253,10 @@ const MapView = {
                     <!-- Open to Play Sessions -->
                     <div class="cfp-card">
                         <div class="section-header">
-                            <h3>🟢 Open to Play</h3>
-                            <button class="btn-primary btn-sm" onclick="Sessions.openToPlayNow(${court.id})">+ Open to Play</button>
+                            <h3>🎯 Looking to Play</h3>
+                            <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">📅 Schedule</button>
                         </div>
                         ${sessionsHTML}
-                        <div style="margin-top:10px">
-                            <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">📅 Schedule a Session</button>
-                        </div>
                     </div>
 
                     <!-- Who's Here -->
@@ -1184,9 +1279,9 @@ const MapView = {
                     <div class="cfp-card">
                         <h3>Quick Actions</h3>
                         <div class="quick-actions-grid cfp-actions-grid">
-                            <button class="quick-action-btn" onclick="Sessions.openToPlayNow(${court.id})">
-                                <span class="quick-action-icon">🟢</span>
-                                <span>Open to Play</span>
+                            <button class="quick-action-btn" onclick="MapView.fullPageStartLookingToPlayNow(${court.id}, 120)">
+                                <span class="quick-action-icon">🎯</span>
+                                <span>Looking to Play Now</span>
                             </button>
                             <button class="quick-action-btn" onclick="Ranked.joinQueue(${court.id})">
                                 <span class="quick-action-icon">⚔️</span>
@@ -1315,20 +1410,6 @@ const MapView = {
             MapView.loadCourts();
         } catch (err) {
             App.toast('Failed to check out', 'error');
-        }
-    },
-
-    /** Full-page LFG toggle */
-    async fullPageToggleLFG(courtId) {
-        try {
-            const res = await API.post('/api/presence/lfg', {});
-            const msg = res.looking_for_game
-                ? "🎯 You're now looking for a game! Others at this court can see."
-                : 'No longer looking for a game.';
-            App.toast(msg);
-            MapView._refreshFullPage(courtId);
-        } catch (err) {
-            App.toast(err.message || 'Failed to update status', 'error');
         }
     },
 

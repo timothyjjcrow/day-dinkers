@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 from backend.app import db
 from backend.models import (
-    PlaySession, PlaySessionPlayer, Court, Notification, Friendship,
+    PlaySession, PlaySessionPlayer, Court, Notification, Friendship, CheckIn,
     RecurringSessionSeries, RecurringSessionSeriesItem,
 )
 from backend.auth_utils import login_required
@@ -85,6 +85,34 @@ def _joined_count(session_id):
     ).count()
 
 
+def _complete_expired_now_sessions():
+    """Mark timed 'now' sessions as completed once their end time has passed."""
+    now = utcnow_naive()
+    expired = PlaySession.query.filter(
+        PlaySession.status == 'active',
+        PlaySession.session_type == 'now',
+        PlaySession.end_time.isnot(None),
+        PlaySession.end_time <= now,
+    ).all()
+    if not expired:
+        return
+    for session in expired:
+        session.status = 'completed'
+    db.session.commit()
+
+
+def _active_sessions_query():
+    now = utcnow_naive()
+    return PlaySession.query.filter(
+        PlaySession.status == 'active',
+        (
+            (PlaySession.session_type != 'now')
+            | PlaySession.end_time.is_(None)
+            | (PlaySession.end_time > now)
+        ),
+    )
+
+
 def _serialize_session(session):
     """Serialize a session and include recurring-series metadata if present."""
     data = session.to_dict()
@@ -103,6 +131,7 @@ def _serialize_session(session):
 @sessions_bp.route('', methods=['GET'])
 def get_sessions():
     """List active sessions, filtered by visibility for the requester."""
+    _complete_expired_now_sessions()
     court_id = request.args.get('court_id', type=int)
     session_type = request.args.get('type', '')  # 'now', 'scheduled', or ''
     visibility_filter = (request.args.get('visibility') or 'all').strip().lower()
@@ -113,11 +142,11 @@ def get_sessions():
     if skill_filter not in ('all', 'beginner', 'intermediate', 'advanced'):
         skill_filter = 'all'
 
-    query = PlaySession.query.filter_by(status='active')
+    query = _active_sessions_query()
     if court_id:
-        query = query.filter_by(court_id=court_id)
+        query = query.filter(PlaySession.court_id == court_id)
     if session_type:
-        query = query.filter_by(session_type=session_type)
+        query = query.filter(PlaySession.session_type == session_type)
 
     sessions = query.order_by(PlaySession.created_at.desc()).limit(50).all()
 
@@ -152,20 +181,20 @@ def get_sessions():
 @login_required
 def get_my_sessions():
     """Get sessions the current user created or joined."""
+    _complete_expired_now_sessions()
     uid = request.current_user.id
 
     # Sessions I created
-    created = PlaySession.query.filter_by(
-        creator_id=uid, status='active'
+    created = _active_sessions_query().filter(
+        PlaySession.creator_id == uid
     ).all()
 
     # Sessions I joined
     joined_ids = [sp.session_id for sp in PlaySessionPlayer.query.filter_by(
         user_id=uid, status='joined'
     ).all()]
-    joined = PlaySession.query.filter(
+    joined = _active_sessions_query().filter(
         PlaySession.id.in_(joined_ids),
-        PlaySession.status == 'active',
     ).all() if joined_ids else []
 
     # Merge and deduplicate
@@ -224,7 +253,8 @@ def create_session():
 
     notes = str(data.get('notes', '')).strip()[:2000]
 
-    # For scheduled sessions, require start_time
+    # Scheduled sessions must include explicit future times.
+    # "Now" sessions use current time and can include a duration/end time.
     start_time = None
     end_time = None
     recurrence = 'none'
@@ -259,8 +289,39 @@ def create_session():
         if recurrence == 'none':
             recurrence_count = 1
         interval_weeks = 2 if recurrence == 'biweekly' else 1
+    else:
+        active_checkin = CheckIn.query.filter_by(
+            user_id=request.current_user.id,
+            checked_out_at=None,
+        ).first()
+        if not active_checkin or active_checkin.court_id != court_id:
+            return jsonify({
+                'error': 'Check in at this court before starting a looking-to-play session'
+            }), 400
 
-    # Cancel any existing active "now" session by this user at this court
+        start_time = utcnow_naive()
+
+        raw_duration = data.get('duration_minutes')
+        if raw_duration not in (None, ''):
+            try:
+                duration_minutes = int(raw_duration)
+            except (TypeError, ValueError):
+                return jsonify({'error': 'duration_minutes must be a number'}), 400
+            if duration_minutes < 30 or duration_minutes > 480:
+                return jsonify({'error': 'duration_minutes must be between 30 and 480'}), 400
+            end_time = start_time + timedelta(minutes=duration_minutes)
+
+        raw_end = str(data.get('end_time') or '').strip()
+        if raw_end:
+            try:
+                parsed_end = datetime.fromisoformat(raw_end)
+            except ValueError:
+                return jsonify({'error': 'End time must be a valid ISO datetime'}), 400
+            if parsed_end <= start_time:
+                return jsonify({'error': 'End time must be after start time'}), 400
+            end_time = parsed_end
+
+    # Cancel any existing active "now" session by this user.
     if session_type == 'now':
         existing = PlaySession.query.filter_by(
             creator_id=request.current_user.id,
@@ -305,6 +366,9 @@ def create_session():
             occurrence_start = start_time + timedelta(weeks=weeks)
             if end_time:
                 occurrence_end = end_time + timedelta(weeks=weeks)
+        else:
+            occurrence_start = start_time
+            occurrence_end = end_time
 
         session = PlaySession(
             creator_id=request.current_user.id,
@@ -356,6 +420,7 @@ def create_session():
 @sessions_bp.route('/<int:session_id>', methods=['GET'])
 def get_session(session_id):
     """Get session details."""
+    _complete_expired_now_sessions()
     session = db.session.get(PlaySession, session_id)
     if not session:
         return jsonify({'error': 'Session not found'}), 404
@@ -369,6 +434,7 @@ def get_session(session_id):
 @login_required
 def join_session(session_id):
     """Join an open-to-play session."""
+    _complete_expired_now_sessions()
     session = db.session.get(PlaySession, session_id)
     if not session:
         return jsonify({'error': 'Session not found'}), 404

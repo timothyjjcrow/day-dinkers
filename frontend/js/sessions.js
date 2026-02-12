@@ -1351,6 +1351,12 @@ const Sessions = {
             const recurrenceCount = Number.isFinite(parsedCount) ? Math.max(1, parsedCount) : 1;
             data.recurrence = recurrence;
             data.recurrence_count = recurrenceCount;
+        } else {
+            const durationInput = form.querySelector('input[name="duration_minutes"]');
+            const parsedDuration = parseInt(durationInput?.value || '90', 10);
+            if (Number.isFinite(parsedDuration) && parsedDuration > 0) {
+                data.duration_minutes = parsedDuration;
+            }
         }
 
         // Collect invited friends
@@ -1368,7 +1374,7 @@ const Sessions = {
                 });
             }
             if (sessionType === 'now') {
-                App.toast("You're open to play! Others can see and join.");
+                App.toast("You're looking to play now! Others can see and join.");
             } else if ((res.created_count || 1) > 1) {
                 App.toast(`Scheduled ${res.created_count} recurring sessions.`);
             } else {

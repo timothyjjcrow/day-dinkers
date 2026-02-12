@@ -34,8 +34,81 @@ def _create_session(client, token, court_id, **overrides):
         'notes': '',
     }
     payload.update(overrides)
-    res = client.post('/api/sessions', json=payload, headers={'Authorization': f'Bearer {token}'})
+    headers = {'Authorization': f'Bearer {token}'}
+    if payload.get('session_type', 'now') == 'now':
+        client.post('/api/presence/checkin', json={'court_id': court_id}, headers=headers)
+    res = client.post('/api/sessions', json=payload, headers=headers)
     return json.loads(res.data)['session']
+
+
+def test_now_session_requires_checkin_at_court(client):
+    token, _ = _register(client, 'now_checkin', 'now_checkin@test.com')
+    court = _create_court(client, token, 'Now Checkin Court')
+    headers = {'Authorization': f'Bearer {token}'}
+
+    payload = {
+        'court_id': court['id'],
+        'session_type': 'now',
+        'game_type': 'open',
+        'skill_level': 'all',
+        'max_players': 4,
+        'visibility': 'all',
+    }
+    res = client.post('/api/sessions', json=payload, headers=headers)
+    assert res.status_code == 400
+    assert 'Check in at this court' in json.loads(res.data)['error']
+
+    checkin = client.post('/api/presence/checkin', json={'court_id': court['id']}, headers=headers)
+    assert checkin.status_code == 201
+
+    res = client.post(
+        '/api/sessions',
+        json={**payload, 'duration_minutes': 120},
+        headers=headers,
+    )
+    assert res.status_code == 201
+
+
+def test_now_session_duration_sets_times_and_expires(client, app):
+    token, _ = _register(client, 'now_duration', 'now_duration@test.com')
+    court = _create_court(client, token, 'Now Duration Court')
+    headers = {'Authorization': f'Bearer {token}'}
+
+    checkin = client.post('/api/presence/checkin', json={'court_id': court['id']}, headers=headers)
+    assert checkin.status_code == 201
+
+    create = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'now',
+        'duration_minutes': 60,
+    }, headers=headers)
+    assert create.status_code == 201
+
+    session = json.loads(create.data)['session']
+    assert session['start_time']
+    assert session['end_time']
+    start_time = datetime.fromisoformat(session['start_time'])
+    end_time = datetime.fromisoformat(session['end_time'])
+    minutes = round((end_time - start_time).total_seconds() / 60)
+    assert 59 <= minutes <= 61
+
+    from backend.app import db
+    from backend.models import PlaySession
+    from backend.time_utils import utcnow_naive
+
+    with app.app_context():
+        db_session = db.session.get(PlaySession, session['id'])
+        db_session.end_time = utcnow_naive() - timedelta(minutes=1)
+        db.session.commit()
+
+    list_res = client.get(f'/api/sessions?court_id={court["id"]}')
+    assert list_res.status_code == 200
+    listed_ids = [s['id'] for s in json.loads(list_res.data)['sessions']]
+    assert session['id'] not in listed_ids
+
+    with app.app_context():
+        refreshed = db.session.get(PlaySession, session['id'])
+        assert refreshed.status == 'completed'
 
 
 def test_sessions_visibility_and_skill_filters(client):

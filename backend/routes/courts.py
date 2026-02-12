@@ -34,6 +34,19 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return R * 2 * math.asin(math.sqrt(a))
 
 
+def _active_play_sessions_query(court_id=None):
+    """Active sessions, excluding timed 'now' sessions that have ended."""
+    now = utcnow_naive()
+    query = PlaySession.query.filter(PlaySession.status == 'active')
+    if court_id is not None:
+        query = query.filter(PlaySession.court_id == court_id)
+    return query.filter(
+        (PlaySession.session_type != 'now')
+        | PlaySession.end_time.is_(None)
+        | (PlaySession.end_time > now)
+    )
+
+
 def _serialize_submission(submission, include_payload=False, redact_data_urls=False):
     data = submission.to_dict(include_payload=False)
     if include_payload:
@@ -224,9 +237,7 @@ def get_courts():
         court_dict['active_players'] = active_checkins
 
         # Count active open-to-play sessions at this court
-        session_count = PlaySession.query.filter_by(
-            court_id=court.id, status='active'
-        ).count()
+        session_count = _active_play_sessions_query(court_id=court.id).count()
         court_dict['open_sessions'] = session_count
 
         if lat is not None and lng is not None:
@@ -351,9 +362,9 @@ def get_court(court_id):
         court_dict['checked_in_users'].append(user_data)
 
     # Active play sessions at this court (replaces upcoming_games)
-    active_sessions = PlaySession.query.filter_by(
-        court_id=court_id, status='active'
-    ).order_by(PlaySession.created_at.desc()).all()
+    active_sessions = _active_play_sessions_query(court_id=court_id) \
+        .order_by(PlaySession.created_at.desc()) \
+        .all()
     court_dict['play_sessions'] = [s.to_dict() for s in active_sessions]
     # Backward compatibility with legacy clients/tests expecting this key.
     court_dict['upcoming_games'] = court_dict['play_sessions']
