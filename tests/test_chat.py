@@ -1,6 +1,9 @@
 """Tests for chat and presence routes."""
 import json
 from datetime import datetime, timedelta, timezone
+from backend.app import db
+from backend.models import CheckIn, PlaySession
+from backend.time_utils import utcnow_naive
 
 
 def _auth(client, username='chatuser', email='chat@test.com'):
@@ -8,6 +11,14 @@ def _auth(client, username='chatuser', email='chat@test.com'):
         'username': username, 'email': email, 'password': 'password123',
     })
     return json.loads(res.data)['token']
+
+
+def _auth_with_user(client, username='chatuser', email='chat@test.com'):
+    res = client.post('/api/auth/register', json={
+        'username': username, 'email': email, 'password': 'password123',
+    })
+    payload = json.loads(res.data)
+    return payload['token'], payload['user']
 
 
 def _create_court(client, token):
@@ -135,3 +146,62 @@ def test_check_in_requires_existing_court(client):
         headers={'Authorization': f'Bearer {token}'},
     )
     assert res.status_code == 404
+
+
+def test_presence_ping_updates_last_seen(client, app):
+    token, user = _auth_with_user(client, 'pinguser', 'ping@test.com')
+    court = _create_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    checkin = client.post('/api/presence/checkin', json={'court_id': court['id']}, headers=headers)
+    assert checkin.status_code == 201
+
+    with app.app_context():
+        active = CheckIn.query.filter_by(user_id=user['id'], checked_out_at=None).first()
+        active.last_presence_ping_at = utcnow_naive() - timedelta(minutes=30)
+        db.session.commit()
+        stale_time = active.last_presence_ping_at
+
+    ping = client.post('/api/presence/ping', json={}, headers=headers)
+    assert ping.status_code == 200
+    ping_data = json.loads(ping.data)
+    assert ping_data['checked_in'] is True
+    assert ping_data['court_id'] == court['id']
+    assert ping_data['last_presence_ping_at'] is not None
+
+    with app.app_context():
+        refreshed = CheckIn.query.filter_by(user_id=user['id'], checked_out_at=None).first()
+        assert refreshed.last_presence_ping_at > stale_time
+
+
+def test_stale_presence_auto_checkout_completes_now_session(client, app):
+    token, user = _auth_with_user(client, 'staleuser', 'stale@test.com')
+    court = _create_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    checkin = client.post('/api/presence/checkin', json={'court_id': court['id']}, headers=headers)
+    assert checkin.status_code == 201
+
+    create_session = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'now',
+        'duration_minutes': 120,
+    }, headers=headers)
+    assert create_session.status_code == 201
+    session_id = json.loads(create_session.data)['session']['id']
+
+    with app.app_context():
+        active = CheckIn.query.filter_by(user_id=user['id'], checked_out_at=None).first()
+        active.last_presence_ping_at = utcnow_naive() - timedelta(minutes=25)
+        db.session.commit()
+
+    status = client.get('/api/presence/status', headers=headers)
+    assert status.status_code == 200
+    status_data = json.loads(status.data)
+    assert status_data['checked_in'] is False
+
+    with app.app_context():
+        checkout_record = CheckIn.query.filter_by(user_id=user['id']).order_by(CheckIn.id.desc()).first()
+        assert checkout_record.checked_out_at is not None
+        session = db.session.get(PlaySession, session_id)
+        assert session.status == 'completed'

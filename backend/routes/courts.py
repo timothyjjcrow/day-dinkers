@@ -2,7 +2,7 @@ import json
 import math
 from datetime import timedelta
 from flask import Blueprint, current_app, request, jsonify
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from backend.app import db
 from backend.models import (
     User, Court, CourtReport, CheckIn, ActivityLog, Notification, PlaySession,
@@ -800,13 +800,43 @@ def get_court_busyness(court_id):
 
 
 def _cleanup_stale_checkins():
-    cutoff = utcnow_naive() - timedelta(hours=4)
+    timeout_minutes = current_app.config.get('PRESENCE_HEARTBEAT_TIMEOUT_MINUTES', 20)
+    try:
+        timeout_minutes = int(timeout_minutes)
+    except (TypeError, ValueError):
+        timeout_minutes = 20
+    timeout_minutes = max(1, timeout_minutes)
+    cutoff = utcnow_naive() - timedelta(minutes=timeout_minutes)
     stale = CheckIn.query.filter(
         CheckIn.checked_out_at.is_(None),
-        CheckIn.checked_in_at < cutoff
+        or_(
+            and_(
+                CheckIn.last_presence_ping_at.isnot(None),
+                CheckIn.last_presence_ping_at < cutoff,
+            ),
+            and_(
+                CheckIn.last_presence_ping_at.is_(None),
+                CheckIn.checked_in_at < cutoff,
+            ),
+        ),
     ).all()
+    if not stale:
+        return
+
+    now = utcnow_naive()
+    stale_user_ids = set()
     for ci in stale:
-        ci.checked_out_at = utcnow_naive()
+        ci.checked_out_at = now
+        stale_user_ids.add(ci.user_id)
+
+    if stale_user_ids:
+        stale_sessions = PlaySession.query.filter(
+            PlaySession.creator_id.in_(list(stale_user_ids)),
+            PlaySession.status == 'active',
+            PlaySession.session_type == 'now',
+        ).all()
+        for session in stale_sessions:
+            session.status = 'completed'
     if stale:
         db.session.commit()
 

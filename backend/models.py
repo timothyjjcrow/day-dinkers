@@ -311,6 +311,7 @@ class CheckIn(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False)
     checked_in_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+    last_presence_ping_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
     checked_out_at = db.Column(db.DateTime, nullable=True)
     looking_for_game = db.Column(db.Boolean, default=False)
 

@@ -37,6 +37,7 @@ def _run_lightweight_migrations():
 
     user_columns = {col['name'] for col in inspector.get_columns('user')}
     court_columns = {col['name'] for col in inspector.get_columns('court')} if 'court' in table_names else set()
+    checkin_columns = {col['name'] for col in inspector.get_columns('check_in')} if 'check_in' in table_names else set()
     with db.engine.begin() as connection:
         if 'is_admin' not in user_columns:
             connection.execute(text(
@@ -60,6 +61,14 @@ def _run_lightweight_migrations():
             ))
             connection.execute(text(
                 'CREATE INDEX IF NOT EXISTS ix_court_county_slug ON court (county_slug)'
+            ))
+
+        if 'check_in' in table_names and 'last_presence_ping_at' not in checkin_columns:
+            connection.execute(text(
+                'ALTER TABLE check_in ADD COLUMN last_presence_ping_at TIMESTAMP'
+            ))
+            connection.execute(text(
+                'UPDATE check_in SET last_presence_ping_at = checked_in_at WHERE last_presence_ping_at IS NULL'
             ))
 
 
