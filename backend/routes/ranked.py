@@ -1,7 +1,7 @@
 """Ranked competitive play — queue, challenges, scheduling, and score confirmation."""
 from datetime import datetime
 from flask import Blueprint, request, jsonify
-from backend.app import db
+from backend.app import db, socketio
 from backend.models import (
     User, Court, Match, MatchPlayer, RankedQueue, CheckIn, Notification,
     RankedLobby, RankedLobbyPlayer,
@@ -206,6 +206,24 @@ def _prune_queue_for_court(court_id):
     ).delete(synchronize_session=False)
 
 
+def _emit_ranked_update(court_id=None, reason=''):
+    payload = {
+        'court_id': court_id,
+        'reason': reason,
+        'updated_at': utcnow_naive().isoformat(),
+    }
+    socketio.emit('ranked_update', payload)
+
+
+def _emit_notification_update(court_id=None, reason=''):
+    payload = {
+        'court_id': court_id,
+        'reason': reason,
+        'updated_at': utcnow_naive().isoformat(),
+    }
+    socketio.emit('notification_update', payload)
+
+
 # ── Queue Management ──────────────────────────────────────────────────
 
 @ranked_bp.route('/queue/<int:court_id>', methods=['GET'])
@@ -259,6 +277,7 @@ def join_queue():
     )
     db.session.add(entry)
     db.session.commit()
+    _emit_ranked_update(court_id=court_id, reason='queue_join')
     return jsonify({'message': 'Joined queue', 'entry': entry.to_dict()}), 201
 
 
@@ -278,6 +297,7 @@ def leave_queue():
         user_id=request.current_user.id, court_id=court_id
     ).delete()
     db.session.commit()
+    _emit_ranked_update(court_id=court_id, reason='queue_leave')
     return jsonify({'message': 'Left queue'})
 
 
@@ -340,6 +360,7 @@ def create_lobby_from_queue():
         RankedQueue.user_id.in_(all_ids),
     ).delete(synchronize_session=False)
     db.session.commit()
+    _emit_ranked_update(court_id=court_id, reason='lobby_created_from_queue')
     return jsonify({'lobby': _lobby_to_dict(lobby)}), 201
 
 
@@ -407,6 +428,8 @@ def create_court_challenge():
         exclude_user_ids={request.current_user.id},
     )
     db.session.commit()
+    _emit_ranked_update(court_id=court_id, reason='court_challenge_created')
+    _emit_notification_update(court_id=court_id, reason='court_challenge_invite')
     return jsonify({'lobby': _lobby_to_dict(lobby)}), 201
 
 
@@ -475,6 +498,8 @@ def create_scheduled_challenge():
         exclude_user_ids={request.current_user.id},
     )
     db.session.commit()
+    _emit_ranked_update(court_id=court_id, reason='scheduled_challenge_created')
+    _emit_notification_update(court_id=court_id, reason='scheduled_challenge_invite')
     return jsonify({'lobby': _lobby_to_dict(lobby)}), 201
 
 
@@ -531,6 +556,9 @@ def respond_to_lobby(lobby_id):
         )
 
     db.session.commit()
+    _emit_ranked_update(court_id=lobby.court_id, reason='lobby_response')
+    if action == 'decline' or lobby.status == 'ready':
+        _emit_notification_update(court_id=lobby.court_id, reason='lobby_response_notification')
     return jsonify({
         'lobby': _lobby_to_dict(lobby),
         'all_accepted': lobby.status == 'ready',
@@ -598,6 +626,7 @@ def start_lobby_match(lobby_id):
     ).delete(synchronize_session=False)
 
     db.session.commit()
+    _emit_ranked_update(court_id=lobby.court_id, reason='lobby_started')
     return jsonify({'match': match.to_dict(), 'lobby': _lobby_to_dict(lobby)})
 
 
@@ -690,6 +719,7 @@ def create_match():
     ).delete(synchronize_session=False)
 
     db.session.commit()
+    _emit_ranked_update(court_id=court_id, reason='match_created')
     return jsonify({'match': match.to_dict()}), 201
 
 
@@ -760,6 +790,8 @@ def submit_score(match_id):
             db.session.add(notif)
 
     db.session.commit()
+    _emit_ranked_update(court_id=match.court_id, reason='score_submitted')
+    _emit_notification_update(court_id=match.court_id, reason='score_confirmation_requested')
 
     # Check if somehow all confirmed (e.g., submitter is the only player)
     if all(p.confirmed for p in match.players):
@@ -767,6 +799,8 @@ def submit_score(match_id):
         match.status = 'completed'
         match.completed_at = utcnow_naive()
         db.session.commit()
+        _emit_ranked_update(court_id=match.court_id, reason='match_completed_auto_confirm')
+        _emit_notification_update(court_id=match.court_id, reason='match_completed_auto_confirm')
 
     return jsonify({
         'match': match.to_dict(),
@@ -815,6 +849,9 @@ def confirm_match(match_id):
             db.session.add(notif)
 
     db.session.commit()
+    _emit_ranked_update(court_id=match.court_id, reason='match_confirmation_updated')
+    if all_confirmed:
+        _emit_notification_update(court_id=match.court_id, reason='match_completed')
     return jsonify({
         'match': match.to_dict(),
         'all_confirmed': all_confirmed,
@@ -861,6 +898,8 @@ def reject_match(match_id):
             db.session.add(notif)
 
     db.session.commit()
+    _emit_ranked_update(court_id=match.court_id, reason='score_rejected')
+    _emit_notification_update(court_id=match.court_id, reason='score_rejected')
     return jsonify({'match': match.to_dict(), 'message': 'Score rejected. Re-submit when ready.'})
 
 

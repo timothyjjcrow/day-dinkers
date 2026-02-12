@@ -41,6 +41,9 @@ const Auth = {
         }
         App.loadFriendsCache();
         App.refreshReviewerAccess();
+        if (typeof App.refreshNotificationBadge === 'function') {
+            App.refreshNotificationBadge();
+        }
         App.toast(welcomeMessage);
     },
 
@@ -155,6 +158,9 @@ const Auth = {
         }
         Auth.updateUI(null);
         App.refreshReviewerAccess();
+        if (typeof App._setNotificationBadge === 'function') {
+            App._setNotificationBadge(0);
+        }
         App.showView('map');
         App.toast('Signed out');
     },
@@ -184,6 +190,9 @@ const Auth = {
             }
             App.loadFriendsCache();
             App.refreshReviewerAccess();
+            if (typeof App.refreshNotificationBadge === 'function') {
+                App.refreshNotificationBadge();
+            }
         } catch {
             // Token is stale/invalid — clear session silently
             localStorage.removeItem('token');

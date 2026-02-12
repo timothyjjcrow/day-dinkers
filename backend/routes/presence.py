@@ -9,6 +9,10 @@ from backend.time_utils import utcnow_naive
 presence_bp = Blueprint('presence', __name__)
 
 
+def _broadcast_presence_update(payload):
+    socketio.emit('presence_update', payload)
+
+
 def _presence_timeout_cutoff():
     timeout_minutes = current_app.config.get('PRESENCE_HEARTBEAT_TIMEOUT_MINUTES', 20)
     try:
@@ -111,10 +115,10 @@ def check_in():
 
     db.session.commit()
 
-    socketio.emit('presence_update', {
+    _broadcast_presence_update({
         'user': request.current_user.to_dict(),
         'court_id': court_id, 'action': 'checkin'
-    }, room=f'court_{court_id}')
+    })
 
     return jsonify({'message': 'Checked in', 'checkin_id': checkin.id}), 201
 
@@ -136,10 +140,10 @@ def check_out():
 
     db.session.commit()
 
-    socketio.emit('presence_update', {
+    _broadcast_presence_update({
         'user': request.current_user.to_dict(),
         'court_id': court_id, 'action': 'checkout'
-    }, room=f'court_{court_id}')
+    })
 
     return jsonify({'message': 'Checked out', 'court_id': court_id})
 
@@ -176,12 +180,12 @@ def toggle_looking_for_game():
     active.looking_for_game = not active.looking_for_game
     db.session.commit()
 
-    socketio.emit('presence_update', {
+    _broadcast_presence_update({
         'user': request.current_user.to_dict(),
         'court_id': active.court_id,
         'action': 'lfg_toggle',
         'looking_for_game': active.looking_for_game,
-    }, room=f'court_{active.court_id}')
+    })
 
     status = 'looking for a game' if active.looking_for_game else 'not looking'
     return jsonify({

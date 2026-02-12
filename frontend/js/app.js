@@ -215,6 +215,78 @@ const App = {
         document.getElementById('invite-modal').style.display = 'none';
     },
 
+    _setNotificationBadge(unreadCount) {
+        const badge = document.getElementById('notif-badge');
+        if (!badge) return;
+        const unread = Number(unreadCount) || 0;
+        if (unread > 0) {
+            badge.textContent = unread;
+            badge.style.display = 'inline';
+        } else {
+            badge.style.display = 'none';
+        }
+    },
+
+    async refreshNotificationBadge() {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            App._setNotificationBadge(0);
+            return;
+        }
+        try {
+            const res = await API.get('/api/auth/notifications');
+            const notifs = res.notifications || [];
+            const unread = notifs.filter(n => !n.read).length;
+            App._setNotificationBadge(unread);
+        } catch {}
+    },
+
+    startLiveUiRefresh() {
+        if (App.liveUiRefreshInterval) {
+            clearInterval(App.liveUiRefreshInterval);
+            App.liveUiRefreshInterval = null;
+        }
+        App.liveUiRefreshInterval = setInterval(() => {
+            App.refreshLiveUiNow();
+        }, 12000);
+    },
+
+    refreshLiveUiNow() {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            App._setNotificationBadge(0);
+            return;
+        }
+
+        App.refreshNotificationBadge();
+        const panel = document.getElementById('court-panel');
+        const panelOpen = !!(panel && panel.style.display !== 'none');
+        const fullPageOpen = App.currentView === 'court-detail';
+
+        if (typeof Ranked !== 'undefined') {
+            if (App.currentView === 'ranked') {
+                const select = document.getElementById('ranked-court-filter');
+                const selectedCourtId = select && select.value
+                    ? parseInt(select.value, 10)
+                    : null;
+                Ranked.loadPendingConfirmations();
+                Ranked.loadLeaderboard(selectedCourtId || null);
+                Ranked.loadMatchHistory(null, selectedCourtId || null);
+            }
+            if ((panelOpen || fullPageOpen) && Ranked.currentCourtId) {
+                Ranked.loadCourtRanked(Ranked.currentCourtId);
+            }
+        }
+
+        if (typeof MapView !== 'undefined' && MapView.currentCourtId) {
+            if (App.currentView === 'court-detail' && typeof MapView._refreshFullPage === 'function') {
+                MapView._refreshFullPage(MapView.currentCourtId);
+            } else if (panelOpen && typeof MapView.openCourtDetail === 'function') {
+                MapView.openCourtDetail(MapView.currentCourtId);
+            }
+        }
+    },
+
     init() {
         const savedCounty = App._normalizeCountySlug(localStorage.getItem(App.countyPrefKey));
         if (savedCounty) App.selectedCountySlug = savedCounty;
@@ -231,6 +303,8 @@ const App = {
         // Check auth (async) — validates token, clears stale sessions
         Auth.checkAuth();
         App.refreshReviewerAccess();
+        App.refreshNotificationBadge();
+        App.startLiveUiRefresh();
 
         // Location tracking is opt-in; do not auto-request geolocation on app load.
         App.initLocationPrompt();
@@ -251,10 +325,10 @@ const App = {
             });
         }
 
-        // Refresh court data every 30s for live player counts
+        // Refresh court data every 15s for live player counts
         App.refreshInterval = setInterval(() => {
             if (App.currentView === 'map') MapView.loadCourts();
-        }, 30000);
+        }, 15000);
     },
 
     initLocationPrompt() {
@@ -474,16 +548,14 @@ const App = {
                 </div>`;
             }).join('');
             const unread = notifs.filter(n => !n.read).length;
-            const badge = document.getElementById('notif-badge');
-            if (unread > 0) { badge.textContent = unread; badge.style.display = 'inline'; }
-            else badge.style.display = 'none';
+            App._setNotificationBadge(unread);
         } catch { list.innerHTML = '<p class="muted">Unable to load</p>'; }
     },
 
     async markNotificationsRead() {
         try {
             await API.post('/api/auth/notifications/read', {});
-            document.getElementById('notif-badge').style.display = 'none';
+            App._setNotificationBadge(0);
             App._loadNotifications();
         } catch {}
     },

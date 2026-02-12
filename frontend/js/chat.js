@@ -4,6 +4,9 @@
 const Chat = {
     socket: null,
     currentRoom: null,
+    rankedRefreshTimer: null,
+    presenceRefreshTimer: null,
+    notificationRefreshTimer: null,
 
     init() {
         try {
@@ -42,19 +45,97 @@ const Chat = {
                 }
             });
 
-            Chat.socket.on('presence_update', (data) => {
-                // Refresh court data when someone checks in/out
-                if (typeof MapView !== 'undefined') {
-                    MapView.loadCourts();
-                    // Also refresh full-page court view if open
-                    if (App.currentView === 'court-detail' && MapView.currentCourtId) {
-                        MapView._refreshFullPage(MapView.currentCourtId);
-                    }
-                }
-            });
+            Chat.socket.on('presence_update', (data) => Chat._queuePresenceRefresh(data));
+            Chat.socket.on('ranked_update', (data) => Chat._queueRankedRefresh(data));
+            Chat.socket.on('notification_update', (data) => Chat._queueNotificationRefresh(data));
         } catch (err) {
             console.log('Socket.IO not available:', err);
         }
+    },
+
+    _queuePresenceRefresh(data = {}) {
+        if (Chat.presenceRefreshTimer) clearTimeout(Chat.presenceRefreshTimer);
+        Chat.presenceRefreshTimer = setTimeout(() => {
+            const courtId = Number(data.court_id) || null;
+            const currentView = (typeof App !== 'undefined' && App.currentView) ? App.currentView : '';
+            if (typeof MapView !== 'undefined') {
+                if (currentView === 'map' && typeof MapView.loadCourts === 'function') {
+                    MapView.loadCourts();
+                }
+
+                const panel = document.getElementById('court-panel');
+                const panelOpen = !!(panel && panel.style.display !== 'none' && MapView.currentCourtId);
+                const fullPageOpen = currentView === 'court-detail' && MapView.currentCourtId;
+                const shouldRefreshCurrentCourt = !courtId || courtId === MapView.currentCourtId;
+
+                if (fullPageOpen && shouldRefreshCurrentCourt && typeof MapView._refreshFullPage === 'function') {
+                    MapView._refreshFullPage(MapView.currentCourtId);
+                } else if (panelOpen && shouldRefreshCurrentCourt && typeof MapView.openCourtDetail === 'function') {
+                    MapView.openCourtDetail(MapView.currentCourtId);
+                }
+            }
+            if (typeof Ranked !== 'undefined'
+                && Ranked.currentCourtId
+                && (!courtId || courtId === Ranked.currentCourtId)
+            ) {
+                Ranked.loadCourtRanked(Ranked.currentCourtId);
+            }
+        }, 250);
+    },
+
+    _queueRankedRefresh(data = {}) {
+        if (Chat.rankedRefreshTimer) clearTimeout(Chat.rankedRefreshTimer);
+        Chat.rankedRefreshTimer = setTimeout(() => {
+            const courtId = Number(data.court_id) || null;
+            const currentView = (typeof App !== 'undefined' && App.currentView) ? App.currentView : '';
+            if (typeof Ranked !== 'undefined') {
+                if (Ranked.currentCourtId && (!courtId || Ranked.currentCourtId === courtId)) {
+                    Ranked.loadCourtRanked(Ranked.currentCourtId);
+                }
+
+                if (currentView === 'ranked') {
+                    const select = document.getElementById('ranked-court-filter');
+                    const selectedCourtId = select && select.value
+                        ? parseInt(select.value, 10)
+                        : null;
+                    Ranked.loadPendingConfirmations();
+                    Ranked.loadLeaderboard(selectedCourtId || null);
+                    Ranked.loadMatchHistory(null, selectedCourtId || null);
+                }
+            }
+
+            if (typeof MapView !== 'undefined' && MapView.currentCourtId) {
+                const panel = document.getElementById('court-panel');
+                const panelOpen = !!(panel && panel.style.display !== 'none' && MapView.currentCourtId);
+                const fullPageOpen = currentView === 'court-detail' && MapView.currentCourtId;
+                const shouldRefreshCurrentCourt = !courtId || courtId === MapView.currentCourtId;
+                if (fullPageOpen && shouldRefreshCurrentCourt && typeof MapView._refreshFullPage === 'function') {
+                    MapView._refreshFullPage(MapView.currentCourtId);
+                } else if (panelOpen && shouldRefreshCurrentCourt && typeof MapView.openCourtDetail === 'function') {
+                    MapView.openCourtDetail(MapView.currentCourtId);
+                }
+            }
+
+            if (typeof App !== 'undefined' && typeof App.refreshNotificationBadge === 'function') {
+                App.refreshNotificationBadge();
+            }
+        }, 250);
+    },
+
+    _queueNotificationRefresh() {
+        if (Chat.notificationRefreshTimer) clearTimeout(Chat.notificationRefreshTimer);
+        Chat.notificationRefreshTimer = setTimeout(() => {
+            const dropdown = document.getElementById('notifications-dropdown');
+            const open = dropdown && dropdown.style.display === 'block';
+            if (open && typeof App !== 'undefined' && typeof App._loadNotifications === 'function') {
+                App._loadNotifications();
+            } else if (typeof App !== 'undefined' && typeof App.refreshNotificationBadge === 'function') {
+                App.refreshNotificationBadge();
+            }
+            if (typeof App !== 'undefined' && App.currentView === 'ranked' && typeof Ranked !== 'undefined') {
+                Ranked.loadPendingConfirmations();
+            }
+        }, 150);
     },
 
     _renderMsg(msg) {
