@@ -150,7 +150,10 @@ def test_start_scheduled_lobby_requires_time_and_checkins(client, app):
 
     too_early = client.post(f'/api/ranked/lobby/{lobby_id}/start', json={}, headers=_auth(t1))
     assert too_early.status_code == 400
-    assert 'cannot start yet' in json.loads(too_early.data)['error']
+    too_early_data = json.loads(too_early.data)
+    assert 'cannot start yet' in too_early_data['error']
+    assert too_early_data['scheduled_for'] is not None
+    assert too_early_data['seconds_until_start'] > 0
 
     with app.app_context():
         lobby = db.session.get(RankedLobby, lobby_id)
@@ -224,6 +227,71 @@ def test_queue_lobby_flow_end_to_end_with_confirmed_score(client):
     board = json.loads(leaderboard.data)['leaderboard']
     player_ids = {row['user_id'] for row in board}
     assert {id1, id2, id3, id4}.issubset(player_ids)
+
+
+def test_queue_lobby_can_auto_start_immediately(client):
+    t1, id1 = _register(client, 'auto_start_u1', 'auto_start_u1@test.com')
+    t2, id2 = _register(client, 'auto_start_u2', 'auto_start_u2@test.com')
+    t3, id3 = _register(client, 'auto_start_u3', 'auto_start_u3@test.com')
+    t4, id4 = _register(client, 'auto_start_u4', 'auto_start_u4@test.com')
+    court = _create_court(client, t1, 'Auto Start Court')
+
+    for token in [t1, t2, t3, t4]:
+        assert _checkin(client, token, court['id']).status_code == 201
+        joined = client.post('/api/ranked/queue/join', json={
+            'court_id': court['id'],
+            'match_type': 'doubles',
+        }, headers=_auth(token))
+        assert joined.status_code == 201
+
+    create_and_start = client.post('/api/ranked/lobby/queue', json={
+        'court_id': court['id'],
+        'match_type': 'doubles',
+        'team1': [id1, id2],
+        'team2': [id3, id4],
+        'start_immediately': True,
+    }, headers=_auth(t1))
+    assert create_and_start.status_code == 201
+    data = json.loads(create_and_start.data)
+    assert data['lobby']['status'] == 'started'
+    assert data['match']['status'] == 'in_progress'
+    assert data['lobby']['started_match_id'] == data['match']['id']
+
+
+def test_reject_score_notifies_only_original_submitter(client):
+    t1, id1 = _register(client, 'reject_notif_u1', 'reject_notif_u1@test.com')
+    t2, id2 = _register(client, 'reject_notif_u2', 'reject_notif_u2@test.com')
+    t3, id3 = _register(client, 'reject_notif_u3', 'reject_notif_u3@test.com')
+    t4, id4 = _register(client, 'reject_notif_u4', 'reject_notif_u4@test.com')
+    court = _create_court(client, t1, 'Reject Notify Court')
+
+    match_res = _create_match(
+        client,
+        t1,
+        court['id'],
+        team1=[id1, id2],
+        team2=[id3, id4],
+    )
+    assert match_res.status_code == 201
+    match_id = json.loads(match_res.data)['match']['id']
+
+    submit = client.post(
+        f'/api/ranked/match/{match_id}/score',
+        json={'team1_score': 11, 'team2_score': 8},
+        headers=_auth(t1),
+    )
+    assert submit.status_code == 200
+
+    reject = client.post(f'/api/ranked/match/{match_id}/reject', json={}, headers=_auth(t2))
+    assert reject.status_code == 200
+
+    submitter_notifs = client.get('/api/auth/notifications', headers=_auth(t1))
+    submitter_types = [n['notif_type'] for n in json.loads(submitter_notifs.data)['notifications']]
+    assert 'match_rejected' in submitter_types
+
+    teammate_notifs = client.get('/api/auth/notifications', headers=_auth(t3))
+    teammate_types = [n['notif_type'] for n in json.loads(teammate_notifs.data)['notifications']]
+    assert 'match_rejected' not in teammate_types
 
 
 def test_non_player_cannot_submit_match_score(client):

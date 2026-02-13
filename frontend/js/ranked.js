@@ -128,6 +128,10 @@ const Ranked = {
         const t2 = Ranked._e((lobby.team2 || []).map(p => p.user?.name || p.user?.username).join(' & '));
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myEntry = (lobby.players || []).find(p => p.user_id === currentUser.id);
+        const courtName = Ranked._e(lobby.court?.name || 'Court');
+        const sourceLabel = lobby.source === 'scheduled_challenge' || lobby.source === 'friends_challenge'
+            ? 'Scheduled challenge'
+            : 'Ranked challenge';
         const accepts = (lobby.players || []).map(p => {
             const label = Ranked._e(p.user?.name || p.user?.username || '?');
             return `<span class="confirm-player ${p.acceptance_status === 'accepted' ? 'confirmed' : 'pending'}">
@@ -135,8 +139,13 @@ const Ranked = {
             </span>`;
         }).join('');
         const scheduledText = lobby.scheduled_for
-            ? ` · ${new Date(lobby.scheduled_for).toLocaleString()}`
+            ? ` · ${Ranked._e(new Date(lobby.scheduled_for).toLocaleString())}`
             : '';
+        const invitedBy = Ranked._e(
+            lobby.created_by?.name
+            || lobby.created_by?.username
+            || 'another player'
+        );
 
         return `
         <div class="pending-match-card">
@@ -146,7 +155,11 @@ const Ranked = {
                 <div class="pending-team"><span class="pending-team-name">${t2}</span></div>
             </div>
             <div class="pending-match-confirmations">
-                <span class="confirm-progress">${lobby.accepted_count || 0}/${lobby.total_players || 0} accepted${scheduledText}</span>
+                <span class="confirm-progress">${sourceLabel} at ${courtName}${scheduledText}</span>
+                <div class="confirm-note muted">Invited by ${invitedBy}</div>
+            </div>
+            <div class="pending-match-confirmations">
+                <span class="confirm-progress">${lobby.accepted_count || 0}/${lobby.total_players || 0} accepted</span>
                 <div class="confirm-players-list">${accepts}</div>
             </div>
             ${myEntry && myEntry.acceptance_status === 'pending' ? `
@@ -166,9 +179,18 @@ const Ranked = {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myMp = match.players.find(p => p.user_id === currentUser.id);
         const alreadyConfirmed = myMp && myMp.confirmed;
-
-        const confirmedCount = match.players.filter(p => p.confirmed).length;
-        const totalPlayers = match.players.length;
+        const confirmedCount = Number.isFinite(match.confirmed_count)
+            ? Number(match.confirmed_count)
+            : match.players.filter(p => p.confirmed).length;
+        const totalPlayers = Number.isFinite(match.total_players)
+            ? Number(match.total_players)
+            : (match.players || []).length;
+        const submitterName = Ranked._e(
+            match.submitted_by_user?.name
+            || match.submitted_by_user?.username
+            || 'a player'
+        );
+        const courtName = Ranked._e(match.court?.name || 'Court');
 
         const confirmStatus = match.players.map(p => {
             const name = Ranked._e(p.user?.name || p.user?.username || '?');
@@ -189,6 +211,9 @@ const Ranked = {
                     <span class="pending-team-name">${t2}</span>
                     <span class="pending-team-score">${match.team2_score}</span>
                 </div>
+            </div>
+            <div class="pending-match-confirmations">
+                <span class="confirm-progress">Submitted by ${submitterName} at ${courtName}</span>
             </div>
             <div class="pending-match-confirmations">
                 <span class="confirm-progress">${confirmedCount}/${totalPlayers} confirmed</span>
@@ -332,6 +357,14 @@ const Ranked = {
         const pendingLobbies = (lobbyData.pending_lobbies || []).filter(l =>
             (l.players || []).some(p => p.user_id === currentUser.id)
         );
+        const myActionLobbies = pendingLobbies.filter(lobby => {
+            const me = (lobby.players || []).find(player => player.user_id === currentUser.id);
+            return !!(me && me.acceptance_status === 'pending');
+        });
+        const waitingChallengeLobbies = pendingLobbies.filter(lobby => {
+            const me = (lobby.players || []).find(player => player.user_id === currentUser.id);
+            return !!(me && me.acceptance_status !== 'pending');
+        });
 
         // Separate in-progress from pending-confirmation matches
         const inProgressMatches = activeMatches.filter(m => m.status === 'in_progress');
@@ -342,7 +375,7 @@ const Ranked = {
             !pendingMatches.some(pm => pm.id === m.id)
         );
         const myPendingCourtMatches = [...myPendingFromActive, ...myPendingOnly];
-        const otherPendingMatches = pendingMatches.filter(m => !myPendingById.has(m.id));
+        const awaitingOthersMatches = pendingMatches.filter(m => !myPendingById.has(m.id));
 
         // Queue section
         const queueHTML = queue.length > 0
@@ -370,8 +403,8 @@ const Ranked = {
         const myPendingHTML = myPendingCourtMatches.length > 0
             ? myPendingCourtMatches.map(m => Ranked._renderPendingCourtMatch(m)).join('')
             : '';
-        const pendingHTML = otherPendingMatches.length > 0
-            ? otherPendingMatches.map(m => Ranked._renderPendingCourtMatch(m)).join('')
+        const pendingHTML = awaitingOthersMatches.length > 0
+            ? awaitingOthersMatches.map(m => Ranked._renderPendingCourtMatch(m)).join('')
             : '';
 
         // Mini leaderboard
@@ -411,33 +444,39 @@ const Ranked = {
         const scheduledLobbyHTML = scheduledLobbies.length
             ? scheduledLobbies.map(l => Ranked._renderLobbyCard(l, true)).join('')
             : '<p class="muted">No accepted scheduled ranked games yet.</p>';
-        const pendingLobbyHTML = pendingLobbies.length
-            ? pendingLobbies.map(l => Ranked._renderPendingLobby(l)).join('')
-            : '<p class="muted">No pending ranked challenge invites.</p>';
+        const actionLobbyHTML = myActionLobbies.length
+            ? myActionLobbies.map(l => Ranked._renderPendingLobby(l)).join('')
+            : '';
+        const waitingLobbyHTML = waitingChallengeLobbies.length
+            ? waitingChallengeLobbies.map(l => Ranked._renderPendingLobby(l)).join('')
+            : '';
+        const actionItemCount = myPendingCourtMatches.length + myActionLobbies.length;
 
         return `
         <div class="court-ranked">
             <div class="ranked-header">
-                <h4>⚔️ Competitive Play</h4>
+                <h4>⚔️ Competitive Play</h4>${actionItemCount > 0 ? `<span class="match-type-badge pending-badge">Needs action: ${actionItemCount}</span>` : ''}
             </div>
 
-            ${myPendingHTML ? `
             <div class="ranked-sub-section">
-                <h5>✅ Needs Your Score Confirmation</h5>
-                <p class="muted">Confirm or reject submitted scores directly from this court page.</p>
+                <h5>🚨 Needs Your Attention</h5>
+                ${actionItemCount > 0 ? '<p class="muted">Handle confirmations and challenge invites here first.</p>' : '<p class="muted">No immediate actions. You are all caught up.</p>'}
                 ${myPendingHTML}
-            </div>` : ''}
+                ${actionLobbyHTML}
+            </div>
 
             ${pendingHTML ? `
             <div class="ranked-sub-section">
-                <h5>⏳ Awaiting Confirmation</h5>
+                <h5>⏳ Awaiting Others' Score Confirmation</h5>
                 ${pendingHTML}
             </div>` : ''}
 
+            ${waitingLobbyHTML ? `
             <div class="ranked-sub-section">
-                <h5>📨 Pending Ranked Challenges</h5>
-                ${pendingLobbyHTML}
+                <h5>⏳ Awaiting Challenge Responses</h5>
+                ${waitingLobbyHTML}
             </div>
+            ` : ''}
 
             <div class="ranked-sub-section">
                 <h5>🎮 Ready Ranked Lobbies</h5>
@@ -507,7 +546,18 @@ const Ranked = {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myMp = match.players.find(p => p.user_id === currentUser.id);
         const alreadyConfirmed = myMp && myMp.confirmed;
-        const confirmedCount = match.players.filter(p => p.confirmed).length;
+        const confirmedCount = Number.isFinite(match.confirmed_count)
+            ? Number(match.confirmed_count)
+            : match.players.filter(p => p.confirmed).length;
+        const totalPlayers = Number.isFinite(match.total_players)
+            ? Number(match.total_players)
+            : match.players.length;
+        const submitterName = Ranked._e(
+            match.submitted_by_user?.name
+            || match.submitted_by_user?.username
+            || 'a player'
+        );
+        const courtName = Ranked._e(match.court?.name || 'Court');
 
         return `
         <div class="active-match-card pending-confirmation-card">
@@ -517,7 +567,10 @@ const Ranked = {
                 <div class="match-team-name ${match.winner_team === 2 ? 'match-winner' : ''}">${t2}</div>
             </div>
             <div class="match-meta-row">
-                <span class="match-type-badge pending-badge">⏳ ${confirmedCount}/${match.players.length} confirmed</span>
+                <span class="muted">Submitted by ${submitterName} at ${courtName}</span>
+            </div>
+            <div class="match-meta-row">
+                <span class="match-type-badge pending-badge">⏳ ${confirmedCount}/${totalPlayers} confirmed</span>
                 ${myMp && !alreadyConfirmed ? `
                     <div class="confirm-inline-actions">
                         <button class="btn-primary btn-sm" onclick="Ranked.confirmMatch(${match.id})">✅ Confirm</button>
@@ -602,6 +655,12 @@ const Ranked = {
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
             if (res.match?.id) Ranked.showScoreModal(res.match.id);
         } catch (err) {
+            const startAt = err?.payload?.scheduled_for;
+            if (startAt) {
+                const when = new Date(startAt).toLocaleString();
+                App.toast(`This scheduled game opens at ${when}.`, 'error');
+                return;
+            }
             App.toast(err.message || 'Could not start ranked game', 'error');
         }
     },
@@ -1056,14 +1115,20 @@ const Ranked = {
         }
 
         try {
-            await API.post('/api/ranked/lobby/queue', {
+            const res = await API.post('/api/ranked/lobby/queue', {
                 court_id: courtId, match_type: matchType,
                 team1, team2,
+                start_immediately: true,
             });
             document.getElementById('match-modal').style.display = 'none';
-            App.toast('Ranked lobby created. Start the game from the court ranked section.');
+            if (res.match?.id) {
+                App.toast('Ranked game started! Enter score when the game ends.');
+            } else {
+                App.toast('Ranked lobby created. Start the game from the court ranked section.');
+            }
             Ranked.loadCourtRanked(courtId);
             Ranked.loadPendingConfirmations();
+            if (res.match?.id) Ranked.showScoreModal(res.match.id);
         } catch (err) {
             App.toast(err.message || 'Failed to create match', 'error');
         }

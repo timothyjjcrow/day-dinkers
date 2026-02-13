@@ -248,7 +248,7 @@ const App = {
         }
         App.liveUiRefreshInterval = setInterval(() => {
             App.refreshLiveUiNow();
-        }, 12000);
+        }, 6000);
     },
 
     refreshLiveUiNow() {
@@ -558,14 +558,10 @@ const App = {
                 else if (isCourtNotif) onclick = `onclick="MapView.openCourtDetail(${n.reference_id}); App.showView('map'); document.getElementById('notifications-dropdown').style.display='none';"`;
                 else if (isFriendNotif) onclick = `onclick="App.showView('profile'); document.getElementById('notifications-dropdown').style.display='none';"`;
                 else if (isMatchNotif) {
-                    if (['match_confirm', 'match_rejected'].includes(n.notif_type)) {
-                        onclick = `onclick="App.showView('ranked'); document.getElementById('notifications-dropdown').style.display='none'; setTimeout(() => Ranked.focusPending(${n.reference_id}), 250);"`;
-                    } else {
-                        onclick = `onclick="App.showView('ranked'); document.getElementById('notifications-dropdown').style.display='none';"`;
-                    }
+                    onclick = `onclick="App.openRankedActionFromNotification('${n.notif_type}', ${Number(n.reference_id) || 'null'});"`;
                 }
                 else if (isChallengeNotif) {
-                    onclick = `onclick="App.showView('ranked'); document.getElementById('notifications-dropdown').style.display='none'; setTimeout(() => Ranked.loadPendingConfirmations(), 200);"`;
+                    onclick = `onclick="App.openRankedActionFromNotification('${n.notif_type}', ${Number(n.reference_id) || 'null'});"`;
                 }
                 else if (isAdminNotif) {
                     onclick = `onclick="App.showView('admin'); document.getElementById('notifications-dropdown').style.display='none';"`;
@@ -579,6 +575,46 @@ const App = {
             const unread = notifs.filter(n => !n.read).length;
             App._setNotificationBadge(unread);
         } catch { list.innerHTML = '<p class="muted">Unable to load</p>'; }
+    },
+
+    async openRankedActionFromNotification(notifType, referenceId = null) {
+        const dropdown = document.getElementById('notifications-dropdown');
+        if (dropdown) dropdown.style.display = 'none';
+
+        const focusRankedAction = () => {
+            if (typeof Ranked === 'undefined') return;
+            if (['match_confirm', 'match_rejected'].includes(notifType) && referenceId) {
+                setTimeout(() => Ranked.focusPending(referenceId), 250);
+            } else if ((notifType || '').startsWith('ranked_challenge')) {
+                setTimeout(() => Ranked.loadPendingConfirmations(), 200);
+            }
+        };
+
+        const fallbackToRanked = () => {
+            App.showView('ranked');
+            focusRankedAction();
+        };
+
+        try {
+            let courtId = null;
+            if (['match_confirm', 'match_rejected', 'match_result', 'elo_change'].includes(notifType) && referenceId) {
+                const matchRes = await API.get(`/api/ranked/match/${referenceId}`);
+                courtId = Number(matchRes.match?.court_id) || null;
+            } else if ((notifType || '').startsWith('ranked_challenge') && referenceId) {
+                const lobbyRes = await API.get(`/api/ranked/lobby/${referenceId}`);
+                courtId = Number(lobbyRes.lobby?.court_id) || null;
+            }
+
+            if (!courtId || typeof MapView === 'undefined' || typeof MapView.openCourtFullPage !== 'function') {
+                fallbackToRanked();
+                return;
+            }
+
+            await MapView.openCourtFullPage(courtId);
+            focusRankedAction();
+        } catch {
+            fallbackToRanked();
+        }
     },
 
     async markNotificationsRead() {

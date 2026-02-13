@@ -519,11 +519,19 @@ class Match(db.Model):
 
     def to_dict(self):
         players_list = [mp.to_dict() for mp in self.players]
+        confirmed_count = sum(1 for player in players_list if player.get('confirmed'))
+        submitter_player = next(
+            (player for player in players_list if player.get('user_id') == self.submitted_by),
+            None,
+        )
         return {
             'id': self.id, 'court_id': self.court_id,
             'match_type': self.match_type, 'status': self.status,
             'team1_score': self.team1_score, 'team2_score': self.team2_score,
             'winner_team': self.winner_team, 'submitted_by': self.submitted_by,
+            'submitted_by_user': submitter_player.get('user') if submitter_player else None,
+            'confirmed_count': confirmed_count,
+            'total_players': len(players_list),
             'players': players_list,
             'team1': [p for p in players_list if p['team'] == 1],
             'team2': [p for p in players_list if p['team'] == 2],

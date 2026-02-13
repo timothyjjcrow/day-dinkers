@@ -31,6 +31,7 @@ const API = {
             const err = new Error(data.error || 'Request failed');
             if (data.errors) err.details = data.errors;
             err.status = response.status;
+            err.payload = data;
             throw err;
         }
         return data;
