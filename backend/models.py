@@ -507,12 +507,17 @@ class Match(db.Model):
     status = db.Column(db.String(20), default='in_progress')
     # pending_confirmation = score submitted, waiting for all players to accept
     # completed = all players accepted, ELO applied
+    # cancelled = match cancelled by a player or expired
     team1_score = db.Column(db.Integer, nullable=True)
     team2_score = db.Column(db.Integer, nullable=True)
     winner_team = db.Column(db.Integer, nullable=True)
     submitted_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
     completed_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.Index('ix_match_court_status', 'court_id', 'status'),
+    )
 
     court = db.relationship('Court', backref='matches')
     players = db.relationship('MatchPlayer', backref='match', lazy='joined')
@@ -552,6 +557,10 @@ class MatchPlayer(db.Model):
     elo_change = db.Column(db.Float, nullable=True)
     confirmed = db.Column(db.Boolean, default=False)
 
+    __table_args__ = (
+        db.Index('ix_match_player_user_confirmed', 'user_id', 'confirmed'),
+    )
+
     user = db.relationship('User', backref='match_participations')
 
     def to_dict(self):
@@ -571,6 +580,10 @@ class RankedQueue(db.Model):
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False)
     match_type = db.Column(db.String(20), default='doubles')
     joined_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'court_id', name='uq_ranked_queue_user_court'),
+    )
 
     user = db.relationship('User', backref='queue_entries')
     court = db.relationship('Court', backref='queue_entries')
@@ -593,9 +606,13 @@ class RankedLobby(db.Model):
     source = db.Column(db.String(30), default='manual')  # queue, court_challenge, scheduled_challenge
     scheduled_for = db.Column(db.DateTime, nullable=True)
     status = db.Column(db.String(30), default='pending_acceptance')
-    # pending_acceptance, ready, started, cancelled, declined
+    # pending_acceptance, ready, started, cancelled, declined, expired
     started_match_id = db.Column(db.Integer, db.ForeignKey('match.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+
+    __table_args__ = (
+        db.Index('ix_ranked_lobby_court_status', 'court_id', 'status'),
+    )
 
     court = db.relationship('Court', backref='ranked_lobbies')
     created_by = db.relationship('User', foreign_keys=[created_by_id], backref='created_ranked_lobbies')

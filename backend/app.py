@@ -71,6 +71,35 @@ def _run_lightweight_migrations():
                 'UPDATE check_in SET last_presence_ping_at = checked_in_at WHERE last_presence_ping_at IS NULL'
             ))
 
+        # Ranked queue: ensure one entry per user per court
+        if 'ranked_queue' in table_names:
+            connection.execute(text(
+                'DELETE FROM ranked_queue WHERE id NOT IN ('
+                '  SELECT MIN(id) FROM ranked_queue GROUP BY user_id, court_id'
+                ')'
+            ))
+            connection.execute(text(
+                'CREATE UNIQUE INDEX IF NOT EXISTS ix_ranked_queue_user_court '
+                'ON ranked_queue (user_id, court_id)'
+            ))
+
+        # Performance indexes for ranked queries
+        if 'match' in table_names:
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_match_court_status '
+                'ON match (court_id, status)'
+            ))
+        if 'match_player' in table_names:
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_match_player_user_confirmed '
+                'ON match_player (user_id, confirmed)'
+            ))
+        if 'ranked_lobby' in table_names:
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_ranked_lobby_court_status '
+                'ON ranked_lobby (court_id, status)'
+            ))
+
 
 def create_app(config_name='development'):
     app = Flask(__name__)

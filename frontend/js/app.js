@@ -548,7 +548,7 @@ const App = {
                 const isSessionNotif = ['session_invite', 'session_join', 'session_spot_opened'].includes(n.notif_type) && n.reference_id;
                 const isCourtNotif = n.notif_type === 'court_invite' && n.reference_id;
                 const isFriendNotif = n.notif_type === 'friend_request' && n.reference_id;
-                const isMatchNotif = ['match_confirm', 'match_rejected', 'match_result', 'elo_change'].includes(n.notif_type) && n.reference_id;
+                const isMatchNotif = ['match_confirm', 'match_rejected', 'match_result', 'match_cancelled', 'elo_change'].includes(n.notif_type) && n.reference_id;
                 const isChallengeNotif = ['ranked_challenge_invite', 'ranked_challenge_ready', 'ranked_challenge_declined'].includes(n.notif_type);
                 const isAdminNotif = ['court_update_review', 'court_report_review'].includes(n.notif_type);
                 let onclick = '';
@@ -597,7 +597,7 @@ const App = {
 
         try {
             let courtId = null;
-            if (['match_confirm', 'match_rejected', 'match_result', 'elo_change'].includes(notifType) && referenceId) {
+            if (['match_confirm', 'match_rejected', 'match_result', 'match_cancelled', 'elo_change'].includes(notifType) && referenceId) {
                 const matchRes = await API.get(`/api/ranked/match/${referenceId}`);
                 courtId = Number(matchRes.match?.court_id) || null;
             } else if ((notifType || '').startsWith('ranked_challenge') && referenceId) {

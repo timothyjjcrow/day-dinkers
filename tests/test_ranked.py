@@ -3,7 +3,7 @@ import json
 from datetime import timedelta
 
 from backend.app import db
-from backend.models import RankedLobby
+from backend.models import Match, RankedLobby
 from backend.time_utils import utcnow_naive
 
 
@@ -318,3 +318,119 @@ def test_non_player_cannot_submit_match_score(client):
         headers=_auth(outsider_token),
     )
     assert score.status_code == 403
+
+
+def test_cancel_match(client):
+    """A player in a match can cancel it; outsiders cannot."""
+    t1, id1 = _register(client, 'cancel_u1', 'cancel_u1@test.com')
+    t2, id2 = _register(client, 'cancel_u2', 'cancel_u2@test.com')
+    _, id3 = _register(client, 'cancel_u3', 'cancel_u3@test.com')
+    _, id4 = _register(client, 'cancel_u4', 'cancel_u4@test.com')
+    outsider_token, _ = _register(client, 'cancel_outsider', 'cancel_outsider@test.com')
+
+    court = _create_court(client, t1, 'Cancel Court')
+    match_res = _create_match(client, t1, court['id'], [id1, id2], [id3, id4])
+    assert match_res.status_code == 201
+    match_id = json.loads(match_res.data)['match']['id']
+
+    # Outsider cannot cancel
+    res = client.post(f'/api/ranked/match/{match_id}/cancel', headers=_auth(outsider_token))
+    assert res.status_code == 403
+
+    # Player in the match can cancel
+    res = client.post(f'/api/ranked/match/{match_id}/cancel', headers=_auth(t1))
+    assert res.status_code == 200
+    data = json.loads(res.data)
+    assert data['match']['status'] == 'cancelled'
+
+    # Cannot cancel an already-cancelled match
+    res = client.post(f'/api/ranked/match/{match_id}/cancel', headers=_auth(t2))
+    assert res.status_code == 400
+
+    # Other player got a notification
+    notifs = client.get('/api/auth/notifications', headers=_auth(t2))
+    types = [n['notif_type'] for n in json.loads(notifs.data)['notifications']]
+    assert 'match_cancelled' in types
+
+
+def test_stale_lobby_expires_during_write(client, app):
+    """Stale lobbies are marked expired when a write operation runs."""
+    t1, id1 = _register(client, 'stale_u1', 'stale_u1@test.com')
+    _, id2 = _register(client, 'stale_u2', 'stale_u2@test.com')
+    court = _create_court(client, t1, 'Stale Court')
+    _checkin(client, t1, court['id'])
+
+    # Create a lobby directly and backdate it
+    with app.app_context():
+        lobby = RankedLobby(
+            court_id=court['id'], created_by_id=id1,
+            match_type='singles', source='court_challenge',
+            status='pending_acceptance',
+            created_at=utcnow_naive() - timedelta(hours=49),
+        )
+        db.session.add(lobby)
+        db.session.commit()
+        lobby_id = lobby.id
+
+    # Joining the queue triggers stale cleanup
+    client.post('/api/ranked/queue/join', json={
+        'court_id': court['id'], 'match_type': 'doubles',
+    }, headers=_auth(t1))
+
+    with app.app_context():
+        updated = db.session.get(RankedLobby, lobby_id)
+        assert updated.status == 'expired'
+
+
+def test_stale_match_expires_during_write(client, app):
+    """Stale in-progress matches are cancelled when a write operation runs."""
+    t1, id1 = _register(client, 'stale_match_u1', 'stale_match_u1@test.com')
+    _, id2 = _register(client, 'stale_match_u2', 'stale_match_u2@test.com')
+    _, id3 = _register(client, 'stale_match_u3', 'stale_match_u3@test.com')
+    _, id4 = _register(client, 'stale_match_u4', 'stale_match_u4@test.com')
+    court = _create_court(client, t1, 'Stale Match Court')
+    _checkin(client, t1, court['id'])
+
+    match_res = _create_match(client, t1, court['id'], [id1, id2], [id3, id4])
+    match_id = json.loads(match_res.data)['match']['id']
+
+    # Backdate the match to simulate staleness
+    with app.app_context():
+        m = db.session.get(Match, match_id)
+        m.created_at = utcnow_naive() - timedelta(hours=25)
+        db.session.commit()
+
+    # Joining the queue triggers stale cleanup
+    client.post('/api/ranked/queue/join', json={
+        'court_id': court['id'], 'match_type': 'doubles',
+    }, headers=_auth(t1))
+
+    with app.app_context():
+        m = db.session.get(Match, match_id)
+        assert m.status == 'cancelled'
+
+
+def test_court_summary_endpoint(client):
+    """The consolidated court summary returns queue, matches, lobbies, leaderboard."""
+    t1, id1 = _register(client, 'summary_u1', 'summary_u1@test.com')
+    _, id2 = _register(client, 'summary_u2', 'summary_u2@test.com')
+    _, id3 = _register(client, 'summary_u3', 'summary_u3@test.com')
+    _, id4 = _register(client, 'summary_u4', 'summary_u4@test.com')
+    court = _create_court(client, t1, 'Summary Court')
+
+    _checkin(client, t1, court['id'])
+
+    # Create a match so we have active data
+    match_res = _create_match(client, t1, court['id'], [id1, id2], [id3, id4])
+    assert match_res.status_code == 201
+
+    res = client.get(f'/api/ranked/court/{court["id"]}/summary')
+    assert res.status_code == 200
+    data = json.loads(res.data)
+    assert 'queue' in data
+    assert 'matches' in data
+    assert 'ready_lobbies' in data
+    assert 'scheduled_lobbies' in data
+    assert 'pending_lobbies' in data
+    assert 'leaderboard' in data
+    assert len(data['matches']) >= 1
