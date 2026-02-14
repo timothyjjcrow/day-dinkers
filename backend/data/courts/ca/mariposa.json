@@ -1,1 +1,24 @@
-[]
+[
+  {
+    "county_slug": "mariposa",
+    "state": "CA",
+    "verified": false,
+    "name": "Mariposa Park",
+    "description": "Mariposa Park is one of the most popular places to play pickleball in Mariposa, CA. There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms. The courts are free.",
+    "address": "Mariposa County Park",
+    "city": "Mariposa",
+    "latitude": 37.489642,
+    "longitude": -119.968147,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+12099662498",
+    "website": "https://www.mariposacounty.org/207/Parks-and-Recreation",
+    "photo_url": "https://cdn.filestackcontent.com/3UEN1qC3RHm15Tu8vIFU",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

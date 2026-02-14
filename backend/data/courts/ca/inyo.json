@@ -1,1 +1,47 @@
-[]
+[
+  {
+    "county_slug": "inyo",
+    "state": "CA",
+    "verified": false,
+    "name": "City of Bishop Park",
+    "description": "City of Bishop Park is a place to play pickleball in Bishop, CA. There are 4 outdoor hard courts. The lines are permanent, and portable nets are available. The courts are free. Players have access to restrooms, water, and lights.",
+    "address": "688 N Main St",
+    "city": "Bishop",
+    "latitude": 37.367414,
+    "longitude": -118.395,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "https://www.cityofbishop.com/departments/parks_and_recreation/city_park.php",
+    "photo_url": "https://cdn.filestackcontent.com/IsFLjVGmRZSec8hjJmoJ",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "inyo",
+    "state": "CA",
+    "verified": false,
+    "name": "Fredonia AZ High School Gym",
+    "description": "Fredonia AZ High School Gym is a place to play pickleball in Parklabrea, CA. There are 3 indoor asphalt courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. Amenities include restrooms and water.",
+    "address": "221 Hortt Street",
+    "city": "Parklabrea",
+    "latitude": 36.951491,
+    "longitude": -118.316101,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Asphalt",
+    "fees": "Fee required",
+    "phone": "435-689-0956",
+    "website": "https://www.fredonia.org/",
+    "photo_url": "https://cdn.filestackcontent.com/2MEUCstRVSPmdVn4P8gQ",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

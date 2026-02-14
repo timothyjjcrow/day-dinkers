@@ -1,1 +1,27 @@
-[]
+[
+  {
+    "county_slug": "plumas",
+    "state": "CA",
+    "verified": false,
+    "name": "Graeagle Tennis & Pickleball Club",
+    "description": "Courts will be closed June 5 thru July 8, 2025 for resurfacing.",
+    "address": "11 Yonkalla Trail",
+    "city": "Graeagle",
+    "latitude": 39.762117,
+    "longitude": -120.614637,
+    "indoor": false,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "fees": "Fee required — $5 drop in fee per day for adults",
+    "phone": "7754208313",
+    "website": "http://playgraeagle.com/graeaglenews/graeagle-tennis-courts-revitalized/",
+    "email": "Clbaldwin1104@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/SZcjpABNTlqqTSX7jasw",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]
