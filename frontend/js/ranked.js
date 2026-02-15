@@ -7,6 +7,8 @@ const Ranked = {
     actionDigestByCourt: {},
     actionFlashCourtId: null,
     actionFlashUntil: 0,
+    recentMatchesByCourt: {},
+    recentGamesFilterByCourt: {},
 
     // ── Helpers ──────────────────────────────────────────────────────
 
@@ -97,6 +99,36 @@ const Ranked = {
         if (!center) return;
         center.classList.add('action-center-highlight');
         setTimeout(() => center.classList.remove('action-center-highlight'), 2200);
+    },
+
+    _getRecentGamesFilter(courtId) {
+        return Ranked.recentGamesFilterByCourt[Number(courtId)] || 'all';
+    },
+
+    _setRecentMatchesForCourt(courtId, matches) {
+        Ranked.recentMatchesByCourt[Number(courtId)] = Array.isArray(matches) ? matches : [];
+    },
+
+    _getRecentMatchesForCourt(courtId) {
+        return Ranked.recentMatchesByCourt[Number(courtId)] || [];
+    },
+
+    renderRecentGamesForCourt(courtId) {
+        const historyEl = document.getElementById('match-history-content');
+        if (!historyEl) return;
+        const matches = Ranked._getRecentMatchesForCourt(courtId);
+        const filter = Ranked._getRecentGamesFilter(courtId);
+        historyEl.innerHTML = Ranked._renderRecentGames(matches, {
+            courtId: Number(courtId),
+            filter,
+            currentUserId: Number(Ranked._currentUser().id) || 0,
+        });
+    },
+
+    setRecentGamesFilter(courtId, filter = 'all') {
+        const normalized = filter === 'mine' ? 'mine' : 'all';
+        Ranked.recentGamesFilterByCourt[Number(courtId)] = normalized;
+        Ranked.renderRecentGamesForCourt(courtId);
     },
 
     _courtContext(courtId) {
@@ -383,10 +415,73 @@ const Ranked = {
     // ── Player Profile View ─────────────────────────────────────────
 
     async viewPlayer(userId) {
+        const targetUserId = Number(userId);
+        if (!targetUserId) return;
         try {
-            const res = await API.get(`/api/auth/profile/${userId}`);
+            const res = await API.get(`/api/auth/profile/${targetUserId}`);
             const u = res.user;
-            App.toast(`${u.name || u.username}: ELO ${Math.round(u.elo_rating || 1200)}, ${u.wins}W-${u.losses}L`);
-        } catch {}
+            const modal = document.getElementById('match-modal');
+            if (!modal) {
+                App.toast(`${u.name || u.username}: ELO ${Math.round(u.elo_rating || 1200)}, ${u.wins}W-${u.losses}L`);
+                return;
+            }
+
+            const currentUserId = Number(Ranked._currentUser().id) || 0;
+            const isCurrentUser = targetUserId === currentUserId;
+            const safeName = Ranked._e(u.name || u.username || 'Player');
+            const safeUsername = Ranked._e(u.username || '');
+            const safeBio = Ranked._e(u.bio || '');
+            const safePlayStyle = Ranked._e(u.play_style || 'Not set');
+            const safeTimes = Ranked._e(u.preferred_times || 'Not set');
+            const safeSkill = u.skill_level ? Ranked._e(String(u.skill_level)) : 'Not set';
+            const elo = Math.round(Number(u.elo_rating) || 1200);
+            const wins = Number(u.wins) || 0;
+            const losses = Number(u.losses) || 0;
+            const games = Number(u.games_played) || 0;
+            const totalCheckins = Number(u.total_checkins) || 0;
+            const winRate = games > 0 ? `${Math.round((wins / games) * 100)}%` : '--';
+            const initials = Ranked._e((u.name || u.username || '?').split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase());
+
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+            <div class="modal-content">
+                <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
+                <h2>Player Profile</h2>
+                <div class="profile-header-card" style="margin-top:8px;">
+                    <div class="profile-avatar-large">${initials}</div>
+                    <div class="profile-header-info">
+                        <h1>${safeName}</h1>
+                        <div class="profile-username">@${safeUsername}</div>
+                    </div>
+                    <div class="profile-tags">
+                        <span class="tag tag-elo">ELO ${elo}</span>
+                        <span class="tag">Skill ${safeSkill}</span>
+                    </div>
+                </div>
+                <div class="profile-stats-grid">
+                    <div class="stat-card"><div class="stat-number">${wins}</div><div class="stat-label">Wins</div></div>
+                    <div class="stat-card"><div class="stat-number">${losses}</div><div class="stat-label">Losses</div></div>
+                    <div class="stat-card"><div class="stat-number">${winRate}</div><div class="stat-label">Win Rate</div></div>
+                </div>
+                <div class="profile-stats-grid">
+                    <div class="stat-card"><div class="stat-number">${games}</div><div class="stat-label">Games</div></div>
+                    <div class="stat-card"><div class="stat-number">${totalCheckins}</div><div class="stat-label">Check-Ins</div></div>
+                    <div class="stat-card"><div class="stat-number">${safeSkill}</div><div class="stat-label">Skill</div></div>
+                </div>
+                <div class="profile-section">
+                    <h3>Playing Preferences</h3>
+                    <p class="muted">Style: ${safePlayStyle}</p>
+                    <p class="muted">Preferred Times: ${safeTimes}</p>
+                    ${safeBio ? `<p style="margin-top:8px">${safeBio}</p>` : '<p class="muted" style="margin-top:8px">No bio added yet.</p>'}
+                </div>
+                <div class="create-match-actions" style="justify-content:flex-end;">
+                    ${isCurrentUser
+                        ? `<button class="btn-secondary btn-sm" onclick="document.getElementById('match-modal').style.display='none'; App.setMainTab('profile');">Open My Profile</button>`
+                        : `<button class="btn-secondary btn-sm" onclick="Ranked.openScheduledChallengeModal(${targetUserId}, 'leaderboard_challenge')">Challenge</button>`}
+                </div>
+            </div>`;
+        } catch {
+            App.toast('Unable to load player profile', 'error');
+        }
     },
 };

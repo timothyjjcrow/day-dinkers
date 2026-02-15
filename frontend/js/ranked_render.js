@@ -4,10 +4,22 @@
  */
 Object.assign(Ranked, {
 
-    _renderLeaderboard(players) {
+    _renderLeaderboard(players, options = {}) {
+        const scopeLabel = Ranked._e(options.scopeLabel || 'Court');
         const currentUser = Ranked._currentUser();
         const currentUserId = Number(currentUser.id) || 0;
-        const rows = (players || []).map(player =>
+        const allPlayers = players || [];
+        const featured = allPlayers.slice(0, 3);
+        const remainder = allPlayers.slice(3);
+        const featuredCards = featured.map(player =>
+            Ranked._leaderboardCardHTML(player, {
+                currentUserId,
+                showChallenge: false,
+                compact: true,
+                featured: true,
+            })
+        ).join('');
+        const rows = remainder.map(player =>
             Ranked._leaderboardCardHTML(player, {
                 currentUserId,
                 showChallenge: true,
@@ -15,10 +27,26 @@ Object.assign(Ranked, {
             })
         ).join('');
 
-        return `<div class="ranked-leaderboard-list">${rows}</div>`;
+        return `
+            <div class="leaderboard-showcase">
+                <div class="leaderboard-showcase-header">
+                    <span class="match-type-badge">${scopeLabel} standings</span>
+                    <span class="muted">${allPlayers.length} ranked player${allPlayers.length === 1 ? '' : 's'}</span>
+                </div>
+                ${featuredCards ? `<div class="leaderboard-podium">${featuredCards}</div>` : ''}
+                ${rows
+                    ? `<div class="ranked-leaderboard-list leaderboard-ranked-list">${rows}</div>`
+                    : ''}
+            </div>
+        `;
     },
 
-    _leaderboardCardHTML(player, { currentUserId = 0, showChallenge = true, compact = false } = {}) {
+    _leaderboardCardHTML(player, {
+        currentUserId = 0,
+        showChallenge = true,
+        compact = false,
+        featured = false,
+    } = {}) {
         const p = player || {};
         const userId = Number(p.user_id) || 0;
         const isCurrentUser = !!(currentUserId && userId === currentUserId);
@@ -33,6 +61,16 @@ Object.assign(Ranked, {
             ? `${Math.round(Number(p.win_rate))}%`
             : '--';
         const eloClass = elo >= 1400 ? 'elo-high' : elo >= 1200 ? 'elo-mid' : 'elo-low';
+        const rankClass = rank === 1 ? 'rank-first' : rank === 2 ? 'rank-second' : rank === 3 ? 'rank-third' : '';
+        const tier = elo >= 1500
+            ? 'Diamond'
+            : elo >= 1400
+                ? 'Platinum'
+                : elo >= 1300
+                    ? 'Gold'
+                    : elo >= 1200
+                        ? 'Silver'
+                        : 'Bronze';
 
         const actionHTML = showChallenge
             ? (isCurrentUser
@@ -41,7 +79,7 @@ Object.assign(Ranked, {
             : '';
 
         return `
-        <div class="ranked-player-card ${compact ? 'compact' : ''} ${isCurrentUser ? 'current-user' : ''}" onclick="Ranked.viewPlayer(${userId})">
+        <div class="ranked-player-card ${compact ? 'compact' : ''} ${featured ? 'featured' : ''} ${rankClass} ${isCurrentUser ? 'current-user' : ''}" onclick="Ranked.viewPlayer(${userId})">
             <div class="ranked-player-rank">#${rank}</div>
             <div class="ranked-player-main">
                 <div class="ranked-player-name-row">
@@ -50,6 +88,7 @@ Object.assign(Ranked, {
                 </div>
                 <div class="ranked-player-metrics">
                     <span class="ranked-player-stat ${eloClass}">ELO ${elo}</span>
+                    <span class="ranked-player-stat">${tier}</span>
                     <span class="ranked-player-stat">${wins}W-${losses}L</span>
                     <span class="ranked-player-stat">${winRate} win</span>
                     <span class="ranked-player-stat">${games} games</span>
@@ -650,30 +689,118 @@ Object.assign(Ranked, {
         </div>`;
     },
 
-    _renderMatchHistory(match) {
-        const t1 = (match.team1 || []).map(player => {
-            const change = player.elo_change ? `(${player.elo_change >= 0 ? '+' : ''}${Math.round(player.elo_change)})` : '';
-            return `${Ranked._e(player.user?.name || player.user?.username)} ${change}`;
-        }).join(' & ');
-        const t2 = (match.team2 || []).map(player => {
-            const change = player.elo_change ? `(${player.elo_change >= 0 ? '+' : ''}${Math.round(player.elo_change)})` : '';
-            return `${Ranked._e(player.user?.name || player.user?.username)} ${change}`;
-        }).join(' & ');
-
-        const date = new Date(match.completed_at).toLocaleDateString('en-US', {
-            month: 'short', day: 'numeric',
+    _formatRecentMatchDate(isoString) {
+        const ts = Ranked._isoToMs(isoString);
+        if (!ts) return 'Unknown time';
+        return new Date(ts).toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
         });
+    },
+
+    _isCurrentUserInMatch(match, currentUserId) {
+        if (!currentUserId) return false;
+        const players = match?.players || [];
+        return players.some(player => Number(player.user_id) === Number(currentUserId));
+    },
+
+    _playerProfileChip(player, winnerTeam) {
+        const userId = Number(player?.user_id) || 0;
+        const safeName = Ranked._e(player?.user?.name || player?.user?.username || 'Player');
+        const isWinner = Number(player?.team) === Number(winnerTeam);
+        if (!userId) {
+            return `<span class="history-player-chip ${isWinner ? 'winner' : ''}">${safeName}</span>`;
+        }
+        return `<button type="button" class="history-player-chip ${isWinner ? 'winner' : ''}" onclick="event.stopPropagation(); Ranked.viewPlayer(${userId})">${safeName}</button>`;
+    },
+
+    _teamPlayerChips(team, winnerTeam) {
+        return (team || []).map(player => Ranked._playerProfileChip(player, winnerTeam)).join('');
+    },
+
+    _renderRecentMatchCard(match, { currentUserId = 0 } = {}) {
+        const winnerTeam = Number(match?.winner_team) || 0;
+        const isMine = Ranked._isCurrentUserInMatch(match, currentUserId);
+        const t1Players = Ranked._teamPlayerChips(match?.team1 || [], winnerTeam);
+        const t2Players = Ranked._teamPlayerChips(match?.team2 || [], winnerTeam);
+        const t1Score = Number.isFinite(Number(match?.team1_score)) ? Number(match.team1_score) : '-';
+        const t2Score = Number.isFinite(Number(match?.team2_score)) ? Number(match.team2_score) : '-';
+        const dateLabel = Ranked._formatRecentMatchDate(match?.completed_at || match?.created_at);
+        const rawType = String(match?.match_type || 'ranked');
+        const matchTypeLabel = Ranked._e(rawType.charAt(0).toUpperCase() + rawType.slice(1));
 
         return `
-        <div class="match-history-card">
-            <div class="match-history-date">${date}</div>
-            <div class="match-history-teams">
-                <span class="${match.winner_team === 1 ? 'match-winner' : ''}">${t1}</span>
-                <span class="match-score">${match.team1_score}-${match.team2_score}</span>
-                <span class="${match.winner_team === 2 ? 'match-winner' : ''}">${t2}</span>
+            <article class="recent-game-card ${isMine ? 'is-mine' : ''}">
+                <div class="recent-game-head">
+                    <span class="recent-game-date">${Ranked._e(dateLabel)}</span>
+                    <div class="recent-game-head-right">
+                        <span class="match-type-badge">${matchTypeLabel}</span>
+                        ${isMine ? '<span class="match-type-badge pending-badge">You played</span>' : ''}
+                    </div>
+                </div>
+                <div class="recent-game-scoreboard">
+                    <div class="recent-game-team ${winnerTeam === 1 ? 'winner' : ''}">
+                        <div class="recent-game-team-label">Team 1</div>
+                        <div class="recent-game-team-players">${t1Players || '<span class="muted">No players</span>'}</div>
+                    </div>
+                    <div class="recent-game-score">
+                        <strong>${t1Score}</strong>
+                        <span class="recent-game-score-sep">-</span>
+                        <strong>${t2Score}</strong>
+                    </div>
+                    <div class="recent-game-team ${winnerTeam === 2 ? 'winner' : ''}">
+                        <div class="recent-game-team-label">Team 2</div>
+                        <div class="recent-game-team-players">${t2Players || '<span class="muted">No players</span>'}</div>
+                    </div>
+                </div>
+            </article>
+        `;
+    },
+
+    _renderRecentGames(matches, { courtId, filter = 'all', currentUserId = 0 } = {}) {
+        const allMatches = Array.isArray(matches) ? matches : [];
+        const myMatches = currentUserId
+            ? allMatches.filter(match => Ranked._isCurrentUserInMatch(match, currentUserId))
+            : [];
+        const effectiveFilter = (filter === 'mine' && currentUserId) ? 'mine' : 'all';
+        const visibleMatches = effectiveFilter === 'mine' ? myMatches : allMatches;
+        const allActive = effectiveFilter === 'all';
+        const mineActive = effectiveFilter === 'mine';
+        const mineDisabled = !currentUserId;
+        const emptyMessage = effectiveFilter === 'mine'
+            ? 'You have not played a completed ranked game at this court yet.'
+            : 'No completed ranked games at this court yet.';
+
+        const cards = visibleMatches.length
+            ? visibleMatches.map(match =>
+                Ranked._renderRecentMatchCard(match, { currentUserId })
+            ).join('')
+            : `<p class="muted">${emptyMessage}</p>`;
+
+        return `
+            <div class="recent-games-panel">
+                <div class="recent-games-toolbar">
+                    <div class="recent-games-filters" role="group" aria-label="Recent games filter">
+                        <button type="button" class="btn-secondary btn-sm ${allActive ? 'active' : ''}" onclick="Ranked.setRecentGamesFilter(${Number(courtId) || 0}, 'all')">
+                            All Court Games (${allMatches.length})
+                        </button>
+                        <button type="button" class="btn-secondary btn-sm ${mineActive ? 'active' : ''}" ${mineDisabled ? 'disabled' : ''} onclick="Ranked.setRecentGamesFilter(${Number(courtId) || 0}, 'mine')">
+                            My Games (${myMatches.length})
+                        </button>
+                    </div>
+                    <span class="muted">Tap a player name to open their profile.</span>
+                </div>
+                <div class="recent-games-list">${cards}</div>
             </div>
-            <span class="match-type-badge">${Ranked._e(match.match_type || 'ranked')}</span>
-        </div>`;
+        `;
+    },
+
+    _renderMatchHistory(match) {
+        return Ranked._renderRecentMatchCard(match, {
+            currentUserId: Number(Ranked._currentUser().id) || 0,
+        });
     },
 
     _showCompletedResults(match) {

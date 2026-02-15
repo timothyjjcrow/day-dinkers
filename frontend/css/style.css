@@ -758,6 +758,21 @@ img { max-width: 100%; display: block; }
     border-color: rgba(34, 197, 94, .55);
     background: var(--primary-light);
 }
+.ranked-player-card.featured {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+.ranked-player-card.rank-first {
+    border-color: rgba(245, 158, 11, .45);
+    box-shadow: 0 10px 20px rgba(245, 158, 11, .08);
+}
+.ranked-player-card.rank-second {
+    border-color: rgba(100, 116, 139, .4);
+    box-shadow: 0 10px 20px rgba(100, 116, 139, .08);
+}
+.ranked-player-card.rank-third {
+    border-color: rgba(194, 101, 56, .4);
+    box-shadow: 0 10px 20px rgba(194, 101, 56, .08);
+}
 .ranked-player-rank {
     min-width: 34px;
     text-align: center;
@@ -791,6 +806,17 @@ img { max-width: 100%; display: block; }
     background: var(--bg-card);
     border: 1px solid var(--border);
 }
+.ranked-player-stat.elo-high {
+    color: #166534;
+    border-color: rgba(34, 197, 94, .35);
+    background: #f0fdf4;
+}
+.ranked-player-stat.elo-mid {
+    color: #4338ca;
+    border-color: rgba(99, 102, 241, .35);
+    background: #eef2ff;
+}
+.ranked-player-stat.elo-low { color: var(--text-muted); }
 .ranked-player-action {
     margin-left: auto;
     flex-shrink: 0;
@@ -804,27 +830,20 @@ img { max-width: 100%; display: block; }
     border: 1px solid var(--border);
 }
 .leaderboard-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
-
-/* Mobile leaderboard cards instead of wide table */
-.leaderboard-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.leaderboard-table th {
-    text-align: left; padding: 6px 4px;
-    border-bottom: 2px solid var(--border);
-    font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
-    color: var(--text-muted);
+.leaderboard-showcase-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
 }
-.leaderboard-table td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
-.lb-row { cursor: pointer; }
-.lb-row:hover { background: var(--bg); }
-.lb-top3 { font-weight: 600; }
-.lb-rank { width: 40px; text-align: center; }
-.lb-player strong { display: block; }
-.lb-player .muted { font-size: 11px; }
-.lb-elo { font-weight: 700; }
-.elo-high { color: var(--primary-dark); }
-.elo-mid { color: var(--accent); }
-.elo-low { color: var(--text-muted); }
-.lb-record, .lb-winrate, .lb-games { font-size: 12px; }
+.leaderboard-podium {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.leaderboard-ranked-list { margin-top: 2px; }
 
 /* Mini leaderboard (in ranked tab) */
 .mini-lb-row {
@@ -838,24 +857,126 @@ img { max-width: 100%; display: block; }
 .mini-lb-record { font-size: 12px; }
 
 /* Match history */
-.match-history-card {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px; border-radius: var(--radius-sm);
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
+.recent-games-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
-.match-history-date { color: var(--text-muted); font-size: 12px; min-width: 50px; }
-.match-history-teams { flex: 1; }
-.match-history-teams .match-winner { font-weight: 600; color: var(--primary-dark); }
-.match-history-mini {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px; border-radius: var(--radius-sm);
-    margin-bottom: 4px;
+.recent-games-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
 }
-.match-history-mini.match-win { background: var(--primary-light); }
-.match-history-mini.match-loss { background: #fef2f2; }
-.match-result-icon { font-size: 16px; }
-.match-mini-info { flex: 1; display: flex; flex-direction: column; font-size: 13px; }
+.recent-games-filters {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.recent-games-filters .btn-secondary.active {
+    background: var(--primary-light);
+    border-color: rgba(34, 197, 94, .45);
+    color: var(--primary-dark);
+}
+.recent-games-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.recent-game-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    padding: 10px;
+}
+.recent-game-card.is-mine {
+    border-color: rgba(34, 197, 94, .5);
+    background: linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%);
+}
+.recent-game-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.recent-game-date {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+.recent-game-head-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.recent-game-scoreboard {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+}
+.recent-game-team {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    padding: 8px;
+    min-height: 68px;
+}
+.recent-game-team.winner {
+    border-color: rgba(34, 197, 94, .45);
+    background: var(--primary-light);
+}
+.recent-game-team-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-bottom: 6px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+.recent-game-team-players {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.history-player-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--text);
+    font-size: 12px;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.history-player-chip.winner {
+    border-color: rgba(34, 197, 94, .45);
+    color: var(--primary-dark);
+    font-weight: 600;
+}
+.history-player-chip:hover {
+    border-color: rgba(34, 197, 94, .45);
+    background: #f8fafc;
+}
+.recent-game-score {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 24px;
+    font-weight: 800;
+    justify-self: center;
+    color: var(--text);
+}
+.recent-game-score-sep {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
 .match-elo-change { font-weight: 700; font-size: 14px; }
 .elo-gain { color: var(--primary-dark); }
 .elo-loss { color: var(--danger); }
@@ -1330,6 +1451,7 @@ img { max-width: 100%; display: block; }
     .dropdown { width: 360px; }
     .court-list-sidebar { width: 340px; }
     .session-card-grid { grid-template-columns: 1fr 1fr; }
+    .leaderboard-podium { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (min-width: 1024px) {

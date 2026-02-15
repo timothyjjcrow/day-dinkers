@@ -220,7 +220,7 @@ const App = {
                 if (!lb.length) {
                     courtLb.innerHTML = '<p class="muted">No ranked players at this court yet.</p>';
                 } else {
-                    courtLb.innerHTML = Ranked._renderLeaderboard(lb);
+                    courtLb.innerHTML = Ranked._renderLeaderboard(lb, { scopeLabel: 'Court' });
                 }
             } catch { courtLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
         }
@@ -234,7 +234,7 @@ const App = {
                 if (!lb.length) {
                     countyLb.innerHTML = '<p class="muted">No ranked players in this county yet.</p>';
                 } else {
-                    countyLb.innerHTML = Ranked._renderLeaderboard(lb);
+                    countyLb.innerHTML = Ranked._renderLeaderboard(lb, { scopeLabel: 'County' });
                 }
             } catch { countyLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
         }
@@ -243,13 +243,10 @@ const App = {
         if (historyEl) {
             historyEl.innerHTML = '<div class="loading">Loading...</div>';
             try {
-                const res = await API.get(`/api/ranked/history?court_id=${courtId}`);
+                const res = await API.get(`/api/ranked/history?court_id=${courtId}&limit=60`);
                 const matches = res.matches || [];
-                if (!matches.length) {
-                    historyEl.innerHTML = '<p class="muted">No matches yet.</p>';
-                } else {
-                    historyEl.innerHTML = matches.map(m => Ranked._renderMatchHistory(m)).join('');
-                }
+                Ranked._setRecentMatchesForCourt(courtId, matches);
+                Ranked.renderRecentGamesForCourt(courtId);
             } catch { historyEl.innerHTML = '<p class="muted">Unable to load.</p>'; }
         }
     },
