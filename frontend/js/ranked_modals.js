@@ -217,13 +217,13 @@ Object.assign(Ranked, {
                     <div class="score-team">
                         <h4>Team 1</h4>
                         <p class="score-team-names">${t1}</p>
-                        <input type="number" id="score-team1" class="score-input" min="0" max="99" value="0" required>
+                        <input type="number" id="score-team1" class="score-input" min="0" max="99" value="" placeholder="0" inputmode="numeric" required>
                     </div>
                     <div class="score-divider">—</div>
                     <div class="score-team">
                         <h4>Team 2</h4>
                         <p class="score-team-names">${t2}</p>
-                        <input type="number" id="score-team2" class="score-input" min="0" max="99" value="0" required>
+                        <input type="number" id="score-team2" class="score-input" min="0" max="99" value="" placeholder="0" inputmode="numeric" required>
                     </div>
                 </div>
                 <p class="score-hint muted">Standard pickleball: first to 11, win by 2</p>
