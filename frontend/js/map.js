@@ -551,9 +551,6 @@ const MapView = {
         const safePhoneLabel = MapView._escapeHtml(court.phone || '');
         const safePhoneHref = MapView._safeTel(court.phone || '');
         const safeWebsiteHref = MapView._safeHttpUrl(court.website || '');
-        const escapedCourtName = MapView._escapeAttr(
-            MapView._escapeJsSingleQuoted(court.name || '')
-        );
 
         // Amenities
         const amenities = [];
@@ -618,25 +615,6 @@ const MapView = {
                     <span id="court-player-count" class="player-count-badge">${checkedIn.length}</span>
                 </div>
                 <div id="court-players-live">${playersHTML}</div>
-            </div>
-
-            <!-- Quick Actions -->
-            <div class="court-section">
-                <h4>Quick Actions</h4>
-                <div class="quick-actions-grid">
-                    <button class="quick-action-btn" onclick="Sessions.showCreateModal(${court.id})">
-                        <span class="quick-action-icon">📅</span><span>Schedule</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="MapView.inviteToCourtPlay(${court.id}, '${escapedCourtName}')">
-                        <span class="quick-action-icon">👥</span><span>Invite Friends</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="Ranked.joinQueue(${court.id})">
-                        <span class="quick-action-icon">⚔️</span><span>Join Queue</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="MapView.reportCourt(${court.id})">
-                        <span class="quick-action-icon">⚠️</span><span>Report Issue</span>
-                    </button>
-                </div>
             </div>
 
             <!-- Court Info -->
@@ -1159,13 +1137,26 @@ const MapView = {
         }
     },
 
+    reportCurrentCourt() {
+        if (!MapView.currentCourtId) {
+            App.toast('Open a court first', 'error');
+            return;
+        }
+        MapView.reportCourt(MapView.currentCourtId);
+    },
+
     async reportCourt(courtId) {
+        const numericCourtId = Number(courtId);
+        if (!numericCourtId) {
+            App.toast('Open a court first', 'error');
+            return;
+        }
         const reason = prompt('What\'s the issue? (wrong info, closed, fake, other)');
         if (!reason) return;
         const token = localStorage.getItem('token');
         if (!token) { Auth.showModal(); return; }
         try {
-            await API.post(`/api/courts/${courtId}/report`, { reason, description: reason });
+            await API.post(`/api/courts/${numericCourtId}/report`, { reason, description: reason });
             App.toast('Report submitted. Thank you!');
         } catch { App.toast('Failed to submit report', 'error'); }
     },

@@ -169,10 +169,15 @@
             </div>
             <!-- Updates Popout Trigger -->
             <div id="updates-popout-trigger" class="updates-popout-trigger">
-                <button onclick="App.toggleUpdatesSheet()">
-                    <span>Suggest Court Update</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 15l-6-6-6 6"/></svg>
-                </button>
+                <div class="court-bottom-actions">
+                    <button class="btn-secondary court-bottom-action-btn court-report-btn" onclick="MapView.reportCurrentCourt()">
+                        <span>Report a Problem</span>
+                    </button>
+                    <button class="btn-primary court-bottom-action-btn" onclick="App.toggleUpdatesSheet()">
+                        <span>Suggest a Court Update</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
             </div>
         </div>
 
