@@ -4,6 +4,9 @@
  */
 const Ranked = {
     currentCourtId: null,
+    actionDigestByCourt: {},
+    actionFlashCourtId: null,
+    actionFlashUntil: 0,
 
     // ── Helpers ──────────────────────────────────────────────────────
 
@@ -33,6 +36,94 @@ const Ranked = {
         const btn = event?.currentTarget || event?.target?.closest?.('button');
         if (btn) btn.disabled = true;
         return btn;
+    },
+
+    _isoToMs(value) {
+        if (!value) return 0;
+        const dt = new Date(value);
+        const ts = dt.getTime();
+        return Number.isFinite(ts) ? ts : 0;
+    },
+
+    _extractActionState(summary = {}) {
+        const currentUser = Ranked._currentUser();
+        const userId = Number(currentUser.id) || 0;
+        if (!userId) return { ids: [], digest: '' };
+
+        const inProgressMatches = (summary.matches || []).filter(m => m.status === 'in_progress');
+        const pendingMatches = (summary.matches || []).filter(m => m.status === 'pending_confirmation');
+        const pendingLobbies = summary.pending_lobbies || [];
+        const readyLobbies = summary.ready_lobbies || [];
+
+        const ids = [];
+
+        inProgressMatches.forEach(match => {
+            const isPlayer = (match.players || []).some(p => p.user_id === userId);
+            if (isPlayer) ids.push(`live:${match.id}`);
+        });
+        pendingMatches.forEach(match => {
+            const me = (match.players || []).find(p => p.user_id === userId);
+            if (me && !me.confirmed) ids.push(`confirm:${match.id}`);
+        });
+        pendingLobbies.forEach(lobby => {
+            const me = (lobby.players || []).find(p => p.user_id === userId);
+            if (me && me.acceptance_status === 'pending') ids.push(`invite:${lobby.id}`);
+        });
+        readyLobbies.forEach(lobby => {
+            const me = (lobby.players || []).find(p => p.user_id === userId);
+            if (me && me.acceptance_status === 'accepted') ids.push(`start:${lobby.id}`);
+        });
+
+        ids.sort();
+        return { ids, digest: ids.join('|') };
+    },
+
+    _markActionCenterUpdated(courtId) {
+        Ranked.actionFlashCourtId = Number(courtId);
+        Ranked.actionFlashUntil = Date.now() + 10000;
+    },
+
+    _isActionCenterHighlighted(courtId) {
+        return Ranked.actionFlashCourtId === Number(courtId)
+            && Date.now() <= Ranked.actionFlashUntil;
+    },
+
+    _maybePromoteActionCenter(courtId) {
+        const tab = document.getElementById('court-ranked-tab');
+        if (!tab) return;
+        tab.scrollTo({ top: 0, behavior: 'smooth' });
+
+        const center = document.getElementById('ranked-action-center');
+        if (!center) return;
+        center.classList.add('action-center-highlight');
+        setTimeout(() => center.classList.remove('action-center-highlight'), 2200);
+    },
+
+    _courtContext(courtId) {
+        const targetCourtId = Number(courtId);
+        const hasMapView = typeof MapView !== 'undefined';
+        const cachedCourt = hasMapView ? MapView.currentCourtData : null;
+        const courtMatches = !!(cachedCourt && Number(cachedCourt.id) === targetCourtId);
+        const court = courtMatches ? cachedCourt : null;
+        const sessions = (courtMatches && Array.isArray(MapView.currentCourtSessions))
+            ? MapView.currentCourtSessions
+            : [];
+        const nowSessions = sessions.filter(s => s && s.session_type === 'now');
+        const checkedInPlayers = (court && Array.isArray(court.checked_in_users))
+            ? court.checked_in_users
+            : [];
+        const myStatus = hasMapView ? (MapView.myCheckinStatus || {}) : {};
+        const amCheckedInHere = !!(
+            myStatus.checked_in && Number(myStatus.court_id) === targetCourtId
+        );
+        return {
+            court,
+            sessions,
+            nowSessions,
+            checkedInPlayers,
+            amCheckedInHere,
+            courtName: court?.name || 'this court',
+        };
     },
 
     // ── Leaderboard View ────────────────────────────────────────────
@@ -74,6 +165,11 @@ const Ranked = {
     async loadPendingConfirmations(focusMatchId = null) {
         const container = document.getElementById('pending-confirmations');
         if (!container) return;
+        if (typeof App !== 'undefined' && App.currentScreen === 'court-details' && App.currentCourtTab === 'ranked') {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
         const token = localStorage.getItem('token');
         if (!token) { container.style.display = 'none'; return; }
 
@@ -92,13 +188,13 @@ const Ranked = {
             container.style.display = 'block';
             const challengeHTML = lobbies.length ? `
                 <div class="pending-confirm-section">
-                    <h3>⚔️ Ranked Challenge Invites</h3>
+                    <h3>Ranked Challenge Invites</h3>
                     <p class="muted">Accept challenges to move them into the ranked lobby.</p>
                     ${lobbies.map(l => Ranked._renderPendingLobby(l)).join('')}
                 </div>` : '';
             const scoreHTML = matches.length ? `
                 <div class="pending-confirm-section">
-                    <h3>⏳ Pending Score Confirmations</h3>
+                    <h3>Pending Score Confirmations</h3>
                     <p class="muted">These matches need your confirmation before rankings update.</p>
                     ${matches.map(m => Ranked._renderPendingMatch(m, focusMatchId)).join('')}
                 </div>` : '';
@@ -129,12 +225,11 @@ const Ranked = {
         try {
             const res = await API.post(`/api/ranked/match/${matchId}/confirm`, {});
             if (res.all_confirmed) {
-                App.toast('🏆 All players confirmed! Rankings updated.');
+                App.toast('All players confirmed. Rankings updated.');
                 Ranked._showCompletedResults(res.match);
             } else {
-                App.toast('✅ Score confirmed! Waiting for other players...');
+                App.toast('Score confirmed. Waiting for other players.');
             }
-            Ranked.loadPendingConfirmations();
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
             Ranked.loadMatchHistory();
         } catch (err) {
@@ -149,7 +244,6 @@ const Ranked = {
         try {
             await API.post(`/api/ranked/match/${matchId}/reject`, {});
             App.toast('Score rejected. The match has been reset for re-scoring.');
-            Ranked.loadPendingConfirmations();
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
         } catch (err) {
             if (btn) btn.disabled = false;
@@ -163,7 +257,6 @@ const Ranked = {
         try {
             await API.post(`/api/ranked/match/${matchId}/cancel`, {});
             App.toast('Match cancelled.');
-            Ranked.loadPendingConfirmations();
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
         } catch (err) {
             if (btn) btn.disabled = false;
@@ -184,13 +277,19 @@ const Ranked = {
 
         try {
             const res = await API.get(`/api/ranked/court/${courtId}/summary`);
+            const nextActionState = Ranked._extractActionState(res);
+            const prevDigest = Ranked.actionDigestByCourt[courtId] || '';
+            const hasNewActions = !!nextActionState.digest && nextActionState.digest !== prevDigest;
+            Ranked.actionDigestByCourt[courtId] = nextActionState.digest;
+            if (hasNewActions) Ranked._markActionCenterUpdated(courtId);
             container.innerHTML = Ranked._renderCourtRanked(res, courtId);
+            if (hasNewActions) Ranked._maybePromoteActionCenter(courtId);
         } catch (err) {
             console.error('Failed to load ranked data:', err);
             container.innerHTML = `
-                <div class="ranked-header"><h4>⚔️ Competitive Play</h4></div>
+                <div class="ranked-header"><h4>Competitive Play</h4></div>
                 <p class="muted">No competitive data yet. Check in and join the queue to get started!</p>
-                <button class="btn-primary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'doubles')" style="margin-top:8px">⚔️ Join Ranked Queue</button>
+                <button class="btn-primary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'doubles')" style="margin-top:8px">Join Ranked Queue</button>
             `;
         }
     },
@@ -226,7 +325,6 @@ const Ranked = {
             App.toast(action === 'accept'
                 ? (res.all_accepted ? 'Challenge accepted. Lobby is ready to start.' : 'Challenge accepted.')
                 : 'Challenge declined.');
-            Ranked.loadPendingConfirmations();
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
         } catch (err) {
             if (btn) btn.disabled = false;
@@ -238,7 +336,7 @@ const Ranked = {
         const btn = Ranked._disableBtn(event);
         try {
             const res = await API.post(`/api/ranked/lobby/${lobbyId}/start`, {});
-            App.toast('Ranked game started! Enter score when the game ends.');
+            App.toast('Ranked game started. Enter score when the game ends.');
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
             if (res.match?.id) Ranked.showScoreModal(res.match.id);
         } catch (err) {

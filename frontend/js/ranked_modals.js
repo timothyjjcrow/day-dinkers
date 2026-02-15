@@ -94,9 +94,9 @@ Object.assign(Ranked, {
         modal.innerHTML = `
         <div class="modal-content">
             <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
-            <h2>⚔️ Create Ranked Match</h2>
+            <h2>Create Ranked Match</h2>
             <p class="muted" style="margin-bottom:8px">${allPlayers.length} players available at this court</p>
-            <p class="confirm-note">📋 All players must confirm the score after the match for rankings to update.</p>
+            <p class="confirm-note">All players must confirm the score after the match for rankings to update.</p>
             <form id="create-match-form" onsubmit="Ranked.createMatch(event, ${courtId})">
                 <div class="form-group">
                     <label>Match Type</label>
@@ -117,7 +117,7 @@ Object.assign(Ranked, {
                     </div>
                 </div>
                 <input type="hidden" id="available-players-data" value='${JSON.stringify(allPlayers)}'>
-                <button type="submit" class="btn-primary btn-full" style="margin-top:16px">🎮 Start Match</button>
+                <button type="submit" class="btn-primary btn-full" style="margin-top:16px">Start Match</button>
             </form>
         </div>`;
 
@@ -211,7 +211,7 @@ Object.assign(Ranked, {
             modal.innerHTML = `
             <div class="modal-content score-modal">
                 <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
-                <h2>📝 Enter Match Score</h2>
+                <h2>Enter Match Score</h2>
                 <p class="confirm-note">All players must confirm the score before rankings update.</p>
                 <div class="score-teams">
                     <div class="score-team">
@@ -253,7 +253,7 @@ Object.assign(Ranked, {
             document.getElementById('match-modal').style.display = 'none';
 
             if (res.pending_confirmation) {
-                App.toast('📋 Score submitted! Waiting for all players to confirm...');
+                App.toast('Score submitted. Waiting for all players to confirm.');
             } else {
                 Ranked._showCompletedResults(res.match);
             }

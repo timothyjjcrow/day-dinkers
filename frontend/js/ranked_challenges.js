@@ -31,7 +31,7 @@ Object.assign(Ranked, {
             modal.innerHTML = `
             <div class="modal-content">
                 <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
-                <h2>⚔️ Challenge Player</h2>
+                <h2>Challenge Player</h2>
                 <form onsubmit="Ranked.createCourtChallenge(event, ${courtId}, ${targetUserId})">
                     ${Ranked._matchTypeSelectHTML('court-challenge', !extraOptions)}
                     <p class="muted">You: <strong>${Ranked._e(me.name || me.username)}</strong></p>
@@ -97,7 +97,7 @@ Object.assign(Ranked, {
         modal.innerHTML = `
         <div class="modal-content">
             <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
-            <h2>📅 Schedule Ranked Challenge</h2>
+            <h2>Schedule Ranked Challenge</h2>
             <form onsubmit="Ranked.createCourtScheduledChallenge(event, ${courtId})">
                 <div class="form-group">
                     <label>Opponent</label>
@@ -172,7 +172,7 @@ Object.assign(Ranked, {
             modal.innerHTML = `
             <div class="modal-content">
                 <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
-                <h2>📅 Schedule Ranked Challenge</h2>
+                <h2>Schedule Ranked Challenge</h2>
                 <form onsubmit="Ranked.createScheduledChallenge(event, ${targetUserId}, '${source}')">
                     <div class="form-group">
                         <label>Court</label>

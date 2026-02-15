@@ -10,6 +10,8 @@ const MapView = {
     activeFilter: 'all',
     courtListOpen: false,
     currentCourtId: null,
+    currentCourtData: null,
+    currentCourtSessions: [],
     myCheckinStatus: null, // { checked_in: bool, court_id }
     friendsPresence: [],  // [{user, court_id, checked_in_at}]
     friendMarkers: [],
@@ -342,6 +344,12 @@ const MapView = {
         };
     },
 
+    _cacheCurrentCourtBundle(court, sessions) {
+        if (!court || !court.id) return;
+        MapView.currentCourtData = court;
+        MapView.currentCourtSessions = sessions || [];
+    },
+
     /** Legacy: redirect to unified court details screen */
     async openCourtDetail(courtId) {
         App.openCourtDetails(courtId);
@@ -370,6 +378,7 @@ const MapView = {
 
         try {
             const { court, sessions } = await MapView._fetchCourtBundle(courtId);
+            MapView._cacheCurrentCourtBundle(court, sessions);
 
             // Set header info
             if (nameEl) nameEl.textContent = court.name || 'Court';
@@ -400,6 +409,7 @@ const MapView = {
         await MapView.refreshMyStatus();
         try {
             const { court, sessions } = await MapView._fetchCourtBundle(courtId);
+            MapView._cacheCurrentCourtBundle(court, sessions);
             const container = document.getElementById('court-info-content');
             if (container) container.innerHTML = MapView._courtInfoHTML(court, sessions);
             Ranked.loadCourtRanked(court.id);
@@ -423,6 +433,7 @@ const MapView = {
         try {
             await MapView.refreshMyStatus();
             const { court, sessions } = await MapView._fetchCourtBundle(targetCourtId);
+            MapView._cacheCurrentCourtBundle(court, sessions);
             const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
             const myStatus = MapView.myCheckinStatus || {};
             const amCheckedInHere = myStatus.checked_in && myStatus.court_id === targetCourtId;
@@ -431,6 +442,7 @@ const MapView = {
                 sessions,
                 currentUser.id,
                 amCheckedInHere,
+                { playerCardOptions: { enableChallenge: false } },
             );
 
             if (sessionsEl) sessionsEl.innerHTML = liveSections.sessionsHTML;
@@ -529,10 +541,6 @@ const MapView = {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myStatus = MapView.myCheckinStatus || {};
         const amCheckedInHere = myStatus.checked_in && myStatus.court_id === court.id;
-        const events = court.upcoming_events || [];
-        const images = court.images || [];
-        const communityInfo = court.community_info || {};
-        const pendingUpdates = court.pending_updates_count || 0;
         const safeCourtName = MapView._escapeHtml(court.name || '');
         const safeDescription = MapView._escapeHtml(court.description || '');
         const safeSurfaceType = MapView._escapeHtml(court.surface_type || 'Unknown');
@@ -567,6 +575,7 @@ const MapView = {
             sessions,
             currentUser.id,
             amCheckedInHere,
+            { playerCardOptions: { enableChallenge: false } },
         );
         const nowSessions = liveSections.nowSessions;
         const sessionsHTML = liveSections.sessionsHTML;
@@ -649,49 +658,16 @@ const MapView = {
                 </div>
             </div>
 
-            <!-- Community Info -->
-            <div class="court-section">
-                <div class="section-header">
-                    <h4>Community Info</h4>
-                    ${pendingUpdates > 0 ? `<span class="player-count-badge">${pendingUpdates} pending</span>` : ''}
-                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">Suggest Update</button>
-                </div>
-                ${MapView._communityInfoHTML(communityInfo)}
-            </div>
-
-            <!-- Images -->
-            <div class="court-section">
-                <div class="section-header">
-                    <h4>Court Images</h4>
-                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">Add Photo</button>
-                </div>
-                ${MapView._imageGalleryHTML(images)}
-            </div>
-
-            <!-- Events -->
-            <div class="court-section">
-                <div class="section-header">
-                    <h4>Upcoming Events</h4>
-                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">Add Event</button>
-                </div>
-                ${MapView._eventCardsHTML(events)}
-            </div>
-
-            <!-- Busyness -->
-            <div class="court-section">
-                <h4>Busyness Patterns</h4>
-                ${MapView._busynessChart(court.busyness)}
-            </div>
-
             <div class="court-contact">
                 ${court.phone ? `<a href="tel:${safePhoneHref}" class="btn-secondary btn-sm">📞 ${safePhoneLabel}</a>` : ''}
                 ${safeWebsiteHref ? `<a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🌐 Website</a>` : ''}
             </div>`;
     },
 
-    _playerCard(user, isLookingToPlay, currentUserId, courtId, amCheckedInHere) {
+    _playerCard(user, isLookingToPlay, currentUserId, courtId, amCheckedInHere, options = {}) {
         const isMe = user.id === currentUserId;
         const isFriend = App.friendIds.includes(user.id);
+        const enableChallenge = options.enableChallenge !== false;
         const initials = (user.name || user.username || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
         const elo = user.elo_rating ? Math.round(user.elo_rating) : 1200;
         const record = `${user.wins || 0}W-${user.losses || 0}L`;
@@ -710,7 +686,7 @@ const MapView = {
                 actionBtn = `<button class="btn-add-friend" onclick="event.stopPropagation(); MapView.sendFriendRequest(${user.id})" title="Add Friend">➕ Add</button>`;
             }
         }
-        const challengeBtn = (!isMe && currentUserId && amCheckedInHere)
+        const challengeBtn = (enableChallenge && !isMe && currentUserId && amCheckedInHere)
             ? `<button class="btn-add-friend" onclick="event.stopPropagation(); Ranked.challengeCheckedInPlayer(${courtId}, ${user.id})" title="Challenge this player">⚔️ Challenge</button>`
             : '';
 
@@ -739,9 +715,10 @@ const MapView = {
         };
     },
 
-    _buildLiveCourtSections(court, sessions, currentUserId, amCheckedInHere) {
+    _buildLiveCourtSections(court, sessions, currentUserId, amCheckedInHere, options = {}) {
         const allSessions = sessions || [];
         const checkedIn = court.checked_in_users || [];
+        const playerCardOptions = options.playerCardOptions || {};
         const nowSessions = allSessions.filter(s => s.session_type === 'now');
         const scheduledSessions = allSessions.filter(s => s.session_type === 'scheduled');
         const playerBuckets = MapView._splitPlayersByLookingToPlay(checkedIn, nowSessions);
@@ -768,14 +745,14 @@ const MapView = {
             if (lookingToPlayPlayers.length > 0) {
                 playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
                 playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(
-                    u, true, currentUserId, court.id, amCheckedInHere
+                    u, true, currentUserId, court.id, amCheckedInHere, playerCardOptions
                 )).join('');
                 playersHTML += '</div>';
             }
             if (otherPlayers.length > 0) {
                 playersHTML += `<div class="players-group"><h5>🏓 At the Court (${otherPlayers.length})</h5>`;
                 playersHTML += otherPlayers.map(u => MapView._playerCard(
-                    u, false, currentUserId, court.id, amCheckedInHere
+                    u, false, currentUserId, court.id, amCheckedInHere, playerCardOptions
                 )).join('');
                 playersHTML += '</div>';
             }
@@ -902,6 +879,9 @@ const MapView = {
             App.toast('Friend request sent!');
             // Refresh friends cache
             await App.loadFriendsCache();
+            if (App.currentScreen === 'court-details' && MapView.currentCourtId) {
+                MapView._refreshCourt(MapView.currentCourtId);
+            }
         } catch (err) {
             const msg = err.message || '';
             if (msg.includes('already')) App.toast('Friend request already sent');
