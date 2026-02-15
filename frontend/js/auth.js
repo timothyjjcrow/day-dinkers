@@ -161,7 +161,7 @@ const Auth = {
         if (typeof App._setNotificationBadge === 'function') {
             App._setNotificationBadge(0);
         }
-        App.showView('map');
+        App.setMainTab('map');
         App.toast('Signed out');
     },
 
@@ -209,11 +209,17 @@ const Auth = {
         const authBtn = document.getElementById('btn-auth');
         const profileBtn = document.getElementById('btn-profile');
         if (user) {
-            authBtn.style.display = 'none';
-            profileBtn.style.display = 'inline-flex';
+            if (authBtn) authBtn.style.display = 'none';
+            if (profileBtn) profileBtn.style.display = 'inline-flex';
+            // Update avatar initial
+            const initialEl = document.getElementById('header-user-initial');
+            if (initialEl) {
+                const name = user.name || user.username || '?';
+                initialEl.textContent = name[0].toUpperCase();
+            }
         } else {
-            authBtn.style.display = 'inline-flex';
-            profileBtn.style.display = 'none';
+            if (authBtn) authBtn.style.display = 'inline-flex';
+            if (profileBtn) profileBtn.style.display = 'none';
         }
     },
 };

@@ -479,7 +479,7 @@ const Sessions = {
             ${session.notes ? `<p class="session-notes">${safeNotes}</p>` : ''}
             <div class="session-card-actions" onclick="event.stopPropagation()">
                 ${actionBtn}
-                <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); MapView.openCourtDetail(${session.court_id}); App.showView('map');">View Court</button>
+                <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); App.openCourtDetails(${session.court_id});">View Court</button>
                 <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.inviteFriends(${session.id})">👥 Invite</button>
                 ${calendarBtn}
             </div>
@@ -497,10 +497,13 @@ const Sessions = {
             const session = res.session;
             Sessions.sessionsById[session.id] = session;
             Sessions.currentSessionCourtId = session.court_id;
-            document.getElementById('sessions-view').querySelector('.view-header').innerHTML = `
-                <button class="btn-secondary" onclick="Sessions._backToList()">← Back to Sessions</button>
-                <h2>Session Details</h2>
-            `;
+            const tabHeader = document.querySelector('#sessions-tab .tab-page-header');
+            if (tabHeader) {
+                tabHeader.innerHTML = `
+                    <button class="btn-secondary" onclick="Sessions._backToList()">&larr; Back</button>
+                    <h2>Session Details</h2>
+                `;
+            }
             container.innerHTML = Sessions._renderDetail(session);
 
             // Load chat
@@ -609,7 +612,7 @@ const Sessions = {
                 <div class="game-detail-info">
                     <div class="detail-section">
                         <h4>Court</h4>
-                        <div class="detail-court-card" onclick="MapView.openCourtDetail(${court.id}); App.showView('map');">
+                        <div class="detail-court-card" onclick="App.openCourtDetails(${court.id});">
                             <strong>${safeCourtName}</strong>
                             <span>${safeCourtAddress}, ${safeCourtCity}</span>
                             <span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'} · ${court.num_courts || '?'} courts</span>
@@ -733,10 +736,13 @@ const Sessions = {
     },
 
     _backToList() {
-        document.getElementById('sessions-view').querySelector('.view-header').innerHTML = `
-            <h2>Open to Play</h2>
-            <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule Session</button>
-        `;
+        const tabHeader = document.querySelector('#sessions-tab .tab-page-header');
+        if (tabHeader) {
+            tabHeader.innerHTML = `
+                <h2>Open to Play</h2>
+                <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Session</button>
+            `;
+        }
         Sessions.currentSessionId = null;
         Sessions.currentSessionCourtId = null;
         Sessions.load();
@@ -1601,7 +1607,7 @@ const Sessions = {
             }
 
             return `
-            <div class="session-mini-card ${isNow ? 'session-mini-active' : ''}" onclick="App.showView('sessions'); setTimeout(() => Sessions.openDetail(${s.id}), 200)">
+            <div class="session-mini-card ${isNow ? 'session-mini-active' : ''}" onclick="App.setMainTab('sessions'); setTimeout(() => Sessions.openDetail(${s.id}), 200)">
                 <div class="session-mini-top">
                     <span class="session-mini-time">${isNow ? '<span class="live-dot"></span> Open Now' : `📅 ${timeStr}`}</span>
                     <span class="session-mini-visibility">${s.visibility === 'friends' ? '👥' : '🌐'}</span>

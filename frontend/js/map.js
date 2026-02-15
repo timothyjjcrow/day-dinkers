@@ -15,7 +15,6 @@ const MapView = {
     friendMarkers: [],
 
     init() {
-        // Initial California north-coast view; county selection adjusts loaded data.
         MapView.map = L.map('map', {
             zoomControl: true,
         }).setView([40.83, -124.08], 11);
@@ -27,14 +26,6 @@ const MapView = {
 
         MapView.loadCourts();
         MapView.refreshMyStatus();
-
-        // Search handler
-        const searchInput = document.getElementById('search-input');
-        let searchTimeout;
-        searchInput.addEventListener('input', () => {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => MapView.search(searchInput.value), 400);
-        });
     },
 
     async refreshMyStatus() {
@@ -205,7 +196,7 @@ const MapView = {
             ${friendsAtCourt.length > 0 ? `<div class="popup-friends">👥 ${safeFriendNames}</div>` : ''}
             <div class="popup-amenities">${amenities.join(' ')}</div>
             <div class="popup-actions">
-                <button class="btn-primary btn-sm" onclick="MapView.openCourtDetail(${court.id})">Details</button>
+                <button class="btn-primary btn-sm" onclick="App.openCourtDetails(${court.id})">Details</button>
                 <a class="btn-secondary btn-sm" href="${MapView._formatDirectionsUrl(court.latitude, court.longitude)}" target="_blank" rel="noopener noreferrer">Directions</a>
             </div>
         </div>`;
@@ -257,7 +248,7 @@ const MapView = {
         }
 
         MapView.map.setView([best.latitude, best.longitude], 14);
-        MapView.openCourtDetail(best.id);
+        App.openCourtDetails(best.id);
 
         const players = best.active_players || 0;
         const sessions = best.open_sessions || 0;
@@ -351,83 +342,81 @@ const MapView = {
         };
     },
 
+    /** Legacy: redirect to unified court details screen */
     async openCourtDetail(courtId) {
-        MapView.currentCourtId = courtId;
-        const panel = document.getElementById('court-panel');
-        const detail = document.getElementById('court-detail');
-        panel.style.display = 'block';
-        detail.innerHTML = '<div class="loading">Loading court details...</div>';
-
-        // Refresh check-in status
-        await MapView.refreshMyStatus();
-
-        try {
-            const { court, sessions } = await MapView._fetchCourtBundle(courtId);
-            detail.innerHTML = MapView._courtDetailHTML(court, sessions);
-
-            // NOW load competitive play data (after HTML is in DOM)
-            Ranked.loadCourtRanked(court.id);
-        } catch {
-            detail.innerHTML = '<p class="error">Failed to load court details</p>';
-        }
+        App.openCourtDetails(courtId);
     },
 
-    /** Expand the side panel into a full-page court view */
+    /** Legacy: redirect to unified court details screen */
     async openCourtFullPage(courtId) {
+        App.openCourtDetails(courtId);
+    },
+
+    /** Open the unified court details screen */
+    async openCourt(courtId) {
         MapView.currentCourtId = courtId;
-        App.showView('court-detail');
-        const container = document.getElementById('court-fullpage-content');
-        container.innerHTML = '<div class="loading">Loading court details...</div>';
+
+        // Update header
+        const nameEl = document.getElementById('court-details-name');
+        const addrEl = document.getElementById('court-details-address');
+        const dirLink = document.getElementById('court-directions-link');
+        if (nameEl) nameEl.textContent = 'Loading...';
+        if (addrEl) addrEl.textContent = '';
+
+        const infoContainer = document.getElementById('court-info-content');
+        if (infoContainer) infoContainer.innerHTML = '<div class="loading">Loading court details...</div>';
 
         await MapView.refreshMyStatus();
 
         try {
             const { court, sessions } = await MapView._fetchCourtBundle(courtId);
-            container.innerHTML = MapView._courtFullPageHTML(court, sessions);
 
-            // Load competitive play into the full-page section
+            // Set header info
+            if (nameEl) nameEl.textContent = court.name || 'Court';
+            if (addrEl) addrEl.textContent = `${court.address || ''}, ${court.city || ''}, CA ${court.zip_code || ''}`;
+            if (dirLink) dirLink.href = MapView._formatDirectionsUrl(court.latitude, court.longitude);
+
+            // Render court info tab
+            if (infoContainer) infoContainer.innerHTML = MapView._courtInfoHTML(court, sessions);
+
+            // Load ranked data for ranked tab
             Ranked.loadCourtRanked(court.id);
 
-            // Load court chat messages inline
-            MapView._loadFullPageChat(court.id);
+            // Load court chat
+            MapView._loadCourtChat(court.id);
 
-            // Join socket room for real-time updates
+            // Join socket room
             if (typeof Chat !== 'undefined' && Chat.socket) {
                 Chat.joinRoom(`court_${court.id}`);
             }
         } catch {
-            container.innerHTML = '<p class="error">Failed to load court details</p>';
+            if (infoContainer) infoContainer.innerHTML = '<p class="error">Failed to load court details</p>';
         }
     },
 
-    /** Refresh the full-page court view (after check-in/session changes). */
-    async _refreshFullPage(courtId) {
-        if (App.currentView !== 'court-detail') return;
+    /** Refresh the court details after check-in/session changes */
+    async _refreshCourt(courtId) {
+        if (App.currentScreen !== 'court-details') return;
         await MapView.refreshMyStatus();
         try {
             const { court, sessions } = await MapView._fetchCourtBundle(courtId);
-            const container = document.getElementById('court-fullpage-content');
-            container.innerHTML = MapView._courtFullPageHTML(court, sessions);
+            const container = document.getElementById('court-info-content');
+            if (container) container.innerHTML = MapView._courtInfoHTML(court, sessions);
             Ranked.loadCourtRanked(court.id);
-            MapView._loadFullPageChat(court.id);
+            MapView._loadCourtChat(court.id);
         } catch {}
     },
 
     async refreshCurrentCourtLiveData(courtId) {
         const targetCourtId = Number(courtId || MapView.currentCourtId);
         if (!targetCourtId) return;
-        const currentView = (typeof App !== 'undefined' && App.currentView) ? App.currentView : '';
-        const fullPageOpen = currentView === 'court-detail' && MapView.currentCourtId === targetCourtId;
-        const panel = document.getElementById('court-panel');
-        const panelOpen = !!(panel && panel.style.display !== 'none' && MapView.currentCourtId === targetCourtId);
-        if (!fullPageOpen && !panelOpen) return;
+        if (App.currentScreen !== 'court-details' || MapView.currentCourtId !== targetCourtId) return;
 
-        const suffix = fullPageOpen ? 'full' : 'panel';
-        const sessionsEl = document.getElementById(`court-sessions-live-${suffix}`);
-        const playersEl = document.getElementById(`court-players-live-${suffix}`);
-        const countEl = document.getElementById(`court-player-count-${suffix}`);
-        const statusEl = document.getElementById(`court-live-status-${suffix}`);
-        const bannerEl = document.getElementById(`court-match-banner-${suffix}`);
+        const sessionsEl = document.getElementById('court-sessions-live');
+        const playersEl = document.getElementById('court-players-live');
+        const countEl = document.getElementById('court-player-count');
+        const statusEl = document.getElementById('court-live-status');
+        const bannerEl = document.getElementById('court-match-banner');
 
         if (!sessionsEl && !playersEl && !countEl && !statusEl && !bannerEl) return;
 
@@ -455,8 +444,9 @@ const MapView = {
         } catch {}
     },
 
-    async _loadFullPageChat(courtId) {
-        const container = document.getElementById('fullpage-chat-messages');
+    /** Load chat messages into the court details chat section */
+    async _loadCourtChat(courtId) {
+        const container = document.getElementById('court-chat-messages');
         if (!container) return;
         const token = localStorage.getItem('token');
         if (!token) {
@@ -467,7 +457,7 @@ const MapView = {
             const res = await API.get(`/api/chat/court/${courtId}`);
             const msgs = res.messages || [];
             if (!msgs.length) {
-                container.innerHTML = '<p class="muted">No messages yet. Say hello to other players!</p>';
+                container.innerHTML = '<p class="muted">No messages yet. Say hello!</p>';
                 return;
             }
             container.innerHTML = msgs.map(m => MapView._renderChatMsg(m)).join('');
@@ -476,6 +466,10 @@ const MapView = {
             container.innerHTML = '<p class="muted">Unable to load messages</p>';
         }
     },
+
+    /** Legacy aliases */
+    async _loadFullPageChat(courtId) { MapView._loadCourtChat(courtId); },
+    async _refreshFullPage(courtId) { MapView._refreshCourt(courtId); },
 
     _renderChatMsg(msg) {
         const sender = msg.sender || {};
@@ -494,23 +488,42 @@ const MapView = {
         </div>`;
     },
 
-    async sendFullPageChat(e, courtId) {
+    /** Send chat from unified court details screen */
+    async sendCourtChat(e) {
         e.preventDefault();
-        const input = document.getElementById('fullpage-chat-input');
+        const input = document.getElementById('court-chat-input');
         const content = input.value.trim();
         if (!content) return;
         const token = localStorage.getItem('token');
         if (!token) { Auth.showModal(); return; }
+        const courtId = MapView.currentCourtId;
+        if (!courtId) return;
         try {
-            await API.post('/api/chat/send', {
-                content, court_id: courtId, msg_type: 'court',
-            });
+            await API.post('/api/chat/send', { content, court_id: courtId, msg_type: 'court' });
             input.value = '';
-            MapView._loadFullPageChat(courtId);
+            MapView._loadCourtChat(courtId);
         } catch { App.toast('Failed to send message', 'error'); }
     },
 
-    _courtDetailHTML(court, sessions) {
+    /** Legacy alias */
+    async sendFullPageChat(e, courtId) {
+        e.preventDefault();
+        const input = document.getElementById('court-chat-input');
+        if (input) {
+            const content = input.value.trim();
+            if (!content) return;
+            const token = localStorage.getItem('token');
+            if (!token) { Auth.showModal(); return; }
+            try {
+                await API.post('/api/chat/send', { content, court_id: courtId, msg_type: 'court' });
+                input.value = '';
+                MapView._loadCourtChat(courtId);
+            } catch { App.toast('Failed to send message', 'error'); }
+        }
+    },
+
+    /** Unified court info tab renderer */
+    _courtInfoHTML(court, sessions) {
         sessions = sessions || [];
         const checkedIn = court.checked_in_users || [];
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -521,9 +534,6 @@ const MapView = {
         const communityInfo = court.community_info || {};
         const pendingUpdates = court.pending_updates_count || 0;
         const safeCourtName = MapView._escapeHtml(court.name || '');
-        const safeCourtAddress = MapView._escapeHtml(court.address || '');
-        const safeCourtCity = MapView._escapeHtml(court.city || '');
-        const safeCourtZip = MapView._escapeHtml(court.zip_code || '');
         const safeDescription = MapView._escapeHtml(court.description || '');
         const safeSurfaceType = MapView._escapeHtml(court.surface_type || 'Unknown');
         const safeFees = MapView._escapeHtml(court.fees || 'Unknown');
@@ -533,7 +543,6 @@ const MapView = {
         const safePhoneLabel = MapView._escapeHtml(court.phone || '');
         const safePhoneHref = MapView._safeTel(court.phone || '');
         const safeWebsiteHref = MapView._safeHttpUrl(court.website || '');
-        const directionsHref = MapView._formatDirectionsUrl(court.latitude, court.longitude);
         const escapedCourtName = MapView._escapeAttr(
             MapView._escapeJsSingleQuoted(court.name || '')
         );
@@ -562,6 +571,7 @@ const MapView = {
         const nowSessions = liveSections.nowSessions;
         const sessionsHTML = liveSections.sessionsHTML;
         const playersHTML = liveSections.playersHTML;
+        const matchBanner = liveSections.matchBannerHTML;
         const players = liveSections.activePlayers;
 
         const checkinBtnHTML = MapView._checkinBarHTML({
@@ -570,49 +580,35 @@ const MapView = {
             amCheckedInHere,
             currentUserId: currentUser.id,
             nowSessions,
-            fullPage: false,
         });
 
         return `
-        <div class="court-detail-page">
-            <div class="court-header">
-                <h2>${safeCourtName}</h2>
-                ${court.verified ? '<span class="verified-badge">✓ Verified</span>' : ''}
-                <button class="btn-expand-court" onclick="MapView.openCourtFullPage(${court.id})" title="Expand to full page">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-                </button>
-            </div>
-            <p class="court-address">${safeCourtAddress}, ${safeCourtCity}, CA ${safeCourtZip}</p>
-
             ${checkinBtnHTML}
 
-            <div id="court-live-status-panel" class="court-live-status ${players > 0 ? 'active' : ''}">
+            <div id="court-live-status" class="court-live-status ${players > 0 ? 'active' : ''}">
                 ${MapView._liveStatusInnerHTML(court, players)}
             </div>
 
+            <div id="court-match-banner">${matchBanner}</div>
+
             ${court.description ? `<p class="court-desc">${safeDescription}</p>` : ''}
 
-            <!-- Open to Play Sessions -->
+            <!-- Looking to Play Sessions -->
             <div class="court-section">
                 <div class="section-header">
-                    <h4>🎯 Looking to Play</h4>
-                    <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">📅 Schedule</button>
+                    <h4>Looking to Play</h4>
+                    <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule</button>
                 </div>
-                <div id="court-sessions-live-panel">${sessionsHTML}</div>
+                <div id="court-sessions-live">${sessionsHTML}</div>
             </div>
 
-            <!-- Who's Here — Players Section (prominent) -->
-            <div class="court-section players-section">
+            <!-- Who's Here -->
+            <div class="court-section">
                 <div class="section-header">
                     <h4>Who's Here</h4>
-                    <span id="court-player-count-panel" class="player-count-badge">${checkedIn.length}</span>
+                    <span id="court-player-count" class="player-count-badge">${checkedIn.length}</span>
                 </div>
-                <div id="court-players-live-panel">${playersHTML}</div>
-            </div>
-
-            <!-- Competitive Play Section (loads dynamically) -->
-            <div class="court-section" id="court-ranked-section">
-                <div class="loading">Loading competitive play...</div>
+                <div id="court-players-live">${playersHTML}</div>
             </div>
 
             <!-- Quick Actions -->
@@ -620,83 +616,77 @@ const MapView = {
                 <h4>Quick Actions</h4>
                 <div class="quick-actions-grid">
                     <button class="quick-action-btn" onclick="Sessions.showCreateModal(${court.id})">
-                        <span class="quick-action-icon">📅</span>
-                        <span>Schedule</span>
+                        <span class="quick-action-icon">📅</span><span>Schedule</span>
                     </button>
                     <button class="quick-action-btn" onclick="MapView.inviteToCourtPlay(${court.id}, '${escapedCourtName}')">
-                        <span class="quick-action-icon">👥</span>
-                        <span>Invite Friends</span>
+                        <span class="quick-action-icon">👥</span><span>Invite Friends</span>
                     </button>
-                    <button class="quick-action-btn" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">
-                        <span class="quick-action-icon">📝</span>
-                        <span>Suggest Update</span>
+                    <button class="quick-action-btn" onclick="Ranked.joinQueue(${court.id})">
+                        <span class="quick-action-icon">⚔️</span><span>Join Queue</span>
                     </button>
                     <button class="quick-action-btn" onclick="MapView.reportCourt(${court.id})">
-                        <span class="quick-action-icon">⚠️</span>
-                        <span>Report Issue</span>
+                        <span class="quick-action-icon">⚠️</span><span>Report Issue</span>
                     </button>
                 </div>
             </div>
 
             <!-- Court Info -->
-            <div class="court-section court-info-collapsible">
-                <h4 onclick="MapView._toggleSection(this)">Court Info ▾</h4>
-                <div class="collapsible-content">
-                    <div class="court-info-grid">
-                        <div class="info-item"><span class="info-label">Type</span><span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'}</span></div>
-                        <div class="info-item"><span class="info-label">Courts</span><span>${court.num_courts}</span></div>
-                        <div class="info-item"><span class="info-label">Surface</span><span>${safeSurfaceType}</span></div>
-                        <div class="info-item"><span class="info-label">Setup</span><span>${typeLabel}</span></div>
-                        <div class="info-item"><span class="info-label">Fees</span><span>${safeFees}</span></div>
-                        <div class="info-item"><span class="info-label">Skill Levels</span><span>${safeSkillLevels}</span></div>
-                        ${court.hours ? `<div class="info-item info-item-full"><span class="info-label">Hours</span><span>${safeHours}</span></div>` : ''}
-                    </div>
-
-                    ${court.open_play_schedule ? `<div class="court-sub-section"><strong>Open Play Schedule</strong><p class="schedule-text">${safeOpenPlaySchedule}</p></div>` : ''}
-
-                    <div class="court-sub-section">
-                        <strong>Amenities</strong>
-                        <div class="amenities-grid">${amenities.join('') || '<span class="muted">No amenities listed</span>'}</div>
-                    </div>
+            <div class="court-section">
+                <h4>Court Info</h4>
+                <div class="court-info-grid">
+                    <div class="info-item"><span class="info-label">Type</span><span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'}</span></div>
+                    <div class="info-item"><span class="info-label">Courts</span><span>${court.num_courts}</span></div>
+                    <div class="info-item"><span class="info-label">Surface</span><span>${safeSurfaceType}</span></div>
+                    <div class="info-item"><span class="info-label">Setup</span><span>${typeLabel}</span></div>
+                    <div class="info-item"><span class="info-label">Fees</span><span>${safeFees}</span></div>
+                    <div class="info-item"><span class="info-label">Skill Levels</span><span>${safeSkillLevels}</span></div>
+                    ${court.hours ? `<div class="info-item info-item-full"><span class="info-label">Hours</span><span>${safeHours}</span></div>` : ''}
+                </div>
+                ${court.open_play_schedule ? `<div class="court-sub-section"><strong>Open Play Schedule</strong><p class="schedule-text">${safeOpenPlaySchedule}</p></div>` : ''}
+                <div class="court-sub-section">
+                    <strong>Amenities</strong>
+                    <div class="amenities-grid">${amenities.join('') || '<span class="muted">No amenities listed</span>'}</div>
                 </div>
             </div>
 
+            <!-- Community Info -->
             <div class="court-section">
                 <div class="section-header">
-                    <h4>🧾 Community Info</h4>
+                    <h4>Community Info</h4>
                     ${pendingUpdates > 0 ? `<span class="player-count-badge">${pendingUpdates} pending</span>` : ''}
-                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">+ Suggest Update</button>
+                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">Suggest Update</button>
                 </div>
                 ${MapView._communityInfoHTML(communityInfo)}
             </div>
 
+            <!-- Images -->
             <div class="court-section">
                 <div class="section-header">
-                    <h4>🖼 Court Images</h4>
-                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">+ Add Photo</button>
+                    <h4>Court Images</h4>
+                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">Add Photo</button>
                 </div>
                 ${MapView._imageGalleryHTML(images)}
             </div>
 
+            <!-- Events -->
             <div class="court-section">
                 <div class="section-header">
-                    <h4>📅 Upcoming Events</h4>
-                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">+ Add Event</button>
+                    <h4>Upcoming Events</h4>
+                    <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">Add Event</button>
                 </div>
                 ${MapView._eventCardsHTML(events)}
             </div>
 
+            <!-- Busyness -->
             <div class="court-section">
-                <h4>📊 Busyness Patterns</h4>
+                <h4>Busyness Patterns</h4>
                 ${MapView._busynessChart(court.busyness)}
             </div>
 
             <div class="court-contact">
                 ${court.phone ? `<a href="tel:${safePhoneHref}" class="btn-secondary btn-sm">📞 ${safePhoneLabel}</a>` : ''}
                 ${safeWebsiteHref ? `<a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🌐 Website</a>` : ''}
-                <a href="${directionsHref}" target="_blank" rel="noopener noreferrer" class="btn-primary btn-sm">🗺 Get Directions</a>
-            </div>
-        </div>`;
+            </div>`;
     },
 
     _playerCard(user, isLookingToPlay, currentUserId, courtId, amCheckedInHere) {
@@ -859,25 +849,22 @@ const MapView = {
         return ` until ${endLabel}`;
     },
 
-    _checkinBarHTML({ courtId, safeCourtName, amCheckedInHere, currentUserId, nowSessions, fullPage }) {
+    _checkinBarHTML({ courtId, safeCourtName, amCheckedInHere, currentUserId, nowSessions }) {
         if (!amCheckedInHere) {
-            const checkInAction = fullPage ? 'MapView.fullPageCheckIn' : 'MapView.checkIn';
             return `
                 <div class="checkin-status-bar">
-                    <button class="btn-primary btn-full" onclick="${checkInAction}(${courtId})">📍 Check In at ${safeCourtName}</button>
-                    <p class="checkin-hint">Check in first, then choose how many hours you're looking to play now.</p>
+                    <button class="btn-primary btn-full" onclick="MapView.checkIn(${courtId})">Check In at ${safeCourtName}</button>
+                    <p class="checkin-hint">Check in first, then choose how many hours you're looking to play.</p>
                 </div>`;
         }
 
-        const checkOutAction = fullPage ? 'MapView.fullPageCheckOut' : 'MapView.checkOut';
-        const createAction = fullPage ? 'MapView.fullPageStartLookingToPlayNow' : 'MapView.startLookingToPlayNow';
         const myNowSession = MapView._nowSessionByCreator(nowSessions, currentUserId);
         const activeDuration = MapView._nowSessionDurationMinutes(myNowSession);
         const durationButtons = MapView._quickPlayDurations()
             .map(minutes => `
                 <button
                     class="session-quick-btn ${activeDuration === minutes ? 'active' : ''}"
-                    onclick="${createAction}(${courtId}, ${minutes})"
+                    onclick="MapView.startLookingToPlayNow(${courtId}, ${minutes})"
                 >${MapView._formatQuickDuration(minutes)}</button>
             `)
             .join('');
@@ -892,12 +879,12 @@ const MapView = {
                     <span>You're checked in here</span>
                 </div>
                 <div class="checkin-actions">
-                    <button class="btn-sm btn-secondary" onclick="${checkOutAction}(${courtId})">Check Out</button>
+                    <button class="btn-sm btn-secondary" onclick="MapView.checkOut(${courtId})">Check Out</button>
                 </div>
                 <div class="checkin-play-controls">
                     <div class="checkin-play-header">
-                        <span>🎯 Looking to Play</span>
-                        <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${courtId})">📅 Schedule</button>
+                        <span>Looking to Play</span>
+                        <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${courtId})">Schedule</button>
                     </div>
                     <p class="checkin-play-help">${helpText}</p>
                     <div class="session-duration-buttons checkin-duration-buttons">
@@ -1122,11 +1109,10 @@ const MapView = {
             if (typeof LocationService !== 'undefined' && typeof LocationService.setCheckedInCourt === 'function') {
                 LocationService.setCheckedInCourt(courtId);
             }
-            App.toast('Checked in! Others can now see you\'re here.');
-            await MapView.refreshMyStatus();
-            MapView.openCourtDetail(courtId);
+            App.toast("Checked in! Others can now see you're here.");
+            MapView._refreshCourt(courtId);
             MapView.loadCourts();
-        } catch (err) {
+        } catch {
             App.toast('Failed to check in', 'error');
         }
     },
@@ -1138,23 +1124,27 @@ const MapView = {
                 LocationService.clearCheckedInCourt();
             }
             App.toast('Checked out. See you next time!');
-            await MapView.refreshMyStatus();
-            MapView.openCourtDetail(courtId);
+            MapView._refreshCourt(courtId);
             MapView.loadCourts();
-        } catch (err) {
+        } catch {
             App.toast('Failed to check out', 'error');
         }
     },
 
+    /** Legacy aliases for full-page check-in/check-out */
+    async fullPageCheckIn(courtId) { MapView.checkIn(courtId); },
+    async fullPageCheckOut(courtId) { MapView.checkOut(courtId); },
+
     async startLookingToPlayNow(courtId, durationMinutes = 120) {
-        await MapView._createLookingToPlaySession(courtId, durationMinutes, false);
+        await MapView._createLookingToPlaySession(courtId, durationMinutes);
     },
 
+    /** Legacy alias */
     async fullPageStartLookingToPlayNow(courtId, durationMinutes = 120) {
-        await MapView._createLookingToPlaySession(courtId, durationMinutes, true);
+        await MapView._createLookingToPlaySession(courtId, durationMinutes);
     },
 
-    async _createLookingToPlaySession(courtId, durationMinutes, fullPage) {
+    async _createLookingToPlaySession(courtId, durationMinutes) {
         const token = localStorage.getItem('token');
         if (!token) { Auth.showModal(); return; }
 
@@ -1182,11 +1172,7 @@ const MapView = {
                 duration_minutes: parsedDuration,
             });
             App.toast(`Looking to Play now for ${MapView._formatQuickDuration(parsedDuration)}.`);
-            if (fullPage) {
-                await MapView._refreshFullPage(courtId);
-            } else {
-                MapView.openCourtDetail(courtId);
-            }
+            MapView._refreshCourt(courtId);
             MapView.loadCourts();
         } catch (err) {
             App.toast(err.message || 'Failed to create looking-to-play session', 'error');
@@ -1204,277 +1190,27 @@ const MapView = {
         } catch { App.toast('Failed to submit report', 'error'); }
     },
 
-    /** ── Full-Page Court View HTML ────────────────────────────── */
-    _courtFullPageHTML(court, sessions) {
-        sessions = sessions || [];
-        const checkedIn = court.checked_in_users || [];
-        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-        const myStatus = MapView.myCheckinStatus || {};
-        const amCheckedInHere = myStatus.checked_in && myStatus.court_id === court.id;
-        const events = court.upcoming_events || [];
-        const images = court.images || [];
-        const communityInfo = court.community_info || {};
-        const pendingUpdates = court.pending_updates_count || 0;
-        const safeCourtName = MapView._escapeHtml(court.name || '');
-        const safeCourtAddress = MapView._escapeHtml(court.address || '');
-        const safeCourtCity = MapView._escapeHtml(court.city || '');
-        const safeCourtZip = MapView._escapeHtml(court.zip_code || '');
-        const safeDescription = MapView._escapeHtml(court.description || '');
-        const safeSurfaceType = MapView._escapeHtml(court.surface_type || 'Unknown');
-        const safeFees = MapView._escapeHtml(court.fees || 'Unknown');
-        const safeSkillLevels = MapView._escapeHtml((court.skill_levels || 'all').replace(/,/g, ', '));
-        const safeHours = MapView._escapeHtml(court.hours || '');
-        const safeOpenPlaySchedule = MapView._escapeHtml(court.open_play_schedule || '');
-        const safePhoneHref = MapView._safeTel(court.phone || '');
-        const safeWebsiteHref = MapView._safeHttpUrl(court.website || '');
-        const directionsHref = MapView._formatDirectionsUrl(court.latitude, court.longitude);
-        const escapedCourtName = MapView._escapeAttr(
-            MapView._escapeJsSingleQuoted(court.name || '')
-        );
+    /** Legacy: _courtDetailHTML redirects to _courtInfoHTML */
+    _courtDetailHTML(court, sessions) { return MapView._courtInfoHTML(court, sessions); },
 
-        // Amenities
-        const amenities = [];
-        if (court.has_restrooms) amenities.push('<span class="amenity">🚻 Restrooms</span>');
-        if (court.has_parking) amenities.push('<span class="amenity">🅿️ Parking</span>');
-        if (court.has_water) amenities.push('<span class="amenity">💧 Water</span>');
-        if (court.lighted) amenities.push('<span class="amenity">💡 Lighted</span>');
-        if (court.nets_provided) amenities.push('<span class="amenity">🥅 Nets Provided</span>');
-        if (court.paddle_rental) amenities.push('<span class="amenity">🏓 Paddle Rental</span>');
-        if (court.has_pro_shop) amenities.push('<span class="amenity">🛒 Pro Shop</span>');
-        if (court.has_ball_machine) amenities.push('<span class="amenity">⚙️ Ball Machine</span>');
-        if (court.wheelchair_accessible) amenities.push('<span class="amenity">♿ Accessible</span>');
-
-        const typeLabel = court.court_type === 'dedicated' ? 'Dedicated Pickleball' :
-                          court.court_type === 'converted' ? 'Converted (tennis lines)' : 'Shared Facility';
-
-        const liveSections = MapView._buildLiveCourtSections(
-            court,
-            sessions,
-            currentUser.id,
-            amCheckedInHere,
-        );
-        const nowSessions = liveSections.nowSessions;
-        const sessionsHTML = liveSections.sessionsHTML;
-        const playersHTML = liveSections.playersHTML;
-        const matchBanner = liveSections.matchBannerHTML;
-        const players = liveSections.activePlayers;
-
-        const checkinBtnHTML = MapView._checkinBarHTML({
-            courtId: court.id,
-            safeCourtName,
-            amCheckedInHere,
-            currentUserId: currentUser.id,
-            nowSessions,
-            fullPage: true,
-        });
-
-        return `
-        <div class="cfp">
-            <!-- Top bar -->
-            <div class="cfp-topbar">
-                <button class="btn-secondary cfp-back-btn" onclick="MapView.closeFullPage()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-                    Back to Map
-                </button>
-                <div class="cfp-topbar-info">
-                    <h1>${safeCourtName}</h1>
-                    ${court.verified ? '<span class="verified-badge">✓ Verified</span>' : ''}
-                </div>
-                <div class="cfp-topbar-actions">
-                    <a href="${directionsHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🗺 Directions</a>
-                    ${court.phone ? `<a href="tel:${safePhoneHref}" class="btn-secondary btn-sm">📞 Call</a>` : ''}
-                    ${safeWebsiteHref ? `<a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🌐 Web</a>` : ''}
-                </div>
-            </div>
-
-            <p class="cfp-address">${safeCourtAddress}, ${safeCourtCity}, CA ${safeCourtZip}</p>
-
-            ${checkinBtnHTML}
-
-            <div id="court-live-status-full" class="cfp-live-bar ${players > 0 ? 'active' : ''}">
-                ${MapView._liveStatusInnerHTML(court, players)}
-            </div>
-
-            <div id="court-match-banner-full">${matchBanner}</div>
-
-            <!-- Two-column layout -->
-            <div class="cfp-grid">
-                <!-- LEFT COLUMN: Sessions + Players + Competitive -->
-                <div class="cfp-main">
-                    <!-- Open to Play Sessions -->
-                    <div class="cfp-card">
-                        <div class="section-header">
-                            <h3>🎯 Looking to Play</h3>
-                            <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">📅 Schedule</button>
-                        </div>
-                        <div id="court-sessions-live-full">${sessionsHTML}</div>
-                    </div>
-
-                    <!-- Who's Here -->
-                    <div class="cfp-card">
-                        <div class="section-header">
-                            <h3>Who's Here</h3>
-                            <span id="court-player-count-full" class="player-count-badge">${checkedIn.length}</span>
-                        </div>
-                        <div id="court-players-live-full" class="players-section-inner">
-                            ${playersHTML}
-                        </div>
-                    </div>
-
-                    <!-- Competitive Play (loaded dynamically) -->
-                    <div class="cfp-card" id="court-ranked-section">
-                        <div class="loading">Loading competitive play...</div>
-                    </div>
-
-                    <!-- Quick Actions -->
-                    <div class="cfp-card">
-                        <h3>Quick Actions</h3>
-                        <div class="quick-actions-grid cfp-actions-grid">
-                            <button class="quick-action-btn" onclick="Ranked.joinQueue(${court.id})">
-                                <span class="quick-action-icon">⚔️</span>
-                                <span>Join Queue</span>
-                            </button>
-                            <button class="quick-action-btn" onclick="MapView.inviteToCourtPlay(${court.id}, '${escapedCourtName}')">
-                                <span class="quick-action-icon">👥</span>
-                                <span>Invite Friends</span>
-                            </button>
-                            <button class="quick-action-btn" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">
-                                <span class="quick-action-icon">📝</span>
-                                <span>Suggest Update</span>
-                            </button>
-                            <button class="quick-action-btn" onclick="MapView.reportCourt(${court.id})">
-                                <span class="quick-action-icon">⚠️</span>
-                                <span>Report Issue</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Court Info -->
-                    <div class="cfp-card">
-                        <h3>Court Info</h3>
-                        ${court.description ? `<p class="court-desc">${safeDescription}</p>` : ''}
-                        <div class="court-info-grid">
-                            <div class="info-item"><span class="info-label">Type</span><span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'}</span></div>
-                            <div class="info-item"><span class="info-label">Courts</span><span>${court.num_courts}</span></div>
-                            <div class="info-item"><span class="info-label">Surface</span><span>${safeSurfaceType}</span></div>
-                            <div class="info-item"><span class="info-label">Setup</span><span>${typeLabel}</span></div>
-                            <div class="info-item"><span class="info-label">Fees</span><span>${safeFees}</span></div>
-                            <div class="info-item"><span class="info-label">Skill Levels</span><span>${safeSkillLevels}</span></div>
-                            ${court.hours ? `<div class="info-item info-item-full"><span class="info-label">Hours</span><span>${safeHours}</span></div>` : ''}
-                        </div>
-                        ${court.open_play_schedule ? `<div class="court-sub-section" style="margin-top:12px"><strong>Open Play Schedule</strong><p class="schedule-text">${safeOpenPlaySchedule}</p></div>` : ''}
-                        <div class="court-sub-section" style="margin-top:12px">
-                            <strong>Amenities</strong>
-                            <div class="amenities-grid">${amenities.join('') || '<span class="muted">No amenities listed</span>'}</div>
-                        </div>
-                    </div>
-
-                    <div class="cfp-card">
-                        <div class="section-header">
-                            <h3>🧾 Community Info</h3>
-                            ${pendingUpdates > 0 ? `<span class="player-count-badge">${pendingUpdates} pending</span>` : ''}
-                            <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">+ Suggest Update</button>
-                        </div>
-                        ${MapView._communityInfoHTML(communityInfo)}
-                    </div>
-
-                    <div class="cfp-card">
-                        <div class="section-header">
-                            <h3>🖼 Court Images</h3>
-                            <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">+ Add Photo</button>
-                        </div>
-                        ${MapView._imageGalleryHTML(images)}
-                    </div>
-
-                    <div class="cfp-card">
-                        <div class="section-header">
-                            <h3>📅 Upcoming Events</h3>
-                            <button class="btn-secondary btn-sm" onclick="CourtUpdates.openModal(${court.id}, '${escapedCourtName}')">+ Add Event</button>
-                        </div>
-                        ${MapView._eventCardsHTML(events)}
-                    </div>
-
-                    <!-- Busyness Patterns -->
-                    <div class="cfp-card">
-                        <h3>📊 Busyness Patterns</h3>
-                        ${MapView._busynessChart(court.busyness)}
-                    </div>
-                </div>
-
-                <!-- RIGHT COLUMN: Chat -->
-                <div class="cfp-sidebar">
-                    <div class="cfp-chat-card">
-                        <div class="cfp-chat-header">
-                            <h3>💬 Court Chat</h3>
-                            <span class="muted">${safeCourtName}</span>
-                        </div>
-                        <div id="fullpage-chat-messages" class="cfp-chat-messages"></div>
-                        <form class="cfp-chat-input" onsubmit="MapView.sendFullPageChat(event, ${court.id})">
-                            <input type="text" id="fullpage-chat-input" placeholder="Message players at this court..." autocomplete="off">
-                            <button type="submit" class="btn-primary btn-sm">Send</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>`;
-    },
-
-    /** Close full page and return to map */
-    closeFullPage() {
-        App.showView('map');
-        // Leave chat room
-        if (MapView.currentCourtId && Chat.socket) {
-            Chat.socket.emit('leave', { room: `court_${MapView.currentCourtId}` });
-        }
-    },
-
-    /** Full-page check-in (refreshes full page instead of side panel) */
-    async fullPageCheckIn(courtId) {
-        const token = localStorage.getItem('token');
-        if (!token) { Auth.showModal(); return; }
-        try {
-            await API.post('/api/presence/checkin', { court_id: courtId });
-            if (typeof LocationService !== 'undefined' && typeof LocationService.setCheckedInCourt === 'function') {
-                LocationService.setCheckedInCourt(courtId);
-            }
-            App.toast("Checked in! Others can now see you're here.");
-            MapView._refreshFullPage(courtId);
-            MapView.loadCourts();
-        } catch (err) {
-            App.toast('Failed to check in', 'error');
-        }
-    },
-
-    /** Full-page check-out */
-    async fullPageCheckOut(courtId) {
-        try {
-            await API.post('/api/presence/checkout', {});
-            if (typeof LocationService !== 'undefined' && typeof LocationService.clearCheckedInCourt === 'function') {
-                LocationService.clearCheckedInCourt();
-            }
-            App.toast('Checked out. See you next time!');
-            MapView._refreshFullPage(courtId);
-            MapView.loadCourts();
-        } catch (err) {
-            App.toast('Failed to check out', 'error');
-        }
-    },
+    /** Legacy alias: close full page = back to main */
+    closeFullPage() { App.backToMain(); },
 
     renderCourtList() {
         const el = document.getElementById('court-list-items');
         if (!el) return;
         const filtered = MapView._filterCourts(MapView.courts);
         el.innerHTML = filtered.map(c => `
-            <div class="court-list-card" onclick="MapView.openCourtDetail(${c.id}); MapView.map.setView([${c.latitude},${c.longitude}], 14);">
+            <div class="court-list-card" onclick="App.openCourtDetails(${c.id}); MapView.map.setView([${c.latitude},${c.longitude}], 14);">
                 <div class="court-list-name">${MapView._escapeHtml(c.name)}</div>
                 <div class="court-list-meta">
                     <span>${c.indoor ? '🏢' : '☀️'} ${MapView._escapeHtml(c.city)}</span>
                     <span>${c.num_courts} court${c.num_courts > 1 ? 's' : ''}</span>
-                    ${c.distance !== undefined ? `<span>📍 ${c.distance} mi</span>` : ''}
-                    ${c.active_players > 0 ? `<span class="live-badge">🟢 ${c.active_players}</span>` : ''}
-                    ${MapView._friendsAtCourt(c.id).length > 0 ? `<span class="friend-badge">👥 ${MapView._friendsAtCourt(c.id).length}</span>` : ''}
+                    ${c.distance !== undefined ? `<span>${c.distance} mi</span>` : ''}
+                    ${c.active_players > 0 ? `<span class="live-badge">${c.active_players}</span>` : ''}
+                    ${MapView._friendsAtCourt(c.id).length > 0 ? `<span class="friend-badge">${MapView._friendsAtCourt(c.id).length}</span>` : ''}
                 </div>
-                ${c.hours ? `<div class="court-list-hours">🕐 ${MapView._escapeHtml(c.hours)}</div>` : ''}
+                ${c.hours ? `<div class="court-list-hours">${MapView._escapeHtml(c.hours)}</div>` : ''}
             </div>
         `).join('') || '<p class="muted">No courts match your filter</p>';
     },

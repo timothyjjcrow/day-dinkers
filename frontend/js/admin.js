@@ -685,7 +685,7 @@ const AdminPage = {
                 ${reviewed ? `<p class="muted">Reviewed ${reviewed}${item.reviewed_by?.username ? ` by ${AdminPage._escapeHtml(item.reviewed_by.username)}` : ''}</p>` : ''}
                 ${item.reviewer_notes ? `<p class="muted">Reviewer note: ${AdminPage._escapeHtml(item.reviewer_notes)}</p>` : ''}
                 <div class="admin-detail-actions">
-                    <button class="btn-secondary btn-sm" onclick="MapView.openCourtDetail(${item.court_id}); App.showView('map')">Open Court</button>
+                    <button class="btn-secondary btn-sm" onclick="App.openCourtDetails(${item.court_id})">Open Court</button>
                 </div>
             </div>
 
@@ -803,7 +803,7 @@ const AdminPage = {
                 <p>${AdminPage._escapeHtml(item.description || 'No extra description provided.')}</p>
                 <p class="muted">Reported ${created} by ${AdminPage._escapeHtml(item.reported_by?.username || `User #${item.user_id}`)}</p>
                 <div class="admin-detail-actions">
-                    <button class="btn-secondary btn-sm" onclick="MapView.openCourtDetail(${item.court_id}); App.showView('map')">Open Court</button>
+                    <button class="btn-secondary btn-sm" onclick="App.openCourtDetails(${item.court_id})">Open Court</button>
                 </div>
             </div>
 
@@ -860,7 +860,7 @@ const AdminPage = {
                     ${reviewed ? `<p class="muted">Reviewed ${reviewed}${item.reviewed_by?.username ? ` by ${AdminPage._escapeHtml(item.reviewed_by.username)}` : ''}</p>` : ''}
                     ${item.reviewer_notes ? `<p class="muted">Reviewer note: ${AdminPage._escapeHtml(item.reviewer_notes)}</p>` : ''}
                     <div class="admin-detail-actions">
-                        <button class="btn-secondary btn-sm" onclick="MapView.openCourtDetail(${item.court_id}); App.showView('map')">Open Court</button>
+                        <button class="btn-secondary btn-sm" onclick="App.openCourtDetails(${item.court_id})">Open Court</button>
                     </div>
                 </div>
 
@@ -958,7 +958,7 @@ const AdminPage = {
                 <p>${AdminPage._escapeHtml(item.description || 'No description provided.')}</p>
                 <p class="muted">Reported ${created} by ${AdminPage._escapeHtml(item.user?.username || '')}</p>
                 <div class="admin-detail-actions">
-                    <button class="btn-secondary btn-sm" onclick="MapView.openCourtDetail(${item.court_id}); App.showView('map')">Open Court</button>
+                    <button class="btn-secondary btn-sm" onclick="App.openCourtDetails(${item.court_id})">Open Court</button>
                 </div>
             </div>
 

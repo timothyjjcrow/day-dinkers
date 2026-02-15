@@ -200,7 +200,7 @@ Object.assign(Ranked, {
             <div class="ranked-sub-section">
                 <h5>🏆 Court Leaderboard</h5>
                 ${lbHTML}
-                <button class="btn-secondary btn-sm" onclick="App.showView('ranked'); Ranked.loadLeaderboard(${courtId})" style="margin-top:8px">View Full Leaderboard</button>
+                <button class="btn-secondary btn-sm" onclick="App.setCourtTab('leaderboard')" style="margin-top:8px">View Full Leaderboard</button>
             </div>
         </div>`;
     },

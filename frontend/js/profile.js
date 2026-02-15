@@ -89,7 +89,7 @@ const Profile = {
                 <div class="profile-section">
                     <h3>⚔️ Match History</h3>
                     <div id="profile-match-history">Loading...</div>
-                    <button class="btn-secondary btn-sm" onclick="App.showView('ranked')" style="margin-top:8px">View Full Leaderboard</button>
+                    <button class="btn-secondary btn-sm" onclick="App.setMainTab('sessions')" style="margin-top:8px">Find a Court</button>
                 </div>
                 <div class="profile-section">
                     <h3>🟢 My Sessions</h3>
@@ -109,7 +109,7 @@ const Profile = {
                 </div>
                 <div class="profile-section" id="profile-court-review-section" style="display:none">
                     <h3>🧾 Court Update Review Queue</h3>
-                    <button class="btn-secondary btn-sm" onclick="App.showView('admin')" style="margin-bottom:8px">Open Admin Console</button>
+                    <button class="btn-secondary btn-sm" onclick="App.showScreen('admin')" style="margin-bottom:8px">Open Admin Console</button>
                     <p id="profile-review-auto-apply-note" class="muted"></p>
                     <div class="form-row">
                         <div class="form-group">
@@ -288,7 +288,7 @@ const Profile = {
             const res = await API.get('/api/sessions/my');
             const sessions = (res.sessions || []).slice(0, 5);
             if (!sessions.length) {
-                el.innerHTML = '<p class="muted">No active or upcoming sessions. <a href="#" onclick="App.showView(\'sessions\')">Browse open sessions</a></p>';
+                el.innerHTML = '<p class="muted">No active or upcoming sessions. <a href="#" onclick="App.setMainTab(\'sessions\')">Browse open sessions</a></p>';
                 return;
             }
             el.innerHTML = sessions.map(s => {
@@ -306,7 +306,7 @@ const Profile = {
                 const heading = isNow ? 'Open to Play Session' : 'Scheduled Session';
                 const gameType = Profile._e((s.game_type || 'open').replace(/_/g, ' '));
                 return `
-                <div class="session-card-mini" onclick="App.showView('sessions'); setTimeout(() => Sessions.openDetail(${s.id}), 200);">
+                <div class="session-card-mini" onclick="App.setMainTab('sessions'); setTimeout(() => Sessions.openDetail(${s.id}), 200);">
                     <div class="session-mini-header">
                         <strong>${Profile._e(heading)}</strong>
                         ${isNow ? '<span class="live-badge-sm">🟢 LIVE</span>' : ''}

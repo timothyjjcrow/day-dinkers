@@ -2,166 +2,238 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Third Shot - California Pickleball</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <link rel="icon" type="image/png" href="assets/third-shot-logo.png">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <!-- Top Navigation -->
-    <nav id="navbar">
-        <div class="nav-left">
-            <div class="logo" onclick="App.showView('map')" aria-label="Third Shot home">
-                <img class="logo-wordmark" src="assets/third-shot-logo.png" alt="Third Shot logo">
-            </div>
-            <div class="county-switcher">
-                <select id="county-select" onchange="App.onCountyChange(this.value)" aria-label="Select county">
-                    <option value="humboldt">Humboldt County</option>
-                </select>
-                <button class="county-location-btn" onclick="App.useLocationCounty()" title="Use my location to set county">Use my location</button>
-            </div>
-            <span class="nav-region">Humboldt County</span>
+
+    <!-- ═══ App Header ═══ -->
+    <header id="app-header">
+        <div class="header-left">
+            <img class="header-logo" src="assets/third-shot-logo.png" alt="Third Shot" onclick="App.showScreen('main')">
         </div>
-        <div class="nav-center">
-            <div class="search-bar">
-                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                <input type="text" id="search-input" placeholder="Search courts, cities...">
-            </div>
+        <div class="header-center">
+            <select id="county-select" onchange="App.onCountyChange(this.value)" aria-label="Select county">
+                <option value="humboldt">Humboldt County</option>
+            </select>
+            <button class="header-icon-btn" onclick="App.useLocationCounty()" title="Use my location">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
+            </button>
         </div>
-        <div class="nav-right">
-            <button class="nav-btn" id="btn-sessions" onclick="App.showView('sessions')" title="Open to Play" aria-label="Open to Play sessions">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-            </button>
-            <button class="nav-btn" id="btn-ranked" onclick="App.showView('ranked')" title="Ranked" aria-label="Ranked leaderboard">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-            </button>
-            <button class="nav-btn" id="btn-admin" onclick="App.showView('admin')" title="Admin Review" aria-label="Admin review console" style="display:none">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 4v5c0 5-3.5 8.74-7 9-3.5-.26-7-4-7-9V7l7-4z"/><path d="M9 12l2 2 4-4"/></svg>
-            </button>
-            <button class="nav-btn" id="btn-notifications" onclick="App.toggleNotifications()" title="Notifications" aria-label="Notifications">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <div class="header-right">
+            <button class="header-icon-btn" id="btn-notifications" onclick="App.toggleNotifications()" title="Notifications">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                 <span class="badge" id="notif-badge" style="display:none">0</span>
             </button>
-            <button class="nav-btn" id="btn-profile" onclick="App.showView('profile')" title="Profile" aria-label="Profile" style="display:none">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <button class="header-auth-btn" id="btn-auth" onclick="Auth.showModal()">Sign In</button>
+            <button class="header-avatar-btn" id="btn-profile" onclick="App.setMainTab('profile')" style="display:none" title="Profile">
+                <span id="header-user-initial">?</span>
             </button>
-            <button class="nav-btn auth-btn" id="btn-auth" onclick="Auth.showModal()">Sign In</button>
         </div>
-    </nav>
+    </header>
 
-    <!-- Location Opt-in Banner -->
+    <!-- Location Consent Banner -->
     <div id="location-consent-banner" class="location-consent-banner" style="display:none">
-        <span>Enable location for nearby-court distance and optional auto check-in.</span>
+        <span>Enable location for nearby courts and check-in.</span>
         <div class="location-consent-actions">
             <button class="btn-primary btn-sm" onclick="App.enableLocationTracking()">Enable</button>
             <button class="btn-secondary btn-sm" onclick="App.dismissLocationPrompt()">Not now</button>
         </div>
     </div>
 
-    <!-- Map View (Main) -->
-    <div id="map-container">
-        <div id="map"></div>
-        <div id="map-filters">
-            <div class="mobile-search-inline">
-                <input type="text" id="mobile-search-input" placeholder="🔍 Search courts, cities...">
+    <!-- ═══════════════════════════════════════════════
+         MAIN SCREEN
+         ═══════════════════════════════════════════════ -->
+    <div id="main-screen" class="screen">
+        <!-- Main Tab Bar -->
+        <div id="main-tab-bar" class="tab-bar">
+            <button class="tab active" data-tab="map" onclick="App.setMainTab('map')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span>Map</span>
+            </button>
+            <button class="tab" data-tab="sessions" onclick="App.setMainTab('sessions')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <span>Open to Play</span>
+            </button>
+            <button class="tab" data-tab="profile" onclick="App.setMainTab('profile')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span>Profile</span>
+            </button>
+        </div>
+
+        <!-- Map Tab -->
+        <div id="map-tab" class="tab-content active">
+            <div id="map-container">
+                <div id="map"></div>
+                <div id="map-filters">
+                    <div class="mobile-search-inline">
+                        <input type="text" id="mobile-search-input" placeholder="Search courts, cities...">
+                    </div>
+                    <button class="filter-chip active" data-filter="all" onclick="MapView.setFilter('all')">All Courts</button>
+                    <button class="filter-chip" data-filter="outdoor" onclick="MapView.setFilter('outdoor')">Outdoor</button>
+                    <button class="filter-chip" data-filter="indoor" onclick="MapView.setFilter('indoor')">Indoor</button>
+                    <button class="filter-chip" data-filter="lighted" onclick="MapView.setFilter('lighted')">Lighted</button>
+                    <button class="filter-chip" data-filter="free" onclick="MapView.setFilter('free')">Free</button>
+                    <button class="filter-chip" data-filter="dedicated" onclick="MapView.setFilter('dedicated')">Dedicated</button>
+                    <button class="filter-chip" data-filter="active" onclick="MapView.setFilter('active')">Players Now</button>
+                    <button class="filter-chip filter-chip-smart" onclick="MapView.openBestCourtNow()">Best Right Now</button>
+                    <span id="map-last-updated" class="map-last-updated"></span>
+                </div>
+                <button id="locate-btn" onclick="MapView.locateUser()" title="My Location" aria-label="Center map on my location">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
+                </button>
+                <button id="list-toggle" onclick="MapView.toggleCourtList()">Court List</button>
+                <div id="court-list-sidebar" class="court-list-sidebar" style="display:none">
+                    <div class="sidebar-header"><h3>Nearby Courts</h3><button onclick="MapView.toggleCourtList()">&times;</button></div>
+                    <div id="court-list-items"></div>
+                </div>
             </div>
-            <button class="filter-chip active" data-filter="all" onclick="MapView.setFilter('all')">All Courts</button>
-            <button class="filter-chip" data-filter="outdoor" onclick="MapView.setFilter('outdoor')">Outdoor</button>
-            <button class="filter-chip" data-filter="indoor" onclick="MapView.setFilter('indoor')">Indoor</button>
-            <button class="filter-chip" data-filter="lighted" onclick="MapView.setFilter('lighted')">Lighted</button>
-            <button class="filter-chip" data-filter="free" onclick="MapView.setFilter('free')">Free</button>
-            <button class="filter-chip" data-filter="dedicated" onclick="MapView.setFilter('dedicated')">Dedicated</button>
-            <button class="filter-chip" data-filter="active" onclick="MapView.setFilter('active')">🟢 Players Now</button>
-            <button class="filter-chip filter-chip-smart" onclick="MapView.openBestCourtNow()">⭐ Best Right Now</button>
-            <span id="map-last-updated" class="map-last-updated"></span>
         </div>
-        <button id="locate-btn" onclick="MapView.locateUser()" title="My Location" aria-label="Center map on my location">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
-        </button>
-        <!-- Court list sidebar toggle -->
-        <button id="list-toggle" onclick="MapView.toggleCourtList()">📋 Court List</button>
-        <div id="court-list-sidebar" class="court-list-sidebar" style="display:none">
-            <div class="sidebar-header"><h3>Nearby Courts</h3><button onclick="MapView.toggleCourtList()">&times;</button></div>
-            <div id="court-list-items"></div>
+
+        <!-- Sessions (Open to Play) Tab -->
+        <div id="sessions-tab" class="tab-content">
+            <div class="tab-page">
+                <div class="tab-page-header">
+                    <h2>Open to Play</h2>
+                    <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Session</button>
+                </div>
+                <div class="sessions-filters">
+                    <select id="sessions-type-filter" onchange="Sessions.load()">
+                        <option value="all">All Types</option>
+                        <option value="now">Active Now</option>
+                        <option value="scheduled">Upcoming</option>
+                    </select>
+                    <select id="sessions-visibility-filter" onchange="Sessions.load()">
+                        <option value="all">All Sessions</option>
+                        <option value="friends">Friends Only</option>
+                    </select>
+                    <select id="sessions-skill-filter" onchange="Sessions.load()">
+                        <option value="all">All Levels</option>
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate">Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                    </select>
+                </div>
+                <div id="sessions-list" class="card-list"></div>
+            </div>
+        </div>
+
+        <!-- Profile Tab -->
+        <div id="profile-tab" class="tab-content">
+            <div class="tab-page">
+                <div id="profile-page-content"></div>
+            </div>
         </div>
     </div>
 
-    <!-- Court Detail Panel (Side Panel) -->
-    <div id="court-panel" class="side-panel">
-        <button class="panel-close" onclick="App.closePanel()" aria-label="Close court details">&times;</button>
-        <div id="court-detail"></div>
+    <!-- ═══════════════════════════════════════════════
+         COURT DETAILS SCREEN
+         ═══════════════════════════════════════════════ -->
+    <div id="court-details-screen" class="screen" style="display:none">
+        <div id="court-details-header">
+            <button class="back-btn" onclick="App.backToMain()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <div class="court-details-title">
+                <h2 id="court-details-name"></h2>
+                <p id="court-details-address" class="muted"></p>
+            </div>
+            <a id="court-directions-link" class="directions-btn" href="#" target="_blank" rel="noopener noreferrer" title="Get Directions">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
+            </a>
+        </div>
+
+        <!-- Court Tab Bar -->
+        <div id="court-tab-bar" class="tab-bar">
+            <button class="tab active" data-tab="court-info" onclick="App.setCourtTab('court-info')">Court</button>
+            <button class="tab" data-tab="ranked" onclick="App.setCourtTab('ranked')">Ranked</button>
+            <button class="tab" data-tab="leaderboard" onclick="App.setCourtTab('leaderboard')">Leaderboard</button>
+        </div>
+
+        <!-- Court Info Tab -->
+        <div id="court-info-tab" class="court-tab-content active">
+            <div id="court-info-content"></div>
+            <div id="court-chat-section" class="court-chat-section">
+                <h3>Court Chat</h3>
+                <div id="court-chat-messages" class="court-chat-messages"></div>
+                <form class="court-chat-form" onsubmit="MapView.sendCourtChat(event)">
+                    <input type="text" id="court-chat-input" placeholder="Message players here..." autocomplete="off">
+                    <button type="submit" class="btn-primary btn-sm">Send</button>
+                </form>
+            </div>
+            <!-- Updates Popout Trigger -->
+            <div id="updates-popout-trigger" class="updates-popout-trigger">
+                <button onclick="App.toggleUpdatesSheet()">
+                    <span>Suggest Court Update</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 15l-6-6-6 6"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Ranked Tab -->
+        <div id="court-ranked-tab" class="court-tab-content">
+            <div id="pending-confirmations" class="ranked-pending" style="display:none"></div>
+            <div id="court-ranked-section">
+                <div class="loading">Loading ranked play...</div>
+            </div>
+        </div>
+
+        <!-- Leaderboard Tab -->
+        <div id="court-leaderboard-tab" class="court-tab-content">
+            <div class="leaderboard-section">
+                <h3>Court Leaderboard</h3>
+                <div id="leaderboard-content" class="card-list"></div>
+            </div>
+            <div class="leaderboard-section">
+                <h3>County Leaderboard</h3>
+                <div id="county-leaderboard-content" class="card-list"></div>
+            </div>
+            <div class="leaderboard-section">
+                <h3>Recent Matches</h3>
+                <div id="match-history-content"></div>
+            </div>
+        </div>
+
+        <!-- Bottom Sheet for Court Updates -->
+        <div id="updates-bottom-sheet" class="bottom-sheet" style="display:none">
+            <div class="bottom-sheet-overlay" onclick="App.toggleUpdatesSheet()"></div>
+            <div class="bottom-sheet-panel">
+                <div class="bottom-sheet-handle" onclick="App.toggleUpdatesSheet()"><div class="handle-bar"></div></div>
+                <div class="bottom-sheet-content" id="updates-sheet-body"></div>
+            </div>
+        </div>
     </div>
 
-    <!-- Court Full Page View -->
-    <div id="court-fullpage-view" class="view court-fullpage" style="display:none">
-        <div id="court-fullpage-content"></div>
-    </div>
-
-    <!-- Profile View -->
-    <div id="profile-view" class="view" style="display:none">
-        <div id="profile-page-content"></div>
-    </div>
-
-    <!-- Sessions (Open to Play) View -->
-    <div id="sessions-view" class="view" style="display:none">
-        <div class="view-header">
-            <h2>Open to Play</h2>
-            <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule Session</button>
+    <!-- ═══════════════════════════════════════════════
+         ADMIN VIEW (standalone)
+         ═══════════════════════════════════════════════ -->
+    <div id="admin-view" class="screen" style="display:none">
+        <div class="admin-header">
+            <button class="back-btn" onclick="App.showScreen('main')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <h2>Admin Console</h2>
         </div>
-        <div class="sessions-filters">
-            <select id="sessions-type-filter" onchange="Sessions.load()">
-                <option value="all">All Types</option>
-                <option value="now">Active Now</option>
-                <option value="scheduled">Upcoming</option>
-            </select>
-            <select id="sessions-visibility-filter" onchange="Sessions.load()">
-                <option value="all">All Sessions</option>
-                <option value="friends">Friends Only</option>
-            </select>
-            <select id="sessions-skill-filter" onchange="Sessions.load()">
-                <option value="all">All Skill Levels</option>
-                <option value="beginner">Beginner (2.0-2.5)</option>
-                <option value="intermediate">Intermediate (3.0-3.5)</option>
-                <option value="advanced">Advanced (4.0+)</option>
-            </select>
-        </div>
-        <div id="sessions-list" class="card-list"></div>
-    </div>
-
-    <!-- Ranked/Leaderboard View -->
-    <div id="ranked-view" class="view" style="display:none">
-        <div class="view-header">
-            <h2>⚔️ Ranked Leaderboard</h2>
-        </div>
-        <div class="ranked-filters">
-            <select id="ranked-court-filter" onchange="Ranked.loadLeaderboard(this.value ? parseInt(this.value) : null)">
-                <option value="">All Courts</option>
-            </select>
-        </div>
-        <div id="pending-confirmations" class="ranked-pending" style="display:none"></div>
-        <div id="leaderboard-content" class="card-list"></div>
-        <div class="ranked-section" style="margin-top:24px">
-            <h3>Recent Matches</h3>
-            <div id="match-history-content"></div>
-        </div>
-    </div>
-
-    <!-- Admin Review View -->
-    <div id="admin-view" class="view" style="display:none">
         <div id="admin-page-content"></div>
     </div>
 
-    <!-- Match Create / Score / Confirmation Modal -->
+    <!-- ═══════════════════════════════════════════════
+         MODALS (unchanged)
+         ═══════════════════════════════════════════════ -->
+
+    <!-- Match Modal -->
     <div id="match-modal" class="modal" style="display:none"></div>
 
     <!-- Auth Modal -->
     <div id="auth-modal" class="modal" style="display:none">
         <div class="modal-content auth-modal-content">
-            <button class="modal-close" onclick="Auth.hideModal()" aria-label="Close authentication dialog">&times;</button>
+            <button class="modal-close" onclick="Auth.hideModal()" aria-label="Close">&times;</button>
             <div class="auth-tabs">
                 <button class="auth-tab active" onclick="Auth.switchTab('login')">Sign In</button>
                 <button class="auth-tab" onclick="Auth.switchTab('register')">Sign Up</button>
@@ -199,8 +271,8 @@
     <!-- Create Session Modal -->
     <div id="session-modal" class="modal" style="display:none">
         <div class="modal-content">
-            <button class="modal-close" onclick="Sessions.hideCreateModal()" aria-label="Close create session dialog">&times;</button>
-            <h2>📅 Schedule Looking to Play</h2>
+            <button class="modal-close" onclick="Sessions.hideCreateModal()">&times;</button>
+            <h2>Schedule Looking to Play</h2>
             <form id="create-session-form" onsubmit="Sessions.create(event)">
                 <div class="form-group">
                     <label>Court</label>
@@ -216,15 +288,14 @@
                             <button type="button" class="session-quick-btn" data-preset="next_week">Next Week</button>
                             <button type="button" class="session-quick-btn" data-preset="custom">Custom</button>
                         </div>
-                        <p class="muted session-quick-help">Pick a day and time in one tap, or use custom fields below.</p>
                     </div>
                     <div class="form-group">
                         <label>Quick Time</label>
                         <div class="session-time-buttons" id="session-time-buttons">
                             <button type="button" class="session-quick-btn" data-time-slot="next">Next Available</button>
-                            <button type="button" class="session-quick-btn" data-time-slot="07:00">7:00 AM</button>
-                            <button type="button" class="session-quick-btn" data-time-slot="09:00">9:00 AM</button>
-                            <button type="button" class="session-quick-btn" data-time-slot="12:00">12:00 PM</button>
+                            <button type="button" class="session-quick-btn" data-time-slot="07:00">7 AM</button>
+                            <button type="button" class="session-quick-btn" data-time-slot="09:00">9 AM</button>
+                            <button type="button" class="session-quick-btn" data-time-slot="12:00">12 PM</button>
                             <button type="button" class="session-quick-btn" data-time-slot="17:30">5:30 PM</button>
                             <button type="button" class="session-quick-btn active" data-time-slot="18:30">6:30 PM</button>
                             <button type="button" class="session-quick-btn" data-time-slot="19:30">7:30 PM</button>
@@ -238,17 +309,15 @@
                             <input type="hidden" name="duration_minutes" id="session-duration-select" value="90">
                             <div class="session-duration-buttons" id="session-duration-buttons">
                                 <button type="button" class="session-quick-btn" data-duration="60">1h</button>
-                                <button type="button" class="session-quick-btn active" data-duration="90">1h 30m</button>
+                                <button type="button" class="session-quick-btn active" data-duration="90">1.5h</button>
                                 <button type="button" class="session-quick-btn" data-duration="120">2h</button>
-                                <button type="button" class="session-quick-btn" data-duration="150">2h 30m</button>
+                                <button type="button" class="session-quick-btn" data-duration="150">2.5h</button>
                                 <button type="button" class="session-quick-btn" data-duration="180">3h</button>
                                 <button type="button" class="session-quick-btn" data-duration="custom">Custom</button>
                             </div>
                         </div>
                     </div>
-                    <div class="session-schedule-summary" id="session-schedule-summary">
-                        Choose a day and time to schedule your session.
-                    </div>
+                    <div class="session-schedule-summary" id="session-schedule-summary">Choose a day and time to schedule your session.</div>
                     <div class="form-row">
                         <div class="form-group"><label>End Time <span class="muted">(optional)</span></label><input type="datetime-local" name="end_time" id="session-end-time" step="900"></div>
                         <div class="form-group">
@@ -263,53 +332,28 @@
                     <div class="form-group" id="session-recurrence-count-group" style="display:none">
                         <label>Occurrences</label>
                         <select name="recurrence_count" id="session-recurrence-count" onchange="Sessions._renderScheduleSummary()">
-                            <option value="2">2 sessions</option>
-                            <option value="3">3 sessions</option>
-                            <option value="4" selected>4 sessions</option>
-                            <option value="6">6 sessions</option>
-                            <option value="8">8 sessions</option>
+                            <option value="2">2 sessions</option><option value="3">3 sessions</option>
+                            <option value="4" selected>4 sessions</option><option value="6">6 sessions</option><option value="8">8 sessions</option>
                         </select>
                     </div>
                 </div>
                 <div class="form-row">
-                    <div class="form-group">
-                        <label>Max Players</label>
-                        <input type="number" name="max_players" value="4" min="2" max="20">
-                    </div>
-                    <div class="form-group">
-                        <label>Visibility</label>
-                        <select name="visibility">
-                            <option value="all">🌐 Open to All Players</option>
-                            <option value="friends">👥 Friends Only</option>
-                        </select>
+                    <div class="form-group"><label>Max Players</label><input type="number" name="max_players" value="4" min="2" max="20"></div>
+                    <div class="form-group"><label>Visibility</label>
+                        <select name="visibility"><option value="all">Open to All</option><option value="friends">Friends Only</option></select>
                     </div>
                 </div>
                 <div class="form-row">
-                    <div class="form-group">
-                        <label>Skill Level</label>
-                        <select name="skill_level">
-                            <option value="all">All Levels</option>
-                            <option value="beginner">Beginner</option>
-                            <option value="intermediate">Intermediate</option>
-                            <option value="advanced">Advanced</option>
-                        </select>
+                    <div class="form-group"><label>Skill Level</label>
+                        <select name="skill_level"><option value="all">All Levels</option><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select>
                     </div>
-                    <div class="form-group">
-                        <label>Game Type</label>
-                        <select name="game_type">
-                            <option value="open">Open Play</option>
-                            <option value="doubles">Doubles</option>
-                            <option value="singles">Singles</option>
-                            <option value="round_robin">Round Robin</option>
-                        </select>
+                    <div class="form-group"><label>Game Type</label>
+                        <select name="game_type"><option value="open">Open Play</option><option value="doubles">Doubles</option><option value="singles">Singles</option><option value="round_robin">Round Robin</option></select>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>Notes <span class="muted">(optional)</span></label>
-                    <textarea name="notes" rows="2" placeholder="Casual doubles, all welcome!"></textarea>
-                </div>
+                <div class="form-group"><label>Notes <span class="muted">(optional)</span></label><textarea name="notes" rows="2" placeholder="Casual doubles, all welcome!"></textarea></div>
                 <div class="form-group" id="session-invite-section" style="display:none">
-                    <label>Invite Friends <span class="muted">(optional)</span></label>
+                    <label>Invite Friends</label>
                     <div id="session-invite-friends" class="friend-picker"></div>
                 </div>
                 <button type="submit" class="btn-primary btn-full">Schedule Session</button>
@@ -317,10 +361,10 @@
         </div>
     </div>
 
-    <!-- Invite Friends Modal (reusable) -->
+    <!-- Invite Friends Modal -->
     <div id="invite-modal" class="modal" style="display:none">
         <div class="modal-content modal-sm">
-            <button class="modal-close" onclick="App.hideInviteModal()" aria-label="Close invite dialog">&times;</button>
+            <button class="modal-close" onclick="App.hideInviteModal()">&times;</button>
             <h2 id="invite-modal-title">Invite Friends</h2>
             <div id="invite-modal-friends" class="friend-picker"></div>
             <button id="invite-modal-send" class="btn-primary btn-full" style="margin-top:12px">Send Invites</button>
@@ -330,37 +374,23 @@
     <!-- Court Update Submission Modal -->
     <div id="court-update-modal" class="modal" style="display:none">
         <div class="modal-content court-update-modal-content">
-            <button class="modal-close" onclick="CourtUpdates.hideModal()" aria-label="Close court update dialog">&times;</button>
+            <button class="modal-close" onclick="CourtUpdates.hideModal()">&times;</button>
             <h2 id="court-update-title">Suggest Court Update</h2>
             <p class="muted">Share accurate court changes. Submissions are reviewed before publishing.</p>
-
             <form id="court-update-form" onsubmit="CourtUpdates.submit(event)">
                 <input type="hidden" id="court-update-court-id" name="court_id">
-
                 <div class="court-update-section">
                     <h3>1) Update Summary</h3>
-                    <div class="form-group">
-                        <label>What changed? <span class="muted">(required)</span></label>
-                        <textarea name="summary" rows="2" required placeholder="Example: Hours changed and two courts were resurfaced."></textarea>
-                    </div>
+                    <div class="form-group"><label>What changed?</label><textarea name="summary" rows="2" required placeholder="Example: Hours changed and two courts were resurfaced."></textarea></div>
                     <div class="form-row">
-                        <div class="form-group">
-                            <label>How confident are you?</label>
-                            <select name="confidence_level">
-                                <option value="high">High — I confirmed in person</option>
-                                <option value="medium" selected>Medium — likely accurate</option>
-                                <option value="low">Low — needs extra verification</option>
-                            </select>
+                        <div class="form-group"><label>Confidence</label>
+                            <select name="confidence_level"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select>
                         </div>
-                        <div class="form-group">
-                            <label>Source / context</label>
-                            <input type="text" name="source_notes" placeholder="Pro shop staff, city website, tournament flyer...">
-                        </div>
+                        <div class="form-group"><label>Source</label><input type="text" name="source_notes" placeholder="Pro shop, city website..."></div>
                     </div>
                 </div>
-
                 <div class="court-update-section">
-                    <h3>2) Location Corrections</h3>
+                    <h3>2) Location</h3>
                     <div class="form-row">
                         <div class="form-group"><label>Address</label><input type="text" name="loc_address"></div>
                         <div class="form-group"><label>City</label><input type="text" name="loc_city"></div>
@@ -373,43 +403,28 @@
                         <div class="form-group"><label>Latitude</label><input type="number" step="any" name="loc_latitude"></div>
                         <div class="form-group"><label>Longitude</label><input type="number" step="any" name="loc_longitude"></div>
                     </div>
-                    <div class="form-group"><label>Location notes</label><textarea name="location_notes" rows="2" placeholder="Pin is on the wrong parking lot entrance..."></textarea></div>
+                    <div class="form-group"><label>Location notes</label><textarea name="location_notes" rows="2"></textarea></div>
                 </div>
-
                 <div class="court-update-section">
                     <h3>3) Court Info</h3>
                     <div class="form-row">
                         <div class="form-group"><label>Court name</label><input type="text" name="court_name"></div>
-                        <div class="form-group"><label>Number of courts</label><input type="number" min="1" max="100" name="court_num_courts"></div>
+                        <div class="form-group"><label>Num courts</label><input type="number" min="1" max="100" name="court_num_courts"></div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group"><label>Surface type</label><input type="text" name="court_surface_type" placeholder="Concrete, asphalt, sport court..."></div>
-                        <div class="form-group">
-                            <label>Court setup</label>
-                            <select name="court_type">
-                                <option value="">No change</option>
-                                <option value="dedicated">Dedicated Pickleball</option>
-                                <option value="converted">Converted / lined tennis</option>
-                                <option value="shared">Shared multi-use</option>
-                            </select>
+                        <div class="form-group"><label>Surface</label><input type="text" name="court_surface_type" placeholder="Concrete, asphalt..."></div>
+                        <div class="form-group"><label>Setup</label>
+                            <select name="court_type"><option value="">No change</option><option value="dedicated">Dedicated</option><option value="converted">Converted</option><option value="shared">Shared</option></select>
                         </div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group">
-                            <label>Indoor / outdoor</label>
-                            <select name="court_indoor">
-                                <option value="">No change</option>
-                                <option value="true">Indoor</option>
-                                <option value="false">Outdoor</option>
-                            </select>
+                        <div class="form-group"><label>Indoor/outdoor</label>
+                            <select name="court_indoor"><option value="">No change</option><option value="true">Indoor</option><option value="false">Outdoor</option></select>
                         </div>
-                        <div class="form-group">
-                            <label>Skill levels</label>
-                            <input type="text" name="court_skill_levels" placeholder="all, beginner, 3.0+, ...">
-                        </div>
+                        <div class="form-group"><label>Skill levels</label><input type="text" name="court_skill_levels" placeholder="all, beginner, 3.0+"></div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group"><label>Fees / drop-in cost</label><input type="text" name="court_fees"></div>
+                        <div class="form-group"><label>Fees</label><input type="text" name="court_fees"></div>
                         <div class="form-group"><label>Phone</label><input type="text" name="court_phone"></div>
                     </div>
                     <div class="form-row">
@@ -417,9 +432,8 @@
                         <div class="form-group"><label>Email</label><input type="email" name="court_email"></div>
                     </div>
                     <div class="form-group"><label>Description</label><textarea name="court_description" rows="2"></textarea></div>
-
                     <div class="form-group">
-                        <label>Amenities / access updates</label>
+                        <label>Amenities</label>
                         <div class="court-update-checkbox-grid">
                             <label><input type="checkbox" name="amenity_lighted"> Lighted</label>
                             <label><input type="checkbox" name="amenity_has_restrooms"> Restrooms</label>
@@ -427,53 +441,45 @@
                             <label><input type="checkbox" name="amenity_has_water"> Water</label>
                             <label><input type="checkbox" name="amenity_has_pro_shop"> Pro shop</label>
                             <label><input type="checkbox" name="amenity_has_ball_machine"> Ball machine</label>
-                            <label><input type="checkbox" name="amenity_wheelchair_accessible"> Wheelchair accessible</label>
-                            <label><input type="checkbox" name="amenity_nets_provided"> Nets provided</label>
+                            <label><input type="checkbox" name="amenity_wheelchair_accessible"> Accessible</label>
+                            <label><input type="checkbox" name="amenity_nets_provided"> Nets</label>
                             <label><input type="checkbox" name="amenity_paddle_rental"> Paddle rental</label>
                         </div>
                     </div>
                 </div>
-
                 <div class="court-update-section">
-                    <h3>4) Hours & Schedule</h3>
-                    <div class="form-group"><label>Court hours</label><textarea name="hours_text" rows="2" placeholder="Mon-Fri 7am-9pm, Sat-Sun 8am-8pm"></textarea></div>
-                    <div class="form-group"><label>Open play schedule</label><textarea name="open_play_schedule" rows="2" placeholder="Mon/Wed/Fri 9am-11am all levels"></textarea></div>
-                    <div class="form-group"><label>Hours notes / seasonal changes</label><textarea name="hours_notes" rows="2"></textarea></div>
+                    <h3>4) Hours</h3>
+                    <div class="form-group"><label>Court hours</label><textarea name="hours_text" rows="2" placeholder="Mon-Fri 7am-9pm..."></textarea></div>
+                    <div class="form-group"><label>Open play schedule</label><textarea name="open_play_schedule" rows="2"></textarea></div>
+                    <div class="form-group"><label>Hours notes</label><textarea name="hours_notes" rows="2"></textarea></div>
                     <div class="form-row">
-                        <div class="form-group"><label>Best times to play</label><input type="text" name="best_times" placeholder="Weekday mornings are least crowded"></div>
-                        <div class="form-group"><label>Closure / maintenance notes</label><input type="text" name="closure_notes" placeholder="Closed Jan 5-8 for resurfacing"></div>
+                        <div class="form-group"><label>Best times</label><input type="text" name="best_times"></div>
+                        <div class="form-group"><label>Closure notes</label><input type="text" name="closure_notes"></div>
                     </div>
                 </div>
-
                 <div class="court-update-section">
-                    <h3>5) Court Images</h3>
-                    <p class="muted">Add image links and/or upload photos from your device.</p>
+                    <h3>5) Images</h3>
                     <div id="court-update-image-rows"></div>
                     <button type="button" class="btn-secondary btn-sm" onclick="CourtUpdates.addImageRow()">+ Add Image Link</button>
                     <div class="form-group" style="margin-top:10px">
-                        <label>Upload photos from device</label>
+                        <label>Upload photos</label>
                         <input type="file" id="court-update-image-files" accept="image/*" multiple>
-                        <p class="muted">Up to 8 images total. Keep each image under 2MB for best results.</p>
                     </div>
                 </div>
-
                 <div class="court-update-section">
-                    <h3>6) Upcoming Events</h3>
+                    <h3>6) Events</h3>
                     <div id="court-update-event-rows"></div>
                     <button type="button" class="btn-secondary btn-sm" onclick="CourtUpdates.addEventRow()">+ Add Event</button>
                 </div>
-
                 <div class="court-update-section">
                     <h3>7) Extra Notes</h3>
                     <div class="form-group"><label>Parking notes</label><textarea name="parking_notes" rows="2"></textarea></div>
-                    <div class="form-group"><label>Access / entrance notes</label><textarea name="access_notes" rows="2"></textarea></div>
-                    <div class="form-group"><label>Court rules / local etiquette</label><textarea name="court_rules" rows="2"></textarea></div>
-                    <div class="form-group"><label>Additional court info</label><textarea name="additional_info" rows="2" placeholder="Windy in afternoons, bring extra balls..."></textarea></div>
+                    <div class="form-group"><label>Access notes</label><textarea name="access_notes" rows="2"></textarea></div>
+                    <div class="form-group"><label>Court rules</label><textarea name="court_rules" rows="2"></textarea></div>
+                    <div class="form-group"><label>Additional info</label><textarea name="additional_info" rows="2"></textarea></div>
                 </div>
-
                 <button type="submit" class="btn-primary btn-full">Send Update For Review</button>
             </form>
-
             <div class="court-update-submissions">
                 <h3>My Recent Submissions</h3>
                 <div id="court-update-my-submissions"></div>
@@ -487,11 +493,11 @@
         <div id="notifications-list" class="dropdown-list"></div>
     </div>
 
-    <!-- Chat Panel -->
+    <!-- Chat Panel (DMs) -->
     <div id="chat-panel" class="chat-panel" style="display:none">
         <div class="chat-header">
             <h3 id="chat-title">Chat</h3>
-            <button class="panel-close" onclick="Chat.close()" aria-label="Close chat panel">&times;</button>
+            <button class="panel-close" onclick="Chat.close()">&times;</button>
         </div>
         <div id="chat-messages" class="chat-messages"></div>
         <form class="chat-input" onsubmit="Chat.send(event)">
@@ -502,6 +508,7 @@
 
     <div id="toast-container"></div>
 
+    <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="js/api.js"></script>
