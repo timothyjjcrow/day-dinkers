@@ -1639,15 +1639,16 @@ img { max-width: 100%; display: block; }
 .session-quick-buttons, .session-time-buttons, .session-duration-buttons {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
 }
 .session-quick-btn {
-    padding: 7px 12px;
+    padding: 6px 10px;
     border: 1px solid var(--border);
-    border-radius: 18px;
+    border-radius: 16px;
     background: var(--bg-card);
     font-size: 12px;
     font-weight: 600;
+    line-height: 1.2;
     color: #334155;
     cursor: pointer;
     font-family: inherit;
@@ -1663,60 +1664,70 @@ img { max-width: 100%; display: block; }
     border-color: var(--primary);
 }
 .session-schedule-summary {
-    font-size: 13px;
+    font-size: 12.5px;
     color: #334155;
-    padding: 10px;
+    padding: 9px 10px;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
     border-radius: var(--radius-sm);
-    margin-bottom: 10px;
     line-height: 1.4;
 }
 
 /* Session create modal */
-.session-modal-content { max-width: 640px; }
+.session-modal-content { max-width: 560px; }
 .session-modal-subtitle {
-    font-size: 13px;
+    font-size: 12.5px;
     color: var(--text-muted);
-    margin: 4px 0 12px;
+    margin: 4px 0 10px;
     padding-right: 24px;
 }
-.session-create-form { display: flex; flex-direction: column; gap: 12px; }
-.session-form-section {
+.session-create-form { display: flex; flex-direction: column; gap: 10px; }
+.session-form-primary {
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 12px;
+    padding: 10px;
     background: #fcfdff;
 }
-.session-form-section-title {
-    font-size: 14px;
-    font-weight: 700;
+.session-quick-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+}
+.session-quick-group {
     margin-bottom: 8px;
+}
+.session-quick-group:last-child {
+    margin-bottom: 0;
 }
 .session-modal-content .form-row {
     display: grid;
     grid-template-columns: 1fr;
     gap: 8px;
 }
+.session-form-timing,
 .session-form-advanced {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--bg-card);
 }
+.session-form-timing > summary,
 .session-form-advanced > summary {
     cursor: pointer;
     font-size: 13px;
     font-weight: 700;
     color: #334155;
     list-style: none;
-    padding: 12px;
+    padding: 10px 12px;
 }
+.session-form-timing > summary::-webkit-details-marker,
 .session-form-advanced > summary::-webkit-details-marker { display: none; }
+.session-form-timing > summary::after,
 .session-form-advanced > summary::after {
     content: 'v';
     float: right;
     color: #64748b;
 }
+.session-form-timing[open] > summary::after,
 .session-form-advanced[open] > summary::after { content: '^'; }
 .session-form-advanced-body { padding: 0 12px 12px; }
 #session-submit-btn { min-height: 44px; font-size: 14px; }

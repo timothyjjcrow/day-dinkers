@@ -834,6 +834,8 @@ const Sessions = {
         if (modalContent) modalContent.scrollTop = 0;
         const advancedOptions = modal.querySelector('.session-form-advanced');
         if (advancedOptions) advancedOptions.open = false;
+        const timingOptions = modal.querySelector('#session-form-timing');
+        if (timingOptions) timingOptions.open = false;
         const form = document.getElementById('create-session-form');
         if (form && typeof form.reset === 'function') {
             form.reset();
@@ -1027,6 +1029,11 @@ const Sessions = {
         });
     },
 
+    _openTimingDetails() {
+        const timingDetails = document.getElementById('session-form-timing');
+        if (timingDetails) timingDetails.open = true;
+    },
+
     _activeQuickDayPreset() {
         const active = document.querySelector('#session-quick-buttons .session-quick-btn.active');
         return active?.dataset?.preset || null;
@@ -1075,7 +1082,7 @@ const Sessions = {
     },
 
     _quickTimeSlots() {
-        return ['07:00', '09:00', '12:00', '17:30', '18:30', '19:30'];
+        return ['09:00', '12:00', '17:30', '18:30'];
     },
 
     _timeSlotToMinutes(slot) {
@@ -1123,6 +1130,7 @@ const Sessions = {
 
         Sessions._setQuickPresetActive(preset);
         if (preset === 'custom') {
+            Sessions._openTimingDetails();
             startInput.focus();
             Sessions._renderScheduleSummary();
             return;
@@ -1196,6 +1204,7 @@ const Sessions = {
             return;
         }
         if (slot === 'custom') {
+            Sessions._openTimingDetails();
             startInput.focus();
             Sessions._renderScheduleSummary();
             return;
@@ -1241,6 +1250,7 @@ const Sessions = {
         }
         Sessions._syncDurationButtonsFromValue(durationSelect.value);
         if (durationSelect.value === 'custom') {
+            Sessions._openTimingDetails();
             if (endInput) endInput.focus();
             Sessions._renderScheduleSummary();
             return;
@@ -1275,7 +1285,7 @@ const Sessions = {
 
         const start = Sessions._parseDateTimeLocal(startInput.value);
         if (!start) {
-            summaryEl.textContent = 'Choose a day and time to schedule your session.';
+            summaryEl.textContent = 'Choose a day and time above.';
             Sessions._updateScheduleSubmitButton(null);
             return;
         }
@@ -1306,7 +1316,7 @@ const Sessions = {
             minute: '2-digit',
         });
 
-        let summary = `Scheduling ${startDateLabel} at ${startTimeLabel} • ${durationLabel}`;
+        let summary = `${startDateLabel} at ${startTimeLabel} • ${durationLabel}`;
         if (end && end > start) {
             const endTimeLabel = end.toLocaleTimeString('en-US', {
                 hour: 'numeric',
@@ -1315,9 +1325,7 @@ const Sessions = {
             summary += ` • Ends ${endTimeLabel}`;
         }
         const recurrence = document.getElementById('session-recurrence-select')?.value || 'none';
-        if (recurrence === 'none') {
-            summary += ' • One-time';
-        } else {
+        if (recurrence !== 'none') {
             const recurrenceCountRaw = parseInt(
                 document.getElementById('session-recurrence-count')?.value || '4',
                 10
@@ -1326,7 +1334,7 @@ const Sessions = {
                 ? Math.max(2, recurrenceCountRaw)
                 : 4;
             const recurrenceLabel = recurrence === 'biweekly' ? 'Every 2 weeks' : 'Weekly';
-            summary += ` • ${recurrenceLabel} (${recurrenceCount} sessions)`;
+            summary += ` • ${recurrenceLabel} x${recurrenceCount}`;
         }
         summaryEl.textContent = summary;
         Sessions._updateScheduleSubmitButton(start);
@@ -1348,7 +1356,7 @@ const Sessions = {
             hour: 'numeric',
             minute: '2-digit',
         });
-        submitBtn.textContent = `Schedule for ${dayLabel} at ${timeLabel}`;
+        submitBtn.textContent = `Schedule ${dayLabel} ${timeLabel}`;
     },
 
     _formatDurationLabel(totalMinutes) {
