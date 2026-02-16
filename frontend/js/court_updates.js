@@ -100,6 +100,9 @@ const CourtUpdates = {
             <button type="button" class="btn-secondary btn-sm" onclick="CourtUpdates.removeRow(this)">Remove Event</button>
         `;
         rows.appendChild(row);
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.enhanceWithin(row);
+        }
     },
 
     removeRow(buttonEl) {

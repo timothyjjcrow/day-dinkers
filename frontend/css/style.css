@@ -1635,6 +1635,56 @@ img { max-width: 100%; display: block; }
 .form-row { display: flex; gap: 8px; }
 .form-row .form-group { flex: 1; }
 
+/* Shared datetime picker (flatpickr) */
+input.flatpickr-input[readonly] {
+    background: var(--bg-card);
+    cursor: pointer;
+}
+.flatpickr-calendar {
+    font-family: inherit;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+}
+.flatpickr-calendar.open {
+    z-index: 5000;
+}
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-current-month input.cur-year {
+    font-family: inherit;
+}
+.flatpickr-day {
+    border-radius: 8px;
+}
+.flatpickr-day.selected,
+.flatpickr-day.startRange,
+.flatpickr-day.endRange,
+.flatpickr-day.selected.inRange,
+.flatpickr-day.startRange.inRange,
+.flatpickr-day.endRange.inRange {
+    background: var(--primary);
+    border-color: var(--primary);
+}
+.flatpickr-time input,
+.flatpickr-time .flatpickr-am-pm {
+    font-size: 16px;
+    min-height: 34px;
+}
+@media (max-width: 520px) {
+    .flatpickr-calendar {
+        width: min(360px, calc(100vw - 20px));
+    }
+    .flatpickr-day {
+        max-width: 41px;
+        height: 41px;
+        line-height: 41px;
+    }
+    .flatpickr-time input,
+    .flatpickr-time .flatpickr-am-pm {
+        min-height: 38px;
+    }
+}
+
 /* Session quick buttons */
 .session-quick-buttons, .session-time-buttons, .session-duration-buttons {
     display: flex;

@@ -63,7 +63,9 @@ Object.assign(Ranked, {
     _defaultScheduleTime() {
         const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
         d.setMinutes(0, 0, 0);
-        return d.toISOString().slice(0, 16);
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T`
+            + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
     },
 
     // ── Match Creation Modal ────────────────────────────────────────

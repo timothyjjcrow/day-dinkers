@@ -577,6 +577,11 @@ const App = {
 
         // Update user avatar in header
         App._updateHeaderAvatar();
+
+        // Apply enhanced datetime pickers to static scheduling inputs.
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.init(document);
+        }
     },
 
     _updateHeaderAvatar() {

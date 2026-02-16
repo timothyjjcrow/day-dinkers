@@ -115,6 +115,9 @@ Object.assign(Ranked, {
                 <button type="submit" class="btn-primary btn-full">Send Scheduled Challenge</button>
             </form>
         </div>`;
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.enhanceWithin(modal);
+        }
     },
 
     async createCourtScheduledChallenge(e, courtId) {
@@ -123,6 +126,7 @@ Object.assign(Ranked, {
         const targetUserId = parseInt(document.getElementById('court-scheduled-opponent').value, 10);
         const scheduledFor = document.getElementById('court-scheduled-time').value;
         if (!targetUserId) { App.toast('Pick an opponent.', 'error'); return; }
+        if (!scheduledFor) { App.toast('Pick a scheduled time.', 'error'); return; }
 
         const parsed = Ranked._parseDoublesTeams('court-scheduled', currentUser.id, targetUserId);
         if (!parsed) return;
@@ -190,6 +194,9 @@ Object.assign(Ranked, {
                     <button type="submit" class="btn-primary btn-full">Send Scheduled Challenge</button>
                 </form>
             </div>`;
+            if (typeof DateTimePicker !== 'undefined') {
+                DateTimePicker.enhanceWithin(modal);
+            }
         } catch {
             App.toast('Unable to open scheduled challenge', 'error');
         }
@@ -200,6 +207,7 @@ Object.assign(Ranked, {
         const currentUser = Ranked._currentUser();
         const courtId = parseInt(document.getElementById('scheduled-challenge-court').value, 10);
         const scheduledFor = document.getElementById('scheduled-challenge-time').value;
+        if (!scheduledFor) { App.toast('Pick a scheduled time.', 'error'); return; }
 
         const parsed = Ranked._parseDoublesTeams('scheduled-challenge', currentUser.id, targetUserId);
         if (!parsed) return;

@@ -840,6 +840,9 @@ const Sessions = {
         if (form && typeof form.reset === 'function') {
             form.reset();
         }
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.enhanceWithin(modal);
+        }
 
         await Sessions._populateCourtSelect(preselectedCourtId);
         Sessions._populateInviteFriendOptions();
@@ -909,13 +912,21 @@ const Sessions = {
 
         const onStartInput = () => {
             if (!startInput.value) {
-                endInput.min = '';
+                if (typeof DateTimePicker !== 'undefined') {
+                    DateTimePicker.setMin(endInput, '');
+                } else {
+                    endInput.min = '';
+                }
                 Sessions._setQuickPresetActive('custom');
                 Sessions._setQuickTimeActive('custom');
                 Sessions._renderScheduleSummary();
                 return;
             }
-            endInput.min = startInput.value;
+            if (typeof DateTimePicker !== 'undefined') {
+                DateTimePicker.setMin(endInput, startInput.value);
+            } else {
+                endInput.min = startInput.value;
+            }
             if (durationSelect.value !== 'custom') {
                 Sessions._syncEndFromDuration();
             }
@@ -985,11 +996,20 @@ const Sessions = {
 
         const minStart = Sessions._roundUpToMinutes(new Date(Date.now() + 5 * 60000), 15);
         const minValue = Sessions._formatDateTimeLocal(minStart);
-        startInput.min = minValue;
-        endInput.min = minValue;
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.setMin(startInput, minValue);
+            DateTimePicker.setMin(endInput, minValue);
+        } else {
+            startInput.min = minValue;
+            endInput.min = minValue;
+        }
 
         if (preserveExisting && startInput.value) {
-            endInput.min = startInput.value;
+            if (typeof DateTimePicker !== 'undefined') {
+                DateTimePicker.setMin(endInput, startInput.value);
+            } else {
+                endInput.min = startInput.value;
+            }
             if (durationSelect.value !== 'custom') {
                 Sessions._syncEndFromDuration();
             }
@@ -1131,7 +1151,11 @@ const Sessions = {
         Sessions._setQuickPresetActive(preset);
         if (preset === 'custom') {
             Sessions._openTimingDetails();
-            startInput.focus();
+            if (typeof DateTimePicker !== 'undefined') {
+                DateTimePicker.focus(startInput);
+            } else {
+                startInput.focus();
+            }
             Sessions._renderScheduleSummary();
             return;
         }
@@ -1150,7 +1174,12 @@ const Sessions = {
         const minStart = Sessions._roundUpToMinutes(new Date(Date.now() + 5 * 60000), 15);
         if (quickStart < minStart) quickStart = minStart;
 
-        startInput.value = Sessions._formatDateTimeLocal(quickStart);
+        const quickStartValue = Sessions._formatDateTimeLocal(quickStart);
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.setValue(startInput, quickStartValue);
+        } else {
+            startInput.value = quickStartValue;
+        }
         Sessions._syncEndFromDuration();
         Sessions._syncQuickSelectorsFromStart();
         Sessions._renderScheduleSummary();
@@ -1197,7 +1226,12 @@ const Sessions = {
             const dayPreset = Sessions._activeQuickDayPreset();
             const currentStart = Sessions._parseDateTimeLocal(startInput.value);
             const nextStart = Sessions._resolveNextAvailableStart(dayPreset, currentStart);
-            startInput.value = Sessions._formatDateTimeLocal(nextStart);
+            const nextStartValue = Sessions._formatDateTimeLocal(nextStart);
+            if (typeof DateTimePicker !== 'undefined') {
+                DateTimePicker.setValue(startInput, nextStartValue);
+            } else {
+                startInput.value = nextStartValue;
+            }
             Sessions._syncEndFromDuration();
             Sessions._syncQuickSelectorsFromStart();
             Sessions._renderScheduleSummary();
@@ -1205,7 +1239,11 @@ const Sessions = {
         }
         if (slot === 'custom') {
             Sessions._openTimingDetails();
-            startInput.focus();
+            if (typeof DateTimePicker !== 'undefined') {
+                DateTimePicker.focus(startInput);
+            } else {
+                startInput.focus();
+            }
             Sessions._renderScheduleSummary();
             return;
         }
@@ -1235,7 +1273,12 @@ const Sessions = {
             }
         }
 
-        startInput.value = Sessions._formatDateTimeLocal(start);
+        const startValue = Sessions._formatDateTimeLocal(start);
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.setValue(startInput, startValue);
+        } else {
+            startInput.value = startValue;
+        }
         Sessions._syncEndFromDuration();
         Sessions._syncQuickSelectorsFromStart();
         Sessions._renderScheduleSummary();
@@ -1251,7 +1294,13 @@ const Sessions = {
         Sessions._syncDurationButtonsFromValue(durationSelect.value);
         if (durationSelect.value === 'custom') {
             Sessions._openTimingDetails();
-            if (endInput) endInput.focus();
+            if (endInput) {
+                if (typeof DateTimePicker !== 'undefined') {
+                    DateTimePicker.focus(endInput);
+                } else {
+                    endInput.focus();
+                }
+            }
             Sessions._renderScheduleSummary();
             return;
         }
@@ -1265,7 +1314,11 @@ const Sessions = {
         const durationSelect = document.getElementById('session-duration-select');
         if (!startInput || !endInput || !durationSelect || !startInput.value) return;
 
-        endInput.min = startInput.value;
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.setMin(endInput, startInput.value);
+        } else {
+            endInput.min = startInput.value;
+        }
         if (durationSelect.value === 'custom') return;
 
         const minutes = parseInt(durationSelect.value, 10);
@@ -1273,7 +1326,12 @@ const Sessions = {
         const start = Sessions._parseDateTimeLocal(startInput.value);
         if (!start) return;
         const end = new Date(start.getTime() + minutes * 60000);
-        endInput.value = Sessions._formatDateTimeLocal(end);
+        const endValue = Sessions._formatDateTimeLocal(end);
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.setValue(endInput, endValue);
+        } else {
+            endInput.value = endValue;
+        }
     },
 
     _renderScheduleSummary() {
