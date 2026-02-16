@@ -179,6 +179,9 @@ const App = {
 
         if (tab === 'map') {
             setTimeout(() => { if (MapView.map) MapView.map.invalidateSize(); }, 100);
+            if (typeof MapView !== 'undefined' && typeof MapView.loadScheduleBanner === 'function') {
+                MapView.loadScheduleBanner();
+            }
         }
         if (tab === 'sessions') {
             Sessions.load();

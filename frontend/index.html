@@ -70,6 +70,23 @@
 
         <!-- Map Tab -->
         <div id="map-tab" class="tab-content active">
+            <section id="map-schedule-banner" class="map-schedule-banner">
+                <button
+                    id="map-schedule-banner-toggle"
+                    class="map-schedule-banner-toggle"
+                    type="button"
+                    onclick="MapView.toggleScheduleBanner()"
+                    aria-expanded="false"
+                    aria-controls="map-schedule-banner-days"
+                >
+                    <span class="map-schedule-banner-title-wrap">
+                        <span class="map-schedule-banner-title">Next 7 Days</span>
+                        <span id="map-schedule-banner-meta" class="map-schedule-banner-meta">Tap to view scheduled games</span>
+                    </span>
+                    <span id="map-schedule-banner-chevron" class="map-schedule-banner-chevron">▼</span>
+                </button>
+                <div id="map-schedule-banner-days" class="map-schedule-banner-days" hidden></div>
+            </section>
             <div id="map-container">
                 <div id="map"></div>
                 <div id="map-filters">

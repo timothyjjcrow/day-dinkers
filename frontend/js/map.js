@@ -15,6 +15,13 @@ const MapView = {
     myCheckinStatus: null, // { checked_in: bool, court_id }
     friendsPresence: [],  // [{user, court_id, checked_in_at}]
     friendMarkers: [],
+    scheduleBannerOpen: false,
+    scheduleBannerDays: [],
+    scheduleBannerLoading: false,
+    scheduleBannerError: '',
+    scheduleBannerLastLoadedAt: 0,
+    scheduleBannerLoadPromise: null,
+    scheduleBannerCountySlug: null,
 
     init() {
         MapView.map = L.map('map', {
@@ -26,6 +33,7 @@ const MapView = {
             maxZoom: 19,
         }).addTo(MapView.map);
 
+        MapView._renderScheduleBanner();
         MapView.loadCourts();
         MapView.refreshMyStatus();
     },
@@ -103,6 +111,7 @@ const MapView = {
                 MapView.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
             }
             MapView._setLastUpdated();
+            MapView.loadScheduleBanner();
         } catch (err) {
             console.error('Failed to load courts:', err);
         }
@@ -116,6 +125,230 @@ const MapView = {
             hour: 'numeric',
             minute: '2-digit',
         })}`;
+    },
+
+    toggleScheduleBanner(forceOpen) {
+        const nextState = typeof forceOpen === 'boolean'
+            ? forceOpen
+            : !MapView.scheduleBannerOpen;
+        MapView.scheduleBannerOpen = nextState;
+        MapView._renderScheduleBanner();
+        if (nextState && !MapView.scheduleBannerDays.length) {
+            MapView.loadScheduleBanner({ force: true });
+        }
+    },
+
+    async loadScheduleBanner(options = {}) {
+        const banner = document.getElementById('map-schedule-banner');
+        if (!banner) return;
+
+        const forceRequested = !!options.force;
+        const countySlug = (typeof App !== 'undefined' && typeof App.getSelectedCountySlug === 'function')
+            ? App.getSelectedCountySlug()
+            : null;
+        const countyChanged = countySlug && countySlug !== MapView.scheduleBannerCountySlug;
+        const force = forceRequested || countyChanged;
+        const freshnessMs = Date.now() - MapView.scheduleBannerLastLoadedAt;
+
+        if (!force && MapView.scheduleBannerDays.length > 0 && freshnessMs < 45000) {
+            MapView._renderScheduleBanner();
+            return;
+        }
+        if (MapView.scheduleBannerLoading && MapView.scheduleBannerLoadPromise) {
+            return MapView.scheduleBannerLoadPromise;
+        }
+
+        MapView.scheduleBannerLoading = true;
+        MapView.scheduleBannerError = '';
+        MapView._renderScheduleBanner();
+
+        MapView.scheduleBannerLoadPromise = (async () => {
+            try {
+                const res = await API.get('/api/sessions?type=scheduled');
+                const sessions = Array.isArray(res?.sessions) ? res.sessions : [];
+                MapView.scheduleBannerDays = MapView._buildScheduleBannerDays(sessions);
+                MapView.scheduleBannerLastLoadedAt = Date.now();
+                MapView.scheduleBannerCountySlug = countySlug;
+            } catch {
+                if (!MapView.scheduleBannerDays.length) {
+                    MapView.scheduleBannerDays = MapView._buildScheduleBannerDays([]);
+                }
+                MapView.scheduleBannerError = 'Unable to load upcoming sessions';
+            } finally {
+                MapView.scheduleBannerLoading = false;
+                MapView.scheduleBannerLoadPromise = null;
+                MapView._renderScheduleBanner();
+            }
+        })();
+
+        return MapView.scheduleBannerLoadPromise;
+    },
+
+    openScheduledDayFromBanner(dayKey) {
+        if (!dayKey) return;
+
+        const typeFilter = document.getElementById('sessions-type-filter');
+        if (typeFilter) typeFilter.value = 'scheduled';
+
+        if (typeof Sessions !== 'undefined') {
+            const targetDate = MapView._dateFromKey(dayKey);
+            if (targetDate) {
+                const today = MapView._startOfDay(new Date());
+                const targetDay = MapView._startOfDay(targetDate);
+                const diffDays = Math.floor((targetDay.getTime() - today.getTime()) / 86400000);
+                Sessions.calendarWeekOffset = Math.floor(diffDays / 7);
+            }
+            Sessions.calendarSelectedDayKey = dayKey;
+            Sessions.calendarExpanded = true;
+        }
+
+        App.setMainTab('sessions');
+
+        if (typeof Sessions !== 'undefined' && typeof Sessions.selectCalendarDate === 'function') {
+            setTimeout(() => {
+                Sessions.selectCalendarDate(dayKey);
+                if (!Sessions.calendarExpanded) {
+                    Sessions.calendarExpanded = true;
+                    if (typeof Sessions._rerenderFromCache === 'function') {
+                        Sessions._rerenderFromCache();
+                    }
+                }
+            }, 40);
+        }
+    },
+
+    _buildScheduleBannerDays(sessions) {
+        const today = MapView._startOfDay(new Date());
+        const endBoundary = new Date(today);
+        endBoundary.setDate(today.getDate() + 7);
+        const selectedCounty = (typeof App !== 'undefined' && typeof App.getSelectedCountySlug === 'function')
+            ? App.getSelectedCountySlug()
+            : '';
+        const grouped = {};
+
+        (sessions || []).forEach((session) => {
+            if (session?.session_type !== 'scheduled' || !session.start_time) return;
+            const start = new Date(session.start_time);
+            if (Number.isNaN(start.getTime())) return;
+            if (start < today || start >= endBoundary) return;
+
+            const sessionCounty = String(session.court?.county_slug || '')
+                .trim()
+                .toLowerCase();
+            if (selectedCounty && sessionCounty && sessionCounty !== selectedCounty) {
+                return;
+            }
+
+            const key = MapView._dateKey(start);
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(start);
+        });
+
+        const days = [];
+        for (let i = 0; i < 7; i += 1) {
+            const day = new Date(today);
+            day.setDate(today.getDate() + i);
+            const key = MapView._dateKey(day);
+            const starts = (grouped[key] || []).sort((a, b) => a.getTime() - b.getTime());
+            const firstStart = starts[0] || null;
+            const firstTimeLabel = firstStart
+                ? firstStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                : '';
+            days.push({
+                key,
+                date: day,
+                count: starts.length,
+                firstTimeLabel,
+            });
+        }
+        return days;
+    },
+
+    _renderScheduleBanner() {
+        const shell = document.getElementById('map-schedule-banner');
+        const toggleBtn = document.getElementById('map-schedule-banner-toggle');
+        const daysEl = document.getElementById('map-schedule-banner-days');
+        const metaEl = document.getElementById('map-schedule-banner-meta');
+        if (!shell || !toggleBtn || !daysEl || !metaEl) return;
+
+        shell.classList.toggle('open', MapView.scheduleBannerOpen);
+        toggleBtn.setAttribute('aria-expanded', MapView.scheduleBannerOpen ? 'true' : 'false');
+
+        const days = MapView.scheduleBannerDays.length
+            ? MapView.scheduleBannerDays
+            : MapView._buildScheduleBannerDays([]);
+        const totalGames = days.reduce((sum, day) => sum + day.count, 0);
+        const daysWithGames = days.filter(day => day.count > 0).length;
+
+        if (MapView.scheduleBannerLoading) {
+            metaEl.textContent = 'Loading upcoming sessions...';
+        } else if (MapView.scheduleBannerError) {
+            metaEl.textContent = MapView.scheduleBannerError;
+        } else if (!totalGames) {
+            metaEl.textContent = 'No scheduled games in the next 7 days';
+        } else {
+            metaEl.textContent = `${totalGames} game${totalGames !== 1 ? 's' : ''} on ${daysWithGames} day${daysWithGames !== 1 ? 's' : ''}`;
+        }
+
+        if (!MapView.scheduleBannerOpen) {
+            daysEl.hidden = true;
+            return;
+        }
+
+        const todayKey = MapView._dateKey(new Date());
+        daysEl.hidden = false;
+        daysEl.innerHTML = days.map((day) => {
+            const dayName = day.date.toLocaleDateString('en-US', { weekday: 'short' });
+            const dateLabel = day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const hasGames = day.count > 0;
+            const countLabel = hasGames
+                ? `${day.count} game${day.count > 1 ? 's' : ''}${day.firstTimeLabel ? ` • ${day.firstTimeLabel}` : ''}`
+                : 'No games';
+            const classes = ['map-schedule-day'];
+            if (hasGames) classes.push('has-games');
+            if (day.key === todayKey) classes.push('today');
+            return `
+                <button
+                    type="button"
+                    class="${classes.join(' ')}"
+                    onclick="MapView.openScheduledDayFromBanner('${day.key}')"
+                    aria-label="${day.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}${hasGames ? `, ${day.count} scheduled game${day.count > 1 ? 's' : ''}` : ', no scheduled games'}"
+                >
+                    <span class="map-schedule-day-name">${dayName}</span>
+                    <span class="map-schedule-day-date">${dateLabel}</span>
+                    <span class="map-schedule-day-count">${countLabel}</span>
+                </button>
+            `;
+        }).join('');
+    },
+
+    _startOfDay(date) {
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    },
+
+    _dateKey(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    },
+
+    _dateFromKey(key) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || ''));
+        if (!match) return null;
+        const year = Number(match[1]);
+        const month = Number(match[2]) - 1;
+        const day = Number(match[3]);
+        if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+        const parsed = new Date(year, month, day);
+        if (
+            parsed.getFullYear() !== year
+            || parsed.getMonth() !== month
+            || parsed.getDate() !== day
+        ) {
+            return null;
+        }
+        return parsed;
     },
 
     renderMarkers() {
