@@ -214,6 +214,15 @@ const Profile = {
                 el.innerHTML = '<p class="muted">No ranked matches yet. Play competitive games to build your record!</p>';
                 return;
             }
+            const canUseLeaderboardHistoryCards = typeof Ranked !== 'undefined'
+                && typeof Ranked._renderMatchHistory === 'function';
+
+            if (canUseLeaderboardHistoryCards) {
+                const cardsHtml = matches.map(match => Ranked._renderMatchHistory(match)).join('');
+                el.innerHTML = `<div class="recent-games-list">${cardsHtml}</div>`;
+                return;
+            }
+
             el.innerHTML = matches.map(m => {
                 const t1 = Profile._e(m.team1.map(p => p.user?.name || p.user?.username).join(' & '));
                 const t2 = Profile._e(m.team2.map(p => p.user?.name || p.user?.username).join(' & '));
