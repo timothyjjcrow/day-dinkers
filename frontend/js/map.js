@@ -603,7 +603,7 @@ const MapView = {
             <div class="court-section">
                 <div class="section-header">
                     <h4>Looking to Play</h4>
-                    <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule</button>
+                    <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule Game</button>
                 </div>
                 <div id="court-sessions-live">${sessionsHTML}</div>
             </div>
@@ -839,7 +839,7 @@ const MapView = {
                 <div class="checkin-play-controls">
                     <div class="checkin-play-header">
                         <span>Looking to Play</span>
-                        <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${courtId})">Schedule</button>
+                        <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${courtId})">Schedule Game</button>
                     </div>
                     <p class="checkin-play-help">${helpText}</p>
                     <div class="session-duration-buttons checkin-duration-buttons">

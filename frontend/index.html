@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Third Shot - California Pickleball</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -101,7 +101,7 @@
             <div class="tab-page">
                 <div class="tab-page-header">
                     <h2>Open to Play</h2>
-                    <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Session</button>
+                    <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Open to Play</button>
                 </div>
                 <div class="sessions-filters">
                     <select id="sessions-type-filter" onchange="Sessions.load()">
@@ -275,15 +275,21 @@
 
     <!-- Create Session Modal -->
     <div id="session-modal" class="modal" style="display:none">
-        <div class="modal-content">
-            <button class="modal-close" onclick="Sessions.hideCreateModal()">&times;</button>
-            <h2>Schedule Looking to Play</h2>
-            <form id="create-session-form" onsubmit="Sessions.create(event)">
-                <div class="form-group">
-                    <label>Court</label>
-                    <select name="court_id" id="session-court-select" required></select>
-                </div>
-                <div>
+        <div class="modal-content session-modal-content">
+            <button class="modal-close" onclick="Sessions.hideCreateModal()" aria-label="Close">&times;</button>
+            <h2>Schedule Open to Play</h2>
+            <p class="session-modal-subtitle">Pick a court and time first. Optional settings are tucked below for quick scheduling on mobile.</p>
+            <form id="create-session-form" class="session-create-form" onsubmit="Sessions.create(event)">
+                <section class="session-form-section">
+                    <h3 class="session-form-section-title">Court</h3>
+                    <div class="form-group">
+                        <label>Select Court</label>
+                        <select name="court_id" id="session-court-select" required></select>
+                    </div>
+                </section>
+
+                <section class="session-form-section">
+                    <h3 class="session-form-section-title">When are you playing?</h3>
                     <div class="form-group">
                         <label>Quick Day</label>
                         <div class="session-quick-buttons" id="session-quick-buttons">
@@ -291,7 +297,7 @@
                             <button type="button" class="session-quick-btn active" data-preset="tomorrow">Tomorrow</button>
                             <button type="button" class="session-quick-btn" data-preset="weekend">This Weekend</button>
                             <button type="button" class="session-quick-btn" data-preset="next_week">Next Week</button>
-                            <button type="button" class="session-quick-btn" data-preset="custom">Custom</button>
+                            <button type="button" class="session-quick-btn" data-preset="custom">Pick Date</button>
                         </div>
                     </div>
                     <div class="form-group">
@@ -304,7 +310,7 @@
                             <button type="button" class="session-quick-btn" data-time-slot="17:30">5:30 PM</button>
                             <button type="button" class="session-quick-btn active" data-time-slot="18:30">6:30 PM</button>
                             <button type="button" class="session-quick-btn" data-time-slot="19:30">7:30 PM</button>
-                            <button type="button" class="session-quick-btn" data-time-slot="custom">Custom</button>
+                            <button type="button" class="session-quick-btn" data-time-slot="custom">Pick Time</button>
                         </div>
                     </div>
                     <div class="form-row">
@@ -341,27 +347,34 @@
                             <option value="4" selected>4 sessions</option><option value="6">6 sessions</option><option value="8">8 sessions</option>
                         </select>
                     </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Max Players</label><input type="number" name="max_players" value="4" min="2" max="20"></div>
-                    <div class="form-group"><label>Visibility</label>
-                        <select name="visibility"><option value="all">Open to All</option><option value="friends">Friends Only</option></select>
+                </section>
+
+                <details class="session-form-advanced">
+                    <summary>More options</summary>
+                    <div class="session-form-advanced-body">
+                        <div class="form-row">
+                            <div class="form-group"><label>Max Players</label><input type="number" name="max_players" value="4" min="2" max="20"></div>
+                            <div class="form-group"><label>Visibility</label>
+                                <select name="visibility"><option value="all">Open to All</option><option value="friends">Friends Only</option></select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label>Skill Level</label>
+                                <select name="skill_level"><option value="all">All Levels</option><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select>
+                            </div>
+                            <div class="form-group"><label>Game Type</label>
+                                <select name="game_type"><option value="open">Open Play</option><option value="doubles">Doubles</option><option value="singles">Singles</option><option value="round_robin">Round Robin</option></select>
+                            </div>
+                        </div>
+                        <div class="form-group"><label>Notes <span class="muted">(optional)</span></label><textarea name="notes" rows="2" placeholder="Casual doubles, all welcome!"></textarea></div>
+                        <div class="form-group" id="session-invite-section" style="display:none">
+                            <label>Invite Friends</label>
+                            <div id="session-invite-friends" class="friend-picker"></div>
+                        </div>
                     </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Skill Level</label>
-                        <select name="skill_level"><option value="all">All Levels</option><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select>
-                    </div>
-                    <div class="form-group"><label>Game Type</label>
-                        <select name="game_type"><option value="open">Open Play</option><option value="doubles">Doubles</option><option value="singles">Singles</option><option value="round_robin">Round Robin</option></select>
-                    </div>
-                </div>
-                <div class="form-group"><label>Notes <span class="muted">(optional)</span></label><textarea name="notes" rows="2" placeholder="Casual doubles, all welcome!"></textarea></div>
-                <div class="form-group" id="session-invite-section" style="display:none">
-                    <label>Invite Friends</label>
-                    <div id="session-invite-friends" class="friend-picker"></div>
-                </div>
-                <button type="submit" class="btn-primary btn-full">Schedule Session</button>
+                </details>
+
+                <button id="session-submit-btn" type="submit" class="btn-primary btn-full">Schedule Open to Play</button>
             </form>
         </div>
     </div>

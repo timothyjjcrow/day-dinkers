@@ -66,35 +66,49 @@ const Sessions = {
                     <p>${typeFilter !== 'all' || visibilityFilter !== 'all' || skillFilter !== 'all'
                         ? 'Try different filters or create a new session.'
                         : 'Check in at a court and set yourself as open to play, or schedule a session!'}</p>
-                    <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule a Session</button>
+                    <button class="btn-primary" onclick="Sessions.showCreateModal()">Schedule Open to Play</button>
                 </div>`;
             return;
         }
 
         let html = '';
+        html += `
+            <section class="sessions-overview-card">
+                <div class="sessions-overview-copy">
+                    <h3>Find or schedule your next run</h3>
+                    <p>${isScheduledView ? 'Browse upcoming games by date and jump in quickly.' : 'Join active games now or lock in your next session.'}</p>
+                </div>
+                <div class="sessions-overview-stats">
+                    <div><strong>${sessions.length}</strong><span>Total</span></div>
+                    <div><strong>${nowSessions.length}</strong><span>Live</span></div>
+                    <div><strong>${scheduledFuture.length}</strong><span>Upcoming</span></div>
+                </div>
+                <button class="btn-primary btn-full" onclick="Sessions.showCreateModal()">Schedule Open to Play</button>
+            </section>
+        `;
         const suggestions = (!isScheduledView && token)
             ? Sessions._getSuggestedSessions(sessions).slice(0, 3)
             : [];
         if (suggestions.length > 0) {
-            html += '<h3 class="session-section-title">⭐ Suggested For You</h3>';
+            html += '<h3 class="session-section-title">Suggested For You</h3>';
             html += '<div class="session-card-grid">';
             html += suggestions.map(s => Sessions._renderCard(s)).join('');
             html += '</div>';
         }
         if (!isScheduledView && nowSessions.length > 0) {
-            html += '<h3 class="session-section-title">🟢 Active Now</h3>';
+            html += '<h3 class="session-section-title">Active Now</h3>';
             html += '<div class="session-card-grid">';
             html += nowSessions.map(s => Sessions._renderCard(s)).join('');
             html += '</div>';
         }
         if (scheduledFuture.length > 0) {
-            html += `<h3 class="session-section-title">${isScheduledView ? '🗓 Scheduled Games Calendar' : '🗓 Session Calendar'}</h3>`;
+            html += `<h3 class="session-section-title">${isScheduledView ? 'Scheduled Games Calendar' : 'Upcoming Calendar'}</h3>`;
             html += Sessions._renderScheduledCalendar(scheduledFuture);
             if (isScheduledView) {
-                html += '<h3 class="session-section-title">📋 All Scheduled Games</h3>';
+                html += '<h3 class="session-section-title">All Scheduled Games</h3>';
                 html += Sessions._renderScheduledByDay(scheduledFuture);
             } else {
-                html += '<h3 class="session-section-title">📅 Upcoming</h3>';
+                html += '<h3 class="session-section-title">Upcoming Sessions</h3>';
                 html += '<div class="session-card-grid">';
                 html += scheduledFuture.map(s => Sessions._renderCard(s)).join('');
                 html += '</div>';
@@ -106,7 +120,7 @@ const Sessions = {
                 <div class="empty-state">
                     <h3>No active or future sessions</h3>
                     <p>Try a different filter, or create a new session.</p>
-                    <button class="btn-primary" onclick="Sessions.showCreateModal()">📅 Schedule a Session</button>
+                    <button class="btn-primary" onclick="Sessions.showCreateModal()">Schedule Open to Play</button>
                 </div>`;
         }
 
@@ -162,11 +176,11 @@ const Sessions = {
         const monthDayKeys = Object.keys(grouped)
             .filter(key => key.startsWith(`${monthKey}-`))
             .sort();
+        const todayKey = Sessions._dateKey(today);
 
         let selectedDayKey = Sessions.calendarSelectedDayKey;
         if (!selectedDayKey || !selectedDayKey.startsWith(`${monthKey}-`)) {
-            const todayKey = Sessions._dateKey(today);
-            if (todayKey.startsWith(`${monthKey}-`)) {
+            if (monthDayKeys.includes(todayKey)) {
                 selectedDayKey = todayKey;
             } else if (monthDayKeys.length > 0) {
                 selectedDayKey = monthDayKeys[0];
@@ -175,8 +189,6 @@ const Sessions = {
             }
             Sessions.calendarSelectedDayKey = selectedDayKey;
         }
-
-        const todayKey = Sessions._dateKey(today);
         const monthLabel = monthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
         const weekdayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -414,10 +426,19 @@ const Sessions = {
         const safeCourtCity = Sessions._e(court.city || '');
         const safeCreatorName = Sessions._e(creator.name || creator.username || 'Unknown');
         const safeGameType = Sessions._e((session.game_type || 'open').replace(/_/g, ' '));
-        const safeSkillLevel = Sessions._e(session.skill_level || 'All levels');
+        const safeSkillLevel = Sessions._e(session.skill_level === 'all' ? 'All levels' : (session.skill_level || 'All levels'));
         const safeNotes = Sessions._e(session.notes || '');
+        const creatorInitial = Sessions._e((creator.name || creator.username || '?')[0].toUpperCase());
+        const openSpots = Math.max(session.max_players - (joined + 1), 0);
+        const skillTone = session.skill_level === 'beginner'
+            ? 'beginner'
+            : session.skill_level === 'intermediate'
+                ? 'intermediate'
+                : session.skill_level === 'advanced'
+                    ? 'advanced'
+                    : 'all';
 
-        let timeStr = 'Active now';
+        let timeStr = 'Open now';
         if (!isNow && session.start_time) {
             const dt = new Date(session.start_time);
             const dateStr = dt.toLocaleDateString('en-US', {
@@ -435,44 +456,45 @@ const Sessions = {
             }
         }
 
-        const typeIcon = session.game_type === 'doubles' ? '👥' :
-                         session.game_type === 'singles' ? '👤' : '🎯';
-        const skillColor = session.skill_level === 'beginner' ? '#22c55e' :
-                           session.skill_level === 'intermediate' ? '#f59e0b' :
-                           session.skill_level === 'advanced' ? '#ef4444' : '#6b7280';
-
         let actionBtn = '';
         if (isMine) {
-            actionBtn = `<button class="btn-danger btn-sm" onclick="event.stopPropagation(); Sessions.endSession(${session.id})">End Session</button>`;
+            actionBtn = `<button class="btn-danger btn-sm session-primary-action" onclick="event.stopPropagation(); Sessions.endSession(${session.id})">End Session</button>`;
         } else if (amJoined || amWaitlisted) {
-            actionBtn = `<button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.leaveSession(${session.id})">Leave</button>`;
+            actionBtn = `<button class="btn-secondary btn-sm session-primary-action" onclick="event.stopPropagation(); Sessions.leaveSession(${session.id})">Leave</button>`;
         } else {
-            actionBtn = `<button class="btn-primary btn-sm" onclick="event.stopPropagation(); Sessions.joinSession(${session.id})">${isFull ? 'Join Waitlist' : 'Join'}</button>`;
+            actionBtn = `<button class="btn-primary btn-sm session-primary-action" onclick="event.stopPropagation(); Sessions.joinSession(${session.id})">${isFull ? 'Join Waitlist' : 'Join Game'}</button>`;
         }
         const calendarBtn = !isNow
-            ? `<button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.downloadCalendar(${session.id})">🗓 Calendar</button>`
+            ? `<button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.downloadCalendar(${session.id})">Add to Calendar</button>`
             : '';
 
         return `
-        <div class="session-card ${isNow ? 'session-active' : ''}" onclick="Sessions.openDetail(${session.id})">
+        <article class="session-card ${isNow ? 'session-active' : ''}" onclick="Sessions.openDetail(${session.id})">
             <div class="session-card-header">
-                <div class="session-time-badge ${isNow ? 'active' : ''}">
-                    ${isNow ? '<span class="live-dot"></span>' : '📅'}
-                    <span>${timeStr}</span>
+                <div class="session-status-wrap">
+                    <span class="session-status-pill ${isNow ? 'live' : 'scheduled'}">${isNow ? 'Live Now' : 'Scheduled'}</span>
+                    <span class="session-time-text">${timeStr}</span>
                 </div>
-                <span class="session-visibility-tag">${session.visibility === 'friends' ? '👥 Friends' : '🌐 Open'}</span>
-                ${series ? `<span class="session-visibility-tag">🔁 ${series.sequence}/${series.occurrences}</span>` : ''}
+                <div class="session-chip-row">
+                    <span class="session-chip">${session.visibility === 'friends' ? 'Friends only' : 'Open to all'}</span>
+                    ${series ? `<span class="session-chip">Series ${series.sequence}/${series.occurrences}</span>` : ''}
+                </div>
             </div>
-            <div class="session-card-court">📍 ${safeCourtName}${court.city ? `, ${safeCourtCity}` : ''}</div>
-            <div class="session-card-meta">
-                <span>${typeIcon} ${safeGameType}</span>
-                <span style="color:${skillColor}">⭐ ${safeSkillLevel}</span>
-                <span>👥 ${joined + 1}/${session.max_players}</span>
-                ${waitlisted > 0 ? `<span>⏳ ${waitlisted} waiting</span>` : ''}
+            <div class="session-card-court">
+                <strong>${safeCourtName}</strong>
+                ${court.city ? `<span>${safeCourtCity}</span>` : ''}
+            </div>
+            <div class="session-card-meta-grid">
+                <div class="session-meta-item"><span>Format</span><strong>${safeGameType}</strong></div>
+                <div class="session-meta-item"><span>Skill</span><strong class="session-skill ${skillTone}">${safeSkillLevel}</strong></div>
+                <div class="session-meta-item"><span>Players</span><strong>${joined + 1}/${session.max_players}</strong></div>
+                ${waitlisted > 0
+        ? `<div class="session-meta-item"><span>Waitlist</span><strong>${waitlisted}</strong></div>`
+        : `<div class="session-meta-item"><span>Open spots</span><strong>${openSpots}</strong></div>`}
             </div>
             <div class="session-card-creator">
-                <span class="session-creator-avatar">${(creator.name || creator.username || '?')[0].toUpperCase()}</span>
-                ${safeCreatorName}
+                <span class="session-creator-avatar">${creatorInitial}</span>
+                <span>Hosted by ${safeCreatorName}</span>
                 ${isMine ? '<span class="session-mine-badge">You</span>' : ''}
                 ${amWaitlisted ? '<span class="session-mine-badge">Waitlisted</span>' : ''}
             </div>
@@ -480,10 +502,10 @@ const Sessions = {
             <div class="session-card-actions" onclick="event.stopPropagation()">
                 ${actionBtn}
                 <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); App.openCourtDetails(${session.court_id});">View Court</button>
-                <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.inviteFriends(${session.id})">👥 Invite</button>
+                <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.inviteFriends(${session.id})">Invite</button>
                 ${calendarBtn}
             </div>
-        </div>`;
+        </article>`;
     },
 
     // ── Session Detail Page ─────────────────────────────────────
@@ -541,6 +563,7 @@ const Sessions = {
         const safeSkillLevel = Sessions._e(session.skill_level || 'All');
         const safeVisibility = Sessions._e(session.visibility === 'friends' ? '👥 Friends Only' : '🌐 Open to All');
         const directionsUrl = Sessions._directionsUrl(court);
+        const targetCourtId = Number(session.court_id) || Number(court.id) || 0;
 
         let timeStr = '';
         if (isNow) {
@@ -612,7 +635,7 @@ const Sessions = {
                 <div class="game-detail-info">
                     <div class="detail-section">
                         <h4>Court</h4>
-                        <div class="detail-court-card" onclick="App.openCourtDetails(${court.id});">
+                        <div class="detail-court-card" onclick="${targetCourtId ? `App.openCourtDetails(${targetCourtId});` : ''}">
                             <strong>${safeCourtName}</strong>
                             <span>${safeCourtAddress}, ${safeCourtCity}</span>
                             <span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'} · ${court.num_courts || '?'} courts</span>
@@ -664,7 +687,7 @@ const Sessions = {
                     <div class="game-chat-container">
                         <h4>💬 Session Chat</h4>
                         <div id="session-chat-messages" class="game-chat-messages"></div>
-                        <form class="game-chat-input" onsubmit="Sessions.sendChat(event, ${session.id}, ${court.id})">
+                        <form class="game-chat-input" onsubmit="Sessions.sendChat(event, ${session.id}, ${session.court_id})">
                             <input type="text" id="session-chat-text" placeholder="Message the group..." autocomplete="off">
                             <button type="submit" class="btn-primary btn-sm">Send</button>
                         </form>
@@ -740,7 +763,7 @@ const Sessions = {
         if (tabHeader) {
             tabHeader.innerHTML = `
                 <h2>Open to Play</h2>
-                <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Session</button>
+                <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Open to Play</button>
             `;
         }
         Sessions.currentSessionId = null;
@@ -755,6 +778,10 @@ const Sessions = {
 
         const modal = document.getElementById('session-modal');
         modal.style.display = 'flex';
+        const modalContent = modal.querySelector('.modal-content');
+        if (modalContent) modalContent.scrollTop = 0;
+        const advancedOptions = modal.querySelector('.session-form-advanced');
+        if (advancedOptions) advancedOptions.open = false;
         const form = document.getElementById('create-session-form');
         if (form && typeof form.reset === 'function') {
             form.reset();
@@ -1197,6 +1224,7 @@ const Sessions = {
         const start = Sessions._parseDateTimeLocal(startInput.value);
         if (!start) {
             summaryEl.textContent = 'Choose a day and time to schedule your session.';
+            Sessions._updateScheduleSubmitButton(null);
             return;
         }
 
@@ -1249,6 +1277,26 @@ const Sessions = {
             summary += ` • ${recurrenceLabel} (${recurrenceCount} sessions)`;
         }
         summaryEl.textContent = summary;
+        Sessions._updateScheduleSubmitButton(start);
+    },
+
+    _updateScheduleSubmitButton(startDate) {
+        const submitBtn = document.getElementById('session-submit-btn');
+        if (!submitBtn) return;
+        if (!startDate) {
+            submitBtn.textContent = 'Schedule Open to Play';
+            return;
+        }
+        const dayLabel = startDate.toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+        });
+        const timeLabel = startDate.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+        submitBtn.textContent = `Schedule for ${dayLabel} at ${timeLabel}`;
     },
 
     _formatDurationLabel(totalMinutes) {
@@ -1279,8 +1327,34 @@ const Sessions = {
 
     _parseDateTimeLocal(value) {
         if (!value) return null;
-        const parsed = new Date(value);
-        if (Number.isNaN(parsed.getTime())) return null;
+        const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(value));
+        if (!match) return null;
+        const year = Number(match[1]);
+        const month = Number(match[2]) - 1;
+        const day = Number(match[3]);
+        const hour = Number(match[4]);
+        const minute = Number(match[5]);
+        const second = match[6] ? Number(match[6]) : 0;
+        if (
+            !Number.isFinite(year)
+            || !Number.isFinite(month)
+            || !Number.isFinite(day)
+            || !Number.isFinite(hour)
+            || !Number.isFinite(minute)
+            || !Number.isFinite(second)
+        ) {
+            return null;
+        }
+        const parsed = new Date(year, month, day, hour, minute, second, 0);
+        if (
+            parsed.getFullYear() !== year
+            || parsed.getMonth() !== month
+            || parsed.getDate() !== day
+            || parsed.getHours() !== hour
+            || parsed.getMinutes() !== minute
+        ) {
+            return null;
+        }
         return parsed;
     },
 
@@ -1295,13 +1369,23 @@ const Sessions = {
     async create(e) {
         e.preventDefault();
         const form = e.target;
+        const courtId = parseInt(form.court_id.value, 10);
+        if (!Number.isFinite(courtId) || courtId <= 0) {
+            App.toast('Please select a court', 'error');
+            return;
+        }
+        const maxPlayers = parseInt(form.max_players.value, 10);
+        if (!Number.isFinite(maxPlayers) || maxPlayers < 2 || maxPlayers > 20) {
+            App.toast('Max players must be between 2 and 20', 'error');
+            return;
+        }
 
         const data = {
-            court_id: parseInt(form.court_id.value),
+            court_id: courtId,
             session_type: 'scheduled',
             game_type: form.game_type.value,
             skill_level: form.skill_level.value,
-            max_players: parseInt(form.max_players.value),
+            max_players: maxPlayers,
             visibility: form.visibility.value,
             notes: form.notes.value,
         };
@@ -1598,6 +1682,10 @@ const Sessions = {
             const creator = s.creator || {};
             const players = s.players || [];
             const joined = players.filter(p => p.status === 'joined').length;
+            const safeCreatorName = Sessions._e(creator.name || creator.username || '?');
+            const safeGameType = Sessions._e((s.game_type || 'open').replace(/_/g, ' '));
+            const safeSkillLevel = Sessions._e(s.skill_level === 'all' ? 'All levels' : (s.skill_level || 'All levels'));
+            const visibilityLabel = s.visibility === 'friends' ? 'Friends only' : 'Open to all';
 
             let timeStr = 'Now';
             if (!isNow && s.start_time) {
@@ -1609,12 +1697,13 @@ const Sessions = {
             return `
             <div class="session-mini-card ${isNow ? 'session-mini-active' : ''}" onclick="App.setMainTab('sessions'); setTimeout(() => Sessions.openDetail(${s.id}), 200)">
                 <div class="session-mini-top">
-                    <span class="session-mini-time">${isNow ? '<span class="live-dot"></span> Open Now' : `📅 ${timeStr}`}</span>
-                    <span class="session-mini-visibility">${s.visibility === 'friends' ? '👥' : '🌐'}</span>
+                    <span class="session-mini-status ${isNow ? 'live' : 'scheduled'}">${isNow ? 'Live now' : 'Scheduled'}</span>
+                    <span class="session-mini-players">${joined + 1}/${s.max_players}</span>
                 </div>
+                <div class="session-mini-time">${isNow ? 'Open to play now' : timeStr}</div>
                 <div class="session-mini-info">
-                    <span>${Sessions._e(creator.name || creator.username || '?')}</span>
-                    <span class="muted">· ${Sessions._e(s.game_type || 'open')} · 👥 ${joined + 1}/${s.max_players}</span>
+                    <span class="session-mini-host">Host: ${safeCreatorName}</span>
+                    <span class="session-mini-meta">${safeGameType} · ${safeSkillLevel} · ${visibilityLabel}</span>
                 </div>
             </div>`;
         }).join('');
