@@ -1915,6 +1915,8 @@ img { max-width: 100%; display: block; }
 .friend-pick-name { font-size: 14px; }
 
 /* ── Calendar (sessions) ──────────────────────── */
+.sessions-calendar-shell { position: relative; }
+.sessions-calendar-backdrop { display: none; }
 .sessions-calendar {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -1925,12 +1927,24 @@ img { max-width: 100%; display: block; }
 }
 .sessions-calendar-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
     margin-bottom: 8px;
+    flex-wrap: wrap;
 }
 .sessions-calendar-month { font-size: 15px; font-weight: 700; }
+.sessions-calendar-range {
+    margin-top: 1px;
+    font-size: 12px;
+    color: #64748b;
+}
+.sessions-calendar-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
 .sessions-calendar-nav {
     display: flex;
     align-items: center;
@@ -1940,52 +1954,38 @@ img { max-width: 100%; display: block; }
     min-height: 30px;
     padding: 5px 9px;
 }
+.sessions-calendar-expand-btn {
+    min-height: 30px;
+    padding: 5px 10px;
+}
 .sessions-calendar-meta {
     font-size: 12px;
     color: #475569;
     margin-bottom: 8px;
 }
-.sessions-calendar-weekdays {
+.sessions-calendar-week-grid {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 4px;
-    margin-bottom: 4px;
-}
-.sessions-calendar-weekday {
-    text-align: center;
-    font-size: 11px;
-    color: #64748b;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-}
-.sessions-calendar-grid {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 4px;
+    gap: 6px;
 }
 .sessions-calendar-day {
     border: 1px solid #e2e8f0;
     background: #fff;
     border-radius: 10px;
-    min-height: 44px;
+    min-height: 66px;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    justify-content: center;
-    gap: 3px;
+    justify-content: space-between;
+    gap: 6px;
     cursor: pointer;
-    padding: 3px;
+    padding: 7px 5px;
     color: #0f172a;
     transition: all .15s;
 }
 .sessions-calendar-day:hover {
     border-color: #86efac;
     background: #f8fffb;
-}
-.sessions-calendar-day.other-month {
-    color: #94a3b8;
-    background: #f8fafc;
 }
 .sessions-calendar-day.has-session {
     border-color: #86efac;
@@ -1998,10 +1998,25 @@ img { max-width: 100%; display: block; }
     border-color: #16a34a;
     background: #dcfce7;
 }
-.sessions-calendar-day-number {
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1;
+.sessions-calendar-day-main {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    min-width: 0;
+}
+.sessions-calendar-day-name {
+    font-size: 10px;
+    color: #64748b;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+.sessions-calendar-day-date {
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #0f172a;
 }
 .sessions-calendar-day-count {
     font-size: 10px;
@@ -2009,8 +2024,12 @@ img { max-width: 100%; display: block; }
     color: #166534;
     background: #bbf7d0;
     border-radius: 999px;
-    padding: 1px 6px;
+    padding: 2px 7px;
     line-height: 1.2;
+    white-space: nowrap;
+}
+.sessions-calendar-day-count-label {
+    display: none;
 }
 .sessions-calendar-legend {
     margin-top: 8px;
@@ -2039,6 +2058,46 @@ img { max-width: 100%; display: block; }
     border-radius: 999px;
     padding: 2px 8px;
     white-space: nowrap;
+}
+.sessions-calendar.expanded .sessions-calendar-week-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+.sessions-calendar.expanded .sessions-calendar-day {
+    min-height: 58px;
+    padding: 9px 11px;
+}
+.sessions-calendar.expanded .sessions-calendar-day-name { font-size: 12px; }
+.sessions-calendar.expanded .sessions-calendar-day-date { font-size: 14px; }
+.sessions-calendar.expanded .sessions-calendar-day-count { font-size: 11px; padding: 3px 8px; }
+.sessions-calendar.expanded .sessions-calendar-day-count-label { display: inline; }
+.sessions-calendar-shell.expanded {
+    position: fixed;
+    inset: 0;
+    z-index: 3200;
+    pointer-events: none;
+}
+.sessions-calendar-shell.expanded .sessions-calendar-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    border: none;
+    background: rgba(15, 23, 42, 0.55);
+    pointer-events: auto;
+}
+.sessions-calendar-shell.expanded .sessions-calendar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    border-radius: 16px 16px 0 0;
+    max-height: 88vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 12px calc(14px + var(--safe-bottom));
+    box-shadow: var(--shadow-lg);
+    pointer-events: auto;
 }
 
 /* ── Verified badge ────────────────────────────── */

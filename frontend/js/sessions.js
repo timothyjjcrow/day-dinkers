@@ -10,6 +10,8 @@ const Sessions = {
     cachedListSessions: [],
     calendarMonthKey: null,
     calendarSelectedDayKey: null,
+    calendarWeekOffset: 0,
+    calendarExpanded: false,
     scheduleControlsBound: false,
 
     async load() {
@@ -58,6 +60,10 @@ const Sessions = {
         const nowSessions = sessions.filter(s => s.session_type === 'now');
         const scheduledFuture = Sessions._getFutureScheduledSessions(sessions);
         const isScheduledView = typeFilter === 'scheduled';
+
+        if (!scheduledFuture.length && Sessions.calendarExpanded) {
+            Sessions.calendarExpanded = false;
+        }
 
         if (!sessions.length) {
             list.innerHTML = `
@@ -142,86 +148,115 @@ const Sessions = {
         });
     },
 
-    changeCalendarMonth(step) {
-        const monthStart = Sessions._monthStartFromKey(Sessions.calendarMonthKey) || Sessions._startOfMonth(new Date());
-        monthStart.setMonth(monthStart.getMonth() + step);
-        Sessions.calendarMonthKey = Sessions._monthKey(monthStart);
+    changeCalendarWeek(step) {
+        const current = Number(Sessions.calendarWeekOffset);
+        const safeCurrent = Number.isFinite(current) ? current : 0;
+        const delta = Number(step);
+        const safeDelta = Number.isFinite(delta) ? delta : 0;
+        Sessions.calendarWeekOffset = safeCurrent + safeDelta;
         Sessions.calendarSelectedDayKey = null;
         Sessions._rerenderFromCache();
     },
 
-    jumpCalendarToCurrentMonth() {
-        Sessions.calendarMonthKey = Sessions._monthKey(new Date());
+    jumpCalendarToCurrentWeek() {
+        Sessions.calendarWeekOffset = 0;
         Sessions.calendarSelectedDayKey = null;
         Sessions._rerenderFromCache();
+    },
+
+    toggleCalendarExpanded() {
+        Sessions.calendarExpanded = !Sessions.calendarExpanded;
+        Sessions._rerenderFromCache();
+    },
+
+    // Legacy aliases kept for existing onclick bindings.
+    changeCalendarMonth(step) {
+        Sessions.changeCalendarWeek(step);
+    },
+
+    jumpCalendarToCurrentMonth() {
+        Sessions.jumpCalendarToCurrentWeek();
     },
 
     selectCalendarDate(dayKey) {
         const day = Sessions._dateFromKey(dayKey);
         if (!day) return;
-        Sessions.calendarMonthKey = Sessions._monthKey(day);
         Sessions.calendarSelectedDayKey = dayKey;
+        const selectedDayStart = Sessions._startOfDay(day);
+        const weekStart = Sessions._calendarWeekStartDate();
+        const diffDays = Math.floor((selectedDayStart.getTime() - weekStart.getTime()) / 86400000);
+        if (diffDays < 0 || diffDays > 6) {
+            const today = Sessions._startOfDay(new Date());
+            const offsetDays = Math.floor((selectedDayStart.getTime() - today.getTime()) / 86400000);
+            Sessions.calendarWeekOffset = Math.floor(offsetDays / 7);
+        }
         Sessions._rerenderFromCache();
+    },
+
+    _calendarWeekStartDate() {
+        const today = Sessions._startOfDay(new Date());
+        const offset = Number(Sessions.calendarWeekOffset);
+        const safeOffset = Number.isFinite(offset) ? offset : 0;
+        const start = new Date(today);
+        start.setDate(start.getDate() + safeOffset * 7);
+        return start;
     },
 
     _renderScheduledCalendar(sessions) {
         if (!sessions.length) return '';
 
         const grouped = Sessions._groupSessionsByDay(sessions);
-        const today = new Date();
-        const monthStart = Sessions._resolveCalendarMonthStart(sessions);
-        const monthKey = Sessions._monthKey(monthStart);
+        const today = Sessions._startOfDay(new Date());
+        const weekStart = Sessions._calendarWeekStartDate();
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
         const sessionCount = sessions.length;
-        const daysCount = Object.keys(grouped).length;
-        const monthDayKeys = Object.keys(grouped)
-            .filter(key => key.startsWith(`${monthKey}-`))
-            .sort();
+        const totalDaysWithSessions = Object.keys(grouped).length;
         const todayKey = Sessions._dateKey(today);
+        const weekDates = [];
+        for (let i = 0; i < 7; i += 1) {
+            const date = new Date(weekStart);
+            date.setDate(weekStart.getDate() + i);
+            weekDates.push(date);
+        }
+        const weekDayKeys = weekDates.map(date => Sessions._dateKey(date));
+        const weekSessionsCount = weekDayKeys
+            .reduce((sum, key) => sum + ((grouped[key] || []).length), 0);
+        const weekDaysWithSessions = weekDayKeys
+            .filter(key => (grouped[key] || []).length > 0)
+            .length;
 
         let selectedDayKey = Sessions.calendarSelectedDayKey;
-        if (!selectedDayKey || !selectedDayKey.startsWith(`${monthKey}-`)) {
-            if (monthDayKeys.includes(todayKey)) {
-                selectedDayKey = todayKey;
-            } else if (monthDayKeys.length > 0) {
-                selectedDayKey = monthDayKeys[0];
-            } else {
-                selectedDayKey = `${monthKey}-01`;
-            }
+        if (!selectedDayKey || !weekDayKeys.includes(selectedDayKey)) {
+            selectedDayKey = weekDayKeys.find(key => (grouped[key] || []).length > 0) || weekDayKeys[0];
             Sessions.calendarSelectedDayKey = selectedDayKey;
         }
-        const monthLabel = monthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        const weekRangeLabel = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 
-        const weekdayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-            .map(day => `<div class="sessions-calendar-weekday">${day}</div>`)
-            .join('');
-
-        const gridStart = new Date(monthStart);
-        gridStart.setDate(1 - monthStart.getDay());
-        const dayButtons = [];
-        for (let i = 0; i < 42; i += 1) {
-            const date = new Date(gridStart);
-            date.setDate(gridStart.getDate() + i);
+        const dayButtons = weekDates.map(date => {
             const key = Sessions._dateKey(date);
             const count = grouped[key]?.length || 0;
-            const isCurrentMonth = date.getMonth() === monthStart.getMonth()
-                && date.getFullYear() === monthStart.getFullYear();
+            const weekday = date.toLocaleDateString('en-US', { weekday: 'short' });
+            const dateLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             const classes = ['sessions-calendar-day'];
-            if (!isCurrentMonth) classes.push('other-month');
             if (count > 0) classes.push('has-session');
             if (key === todayKey) classes.push('today');
             if (key === selectedDayKey) classes.push('selected');
-            dayButtons.push(`
+            return `
                 <button
                     type="button"
                     class="${classes.join(' ')}"
                     onclick="Sessions.selectCalendarDate('${key}')"
                     aria-label="${date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}${count ? `, ${count} session${count > 1 ? 's' : ''}` : ''}"
                 >
-                    <span class="sessions-calendar-day-number">${date.getDate()}</span>
-                    ${count > 0 ? `<span class="sessions-calendar-day-count">${count}</span>` : ''}
+                    <span class="sessions-calendar-day-main">
+                        <span class="sessions-calendar-day-name">${weekday}</span>
+                        <span class="sessions-calendar-day-date">${dateLabel}</span>
+                    </span>
+                    ${count > 0 ? `<span class="sessions-calendar-day-count">${count}<span class="sessions-calendar-day-count-label"> games</span></span>` : ''}
                 </button>
-            `);
-        }
+            `;
+        }).join('');
 
         let selectedSection = '';
         if (selectedDayKey) {
@@ -234,7 +269,7 @@ const Sessions = {
                 selectedSection = `
                     <div class="sessions-calendar-selected">
                         <h4>
-                            <span>Scheduled for ${Sessions._e(selectedLabel)}</span>
+                            <span>Games on ${Sessions._e(selectedLabel)}</span>
                             <span class="sessions-calendar-selected-count">${selectedSessions.length} session${selectedSessions.length > 1 ? 's' : ''}</span>
                         </h4>
                         <div class="session-card-grid">
@@ -254,25 +289,38 @@ const Sessions = {
         } else {
             selectedSection = `
                 <div class="sessions-calendar-selected">
-                    <p class="muted">No sessions are scheduled in ${Sessions._e(monthLabel)}.</p>
+                    <p class="muted">No scheduled sessions in this week.</p>
                 </div>`;
         }
 
         return `
-            <div class="sessions-calendar">
+            <div class="sessions-calendar-shell ${Sessions.calendarExpanded ? 'expanded' : ''}">
+                ${Sessions.calendarExpanded
+        ? '<button type="button" class="sessions-calendar-backdrop" onclick="Sessions.toggleCalendarExpanded()" aria-label="Close expanded calendar"></button>'
+        : ''}
+            <div class="sessions-calendar ${Sessions.calendarExpanded ? 'expanded' : ''}">
                 <div class="sessions-calendar-header">
-                    <div class="sessions-calendar-month">${Sessions._e(monthLabel)}</div>
-                    <div class="sessions-calendar-nav">
-                        <button type="button" class="btn-secondary btn-sm" onclick="Sessions.changeCalendarMonth(-1)" aria-label="View previous month">←</button>
-                        <button type="button" class="btn-secondary btn-sm" onclick="Sessions.jumpCalendarToCurrentMonth()">Today</button>
-                        <button type="button" class="btn-secondary btn-sm" onclick="Sessions.changeCalendarMonth(1)" aria-label="View next month">→</button>
+                    <div>
+                        <div class="sessions-calendar-month">Next 7 Days</div>
+                        <div class="sessions-calendar-range">${Sessions._e(weekRangeLabel)}</div>
+                    </div>
+                    <div class="sessions-calendar-controls">
+                        <div class="sessions-calendar-nav">
+                            <button type="button" class="btn-secondary btn-sm" onclick="Sessions.changeCalendarWeek(-1)" aria-label="View previous week">←</button>
+                            <button type="button" class="btn-secondary btn-sm" onclick="Sessions.jumpCalendarToCurrentWeek()">Today</button>
+                            <button type="button" class="btn-secondary btn-sm" onclick="Sessions.changeCalendarWeek(1)" aria-label="View next week">→</button>
+                        </div>
+                        <button type="button" class="btn-secondary btn-sm sessions-calendar-expand-btn" onclick="Sessions.toggleCalendarExpanded()">${Sessions.calendarExpanded ? 'Close' : 'Expand'}</button>
                     </div>
                 </div>
-                <div class="sessions-calendar-meta">${sessionCount} future game${sessionCount > 1 ? 's' : ''} across ${daysCount} day${daysCount !== 1 ? 's' : ''}</div>
-                <div class="sessions-calendar-weekdays">${weekdayHeaders}</div>
-                <div class="sessions-calendar-grid">${dayButtons.join('')}</div>
-                <div class="sessions-calendar-legend">Highlighted days include future scheduled sessions.</div>
+                <div class="sessions-calendar-meta">
+                    ${weekSessionsCount} game${weekSessionsCount !== 1 ? 's' : ''} on ${weekDaysWithSessions} day${weekDaysWithSessions !== 1 ? 's' : ''} in this 7-day window
+                    • ${sessionCount} future game${sessionCount !== 1 ? 's' : ''} across ${totalDaysWithSessions} day${totalDaysWithSessions !== 1 ? 's' : ''}.
+                </div>
+                <div class="sessions-calendar-week-grid">${dayButtons}</div>
+                <div class="sessions-calendar-legend">Use arrows to move week by week for upcoming games.</div>
                 ${selectedSection}
+            </div>
             </div>`;
     },
 
@@ -364,6 +412,10 @@ const Sessions = {
 
     _startOfMonth(date) {
         return new Date(date.getFullYear(), date.getMonth(), 1);
+    },
+
+    _startOfDay(date) {
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate());
     },
 
     _monthKey(date) {
