@@ -329,9 +329,21 @@ const App = {
         // County leaderboard
         const countyLb = document.getElementById('county-leaderboard-content');
         if (countyLb) {
+            const countyScopeLabel = document.getElementById('county-leaderboard-scope-label');
+            if (countyScopeLabel) {
+                const selectedCounty = App.getSelectedCountyName();
+                const countyDisplayName = /county$/i.test(selectedCounty)
+                    ? selectedCounty
+                    : `${selectedCounty} County`;
+                countyScopeLabel.textContent = `Showing results for ${countyDisplayName}`;
+            }
             countyLb.innerHTML = '<div class="loading">Loading...</div>';
             try {
-                const res = await API.get('/api/ranked/leaderboard');
+                const countySlug = App.getSelectedCountySlug();
+                const countyQuery = countySlug
+                    ? `?county_slug=${encodeURIComponent(countySlug)}`
+                    : '';
+                const res = await API.get(`/api/ranked/leaderboard${countyQuery}`);
                 const lb = res.leaderboard || [];
                 if (!lb.length) {
                     countyLb.innerHTML = '<p class="muted">No ranked players in this county yet.</p>';

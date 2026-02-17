@@ -218,9 +218,16 @@ const Ranked = {
             container.innerHTML = '<div class="loading">Loading leaderboard...</div>';
         }
 
+        const countySlug = (!courtId
+            && typeof App !== 'undefined'
+            && typeof App.getSelectedCountySlug === 'function')
+            ? App.getSelectedCountySlug()
+            : '';
         const url = courtId
             ? `/api/ranked/leaderboard?court_id=${courtId}`
-            : '/api/ranked/leaderboard';
+            : (countySlug
+                ? `/api/ranked/leaderboard?county_slug=${encodeURIComponent(countySlug)}`
+                : '/api/ranked/leaderboard');
 
         try {
             const res = await API.get(url);
@@ -498,6 +505,13 @@ const Ranked = {
         let url = '/api/ranked/history?';
         if (userId) url += `user_id=${userId}&`;
         if (courtId) url += `court_id=${courtId}&`;
+        if (!courtId
+            && typeof App !== 'undefined'
+            && typeof App.getSelectedCountySlug === 'function'
+        ) {
+            const countySlug = App.getSelectedCountySlug();
+            if (countySlug) url += `county_slug=${encodeURIComponent(countySlug)}&`;
+        }
 
         try {
             const res = await API.get(url);

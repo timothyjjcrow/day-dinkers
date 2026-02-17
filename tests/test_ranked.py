@@ -3,7 +3,7 @@ import json
 from datetime import timedelta
 
 from backend.app import db
-from backend.models import Match, RankedLobby
+from backend.models import Match, MatchPlayer, RankedLobby, User
 from backend.time_utils import utcnow_naive
 
 
@@ -21,13 +21,16 @@ def _auth(token):
     return {'Authorization': f'Bearer {token}'}
 
 
-def _create_court(client, token, name='Ranked Court'):
-    res = client.post('/api/courts', json={
+def _create_court(client, token, name='Ranked Court', county_slug=None):
+    payload = {
         'name': name,
         'latitude': 40.80,
         'longitude': -124.16,
         'city': 'Eureka',
-    }, headers=_auth(token))
+    }
+    if county_slug:
+        payload['county_slug'] = county_slug
+    res = client.post('/api/courts', json=payload, headers=_auth(token))
     return json.loads(res.data)['court']
 
 
@@ -256,6 +259,112 @@ def test_queue_lobby_can_auto_start_immediately(client):
     assert data['lobby']['status'] == 'started'
     assert data['match']['status'] == 'in_progress'
     assert data['lobby']['started_match_id'] == data['match']['id']
+
+
+def test_leaderboard_and_history_filter_by_county(client, app):
+    t1, id1 = _register(client, 'county_lb_u1', 'county_lb_u1@test.com')
+    _, id2 = _register(client, 'county_lb_u2', 'county_lb_u2@test.com')
+    _, id3 = _register(client, 'county_lb_u3', 'county_lb_u3@test.com')
+
+    humboldt_court = _create_court(
+        client,
+        t1,
+        'County Humboldt Court',
+        county_slug='humboldt',
+    )
+    alameda_court = _create_court(
+        client,
+        t1,
+        'County Alameda Court',
+        county_slug='alameda',
+    )
+
+    with app.app_context():
+        humboldt_match = Match(
+            court_id=humboldt_court['id'],
+            match_type='singles',
+            status='completed',
+            team1_score=11,
+            team2_score=8,
+            winner_team=1,
+            submitted_by=id1,
+            completed_at=utcnow_naive(),
+        )
+        alameda_match = Match(
+            court_id=alameda_court['id'],
+            match_type='singles',
+            status='completed',
+            team1_score=11,
+            team2_score=9,
+            winner_team=1,
+            submitted_by=id2,
+            completed_at=utcnow_naive(),
+        )
+        db.session.add_all([humboldt_match, alameda_match])
+        db.session.flush()
+        humboldt_match_id = humboldt_match.id
+        alameda_match_id = alameda_match.id
+
+        db.session.add_all([
+            MatchPlayer(
+                match_id=humboldt_match_id,
+                user_id=id1,
+                team=1,
+                confirmed=True,
+            ),
+            MatchPlayer(
+                match_id=humboldt_match_id,
+                user_id=id3,
+                team=2,
+                confirmed=True,
+            ),
+            MatchPlayer(
+                match_id=alameda_match_id,
+                user_id=id2,
+                team=1,
+                confirmed=True,
+            ),
+            MatchPlayer(
+                match_id=alameda_match_id,
+                user_id=id3,
+                team=2,
+                confirmed=True,
+            ),
+        ])
+
+        user1 = db.session.get(User, id1)
+        user2 = db.session.get(User, id2)
+        user3 = db.session.get(User, id3)
+        user1.games_played, user1.wins, user1.losses = 1, 1, 0
+        user2.games_played, user2.wins, user2.losses = 1, 1, 0
+        user3.games_played, user3.wins, user3.losses = 2, 0, 2
+        db.session.commit()
+
+    humboldt_lb = client.get('/api/ranked/leaderboard?county_slug=humboldt')
+    assert humboldt_lb.status_code == 200
+    humboldt_ids = {row['user_id'] for row in json.loads(humboldt_lb.data)['leaderboard']}
+    assert id1 in humboldt_ids
+    assert id3 in humboldt_ids
+    assert id2 not in humboldt_ids
+
+    alameda_lb = client.get('/api/ranked/leaderboard?county_slug=alameda')
+    assert alameda_lb.status_code == 200
+    alameda_ids = {row['user_id'] for row in json.loads(alameda_lb.data)['leaderboard']}
+    assert id2 in alameda_ids
+    assert id3 in alameda_ids
+    assert id1 not in alameda_ids
+
+    humboldt_history = client.get('/api/ranked/history?county_slug=humboldt')
+    assert humboldt_history.status_code == 200
+    humboldt_match_ids = {m['id'] for m in json.loads(humboldt_history.data)['matches']}
+    assert humboldt_match_id in humboldt_match_ids
+    assert alameda_match_id not in humboldt_match_ids
+
+    alameda_history = client.get('/api/ranked/history?county_slug=alameda')
+    assert alameda_history.status_code == 200
+    alameda_match_ids = {m['id'] for m in json.loads(alameda_history.data)['matches']}
+    assert alameda_match_id in alameda_match_ids
+    assert humboldt_match_id not in alameda_match_ids
 
 
 def test_reject_score_notifies_only_original_submitter(client):

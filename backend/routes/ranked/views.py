@@ -9,18 +9,41 @@ from backend.models import (
 from backend.auth_utils import login_required
 from backend.routes.ranked import ranked_bp
 from backend.routes.ranked.helpers import _lobby_to_dict, _categorize_court_lobbies
+from backend.services.court_payloads import normalize_county_slug
 from backend.time_utils import utcnow_naive
+
+
+def _requested_county_slug():
+    raw_county_slug = (request.args.get('county_slug') or '').strip()
+    return normalize_county_slug(raw_county_slug, fallback='')
+
+
+def _apply_match_scope(query, court_id=None, county_slug=''):
+    if court_id:
+        query = query.filter(Match.court_id == court_id)
+    if county_slug:
+        query = query.join(Court, Court.id == Match.court_id).filter(
+            Court.county_slug == county_slug,
+        )
+    return query
 
 
 @ranked_bp.route('/leaderboard', methods=['GET'])
 def get_leaderboard():
     court_id = request.args.get('court_id', type=int)
+    county_slug = _requested_county_slug()
     limit = request.args.get('limit', 50, type=int)
 
-    if court_id:
-        player_ids = db.session.query(MatchPlayer.user_id).join(Match).filter(
-            Match.court_id == court_id, Match.status == 'completed'
-        ).distinct().subquery()
+    if court_id or county_slug:
+        player_ids_query = db.session.query(MatchPlayer.user_id).join(Match).filter(
+            Match.status == 'completed'
+        )
+        player_ids_query = _apply_match_scope(
+            player_ids_query,
+            court_id=court_id,
+            county_slug=county_slug,
+        )
+        player_ids = player_ids_query.distinct().subquery()
         players = User.query.filter(
             User.id.in_(db.session.query(player_ids))
         ).filter(User.games_played > 0)\
@@ -41,18 +64,22 @@ def get_leaderboard():
             'wins': player.wins, 'losses': player.losses,
             'games_played': player.games_played, 'win_rate': win_rate,
         })
-    return jsonify({'leaderboard': leaderboard, 'court_id': court_id})
+    return jsonify({
+        'leaderboard': leaderboard,
+        'court_id': court_id,
+        'county_slug': county_slug or None,
+    })
 
 
 @ranked_bp.route('/history', methods=['GET'])
 def get_match_history():
     user_id = request.args.get('user_id', type=int)
     court_id = request.args.get('court_id', type=int)
+    county_slug = _requested_county_slug()
     limit = request.args.get('limit', 20, type=int)
 
     query = Match.query.filter_by(status='completed')
-    if court_id:
-        query = query.filter_by(court_id=court_id)
+    query = _apply_match_scope(query, court_id=court_id, county_slug=county_slug)
     if user_id:
         query = query.filter(
             Match.id.in_(
