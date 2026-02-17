@@ -91,41 +91,82 @@ Object.assign(Ranked, {
             return;
         }
 
+        const canDoubles = allPlayers.length >= 4;
+        const defaultType = canDoubles ? 'doubles' : 'singles';
+
         const modal = document.getElementById('match-modal');
         modal.style.display = 'flex';
         modal.innerHTML = `
-        <div class="modal-content">
+        <div class="modal-content match-create-modal">
             <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
             <h2>Create Ranked Match</h2>
-            <p class="muted" style="margin-bottom:8px">${allPlayers.length} players available at this court</p>
-            <p class="confirm-note">All players must confirm the score after the match for rankings to update.</p>
-            <form id="create-match-form" onsubmit="Ranked.createMatch(event, ${courtId})">
-                <div class="form-group">
-                    <label>Match Type</label>
-                    <select name="match_type" id="match-type-select" onchange="Ranked._updateTeamSlots()">
-                        <option value="doubles" ${allPlayers.length >= 4 ? '' : 'disabled'}>Doubles (2v2)${allPlayers.length < 4 ? ' — need 4 players' : ''}</option>
-                        <option value="singles">Singles (1v1)</option>
-                    </select>
+            <div class="match-create-hero">
+                <div class="match-create-hero-info">
+                    <strong>${allPlayers.length} players available</strong>
+                    <span class="muted">Queue and checked-in players at this court</span>
                 </div>
-                <div class="match-teams-setup">
-                    <div class="team-setup" id="team1-setup">
-                        <h4>Team 1</h4>
-                        <div id="team1-slots"></div>
+                <span class="t-badge t-badge-upcoming">Ranked</span>
+            </div>
+            <form id="create-match-form" onsubmit="Ranked.createMatch(event, ${courtId})">
+                <div class="match-create-section">
+                    <span class="match-create-section-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        Match Format
+                    </span>
+                    <div class="match-type-toggle">
+                        <button type="button" class="match-type-btn ${defaultType === 'singles' ? 'active' : ''}" data-type="singles" onclick="Ranked._selectMatchType('singles')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            Singles (1v1)
+                        </button>
+                        <button type="button" class="match-type-btn ${canDoubles && defaultType === 'doubles' ? 'active' : ''} ${!canDoubles ? 'disabled' : ''}" data-type="doubles" onclick="${canDoubles ? "Ranked._selectMatchType('doubles')" : ''}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            Doubles (2v2)${!canDoubles ? ' — need 4' : ''}
+                        </button>
                     </div>
-                    <div class="vs-divider">VS</div>
-                    <div class="team-setup" id="team2-setup">
-                        <h4>Team 2</h4>
-                        <div id="team2-slots"></div>
+                    <input type="hidden" name="match_type" id="match-type-select" value="${defaultType}">
+                </div>
+                <div class="match-create-section">
+                    <span class="match-create-section-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        Select Players
+                    </span>
+                    <div class="match-teams-setup">
+                        <div class="team-setup" id="team1-setup">
+                            <div class="team-setup-header">
+                                <span class="team-setup-number team-1-accent">1</span>
+                                <h4>Team 1</h4>
+                            </div>
+                            <div id="team1-slots"></div>
+                        </div>
+                        <div class="vs-divider">VS</div>
+                        <div class="team-setup" id="team2-setup">
+                            <div class="team-setup-header">
+                                <span class="team-setup-number team-2-accent">2</span>
+                                <h4>Team 2</h4>
+                            </div>
+                            <div id="team2-slots"></div>
+                        </div>
                     </div>
+                </div>
+                <div class="match-create-note">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                    All players must confirm the score after the match for ELO rankings to update.
                 </div>
                 <input type="hidden" id="available-players-data" value='${JSON.stringify(allPlayers)}'>
-                <button type="submit" class="btn-primary btn-full" style="margin-top:16px">Start Match</button>
+                <button type="submit" class="btn-primary btn-full" style="min-height:44px;font-size:14px">Start Match</button>
             </form>
         </div>`;
 
-        if (allPlayers.length < 4) {
-            document.getElementById('match-type-select').value = 'singles';
-        }
+        Ranked._updateTeamSlots();
+    },
+
+    _selectMatchType(type) {
+        const hidden = document.getElementById('match-type-select');
+        if (!hidden) return;
+        hidden.value = type;
+        document.querySelectorAll('.match-type-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.type === type);
+        });
         Ranked._updateTeamSlots();
     },
 
@@ -134,9 +175,10 @@ Object.assign(Ranked, {
         const count = type === 'singles' ? 1 : 2;
         const players = JSON.parse(document.getElementById('available-players-data').value || '[]');
 
-        const options = players.map(p =>
-            `<option value="${p.id}">${Ranked._e(p.name || p.username)} (ELO ${Math.round(p.elo_rating || 1200)})</option>`
-        ).join('');
+        const options = players.map(p => {
+            const elo = Math.round(p.elo_rating || 1200);
+            return `<option value="${p.id}">${Ranked._e(p.name || p.username)} · ELO ${elo}</option>`;
+        }).join('');
 
         for (let team = 1; team <= 2; team++) {
             const container = document.getElementById(`team${team}-slots`);
