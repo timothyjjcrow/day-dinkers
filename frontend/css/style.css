@@ -220,6 +220,7 @@ img { max-width: 100%; display: block; }
     border-bottom: 1px solid var(--border);
     padding: 7px 10px 9px;
     box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+    flex-shrink: 0;
 }
 .map-schedule-banner-toggle {
     width: 100%;
@@ -2528,7 +2529,7 @@ input.flatpickr-input[readonly] {
     .leaderboard-table td { padding: 10px 8px; }
 
     /* Desktop split-view: court list always visible on left */
-    #map-container { display: flex; flex-direction: row; }
+    #map-container { display: flex; flex-direction: row; height: auto; }
     .court-list-sidebar {
         position: relative; left: auto; right: auto; bottom: auto;
         width: 320px; height: 100%; max-height: none;
