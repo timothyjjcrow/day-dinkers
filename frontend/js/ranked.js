@@ -414,9 +414,16 @@ const Ranked = {
         } catch (err) {
             console.error('Failed to load ranked data:', err);
             container.innerHTML = `
-                <div class="ranked-header"><h4>Competitive Play</h4></div>
-                <p class="muted">No competitive data yet. Check in and join the queue to get started!</p>
-                <button class="btn-primary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'doubles')" style="margin-top:8px">Join Ranked Queue</button>
+                <div class="court-ranked">
+                    <div class="ranked-hero">
+                        <div class="ranked-hero-title-row">
+                            <h4>Competitive Play</h4>
+                            <span class="t-badge t-badge-upcoming">Active</span>
+                        </div>
+                        <p class="muted">No competitive data yet. Check in and join the queue to get started!</p>
+                        <button class="btn-primary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'doubles')" style="margin-top:10px">Join Ranked Queue</button>
+                    </div>
+                </div>
             `;
         }
     },

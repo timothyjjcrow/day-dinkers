@@ -30,7 +30,10 @@ Object.assign(Ranked, {
         return `
             <div class="leaderboard-showcase">
                 <div class="leaderboard-showcase-header">
-                    <span class="match-type-badge">${scopeLabel} standings</span>
+                    <div style="display:flex;align-items:center;gap:6px">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" style="opacity:.5"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+                        <strong style="font-size:14px">${scopeLabel} Standings</strong>
+                    </div>
                     <span class="muted">${allPlayers.length} ranked player${allPlayers.length === 1 ? '' : 's'}</span>
                 </div>
                 ${featuredCards ? `<div class="leaderboard-podium">${featuredCards}</div>` : ''}
@@ -204,7 +207,7 @@ Object.assign(Ranked, {
 
     _renderQueueCards(queue, currentUserId) {
         const items = queue || [];
-        if (!items.length) return '<p class="muted">No queue entries yet.</p>';
+        if (!items.length) return '<p class="muted">No queue entries yet. Join to start the next game.</p>';
 
         return items.map((entry, index) => {
             const user = entry.user || {};
@@ -213,6 +216,7 @@ Object.assign(Ranked, {
             const safeName = Ranked._e(name);
             const safeInitial = Ranked._e((name[0] || '?').toUpperCase());
             const elo = Math.round(Number(user.elo_rating) || 1200);
+            const eloChipClass = elo >= 1400 ? 'elo-high' : elo >= 1200 ? 'elo-mid' : 'elo-low';
             const matchType = entry.match_type === 'singles' ? 'Singles' : 'Doubles';
             const joinedAgo = Ranked._relativeFromIso(entry.joined_at);
 
@@ -226,7 +230,9 @@ Object.assign(Ranked, {
                                 <strong>${safeName}${isMe ? ' (You)' : ''}</strong>
                                 ${joinedAgo ? `<span class="queue-entry-time">${Ranked._e(joinedAgo)}</span>` : ''}
                             </div>
-                            <div class="queue-entry-meta">ELO ${elo}</div>
+                            <div class="queue-entry-meta">
+                                <span class="queue-entry-elo-chip ${eloChipClass}">ELO ${elo}</span>
+                            </div>
                         </div>
                     </div>
                     <span class="queue-entry-pill">${matchType}</span>
@@ -235,11 +241,25 @@ Object.assign(Ranked, {
         }).join('');
     },
 
+    _actionGroupIcon(title) {
+        const t = String(title || '').toLowerCase();
+        if (t.includes('score') && t.includes('enter'))
+            return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+        if (t.includes('confirm'))
+            return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+        if (t.includes('respond') || t.includes('invit'))
+            return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
+        if (t.includes('start'))
+            return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+        return '';
+    },
+
     _renderActionGroup(title, cardsHtml) {
         if (!cardsHtml) return '';
+        const icon = Ranked._actionGroupIcon(title);
         return `
             <div class="ranked-action-group">
-                <h6>${Ranked._e(title)}</h6>
+                <h6>${icon}${Ranked._e(title)}</h6>
                 <div class="ranked-action-items">${cardsHtml}</div>
             </div>
         `;
@@ -404,19 +424,47 @@ Object.assign(Ranked, {
             ? actionGroups.join('')
             : '<p class="muted">No actions pending. New ranked updates will appear here automatically.</p>';
 
+        const queueFillPct = Math.min(100, Math.round((sortedQueue.length / 4) * 100));
+        const queueFillReady = sortedQueue.length >= 2;
+        const totalActiveGames = spectatorLiveMatches.length + myLiveMatches.length;
+        const totalScheduled = sortedScheduledLobbies.length;
+
         return `
         <div class="court-ranked">
-            <div class="ranked-header">
-                <div>
+            <div class="ranked-hero">
+                <div class="ranked-hero-title-row">
                     <h4>Competitive Play</h4>
-                    <p class="muted ranked-header-copy">Live ranked updates and quick actions</p>
+                    <div style="display:flex;gap:6px;align-items:center">
+                        ${actionItemCount > 0 ? `<span class="t-badge t-badge-live">${actionItemCount} pending</span>` : '<span class="t-badge t-badge-upcoming">Active</span>'}
+                    </div>
                 </div>
-                ${actionItemCount > 0 ? `<span class="match-type-badge pending-badge">${actionItemCount} pending</span>` : ''}
+                <p class="muted">Live ranked updates and quick actions for this court.</p>
+                <div class="ranked-hero-meta">
+                    <div class="ranked-meta-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        <strong>${sortedQueue.length}</strong> in queue
+                    </div>
+                    <div class="ranked-meta-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        <strong>${totalActiveGames}</strong> live
+                    </div>
+                    <div class="ranked-meta-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                        <strong>${totalScheduled}</strong> scheduled
+                    </div>
+                    <div class="ranked-meta-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+                        <strong>${leaderboard.length}</strong> ranked
+                    </div>
+                </div>
             </div>
 
             <div id="ranked-action-center" class="${actionCenterClass}">
                 <div class="section-header">
-                    <h5>Action Center</h5>
+                    <h5>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        Action Center
+                    </h5>
                     ${actionItemCount > 0 ? `<span class="player-count-badge">${actionItemCount}</span>` : ''}
                 </div>
                 <p class="muted">Updates are surfaced here first so you can respond quickly.</p>
@@ -431,28 +479,40 @@ Object.assign(Ranked, {
 
             <div class="ranked-sub-section">
                 <div class="section-header">
-                    <h5>Checked-In Players</h5>
+                    <h5>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                        Checked-In Players
+                    </h5>
                     <button class="btn-secondary btn-sm" onclick="Ranked.openCourtScheduledChallenge(${courtId})">Schedule Friend Challenge</button>
                 </div>
                 ${checkedInHint}
                 ${checkedInPlayersHTML}
             </div>
 
-            <div class="ranked-queue-section">
+            <div class="ranked-queue-section ${sortedQueue.length > 0 ? 'queue-has-players' : ''}">
                 <div class="queue-header">
-                    <h5>Match Queue</h5>
+                    <h5>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                        Match Queue
+                    </h5>
                     ${queueActionControls}
                 </div>
+                <div class="queue-fill-bar">
+                    <span class="queue-fill-bar-label">${sortedQueue.length}/4 for doubles</span>
+                    <div class="queue-fill-bar-track">
+                        <div class="queue-fill-bar-fill ${queueFillReady ? 'queue-ready' : ''}" style="width:${queueFillPct}%"></div>
+                    </div>
+                </div>
                 <div class="queue-metrics">
-                    <div class="queue-metric">
+                    <div class="queue-metric ${sortedQueue.length > 0 ? 'queue-metric-active' : ''}">
                         <span class="queue-metric-label">In Queue</span>
                         <strong>${sortedQueue.length}</strong>
                     </div>
-                    <div class="queue-metric">
+                    <div class="queue-metric ${queueSinglesCount > 0 ? 'queue-metric-active' : ''}">
                         <span class="queue-metric-label">Singles</span>
                         <strong>${queueSinglesCount}</strong>
                     </div>
-                    <div class="queue-metric">
+                    <div class="queue-metric ${queueDoublesCount > 0 ? 'queue-metric-active' : ''}">
                         <span class="queue-metric-label">Doubles</span>
                         <strong>${queueDoublesCount}</strong>
                     </div>
@@ -463,32 +523,49 @@ Object.assign(Ranked, {
             </div>
 
             <div class="ranked-sub-section">
-                <h5>Ready Games</h5>
+                <h5>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                    Ready Games
+                </h5>
                 ${readyLobbyHTML}
             </div>
 
             <div class="ranked-sub-section">
-                <h5>Scheduled Games</h5>
+                <h5>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                    Scheduled Games
+                </h5>
                 ${scheduledLobbyHTML}
             </div>
 
             <div class="ranked-sub-section">
-                <h5>Live Games</h5>
+                <h5>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    Live Games
+                </h5>
                 ${liveGamesHTML}
             </div>
 
             ${(awaitingScoreHTML || awaitingChallengeHTML) ? `
             <div class="ranked-sub-section">
-                <h5>Awaiting Other Players</h5>
+                <h5>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+                    Awaiting Other Players
+                </h5>
                 ${awaitingScoreHTML}
                 ${awaitingChallengeHTML}
             </div>` : ''}
 
             <div class="ranked-sub-section">
-                <h5>Court Rankings</h5>
+                <div class="section-header">
+                    <h5>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+                        Court Rankings
+                    </h5>
+                    <button class="btn-secondary btn-sm" onclick="App.setCourtTab('leaderboard')">Full Leaderboard</button>
+                </div>
                 <p class="muted">View player form, win rate, and total games at this court.</p>
                 <div class="ranked-mini-leaderboard">${leaderboardHTML}</div>
-                <button class="btn-secondary btn-sm" onclick="App.setCourtTab('leaderboard')" style="margin-top:8px">Open Full Leaderboard</button>
             </div>
         </div>`;
     },
@@ -502,19 +579,23 @@ Object.assign(Ranked, {
 
         return `
         <div class="active-match-card ${options.actionMode ? 'ranked-action-card' : ''}">
+            <div class="match-meta-row" style="margin-bottom:8px">
+                <span class="match-type-badge live-badge">${Ranked._e(match.match_type || 'ranked')}</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                    <span class="t-badge t-badge-live">In Progress</span>
+                    ${started ? `<span class="muted">${Ranked._e(started)}</span>` : ''}
+                </div>
+            </div>
             <div class="match-teams">
                 <div class="match-team-name">${t1}</div>
                 <span class="match-vs">VS</span>
                 <div class="match-team-name">${t2}</div>
             </div>
-            <div class="match-meta-row">
-                <span class="match-type-badge">${Ranked._e(match.match_type || 'ranked')}</span>
-                ${started ? `<span class="muted">${Ranked._e(started)}</span>` : ''}
-                ${isPlayer ? `
-                    <button class="btn-primary btn-sm" onclick="Ranked.showScoreModal(${match.id})">Enter Score</button>
-                    <button class="btn-outline btn-sm" onclick="Ranked.cancelMatch(${match.id}, event)">Cancel</button>
-                ` : '<span class="muted">In progress</span>'}
-            </div>
+            ${isPlayer ? `
+            <div class="match-meta-row" style="margin-top:8px;justify-content:flex-end">
+                <button class="btn-primary btn-sm" onclick="Ranked.showScoreModal(${match.id})">Enter Score</button>
+                <button class="btn-outline btn-sm" onclick="Ranked.cancelMatch(${match.id}, event)">Cancel</button>
+            </div>` : ''}
         </div>`;
     },
 
@@ -537,15 +618,16 @@ Object.assign(Ranked, {
 
         return `
         <div class="active-match-card pending-confirmation-card">
+            <div class="match-meta-row" style="margin-bottom:8px">
+                <span class="muted">Reported by ${submitterName} at ${courtName}</span>
+                <span class="t-badge t-badge-upcoming">${confirmedCount}/${totalPlayers} confirmed</span>
+            </div>
             <div class="match-teams">
                 <div class="match-team-name ${match.winner_team === 1 ? 'match-winner' : ''}">${t1}</div>
                 <span class="match-score">${match.team1_score}-${match.team2_score}</span>
                 <div class="match-team-name ${match.winner_team === 2 ? 'match-winner' : ''}">${t2}</div>
             </div>
-            <div class="match-meta-row">
-                <span class="muted">Reported by ${submitterName} at ${courtName}</span>
-            </div>
-            <div class="match-meta-row">
+            <div class="match-meta-row" style="margin-top:8px">
                 <span class="match-type-badge pending-badge">${confirmedCount}/${totalPlayers} confirmed</span>
                 ${myEntry && !alreadyConfirmed ? `
                     <div class="confirm-inline-actions">
@@ -553,7 +635,7 @@ Object.assign(Ranked, {
                         <button class="btn-danger btn-sm" onclick="Ranked.rejectMatch(${match.id}, event)">Reject</button>
                     </div>
                 ` : myEntry && alreadyConfirmed ? `
-                    <span class="muted">Confirmed. Waiting for others.</span>
+                    <span class="t-badge t-badge-completed">Confirmed</span>
                 ` : `
                     <span class="muted">Waiting for player confirmations.</span>
                 `}
@@ -573,7 +655,7 @@ Object.assign(Ranked, {
         const accepts = (lobby.players || []).map(player => {
             const label = Ranked._e(player.user?.name || player.user?.username || '?');
             const accepted = player.acceptance_status === 'accepted';
-            return `<span class="confirm-player ${accepted ? 'confirmed' : 'pending'}">
+            return `<span class="t-participant-chip ${accepted ? 't-chip-checked-in' : 't-chip-not-checked-in'}">
                 ${label} · ${accepted ? 'Accepted' : 'Pending'}
             </span>`;
         }).join('');
@@ -583,21 +665,23 @@ Object.assign(Ranked, {
         const invitedBy = Ranked._e(
             lobby.created_by?.name || lobby.created_by?.username || 'another player'
         );
+        const acceptedCount = lobby.accepted_count || 0;
+        const totalPlayers = lobby.total_players || 0;
 
         return `
         <div class="pending-match-card">
+            <div class="match-meta-row" style="margin-bottom:8px">
+                <span class="muted">${sourceLabel} at ${courtName}${scheduledText}</span>
+                <span class="t-badge t-badge-upcoming">${acceptedCount}/${totalPlayers} accepted</span>
+            </div>
             <div class="pending-match-score">
                 <div class="pending-team"><span class="pending-team-name">${t1}</span></div>
                 <span class="match-vs">VS</span>
                 <div class="pending-team"><span class="pending-team-name">${t2}</span></div>
             </div>
             <div class="pending-match-confirmations">
-                <span class="confirm-progress">${sourceLabel} at ${courtName}${scheduledText}</span>
                 <div class="confirm-note muted">Invited by ${invitedBy}</div>
-            </div>
-            <div class="pending-match-confirmations">
-                <span class="confirm-progress">${lobby.accepted_count || 0}/${lobby.total_players || 0} accepted</span>
-                <div class="confirm-players-list">${accepts}</div>
+                <div class="confirm-players-list" style="margin-top:6px">${accepts}</div>
             </div>
             ${myEntry && myEntry.acceptance_status === 'pending' ? `
             <div class="pending-match-actions">
@@ -629,13 +713,17 @@ Object.assign(Ranked, {
 
         const confirmStatus = (match.players || []).map(player => {
             const name = Ranked._e(player.user?.name || player.user?.username || '?');
-            return `<span class="confirm-player ${player.confirmed ? 'confirmed' : 'pending'}">
+            return `<span class="t-participant-chip ${player.confirmed ? 't-chip-checked-in' : 't-chip-not-checked-in'}">
                 ${name} · ${player.confirmed ? 'Confirmed' : 'Pending'}
             </span>`;
         }).join('');
 
         return `
         <div id="pending-match-${match.id}" class="pending-match-card ${match.id === focusMatchId ? 'pending-match-focus' : ''}">
+            <div class="match-meta-row" style="margin-bottom:8px">
+                <span class="muted">Reported by ${submitterName} at ${courtName}</span>
+                <span class="t-badge t-badge-upcoming">${confirmedCount}/${totalPlayers} confirmed</span>
+            </div>
             <div class="pending-match-score">
                 <div class="pending-team ${match.winner_team === 1 ? 'winner' : ''}">
                     <span class="pending-team-name">${t1}</span>
@@ -648,10 +736,6 @@ Object.assign(Ranked, {
                 </div>
             </div>
             <div class="pending-match-confirmations">
-                <span class="confirm-progress">Reported by ${submitterName} at ${courtName}</span>
-            </div>
-            <div class="pending-match-confirmations">
-                <span class="confirm-progress">${confirmedCount}/${totalPlayers} confirmed</span>
                 <div class="confirm-players-list">${confirmStatus}</div>
             </div>
             ${!alreadyConfirmed ? `
@@ -660,7 +744,8 @@ Object.assign(Ranked, {
                 <button class="btn-danger btn-sm" onclick="Ranked.rejectMatch(${match.id}, event)">Reject Score</button>
             </div>` : `
             <div class="pending-match-actions">
-                <span class="muted">Confirmed. Waiting for other players.</span>
+                <span class="t-badge t-badge-completed">Confirmed</span>
+                <span class="muted">Waiting for other players.</span>
             </div>`}
         </div>`;
     },
@@ -674,19 +759,25 @@ Object.assign(Ranked, {
         const scheduledTime = lobby.scheduled_for
             ? new Date(lobby.scheduled_for).toLocaleString()
             : null;
+        const statusBadge = scheduled
+            ? '<span class="t-badge t-badge-upcoming">Scheduled</span>'
+            : (canStart ? '<span class="t-badge t-badge-live">Ready</span>' : '<span class="t-badge t-badge-upcoming">Pending</span>');
 
         return `
         <div class="active-match-card ${scheduled ? 'pending-confirmation-card scheduled-card' : ''} ${options.actionMode ? 'ranked-action-card' : ''}">
+            <div class="match-meta-row" style="margin-bottom:8px">
+                <span class="match-type-badge">${Ranked._e(lobby.match_type || 'ranked')}</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                    ${statusBadge}
+                    ${scheduledTime ? `<span class="muted">${Ranked._e(scheduledTime)}</span>` : ''}
+                </div>
+            </div>
             <div class="match-teams">
                 <div class="match-team-name">${t1}</div>
                 <span class="match-vs">VS</span>
                 <div class="match-team-name">${t2}</div>
             </div>
-            <div class="match-meta-row">
-                <span class="match-type-badge">
-                    ${Ranked._e(lobby.match_type || 'ranked')}
-                    ${scheduledTime ? ` · ${Ranked._e(scheduledTime)}` : ''}
-                </span>
+            <div class="match-meta-row" style="margin-top:8px;justify-content:flex-end">
                 ${canStart
                     ? `<button class="btn-primary btn-sm" onclick="Ranked.startLobbyMatch(${lobby.id}, event)">Start Game</button>`
                     : '<span class="muted">Participants can start once checked in.</span>'}
