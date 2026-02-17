@@ -7,6 +7,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css" />
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <link rel="icon" type="image/png" href="assets/third-shot-logo.png">
@@ -20,12 +22,23 @@
             <img class="header-logo" src="assets/third-shot-logo.png" alt="Third Shot" onclick="App.showScreen('main')">
         </div>
         <div class="header-center">
-            <select id="county-select" onchange="App.onCountyChange(this.value)" aria-label="Select county">
+            <select id="county-select" onchange="App.onCountyChange(this.value)" aria-label="Select county" style="display:none">
                 <option value="humboldt">Humboldt County</option>
             </select>
-            <button class="header-icon-btn" onclick="App.useLocationCounty()" title="Use my location">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
-            </button>
+            <div class="county-picker" id="county-picker">
+                <button type="button" class="county-picker-trigger" id="county-picker-trigger" onclick="App.toggleCountyPicker()">
+                    <span id="county-picker-label">Humboldt County</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                <div class="county-picker-dropdown" id="county-picker-dropdown" style="display:none">
+                    <button type="button" class="county-picker-locate" onclick="App.useLocationCounty(); App.closeCountyPicker();">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
+                        <span>Use My Location</span>
+                    </button>
+                    <input type="text" id="county-picker-search" placeholder="Search counties..." oninput="App.filterCountyList(this.value)" autocomplete="off">
+                    <div id="county-picker-list" class="county-picker-list"></div>
+                </div>
+            </div>
         </div>
         <div class="header-right">
             <button class="header-icon-btn" id="btn-notifications" onclick="App.toggleNotifications()" title="Notifications">
@@ -91,14 +104,20 @@
                 <div id="map"></div>
                 <div id="map-filters">
                     <div class="mobile-search-inline">
-                        <input type="text" id="mobile-search-input" placeholder="Search courts, cities...">
+                        <input type="text" id="mobile-search-input" placeholder="Search courts, cities..." autocomplete="off">
+                        <button type="button" class="search-clear-btn" id="search-clear-btn" onclick="MapView.clearSearch()" style="display:none">&times;</button>
+                        <div id="search-suggestions" class="search-suggestions" style="display:none"></div>
                     </div>
-                    <button class="filter-chip active" data-filter="all" onclick="MapView.setFilter('all')">All Courts</button>
+                    <span id="map-court-count" class="map-court-count"></span>
+                    <button class="filter-chip active" data-filter="all" onclick="MapView.setFilter('all')">All</button>
                     <button class="filter-chip" data-filter="outdoor" onclick="MapView.setFilter('outdoor')">Outdoor</button>
                     <button class="filter-chip" data-filter="indoor" onclick="MapView.setFilter('indoor')">Indoor</button>
                     <button class="filter-chip" data-filter="lighted" onclick="MapView.setFilter('lighted')">Lighted</button>
                     <button class="filter-chip" data-filter="free" onclick="MapView.setFilter('free')">Free</button>
                     <button class="filter-chip" data-filter="dedicated" onclick="MapView.setFilter('dedicated')">Dedicated</button>
+                    <button class="filter-chip" data-filter="restrooms" onclick="MapView.setFilter('restrooms')">Restrooms</button>
+                    <button class="filter-chip" data-filter="parking" onclick="MapView.setFilter('parking')">Parking</button>
+                    <button class="filter-chip" data-filter="accessible" onclick="MapView.setFilter('accessible')">Accessible</button>
                     <button class="filter-chip" data-filter="active" onclick="MapView.setFilter('active')">Players Now</button>
                     <button class="filter-chip filter-chip-smart" onclick="MapView.openBestCourtNow()">Best Right Now</button>
                     <span id="map-last-updated" class="map-last-updated"></span>
@@ -106,9 +125,21 @@
                 <button id="locate-btn" onclick="MapView.locateUser()" title="My Location" aria-label="Center map on my location">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
                 </button>
-                <button id="list-toggle" onclick="MapView.toggleCourtList()">Court List</button>
-                <div id="court-list-sidebar" class="court-list-sidebar" style="display:none">
-                    <div class="sidebar-header"><h3>Nearby Courts</h3><button onclick="MapView.toggleCourtList()">&times;</button></div>
+                <button id="list-toggle" onclick="MapView.toggleCourtList()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                    <span>Courts</span>
+                </button>
+                <div id="court-list-sidebar" class="court-list-sidebar">
+                    <div class="sidebar-header">
+                        <h3>Courts</h3>
+                        <select id="court-sort-select" onchange="MapView.setSort(this.value)">
+                            <option value="name">Sort: Name</option>
+                            <option value="distance">Sort: Distance</option>
+                            <option value="courts">Sort: # Courts</option>
+                            <option value="active">Sort: Active Players</option>
+                        </select>
+                        <button class="sidebar-close-btn" onclick="MapView.toggleCourtList()">&times;</button>
+                    </div>
                     <div id="court-list-items"></div>
                 </div>
             </div>
@@ -547,6 +578,7 @@
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="js/api.js"></script>

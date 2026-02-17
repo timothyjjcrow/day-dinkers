@@ -5,10 +5,13 @@
 const MapView = {
     map: null,
     markers: [],
+    clusterGroup: null,
     courts: [],
     lastUpdatedAt: null,
-    activeFilter: 'all',
+    activeFilters: new Set(),
     courtListOpen: false,
+    courtListSort: 'name',
+    userLocationMarker: null,
     currentCourtId: null,
     currentCourtData: null,
     currentCourtSessions: [],
@@ -28,14 +31,44 @@ const MapView = {
             zoomControl: true,
         }).setView([40.83, -124.08], 11);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
-            maxZoom: 19,
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png', {
+            attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>, &copy; <a href="https://carto.com">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20,
         }).addTo(MapView.map);
+
+        MapView.clusterGroup = L.markerClusterGroup({
+            maxClusterRadius: 50,
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: false,
+            zoomToBoundsOnClick: true,
+            iconCreateFunction(cluster) {
+                const count = cluster.getChildCount();
+                let size = 'small';
+                if (count > 30) size = 'large';
+                else if (count > 10) size = 'medium';
+                return L.divIcon({
+                    html: `<div class="cluster-marker cluster-${size}"><span>${count}</span></div>`,
+                    className: 'court-cluster-icon',
+                    iconSize: L.point(40, 40),
+                });
+            },
+        });
+        MapView.map.addLayer(MapView.clusterGroup);
 
         MapView._renderScheduleBanner();
         MapView.loadCourts();
         MapView.refreshMyStatus();
+        MapView._autoLocate();
+    },
+
+    _autoLocate() {
+        const pref = localStorage.getItem('location_tracking_pref');
+        if (pref !== 'enabled') return;
+        navigator.geolocation?.getCurrentPosition(pos => {
+            const { latitude, longitude } = pos.coords;
+            MapView._placeUserDot(latitude, longitude);
+        }, () => {}, { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 });
     },
 
     async refreshMyStatus() {
@@ -98,22 +131,35 @@ const MapView = {
             const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
                 ? App.buildCourtsQuery()
                 : '/api/courts';
-            const res = await API.get(courtsUrl);
+            const [res] = await Promise.all([
+                API.get(courtsUrl),
+                MapView.loadFriendsPresence(),
+            ]);
             MapView.courts = res.courts || [];
             MapView.renderMarkers();
             MapView.renderCourtList();
-            await MapView.loadFriendsPresence();
-            // Re-render so popups/list can include friend indicators once presence arrives.
-            MapView.renderMarkers();
-            MapView.renderCourtList();
+            MapView._updateCourtCount();
+            MapView._syncFilterChips();
             if (fitToCourts && MapView.courts.length) {
                 const bounds = L.latLngBounds(MapView.courts.map(c => [c.latitude, c.longitude]));
-                MapView.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+                MapView.map.flyToBounds(bounds, { padding: [50, 50], maxZoom: 12, duration: 0.8 });
             }
             MapView._setLastUpdated();
             MapView.loadScheduleBanner();
         } catch (err) {
             console.error('Failed to load courts:', err);
+        }
+    },
+
+    _updateCourtCount() {
+        const el = document.getElementById('map-court-count');
+        if (!el) return;
+        const filtered = MapView._filterCourts(MapView.courts);
+        const total = MapView.courts.length;
+        if (MapView.activeFilters.size > 0 && filtered.length !== total) {
+            el.textContent = `${filtered.length} of ${total}`;
+        } else {
+            el.textContent = `${total} courts`;
         }
     },
 
@@ -359,8 +405,11 @@ const MapView = {
     },
 
     renderMarkers() {
-        // Clear existing markers
-        MapView.markers.forEach(m => MapView.map.removeLayer(m));
+        if (MapView.clusterGroup) {
+            MapView.clusterGroup.clearLayers();
+        } else {
+            MapView.markers.forEach(m => MapView.map.removeLayer(m));
+        }
         MapView.markers = [];
 
         const filtered = MapView._filterCourts(MapView.courts);
@@ -368,31 +417,40 @@ const MapView = {
         filtered.forEach(court => {
             const players = court.active_players || 0;
             const icon = MapView._courtIcon(court, players);
-            const marker = L.marker([court.latitude, court.longitude], { icon })
-                .addTo(MapView.map);
+            const marker = L.marker([court.latitude, court.longitude], { icon });
 
             marker.bindPopup(MapView._popupContent(court, players));
-            marker.on('click', () => {
-                marker.openPopup();
-            });
+            marker.on('click', () => marker.openPopup());
             marker.courtId = court.id;
             MapView.markers.push(marker);
         });
+
+        if (MapView.clusterGroup) {
+            MapView.clusterGroup.addLayers(MapView.markers);
+        } else {
+            MapView.markers.forEach(m => m.addTo(MapView.map));
+        }
     },
 
     _courtIcon(court, players) {
         const color = court.indoor ? '#6366f1' : '#22c55e';
         const busy = players > 0 ? '#ef4444' : color;
         const badge = players > 0 ? `<span class="marker-badge">${players}</span>` : '';
+        const pulseClass = players > 0 ? ' marker-pulse' : '';
+        const verifiedBadge = court.verified ? '<span class="marker-verified">✓</span>' : '';
+        const hasFriends = MapView._friendsAtCourt(court.id).length > 0;
+        const friendRing = hasFriends ? ' marker-friend-ring' : '';
+        const size = (court.num_courts || 1) >= 6 ? 36 : 32;
+        const iconChar = court.indoor
+            ? '<svg viewBox="0 0 24 24" fill="white" width="14" height="14"><path d="M3 21V7l9-4 9 4v14H3z"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="white" width="14" height="14"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2m11-11h-2M3 12H1m16.4-6.4-1.4 1.4M7 7 5.6 5.6m12.8 12.8L17 17M7 17l-1.4 1.4"/></svg>';
 
         return L.divIcon({
             className: 'court-marker-icon',
-            html: `<div class="court-marker" style="background:${busy}">${badge}
-                     <svg viewBox="0 0 24 24" fill="white" width="16" height="16"><circle cx="12" cy="12" r="6"/></svg>
-                   </div>`,
-            iconSize: [32, 32],
-            iconAnchor: [16, 32],
-            popupAnchor: [0, -30],
+            html: `<div class="court-marker${pulseClass}${friendRing}" style="background:${busy};width:${size}px;height:${size}px">${badge}${verifiedBadge}${iconChar}</div>`,
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size],
+            popupAnchor: [0, -size + 2],
         });
     },
 
@@ -404,6 +462,7 @@ const MapView = {
         if (court.lighted) amenities.push('💡');
         if (court.paddle_rental) amenities.push('🏓');
         if (court.has_pro_shop) amenities.push('🛒');
+        if (court.wheelchair_accessible) amenities.push('♿');
 
         const courtName = MapView._escapeHtml(court.name || '');
         const courtAddress = MapView._escapeHtml(court.address || '');
@@ -422,10 +481,21 @@ const MapView = {
         const safeFriendNames = friendsAtCourt
             .map(f => MapView._escapeHtml(f.user.name || f.user.username))
             .join(', ');
+        const verifiedLabel = court.verified ? '<span class="popup-verified">✓ Verified</span>' : '';
+
+        const photoHtml = court.photo_url
+            ? `<div class="popup-photo"><img src="${MapView._escapeAttr(court.photo_url)}" alt="${courtName}" loading="lazy"></div>`
+            : '';
+
+        const token = localStorage.getItem('token');
+        const checkinBtn = token
+            ? `<button class="btn-primary btn-sm" onclick="MapView.checkIn(${court.id})">Check In</button>`
+            : '';
 
         return `
         <div class="court-popup">
-            <h3>${courtName} ${distStr}</h3>
+            ${photoHtml}
+            <h3>${courtName} ${verifiedLabel} ${distStr}</h3>
             <p class="popup-addr">${courtAddress}, ${courtCity}</p>
             <div class="popup-meta">
                 <span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'}</span>
@@ -439,30 +509,79 @@ const MapView = {
             <div class="popup-amenities">${amenities.join(' ')}</div>
             <div class="popup-actions">
                 <button class="btn-primary btn-sm" onclick="App.openCourtDetails(${court.id})">Details</button>
+                ${checkinBtn}
                 <a class="btn-secondary btn-sm" href="${MapView._formatDirectionsUrl(court.latitude, court.longitude)}" target="_blank" rel="noopener noreferrer">Directions</a>
             </div>
         </div>`;
     },
 
     _filterCourts(courts) {
-        const f = MapView.activeFilter;
-        if (f === 'all') return courts;
-        if (f === 'indoor') return courts.filter(c => c.indoor);
-        if (f === 'outdoor') return courts.filter(c => !c.indoor);
-        if (f === 'lighted') return courts.filter(c => c.lighted);
-        if (f === 'free') return courts.filter(c => (c.fees || '').toLowerCase().includes('free'));
-        if (f === 'dedicated') return courts.filter(c => c.court_type === 'dedicated');
-        if (f === 'active') return courts.filter(c => c.active_players > 0);
-        return courts;
+        if (MapView.activeFilters.size === 0) return courts;
+        return courts.filter(c => {
+            for (const f of MapView.activeFilters) {
+                if (f === 'indoor' && !c.indoor) return false;
+                if (f === 'outdoor' && c.indoor) return false;
+                if (f === 'lighted' && !c.lighted) return false;
+                if (f === 'free' && !(c.fees || '').toLowerCase().includes('free')) return false;
+                if (f === 'dedicated' && c.court_type !== 'dedicated') return false;
+                if (f === 'active' && !(c.active_players > 0)) return false;
+                if (f === 'restrooms' && !c.has_restrooms) return false;
+                if (f === 'parking' && !c.has_parking) return false;
+                if (f === 'accessible' && !c.wheelchair_accessible) return false;
+            }
+            return true;
+        });
     },
 
     setFilter(filter) {
-        MapView.activeFilter = filter;
-        document.querySelectorAll('.filter-chip').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.filter === filter);
-        });
+        if (filter === 'all') {
+            MapView.activeFilters.clear();
+        } else if (MapView.activeFilters.has(filter)) {
+            MapView.activeFilters.delete(filter);
+        } else {
+            MapView.activeFilters.add(filter);
+        }
+        MapView._syncFilterChips();
         MapView.renderMarkers();
         MapView.renderCourtList();
+        MapView._updateCourtCount();
+    },
+
+    _syncFilterChips() {
+        const filtered = MapView._filterCourts(MapView.courts);
+        document.querySelectorAll('.filter-chip').forEach(btn => {
+            const f = btn.dataset.filter;
+            if (!f) return;
+            if (f === 'all') {
+                btn.classList.toggle('active', MapView.activeFilters.size === 0);
+            } else {
+                btn.classList.toggle('active', MapView.activeFilters.has(f));
+            }
+            const count = MapView._filterCountForChip(f);
+            const badge = btn.querySelector('.filter-count');
+            if (badge) badge.textContent = count;
+            else if (f !== 'all') {
+                const span = document.createElement('span');
+                span.className = 'filter-count';
+                span.textContent = count;
+                btn.appendChild(span);
+            }
+        });
+    },
+
+    _filterCountForChip(filter) {
+        const courts = MapView.courts;
+        if (filter === 'all') return courts.length;
+        if (filter === 'indoor') return courts.filter(c => c.indoor).length;
+        if (filter === 'outdoor') return courts.filter(c => !c.indoor).length;
+        if (filter === 'lighted') return courts.filter(c => c.lighted).length;
+        if (filter === 'free') return courts.filter(c => (c.fees || '').toLowerCase().includes('free')).length;
+        if (filter === 'dedicated') return courts.filter(c => c.court_type === 'dedicated').length;
+        if (filter === 'active') return courts.filter(c => c.active_players > 0).length;
+        if (filter === 'restrooms') return courts.filter(c => c.has_restrooms).length;
+        if (filter === 'parking') return courts.filter(c => c.has_parking).length;
+        if (filter === 'accessible') return courts.filter(c => c.wheelchair_accessible).length;
+        return 0;
     },
 
     async openBestCourtNow() {
@@ -489,7 +608,7 @@ const MapView = {
             return;
         }
 
-        MapView.map.setView([best.latitude, best.longitude], 14);
+        MapView.map.flyTo([best.latitude, best.longitude], 14, { duration: 0.8 });
         App.openCourtDetails(best.id);
 
         const players = best.active_players || 0;
@@ -538,10 +657,15 @@ const MapView = {
     },
 
     async search(query) {
+        const clearBtn = document.getElementById('search-clear-btn');
+        if (clearBtn) clearBtn.style.display = query ? 'flex' : 'none';
+
         if (!query) {
+            MapView.hideSuggestions();
             MapView.loadCourts();
             return;
         }
+        MapView._showSuggestions(query);
         try {
             const url = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
                 ? App.buildCourtsQuery({ search: query })
@@ -550,27 +674,104 @@ const MapView = {
             MapView.courts = res.courts || [];
             MapView.renderMarkers();
             MapView.renderCourtList();
-            // If results, fit map to show them
+            MapView._updateCourtCount();
             if (MapView.courts.length > 0) {
                 const bounds = L.latLngBounds(MapView.courts.map(c => [c.latitude, c.longitude]));
-                MapView.map.fitBounds(bounds, { padding: [50, 50] });
+                MapView.map.flyToBounds(bounds, { padding: [50, 50], duration: 0.6 });
             }
         } catch {}
+    },
+
+    clearSearch() {
+        const input = document.getElementById('mobile-search-input');
+        if (input) input.value = '';
+        const clearBtn = document.getElementById('search-clear-btn');
+        if (clearBtn) clearBtn.style.display = 'none';
+        MapView.hideSuggestions();
+        MapView.loadCourts();
+    },
+
+    _showSuggestions(query) {
+        const el = document.getElementById('search-suggestions');
+        if (!el) return;
+        const q = query.toLowerCase().trim();
+        if (!q) { el.style.display = 'none'; return; }
+
+        const matches = MapView.courts
+            .filter(c =>
+                (c.name || '').toLowerCase().includes(q) ||
+                (c.city || '').toLowerCase().includes(q) ||
+                (c.address || '').toLowerCase().includes(q)
+            )
+            .slice(0, 6);
+
+        if (!matches.length) {
+            el.innerHTML = '<div class="suggestion-empty">No matches</div>';
+            el.style.display = 'block';
+            return;
+        }
+
+        el.innerHTML = matches.map(c => {
+            const name = MapView._highlightMatch(c.name || '', q);
+            const city = MapView._escapeHtml(c.city || '');
+            const players = c.active_players || 0;
+            const liveTag = players > 0 ? `<span class="suggestion-live">${players} playing</span>` : '';
+            return `<button type="button" class="suggestion-item" onclick="MapView._pickSuggestion(${c.id})">
+                <div class="suggestion-name">${name} ${liveTag}</div>
+                <div class="suggestion-meta">${city} · ${c.num_courts} court${c.num_courts > 1 ? 's' : ''}</div>
+            </button>`;
+        }).join('');
+        el.style.display = 'block';
+    },
+
+    hideSuggestions() {
+        const el = document.getElementById('search-suggestions');
+        if (el) el.style.display = 'none';
+    },
+
+    _pickSuggestion(courtId) {
+        MapView.hideSuggestions();
+        const court = MapView.courts.find(c => c.id === courtId);
+        if (court) {
+            MapView.map.flyTo([court.latitude, court.longitude], 15, { duration: 0.6 });
+            const marker = MapView.markers.find(m => m.courtId === courtId);
+            if (marker) setTimeout(() => marker.openPopup(), 400);
+        }
+        App.openCourtDetails(courtId);
+    },
+
+    _highlightMatch(text, query) {
+        const safe = MapView._escapeHtml(text);
+        const idx = text.toLowerCase().indexOf(query);
+        if (idx === -1) return safe;
+        const before = MapView._escapeHtml(text.slice(0, idx));
+        const match = MapView._escapeHtml(text.slice(idx, idx + query.length));
+        const after = MapView._escapeHtml(text.slice(idx + query.length));
+        return `${before}<strong>${match}</strong>${after}`;
     },
 
     locateUser() {
         if (!navigator.geolocation) return;
         navigator.geolocation.getCurrentPosition(pos => {
             const { latitude, longitude } = pos.coords;
-            MapView.map.setView([latitude, longitude], 13);
-            L.marker([latitude, longitude], {
-                icon: L.divIcon({
-                    className: 'user-location-icon',
-                    html: '<div class="user-dot"></div>',
-                    iconSize: [16, 16],
-                })
-            }).addTo(MapView.map).bindPopup('You are here');
+            MapView.map.flyTo([latitude, longitude], 13, { duration: 0.8 });
+            MapView._placeUserDot(latitude, longitude);
         });
+    },
+
+    _placeUserDot(lat, lng) {
+        if (MapView.userLocationMarker) {
+            MapView.map.removeLayer(MapView.userLocationMarker);
+        }
+        MapView.userLocationMarker = L.marker([lat, lng], {
+            icon: L.divIcon({
+                className: 'user-location-icon',
+                html: '<div class="user-dot"><div class="user-dot-ring"></div></div>',
+                iconSize: [22, 22],
+                iconAnchor: [11, 11],
+            }),
+            zIndexOffset: 1000,
+        }).addTo(MapView.map).bindPopup('You are here');
     },
 
     async _fetchCourtBundle(courtId) {
@@ -1410,24 +1611,62 @@ const MapView = {
     renderCourtList() {
         const el = document.getElementById('court-list-items');
         if (!el) return;
-        const filtered = MapView._filterCourts(MapView.courts);
-        el.innerHTML = filtered.map(c => `
-            <div class="court-list-card" onclick="App.openCourtDetails(${c.id}); MapView.map.setView([${c.latitude},${c.longitude}], 14);">
-                <div class="court-list-name">${MapView._escapeHtml(c.name)}</div>
+        const filtered = MapView._sortCourts(MapView._filterCourts(MapView.courts));
+        el.innerHTML = filtered.map(c => {
+            const amenityIcons = [];
+            if (c.has_restrooms) amenityIcons.push('🚻');
+            if (c.has_parking) amenityIcons.push('🅿️');
+            if (c.lighted) amenityIcons.push('💡');
+            if (c.has_water) amenityIcons.push('💧');
+            const amenityStr = amenityIcons.length ? `<span class="court-list-amenities">${amenityIcons.join('')}</span>` : '';
+            const friendCount = MapView._friendsAtCourt(c.id).length;
+            return `
+            <div class="court-list-card" onclick="App.openCourtDetails(${c.id}); MapView.map.flyTo([${c.latitude},${c.longitude}], 14, {duration:0.6});"
+                 onmouseenter="MapView._highlightMarker(${c.id})" onmouseleave="MapView._unhighlightMarker(${c.id})">
+                <div class="court-list-top">
+                    <div class="court-list-name">${MapView._escapeHtml(c.name)}</div>
+                    ${c.active_players > 0 ? `<span class="live-badge">${c.active_players} playing</span>` : ''}
+                </div>
                 <div class="court-list-meta">
                     <span>${c.indoor ? '🏢' : '☀️'} ${MapView._escapeHtml(c.city)}</span>
                     <span>${c.num_courts} court${c.num_courts > 1 ? 's' : ''}</span>
                     ${c.distance !== undefined ? `<span>${c.distance} mi</span>` : ''}
-                    ${c.active_players > 0 ? `<span class="live-badge">${c.active_players}</span>` : ''}
-                    ${MapView._friendsAtCourt(c.id).length > 0 ? `<span class="friend-badge">${MapView._friendsAtCourt(c.id).length}</span>` : ''}
+                    ${friendCount > 0 ? `<span class="friend-badge">👥 ${friendCount}</span>` : ''}
+                    ${amenityStr}
                 </div>
-                ${c.hours ? `<div class="court-list-hours">${MapView._escapeHtml(c.hours)}</div>` : ''}
-            </div>
-        `).join('') || '<p class="muted">No courts match your filter</p>';
+            </div>`;
+        }).join('') || '<p class="muted" style="padding:16px">No courts match your filter</p>';
+    },
+
+    setSort(sortKey) {
+        MapView.courtListSort = sortKey;
+        MapView.renderCourtList();
+    },
+
+    _sortCourts(courts) {
+        const sorted = [...courts];
+        switch (MapView.courtListSort) {
+            case 'distance': sorted.sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999)); break;
+            case 'courts': sorted.sort((a, b) => (b.num_courts || 0) - (a.num_courts || 0)); break;
+            case 'active': sorted.sort((a, b) => (b.active_players || 0) - (a.active_players || 0)); break;
+            default: sorted.sort((a, b) => (a.name || '').localeCompare(b.name || '')); break;
+        }
+        return sorted;
+    },
+
+    _highlightMarker(courtId) {
+        const marker = MapView.markers.find(m => m.courtId === courtId);
+        if (marker?._icon) marker._icon.classList.add('marker-highlight');
+    },
+
+    _unhighlightMarker(courtId) {
+        const marker = MapView.markers.find(m => m.courtId === courtId);
+        if (marker?._icon) marker._icon.classList.remove('marker-highlight');
     },
 
     toggleCourtList() {
         MapView.courtListOpen = !MapView.courtListOpen;
-        document.getElementById('court-list-sidebar').style.display = MapView.courtListOpen ? 'block' : 'none';
+        const sidebar = document.getElementById('court-list-sidebar');
+        if (sidebar) sidebar.classList.toggle('open', MapView.courtListOpen);
     },
 };

@@ -63,8 +63,7 @@ const App = {
 
     async initCountyPicker() {
         const select = document.getElementById('county-select');
-        if (!select) return;
-        select.innerHTML = '<option value="">Loading...</option>';
+        if (select) select.innerHTML = '<option value="">Loading...</option>';
 
         let counties = [];
         try {
@@ -82,9 +81,12 @@ const App = {
         }
 
         App.counties = counties;
-        select.innerHTML = counties.map(c =>
-            `<option value="${c.slug}">${c.name} County (${c.court_count})</option>`
-        ).join('');
+
+        if (select) {
+            select.innerHTML = counties.map(c =>
+                `<option value="${c.slug}">${c.name} County (${c.court_count})</option>`
+            ).join('');
+        }
 
         let selected = App.getSelectedCountySlug();
         if (!counties.some(c => c.slug === selected)) selected = counties[0].slug;
@@ -93,7 +95,63 @@ const App = {
             reloadCourts: selected !== App.getSelectedCountySlug(),
             fitMap: true, showToast: false,
         });
-        select.value = selected;
+        if (select) select.value = selected;
+
+        App._renderCountyPickerList();
+        App._updateCountyPickerLabel();
+    },
+
+    toggleCountyPicker() {
+        const dd = document.getElementById('county-picker-dropdown');
+        if (!dd) return;
+        const isOpen = dd.style.display !== 'none';
+        dd.style.display = isOpen ? 'none' : 'block';
+        if (!isOpen) {
+            const input = document.getElementById('county-picker-search');
+            if (input) { input.value = ''; input.focus(); }
+            App._renderCountyPickerList();
+        }
+    },
+
+    closeCountyPicker() {
+        const dd = document.getElementById('county-picker-dropdown');
+        if (dd) dd.style.display = 'none';
+    },
+
+    filterCountyList(query) {
+        App._renderCountyPickerList(query);
+    },
+
+    _renderCountyPickerList(query) {
+        const list = document.getElementById('county-picker-list');
+        if (!list) return;
+        const q = (query || '').toLowerCase().trim();
+        const filtered = q
+            ? App.counties.filter(c => c.name.toLowerCase().includes(q) || c.slug.includes(q))
+            : App.counties;
+        const selectedSlug = App.getSelectedCountySlug();
+        list.innerHTML = filtered.map(c => {
+            const active = c.slug === selectedSlug ? ' county-item-active' : '';
+            const hasCourtsBadge = c.court_count > 0
+                ? `<span class="county-count">${c.court_count}</span>`
+                : '<span class="county-count county-count-zero">0</span>';
+            return `<button type="button" class="county-item${active}" onclick="App.selectCountyFromPicker('${c.slug}')">
+                <span class="county-item-name">${c.name} County</span>
+                ${hasCourtsBadge}
+            </button>`;
+        }).join('') || '<div class="county-empty">No counties match</div>';
+    },
+
+    _updateCountyPickerLabel() {
+        const label = document.getElementById('county-picker-label');
+        if (label) label.textContent = App.getSelectedCountyName() + ' County';
+    },
+
+    selectCountyFromPicker(slug) {
+        App.closeCountyPicker();
+        App.onCountyChange(slug);
+        App._updateCountyPickerLabel();
+        App._renderCountyPickerList();
     },
 
     setSelectedCounty(rawSlug, { persist = true, reloadCourts = true, fitMap = false, showToast = false } = {}) {
@@ -104,6 +162,7 @@ const App = {
 
         const select = document.getElementById('county-select');
         if (select && select.value !== normalized) select.value = normalized;
+        App._updateCountyPickerLabel();
 
         if (!changed) return;
         if (reloadCourts) {
@@ -651,7 +710,21 @@ const App = {
                 clearTimeout(mobileSearchTimeout);
                 mobileSearchTimeout = setTimeout(() => MapView.search(mobileSearchInput.value), 400);
             });
+            mobileSearchInput.addEventListener('focus', () => {
+                if (mobileSearchInput.value.trim()) MapView._showSuggestions(mobileSearchInput.value);
+            });
         }
+
+        // Close dropdowns on outside click
+        document.addEventListener('click', (e) => {
+            const picker = document.getElementById('county-picker');
+            if (picker && !picker.contains(e.target)) App.closeCountyPicker();
+            const suggestions = document.getElementById('search-suggestions');
+            const searchInput = document.getElementById('mobile-search-input');
+            if (suggestions && !suggestions.contains(e.target) && e.target !== searchInput) {
+                if (typeof MapView !== 'undefined') MapView.hideSuggestions();
+            }
+        });
 
         // Update user avatar in header
         App._updateHeaderAvatar();

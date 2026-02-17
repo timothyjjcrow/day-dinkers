@@ -63,6 +63,65 @@ img { max-width: 100%; display: block; }
     font-family: inherit; min-width: 0;
 }
 .header-center select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(34,197,94,.15); }
+
+/* ── County Picker ────────────────────────────── */
+.county-picker { position: relative; flex: 1; min-width: 0; }
+.county-picker-trigger {
+    width: 100%; height: 34px; border: 1px solid var(--border);
+    border-radius: 20px; background: var(--bg); color: var(--text);
+    padding: 0 10px; font-size: 12px; font-weight: 600;
+    font-family: inherit; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between; gap: 4px;
+    transition: border-color .15s, box-shadow .15s;
+}
+.county-picker-trigger:hover { border-color: var(--primary); }
+.county-picker-trigger:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(34,197,94,.15); }
+.county-picker-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.county-picker-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    min-width: 240px; max-height: 360px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow-lg);
+    z-index: 1100; overflow: hidden;
+    display: flex; flex-direction: column;
+}
+.county-picker-locate {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 10px 12px; border: none;
+    background: var(--primary-light); color: var(--primary-dark);
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    font-family: inherit; border-bottom: 1px solid var(--border);
+}
+.county-picker-locate:hover { background: #bbf7d0; }
+.county-picker-locate svg { flex-shrink: 0; }
+#county-picker-search {
+    width: 100%; padding: 9px 12px; border: none;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px; font-family: inherit; background: var(--bg);
+}
+#county-picker-search:focus { outline: none; background: #fff; }
+.county-picker-list {
+    overflow-y: auto; max-height: 260px;
+    -webkit-overflow-scrolling: touch;
+}
+.county-item {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: 8px 12px; border: none; background: none;
+    font-size: 13px; cursor: pointer; font-family: inherit;
+    color: var(--text); text-align: left;
+    border-bottom: 1px solid rgba(226,232,240,.5);
+    transition: background .1s;
+}
+.county-item:hover { background: var(--bg); }
+.county-item-active { background: var(--primary-light); font-weight: 600; }
+.county-item-active:hover { background: #bbf7d0; }
+.county-count {
+    font-size: 11px; font-weight: 700; background: var(--primary);
+    color: #fff; padding: 1px 7px; border-radius: 10px;
+    min-width: 22px; text-align: center;
+}
+.county-count-zero { background: var(--border); color: var(--text-muted); }
+.county-empty { padding: 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
 .header-icon-btn {
     background: none; border: none; padding: 6px; cursor: pointer;
     border-radius: var(--radius-sm); color: var(--text-muted);
@@ -289,13 +348,61 @@ img { max-width: 100%; display: block; }
     background: linear-gradient(to bottom, rgba(255,255,255,.95) 70%, transparent);
 }
 #map-filters::-webkit-scrollbar { display: none; }
-.mobile-search-inline { flex-shrink: 0; }
+.mobile-search-inline { flex-shrink: 0; position: relative; }
 .mobile-search-inline input {
-    width: 160px; padding: 7px 10px; border: 1px solid var(--border);
+    width: 180px; padding: 7px 28px 7px 10px; border: 1px solid var(--border);
     border-radius: 20px; font-size: 13px; background: var(--bg-card);
-    font-family: inherit;
+    font-family: inherit; transition: width .2s ease, border-color .15s;
 }
-.mobile-search-inline input:focus { outline: none; border-color: var(--primary); width: 200px; }
+.mobile-search-inline input:focus { outline: none; border-color: var(--primary); width: 220px; }
+.search-clear-btn {
+    position: absolute; right: 6px; top: 50%;
+    transform: translateY(-50%); width: 20px; height: 20px;
+    border: none; background: var(--border); color: var(--text-muted);
+    border-radius: 50%; font-size: 14px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+}
+.search-clear-btn:hover { background: var(--text-muted); color: #fff; }
+
+/* Search Suggestions */
+.search-suggestions {
+    position: absolute; top: calc(100% + 4px); left: 0;
+    width: 280px; max-height: 320px; overflow-y: auto;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow-lg);
+    z-index: 700;
+}
+.suggestion-item {
+    display: block; width: 100%; padding: 8px 12px;
+    border: none; background: none; text-align: left;
+    cursor: pointer; font-family: inherit;
+    border-bottom: 1px solid rgba(226,232,240,.4);
+    transition: background .1s;
+}
+.suggestion-item:hover { background: var(--primary-light); }
+.suggestion-item:last-child { border-bottom: none; }
+.suggestion-name { font-size: 13px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.suggestion-name strong { color: var(--primary-dark); }
+.suggestion-meta { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+.suggestion-live {
+    font-size: 10px; font-weight: 700; color: var(--primary-dark);
+    background: var(--primary-light); padding: 1px 6px; border-radius: 8px;
+}
+.suggestion-empty { padding: 12px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+/* Court Count Badge */
+.map-court-count {
+    flex-shrink: 0; font-size: 11px; font-weight: 600;
+    color: var(--text-muted); white-space: nowrap;
+    background: var(--bg); padding: 3px 8px; border-radius: 10px;
+}
+
+/* Filter Count */
+.filter-count {
+    font-size: 10px; margin-left: 3px; opacity: .7;
+}
+.filter-chip.active .filter-count { opacity: .9; }
 .filter-chip {
     flex-shrink: 0; padding: 6px 12px; border: 1px solid var(--border);
     border-radius: 20px; background: var(--bg-card); font-size: 12px;
@@ -328,29 +435,61 @@ img { max-width: 100%; display: block; }
     background: var(--bg-card); border: 1px solid var(--border);
     box-shadow: var(--shadow-md); cursor: pointer;
     font-size: 12px; font-weight: 600; font-family: inherit;
+    display: flex; align-items: center; gap: 5px;
 }
 
 .court-list-sidebar {
-    position: absolute; top: 0; left: 0; bottom: 0; width: 280px;
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 55%; max-height: 420px;
     background: var(--bg-card); z-index: 600;
-    box-shadow: var(--shadow-lg); overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    box-shadow: 0 -4px 20px rgba(0,0,0,.12);
+    overflow: hidden;
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+    transition: transform .3s cubic-bezier(.4,0,.2,1);
+    display: flex; flex-direction: column;
 }
+.court-list-sidebar.open { transform: translateY(0); }
 .sidebar-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px; border-bottom: 1px solid var(--border);
-    position: sticky; top: 0; background: var(--bg-card);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    background: var(--bg-card); flex-shrink: 0;
+    border-radius: 16px 16px 0 0;
 }
-.sidebar-header h3 { font-size: 15px; }
-.sidebar-header button { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px 8px; }
+.sidebar-header h3 { font-size: 15px; white-space: nowrap; }
+.sidebar-header select {
+    flex: 1; min-width: 0; height: 30px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg);
+    font-size: 11px; font-family: inherit; padding: 0 6px;
+}
+.sidebar-close-btn {
+    background: none; border: none; font-size: 22px; cursor: pointer;
+    padding: 2px 6px; color: var(--text-muted); line-height: 1;
+}
+.sidebar-close-btn:hover { color: var(--text); }
+#court-list-items {
+    flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
 .court-list-card {
     padding: 10px 12px; border-bottom: 1px solid var(--border);
-    cursor: pointer;
+    cursor: pointer; transition: background .1s;
 }
 .court-list-card:hover { background: var(--bg); }
+.court-list-card:active { background: var(--primary-light); }
+.court-list-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .court-list-name { font-weight: 600; font-size: 14px; }
 .court-list-meta { display: flex; gap: 8px; font-size: 12px; color: var(--text-muted); flex-wrap: wrap; margin-top: 2px; }
+.court-list-amenities { font-size: 11px; letter-spacing: 1px; }
 .court-list-hours { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.live-badge {
+    font-size: 10px; font-weight: 700; color: #fff;
+    background: var(--primary); padding: 2px 7px; border-radius: 10px;
+    white-space: nowrap;
+}
+.friend-badge {
+    font-size: 11px; font-weight: 600; color: var(--accent);
+    white-space: nowrap;
+}
 
 /* ── Court Details Screen ──────────────────────── */
 #court-details-screen {
@@ -2345,14 +2484,13 @@ input.flatpickr-input[readonly] {
 }
 
 /* ── Map Popup ─────────────────────────────────── */
-.court-popup { font-family: 'Inter', sans-serif; font-size: 13px; min-width: 200px; }
-.court-popup h3 { font-size: 14px; margin-bottom: 4px; }
+.court-popup { font-family: 'Inter', sans-serif; font-size: 13px; min-width: 220px; max-width: 300px; }
+.court-popup h3 { font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
 .popup-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .popup-meta span { font-size: 12px; color: var(--text-muted); }
 .popup-live { display: flex; align-items: center; gap: 4px; font-size: 12px; margin-bottom: 6px; }
 .popup-live .active-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
 .popup-amenities { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; }
-.popup-actions { display: flex; gap: 6px; }
 
 @media (max-width: 460px) {
     .tournament-round-grid { grid-auto-columns: minmax(220px, 84vw); }
@@ -2374,10 +2512,9 @@ input.flatpickr-input[readonly] {
     :root { --header-height: 56px; --tab-bar-height: 48px; }
     .header-logo { height: 42px; }
     .header-center { max-width: 300px; }
-    .mobile-search-inline input { width: 200px; }
-    .mobile-search-inline input:focus { width: 260px; }
+    .mobile-search-inline input { width: 220px; }
+    .mobile-search-inline input:focus { width: 280px; }
     .dropdown { width: 360px; }
-    .court-list-sidebar { width: 340px; }
     .session-card-grid { grid-template-columns: 1fr 1fr; }
     .leaderboard-podium { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -2389,6 +2526,20 @@ input.flatpickr-input[readonly] {
     #court-leaderboard-tab { max-width: 800px; margin: 0 auto; }
     .session-card-grid { grid-template-columns: 1fr 1fr 1fr; }
     .leaderboard-table td { padding: 10px 8px; }
+
+    /* Desktop split-view: court list always visible on left */
+    #map-container { display: flex; flex-direction: row; }
+    .court-list-sidebar {
+        position: relative; left: auto; right: auto; bottom: auto;
+        width: 320px; height: 100%; max-height: none;
+        transform: none; border-radius: 0;
+        box-shadow: 1px 0 4px rgba(0,0,0,.06);
+        flex-shrink: 0; display: flex; flex-direction: column;
+    }
+    .court-list-sidebar.open { transform: none; }
+    #map { flex: 1; }
+    #list-toggle { display: none; }
+    .sidebar-close-btn { display: none; }
 }
 
 /* ── Admin (reuse) ─────────────────────────────── */
@@ -2420,9 +2571,44 @@ input.flatpickr-input[readonly] {
 .court-marker {
     width: 32px; height: 32px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 6px rgba(0,0,0,.3); position: relative;
-    border: 2px solid #fff;
+    box-shadow: 0 2px 6px rgba(0,0,0,.25); position: relative;
+    border: 2.5px solid #fff;
+    transition: transform .15s ease, box-shadow .15s ease;
 }
+.court-marker svg { pointer-events: none; }
+
+/* Pulsing animation for active courts */
+.court-marker.marker-pulse {
+    animation: court-pulse 2s ease-in-out infinite;
+}
+@keyframes court-pulse {
+    0%, 100% { box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+    50% { box-shadow: 0 0 0 8px rgba(239,68,68,.2), 0 2px 6px rgba(0,0,0,.25); }
+}
+
+/* Friend ring glow */
+.court-marker.marker-friend-ring {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99,102,241,.25), 0 2px 6px rgba(0,0,0,.25);
+}
+
+/* Verified badge on marker */
+.marker-verified {
+    position: absolute; bottom: -4px; right: -4px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--primary); color: #fff; font-size: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; border: 1.5px solid #fff;
+    line-height: 1;
+}
+
+/* Hover highlight from court list */
+.marker-highlight .court-marker {
+    transform: scale(1.35);
+    box-shadow: 0 0 0 4px rgba(34,197,94,.4), 0 4px 12px rgba(0,0,0,.3);
+    z-index: 9999 !important;
+}
+
 .marker-badge {
     position: absolute; top: -6px; right: -6px;
     background: var(--danger); color: #fff; font-size: 10px;
@@ -2430,19 +2616,65 @@ input.flatpickr-input[readonly] {
     border-radius: 8px; display: flex; align-items: center;
     justify-content: center; padding: 0 3px;
 }
+
+/* Cluster markers */
+.court-cluster-icon { background: none !important; border: none !important; }
+.cluster-marker {
+    width: 40px; height: 40px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px; color: #fff;
+    border: 2.5px solid #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.cluster-marker span { line-height: 1; }
+.cluster-small { background: var(--primary); }
+.cluster-medium { background: var(--warning); }
+.cluster-large { background: var(--danger); }
+
+/* User location */
 .user-location-icon { background: none !important; border: none !important; }
 .user-dot {
     width: 16px; height: 16px; border-radius: 50%;
     background: #3b82f6; border: 3px solid #fff;
     box-shadow: 0 0 8px rgba(59,130,246,.5);
+    position: relative;
+}
+.user-dot-ring {
+    position: absolute; top: 50%; left: 50%;
+    width: 32px; height: 32px; border-radius: 50%;
+    background: rgba(59,130,246,.12);
+    border: 1px solid rgba(59,130,246,.2);
+    transform: translate(-50%, -50%);
+    animation: user-ring-pulse 3s ease-in-out infinite;
+}
+@keyframes user-ring-pulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: .6; }
+    50% { transform: translate(-50%, -50%) scale(1.4); opacity: .2; }
+}
+
+/* Popup enhancements */
+.popup-photo {
+    margin: -10px -10px 8px;
+    border-radius: var(--radius) var(--radius) 0 0;
+    overflow: hidden; max-height: 120px;
+}
+.popup-photo img {
+    width: 100%; height: 120px; object-fit: cover;
+    display: block;
+}
+.popup-verified {
+    font-size: 10px; font-weight: 700; color: var(--primary-dark);
+    background: var(--primary-light); padding: 1px 6px; border-radius: 8px;
+    margin-left: 4px; vertical-align: middle;
 }
 .popup-addr { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
 .popup-players { font-size: 12px; margin-bottom: 4px; }
 .popup-players.active { color: var(--primary-dark); font-weight: 500; }
 .popup-fees, .popup-hours, .popup-friends { font-size: 12px; color: var(--text-muted); margin-bottom: 2px; }
 .popup-dist { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: 4px; }
+.popup-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 
 /* ── Leaflet fixes ─────────────────────────────── */
 .leaflet-control-zoom { border-radius: var(--radius-sm) !important; }
-.leaflet-popup-content-wrapper { border-radius: var(--radius) !important; }
-.leaflet-popup-content { margin: 10px !important; }
+.leaflet-popup-content-wrapper { border-radius: var(--radius) !important; box-shadow: var(--shadow-lg) !important; }
+.leaflet-popup-content { margin: 10px !important; min-width: 220px; max-width: 300px; }
