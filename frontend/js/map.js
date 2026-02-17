@@ -992,6 +992,11 @@ const MapView = {
         const safePhoneLabel = MapView._escapeHtml(court.phone || '');
         const safePhoneHref = MapView._safeTel(court.phone || '');
         const safeWebsiteHref = MapView._safeHttpUrl(court.website || '');
+        const safePhotoUrl = MapView._escapeAttr(court.photo_url || '');
+        const safePhotoAlt = MapView._escapeAttr(court.name || 'Court');
+        const photoHtml = safePhotoUrl
+            ? `<div class="court-detail-photo"><img src="${safePhotoUrl}" alt="${safePhotoAlt}" loading="lazy" onerror="this.parentElement.remove()"></div>`
+            : '';
 
         // Amenities
         const amenities = [];
@@ -1030,6 +1035,7 @@ const MapView = {
         });
 
         return `
+            ${photoHtml}
             ${checkinBtnHTML}
 
             <div id="court-live-status" class="court-live-status ${players > 0 ? 'active' : ''}">

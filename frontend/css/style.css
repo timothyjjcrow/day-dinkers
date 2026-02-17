@@ -542,6 +542,21 @@ img { max-width: 100%; display: block; }
 
 /* ── Court Info Content ────────────────────────── */
 #court-info-content { padding: 14px 12px 8px; }
+.court-detail-photo {
+    margin: 0 0 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    background: var(--bg);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.court-detail-photo img {
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+    display: block;
+}
+.court-detail-photo img[src=""] { display: none; }
 
 /* Checkin bar */
 .checkin-status-bar {
