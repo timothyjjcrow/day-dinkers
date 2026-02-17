@@ -484,7 +484,7 @@ const MapView = {
         const verifiedLabel = court.verified ? '<span class="popup-verified">✓ Verified</span>' : '';
 
         const photoHtml = court.photo_url
-            ? `<div class="popup-photo"><img src="${MapView._escapeAttr(court.photo_url)}" alt="${courtName}" loading="lazy"></div>`
+            ? `<div class="popup-photo"><img src="${MapView._escapeAttr(court.photo_url)}" alt="${courtName}" loading="lazy" onerror="this.parentElement.remove()"></div>`
             : '';
 
         const token = localStorage.getItem('token');
@@ -1413,7 +1413,7 @@ const MapView = {
             <div class="court-image-gallery">
                 ${images.map(img => `
                     <figure class="court-image-card">
-                        <img src="${MapView._escapeAttr(img.image_url || '')}" alt="Court image">
+                        <img src="${MapView._escapeAttr(img.image_url || '')}" alt="Court image" onerror="this.closest('.court-image-card').remove()">
                         <figcaption>${MapView._escapeHtml(img.caption || 'Community photo')}</figcaption>
                     </figure>
                 `).join('')}

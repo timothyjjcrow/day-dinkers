@@ -2657,11 +2657,14 @@ input.flatpickr-input[readonly] {
     margin: -10px -10px 8px;
     border-radius: var(--radius) var(--radius) 0 0;
     overflow: hidden; max-height: 120px;
+    background: var(--bg); min-height: 60px;
+    display: flex; align-items: center; justify-content: center;
 }
 .popup-photo img {
     width: 100%; height: 120px; object-fit: cover;
     display: block;
 }
+.popup-photo img[src=""] { display: none; }
 .popup-verified {
     font-size: 10px; font-weight: 700; color: var(--primary-dark);
     background: var(--primary-light); padding: 1px 6px; border-radius: 8px;
