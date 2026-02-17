@@ -5,6 +5,8 @@
 const Ranked = {
     currentCourtId: null,
     actionDigestByCourt: {},
+    summaryDigestByCourt: {},
+    tournamentSummaryDigestById: {},
     actionFlashCourtId: null,
     actionFlashUntil: 0,
     recentMatchesByCourt: {},
@@ -45,6 +47,54 @@ const Ranked = {
         const dt = new Date(value);
         const ts = dt.getTime();
         return Number.isFinite(ts) ? ts : 0;
+    },
+
+    _buildCourtSummaryDigest(summary = {}) {
+        const payload = {
+            queue: summary.queue || [],
+            matches: summary.matches || [],
+            ready_lobbies: summary.ready_lobbies || [],
+            scheduled_lobbies: summary.scheduled_lobbies || [],
+            pending_lobbies: summary.pending_lobbies || [],
+            leaderboard: summary.leaderboard || [],
+            tournaments_live: summary.tournaments_live || [],
+            tournaments_upcoming: summary.tournaments_upcoming || [],
+            tournaments_completed: summary.tournaments_completed || [],
+        };
+        try {
+            return JSON.stringify(payload);
+        } catch {
+            return '';
+        }
+    },
+
+    _tournamentDigest(tournament = {}) {
+        const t = tournament || {};
+        try {
+            return JSON.stringify({
+                id: Number(t.id) || 0,
+                status: String(t.status || ''),
+                registered_count: Number(t.registered_count || t.participants_count || 0),
+                checked_in_count: Number(t.checked_in_count || 0),
+                start_time: String(t.start_time || ''),
+                completed_at: String(t.completed_at || ''),
+                cancelled_at: String(t.cancelled_at || ''),
+                bracket_size: Number(t.bracket_size || 0),
+                total_rounds: Number(t.total_rounds || 0),
+            });
+        } catch {
+            return '';
+        }
+    },
+
+    _findTournamentInSummary(summary = {}, tournamentId) {
+        const targetId = Number(tournamentId) || 0;
+        if (!targetId) return null;
+        const candidates = []
+            .concat(summary.tournaments_live || [])
+            .concat(summary.tournaments_upcoming || [])
+            .concat(summary.tournaments_completed || []);
+        return candidates.find(item => Number(item.id) === targetId) || null;
     },
 
     _extractActionState(summary = {}) {
@@ -312,12 +362,21 @@ const Ranked = {
         const container = document.getElementById('court-ranked-section');
         if (!container) return;
         const silent = !!options.silent;
+        const previousTournamentView = document.getElementById('ranked-tournament-view');
+        const preservedTournamentHtml = previousTournamentView ? previousTournamentView.innerHTML : '';
         if (!silent || !container.innerHTML.trim()) {
             container.innerHTML = '<div class="loading">Loading competitive play...</div>';
         }
 
         try {
             const res = await API.get(`/api/ranked/court/${courtId}/summary`);
+            const nextSummaryDigest = Ranked._buildCourtSummaryDigest(res);
+            const previousSummaryDigest = Ranked.summaryDigestByCourt[courtId] || '';
+            if (silent && previousSummaryDigest && previousSummaryDigest === nextSummaryDigest) {
+                return;
+            }
+            Ranked.summaryDigestByCourt[courtId] = nextSummaryDigest;
+
             const nextActionState = Ranked._extractActionState(res);
             const prevDigest = Ranked.actionDigestByCourt[courtId] || '';
             const hasNewActions = !!nextActionState.digest && nextActionState.digest !== prevDigest;
@@ -329,7 +388,27 @@ const Ranked = {
                 && Number(Ranked.currentTournamentCourtId || courtId) === Number(courtId)
                 && typeof Ranked.openTournament === 'function'
             ) {
-                Ranked.openTournament(Ranked.currentTournamentId, courtId, { silent: true });
+                const tournamentId = Number(Ranked.currentTournamentId) || 0;
+                const inlineView = document.getElementById('ranked-tournament-view');
+                if (inlineView && preservedTournamentHtml.trim()) {
+                    inlineView.innerHTML = preservedTournamentHtml;
+                }
+
+                const summaryTournament = Ranked._findTournamentInSummary(res, tournamentId);
+                const nextTournamentDigest = summaryTournament
+                    ? Ranked._tournamentDigest(summaryTournament)
+                    : '';
+                const previousTournamentDigest = Ranked.tournamentSummaryDigestById[tournamentId] || '';
+                const shouldRefreshTournamentDetail = (
+                    !silent
+                    || !preservedTournamentHtml.trim()
+                    || nextTournamentDigest !== previousTournamentDigest
+                );
+
+                if (shouldRefreshTournamentDetail) {
+                    Ranked.openTournament(tournamentId, courtId, { silent: true });
+                }
+                Ranked.tournamentSummaryDigestById[tournamentId] = nextTournamentDigest;
             }
             if (hasNewActions) Ranked._maybePromoteActionCenter(courtId);
         } catch (err) {

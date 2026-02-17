@@ -310,6 +310,11 @@ Object.assign(Ranked, {
         try {
             const res = await API.get(`/api/ranked/tournaments/${id}`);
             const tournament = res.tournament || {};
+            if (typeof Ranked._tournamentDigest === 'function') {
+                const digest = Ranked._tournamentDigest(tournament);
+                if (!Ranked.tournamentSummaryDigestById) Ranked.tournamentSummaryDigestById = {};
+                Ranked.tournamentSummaryDigestById[id] = digest;
+            }
             Ranked.currentTournamentId = id;
             Ranked.currentTournamentCourtId = Number(courtId) || Number(tournament.court_id) || null;
             const inlineView = document.getElementById('ranked-tournament-view');
