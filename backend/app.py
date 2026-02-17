@@ -38,6 +38,7 @@ def _run_lightweight_migrations():
     user_columns = {col['name'] for col in inspector.get_columns('user')}
     court_columns = {col['name'] for col in inspector.get_columns('court')} if 'court' in table_names else set()
     checkin_columns = {col['name'] for col in inspector.get_columns('check_in')} if 'check_in' in table_names else set()
+    match_columns = {col['name'] for col in inspector.get_columns('match')} if 'match' in table_names else set()
     with db.engine.begin() as connection:
         if 'is_admin' not in user_columns:
             connection.execute(text(
@@ -85,9 +86,25 @@ def _run_lightweight_migrations():
 
         # Performance indexes for ranked queries
         if 'match' in table_names:
+            if 'tournament_id' not in match_columns:
+                connection.execute(text(
+                    'ALTER TABLE "match" ADD COLUMN tournament_id INTEGER'
+                ))
+            if 'bracket_round' not in match_columns:
+                connection.execute(text(
+                    'ALTER TABLE "match" ADD COLUMN bracket_round INTEGER'
+                ))
+            if 'bracket_slot' not in match_columns:
+                connection.execute(text(
+                    'ALTER TABLE "match" ADD COLUMN bracket_slot INTEGER'
+                ))
             connection.execute(text(
                 'CREATE INDEX IF NOT EXISTS ix_match_court_status '
                 'ON match (court_id, status)'
+            ))
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_match_tournament_round_slot '
+                'ON match (tournament_id, bracket_round, bracket_slot)'
             ))
         if 'match_player' in table_names:
             connection.execute(text(
@@ -98,6 +115,25 @@ def _run_lightweight_migrations():
             connection.execute(text(
                 'CREATE INDEX IF NOT EXISTS ix_ranked_lobby_court_status '
                 'ON ranked_lobby (court_id, status)'
+            ))
+        if 'tournament' in table_names:
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_tournament_court_status_start '
+                'ON tournament (court_id, status, start_time)'
+            ))
+        if 'tournament_participant' in table_names:
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_tournament_participant_tournament_status '
+                'ON tournament_participant (tournament_id, participant_status)'
+            ))
+        if 'tournament_result' in table_names:
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_tournament_result_court_points '
+                'ON tournament_result (court_id, points)'
+            ))
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_tournament_result_user_created '
+                'ON tournament_result (user_id, created_at)'
             ))
 
 

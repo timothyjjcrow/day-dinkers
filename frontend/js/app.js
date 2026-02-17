@@ -227,6 +227,46 @@ const App = {
                 }
             } catch { courtLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
         }
+        // Tournament leaderboard
+        const tournamentLb = document.getElementById('tournament-leaderboard-content');
+        if (tournamentLb) {
+            tournamentLb.innerHTML = '<div class="loading">Loading...</div>';
+            try {
+                const res = await API.get(`/api/ranked/tournaments/leaderboard?court_id=${courtId}&limit=20`);
+                const lb = res.leaderboard || [];
+                if (!lb.length) {
+                    tournamentLb.innerHTML = '<p class="muted">No tournament results at this court yet.</p>';
+                } else {
+                    const tieBreakNote = `
+                        <p class="muted" style="margin-bottom:8px">
+                            Sorted by points, titles, wins, then average finish and losses.
+                        </p>
+                    `;
+                    tournamentLb.innerHTML = lb.map(row => `
+                        <div class="ranked-player-card compact" onclick="Ranked.viewPlayer(${Number(row.user_id) || 0})">
+                            <div class="ranked-player-rank">#${Number(row.rank) || '-'}</div>
+                            <div class="ranked-player-main">
+                                <div class="ranked-player-name-row">
+                                    <strong>${Ranked._e(row.name || row.username || 'Player')}</strong>
+                                    <span class="muted">@${Ranked._e(row.username || '')}</span>
+                                </div>
+                                <div class="ranked-player-metrics">
+                                    <span class="ranked-player-stat">${Number(row.points) || 0} pts</span>
+                                    <span class="ranked-player-stat">${Number(row.titles) || 0} titles</span>
+                                    <span class="ranked-player-stat">${Number(row.wins) || 0}W-${Number(row.losses) || 0}L</span>
+                                    <span class="ranked-player-stat">${Math.round((Number(row.win_rate) || 0) * 100)}% win</span>
+                                    <span class="ranked-player-stat">Best #${Number(row.best_finish) || '-'}</span>
+                                    <span class="ranked-player-stat">Avg #${Number(row.avg_placement || 0).toFixed(2)}</span>
+                                    <span class="ranked-player-stat">${Number(row.points_per_tournament || 0).toFixed(1)} pts/event</span>
+                                    <span class="ranked-player-stat">${Number(row.tournaments_played) || 0} events</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                    tournamentLb.innerHTML = tieBreakNote + tournamentLb.innerHTML;
+                }
+            } catch { tournamentLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
+        }
         // County leaderboard
         const countyLb = document.getElementById('county-leaderboard-content');
         if (countyLb) {
@@ -380,6 +420,7 @@ const App = {
                 const isCourtNotif = ['court_invite', 'checkin_notify'].includes(n.notif_type);
                 const isMatchNotif = ['match_confirm', 'match_rejected', 'match_result', 'match_cancelled', 'elo_change'].includes(n.notif_type);
                 const isChallengeNotif = (n.notif_type || '').startsWith('ranked_challenge');
+                const isTournamentNotif = (n.notif_type || '').startsWith('tournament_');
                 const isAdminNotif = ['court_update_approved', 'court_update_rejected'].includes(n.notif_type);
                 let onclick = '';
                 if (isSessionNotif && n.reference_id) {
@@ -389,6 +430,9 @@ const App = {
                 else if (isFriendNotif) onclick = `onclick="App.setMainTab('profile'); document.getElementById('notifications-dropdown').style.display='none';"`;
                 else if (isMatchNotif || isChallengeNotif) {
                     onclick = `onclick="App.openRankedActionFromNotification('${n.notif_type}', ${Number(n.reference_id) || 'null'});"`;
+                }
+                else if (isTournamentNotif) {
+                    onclick = `onclick="App.openTournamentActionFromNotification('${n.notif_type}', ${Number(n.reference_id) || 'null'});"`;
                 }
                 else if (isAdminNotif) onclick = `onclick="App.showScreen('admin'); document.getElementById('notifications-dropdown').style.display='none';"`;
                 return `
@@ -424,6 +468,37 @@ const App = {
         } catch {}
 
         // Fallback: go to profile
+        App.setMainTab('profile');
+    },
+
+    async openTournamentActionFromNotification(notifType, referenceId = null) {
+        const dropdown = document.getElementById('notifications-dropdown');
+        if (dropdown) dropdown.style.display = 'none';
+
+        let tournamentId = null;
+        let courtId = null;
+        try {
+            if (notifType === 'tournament_match_ready' && referenceId) {
+                const matchRes = await API.get(`/api/ranked/match/${referenceId}`);
+                tournamentId = Number(matchRes.match?.tournament_id) || null;
+                courtId = Number(matchRes.match?.court_id) || null;
+            }
+            if (!tournamentId && referenceId) {
+                const tournamentRes = await API.get(`/api/ranked/tournaments/${referenceId}`);
+                tournamentId = Number(tournamentRes.tournament?.id) || null;
+                courtId = Number(tournamentRes.tournament?.court_id) || null;
+            }
+            if (tournamentId && courtId) {
+                if (typeof Ranked !== 'undefined' && typeof Ranked.openTournamentFromSchedule === 'function') {
+                    Ranked.openTournamentFromSchedule(courtId, tournamentId);
+                } else {
+                    App.openCourtDetails(courtId);
+                    App.setCourtTab('ranked');
+                }
+                return;
+            }
+        } catch {}
+
         App.setMainTab('profile');
     },
 

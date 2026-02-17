@@ -42,10 +42,27 @@ const Sessions = {
 
         try {
             const res = await API.get(url);
+            let tournamentRes = { tournaments: [] };
+            try {
+                tournamentRes = await API.get('/api/ranked/tournaments/upcoming?days=120');
+            } catch {
+                tournamentRes = { tournaments: [] };
+            }
             const sessions = res.sessions || [];
-            Sessions.cachedListSessions = sessions;
-            Sessions.sessionsById = Object.fromEntries(sessions.map(s => [s.id, s]));
-            Sessions._renderList(list, sessions, {
+            const includeTournaments = typeFilter !== 'now';
+            const tournaments = includeTournaments
+                ? Sessions._normalizeTournamentScheduleItems(tournamentRes.tournaments || [])
+                : [];
+            let mergedItems = [...sessions, ...tournaments];
+            if (visibilityFilter === 'friends') {
+                mergedItems = mergedItems.filter(item => {
+                    if (item.item_type !== 'tournament') return true;
+                    return item.visibility === 'friends';
+                });
+            }
+            Sessions.cachedListSessions = mergedItems;
+            Sessions.sessionsById = Object.fromEntries(mergedItems.map(s => [s.id, s]));
+            Sessions._renderList(list, mergedItems, {
                 typeFilter,
                 visibilityFilter,
                 skillFilter,
@@ -131,6 +148,36 @@ const Sessions = {
         }
 
         list.innerHTML = html;
+    },
+
+    _normalizeTournamentScheduleItems(tournaments) {
+        return (tournaments || []).map(tournament => ({
+            id: `tournament-${tournament.id}`,
+            item_type: 'tournament',
+            tournament_id: tournament.id,
+            court_id: tournament.court_id,
+            session_type: 'scheduled',
+            start_time: tournament.start_time,
+            end_time: null,
+            game_type: 'tournament',
+            skill_level: 'all',
+            max_players: tournament.max_players,
+            visibility: tournament.access_mode === 'invite_only' ? 'friends' : 'all',
+            notes: tournament.description || '',
+            status: tournament.status,
+            creator_id: tournament.host_user_id,
+            creator: tournament.host_user || null,
+            court: tournament.court || null,
+            players: [],
+            tournament,
+        }));
+    },
+
+    openTournamentFromSchedule(courtId, tournamentId) {
+        if (typeof Ranked === 'undefined' || typeof Ranked.openTournamentFromSchedule !== 'function') {
+            return;
+        }
+        Ranked.openTournamentFromSchedule(courtId, tournamentId);
     },
 
     _rerenderFromCache() {
@@ -462,6 +509,57 @@ const Sessions = {
     },
 
     _renderCard(session) {
+        if (session?.item_type === 'tournament') {
+            const tournament = session.tournament || {};
+            const safeName = Sessions._e(tournament.name || 'Tournament');
+            const court = session.court || {};
+            const safeCourtName = Sessions._e(court.name || 'Unknown court');
+            const safeCourtCity = Sessions._e(court.city || '');
+            const host = session.creator || {};
+            const safeHost = Sessions._e(host.name || host.username || 'Host');
+            const start = session.start_time ? new Date(session.start_time) : null;
+            const when = start && !Number.isNaN(start.getTime())
+                ? start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                    + ' at '
+                    + start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                : 'Scheduled';
+            const participants = Number(tournament.participants_count || tournament.registered_count || 0);
+            const maxPlayers = Number(tournament.max_players || 0);
+            const participantLabel = maxPlayers
+                ? `${participants}/${maxPlayers} players`
+                : `${participants} players`;
+            const accessLabel = tournament.access_mode === 'invite_only' ? 'Invite only' : 'Open tournament';
+            const status = Sessions._e(tournament.status || 'upcoming');
+            return `
+            <article class="session-card" onclick="Sessions.openTournamentFromSchedule(${Number(session.court_id) || 0}, ${Number(session.tournament_id) || 0})">
+                <div class="session-card-header">
+                    <div class="session-status-wrap">
+                        <span class="session-status-pill scheduled">Tournament</span>
+                        <span class="session-time-text">${Sessions._e(when)}</span>
+                    </div>
+                    <div class="session-chip-row">
+                        <span class="session-chip">${Sessions._e(accessLabel)}</span>
+                        <span class="session-chip">Status: ${status}</span>
+                    </div>
+                </div>
+                <div class="session-card-court">
+                    <strong>${safeName}</strong>
+                    <span>${safeCourtName}${safeCourtCity ? ` · ${safeCourtCity}` : ''}</span>
+                </div>
+                <div class="session-card-meta-grid">
+                    <div class="session-meta-item"><span>Type</span><strong>Single Elim</strong></div>
+                    <div class="session-meta-item"><span>Players</span><strong>${Sessions._e(participantLabel)}</strong></div>
+                    <div class="session-meta-item"><span>Host</span><strong>${safeHost}</strong></div>
+                    <div class="session-meta-item"><span>ELO</span><strong>${tournament.affects_elo ? 'On' : 'Off'}</strong></div>
+                </div>
+                ${session.notes ? `<p class="session-notes">${Sessions._e(session.notes)}</p>` : ''}
+                <div class="session-card-actions" onclick="event.stopPropagation()">
+                    <button class="btn-primary btn-sm" onclick="event.stopPropagation(); Sessions.openTournamentFromSchedule(${Number(session.court_id) || 0}, ${Number(session.tournament_id) || 0})">Open Tournament</button>
+                    <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); App.openCourtDetails(${Number(session.court_id) || 0});">View Court</button>
+                </div>
+            </article>`;
+        }
+
         const court = session.court || {};
         const creator = session.creator || {};
         const players = session.players || [];
@@ -1656,8 +1754,9 @@ const Sessions = {
         if (!userId) return [];
         const friendIds = App.friendIds || [];
         const userSkill = Sessions._userSkillCategory(currentUser.skill_level);
+        const openPlaySessions = (sessions || []).filter(session => session.item_type !== 'tournament');
 
-        return sessions
+        return openPlaySessions
             .filter(s => s.creator_id !== userId)
             .filter(s => {
                 const me = (s.players || []).find(p => p.user_id === userId);

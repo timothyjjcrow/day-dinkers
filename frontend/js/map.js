@@ -164,9 +164,14 @@ const MapView = {
 
         MapView.scheduleBannerLoadPromise = (async () => {
             try {
-                const res = await API.get('/api/sessions?type=scheduled');
+                const [res, tournamentRes] = await Promise.all([
+                    API.get('/api/sessions?type=scheduled'),
+                    API.get('/api/ranked/tournaments/upcoming?days=14'),
+                ]);
                 const sessions = Array.isArray(res?.sessions) ? res.sessions : [];
-                MapView.scheduleBannerDays = MapView._buildScheduleBannerDays(sessions);
+                const tournaments = Array.isArray(tournamentRes?.tournaments) ? tournamentRes.tournaments : [];
+                const scheduleItems = [...sessions, ...tournaments];
+                MapView.scheduleBannerDays = MapView._buildScheduleBannerDays(scheduleItems);
                 MapView.scheduleBannerLastLoadedAt = Date.now();
                 MapView.scheduleBannerCountySlug = countySlug;
             } catch {
@@ -217,7 +222,7 @@ const MapView = {
         }
     },
 
-    _buildScheduleBannerDays(sessions) {
+    _buildScheduleBannerDays(scheduleItems) {
         const today = MapView._startOfDay(new Date());
         const endBoundary = new Date(today);
         endBoundary.setDate(today.getDate() + 7);
@@ -226,13 +231,15 @@ const MapView = {
             : '';
         const grouped = {};
 
-        (sessions || []).forEach((session) => {
-            if (session?.session_type !== 'scheduled' || !session.start_time) return;
-            const start = new Date(session.start_time);
+        (scheduleItems || []).forEach((item) => {
+            const isTournament = item?.item_type === 'tournament';
+            if (!isTournament && item?.session_type !== 'scheduled') return;
+            if (!item?.start_time) return;
+            const start = new Date(item.start_time);
             if (Number.isNaN(start.getTime())) return;
             if (start < today || start >= endBoundary) return;
 
-            const sessionCounty = String(session.court?.county_slug || '')
+            const sessionCounty = String(item.court?.county_slug || '')
                 .trim()
                 .toLowerCase();
             if (selectedCounty && sessionCounty && sessionCounty !== selectedCounty) {

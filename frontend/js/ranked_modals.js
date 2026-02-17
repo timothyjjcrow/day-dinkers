@@ -262,6 +262,9 @@ Object.assign(Ranked, {
 
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
             Ranked.loadPendingConfirmations();
+            if (typeof Ranked.refreshOpenTournamentModal === 'function') {
+                Ranked.refreshOpenTournamentModal();
+            }
         } catch (err) {
             if (btn) btn.disabled = false;
             App.toast(err.message || 'Failed to submit score', 'error');

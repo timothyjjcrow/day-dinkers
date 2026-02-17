@@ -10,6 +10,10 @@ from backend.routes.ranked.helpers import (
     _create_match_record, _apply_elo,
     _emit_ranked_update, _emit_notification_update,
 )
+from backend.routes.ranked.tournaments_helpers import (
+    advance_tournament_after_completed_match,
+    should_apply_elo_for_match,
+)
 from backend.time_utils import utcnow_naive
 
 
@@ -124,9 +128,16 @@ def submit_score(match_id):
     _emit_notification_update(court_id=match.court_id, reason='score_confirmation_requested')
 
     if all(p.confirmed for p in match.players):
-        _apply_elo(match)
+        if should_apply_elo_for_match(match):
+            _apply_elo(match)
+        else:
+            for participant in match.players:
+                baseline = participant.elo_before or participant.user.elo_rating
+                participant.elo_after = baseline
+                participant.elo_change = 0
         match.status = 'completed'
         match.completed_at = utcnow_naive()
+        advance_tournament_after_completed_match(match)
         db.session.commit()
         _emit_ranked_update(court_id=match.court_id, reason='match_completed_auto_confirm')
         _emit_notification_update(court_id=match.court_id, reason='match_completed_auto_confirm')
@@ -158,9 +169,16 @@ def confirm_match(match_id):
 
     all_confirmed = all(p.confirmed for p in match.players)
     if all_confirmed:
-        _apply_elo(match)
+        if should_apply_elo_for_match(match):
+            _apply_elo(match)
+        else:
+            for participant in match.players:
+                baseline = participant.elo_before or participant.user.elo_rating
+                participant.elo_after = baseline
+                participant.elo_change = 0
         match.status = 'completed'
         match.completed_at = utcnow_naive()
+        advance_tournament_after_completed_match(match)
 
         for p in match.players:
             won = (p.team == match.winner_team)

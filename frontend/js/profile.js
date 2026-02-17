@@ -92,6 +92,10 @@ const Profile = {
                     <button class="btn-secondary btn-sm" onclick="App.setMainTab('sessions')" style="margin-top:8px">Find a Court</button>
                 </div>
                 <div class="profile-section">
+                    <h3>🏆 Tournament Results</h3>
+                    <div id="profile-tournament-results">Loading...</div>
+                </div>
+                <div class="profile-section">
                     <h3>🟢 My Sessions</h3>
                     <div id="profile-upcoming-sessions">Loading...</div>
                 </div>
@@ -199,7 +203,53 @@ const Profile = {
         Profile._loadPendingRequests();
         Profile._loadUpcomingSessions();
         Profile._loadMatchHistory();
+        Profile._loadTournamentResults();
         CourtUpdates.loadReviewerPanel();
+    },
+
+    async _loadTournamentResults() {
+        const el = document.getElementById('profile-tournament-results');
+        if (!el) return;
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        if (!user.id) {
+            el.innerHTML = '<p class="muted">Sign in to view tournament history.</p>';
+            return;
+        }
+        try {
+            const res = await API.get(`/api/ranked/tournaments/results?user_id=${user.id}&limit=10`);
+            const results = res.results || [];
+            if (!results.length) {
+                el.innerHTML = '<p class="muted">No tournament results yet. Join a tournament from a court ranked tab.</p>';
+                return;
+            }
+            el.innerHTML = results.map(result => {
+                const tournamentName = Profile._e(result.tournament?.name || 'Tournament');
+                const courtName = Profile._e(result.court?.name || 'Court');
+                const placement = Number(result.placement) || '-';
+                const points = Number(result.points) || 0;
+                const wins = Number(result.wins) || 0;
+                const losses = Number(result.losses) || 0;
+                const date = result.created_at
+                    ? new Date(result.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : '';
+                const tournamentId = Number(result.tournament_id) || 0;
+                const courtId = Number(result.court_id) || 0;
+                return `
+                    <div class="match-history-mini" onclick="${tournamentId && courtId
+                        ? `Ranked.openTournamentFromSchedule(${courtId}, ${tournamentId})`
+                        : ''}">
+                        <span class="match-result-icon">#${placement}</span>
+                        <div class="match-mini-info">
+                            <span>${tournamentName}</span>
+                            <span class="muted">${courtName} · ${wins}W-${losses}L · ${date}</span>
+                        </div>
+                        <span class="match-elo-change elo-gain">${points} pts</span>
+                    </div>
+                `;
+            }).join('');
+        } catch {
+            el.innerHTML = '<p class="muted">Unable to load tournament results.</p>';
+        }
     },
 
     async _loadMatchHistory() {

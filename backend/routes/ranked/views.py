@@ -1,13 +1,15 @@
 """Ranked read-only views — leaderboard, history, active matches, court summary."""
+from datetime import timedelta
 from flask import request, jsonify
 from backend.app import db
 from backend.models import (
     User, Court, Match, MatchPlayer, RankedQueue, CheckIn,
-    RankedLobbyPlayer,
+    RankedLobbyPlayer, Tournament,
 )
 from backend.auth_utils import login_required
 from backend.routes.ranked import ranked_bp
 from backend.routes.ranked.helpers import _lobby_to_dict, _categorize_court_lobbies
+from backend.time_utils import utcnow_naive
 
 
 @ranked_bp.route('/leaderboard', methods=['GET'])
@@ -127,6 +129,28 @@ def get_court_summary(court_id):
     # Lobbies
     ready, scheduled, pending = _categorize_court_lobbies(court_id)
 
+    now = utcnow_naive()
+    live_tournaments = Tournament.query.filter(
+        Tournament.court_id == court_id,
+        Tournament.status == 'live',
+    ).order_by(
+        Tournament.start_time.asc(),
+    ).limit(10).all()
+    upcoming_tournaments = Tournament.query.filter(
+        Tournament.court_id == court_id,
+        Tournament.status == 'upcoming',
+        Tournament.start_time >= (now - timedelta(hours=6)),
+    ).order_by(
+        Tournament.start_time.asc(),
+    ).limit(12).all()
+    completed_tournaments = Tournament.query.filter(
+        Tournament.court_id == court_id,
+        Tournament.status == 'completed',
+    ).order_by(
+        Tournament.completed_at.desc(),
+        Tournament.start_time.desc(),
+    ).limit(8).all()
+
     # Mini leaderboard
     lb_limit = request.args.get('leaderboard_limit', 10, type=int)
     player_ids = db.session.query(MatchPlayer.user_id).join(Match).filter(
@@ -158,4 +182,16 @@ def get_court_summary(court_id):
         'scheduled_lobbies': scheduled,
         'pending_lobbies': pending,
         'leaderboard': leaderboard,
+        'tournaments_live': [
+            t.to_dict(include_participants=False, include_results=False)
+            for t in live_tournaments
+        ],
+        'tournaments_upcoming': [
+            t.to_dict(include_participants=False, include_results=False)
+            for t in upcoming_tournaments
+        ],
+        'tournaments_completed': [
+            t.to_dict(include_participants=False, include_results=False)
+            for t in completed_tournaments
+        ],
     })

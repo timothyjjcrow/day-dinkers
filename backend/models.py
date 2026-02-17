@@ -499,10 +499,197 @@ class CourtUpdateSubmission(db.Model):
 
 # ── Ranked Competitive Play ──────────────────────────────────────────
 
+class Tournament(db.Model):
+    """Court-hosted ranked tournament (v1 single-elimination)."""
+    id = db.Column(db.Integer, primary_key=True)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False)
+    host_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, default='')
+    tournament_format = db.Column(db.String(40), default='single_elimination')
+    access_mode = db.Column(db.String(20), default='open')  # open, invite_only
+    match_type = db.Column(db.String(20), default='singles')  # singles for v1
+    affects_elo = db.Column(db.Boolean, default=True)
+    status = db.Column(db.String(20), default='upcoming')
+    # upcoming, live, completed, cancelled
+    start_time = db.Column(db.DateTime, nullable=False)
+    registration_close_time = db.Column(db.DateTime, nullable=True)
+    max_players = db.Column(db.Integer, default=16)
+    min_participants = db.Column(db.Integer, default=4)
+    check_in_required = db.Column(db.Boolean, default=True)
+    no_show_policy = db.Column(db.String(30), default='auto_forfeit')
+    # auto_forfeit, host_mark
+    no_show_grace_minutes = db.Column(db.Integer, default=10)
+    bracket_size = db.Column(db.Integer, nullable=True)
+    total_rounds = db.Column(db.Integer, nullable=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    cancelled_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+
+    __table_args__ = (
+        db.Index('ix_tournament_court_status_start', 'court_id', 'status', 'start_time'),
+    )
+
+    court = db.relationship('Court', backref='tournaments')
+    host_user = db.relationship('User', foreign_keys=[host_user_id], backref='hosted_tournaments')
+    participants = db.relationship(
+        'TournamentParticipant',
+        backref='tournament',
+        lazy='joined',
+        cascade='all, delete-orphan',
+    )
+    results = db.relationship(
+        'TournamentResult',
+        backref='tournament',
+        lazy='joined',
+        cascade='all, delete-orphan',
+    )
+
+    def to_dict(self, include_participants=False, include_results=False):
+        participant_list = [p.to_dict() for p in self.participants] if include_participants else []
+        checked_in_count = sum(
+            1 for p in self.participants
+            if p.participant_status == 'checked_in'
+        )
+        registered_count = sum(
+            1 for p in self.participants
+            if p.participant_status in {'registered', 'checked_in'}
+        )
+        data = {
+            'id': self.id,
+            'court_id': self.court_id,
+            'host_user_id': self.host_user_id,
+            'name': self.name,
+            'description': self.description,
+            'tournament_format': self.tournament_format,
+            'access_mode': self.access_mode,
+            'match_type': self.match_type,
+            'affects_elo': self.affects_elo,
+            'status': self.status,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'registration_close_time': (
+                self.registration_close_time.isoformat()
+                if self.registration_close_time else None
+            ),
+            'max_players': self.max_players,
+            'min_participants': self.min_participants,
+            'check_in_required': self.check_in_required,
+            'no_show_policy': self.no_show_policy,
+            'no_show_grace_minutes': self.no_show_grace_minutes,
+            'bracket_size': self.bracket_size,
+            'total_rounds': self.total_rounds,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'host_user': self.host_user.to_dict() if self.host_user else None,
+            'court': self.court.to_dict() if self.court else None,
+            'registered_count': registered_count,
+            'checked_in_count': checked_in_count,
+        }
+        if include_participants:
+            data['participants'] = participant_list
+        if include_results:
+            data['results'] = [result.to_dict() for result in self.results]
+        return data
+
+
+class TournamentParticipant(db.Model):
+    """Tournament participant registration and invite/check-in state."""
+    id = db.Column(db.Integer, primary_key=True)
+    tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    invited_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    invite_status = db.Column(db.String(20), default='none')
+    # none, invited, accepted, declined
+    participant_status = db.Column(db.String(20), default='registered')
+    # invited, registered, checked_in, no_show, eliminated, withdrawn, winner, declined
+    seed = db.Column(db.Integer, nullable=True)
+    final_placement = db.Column(db.Integer, nullable=True)
+    wins = db.Column(db.Integer, default=0)
+    losses = db.Column(db.Integer, default=0)
+    points = db.Column(db.Integer, default=0)
+    checked_in_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+
+    __table_args__ = (
+        db.UniqueConstraint('tournament_id', 'user_id', name='uq_tournament_participant_unique'),
+        db.Index('ix_tournament_participant_tournament_status', 'tournament_id', 'participant_status'),
+    )
+
+    user = db.relationship('User', foreign_keys=[user_id], backref='tournament_entries')
+    invited_by = db.relationship('User', foreign_keys=[invited_by_user_id], backref='tournament_invites_sent')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tournament_id': self.tournament_id,
+            'user_id': self.user_id,
+            'invited_by_user_id': self.invited_by_user_id,
+            'invite_status': self.invite_status,
+            'participant_status': self.participant_status,
+            'seed': self.seed,
+            'final_placement': self.final_placement,
+            'wins': self.wins,
+            'losses': self.losses,
+            'points': self.points,
+            'checked_in_at': self.checked_in_at.isoformat() if self.checked_in_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'user': self.user.to_dict() if self.user else None,
+        }
+
+
+class TournamentResult(db.Model):
+    """Immutable-ish result snapshot used for leaderboard/profile history."""
+    id = db.Column(db.Integer, primary_key=True)
+    tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False)
+    placement = db.Column(db.Integer, nullable=False)
+    wins = db.Column(db.Integer, default=0)
+    losses = db.Column(db.Integer, default=0)
+    points = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+
+    __table_args__ = (
+        db.UniqueConstraint('tournament_id', 'user_id', name='uq_tournament_result_unique'),
+        db.Index('ix_tournament_result_court_points', 'court_id', 'points'),
+        db.Index('ix_tournament_result_user_created', 'user_id', 'created_at'),
+    )
+
+    user = db.relationship('User', backref='tournament_results')
+    court = db.relationship('Court', backref='tournament_results')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tournament_id': self.tournament_id,
+            'user_id': self.user_id,
+            'court_id': self.court_id,
+            'placement': self.placement,
+            'wins': self.wins,
+            'losses': self.losses,
+            'points': self.points,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'user': self.user.to_dict() if self.user else None,
+            'court': self.court.to_dict() if self.court else None,
+            'tournament': {
+                'id': self.tournament.id,
+                'name': self.tournament.name,
+                'status': self.tournament.status,
+                'start_time': self.tournament.start_time.isoformat() if self.tournament.start_time else None,
+            } if self.tournament else None,
+        }
+
+
 class Match(db.Model):
     """A competitive ranked match between players/teams."""
     id = db.Column(db.Integer, primary_key=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False)
+    tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'), nullable=True)
+    bracket_round = db.Column(db.Integer, nullable=True)
+    bracket_slot = db.Column(db.Integer, nullable=True)
     match_type = db.Column(db.String(20), nullable=False)  # singles, doubles
     status = db.Column(db.String(20), default='in_progress')
     # pending_confirmation = score submitted, waiting for all players to accept
@@ -517,9 +704,11 @@ class Match(db.Model):
 
     __table_args__ = (
         db.Index('ix_match_court_status', 'court_id', 'status'),
+        db.Index('ix_match_tournament_round_slot', 'tournament_id', 'bracket_round', 'bracket_slot'),
     )
 
     court = db.relationship('Court', backref='matches')
+    tournament = db.relationship('Tournament', backref='matches')
     players = db.relationship('MatchPlayer', backref='match', lazy='joined')
 
     def to_dict(self):
@@ -531,6 +720,9 @@ class Match(db.Model):
         )
         return {
             'id': self.id, 'court_id': self.court_id,
+            'tournament_id': self.tournament_id,
+            'bracket_round': self.bracket_round,
+            'bracket_slot': self.bracket_slot,
             'match_type': self.match_type, 'status': self.status,
             'team1_score': self.team1_score, 'team2_score': self.team2_score,
             'winner_team': self.winner_team, 'submitted_by': self.submitted_by,

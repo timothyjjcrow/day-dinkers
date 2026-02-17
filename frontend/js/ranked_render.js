@@ -279,6 +279,9 @@ Object.assign(Ranked, {
         const sortedPendingLobbies = allPendingLobbies
             .slice()
             .sort((a, b) => Ranked._isoToMs(b.created_at) - Ranked._isoToMs(a.created_at));
+        const tournamentsPanelHTML = (typeof Ranked._renderTournamentsPanel === 'function')
+            ? Ranked._renderTournamentsPanel(data, courtId)
+            : '';
 
         const myPendingCourtMatches = sortedPendingMatches.filter(match => {
             const me = (match.players || []).find(player => Number(player.user_id) === currentUserId);
@@ -419,6 +422,8 @@ Object.assign(Ranked, {
                 <p class="muted">Updates are surfaced here first so you can respond quickly.</p>
                 ${actionCenterBody}
             </div>
+
+            ${tournamentsPanelHTML}
 
             <div class="ranked-checkin-shell">
                 ${checkinPanelHTML}

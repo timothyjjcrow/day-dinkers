@@ -264,6 +264,9 @@ const Ranked = {
             }
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
             Ranked.loadMatchHistory();
+            if (typeof Ranked.refreshOpenTournamentModal === 'function') {
+                Ranked.refreshOpenTournamentModal();
+            }
         } catch (err) {
             if (btn) btn.disabled = false;
             App.toast(err.message || 'Failed to confirm match', 'error');
@@ -277,6 +280,9 @@ const Ranked = {
             await API.post(`/api/ranked/match/${matchId}/reject`, {});
             App.toast('Score rejected. The match has been reset for re-scoring.');
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
+            if (typeof Ranked.refreshOpenTournamentModal === 'function') {
+                Ranked.refreshOpenTournamentModal();
+            }
         } catch (err) {
             if (btn) btn.disabled = false;
             App.toast(err.message || 'Failed to reject match', 'error');
@@ -290,6 +296,9 @@ const Ranked = {
             await API.post(`/api/ranked/match/${matchId}/cancel`, {});
             App.toast('Match cancelled.');
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
+            if (typeof Ranked.refreshOpenTournamentModal === 'function') {
+                Ranked.refreshOpenTournamentModal();
+            }
         } catch (err) {
             if (btn) btn.disabled = false;
             App.toast(err.message || 'Failed to cancel match', 'error');
@@ -315,6 +324,13 @@ const Ranked = {
             Ranked.actionDigestByCourt[courtId] = nextActionState.digest;
             if (hasNewActions) Ranked._markActionCenterUpdated(courtId);
             container.innerHTML = Ranked._renderCourtRanked(res, courtId);
+            if (
+                Ranked.currentTournamentId
+                && Number(Ranked.currentTournamentCourtId || courtId) === Number(courtId)
+                && typeof Ranked.openTournament === 'function'
+            ) {
+                Ranked.openTournament(Ranked.currentTournamentId, courtId, { silent: true });
+            }
             if (hasNewActions) Ranked._maybePromoteActionCenter(courtId);
         } catch (err) {
             console.error('Failed to load ranked data:', err);
