@@ -12,6 +12,7 @@ const Sessions = {
     calendarWeekOffset: 0,
     calendarExpanded: false,
     scheduleControlsBound: false,
+    allowedGameTypes: new Set(['open', 'doubles', 'singles']),
 
     async load() {
         const list = document.getElementById('sessions-list');
@@ -1058,7 +1059,7 @@ const Sessions = {
     },
 
     // ── Create Session Modal ──────────────────────────────────
-    async showCreateModal(preselectedCourtId) {
+    async showCreateModal(preselectedCourtId, selectedDayKey = null) {
         const token = localStorage.getItem('token');
         if (!token) { Auth.showModal(); return; }
 
@@ -1089,6 +1090,7 @@ const Sessions = {
         if (durationSelect) durationSelect.value = '90';
         Sessions._toggleRecurrenceFields();
         Sessions._initializeScheduleInputs('tomorrow');
+        Sessions._applyScheduleDayContext(selectedDayKey);
     },
 
     hideCreateModal() {
@@ -1259,6 +1261,36 @@ const Sessions = {
         Sessions._syncDurationButtonsFromValue(durationSelect.value);
         Sessions._applyQuickPreset(defaultPreset);
         Sessions._applyQuickTime('18:30');
+        Sessions._renderScheduleSummary();
+    },
+
+    _applyScheduleDayContext(selectedDayKey) {
+        const scheduleDay = Sessions._dateFromKey(String(selectedDayKey || '').trim());
+        if (!scheduleDay) return;
+        const startInput = document.getElementById('session-start-time');
+        if (!startInput) return;
+
+        // When launched from a selected schedule day, default to the next day.
+        const contextualStart = new Date(
+            scheduleDay.getFullYear(),
+            scheduleDay.getMonth(),
+            scheduleDay.getDate() + 1,
+            18,
+            30,
+            0,
+            0
+        );
+
+        const minStart = Sessions._roundUpToMinutes(new Date(Date.now() + 5 * 60000), 15);
+        const start = contextualStart < minStart ? minStart : contextualStart;
+        const startValue = Sessions._formatDateTimeLocal(start);
+        if (typeof DateTimePicker !== 'undefined') {
+            DateTimePicker.setValue(startInput, startValue);
+        } else {
+            startInput.value = startValue;
+        }
+        Sessions._syncEndFromDuration();
+        Sessions._syncQuickSelectorsFromStart();
         Sessions._renderScheduleSummary();
     },
 
@@ -1718,6 +1750,14 @@ const Sessions = {
         Sessions._renderScheduleSummary();
     },
 
+    _sanitizeGameType(rawGameType) {
+        const normalized = String(rawGameType || 'open')
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, '_');
+        return Sessions.allowedGameTypes.has(normalized) ? normalized : 'open';
+    },
+
     async create(e) {
         e.preventDefault();
         const form = e.target;
@@ -1732,10 +1772,15 @@ const Sessions = {
             return;
         }
 
+        const safeGameType = Sessions._sanitizeGameType(form.game_type?.value);
+        if (form.game_type && form.game_type.value !== safeGameType) {
+            form.game_type.value = safeGameType;
+        }
+
         const data = {
             court_id: courtId,
             session_type: 'scheduled',
-            game_type: form.game_type.value,
+            game_type: safeGameType,
             skill_level: form.skill_level.value,
             max_players: maxPlayers,
             visibility: form.visibility.value,

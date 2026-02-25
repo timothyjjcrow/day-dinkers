@@ -238,7 +238,7 @@
     </div>
 
     <!-- Create Session Modal -->
-    <div id="session-modal" class="modal" style="display:none">
+    <div id="session-modal" class="modal" style="display:none" onclick="if (event.target === this) Sessions.hideCreateModal()">
         <div class="modal-content session-modal-content">
             <button class="modal-close" onclick="Sessions.hideCreateModal()" aria-label="Close">&times;</button>
             <h2>Schedule Open to Play</h2>
@@ -256,7 +256,6 @@
                                 <option value="open">Open Play</option>
                                 <option value="doubles">Doubles</option>
                                 <option value="singles">Singles</option>
-                                <option value="round_robin">Round Robin</option>
                             </select>
                         </div>
                     </div>

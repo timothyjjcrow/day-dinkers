@@ -287,7 +287,7 @@ const MapView = {
     _renderDayPopupBody(dayKey, courtId) {
         const items = MapView._getItemsForDay(dayKey, courtId);
         const courtIdNum = courtId ? Number(courtId) : 0;
-        const scheduleActions = MapView._scheduleActionsHTML(courtIdNum);
+        const scheduleActions = MapView._scheduleActionsHTML(courtIdNum, dayKey);
 
         if (!items.length) {
             return `<div class="schedule-empty-day">
@@ -320,10 +320,13 @@ const MapView = {
         return html;
     },
 
-    _scheduleActionsHTML(courtId) {
+    _scheduleActionsHTML(courtId, dayKey) {
         const cArg = courtId ? String(courtId) : 'null';
+        const scheduleCourtArg = courtId ? String(courtId) : 'undefined';
+        const safeDayKey = String(dayKey || '').replace(/[^0-9-]/g, '');
+        const scheduleDayArg = safeDayKey ? `'${safeDayKey}'` : 'null';
         return `<div class="schedule-action-btns">
-            <button class="btn-primary btn-sm" onclick="MapView.closeDayPopup(); Sessions.showCreateModal(${courtId || ''})">Open Play</button>
+            <button class="btn-primary btn-sm" onclick="MapView.closeDayPopup(); Sessions.showCreateModal(${scheduleCourtArg}, ${scheduleDayArg})">Open Play</button>
             <button class="btn-secondary btn-sm" onclick="MapView.closeDayPopup(); Ranked.openCourtScheduledChallenge(${cArg})">Ranked Challenge</button>
             <button class="btn-secondary btn-sm" onclick="MapView.closeDayPopup(); Ranked.showCreateTournamentModal(${cArg})">Tournament</button>
         </div>`;
