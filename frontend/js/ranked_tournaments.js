@@ -185,6 +185,23 @@ Object.assign(Ranked, {
         if (!token) { Auth.showModal(); return; }
         await App.loadFriendsCache();
         Ranked._resetTournamentInviteSelection();
+
+        const hasCourtId = courtId && Number(courtId) > 0;
+        let courtSelectHTML = '';
+        if (!hasCourtId) {
+            try {
+                const courtsRes = await API.get(App.buildCourtsQuery());
+                const courts = courtsRes.courts || [];
+                const courtsOptions = courts.map(c =>
+                    `<option value="${c.id}">${Ranked._e(c.name)} — ${Ranked._e(c.city)}</option>`
+                ).join('');
+                courtSelectHTML = `<div class="form-group">
+                    <label>Court</label>
+                    <select id="tournament-court-select" required>${courtsOptions}</select>
+                </div>`;
+            } catch { /* proceed without court list */ }
+        }
+
         const modal = document.getElementById('match-modal');
         modal.style.display = 'flex';
         modal.innerHTML = `
@@ -192,9 +209,11 @@ Object.assign(Ranked, {
                 <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
                 <h2>Create Tournament</h2>
                 <p class="muted" style="margin-bottom:12px">Single-elimination bracket. Set up your tournament details below.</p>
-                <form onsubmit="Ranked.createTournament(event, ${Number(courtId) || 0})">
+                <input type="hidden" id="tournament-fixed-court" value="${hasCourtId ? courtId : ''}">
+                <form onsubmit="Ranked.createTournament(event)">
                     <div class="tournament-create-section">
                         <span class="tournament-create-section-label">Basic Info</span>
+                        ${courtSelectHTML}
                         <div class="form-group">
                             <label>Tournament Name</label>
                             <input type="text" id="tournament-name" required maxlength="200" placeholder="Saturday Showdown">
@@ -268,9 +287,20 @@ Object.assign(Ranked, {
         }
     },
 
-    async createTournament(event, courtId) {
+    async createTournament(event) {
         event.preventDefault();
         const btn = Ranked._disableBtn(event);
+
+        const fixedCourt = document.getElementById('tournament-fixed-court')?.value;
+        const courtId = fixedCourt
+            ? Number(fixedCourt)
+            : Number(document.getElementById('tournament-court-select')?.value || 0);
+        if (!Number.isFinite(courtId) || courtId <= 0) {
+            if (btn) btn.disabled = false;
+            App.toast('Please select a court.', 'error');
+            return;
+        }
+
         const name = String(document.getElementById('tournament-name')?.value || '').trim();
         const startTime = document.getElementById('tournament-start-time')?.value || '';
         const accessMode = document.getElementById('tournament-access-mode')?.value || 'open';
@@ -297,7 +327,7 @@ Object.assign(Ranked, {
         }
         try {
             const res = await API.post('/api/ranked/tournaments', {
-                court_id: Number(courtId),
+                court_id: courtId,
                 name,
                 start_time: startTime,
                 access_mode: accessMode,

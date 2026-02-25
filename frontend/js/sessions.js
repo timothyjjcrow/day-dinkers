@@ -658,35 +658,186 @@ const Sessions = {
     },
 
     // ── Session Detail Page ─────────────────────────────────────
-    async openDetail(sessionId) {
+    async openDetail(sessionId, opts = {}) {
         Sessions.currentSessionId = sessionId;
-        const container = document.getElementById('sessions-list');
-        container.innerHTML = '<div class="loading">Loading session details...</div>';
+        const modal = document.getElementById('match-modal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        modal.onclick = (e) => { if (e.target === modal) Sessions.closeDetail(); };
+        Sessions._detailEscHandler = (e) => { if (e.key === 'Escape') Sessions.closeDetail(); };
+        document.addEventListener('keydown', Sessions._detailEscHandler);
+        modal.innerHTML = `<div class="modal-content session-detail-modal">
+            <div class="loading">Loading session details...</div>
+        </div>`;
 
         try {
             const res = await API.get(`/api/sessions/${sessionId}`);
             const session = res.session;
             Sessions.sessionsById[session.id] = session;
             Sessions.currentSessionCourtId = session.court_id;
-            const tabHeader = document.querySelector('#sessions-tab .tab-page-header');
-            if (tabHeader) {
-                tabHeader.innerHTML = `
-                    <button class="btn-secondary" onclick="Sessions._backToList()">&larr; Back</button>
-                    <h2>Session Details</h2>
-                `;
-            }
-            container.innerHTML = Sessions._renderDetail(session);
+            const courtId = Number(session.court_id || session.court?.id || 0);
+            const goToCourtBtn = courtId
+                ? `<button class="btn-secondary btn-full" onclick="Sessions.closeDetail(); Sessions.openDetailAtCourt(${session.id}, ${courtId})">View at Court</button>`
+                : '';
+            modal.innerHTML = `<div class="modal-content session-detail-modal">
+                ${Sessions._renderDetail(session)}
+                ${goToCourtBtn}
+            </div>`;
 
-            // Load chat
             Sessions._loadSessionChat(sessionId, session.court_id);
 
-            // Join the court room so chat updates stream into the detail view.
             if (typeof Chat !== 'undefined' && typeof Chat.joinRoom === 'function') {
                 Chat.joinRoom(`court_${session.court_id}`);
             }
         } catch {
-            container.innerHTML = '<p class="error">Failed to load session details</p>';
+            modal.innerHTML = `<div class="modal-content session-detail-modal">
+                <p class="error">Failed to load session details</p>
+            </div>`;
         }
+    },
+
+    closeDetail() {
+        const modal = document.getElementById('match-modal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.onclick = null;
+        }
+        if (Sessions._detailEscHandler) {
+            document.removeEventListener('keydown', Sessions._detailEscHandler);
+            Sessions._detailEscHandler = null;
+        }
+        Sessions.currentSessionId = null;
+        Sessions.currentSessionCourtId = null;
+    },
+
+    openDetailAtCourt(sessionId, courtId) {
+        if (App.currentScreen === 'court-details' && MapView.currentCourtId === courtId) {
+            Sessions.openDetailInline(sessionId);
+        } else {
+            App.openCourtDetails(courtId);
+            setTimeout(() => Sessions.openDetailInline(sessionId), 500);
+        }
+    },
+
+    async openDetailInline(sessionId) {
+        Sessions.currentSessionId = sessionId;
+        const container = document.getElementById('court-session-detail-view');
+        if (!container) {
+            Sessions.openDetail(sessionId);
+            return;
+        }
+        container.innerHTML = `<div class="inline-session-detail"><div class="loading">Loading session...</div></div>`;
+        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        try {
+            const res = await API.get(`/api/sessions/${sessionId}`);
+            const session = res.session;
+            Sessions.sessionsById[session.id] = session;
+            Sessions.currentSessionCourtId = session.court_id;
+            container.innerHTML = Sessions._renderInlineDetail(session);
+            container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            Sessions._loadSessionChat(sessionId, session.court_id);
+            if (typeof Chat !== 'undefined' && typeof Chat.joinRoom === 'function') {
+                Chat.joinRoom(`court_${session.court_id}`);
+            }
+        } catch {
+            container.innerHTML = `<div class="inline-session-detail"><p class="error">Failed to load session details</p></div>`;
+        }
+    },
+
+    closeDetailInline() {
+        const container = document.getElementById('court-session-detail-view');
+        if (container) container.innerHTML = '';
+        Sessions.currentSessionId = null;
+        Sessions.currentSessionCourtId = null;
+    },
+
+    _refreshCurrentDetail(sessionId) {
+        const inlineContainer = document.getElementById('court-session-detail-view');
+        if (inlineContainer && inlineContainer.innerHTML.trim()) {
+            Sessions.openDetailInline(sessionId);
+        } else {
+            Sessions.openDetail(sessionId);
+        }
+    },
+
+    _renderInlineDetail(session) {
+        const creator = session.creator || {};
+        const players = session.players || [];
+        const series = session.series || null;
+        const isNow = session.session_type === 'now';
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const isMine = session.creator_id === currentUser.id;
+        const amJoined = players.some(p => p.user_id === currentUser.id && p.status === 'joined');
+        const amWaitlisted = players.some(p => p.user_id === currentUser.id && p.status === 'waitlisted');
+        const joinedPlayers = players.filter(p => p.status === 'joined');
+        const waitlistedPlayers = players.filter(p => p.status === 'waitlisted');
+        const isFull = joinedPlayers.length + 1 >= session.max_players;
+        const e = Sessions._e;
+        const safeCreatorName = e(creator.name || creator.username || '');
+        const safeGameType = e(session.game_type || 'Open Play');
+        const safeSkillLevel = e(session.skill_level || 'All');
+
+        let timeStr = '';
+        if (isNow) {
+            timeStr = 'Active Now';
+        } else if (session.start_time) {
+            const dt = new Date(session.start_time);
+            timeStr = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            timeStr += ' · ' + dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            if (session.end_time) {
+                timeStr += ` – ${new Date(session.end_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+            }
+        }
+
+        const playersChips = [creator, ...joinedPlayers.map(p => p.user || {})].map(u => {
+            const name = e(u.name || u.username || '?');
+            const init = (name[0] || '?').toUpperCase();
+            return `<span class="inline-player-chip"><span class="player-avatar-sm">${init}</span>${name}</span>`;
+        }).join('');
+
+        let actionBtns = '';
+        if (isMine) {
+            actionBtns = `<button class="btn-danger btn-sm" onclick="Sessions.endSession(${session.id})">End</button>
+                <button class="btn-secondary btn-sm" onclick="Sessions.inviteFriends(${session.id})">Invite</button>`;
+        } else if (amJoined || amWaitlisted) {
+            actionBtns = `<button class="btn-danger btn-sm" onclick="Sessions.leaveSession(${session.id})">${amWaitlisted ? 'Leave Waitlist' : 'Leave'}</button>`;
+        } else {
+            actionBtns = `<button class="btn-primary btn-sm" onclick="Sessions.joinSession(${session.id})">✅ ${isFull ? 'Join Waitlist' : 'Join'}</button>`;
+        }
+        actionBtns += `<button class="btn-secondary btn-sm" onclick="Sessions.inviteFriends(${session.id})">👥 Invite</button>`;
+        if (!isNow) actionBtns += `<button class="btn-secondary btn-sm" onclick="Sessions.downloadCalendar(${session.id})">🗓 Calendar</button>`;
+        if (isMine && series) {
+            actionBtns += `<button class="btn-danger btn-sm" onclick="Sessions.cancelSeries(${series.id}, ${session.id})">Cancel Series</button>`;
+        }
+
+        const waitlistNote = waitlistedPlayers.length > 0
+            ? `<span class="muted" style="font-size:12px"> · ⏳ ${waitlistedPlayers.length} waitlisted</span>`
+            : '';
+
+        return `<div class="inline-session-detail">
+            <div class="inline-session-header">
+                <div class="inline-session-title">
+                    <strong>${safeCreatorName}'s ${safeGameType} game</strong>
+                    <span class="session-status-badge ${isNow ? 'active' : 'scheduled'}">${isNow ? 'Live' : 'Scheduled'}</span>
+                </div>
+                <button class="inline-close-btn" onclick="Sessions.closeDetailInline()" aria-label="Close">✕</button>
+            </div>
+            <div class="inline-session-meta">
+                <span>${timeStr}</span> · <span>${safeSkillLevel}</span> · <span>${joinedPlayers.length + 1}/${session.max_players} players</span>${waitlistNote}
+            </div>
+            ${session.notes ? `<p class="inline-session-notes">${e(session.notes)}</p>` : ''}
+            <div class="inline-session-players">${playersChips}</div>
+            <div class="inline-session-actions">${actionBtns}</div>
+            <div class="inline-session-chat">
+                <h5>💬 Chat</h5>
+                <div id="session-chat-messages" class="inline-chat-messages"></div>
+                <form class="inline-chat-form" onsubmit="Sessions.sendChat(event, ${session.id}, ${session.court_id})">
+                    <input type="text" id="session-chat-text" placeholder="Message the group..." autocomplete="off">
+                    <button type="submit" class="btn-primary btn-sm">Send</button>
+                </form>
+            </div>
+        </div>`;
     },
 
     _renderDetail(session) {
@@ -908,16 +1059,7 @@ const Sessions = {
     },
 
     _backToList() {
-        const tabHeader = document.querySelector('#sessions-tab .tab-page-header');
-        if (tabHeader) {
-            tabHeader.innerHTML = `
-                <h2>Open to Play</h2>
-                <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Open to Play</button>
-            `;
-        }
-        Sessions.currentSessionId = null;
-        Sessions.currentSessionCourtId = null;
-        Sessions.load();
+        Sessions.closeDetail();
     },
 
     // ── Create Session Modal ──────────────────────────────────
@@ -1678,7 +1820,7 @@ const Sessions = {
             Sessions.load();
             if (App.currentView === 'map') MapView.loadCourts();
             if (Sessions.currentSessionId === sessionId) {
-                Sessions.openDetail(sessionId);
+                Sessions._refreshCurrentDetail(sessionId);
             }
         } catch (err) {
             App.toast(err.message || 'Failed to join session', 'error');
@@ -1694,7 +1836,7 @@ const Sessions = {
             }
             Sessions.load();
             if (Sessions.currentSessionId === sessionId) {
-                Sessions.openDetail(sessionId);
+                Sessions._refreshCurrentDetail(sessionId);
             }
             if (App.currentView === 'map') MapView.loadCourts();
         } catch { App.toast('Failed to leave session', 'error'); }
@@ -1704,7 +1846,8 @@ const Sessions = {
         try {
             await API.post(`/api/sessions/${sessionId}/end`, {});
             App.toast('Session ended');
-            Sessions.load();
+            Sessions.closeDetail();
+            Sessions.closeDetailInline();
             if (App.currentView === 'map') MapView.loadCourts();
         } catch { App.toast('Failed to end session', 'error'); }
     },
@@ -1739,7 +1882,7 @@ const Sessions = {
             }
             Sessions.load();
             if (Sessions.currentSessionId === sessionId) {
-                Sessions.openDetail(sessionId);
+                Sessions._refreshCurrentDetail(sessionId);
             }
             if (App.currentView === 'map') MapView.loadCourts();
         } catch (err) {
@@ -1911,7 +2054,7 @@ const Sessions = {
             }
 
             return `
-            <div class="session-mini-card ${isNow ? 'session-mini-active' : ''}" onclick="App.setMainTab('sessions'); setTimeout(() => Sessions.openDetail(${s.id}), 200)">
+            <div class="session-mini-card ${isNow ? 'session-mini-active' : ''}" onclick="Sessions.openDetail(${s.id})">
                 <div class="session-mini-top">
                     <span class="session-mini-status ${isNow ? 'live' : 'scheduled'}">${isNow ? 'Live now' : 'Scheduled'}</span>
                     <span class="session-mini-players">${joined + 1}/${s.max_players}</span>

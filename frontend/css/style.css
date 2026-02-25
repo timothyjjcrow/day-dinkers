@@ -2308,6 +2308,89 @@ img { max-width: 100%; display: block; }
 }
 
 /* Session detail view */
+.session-detail-modal {
+    max-width: 600px; max-height: 90vh; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Inline session detail (expanded under schedule) */
+.inline-session-detail {
+    margin-top: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    animation: slideDown .2s ease;
+}
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.inline-session-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.inline-session-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.inline-session-title strong { font-size: 15px; }
+.inline-close-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 18px; color: var(--text-muted);
+    padding: 2px 6px; border-radius: 6px;
+    line-height: 1;
+}
+.inline-close-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.inline-session-meta {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+.inline-session-notes {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0 0 8px;
+    font-style: italic;
+}
+.inline-session-players {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 10px;
+}
+.inline-player-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--bg-hover); border-radius: 20px;
+    padding: 3px 10px 3px 3px; font-size: 13px;
+}
+.player-avatar-sm {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--primary); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600;
+}
+.inline-session-actions {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 10px;
+}
+.inline-session-chat { border-top: 1px solid var(--border); padding-top: 10px; }
+.inline-session-chat h5 { margin: 0 0 6px; font-size: 14px; }
+.inline-chat-messages {
+    max-height: 150px; overflow-y: auto;
+    margin-bottom: 8px; font-size: 13px;
+    -webkit-overflow-scrolling: touch;
+}
+.inline-chat-form {
+    display: flex; gap: 6px;
+}
+.inline-chat-form input {
+    flex: 1; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border); font-size: 13px;
+}
 .session-detail { display: flex; flex-direction: column; gap: 10px; }
 .session-detail-hero {
     display: flex;
@@ -3622,6 +3705,14 @@ input.flatpickr-input[readonly] {
     text-align: center; padding: 32px 16px; color: var(--text-muted);
 }
 .schedule-empty-day p { margin: 4px 0 12px; }
+.schedule-action-btns {
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+}
+.schedule-action-btns .btn-sm { min-width: 100px; }
+.schedule-popup-actions {
+    padding: 16px 0 4px; border-top: 1px solid var(--border); margin-top: 12px;
+    text-align: center;
+}
 
 /* ══════════════════════════════════════════════════
    COURT SCROLLABLE PAGE

@@ -365,7 +365,7 @@ const Profile = {
                 const heading = isNow ? 'Open to Play Session' : 'Scheduled Session';
                 const gameType = Profile._e((s.game_type || 'open').replace(/_/g, ' '));
                 return `
-                <div class="session-card-mini ${isNow ? 'session-mini-active' : ''}" onclick="App.setMainTab('sessions'); setTimeout(() => Sessions.openDetail(${s.id}), 200);">
+                <div class="session-card-mini ${isNow ? 'session-mini-active' : ''}" onclick="Sessions.openDetail(${s.id})">
                     <div class="session-mini-header">
                         <strong>${Profile._e(heading)}</strong>
                         ${isNow ? '<span class="live-badge-sm">🟢 LIVE</span>' : ''}

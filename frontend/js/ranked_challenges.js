@@ -92,13 +92,30 @@ Object.assign(Ranked, {
             `<option value="${f.id}">${Ranked._e(f.name || f.username)}</option>`
         ).join('');
 
+        let courtSelectHTML = '';
+        const hasCourtId = courtId && Number(courtId) > 0;
+        if (!hasCourtId) {
+            try {
+                const courtsRes = await API.get(App.buildCourtsQuery());
+                const courts = courtsRes.courts || [];
+                const courtsOptions = courts.map(c =>
+                    `<option value="${c.id}">${Ranked._e(c.name)} — ${Ranked._e(c.city)}</option>`
+                ).join('');
+                courtSelectHTML = `<div class="form-group">
+                    <label>Court</label>
+                    <select id="court-scheduled-court" required>${courtsOptions}</select>
+                </div>`;
+            } catch { /* proceed without court list */ }
+        }
+
         const modal = document.getElementById('match-modal');
         modal.style.display = 'flex';
         modal.innerHTML = `
         <div class="modal-content">
             <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
             <h2>Schedule Ranked Challenge</h2>
-            <form onsubmit="Ranked.createCourtScheduledChallenge(event, ${courtId})">
+            <form onsubmit="Ranked.createCourtScheduledChallenge(event)">
+                ${courtSelectHTML}
                 <div class="form-group">
                     <label>Opponent</label>
                     <select id="court-scheduled-opponent" required>
@@ -112,6 +129,7 @@ Object.assign(Ranked, {
                 </div>
                 ${Ranked._matchTypeSelectHTML('court-scheduled')}
                 ${Ranked._doublesFormHTML('court-scheduled', partnerOptions)}
+                <input type="hidden" id="court-scheduled-fixed-court" value="${hasCourtId ? courtId : ''}">
                 <button type="submit" class="btn-primary btn-full">Send Scheduled Challenge</button>
             </form>
         </div>`;
@@ -120,13 +138,22 @@ Object.assign(Ranked, {
         }
     },
 
-    async createCourtScheduledChallenge(e, courtId) {
+    async createCourtScheduledChallenge(e) {
         e.preventDefault();
         const currentUser = Ranked._currentUser();
         const targetUserId = parseInt(document.getElementById('court-scheduled-opponent').value, 10);
         const scheduledFor = document.getElementById('court-scheduled-time').value;
         if (!targetUserId) { App.toast('Pick an opponent.', 'error'); return; }
         if (!scheduledFor) { App.toast('Pick a scheduled time.', 'error'); return; }
+
+        const fixedCourt = document.getElementById('court-scheduled-fixed-court')?.value;
+        const courtId = fixedCourt
+            ? parseInt(fixedCourt, 10)
+            : parseInt(document.getElementById('court-scheduled-court')?.value, 10);
+        if (!Number.isFinite(courtId) || courtId <= 0) {
+            App.toast('Please select a court.', 'error');
+            return;
+        }
 
         const parsed = Ranked._parseDoublesTeams('court-scheduled', currentUser.id, targetUserId);
         if (!parsed) return;
@@ -145,7 +172,7 @@ Object.assign(Ranked, {
             document.getElementById('match-modal').style.display = 'none';
             App.toast('Scheduled ranked challenge sent.');
             Ranked.loadPendingConfirmations();
-            Ranked.loadCourtRanked(courtId);
+            if (courtId) Ranked.loadCourtRanked(courtId);
         } catch (err) {
             if (btn) btn.disabled = false;
             App.toast(err.message || 'Failed to schedule ranked challenge', 'error');
