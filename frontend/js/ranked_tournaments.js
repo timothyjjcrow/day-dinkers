@@ -780,4 +780,25 @@ Object.assign(Ranked, {
     openTournamentFromSchedule(courtId, tournamentId) {
         Ranked._openTournamentDeepLink(courtId, tournamentId);
     },
+
+    _renderCompactTournamentsSection(data, courtId) {
+        const live = data.tournaments_live || [];
+        const upcoming = data.tournaments_upcoming || [];
+        if (!live.length && !upcoming.length) return '';
+
+        let html = '<div style="margin-bottom:12px">';
+        html += `<div class="compact-ranked-header">
+            <h4>Tournaments</h4>
+            <button class="btn-secondary btn-sm" onclick="Ranked.showCreateTournamentModal(${courtId})">+ New</button>
+        </div>`;
+        if (live.length) {
+            html += live.map(t => Ranked._renderTournamentCard(t, courtId)).join('');
+        }
+        if (upcoming.length) {
+            html += upcoming.map(t => Ranked._renderTournamentCard(t, courtId)).join('');
+        }
+        html += '<div id="ranked-tournament-view"></div>';
+        html += '</div>';
+        return html;
+    },
 });

@@ -17,7 +17,6 @@ const Sessions = {
     async load() {
         const list = document.getElementById('sessions-list');
         if (!list) return;
-        list.innerHTML = '<div class="loading">Loading sessions...</div>';
 
         const typeFilter = document.getElementById('sessions-type-filter')?.value || 'all';
         const visibilityFilter = document.getElementById('sessions-visibility-filter')?.value || 'all';

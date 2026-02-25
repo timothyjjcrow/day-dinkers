@@ -20,6 +20,7 @@ const MapView = {
     friendMarkers: [],
     scheduleBannerOpen: false,
     scheduleBannerDays: [],
+    scheduleBannerItems: [],
     scheduleBannerLoading: false,
     scheduleBannerError: '',
     scheduleBannerLastLoadedAt: 0,
@@ -208,15 +209,37 @@ const MapView = {
         MapView.scheduleBannerError = '';
         MapView._renderScheduleBanner();
 
+        const token = localStorage.getItem('token');
         MapView.scheduleBannerLoadPromise = (async () => {
             try {
-                const [res, tournamentRes] = await Promise.all([
+                const fetches = [
                     API.get('/api/sessions?type=scheduled'),
                     API.get('/api/ranked/tournaments/upcoming?days=14'),
-                ]);
-                const sessions = Array.isArray(res?.sessions) ? res.sessions : [];
-                const tournaments = Array.isArray(tournamentRes?.tournaments) ? tournamentRes.tournaments : [];
-                const scheduleItems = [...sessions, ...tournaments];
+                ];
+                if (token) {
+                    fetches.push(API.get('/api/ranked/lobby/my-lobbies').catch(() => ({ lobbies: [] })));
+                }
+                const results = await Promise.all(fetches);
+                const sessions = Array.isArray(results[0]?.sessions) ? results[0].sessions : [];
+                const tournaments = Array.isArray(results[1]?.tournaments) ? results[1].tournaments : [];
+                const rankedLobbies = token && results[2]
+                    ? (Array.isArray(results[2]?.lobbies) ? results[2].lobbies : [])
+                    : [];
+                const normalizedTournaments = tournaments.map(t => ({
+                    ...t,
+                    item_type: 'tournament',
+                    session_type: 'scheduled',
+                }));
+                const normalizedLobbies = rankedLobbies
+                    .filter(l => l.scheduled_for || l.status === 'pending' || l.status === 'ready')
+                    .map(l => ({
+                        ...l,
+                        item_type: 'ranked_lobby',
+                        session_type: 'scheduled',
+                        start_time: l.scheduled_for || l.created_at,
+                    }));
+                const scheduleItems = [...sessions, ...normalizedTournaments, ...normalizedLobbies];
+                MapView.scheduleBannerItems = scheduleItems;
                 MapView.scheduleBannerDays = MapView._buildScheduleBannerDays(scheduleItems);
                 MapView.scheduleBannerLastLoadedAt = Date.now();
                 MapView.scheduleBannerCountySlug = countySlug;
@@ -237,35 +260,162 @@ const MapView = {
 
     openScheduledDayFromBanner(dayKey) {
         if (!dayKey) return;
+        MapView.openDayPopup(dayKey);
+    },
 
-        const typeFilter = document.getElementById('sessions-type-filter');
-        if (typeFilter) typeFilter.value = 'scheduled';
+    openDayPopup(dayKey, courtId) {
+        if (!dayKey) return;
+        const popup = document.getElementById('schedule-day-popup');
+        if (!popup) return;
 
-        if (typeof Sessions !== 'undefined') {
-            const targetDate = MapView._dateFromKey(dayKey);
-            if (targetDate) {
-                const today = MapView._startOfDay(new Date());
-                const targetDay = MapView._startOfDay(targetDate);
-                const diffDays = Math.floor((targetDay.getTime() - today.getTime()) / 86400000);
-                Sessions.calendarWeekOffset = Math.floor(diffDays / 7);
+        const date = MapView._dateFromKey(dayKey);
+        const titleEl = document.getElementById('schedule-day-popup-title');
+        const bodyEl = document.getElementById('schedule-day-popup-body');
+        if (!date || !titleEl || !bodyEl) return;
+
+        const dateLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        titleEl.textContent = dateLabel;
+        bodyEl.innerHTML = MapView._renderDayPopupBody(dayKey, courtId);
+        popup.style.display = 'flex';
+    },
+
+    closeDayPopup() {
+        const popup = document.getElementById('schedule-day-popup');
+        if (popup) popup.style.display = 'none';
+    },
+
+    _renderDayPopupBody(dayKey, courtId) {
+        const items = MapView._getItemsForDay(dayKey, courtId);
+        if (!items.length) {
+            return `<div class="schedule-empty-day">
+                <h4>No games scheduled</h4>
+                <p>Be the first to schedule a game for this day.</p>
+                <button class="btn-primary btn-sm" onclick="MapView.closeDayPopup(); Sessions.showCreateModal()">Schedule a Game</button>
+            </div>`;
+        }
+
+        const byHour = {};
+        items.forEach(item => {
+            const start = new Date(item.start_time);
+            const hour = start.getHours();
+            const key = `${String(hour).padStart(2, '0')}:00`;
+            if (!byHour[key]) byHour[key] = [];
+            byHour[key].push(item);
+        });
+
+        const sortedHours = Object.keys(byHour).sort();
+        return sortedHours.map(hourKey => {
+            const hourNum = parseInt(hourKey, 10);
+            const label = hourNum === 0 ? '12 AM' : hourNum < 12 ? `${hourNum} AM` : hourNum === 12 ? '12 PM' : `${hourNum - 12} PM`;
+            const cards = byHour[hourKey].map(item => MapView._renderDayPopupEventCard(item)).join('');
+            return `<div class="schedule-hour-group">
+                <div class="schedule-hour-label">${label}</div>
+                ${cards}
+            </div>`;
+        }).join('');
+    },
+
+    _getItemsForDay(dayKey, courtId) {
+        const date = MapView._dateFromKey(dayKey);
+        if (!date) return [];
+        const dayStart = MapView._startOfDay(date);
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+
+        const selectedCounty = (typeof App !== 'undefined' && typeof App.getSelectedCountySlug === 'function')
+            ? App.getSelectedCountySlug()
+            : '';
+
+        return (MapView.scheduleBannerItems || []).filter(item => {
+            if (!item.start_time) return false;
+            const start = new Date(item.start_time);
+            if (Number.isNaN(start.getTime())) return false;
+            if (start < dayStart || start >= dayEnd) return false;
+            if (courtId && Number(item.court_id || item.court?.id) !== Number(courtId)) return false;
+            if (!courtId && selectedCounty) {
+                const itemCounty = String(item.court?.county_slug || '').trim().toLowerCase();
+                if (itemCounty && itemCounty !== selectedCounty) return false;
             }
-            Sessions.calendarSelectedDayKey = dayKey;
-            Sessions.calendarExpanded = true;
+            return true;
+        }).sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+    },
+
+    _renderDayPopupEventCard(item) {
+        const e = MapView._escapeHtml;
+        const start = new Date(item.start_time);
+        const timeLabel = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const courtName = e(item.court?.name || 'Court');
+        const courtId = Number(item.court_id || item.court?.id || 0);
+
+        if (item.item_type === 'tournament') {
+            const name = e(item.name || 'Tournament');
+            const players = Number(item.registered_count || item.participants_count || 0);
+            const maxP = Number(item.max_players || 0);
+            const playerLabel = maxP ? `${players}/${maxP}` : `${players} players`;
+            const tId = Number(item.id) || 0;
+            return `<div class="schedule-event-card">
+                <div class="schedule-event-card-header">
+                    <strong>${name}</strong>
+                    <span class="schedule-event-type-badge tournament">Tournament</span>
+                </div>
+                <div class="schedule-event-meta">
+                    <span>${timeLabel}</span>
+                    <span>${courtName}</span>
+                    <span>${playerLabel}</span>
+                </div>
+                <div class="schedule-event-actions">
+                    <button class="btn-primary btn-sm" onclick="MapView.closeDayPopup(); Ranked.openTournament(${tId}, ${courtId})">View Tournament</button>
+                    <button class="btn-secondary btn-sm" onclick="MapView.closeDayPopup(); App.openCourtDetails(${courtId})">View Court</button>
+                </div>
+            </div>`;
         }
 
-        App.setMainTab('sessions');
-
-        if (typeof Sessions !== 'undefined' && typeof Sessions.selectCalendarDate === 'function') {
-            setTimeout(() => {
-                Sessions.selectCalendarDate(dayKey);
-                if (!Sessions.calendarExpanded) {
-                    Sessions.calendarExpanded = true;
-                    if (typeof Sessions._rerenderFromCache === 'function') {
-                        Sessions._rerenderFromCache();
-                    }
-                }
-            }, 40);
+        if (item.item_type === 'ranked_lobby') {
+            const lobbyId = Number(item.id) || 0;
+            const t1 = (item.team1 || []).map(p => e(p.user?.name || p.user?.username || '?')).join(' & ');
+            const t2 = (item.team2 || []).map(p => e(p.user?.name || p.user?.username || '?')).join(' & ');
+            const matchLabel = t1 && t2 ? `${t1} vs ${t2}` : 'Ranked Match';
+            return `<div class="schedule-event-card">
+                <div class="schedule-event-card-header">
+                    <strong>${matchLabel}</strong>
+                    <span class="schedule-event-type-badge ranked">Ranked</span>
+                </div>
+                <div class="schedule-event-meta">
+                    <span>${timeLabel}</span>
+                    <span>${courtName}</span>
+                </div>
+                <div class="schedule-event-actions">
+                    <button class="btn-primary btn-sm" onclick="MapView.closeDayPopup(); App.openCourtDetails(${courtId}); setTimeout(() => { const el = document.getElementById('court-ranked-inline'); if (el) el.scrollIntoView({behavior:'smooth'}); }, 400);">View Match</button>
+                    <button class="btn-secondary btn-sm" onclick="MapView.closeDayPopup(); App.openCourtDetails(${courtId})">View Court</button>
+                </div>
+            </div>`;
         }
+
+        const creator = e(item.creator?.name || item.creator?.username || 'Someone');
+        const gameType = e(item.game_type || 'open');
+        const skillLevel = e(item.skill_level || 'all');
+        const playerCount = (item.players || []).length;
+        const maxPlayers = Number(item.max_players || 4);
+        const sessionId = Number(item.id) || 0;
+        const notes = item.notes ? `<p style="font-size:12px;color:var(--text-muted);margin:4px 0 0">${e(item.notes)}</p>` : '';
+
+        return `<div class="schedule-event-card">
+            <div class="schedule-event-card-header">
+                <strong>${creator}'s ${gameType} game</strong>
+                <span class="schedule-event-type-badge session">Open to Play</span>
+            </div>
+            <div class="schedule-event-meta">
+                <span>${timeLabel}</span>
+                <span>${courtName}</span>
+                <span>${playerCount}/${maxPlayers} players</span>
+                <span>${skillLevel}</span>
+            </div>
+            ${notes}
+            <div class="schedule-event-actions">
+                <button class="btn-primary btn-sm" onclick="MapView.closeDayPopup(); Sessions.openDetail(${sessionId})">Join / Details</button>
+                <button class="btn-secondary btn-sm" onclick="MapView.closeDayPopup(); App.openCourtDetails(${courtId})">View Court</button>
+            </div>
+        </div>`;
     },
 
     _buildScheduleBannerDays(scheduleItems) {
@@ -805,15 +955,14 @@ const MapView = {
     async openCourt(courtId) {
         MapView.currentCourtId = courtId;
 
-        // Update header
         const nameEl = document.getElementById('court-details-name');
         const addrEl = document.getElementById('court-details-address');
         const dirLink = document.getElementById('court-directions-link');
         if (nameEl) nameEl.textContent = 'Loading...';
         if (addrEl) addrEl.textContent = '';
 
-        const infoContainer = document.getElementById('court-info-content');
-        if (infoContainer) infoContainer.innerHTML = '<div class="loading">Loading court details...</div>';
+        const pageContainer = document.getElementById('court-page-content');
+        if (pageContainer) pageContainer.innerHTML = '<div class="loading" style="padding:40px;text-align:center">Loading court details...</div>';
 
         await MapView.refreshMyStatus();
 
@@ -821,39 +970,34 @@ const MapView = {
             const { court, sessions } = await MapView._fetchCourtBundle(courtId);
             MapView._cacheCurrentCourtBundle(court, sessions);
 
-            // Set header info
             if (nameEl) nameEl.textContent = court.name || 'Court';
             if (addrEl) addrEl.textContent = `${court.address || ''}, ${court.city || ''}, CA ${court.zip_code || ''}`;
             if (dirLink) dirLink.href = MapView._formatDirectionsUrl(court.latitude, court.longitude);
 
-            // Render court info tab
-            if (infoContainer) infoContainer.innerHTML = MapView._courtInfoHTML(court, sessions);
+            if (pageContainer) pageContainer.innerHTML = MapView._courtPageHTML(court, sessions);
 
-            // Load ranked data for ranked tab
             Ranked.loadCourtRanked(court.id);
-
-            // Load court chat
+            App._loadLeaderboardInline(court.id);
             MapView._loadCourtChat(court.id);
 
-            // Join socket room
             if (typeof Chat !== 'undefined' && Chat.socket) {
                 Chat.joinRoom(`court_${court.id}`);
             }
         } catch {
-            if (infoContainer) infoContainer.innerHTML = '<p class="error">Failed to load court details</p>';
+            if (pageContainer) pageContainer.innerHTML = '<p class="error" style="padding:20px">Failed to load court details</p>';
         }
     },
 
-    /** Refresh the court details after check-in/session changes */
     async _refreshCourt(courtId) {
         if (App.currentScreen !== 'court-details') return;
         await MapView.refreshMyStatus();
         try {
             const { court, sessions } = await MapView._fetchCourtBundle(courtId);
             MapView._cacheCurrentCourtBundle(court, sessions);
-            const container = document.getElementById('court-info-content');
-            if (container) container.innerHTML = MapView._courtInfoHTML(court, sessions);
+            const pageContainer = document.getElementById('court-page-content');
+            if (pageContainer) pageContainer.innerHTML = MapView._courtPageHTML(court, sessions);
             Ranked.loadCourtRanked(court.id);
+            App._loadLeaderboardInline(court.id);
             MapView._loadCourtChat(court.id);
         } catch {}
     },
@@ -975,8 +1119,11 @@ const MapView = {
         }
     },
 
-    /** Unified court info tab renderer */
     _courtInfoHTML(court, sessions) {
+        return MapView._courtPageHTML(court, sessions);
+    },
+
+    _courtPageHTML(court, sessions) {
         sessions = sessions || [];
         const checkedIn = court.checked_in_users || [];
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -998,7 +1145,6 @@ const MapView = {
             ? `<div class="court-detail-photo"><img src="${safePhotoUrl}" alt="${safePhotoAlt}" loading="lazy" onerror="this.parentElement.remove()"></div>`
             : '';
 
-        // Amenities
         const amenities = [];
         if (court.has_restrooms) amenities.push('<span class="amenity">🚻 Restrooms</span>');
         if (court.has_parking) amenities.push('<span class="amenity">🅿️ Parking</span>');
@@ -1014,59 +1160,52 @@ const MapView = {
                           court.court_type === 'converted' ? 'Converted (tennis lines)' : 'Shared Facility';
 
         const liveSections = MapView._buildLiveCourtSections(
-            court,
-            sessions,
-            currentUser.id,
-            amCheckedInHere,
-            { playerCardOptions: { enableChallenge: false } },
+            court, sessions, currentUser.id, amCheckedInHere,
+            { playerCardOptions: { enableChallenge: true } },
         );
         const nowSessions = liveSections.nowSessions;
-        const sessionsHTML = liveSections.sessionsHTML;
-        const playersHTML = liveSections.playersHTML;
-        const matchBanner = liveSections.matchBannerHTML;
         const players = liveSections.activePlayers;
 
         const checkinBtnHTML = MapView._checkinBarHTML({
-            courtId: court.id,
-            safeCourtName,
-            amCheckedInHere,
-            currentUserId: currentUser.id,
-            nowSessions,
+            courtId: court.id, safeCourtName, amCheckedInHere,
+            currentUserId: currentUser.id, nowSessions,
         });
 
-        return `
-            ${photoHtml}
-            ${checkinBtnHTML}
-
-            <div id="court-live-status" class="court-live-status ${players > 0 ? 'active' : ''}">
-                ${MapView._liveStatusInnerHTML(court, players)}
-            </div>
-
-            <div id="court-match-banner">${matchBanner}</div>
-
-            ${court.description ? `<p class="court-desc">${safeDescription}</p>` : ''}
-
-            <!-- Looking to Play Sessions -->
-            <div class="court-section">
-                <div class="section-header">
-                    <h4>Looking to Play</h4>
-                    <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule Game</button>
-                </div>
-                <div id="court-sessions-live">${sessionsHTML}</div>
-            </div>
-
-            <!-- Who's Here -->
-            <div class="court-section">
+        const checkedInSection = checkedIn.length > 0 ? `
+            <div class="court-page-section" id="court-players-section">
                 <div class="section-header">
                     <h4>Who's Here</h4>
                     <span id="court-player-count" class="player-count-badge">${checkedIn.length}</span>
                 </div>
-                <div id="court-players-live">${playersHTML}</div>
-            </div>
+                <div id="court-players-live">${liveSections.playersHTML}</div>
+            </div>` : '';
 
-            <!-- Court Info -->
-            <div class="court-section">
+        const scheduleDaysHTML = MapView._courtScheduleDaysHTML(court.id);
+
+        const sections = [
+            photoHtml,
+            `<div class="court-page-section">
+                ${checkinBtnHTML}
+                <div id="court-live-status" class="court-live-status ${players > 0 ? 'active' : ''}">
+                    ${MapView._liveStatusInnerHTML(court, players)}
+                </div>
+                <div id="court-match-banner">${liveSections.matchBannerHTML}</div>
+            </div>`,
+            checkedInSection,
+            `<div class="court-page-section">
+                <div class="section-header">
+                    <h4>Schedule</h4>
+                    <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule Game</button>
+                </div>
+                ${scheduleDaysHTML}
+                <div id="court-sessions-live" style="margin-top:10px">${liveSections.sessionsHTML}</div>
+            </div>`,
+            `<div class="court-page-section" id="court-ranked-inline">
+                <div id="court-ranked-section"><div class="loading">Loading ranked...</div></div>
+            </div>`,
+            `<div class="court-page-section">
                 <h4>Court Info</h4>
+                ${court.description ? `<p class="court-desc">${safeDescription}</p>` : ''}
                 <div class="court-info-grid">
                     <div class="info-item"><span class="info-label">Type</span><span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'}</span></div>
                     <div class="info-item"><span class="info-label">Courts</span><span>${court.num_courts}</span></div>
@@ -1081,12 +1220,62 @@ const MapView = {
                     <strong>Amenities</strong>
                     <div class="amenities-grid">${amenities.join('') || '<span class="muted">No amenities listed</span>'}</div>
                 </div>
-            </div>
+                <div class="court-contact">
+                    ${court.phone ? `<a href="tel:${safePhoneHref}" class="btn-secondary btn-sm">📞 ${safePhoneLabel}</a>` : ''}
+                    ${safeWebsiteHref ? `<a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🌐 Website</a>` : ''}
+                </div>
+            </div>`,
+            `<div class="court-page-section" id="court-leaderboard-inline">
+                <div class="section-header">
+                    <h4>Leaderboard</h4>
+                    <button class="btn-secondary btn-sm" onclick="App.openLeaderboardPopup(${court.id})">Full Leaderboard</button>
+                </div>
+                <div id="leaderboard-content" class="compact-leaderboard-list"><div class="loading">Loading...</div></div>
+            </div>`,
+            `<div class="court-page-section court-chat-section">
+                <h4>Court Chat</h4>
+                <div id="court-chat-messages" class="court-chat-messages"></div>
+                <form class="court-chat-form" onsubmit="MapView.sendCourtChat(event)">
+                    <input type="text" id="court-chat-input" placeholder="Message players here..." autocomplete="off">
+                    <button type="submit" class="btn-primary btn-sm">Send</button>
+                </form>
+            </div>`,
+            `<div class="court-page-section">
+                <div class="court-bottom-actions">
+                    <button class="btn-secondary court-bottom-action-btn court-report-btn" onclick="MapView.reportCurrentCourt()">Report a Problem</button>
+                    <button class="btn-primary court-bottom-action-btn" onclick="App.toggleUpdatesSheet()">Suggest a Court Update</button>
+                </div>
+            </div>`,
+        ];
 
-            <div class="court-contact">
-                ${court.phone ? `<a href="tel:${safePhoneHref}" class="btn-secondary btn-sm">📞 ${safePhoneLabel}</a>` : ''}
-                ${safeWebsiteHref ? `<a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🌐 Website</a>` : ''}
-            </div>`;
+        return sections.filter(Boolean).join('');
+    },
+
+    _courtScheduleDaysHTML(courtId) {
+        const today = MapView._startOfDay(new Date());
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+            const day = new Date(today);
+            day.setDate(today.getDate() + i);
+            const key = MapView._dateKey(day);
+            const items = MapView._getItemsForDay(key, courtId);
+            days.push({ key, date: day, count: items.length });
+        }
+        const todayKey = MapView._dateKey(new Date());
+        return `<div class="court-schedule-days">${days.map(day => {
+            const dayName = day.date.toLocaleDateString('en-US', { weekday: 'short' });
+            const dateLabel = day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const classes = ['court-schedule-day'];
+            if (day.count > 0) classes.push('has-games');
+            if (day.key === todayKey) classes.push('today');
+            return `<button type="button" class="${classes.join(' ')}"
+                onclick="MapView.openDayPopup('${day.key}', ${courtId})"
+                aria-label="${dayName} ${dateLabel}, ${day.count} events">
+                <span class="court-schedule-day-name">${dayName}</span>
+                <span class="court-schedule-day-date">${dateLabel}</span>
+                <span class="court-schedule-day-count">${day.count > 0 ? day.count + ' game' + (day.count > 1 ? 's' : '') : '-'}</span>
+            </button>`;
+        }).join('')}</div>`;
     },
 
     _playerCard(user, isLookingToPlay, currentUserId, courtId, amCheckedInHere, options = {}) {

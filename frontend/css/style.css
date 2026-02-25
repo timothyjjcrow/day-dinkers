@@ -3548,3 +3548,131 @@ input.flatpickr-input[readonly] {
 .leaflet-control-zoom { border-radius: var(--radius-sm) !important; }
 .leaflet-popup-content-wrapper { border-radius: var(--radius) !important; box-shadow: var(--shadow-lg) !important; }
 .leaflet-popup-content { margin: 10px !important; min-width: 220px; max-width: 300px; }
+
+/* ══════════════════════════════════════════════════
+   SCHEDULE DAY POPUP & LEADERBOARD POPUP
+   ══════════════════════════════════════════════════ */
+.schedule-day-popup {
+    position: fixed; inset: 0; z-index: 2000;
+    display: flex; align-items: flex-end; justify-content: center;
+}
+.schedule-day-popup-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,.45);
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.schedule-day-popup-panel {
+    position: relative; z-index: 1;
+    background: var(--bg); border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    width: 100%; max-width: 520px; max-height: 80vh;
+    display: flex; flex-direction: column;
+    box-shadow: var(--shadow-lg);
+    animation: slideUpPopup .25s ease-out;
+}
+@keyframes slideUpPopup {
+    from { transform: translateY(40%); opacity: .6; }
+    to   { transform: translateY(0);   opacity: 1; }
+}
+.schedule-day-popup-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 16px 12px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.schedule-day-popup-header h3 { margin: 0; font-size: 16px; }
+.schedule-day-popup-body {
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 12px 16px 24px; flex: 1;
+}
+
+/* Event cards inside popup */
+.schedule-event-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px; margin-bottom: 10px;
+    transition: box-shadow .15s;
+}
+.schedule-event-card:last-child { margin-bottom: 0; }
+.schedule-event-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+}
+.schedule-event-card-header strong { font-size: 14px; }
+.schedule-event-type-badge {
+    font-size: 11px; font-weight: 600; padding: 2px 8px;
+    border-radius: 10px; text-transform: uppercase; letter-spacing: .3px;
+}
+.schedule-event-type-badge.session { background: var(--primary-light); color: var(--primary-dark); }
+.schedule-event-type-badge.ranked  { background: #fef3c7; color: #92400e; }
+.schedule-event-type-badge.tournament { background: #ede9fe; color: #5b21b6; }
+.schedule-event-meta {
+    display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px;
+    color: var(--text-muted); margin-bottom: 8px;
+}
+.schedule-event-meta span { display: inline-flex; align-items: center; gap: 3px; }
+.schedule-event-actions {
+    display: flex; gap: 6px; flex-wrap: wrap;
+}
+.schedule-hour-group { margin-bottom: 14px; }
+.schedule-hour-label {
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .5px;
+    margin-bottom: 6px; padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+.schedule-empty-day {
+    text-align: center; padding: 32px 16px; color: var(--text-muted);
+}
+.schedule-empty-day p { margin: 4px 0 12px; }
+
+/* ══════════════════════════════════════════════════
+   COURT SCROLLABLE PAGE
+   ══════════════════════════════════════════════════ */
+.court-scrollable-page {
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    flex: 1; padding-bottom: 24px;
+}
+.court-page-section {
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+}
+.court-page-section:last-child { border-bottom: none; }
+.court-page-section-empty { display: none; }
+
+/* Compact schedule on court page */
+.court-schedule-days {
+    display: flex; gap: 4px; overflow-x: auto; padding: 4px 0;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.court-schedule-days::-webkit-scrollbar { display: none; }
+.court-schedule-day {
+    flex: 0 0 auto; min-width: 64px; padding: 8px 6px;
+    border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--card-bg); text-align: center; cursor: pointer;
+    font-size: 12px; transition: all .15s;
+}
+.court-schedule-day:active, .court-schedule-day.today {
+    border-color: var(--primary); background: var(--primary-light);
+}
+.court-schedule-day.has-games { border-color: var(--primary); }
+.court-schedule-day-name { display: block; font-weight: 600; font-size: 11px; }
+.court-schedule-day-date { display: block; font-size: 12px; margin: 2px 0; }
+.court-schedule-day-count {
+    display: block; font-size: 10px; color: var(--text-muted);
+}
+.court-schedule-day.has-games .court-schedule-day-count {
+    color: var(--primary-dark); font-weight: 500;
+}
+
+/* Compact ranked section */
+.compact-ranked { padding: 0; }
+.compact-ranked .ranked-hero { display: none; }
+.compact-ranked .ranked-checkin-shell { display: none; }
+.compact-ranked-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+}
+.compact-ranked-header h4 { margin: 0; font-size: 15px; }
+
+/* Compact leaderboard */
+.compact-leaderboard-list .ranked-player-card { padding: 8px; }
+.compact-leaderboard-footer {
+    text-align: center; padding-top: 8px;
+}

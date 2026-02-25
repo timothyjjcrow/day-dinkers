@@ -71,10 +71,6 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                 <span>Map</span>
             </button>
-            <button class="tab" data-tab="sessions" onclick="App.setMainTab('sessions')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                <span>Open to Play</span>
-            </button>
             <button class="tab" data-tab="profile" onclick="App.setMainTab('profile')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 <span>Profile</span>
@@ -145,34 +141,6 @@
             </div>
         </div>
 
-        <!-- Sessions (Open to Play) Tab -->
-        <div id="sessions-tab" class="tab-content">
-            <div class="tab-page">
-                <div class="tab-page-header">
-                    <h2>Open to Play</h2>
-                    <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Open to Play</button>
-                </div>
-                <div class="sessions-filters">
-                    <select id="sessions-type-filter" onchange="Sessions.load()">
-                        <option value="all">All Types</option>
-                        <option value="now">Active Now</option>
-                        <option value="scheduled">Upcoming</option>
-                    </select>
-                    <select id="sessions-visibility-filter" onchange="Sessions.load()">
-                        <option value="all">All Sessions</option>
-                        <option value="friends">Friends Only</option>
-                    </select>
-                    <select id="sessions-skill-filter" onchange="Sessions.load()">
-                        <option value="all">All Levels</option>
-                        <option value="beginner">Beginner</option>
-                        <option value="intermediate">Intermediate</option>
-                        <option value="advanced">Advanced</option>
-                    </select>
-                </div>
-                <div id="sessions-list" class="card-list"></div>
-            </div>
-        </div>
-
         <!-- Profile Tab -->
         <div id="profile-tab" class="tab-content">
             <div class="tab-page">
@@ -198,66 +166,8 @@
             </a>
         </div>
 
-        <!-- Court Tab Bar -->
-        <div id="court-tab-bar" class="tab-bar">
-            <button class="tab active" data-tab="court-info" onclick="App.setCourtTab('court-info')">Court</button>
-            <button class="tab" data-tab="ranked" onclick="App.setCourtTab('ranked')">Ranked</button>
-            <button class="tab" data-tab="leaderboard" onclick="App.setCourtTab('leaderboard')">Leaderboard</button>
-        </div>
-
-        <!-- Court Info Tab -->
-        <div id="court-info-tab" class="court-tab-content active">
-            <div id="court-info-content"></div>
-            <div id="court-chat-section" class="court-chat-section">
-                <h3>Court Chat</h3>
-                <div id="court-chat-messages" class="court-chat-messages"></div>
-                <form class="court-chat-form" onsubmit="MapView.sendCourtChat(event)">
-                    <input type="text" id="court-chat-input" placeholder="Message players here..." autocomplete="off">
-                    <button type="submit" class="btn-primary btn-sm">Send</button>
-                </form>
-            </div>
-            <!-- Updates Popout Trigger -->
-            <div id="updates-popout-trigger" class="updates-popout-trigger">
-                <div class="court-bottom-actions">
-                    <button class="btn-secondary court-bottom-action-btn court-report-btn" onclick="MapView.reportCurrentCourt()">
-                        <span>Report a Problem</span>
-                    </button>
-                    <button class="btn-primary court-bottom-action-btn" onclick="App.toggleUpdatesSheet()">
-                        <span>Suggest a Court Update</span>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Ranked Tab -->
-        <div id="court-ranked-tab" class="court-tab-content">
-            <div id="pending-confirmations" class="ranked-pending" style="display:none"></div>
-            <div id="court-ranked-section">
-                <div class="loading">Loading ranked play...</div>
-            </div>
-        </div>
-
-        <!-- Leaderboard Tab -->
-        <div id="court-leaderboard-tab" class="court-tab-content">
-            <div class="leaderboard-section">
-                <h3>Court Standings</h3>
-                <div id="leaderboard-content" class="card-list"></div>
-            </div>
-            <div class="leaderboard-section">
-                <h3>Tournament Standings</h3>
-                <div id="tournament-leaderboard-content" class="card-list"></div>
-            </div>
-            <div class="leaderboard-section">
-                <h3>County Standings</h3>
-                <p id="county-leaderboard-scope-label" class="muted" style="margin:-4px 0 10px 0;font-size:12px"></p>
-                <div id="county-leaderboard-content" class="card-list"></div>
-            </div>
-            <div class="leaderboard-section">
-                <h3>Recent Games</h3>
-                <div id="match-history-content"></div>
-            </div>
-        </div>
+        <!-- Single scrollable court page -->
+        <div id="court-page-content" class="court-scrollable-page"></div>
 
         <!-- Bottom Sheet for Court Updates -->
         <div id="updates-bottom-sheet" class="bottom-sheet" style="display:none">
@@ -573,6 +483,30 @@
             <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
             <button type="submit" class="btn-primary">Send</button>
         </form>
+    </div>
+
+    <!-- Schedule Day Popup (map + court) -->
+    <div id="schedule-day-popup" class="schedule-day-popup" style="display:none">
+        <div class="schedule-day-popup-overlay" onclick="MapView.closeDayPopup()"></div>
+        <div class="schedule-day-popup-panel">
+            <div class="schedule-day-popup-header">
+                <h3 id="schedule-day-popup-title">Schedule</h3>
+                <button class="modal-close" onclick="MapView.closeDayPopup()" aria-label="Close">&times;</button>
+            </div>
+            <div id="schedule-day-popup-body" class="schedule-day-popup-body"></div>
+        </div>
+    </div>
+
+    <!-- Leaderboard Popup -->
+    <div id="leaderboard-popup" class="schedule-day-popup" style="display:none">
+        <div class="schedule-day-popup-overlay" onclick="App.closeLeaderboardPopup()"></div>
+        <div class="schedule-day-popup-panel">
+            <div class="schedule-day-popup-header">
+                <h3>Leaderboard</h3>
+                <button class="modal-close" onclick="App.closeLeaderboardPopup()" aria-label="Close">&times;</button>
+            </div>
+            <div id="leaderboard-popup-body" class="schedule-day-popup-body"></div>
+        </div>
     </div>
 
     <div id="toast-container"></div>

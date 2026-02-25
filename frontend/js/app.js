@@ -224,14 +224,12 @@ const App = {
     },
 
     setMainTab(tab) {
-        // Ensure we're on the main screen
         if (App.currentScreen !== 'main') App.showScreen('main');
 
         const tabs = document.querySelectorAll('#main-tab-bar .tab');
         tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
 
         document.getElementById('map-tab').classList.toggle('active', tab === 'map');
-        document.getElementById('sessions-tab').classList.toggle('active', tab === 'sessions');
         document.getElementById('profile-tab').classList.toggle('active', tab === 'profile');
 
         App.currentMainTab = tab;
@@ -243,7 +241,8 @@ const App = {
             }
         }
         if (tab === 'sessions') {
-            Sessions.load();
+            App.setMainTab('map');
+            return;
         }
         if (tab === 'profile') {
             Profile.load();
@@ -252,123 +251,100 @@ const App = {
     },
 
     setCourtTab(tab) {
-        const tabs = document.querySelectorAll('#court-tab-bar .tab');
-        tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-
-        document.getElementById('court-info-tab').classList.toggle('active', tab === 'court-info');
-        document.getElementById('court-ranked-tab').classList.toggle('active', tab === 'ranked');
-        document.getElementById('court-leaderboard-tab').classList.toggle('active', tab === 'leaderboard');
-
-        App.currentCourtTab = tab;
-
-        // Load tab data on switch
         if (tab === 'ranked' && MapView.currentCourtId) {
-            Ranked.loadCourtRanked(MapView.currentCourtId);
-            Ranked.loadPendingConfirmations();
+            const el = document.getElementById('court-ranked-inline');
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
         }
         if (tab === 'leaderboard' && MapView.currentCourtId) {
-            App._loadLeaderboardTab(MapView.currentCourtId);
+            const el = document.getElementById('court-leaderboard-inline');
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
         }
     },
 
     async _loadLeaderboardTab(courtId) {
-        // Court leaderboard
+        App._loadLeaderboardInline(courtId);
+    },
+
+    async _loadLeaderboardInline(courtId) {
         const courtLb = document.getElementById('leaderboard-content');
-        if (courtLb) {
-            courtLb.innerHTML = '<div class="loading">Loading...</div>';
-            try {
-                const res = await API.get(`/api/ranked/leaderboard?court_id=${courtId}`);
-                const lb = res.leaderboard || [];
-                if (!lb.length) {
-                    courtLb.innerHTML = '<p class="muted">No ranked players at this court yet.</p>';
-                } else {
-                    courtLb.innerHTML = Ranked._renderLeaderboard(lb, { scopeLabel: 'Court' });
-                }
-            } catch { courtLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
-        }
-        // Tournament leaderboard
-        const tournamentLb = document.getElementById('tournament-leaderboard-content');
-        if (tournamentLb) {
-            tournamentLb.innerHTML = '<div class="loading">Loading...</div>';
-            try {
-                const res = await API.get(`/api/ranked/tournaments/leaderboard?court_id=${courtId}&limit=20`);
-                const lb = res.leaderboard || [];
-                if (!lb.length) {
-                    tournamentLb.innerHTML = '<p class="muted">No tournament results at this court yet.</p>';
-                } else {
-                    const tieBreakNote = `
-                        <p class="muted" style="margin-bottom:8px">
-                            Sorted by points, titles, wins, then average finish and losses.
-                        </p>
-                    `;
-                    tournamentLb.innerHTML = lb.map(row => `
-                        <div class="ranked-player-card compact" onclick="Ranked.viewPlayer(${Number(row.user_id) || 0})">
-                            <div class="ranked-player-rank">#${Number(row.rank) || '-'}</div>
-                            <div class="ranked-player-main">
-                                <div class="ranked-player-name-row">
-                                    <strong>${Ranked._e(row.name || row.username || 'Player')}</strong>
-                                    <span class="muted">@${Ranked._e(row.username || '')}</span>
-                                </div>
-                                <div class="ranked-player-metrics">
-                                    <span class="ranked-player-stat">${Number(row.points) || 0} pts</span>
-                                    <span class="ranked-player-stat">${Number(row.titles) || 0} titles</span>
-                                    <span class="ranked-player-stat">${Number(row.wins) || 0}W-${Number(row.losses) || 0}L</span>
-                                    <span class="ranked-player-stat">${Math.round((Number(row.win_rate) || 0) * 100)}% win</span>
-                                    <span class="ranked-player-stat">Best #${Number(row.best_finish) || '-'}</span>
-                                    <span class="ranked-player-stat">Avg #${Number(row.avg_placement || 0).toFixed(2)}</span>
-                                    <span class="ranked-player-stat">${Number(row.points_per_tournament || 0).toFixed(1)} pts/event</span>
-                                    <span class="ranked-player-stat">${Number(row.tournaments_played) || 0} events</span>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('');
-                    tournamentLb.innerHTML = tieBreakNote + tournamentLb.innerHTML;
-                }
-            } catch { tournamentLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
-        }
-        // County leaderboard
-        const countyLb = document.getElementById('county-leaderboard-content');
-        if (countyLb) {
-            const countyScopeLabel = document.getElementById('county-leaderboard-scope-label');
-            if (countyScopeLabel) {
-                const selectedCounty = App.getSelectedCountyName();
-                const countyDisplayName = /county$/i.test(selectedCounty)
-                    ? selectedCounty
-                    : `${selectedCounty} County`;
-                countyScopeLabel.textContent = `Showing results for ${countyDisplayName}`;
+        if (!courtLb) return;
+        courtLb.innerHTML = '<div class="loading">Loading...</div>';
+        try {
+            const res = await API.get(`/api/ranked/leaderboard?court_id=${courtId}`);
+            const lb = res.leaderboard || [];
+            if (!lb.length) {
+                courtLb.innerHTML = '<p class="muted">No ranked players at this court yet.</p>';
+                const section = document.getElementById('court-leaderboard-inline');
+                if (section) section.classList.add('court-page-section-empty');
+            } else {
+                const top5 = lb.slice(0, 5);
+                courtLb.innerHTML = top5.map(player =>
+                    Ranked._leaderboardCardHTML(player, {
+                        currentUserId: Number(Ranked._currentUser().id) || 0,
+                        showChallenge: false,
+                        compact: true,
+                    })
+                ).join('');
             }
-            countyLb.innerHTML = '<div class="loading">Loading...</div>';
-            try {
-                const countySlug = App.getSelectedCountySlug();
-                const countyQuery = countySlug
-                    ? `?county_slug=${encodeURIComponent(countySlug)}`
-                    : '';
-                const res = await API.get(`/api/ranked/leaderboard${countyQuery}`);
-                const lb = res.leaderboard || [];
-                if (!lb.length) {
-                    countyLb.innerHTML = '<p class="muted">No ranked players in this county yet.</p>';
-                } else {
-                    countyLb.innerHTML = Ranked._renderLeaderboard(lb, { scopeLabel: 'County' });
-                }
-            } catch { countyLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
-        }
-        // Match history
-        const historyEl = document.getElementById('match-history-content');
-        if (historyEl) {
-            historyEl.innerHTML = '<div class="loading">Loading...</div>';
-            try {
-                const res = await API.get(`/api/ranked/history?court_id=${courtId}&limit=60`);
-                const matches = res.matches || [];
-                Ranked._setRecentMatchesForCourt(courtId, matches);
-                Ranked.renderRecentGamesForCourt(courtId);
-            } catch { historyEl.innerHTML = '<p class="muted">Unable to load.</p>'; }
+        } catch { courtLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
+    },
+
+    async openLeaderboardPopup(courtId) {
+        const popup = document.getElementById('leaderboard-popup');
+        const body = document.getElementById('leaderboard-popup-body');
+        if (!popup || !body) return;
+        body.innerHTML = '<div class="loading">Loading leaderboard...</div>';
+        popup.style.display = 'flex';
+
+        try {
+            const [courtRes, countyRes, historyRes] = await Promise.all([
+                API.get(`/api/ranked/leaderboard?court_id=${courtId}`),
+                API.get(`/api/ranked/leaderboard?county_slug=${encodeURIComponent(App.getSelectedCountySlug())}`),
+                API.get(`/api/ranked/history?court_id=${courtId}&limit=30`),
+            ]);
+            const courtLb = courtRes.leaderboard || [];
+            const countyLb = countyRes.leaderboard || [];
+            const matches = historyRes.matches || [];
+
+            let html = '';
+            html += '<h4 style="margin:0 0 8px">Court Standings</h4>';
+            html += courtLb.length
+                ? Ranked._renderLeaderboard(courtLb, { scopeLabel: 'Court' })
+                : '<p class="muted">No ranked players at this court yet.</p>';
+
+            html += '<h4 style="margin:16px 0 8px">County Standings</h4>';
+            html += countyLb.length
+                ? Ranked._renderLeaderboard(countyLb, { scopeLabel: 'County' })
+                : '<p class="muted">No ranked players in this county yet.</p>';
+
+            if (matches.length) {
+                html += '<h4 style="margin:16px 0 8px">Recent Games</h4>';
+                html += matches.slice(0, 10).map(m => {
+                    const t1 = Ranked._teamNames(m.team1);
+                    const t2 = Ranked._teamNames(m.team2);
+                    const score = `${m.team1_score}-${m.team2_score}`;
+                    return `<div class="schedule-event-card" style="padding:8px">
+                        <div style="display:flex;justify-content:space-between;align-items:center">
+                            <span>${t1} vs ${t2}</span>
+                            <strong>${score}</strong>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+
+            body.innerHTML = html;
+        } catch {
+            body.innerHTML = '<p class="muted">Unable to load leaderboard.</p>';
         }
     },
 
-    /** Navigate to court details screen */
+    closeLeaderboardPopup() {
+        const popup = document.getElementById('leaderboard-popup');
+        if (popup) popup.style.display = 'none';
+    },
+
     openCourtDetails(courtId) {
         App.showScreen('court-details');
-        App.setCourtTab('court-info');
         MapView.openCourt(courtId);
     },
 
@@ -495,7 +471,7 @@ const App = {
                 const isAdminNotif = ['court_update_approved', 'court_update_rejected'].includes(n.notif_type);
                 let onclick = '';
                 if (isSessionNotif && n.reference_id) {
-                    onclick = `onclick="App.setMainTab('sessions'); document.getElementById('notifications-dropdown').style.display='none'; setTimeout(() => Sessions.openDetail(${n.reference_id}), 200);"`;
+                    onclick = `onclick="document.getElementById('notifications-dropdown').style.display='none'; Sessions.openDetail(${n.reference_id});"`;
                 }
                 else if (isCourtNotif && n.reference_id) onclick = `onclick="App.openCourtDetails(${n.reference_id}); document.getElementById('notifications-dropdown').style.display='none';"`;
                 else if (isFriendNotif) onclick = `onclick="App.setMainTab('profile'); document.getElementById('notifications-dropdown').style.display='none';"`;
@@ -633,15 +609,7 @@ const App = {
 
         const courtOpen = App.currentScreen === 'court-details';
         if (typeof Ranked !== 'undefined' && courtOpen && MapView.currentCourtId) {
-            if (App.currentCourtTab === 'ranked') {
-                Ranked.loadCourtRanked(MapView.currentCourtId, { silent: true });
-            }
-        }
-
-        if (typeof MapView !== 'undefined' && MapView.currentCourtId && courtOpen) {
-            if (typeof MapView.refreshCurrentCourtLiveData === 'function') {
-                MapView.refreshCurrentCourtLiveData(MapView.currentCourtId);
-            }
+            Ranked.loadCourtRanked(MapView.currentCourtId, { silent: true });
         }
     },
 

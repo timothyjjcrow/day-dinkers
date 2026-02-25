@@ -932,4 +932,93 @@ Object.assign(Ranked, {
             <button class="btn-primary btn-full" onclick="document.getElementById('match-modal').style.display='none'" style="margin-top:16px">Done</button>
         </div>`;
     },
+
+    _renderCompactCourtRanked(data, courtId) {
+        const queue = data.queue || [];
+        const activeMatches = data.matches || [];
+        const readyLobbies = data.ready_lobbies || [];
+        const scheduledLobbies = data.scheduled_lobbies || [];
+        const allPendingLobbies = data.pending_lobbies || [];
+        const currentUser = Ranked._currentUser();
+        const currentUserId = Number(currentUser.id) || 0;
+        const inQueue = queue.some(q => Number(q.user_id) === currentUserId);
+
+        const myLiveMatches = activeMatches
+            .filter(m => m.status === 'in_progress' && (m.players || []).some(p => Number(p.user_id) === currentUserId));
+        const myPendingMatches = activeMatches
+            .filter(m => m.status === 'pending_confirmation')
+            .filter(m => { const me = (m.players || []).find(p => Number(p.user_id) === currentUserId); return me && !me.confirmed; });
+        const myActionLobbies = allPendingLobbies
+            .filter(l => { const me = (l.players || []).find(p => Number(p.user_id) === currentUserId); return me && me.acceptance_status === 'pending'; });
+        const myReadyLobbies = readyLobbies
+            .filter(l => { const me = (l.players || []).find(p => Number(p.user_id) === currentUserId); return me && me.acceptance_status === 'accepted'; });
+        const myScheduledLobbies = scheduledLobbies
+            .filter(l => (l.players || []).some(p => Number(p.user_id) === currentUserId));
+
+        const actionGroups = [
+            Ranked._renderActionGroup('Enter Score', myLiveMatches.map(m => Ranked._renderActiveMatch(m, { actionMode: true })).join('')),
+            Ranked._renderActionGroup('Confirm Scores', myPendingMatches.map(m => Ranked._renderPendingCourtMatch(m)).join('')),
+            Ranked._renderActionGroup('Respond to Invitations', myActionLobbies.map(l => Ranked._renderPendingLobby(l)).join('')),
+            Ranked._renderActionGroup('Start Ready Games', myReadyLobbies.map(l => Ranked._renderLobbyCard(l, false, { actionMode: true })).join('')),
+        ].filter(Boolean);
+        const actionItemCount = myLiveMatches.length + myPendingMatches.length + myActionLobbies.length + myReadyLobbies.length;
+
+        const tournamentsPanelHTML = (typeof Ranked._renderCompactTournamentsSection === 'function')
+            ? Ranked._renderCompactTournamentsSection(data, courtId)
+            : '';
+
+        let html = '<div class="compact-ranked">';
+        html += `<div class="compact-ranked-header">
+            <h4>Competitive Play</h4>
+            ${actionItemCount > 0 ? `<span class="t-badge t-badge-live">${actionItemCount} pending</span>` : ''}
+        </div>`;
+
+        if (actionItemCount > 0) {
+            html += `<div id="ranked-action-center" class="ranked-action-center has-actions" style="margin-bottom:12px">
+                ${actionGroups.join('')}
+            </div>`;
+        }
+
+        const queueSummary = Ranked._queueStatusText(queue.length);
+        const queueControls = inQueue
+            ? `<div class="queue-join-controls in-queue">
+                    <span class="match-type-badge">You are in queue</span>
+                    <button class="btn-danger btn-sm" onclick="Ranked.leaveQueue(${courtId})">Leave</button>
+               </div>`
+            : `<div class="queue-join-controls">
+                    <button class="btn-secondary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'singles')">Join Singles</button>
+                    <button class="btn-primary btn-sm" onclick="Ranked.joinQueue(${courtId}, 'doubles')">Join Doubles</button>
+               </div>`;
+        const createGameBtn = queue.length >= 2
+            ? `<button class="btn-primary btn-sm" style="margin-top:6px" onclick="Ranked.showCreateMatch(${courtId})">Create Game from Queue</button>`
+            : '';
+
+        html += `<div class="ranked-queue-section ${queue.length > 0 ? 'queue-has-players' : ''}" style="margin-bottom:12px">
+            <div class="queue-header">
+                <h5>Match Queue (${queue.length})</h5>
+                ${queueControls}
+            </div>
+            <p class="muted" style="font-size:12px;margin:4px 0">${queueSummary}</p>
+            ${queue.length > 0 ? Ranked._renderQueueCards(queue, currentUserId) : ''}
+            ${createGameBtn}
+        </div>`;
+
+        if (myScheduledLobbies.length > 0) {
+            html += `<div class="ranked-sub-section" style="margin-bottom:12px">
+                <h5>Your Scheduled Games</h5>
+                ${myScheduledLobbies.map(l => Ranked._renderLobbyCard(l, true)).join('')}
+            </div>`;
+        }
+
+        if (tournamentsPanelHTML) {
+            html += tournamentsPanelHTML;
+        }
+
+        html += `<div style="margin-top:8px">
+            <button class="btn-secondary btn-sm" onclick="Ranked.openCourtScheduledChallenge(${courtId})">Schedule Friend Challenge</button>
+        </div>`;
+
+        html += '</div>';
+        return html;
+    },
 });

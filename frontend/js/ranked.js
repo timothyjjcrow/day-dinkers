@@ -141,12 +141,9 @@ const Ranked = {
     },
 
     _maybePromoteActionCenter(courtId) {
-        const tab = document.getElementById('court-ranked-tab');
-        if (!tab) return;
-        tab.scrollTo({ top: 0, behavior: 'smooth' });
-
         const center = document.getElementById('ranked-action-center');
         if (!center) return;
+        center.scrollIntoView({ behavior: 'smooth', block: 'start' });
         center.classList.add('action-center-highlight');
         setTimeout(() => center.classList.remove('action-center-highlight'), 2200);
     },
@@ -389,7 +386,10 @@ const Ranked = {
             const hasNewActions = !!nextActionState.digest && nextActionState.digest !== prevDigest;
             Ranked.actionDigestByCourt[courtId] = nextActionState.digest;
             if (hasNewActions) Ranked._markActionCenterUpdated(courtId);
-            container.innerHTML = Ranked._renderCourtRanked(res, courtId);
+            const renderer = typeof Ranked._renderCompactCourtRanked === 'function'
+                ? Ranked._renderCompactCourtRanked
+                : Ranked._renderCourtRanked;
+            container.innerHTML = renderer(res, courtId);
             if (
                 Ranked.currentTournamentId
                 && Number(Ranked.currentTournamentCourtId || courtId) === Number(courtId)
