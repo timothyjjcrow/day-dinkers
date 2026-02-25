@@ -299,6 +299,22 @@ Object.assign(Ranked, {
         const sortedPendingLobbies = allPendingLobbies
             .slice()
             .sort((a, b) => Ranked._isoToMs(b.created_at) - Ranked._isoToMs(a.created_at));
+        const myPendingScheduledLobbies = sortedPendingLobbies.filter(lobby => {
+            if (!lobby.scheduled_for) return false;
+            return (lobby.players || []).some(player => Number(player.user_id) === currentUserId);
+        });
+        const scheduledLobbyMap = new Map(
+            sortedScheduledLobbies.map(lobby => [Number(lobby.id), lobby]),
+        );
+        myPendingScheduledLobbies.forEach(lobby => {
+            const lobbyId = Number(lobby.id);
+            if (!scheduledLobbyMap.has(lobbyId)) scheduledLobbyMap.set(lobbyId, lobby);
+        });
+        const scheduledDisplayLobbies = Array.from(scheduledLobbyMap.values()).sort((a, b) => {
+            const aTime = Ranked._isoToMs(a.scheduled_for) || Ranked._isoToMs(a.created_at);
+            const bTime = Ranked._isoToMs(b.scheduled_for) || Ranked._isoToMs(b.created_at);
+            return aTime - bTime;
+        });
         const tournamentsPanelHTML = (typeof Ranked._renderTournamentsPanel === 'function')
             ? Ranked._renderTournamentsPanel(data, courtId)
             : '';
@@ -378,8 +394,8 @@ Object.assign(Ranked, {
         const readyLobbyHTML = sortedReadyLobbies.length
             ? sortedReadyLobbies.map(lobby => Ranked._renderLobbyCard(lobby)).join('')
             : '<p class="muted">No games are ready to start yet.</p>';
-        const scheduledLobbyHTML = sortedScheduledLobbies.length
-            ? sortedScheduledLobbies.map(lobby => Ranked._renderLobbyCard(lobby, true)).join('')
+        const scheduledLobbyHTML = scheduledDisplayLobbies.length
+            ? scheduledDisplayLobbies.map(lobby => Ranked._renderLobbyCard(lobby, true)).join('')
             : '<p class="muted">No scheduled ranked games yet.</p>';
         const liveGamesHTML = spectatorLiveMatches.length
             ? spectatorLiveMatches.map(match => Ranked._renderActiveMatch(match)).join('')
@@ -427,7 +443,7 @@ Object.assign(Ranked, {
         const queueFillPct = Math.min(100, Math.round((sortedQueue.length / 4) * 100));
         const queueFillReady = sortedQueue.length >= 2;
         const totalActiveGames = spectatorLiveMatches.length + myLiveMatches.length;
-        const totalScheduled = sortedScheduledLobbies.length;
+        const totalScheduled = scheduledDisplayLobbies.length;
 
         return `
         <div class="court-ranked">
@@ -954,6 +970,19 @@ Object.assign(Ranked, {
             .filter(l => { const me = (l.players || []).find(p => Number(p.user_id) === currentUserId); return me && me.acceptance_status === 'accepted'; });
         const myScheduledLobbies = scheduledLobbies
             .filter(l => (l.players || []).some(p => Number(p.user_id) === currentUserId));
+        const myPendingScheduledLobbies = allPendingLobbies
+            .filter(l => l.scheduled_for)
+            .filter(l => (l.players || []).some(p => Number(p.user_id) === currentUserId));
+        const myScheduledMap = new Map(myScheduledLobbies.map(l => [Number(l.id), l]));
+        myPendingScheduledLobbies.forEach(lobby => {
+            const lobbyId = Number(lobby.id);
+            if (!myScheduledMap.has(lobbyId)) myScheduledMap.set(lobbyId, lobby);
+        });
+        const myScheduledDisplayLobbies = Array.from(myScheduledMap.values()).sort((a, b) => {
+            const aTime = Ranked._isoToMs(a.scheduled_for) || Ranked._isoToMs(a.created_at);
+            const bTime = Ranked._isoToMs(b.scheduled_for) || Ranked._isoToMs(b.created_at);
+            return aTime - bTime;
+        });
 
         const actionGroups = [
             Ranked._renderActionGroup('Enter Score', myLiveMatches.map(m => Ranked._renderActiveMatch(m, { actionMode: true })).join('')),
@@ -1003,10 +1032,10 @@ Object.assign(Ranked, {
             ${createGameBtn}
         </div>`;
 
-        if (myScheduledLobbies.length > 0) {
+        if (myScheduledDisplayLobbies.length > 0) {
             html += `<div class="ranked-sub-section" style="margin-bottom:12px">
                 <h5>Your Scheduled Games</h5>
-                ${myScheduledLobbies.map(l => Ranked._renderLobbyCard(l, true)).join('')}
+                ${myScheduledDisplayLobbies.map(l => Ranked._renderLobbyCard(l, true)).join('')}
             </div>`;
         }
 
