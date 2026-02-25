@@ -17,12 +17,12 @@ const Chat = {
             });
 
             Chat.socket.on('new_message', (msg) => {
-                // Session detail chat uses the same underlying court room stream.
+                // Session detail chat is scoped to the active session room.
                 const sessionChat = document.getElementById('session-chat-messages');
-                const inSessionCourt = typeof Sessions !== 'undefined'
-                    && Sessions.currentSessionCourtId
-                    && msg.court_id === Sessions.currentSessionCourtId;
-                if (sessionChat && msg.msg_type === 'court' && inSessionCourt) {
+                const inActiveSession = typeof Sessions !== 'undefined'
+                    && Sessions.currentSessionId
+                    && Number(msg.session_id) === Number(Sessions.currentSessionId);
+                if (sessionChat && msg.msg_type === 'session' && inActiveSession) {
                     const existing = sessionChat.querySelector(`[data-msg-id="${msg.id}"]`);
                     if (!existing) {
                         sessionChat.insertAdjacentHTML('beforeend', Sessions._renderChatMsg(msg));

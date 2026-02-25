@@ -39,6 +39,7 @@ def _run_lightweight_migrations():
     court_columns = {col['name'] for col in inspector.get_columns('court')} if 'court' in table_names else set()
     checkin_columns = {col['name'] for col in inspector.get_columns('check_in')} if 'check_in' in table_names else set()
     match_columns = {col['name'] for col in inspector.get_columns('match')} if 'match' in table_names else set()
+    message_columns = {col['name'] for col in inspector.get_columns('message')} if 'message' in table_names else set()
     with db.engine.begin() as connection:
         if 'is_admin' not in user_columns:
             connection.execute(text(
@@ -70,6 +71,20 @@ def _run_lightweight_migrations():
             ))
             connection.execute(text(
                 'UPDATE check_in SET last_presence_ping_at = checked_in_at WHERE last_presence_ping_at IS NULL'
+            ))
+
+        if 'message' in table_names:
+            if 'session_id' not in message_columns:
+                connection.execute(text(
+                    'ALTER TABLE message ADD COLUMN session_id INTEGER'
+                ))
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_message_court_type_created '
+                'ON message (court_id, msg_type, created_at)'
+            ))
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_message_session_type_created '
+                'ON message (session_id, msg_type, created_at)'
             ))
 
         # Ranked queue: ensure one entry per user per court

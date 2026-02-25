@@ -231,7 +231,7 @@ const MapView = {
                     session_type: 'scheduled',
                 }));
                 const normalizedLobbies = rankedLobbies
-                    .filter(l => l.scheduled_for || l.status === 'pending' || l.status === 'ready')
+                    .filter(l => l.scheduled_for || l.status === 'pending_acceptance' || l.status === 'ready')
                     .map(l => ({
                         ...l,
                         item_type: 'ranked_lobby',
@@ -1038,13 +1038,14 @@ const MapView = {
             MapView._cacheCurrentCourtBundle(court, sessions);
             const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
             const myStatus = MapView.myCheckinStatus || {};
-            const amCheckedInHere = myStatus.checked_in && myStatus.court_id === targetCourtId;
+            const amCheckedInHere = myStatus.checked_in
+                && Number(myStatus.court_id) === targetCourtId;
             const liveSections = MapView._buildLiveCourtSections(
                 court,
                 sessions,
                 currentUser.id,
                 amCheckedInHere,
-                { playerCardOptions: { enableChallenge: false } },
+                { playerCardOptions: { enableChallenge: true } },
             );
 
             if (sessionsEl) sessionsEl.innerHTML = liveSections.sessionsHTML;
@@ -1145,7 +1146,8 @@ const MapView = {
         const checkedIn = court.checked_in_users || [];
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         const myStatus = MapView.myCheckinStatus || {};
-        const amCheckedInHere = myStatus.checked_in && myStatus.court_id === court.id;
+        const amCheckedInHere = myStatus.checked_in
+            && Number(myStatus.court_id) === Number(court.id);
         const safeCourtName = MapView._escapeHtml(court.name || '');
         const safeDescription = MapView._escapeHtml(court.description || '');
         const safeSurfaceType = MapView._escapeHtml(court.surface_type || 'Unknown');

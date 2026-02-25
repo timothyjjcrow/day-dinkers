@@ -286,9 +286,10 @@ class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('play_session.id'), nullable=True)
     recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     content = db.Column(db.Text, nullable=False)
-    msg_type = db.Column(db.String(20), default='court')  # court, direct
+    msg_type = db.Column(db.String(20), default='court')  # court, session, direct, game
     created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
@@ -297,6 +298,7 @@ class Message(db.Model):
         return {
             'id': self.id, 'sender_id': self.sender_id,
             'court_id': self.court_id,
+            'session_id': self.session_id,
             'recipient_id': self.recipient_id, 'content': self.content,
             'msg_type': self.msg_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,

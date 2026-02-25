@@ -47,6 +47,25 @@ def _create_match(client, token, court_id, team1, team2, match_type='doubles'):
     }, headers=_auth(token))
 
 
+def _make_friends(client, requester_token, recipient_token, requester_id, recipient_id):
+    send = client.post('/api/auth/friends/request', json={
+        'friend_id': recipient_id,
+    }, headers=_auth(requester_token))
+    assert send.status_code == 201
+
+    pending = client.get('/api/auth/friends/pending', headers=_auth(recipient_token))
+    assert pending.status_code == 200
+    requests = json.loads(pending.data)['requests']
+    friendship = next((r for r in requests if r['user']['id'] == requester_id), None)
+    assert friendship is not None
+
+    accept = client.post('/api/auth/friends/respond', json={
+        'friendship_id': friendship['id'],
+        'action': 'accept',
+    }, headers=_auth(recipient_token))
+    assert accept.status_code == 200
+
+
 def test_join_queue_requires_checkin_at_same_court(client):
     token, _ = _register(client, 'queue_checkin_u1', 'queue_checkin_u1@test.com')
     court = _create_court(client, token, 'Queue Checkin Court')
@@ -113,7 +132,9 @@ def test_scheduled_challenge_only_appears_after_all_accept(client):
         'source': 'friends_challenge',
     }, headers=_auth(t1))
     assert create.status_code == 201
-    lobby_id = json.loads(create.data)['lobby']['id']
+    create_data = json.loads(create.data)
+    assert create_data['lobby']['source'] == 'friends_challenge'
+    lobby_id = create_data['lobby']['id']
 
     before = client.get(f'/api/ranked/court/{court["id"]}/lobbies')
     assert before.status_code == 200
@@ -174,6 +195,364 @@ def test_start_scheduled_lobby_requires_time_and_checkins(client, app):
     started_data = json.loads(started.data)
     assert started_data['match']['status'] == 'in_progress'
     assert started_data['lobby']['status'] == 'started'
+
+
+def test_checked_in_player_can_schedule_ranked_game_and_start_after_checkins(client, app):
+    t1, id1 = _register(client, 'checked_sched_u1', 'checked_sched_u1@test.com')
+    t2, id2 = _register(client, 'checked_sched_u2', 'checked_sched_u2@test.com')
+    court = _create_court(client, t1, 'Checked Scheduled Court')
+
+    assert _checkin(client, t1, court['id']).status_code == 201
+
+    scheduled_for = (utcnow_naive() + timedelta(hours=2)).isoformat()
+    create = client.post('/api/ranked/challenge/scheduled', json={
+        'court_id': court['id'],
+        'match_type': 'singles',
+        'team1': [id1],
+        'team2': [id2],
+        'scheduled_for': scheduled_for,
+        'source': 'friends_challenge',
+    }, headers=_auth(t1))
+    assert create.status_code == 201
+    lobby_id = json.loads(create.data)['lobby']['id']
+
+    accept = client.post(
+        f'/api/ranked/lobby/{lobby_id}/respond',
+        json={'action': 'accept'},
+        headers=_auth(t2),
+    )
+    assert accept.status_code == 200
+    assert json.loads(accept.data)['all_accepted'] is True
+
+    with app.app_context():
+        lobby = db.session.get(RankedLobby, lobby_id)
+        lobby.scheduled_for = utcnow_naive() - timedelta(minutes=1)
+        db.session.commit()
+
+    missing_checkin = client.post(
+        f'/api/ranked/lobby/{lobby_id}/start',
+        json={},
+        headers=_auth(t1),
+    )
+    assert missing_checkin.status_code == 400
+    assert json.loads(missing_checkin.data)['missing_player_ids'] == [id2]
+
+    assert _checkin(client, t2, court['id']).status_code == 201
+    started = client.post(
+        f'/api/ranked/lobby/{lobby_id}/start',
+        json={},
+        headers=_auth(t1),
+    )
+    assert started.status_code == 200
+    started_data = json.loads(started.data)
+    assert started_data['lobby']['status'] == 'started'
+    assert started_data['match']['status'] == 'in_progress'
+
+
+def test_my_lobbies_endpoint_includes_current_user_scheduled_lobbies(client):
+    t1, id1 = _register(client, 'my_lobbies_u1', 'my_lobbies_u1@test.com')
+    t2, id2 = _register(client, 'my_lobbies_u2', 'my_lobbies_u2@test.com')
+    court = _create_court(client, t1, 'My Lobbies Court')
+    scheduled_for = (utcnow_naive() + timedelta(hours=2)).isoformat()
+
+    create = client.post('/api/ranked/challenge/scheduled', json={
+        'court_id': court['id'],
+        'match_type': 'singles',
+        'team1': [id1],
+        'team2': [id2],
+        'scheduled_for': scheduled_for,
+        'source': 'friends_challenge',
+    }, headers=_auth(t1))
+    assert create.status_code == 201
+    lobby_id = json.loads(create.data)['lobby']['id']
+
+    mine_creator = client.get('/api/ranked/lobby/my-lobbies', headers=_auth(t1))
+    assert mine_creator.status_code == 200
+    creator_ids = [l['id'] for l in json.loads(mine_creator.data)['lobbies']]
+    assert lobby_id in creator_ids
+
+    mine_invitee = client.get('/api/ranked/lobby/my-lobbies', headers=_auth(t2))
+    assert mine_invitee.status_code == 200
+    invitee_ids = [l['id'] for l in json.loads(mine_invitee.data)['lobbies']]
+    assert lobby_id in invitee_ids
+
+
+def test_checked_in_court_challenge_walkthrough_flow(client):
+    t1, id1 = _register(client, 'walk_court_u1', 'walk_court_u1@test.com')
+    t2, id2 = _register(client, 'walk_court_u2', 'walk_court_u2@test.com')
+    court = _create_court(client, t1, 'Walkthrough Court Challenge')
+
+    assert _checkin(client, t1, court['id']).status_code == 201
+    assert _checkin(client, t2, court['id']).status_code == 201
+
+    create = client.post('/api/ranked/challenge/court', json={
+        'court_id': court['id'],
+        'match_type': 'singles',
+        'team1': [id1],
+        'team2': [id2],
+    }, headers=_auth(t1))
+    assert create.status_code == 201
+    lobby_id = json.loads(create.data)['lobby']['id']
+
+    pending = client.get('/api/ranked/challenges/pending', headers=_auth(t2))
+    assert pending.status_code == 200
+    pending_ids = [l['id'] for l in json.loads(pending.data)['lobbies']]
+    assert lobby_id in pending_ids
+
+    accept = client.post(
+        f'/api/ranked/lobby/{lobby_id}/respond',
+        json={'action': 'accept'},
+        headers=_auth(t2),
+    )
+    assert accept.status_code == 200
+    assert json.loads(accept.data)['all_accepted'] is True
+
+    lobbies = client.get(f'/api/ranked/court/{court["id"]}/lobbies')
+    assert lobbies.status_code == 200
+    ready_ids = [l['id'] for l in json.loads(lobbies.data)['ready_lobbies']]
+    assert lobby_id in ready_ids
+
+    start = client.post(f'/api/ranked/lobby/{lobby_id}/start', json={}, headers=_auth(t1))
+    assert start.status_code == 200
+    match_id = json.loads(start.data)['match']['id']
+
+    score = client.post(
+        f'/api/ranked/match/{match_id}/score',
+        json={'team1_score': 11, 'team2_score': 7},
+        headers=_auth(t1),
+    )
+    assert score.status_code == 200
+    assert json.loads(score.data)['pending_confirmation'] is True
+
+    confirm = client.post(f'/api/ranked/match/{match_id}/confirm', json={}, headers=_auth(t2))
+    assert confirm.status_code == 200
+    assert json.loads(confirm.data)['all_confirmed'] is True
+
+
+def test_ranked_friends_walkthrough_flow(client, app):
+    t1, id1 = _register(client, 'walk_friend_u1', 'walk_friend_u1@test.com')
+    t2, id2 = _register(client, 'walk_friend_u2', 'walk_friend_u2@test.com')
+    court = _create_court(client, t1, 'Walkthrough Friends Ranked Court')
+
+    # Become friends through normal endpoints.
+    _make_friends(
+        client,
+        requester_token=t1,
+        recipient_token=t2,
+        requester_id=id1,
+        recipient_id=id2,
+    )
+
+    friends_u1 = client.get('/api/auth/friends', headers=_auth(t1))
+    assert friends_u1.status_code == 200
+    friend_ids_u1 = {u['id'] for u in json.loads(friends_u1.data)['friends']}
+    assert id2 in friend_ids_u1
+
+    scheduled_for = (utcnow_naive() + timedelta(hours=2)).isoformat()
+    create = client.post('/api/ranked/challenge/scheduled', json={
+        'court_id': court['id'],
+        'match_type': 'singles',
+        'team1': [id1],
+        'team2': [id2],
+        'scheduled_for': scheduled_for,
+        'source': 'friends_challenge',
+    }, headers=_auth(t1))
+    assert create.status_code == 201
+    create_data = json.loads(create.data)
+    assert create_data['lobby']['source'] == 'friends_challenge'
+    lobby_id = create_data['lobby']['id']
+
+    mine_creator = client.get('/api/ranked/lobby/my-lobbies', headers=_auth(t1))
+    assert mine_creator.status_code == 200
+    mine_creator_ids = [l['id'] for l in json.loads(mine_creator.data)['lobbies']]
+    assert lobby_id in mine_creator_ids
+
+    pending_invitee = client.get('/api/ranked/challenges/pending', headers=_auth(t2))
+    assert pending_invitee.status_code == 200
+    pending_invitee_ids = [l['id'] for l in json.loads(pending_invitee.data)['lobbies']]
+    assert lobby_id in pending_invitee_ids
+
+    accept = client.post(
+        f'/api/ranked/lobby/{lobby_id}/respond',
+        json={'action': 'accept'},
+        headers=_auth(t2),
+    )
+    assert accept.status_code == 200
+    assert json.loads(accept.data)['all_accepted'] is True
+
+    # Not startable until scheduled time.
+    too_early = client.post(f'/api/ranked/lobby/{lobby_id}/start', json={}, headers=_auth(t1))
+    assert too_early.status_code == 400
+
+    with app.app_context():
+        lobby = db.session.get(RankedLobby, lobby_id)
+        lobby.scheduled_for = utcnow_naive() - timedelta(minutes=1)
+        db.session.commit()
+
+    # Not startable until both players are checked in.
+    start_without_checkins = client.post(
+        f'/api/ranked/lobby/{lobby_id}/start',
+        json={},
+        headers=_auth(t1),
+    )
+    assert start_without_checkins.status_code == 400
+    missing_ids = sorted(json.loads(start_without_checkins.data)['missing_player_ids'])
+    assert missing_ids == sorted([id1, id2])
+
+    assert _checkin(client, t1, court['id']).status_code == 201
+    assert _checkin(client, t2, court['id']).status_code == 201
+
+    start = client.post(f'/api/ranked/lobby/{lobby_id}/start', json={}, headers=_auth(t1))
+    assert start.status_code == 200
+    start_data = json.loads(start.data)
+    match_id = start_data['match']['id']
+    assert start_data['lobby']['status'] == 'started'
+
+    submit_score = client.post(
+        f'/api/ranked/match/{match_id}/score',
+        json={'team1_score': 11, 'team2_score': 9},
+        headers=_auth(t1),
+    )
+    assert submit_score.status_code == 200
+
+    final_confirm = client.post(
+        f'/api/ranked/match/{match_id}/confirm',
+        json={},
+        headers=_auth(t2),
+    )
+    assert final_confirm.status_code == 200
+    assert json.loads(final_confirm.data)['all_confirmed'] is True
+
+
+def test_friends_scheduled_challenge_decline_removes_active_lobby(client):
+    t1, id1 = _register(client, 'decline_friend_u1', 'decline_friend_u1@test.com')
+    t2, id2 = _register(client, 'decline_friend_u2', 'decline_friend_u2@test.com')
+    court = _create_court(client, t1, 'Decline Friends Challenge Court')
+
+    _make_friends(
+        client,
+        requester_token=t1,
+        recipient_token=t2,
+        requester_id=id1,
+        recipient_id=id2,
+    )
+
+    scheduled_for = (utcnow_naive() + timedelta(hours=2)).isoformat()
+    create = client.post('/api/ranked/challenge/scheduled', json={
+        'court_id': court['id'],
+        'match_type': 'singles',
+        'team1': [id1],
+        'team2': [id2],
+        'scheduled_for': scheduled_for,
+        'source': 'friends_challenge',
+    }, headers=_auth(t1))
+    assert create.status_code == 201
+    lobby_id = json.loads(create.data)['lobby']['id']
+
+    decline = client.post(
+        f'/api/ranked/lobby/{lobby_id}/respond',
+        json={'action': 'decline'},
+        headers=_auth(t2),
+    )
+    assert decline.status_code == 200
+    decline_data = json.loads(decline.data)
+    assert decline_data['all_accepted'] is False
+    assert decline_data['lobby']['status'] == 'declined'
+
+    pending_invitee = client.get('/api/ranked/challenges/pending', headers=_auth(t2))
+    assert pending_invitee.status_code == 200
+    assert lobby_id not in [l['id'] for l in json.loads(pending_invitee.data)['lobbies']]
+
+    court_lobbies = client.get(f'/api/ranked/court/{court["id"]}/lobbies')
+    assert court_lobbies.status_code == 200
+    court_data = json.loads(court_lobbies.data)
+    all_active_ids = (
+        [l['id'] for l in court_data['ready_lobbies']]
+        + [l['id'] for l in court_data['scheduled_lobbies']]
+        + [l['id'] for l in court_data['pending_lobbies']]
+    )
+    assert lobby_id not in all_active_ids
+
+    my_creator = client.get('/api/ranked/lobby/my-lobbies', headers=_auth(t1))
+    assert my_creator.status_code == 200
+    assert lobby_id not in [l['id'] for l in json.loads(my_creator.data)['lobbies']]
+
+    creator_notifs = client.get('/api/auth/notifications', headers=_auth(t1))
+    assert creator_notifs.status_code == 200
+    creator_types = [n['notif_type'] for n in json.loads(creator_notifs.data)['notifications']]
+    assert 'ranked_challenge_declined' in creator_types
+
+
+def test_friends_scheduled_challenge_ready_notification_and_started_visibility(client, app):
+    t1, id1 = _register(client, 'ready_friend_u1', 'ready_friend_u1@test.com')
+    t2, id2 = _register(client, 'ready_friend_u2', 'ready_friend_u2@test.com')
+    court = _create_court(client, t1, 'Ready Friends Challenge Court')
+
+    _make_friends(
+        client,
+        requester_token=t1,
+        recipient_token=t2,
+        requester_id=id1,
+        recipient_id=id2,
+    )
+
+    scheduled_for = (utcnow_naive() + timedelta(hours=2)).isoformat()
+    create = client.post('/api/ranked/challenge/scheduled', json={
+        'court_id': court['id'],
+        'match_type': 'singles',
+        'team1': [id1],
+        'team2': [id2],
+        'scheduled_for': scheduled_for,
+        'source': 'friends_challenge',
+    }, headers=_auth(t1))
+    assert create.status_code == 201
+    lobby_id = json.loads(create.data)['lobby']['id']
+
+    accept = client.post(
+        f'/api/ranked/lobby/{lobby_id}/respond',
+        json={'action': 'accept'},
+        headers=_auth(t2),
+    )
+    assert accept.status_code == 200
+    accept_data = json.loads(accept.data)
+    assert accept_data['all_accepted'] is True
+    assert accept_data['lobby']['status'] == 'ready'
+
+    creator_notifs = client.get('/api/auth/notifications', headers=_auth(t1))
+    assert creator_notifs.status_code == 200
+    creator_types = [n['notif_type'] for n in json.loads(creator_notifs.data)['notifications']]
+    assert 'ranked_challenge_ready' in creator_types
+
+    with app.app_context():
+        lobby = db.session.get(RankedLobby, lobby_id)
+        lobby.scheduled_for = utcnow_naive() - timedelta(minutes=1)
+        db.session.commit()
+
+    assert _checkin(client, t1, court['id']).status_code == 201
+    assert _checkin(client, t2, court['id']).status_code == 201
+
+    started = client.post(
+        f'/api/ranked/lobby/{lobby_id}/start',
+        json={},
+        headers=_auth(t1),
+    )
+    assert started.status_code == 200
+    started_data = json.loads(started.data)
+    assert started_data['lobby']['status'] == 'started'
+
+    my_creator = client.get('/api/ranked/lobby/my-lobbies', headers=_auth(t1))
+    assert my_creator.status_code == 200
+    creator_lobbies = json.loads(my_creator.data)['lobbies']
+    creator_entry = next((l for l in creator_lobbies if l['id'] == lobby_id), None)
+    assert creator_entry is not None
+    assert creator_entry['status'] == 'started'
+
+    my_invitee = client.get('/api/ranked/lobby/my-lobbies', headers=_auth(t2))
+    assert my_invitee.status_code == 200
+    invitee_lobbies = json.loads(my_invitee.data)['lobbies']
+    invitee_entry = next((l for l in invitee_lobbies if l['id'] == lobby_id), None)
+    assert invitee_entry is not None
+    assert invitee_entry['status'] == 'started'
 
 
 def test_queue_lobby_flow_end_to_end_with_confirmed_score(client):

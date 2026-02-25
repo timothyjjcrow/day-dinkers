@@ -5,7 +5,6 @@
  */
 const Sessions = {
     currentSessionId: null,
-    currentSessionCourtId: null,
     sessionsById: {},
     cachedListSessions: [],
     calendarMonthKey: null,
@@ -674,7 +673,6 @@ const Sessions = {
             const res = await API.get(`/api/sessions/${sessionId}`);
             const session = res.session;
             Sessions.sessionsById[session.id] = session;
-            Sessions.currentSessionCourtId = session.court_id;
             const courtId = Number(session.court_id || session.court?.id || 0);
             const goToCourtBtn = courtId
                 ? `<button class="btn-secondary btn-full" onclick="Sessions.closeDetail(); Sessions.openDetailAtCourt(${session.id}, ${courtId})">View at Court</button>`
@@ -684,10 +682,10 @@ const Sessions = {
                 ${goToCourtBtn}
             </div>`;
 
-            Sessions._loadSessionChat(sessionId, session.court_id);
+            Sessions._loadSessionChat(sessionId);
 
             if (typeof Chat !== 'undefined' && typeof Chat.joinRoom === 'function') {
-                Chat.joinRoom(`court_${session.court_id}`);
+                Chat.joinRoom(`session_${session.id}`);
             }
         } catch {
             modal.innerHTML = `<div class="modal-content session-detail-modal">
@@ -707,7 +705,6 @@ const Sessions = {
             Sessions._detailEscHandler = null;
         }
         Sessions.currentSessionId = null;
-        Sessions.currentSessionCourtId = null;
     },
 
     openDetailAtCourt(sessionId, courtId) {
@@ -733,12 +730,11 @@ const Sessions = {
             const res = await API.get(`/api/sessions/${sessionId}`);
             const session = res.session;
             Sessions.sessionsById[session.id] = session;
-            Sessions.currentSessionCourtId = session.court_id;
             container.innerHTML = Sessions._renderInlineDetail(session);
             container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            Sessions._loadSessionChat(sessionId, session.court_id);
+            Sessions._loadSessionChat(sessionId);
             if (typeof Chat !== 'undefined' && typeof Chat.joinRoom === 'function') {
-                Chat.joinRoom(`court_${session.court_id}`);
+                Chat.joinRoom(`session_${session.id}`);
             }
         } catch {
             container.innerHTML = `<div class="inline-session-detail"><p class="error">Failed to load session details</p></div>`;
@@ -749,7 +745,6 @@ const Sessions = {
         const container = document.getElementById('court-session-detail-view');
         if (container) container.innerHTML = '';
         Sessions.currentSessionId = null;
-        Sessions.currentSessionCourtId = null;
     },
 
     _refreshCurrentDetail(sessionId) {
@@ -832,7 +827,7 @@ const Sessions = {
             <div class="inline-session-chat">
                 <h5>💬 Chat</h5>
                 <div id="session-chat-messages" class="inline-chat-messages"></div>
-                <form class="inline-chat-form" onsubmit="Sessions.sendChat(event, ${session.id}, ${session.court_id})">
+                <form class="inline-chat-form" onsubmit="Sessions.sendChat(event, ${session.id})">
                     <input type="text" id="session-chat-text" placeholder="Message the group..." autocomplete="off">
                     <button type="submit" class="btn-primary btn-sm">Send</button>
                 </form>
@@ -987,7 +982,7 @@ const Sessions = {
                     <div class="game-chat-container">
                         <h4>💬 Session Chat</h4>
                         <div id="session-chat-messages" class="game-chat-messages"></div>
-                        <form class="game-chat-input" onsubmit="Sessions.sendChat(event, ${session.id}, ${session.court_id})">
+                        <form class="game-chat-input" onsubmit="Sessions.sendChat(event, ${session.id})">
                             <input type="text" id="session-chat-text" placeholder="Message the group..." autocomplete="off">
                             <button type="submit" class="btn-primary btn-sm">Send</button>
                         </form>
@@ -997,7 +992,7 @@ const Sessions = {
         </div>`;
     },
 
-    async _loadSessionChat(sessionId, courtId) {
+    async _loadSessionChat(sessionId) {
         const container = document.getElementById('session-chat-messages');
         if (!container) return;
         const token = localStorage.getItem('token');
@@ -1005,12 +1000,12 @@ const Sessions = {
             container.innerHTML = '<p class="muted">Sign in to view and send messages</p>';
             return;
         }
-        if (!courtId) {
+        if (!sessionId) {
             container.innerHTML = '<p class="muted">Chat unavailable for this session</p>';
             return;
         }
         try {
-            const res = await API.get(`/api/chat/court/${courtId}`);
+            const res = await API.get(`/api/chat/session/${sessionId}`);
             const msgs = res.messages || [];
             if (!msgs.length) {
                 container.innerHTML = '<p class="muted">No messages yet. Say hello!</p>';
@@ -1031,7 +1026,7 @@ const Sessions = {
         const safeSender = Sessions._e(isMe ? 'You' : (sender.name || sender.username));
         const safeContent = Sessions._e(msg.content || '');
         return `
-        <div class="chat-msg ${isMe ? 'chat-msg-me' : ''}">
+        <div class="chat-msg ${isMe ? 'chat-msg-me' : ''}" data-msg-id="${msg.id}">
             <div class="chat-msg-header">
                 <strong>${safeSender}</strong>
                 <span class="chat-msg-time">${time}</span>
@@ -1040,21 +1035,21 @@ const Sessions = {
         </div>`;
     },
 
-    async sendChat(e, sessionId, courtId) {
+    async sendChat(e, sessionId) {
         e.preventDefault();
         const input = document.getElementById('session-chat-text');
         const content = input.value.trim();
         if (!content) return;
         const token = localStorage.getItem('token');
         if (!token) { Auth.showModal(); return; }
-        if (!courtId) { App.toast('Chat unavailable for this session', 'error'); return; }
+        if (!sessionId) { App.toast('Chat unavailable for this session', 'error'); return; }
 
         try {
             await API.post('/api/chat/send', {
-                content, court_id: courtId, msg_type: 'court',
+                content, session_id: sessionId, msg_type: 'session',
             });
             input.value = '';
-            Sessions._loadSessionChat(sessionId, courtId);
+            Sessions._loadSessionChat(sessionId);
         } catch { App.toast('Failed to send message', 'error'); }
     },
 

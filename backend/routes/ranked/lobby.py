@@ -2,7 +2,7 @@
 from flask import request, jsonify
 from backend.app import db
 from backend.models import (
-    Court, Match, RankedQueue, RankedLobbyPlayer,
+    Court, Match, RankedQueue, RankedLobby, RankedLobbyPlayer,
 )
 from backend.auth_utils import login_required
 from backend.routes.ranked import ranked_bp
@@ -101,9 +101,39 @@ def create_lobby_from_queue():
     return jsonify(response), 201
 
 
+@ranked_bp.route('/lobby/my-lobbies', methods=['GET'])
+@login_required
+def get_my_lobbies():
+    """List active ranked lobbies for the current user."""
+    user_id = request.current_user.id
+    try:
+        court_id_filter = int(request.args.get('court_id')) if request.args.get('court_id') else None
+    except (TypeError, ValueError):
+        court_id_filter = None
+
+    rows = RankedLobbyPlayer.query.filter_by(user_id=user_id).all()
+    active_statuses = {'pending_acceptance', 'ready', 'started'}
+    lobbies_by_id = {}
+    for row in rows:
+        lobby = row.lobby
+        if not lobby or lobby.status not in active_statuses:
+            continue
+        if court_id_filter and lobby.court_id != court_id_filter:
+            continue
+        lobbies_by_id[lobby.id] = _lobby_to_dict(lobby)
+
+    lobbies = list(lobbies_by_id.values())
+    lobbies.sort(
+        key=lambda lobby: (
+            lobby.get('scheduled_for') or '',
+            lobby.get('created_at') or '',
+        ),
+    )
+    return jsonify({'lobbies': lobbies})
+
+
 @ranked_bp.route('/lobby/<int:lobby_id>', methods=['GET'])
 def get_lobby(lobby_id):
-    from backend.models import RankedLobby
     lobby = db.session.get(RankedLobby, lobby_id)
     if not lobby:
         return jsonify({'error': 'Lobby not found'}), 404
@@ -168,7 +198,6 @@ def respond_to_lobby(lobby_id):
 @login_required
 def start_lobby_match(lobby_id):
     """Start a ranked match from a ready lobby."""
-    from backend.models import RankedLobby
     lobby = db.session.get(RankedLobby, lobby_id)
     if not lobby:
         return jsonify({'error': 'Lobby not found'}), 404

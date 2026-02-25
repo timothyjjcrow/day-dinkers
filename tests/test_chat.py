@@ -72,6 +72,100 @@ def test_court_chat(client):
     assert len(data['messages']) == 1
 
 
+def test_session_chat_is_scoped_and_separate_from_court_chat(client):
+    token = _auth(client, 'sessionchat', 'sessionchat@test.com')
+    court = _create_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    start_one = utcnow_naive() + timedelta(hours=2)
+    end_one = start_one + timedelta(hours=1)
+    session_one_res = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': start_one.isoformat(),
+        'end_time': end_one.isoformat(),
+    }, headers=headers)
+    assert session_one_res.status_code == 201
+    session_one_id = json.loads(session_one_res.data)['session']['id']
+
+    start_two = utcnow_naive() + timedelta(hours=5)
+    end_two = start_two + timedelta(hours=1)
+    session_two_res = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': start_two.isoformat(),
+        'end_time': end_two.isoformat(),
+    }, headers=headers)
+    assert session_two_res.status_code == 201
+    session_two_id = json.loads(session_two_res.data)['session']['id']
+
+    session_msg_one = client.post('/api/chat/send', json={
+        'content': 'Session one hello',
+        'msg_type': 'session',
+        'session_id': session_one_id,
+    }, headers=headers)
+    assert session_msg_one.status_code == 201
+    assert json.loads(session_msg_one.data)['message']['session_id'] == session_one_id
+
+    session_msg_two = client.post('/api/chat/send', json={
+        'content': 'Session two hello',
+        'msg_type': 'session',
+        'session_id': session_two_id,
+    }, headers=headers)
+    assert session_msg_two.status_code == 201
+    assert json.loads(session_msg_two.data)['message']['session_id'] == session_two_id
+
+    court_msg = client.post('/api/chat/send', json={
+        'content': 'General court hello',
+        'msg_type': 'court',
+        'court_id': court['id'],
+    }, headers=headers)
+    assert court_msg.status_code == 201
+    assert json.loads(court_msg.data)['message']['msg_type'] == 'court'
+
+    session_one_msgs = client.get(
+        f'/api/chat/session/{session_one_id}',
+        headers=headers,
+    )
+    assert session_one_msgs.status_code == 200
+    session_one_data = json.loads(session_one_msgs.data)['messages']
+    assert len(session_one_data) == 1
+    assert session_one_data[0]['content'] == 'Session one hello'
+    assert session_one_data[0]['msg_type'] == 'session'
+    assert session_one_data[0]['session_id'] == session_one_id
+
+    session_two_msgs = client.get(
+        f'/api/chat/session/{session_two_id}',
+        headers=headers,
+    )
+    assert session_two_msgs.status_code == 200
+    session_two_data = json.loads(session_two_msgs.data)['messages']
+    assert len(session_two_data) == 1
+    assert session_two_data[0]['content'] == 'Session two hello'
+    assert session_two_data[0]['msg_type'] == 'session'
+    assert session_two_data[0]['session_id'] == session_two_id
+
+    court_msgs = client.get(
+        f'/api/chat/court/{court["id"]}',
+        headers=headers,
+    )
+    assert court_msgs.status_code == 200
+    court_data = json.loads(court_msgs.data)['messages']
+    assert len(court_data) == 1
+    assert court_data[0]['content'] == 'General court hello'
+    assert court_data[0]['msg_type'] == 'court'
+    assert court_data[0]['session_id'] is None
+
+
+def test_session_chat_requires_session_id(client):
+    token = _auth(client, 'sessionmissing', 'sessionmissing@test.com')
+    res = client.post('/api/chat/send', json={
+        'content': 'Missing session id',
+        'msg_type': 'session',
+    }, headers={'Authorization': f'Bearer {token}'})
+    assert res.status_code == 400
+
+
 def test_direct_message(client):
     token1 = _auth(client, 'dm1', 'dm1@test.com')
     token2 = _auth(client, 'dm2', 'dm2@test.com')

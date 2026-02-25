@@ -1,10 +1,31 @@
 from flask import Blueprint, request, jsonify
 from flask_socketio import emit, join_room, leave_room
 from backend.app import db, socketio
-from backend.models import Message, Game
+from backend.models import Message, Game, PlaySession, PlaySessionPlayer, Friendship
 from backend.auth_utils import login_required
 
 chat_bp = Blueprint('chat', __name__)
+
+
+def _get_friend_ids(user_id):
+    friendships = Friendship.query.filter(
+        ((Friendship.user_id == user_id) | (Friendship.friend_id == user_id))
+        & (Friendship.status == 'accepted')
+    ).all()
+    friend_ids = set()
+    for friendship in friendships:
+        friend_ids.add(friendship.friend_id if friendship.user_id == user_id else friendship.user_id)
+    return friend_ids
+
+
+def _can_view_session(session, current_user_id):
+    if session.visibility != 'friends':
+        return True
+    if session.creator_id == current_user_id:
+        return True
+    if PlaySessionPlayer.query.filter_by(session_id=session.id, user_id=current_user_id).first():
+        return True
+    return session.creator_id in _get_friend_ids(current_user_id)
 
 
 @chat_bp.route('/court/<int:court_id>', methods=['GET'])
@@ -12,6 +33,20 @@ chat_bp = Blueprint('chat', __name__)
 def get_court_messages(court_id):
     messages = Message.query.filter_by(
         court_id=court_id, msg_type='court'
+    ).order_by(Message.created_at.asc()).limit(100).all()
+    return jsonify({'messages': [m.to_dict() for m in messages]})
+
+
+@chat_bp.route('/session/<int:session_id>', methods=['GET'])
+@login_required
+def get_session_messages(session_id):
+    session = db.session.get(PlaySession, session_id)
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+    if not _can_view_session(session, request.current_user.id):
+        return jsonify({'error': 'Session chat is private'}), 403
+    messages = Message.query.filter_by(
+        session_id=session_id, msg_type='session'
     ).order_by(Message.created_at.asc()).limit(100).all()
     return jsonify({'messages': [m.to_dict() for m in messages]})
 
@@ -47,14 +82,34 @@ def get_game_messages(game_id):
 @chat_bp.route('/send', methods=['POST'])
 @login_required
 def send_message():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid JSON payload'}), 400
+
     content = data.get('content', '').strip()
     if not content:
         return jsonify({'error': 'Message content is required'}), 400
 
-    msg_type = data.get('msg_type', 'court')
-    court_id = data.get('court_id')
-    game_id = data.get('game_id')
+    msg_type = str(data.get('msg_type') or 'court').strip().lower()
+    if msg_type not in {'court', 'session', 'direct', 'game'}:
+        return jsonify({'error': 'Invalid message type'}), 400
+
+    try:
+        court_id = int(data.get('court_id')) if data.get('court_id') is not None else None
+    except (TypeError, ValueError):
+        court_id = None
+    try:
+        game_id = int(data.get('game_id')) if data.get('game_id') is not None else None
+    except (TypeError, ValueError):
+        game_id = None
+    try:
+        session_id = int(data.get('session_id')) if data.get('session_id') is not None else None
+    except (TypeError, ValueError):
+        session_id = None
+    try:
+        recipient_id = int(data.get('recipient_id')) if data.get('recipient_id') is not None else None
+    except (TypeError, ValueError):
+        recipient_id = None
 
     if msg_type == 'game':
         if not game_id:
@@ -64,19 +119,37 @@ def send_message():
             return jsonify({'error': 'Game not found'}), 404
         # Legacy game chat is scoped by the game's court and creation time.
         court_id = game.court_id
+    elif msg_type == 'session':
+        if not session_id:
+            return jsonify({'error': 'Session ID is required for session chat'}), 400
+        session = db.session.get(PlaySession, session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if not _can_view_session(session, request.current_user.id):
+            return jsonify({'error': 'Session chat is private'}), 403
+        court_id = session.court_id
+    elif msg_type == 'court':
+        if not court_id:
+            return jsonify({'error': 'Court ID is required for court chat'}), 400
+    elif msg_type == 'direct':
+        if not recipient_id:
+            return jsonify({'error': 'Recipient ID is required for direct messages'}), 400
 
     msg = Message(
         sender_id=request.current_user.id,
         content=content,
         msg_type=msg_type,
         court_id=court_id,
-        recipient_id=data.get('recipient_id'),
+        session_id=session_id if msg_type == 'session' else None,
+        recipient_id=recipient_id,
     )
     db.session.add(msg)
     db.session.commit()
 
     msg_dict = msg.to_dict()
-    if msg.msg_type == 'game' and game_id:
+    if msg.msg_type == 'session' and msg.session_id:
+        socketio.emit('new_message', msg_dict, room=f'session_{msg.session_id}')
+    elif msg.msg_type == 'game' and game_id:
         msg_dict['game_id'] = game_id
         socketio.emit('new_message', msg_dict, room=f'game_{game_id}')
     elif msg.court_id:
