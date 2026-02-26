@@ -1105,16 +1105,46 @@ const Sessions = {
                 ? App.buildCourtsQuery()
                 : '/api/courts';
             const res = await API.get(courtsUrl);
-            const courts = res.courts || [];
+            const courts = [...(res.courts || [])].sort((a, b) => {
+                const aName = String(a.name || '').toLowerCase();
+                const bName = String(b.name || '').toLowerCase();
+                return aName.localeCompare(bName);
+            });
             if (!courts.length) {
                 select.innerHTML = '<option value="">No courts available</option>';
+                if (typeof SelectPicker !== 'undefined') {
+                    SelectPicker.enhanceById('session-court-select', {
+                        searchPlaceholder: 'Search courts...',
+                        emptyMessage: 'No courts found.',
+                        searchThreshold: 8,
+                    });
+                }
                 return;
             }
-            select.innerHTML = courts.map(c =>
-                `<option value="${c.id}" ${String(c.id) === String(preselectedCourtId) ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
-            ).join('');
+            const selectedId = preselectedCourtId ? String(preselectedCourtId) : '';
+            const placeholderSelected = selectedId ? '' : ' selected';
+            select.innerHTML = `
+                <option value=""${placeholderSelected}>Select a court...</option>
+                ${courts.map(c =>
+                    `<option value="${c.id}" ${String(c.id) === selectedId ? 'selected' : ''}>${Sessions._e(c.name)} — ${Sessions._e(c.city)}</option>`
+                ).join('')}
+            `;
+            if (typeof SelectPicker !== 'undefined') {
+                SelectPicker.enhanceById('session-court-select', {
+                    searchPlaceholder: 'Search courts...',
+                    emptyMessage: 'No courts match your search.',
+                    searchThreshold: 8,
+                });
+            }
         } catch {
             select.innerHTML = '<option value="">Error loading courts</option>';
+            if (typeof SelectPicker !== 'undefined') {
+                SelectPicker.enhanceById('session-court-select', {
+                    searchPlaceholder: 'Search courts...',
+                    emptyMessage: 'No courts found.',
+                    searchThreshold: 8,
+                });
+            }
         }
     },
 

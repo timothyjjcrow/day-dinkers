@@ -29,17 +29,25 @@ Object.assign(Ranked, {
             const modal = document.getElementById('match-modal');
             modal.style.display = 'flex';
             modal.innerHTML = `
-            <div class="modal-content">
+            <div class="modal-content ranked-challenge-modal">
                 <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
                 <h2>Challenge Player</h2>
-                <form onsubmit="Ranked.createCourtChallenge(event, ${courtId}, ${targetUserId})">
-                    ${Ranked._matchTypeSelectHTML('court-challenge', !extraOptions)}
-                    <p class="muted">You: <strong>${Ranked._e(me.name || me.username)}</strong></p>
-                    <p class="muted">Opponent: <strong>${Ranked._e(target.name || target.username)}</strong></p>
-                    ${Ranked._doublesFormHTML('court-challenge', extraOptions)}
+                <p class="ranked-challenge-subtitle">Send a ranked invite to someone checked in at this court.</p>
+                <form class="ranked-challenge-form" onsubmit="Ranked.createCourtChallenge(event, ${courtId}, ${targetUserId})">
+                    <div class="ranked-form-section">
+                        <span class="ranked-form-section-label">Players</span>
+                        <p class="muted">You: <strong>${Ranked._e(me.name || me.username)}</strong></p>
+                        <p class="muted">Opponent: <strong>${Ranked._e(target.name || target.username)}</strong></p>
+                    </div>
+                    <div class="ranked-form-section">
+                        <span class="ranked-form-section-label">Match setup</span>
+                        ${Ranked._matchTypeSelectHTML('court-challenge', !extraOptions)}
+                        ${Ranked._doublesFormHTML('court-challenge', extraOptions)}
+                    </div>
                     <button type="submit" class="btn-primary btn-full">Send Challenge</button>
                 </form>
             </div>`;
+            Ranked._bindChallengePartnerSelectors('court-challenge', '', Number(targetUserId));
         } catch {
             App.toast('Unable to load challenge setup', 'error');
         }
@@ -79,7 +87,11 @@ Object.assign(Ranked, {
             await App.loadFriendsCache();
         }
 
-        const friends = App.friendsList || [];
+        const friends = [...(App.friendsList || [])].sort((a, b) => {
+            const aName = String(a.name || a.username || '').toLowerCase();
+            const bName = String(b.name || b.username || '').toLowerCase();
+            return aName.localeCompare(bName);
+        });
         if (!friends.length) {
             App.toast('Add friends first to schedule ranked challenges.', 'error');
             return;
@@ -97,13 +109,20 @@ Object.assign(Ranked, {
         if (!hasCourtId) {
             try {
                 const courtsRes = await API.get(App.buildCourtsQuery());
-                const courts = courtsRes.courts || [];
+                const courts = [...(courtsRes.courts || [])].sort((a, b) => {
+                    const aName = String(a.name || '').toLowerCase();
+                    const bName = String(b.name || '').toLowerCase();
+                    return aName.localeCompare(bName);
+                });
                 const courtsOptions = courts.map(c =>
                     `<option value="${c.id}">${Ranked._e(c.name)} — ${Ranked._e(c.city)}</option>`
                 ).join('');
                 courtSelectHTML = `<div class="form-group">
                     <label>Court</label>
-                    <select id="court-scheduled-court" required>${courtsOptions}</select>
+                    <select id="court-scheduled-court" required>
+                        <option value="">Select court...</option>
+                        ${courtsOptions}
+                    </select>
                 </div>`;
             } catch { /* proceed without court list */ }
         }
@@ -111,24 +130,38 @@ Object.assign(Ranked, {
         const modal = document.getElementById('match-modal');
         modal.style.display = 'flex';
         modal.innerHTML = `
-        <div class="modal-content">
+        <div class="modal-content ranked-challenge-modal">
             <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
             <h2>Schedule Ranked Challenge</h2>
-            <form onsubmit="Ranked.createCourtScheduledChallenge(event)">
-                ${courtSelectHTML}
-                <div class="form-group">
-                    <label>Opponent</label>
-                    <select id="court-scheduled-opponent" required>
-                        <option value="">Select opponent...</option>
-                        ${opponentOptions}
-                    </select>
+            <p class="ranked-challenge-subtitle">Pick your friend, lock in a time, and send the invite.</p>
+            <form class="ranked-challenge-form" onsubmit="Ranked.createCourtScheduledChallenge(event)">
+                <div class="ranked-form-section">
+                    <span class="ranked-form-section-label">Opponent and court</span>
+                    ${courtSelectHTML}
+                    <div class="form-group">
+                        <label>Opponent</label>
+                        <select id="court-scheduled-opponent" required>
+                            <option value="">Select opponent...</option>
+                            ${opponentOptions}
+                        </select>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Scheduled Time</label>
-                    <input type="datetime-local" id="court-scheduled-time" value="${Ranked._defaultScheduleTime()}" required>
+
+                <div class="ranked-form-section">
+                    <span class="ranked-form-section-label">Schedule</span>
+                    <div class="form-group">
+                        <label>Scheduled Time</label>
+                        <input type="datetime-local" id="court-scheduled-time" value="${Ranked._defaultScheduleTime()}" required>
+                        ${Ranked._scheduleQuickPicksHTML('court-scheduled-time', 'court-scheduled-time-preview')}
+                        <div id="court-scheduled-time-preview" class="schedule-time-preview"></div>
+                    </div>
                 </div>
-                ${Ranked._matchTypeSelectHTML('court-scheduled')}
-                ${Ranked._doublesFormHTML('court-scheduled', partnerOptions)}
+
+                <div class="ranked-form-section">
+                    <span class="ranked-form-section-label">Match setup</span>
+                    ${Ranked._matchTypeSelectHTML('court-scheduled')}
+                    ${Ranked._doublesFormHTML('court-scheduled', partnerOptions)}
+                </div>
                 <input type="hidden" id="court-scheduled-fixed-court" value="${hasCourtId ? courtId : ''}">
                 <button type="submit" class="btn-primary btn-full">Send Scheduled Challenge</button>
             </form>
@@ -136,6 +169,15 @@ Object.assign(Ranked, {
         if (typeof DateTimePicker !== 'undefined') {
             DateTimePicker.enhanceWithin(modal);
         }
+        if (typeof SelectPicker !== 'undefined') {
+            SelectPicker.enhanceById('court-scheduled-court', {
+                searchPlaceholder: 'Search courts...',
+                emptyMessage: 'No courts match your search.',
+                searchThreshold: 8,
+            });
+        }
+        Ranked._initSchedulePicker('court-scheduled-time', 'court-scheduled-time-preview');
+        Ranked._bindChallengePartnerSelectors('court-scheduled', 'court-scheduled-opponent');
     },
 
     async createCourtScheduledChallenge(e) {
@@ -183,13 +225,24 @@ Object.assign(Ranked, {
 
     async openScheduledChallengeModal(targetUserId, source = 'scheduled_challenge') {
         try {
+            if (!App.friendsList || !App.friendsList.length) {
+                await App.loadFriendsCache();
+            }
             const [courtsRes, targetProfile] = await Promise.all([
                 API.get(App.buildCourtsQuery()),
                 API.get(`/api/auth/profile/${targetUserId}`),
             ]);
-            const courts = courtsRes.courts || [];
+            const courts = [...(courtsRes.courts || [])].sort((a, b) => {
+                const aName = String(a.name || '').toLowerCase();
+                const bName = String(b.name || '').toLowerCase();
+                return aName.localeCompare(bName);
+            });
             const target = targetProfile.user || {};
-            const friends = App.friendsList || [];
+            const friends = [...(App.friendsList || [])].sort((a, b) => {
+                const aName = String(a.name || a.username || '').toLowerCase();
+                const bName = String(b.name || b.username || '').toLowerCase();
+                return aName.localeCompare(bName);
+            });
             const extraOptions = friends
                 .filter(f => f.id !== targetUserId)
                 .map(f => `<option value="${f.id}">${Ranked._e(f.name || f.username)}</option>`)
@@ -201,29 +254,53 @@ Object.assign(Ranked, {
             const modal = document.getElementById('match-modal');
             modal.style.display = 'flex';
             modal.innerHTML = `
-            <div class="modal-content">
+            <div class="modal-content ranked-challenge-modal">
                 <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
                 <h2>Schedule Ranked Challenge</h2>
-                <form onsubmit="Ranked.createScheduledChallenge(event, ${targetUserId}, '${source}')">
-                    <div class="form-group">
-                        <label>Court</label>
-                        <select id="scheduled-challenge-court" required>
-                            ${courtsOptions}
-                        </select>
+                <p class="ranked-challenge-subtitle">Challenge a friend from profile or leaderboard with one clean flow.</p>
+                <form class="ranked-challenge-form" onsubmit="Ranked.createScheduledChallenge(event, ${targetUserId}, '${source}')">
+                    <div class="ranked-form-section">
+                        <span class="ranked-form-section-label">Court and opponent</span>
+                        <div class="form-group">
+                            <label>Court</label>
+                            <select id="scheduled-challenge-court" required>
+                                <option value="">Select court...</option>
+                                ${courtsOptions}
+                            </select>
+                        </div>
+                        <p class="muted">Opponent: <strong>${Ranked._e(target.name || target.username || 'Player')}</strong></p>
                     </div>
-                    <div class="form-group">
-                        <label>Scheduled Time</label>
-                        <input type="datetime-local" id="scheduled-challenge-time" value="${Ranked._defaultScheduleTime()}" required>
+
+                    <div class="ranked-form-section">
+                        <span class="ranked-form-section-label">Schedule</span>
+                        <div class="form-group">
+                            <label>Scheduled Time</label>
+                            <input type="datetime-local" id="scheduled-challenge-time" value="${Ranked._defaultScheduleTime()}" required>
+                            ${Ranked._scheduleQuickPicksHTML('scheduled-challenge-time', 'scheduled-challenge-time-preview')}
+                            <div id="scheduled-challenge-time-preview" class="schedule-time-preview"></div>
+                        </div>
                     </div>
-                    ${Ranked._matchTypeSelectHTML('scheduled-challenge', !extraOptions)}
-                    <p class="muted">Opponent: <strong>${Ranked._e(target.name || target.username || 'Player')}</strong></p>
-                    ${Ranked._doublesFormHTML('scheduled-challenge', extraOptions)}
+
+                    <div class="ranked-form-section">
+                        <span class="ranked-form-section-label">Match setup</span>
+                        ${Ranked._matchTypeSelectHTML('scheduled-challenge', !extraOptions)}
+                        ${Ranked._doublesFormHTML('scheduled-challenge', extraOptions)}
+                    </div>
                     <button type="submit" class="btn-primary btn-full">Send Scheduled Challenge</button>
                 </form>
             </div>`;
             if (typeof DateTimePicker !== 'undefined') {
                 DateTimePicker.enhanceWithin(modal);
             }
+            if (typeof SelectPicker !== 'undefined') {
+                SelectPicker.enhanceById('scheduled-challenge-court', {
+                    searchPlaceholder: 'Search courts...',
+                    emptyMessage: 'No courts match your search.',
+                    searchThreshold: 8,
+                });
+            }
+            Ranked._initSchedulePicker('scheduled-challenge-time', 'scheduled-challenge-time-preview');
+            Ranked._bindChallengePartnerSelectors('scheduled-challenge', '', Number(targetUserId));
         } catch {
             App.toast('Unable to open scheduled challenge', 'error');
         }
@@ -234,6 +311,7 @@ Object.assign(Ranked, {
         const currentUser = Ranked._currentUser();
         const courtId = parseInt(document.getElementById('scheduled-challenge-court').value, 10);
         const scheduledFor = document.getElementById('scheduled-challenge-time').value;
+        if (!Number.isFinite(courtId) || courtId <= 0) { App.toast('Pick a court.', 'error'); return; }
         if (!scheduledFor) { App.toast('Pick a scheduled time.', 'error'); return; }
 
         const parsed = Ranked._parseDoublesTeams('scheduled-challenge', currentUser.id, targetUserId);

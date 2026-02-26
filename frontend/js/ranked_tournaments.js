@@ -191,7 +191,11 @@ Object.assign(Ranked, {
         if (!hasCourtId) {
             try {
                 const courtsRes = await API.get(App.buildCourtsQuery());
-                const courts = courtsRes.courts || [];
+                const courts = [...(courtsRes.courts || [])].sort((a, b) => {
+                    const aName = String(a.name || '').toLowerCase();
+                    const bName = String(b.name || '').toLowerCase();
+                    return aName.localeCompare(bName);
+                });
                 const courtsOptions = courts.map(c =>
                     `<option value="${c.id}">${Ranked._e(c.name)} — ${Ranked._e(c.city)}</option>`
                 ).join('');
@@ -221,6 +225,8 @@ Object.assign(Ranked, {
                         <div class="form-group">
                             <label>Start Time</label>
                             <input type="datetime-local" id="tournament-start-time" required value="${Ranked._defaultScheduleTime()}">
+                            ${Ranked._scheduleQuickPicksHTML('tournament-start-time', 'tournament-start-preview')}
+                            <div id="tournament-start-preview" class="schedule-time-preview"></div>
                         </div>
                     </div>
                     <div class="tournament-create-section">
@@ -285,6 +291,14 @@ Object.assign(Ranked, {
         if (typeof DateTimePicker !== 'undefined') {
             DateTimePicker.enhanceWithin(modal);
         }
+        if (typeof SelectPicker !== 'undefined') {
+            SelectPicker.enhanceById('tournament-court-select', {
+                searchPlaceholder: 'Search courts...',
+                emptyMessage: 'No courts match your search.',
+                searchThreshold: 8,
+            });
+        }
+        Ranked._initSchedulePicker('tournament-start-time', 'tournament-start-preview');
     },
 
     async createTournament(event) {
