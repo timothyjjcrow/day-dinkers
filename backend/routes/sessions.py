@@ -1,6 +1,7 @@
 """Open-to-Play sessions — create, join, schedule, invite."""
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
+from sqlalchemy.exc import IntegrityError
 from backend.app import db
 from backend.models import (
     PlaySession, PlaySessionPlayer, Court, Notification, Friendship, CheckIn,
@@ -492,7 +493,24 @@ def join_session(session_id):
             reference_id=session_id,
         )
         db.session.add(notif)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Concurrent joins can race; unique(session_id, user_id) is the source of truth.
+        db.session.rollback()
+        existing_after_race = PlaySessionPlayer.query.filter_by(
+            session_id=session_id,
+            user_id=uid,
+        ).first()
+        current_session = db.session.get(PlaySession, session_id)
+        if existing_after_race and current_session:
+            waitlisted_after_race = existing_after_race.status == 'waitlisted'
+            return jsonify({
+                'message': 'Already joined' if not waitlisted_after_race else 'Session full — added to waitlist',
+                'waitlisted': waitlisted_after_race,
+                'session': _serialize_session(current_session),
+            })
+        return jsonify({'error': 'Could not join session right now. Please retry.'}), 409
 
     return jsonify({
         'message': 'Joined session' if not waitlisted else 'Session full — added to waitlist',

@@ -210,6 +210,7 @@
             <form id="login-form" class="auth-form" onsubmit="Auth.login(event)">
                 <div class="form-group"><label>Email</label><input type="email" name="email" required placeholder="you@example.com"></div>
                 <div class="form-group"><label>Password</label><input type="password" name="password" required placeholder="••••••••"></div>
+                <button type="button" class="btn-text" onclick="Auth.showResetRequestForm()">Forgot password?</button>
                 <button type="submit" class="btn-primary btn-full">Sign In</button>
                 <div id="google-auth-wrapper" class="google-auth-wrapper" style="display:none">
                     <div class="auth-divider"><span>or</span></div>
@@ -218,10 +219,30 @@
                 </div>
                 <p class="auth-error" id="login-error"></p>
             </form>
+            <form id="reset-request-form" class="auth-form" style="display:none" onsubmit="Auth.requestPasswordReset(event)">
+                <p class="muted">Enter your account email and we will generate reset instructions.</p>
+                <div class="form-group"><label>Email</label><input type="email" name="email" required placeholder="you@example.com"></div>
+                <button type="submit" class="btn-primary btn-full">Request Password Reset</button>
+                <button type="button" class="btn-text" onclick="Auth.showResetConfirmForm()">Have a reset token?</button>
+                <button type="button" class="btn-text" onclick="Auth.switchTab('login')">Back to sign in</button>
+                <p class="auth-error" id="reset-request-error"></p>
+                <p class="muted" id="reset-request-status"></p>
+            </form>
+            <form id="reset-confirm-form" class="auth-form" style="display:none" onsubmit="Auth.confirmPasswordReset(event)">
+                <p class="muted">Enter your reset token and choose a new password.</p>
+                <div class="form-group"><label>Email (optional)</label><input type="email" name="email" placeholder="you@example.com"></div>
+                <div class="form-group"><label>Reset Token</label><input type="text" name="token" required placeholder="Paste your reset token"></div>
+                <div class="form-group"><label>New Password</label><input type="password" name="new_password" required minlength="8" placeholder="At least 8 chars, letters + numbers"></div>
+                <button type="submit" class="btn-primary btn-full">Reset Password</button>
+                <button type="button" class="btn-text" onclick="Auth.showResetRequestForm()">Need a reset token?</button>
+                <button type="button" class="btn-text" onclick="Auth.switchTab('login')">Back to sign in</button>
+                <p class="auth-error" id="reset-confirm-error"></p>
+                <p class="muted" id="reset-confirm-status"></p>
+            </form>
             <form id="register-form" class="auth-form" style="display:none" onsubmit="Auth.register(event)">
                 <div class="form-group"><label>Username</label><input type="text" name="username" required placeholder="picklepro42"></div>
                 <div class="form-group"><label>Email</label><input type="email" name="email" required placeholder="you@example.com"></div>
-                <div class="form-group"><label>Password</label><input type="password" name="password" required minlength="6" placeholder="••••••••"></div>
+                <div class="form-group"><label>Password</label><input type="password" name="password" required minlength="8" placeholder="At least 8 chars, letters + numbers"></div>
                 <div class="form-group"><label>Display Name</label><input type="text" name="name" placeholder="Alex Smith"></div>
                 <div class="form-row">
                     <div class="form-group"><label>Skill Level</label>

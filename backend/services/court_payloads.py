@@ -2,6 +2,12 @@
 
 import re
 
+from backend.services.california_county_bounds import (
+    county_name_for_slug,
+    is_point_within_county_bounds,
+    resolve_county_slug_for_point,
+)
+
 _BOOL_TRUE = {'true', '1', 'yes', 'on'}
 _BOOL_FALSE = {'false', '0', 'no', 'off'}
 ALLOWED_COURT_TYPES = {'dedicated', 'converted', 'shared'}
@@ -98,7 +104,7 @@ def _parse_bool(value):
     return None
 
 
-def normalize_court_payload(raw_data, partial=False):
+def normalize_court_payload(raw_data, partial=False, validate_county_bounds=True):
     """Return normalized court payload and validation errors."""
     if not isinstance(raw_data, dict):
         return {}, ['Invalid JSON payload']
@@ -169,7 +175,30 @@ def normalize_court_payload(raw_data, partial=False):
         if not court_data.get('name') or 'latitude' not in court_data or 'longitude' not in court_data:
             errors.append('Name, latitude, and longitude are required')
         if 'county_slug' not in court_data:
-            court_data['county_slug'] = DEFAULT_COUNTY_SLUG
+            inferred_slug = resolve_county_slug_for_point(
+                court_data.get('latitude'),
+                court_data.get('longitude'),
+                preferred_slug=DEFAULT_COUNTY_SLUG,
+            )
+            court_data['county_slug'] = inferred_slug or DEFAULT_COUNTY_SLUG
+
+    if (
+        validate_county_bounds
+        and
+        'county_slug' in court_data
+        and 'latitude' in court_data
+        and 'longitude' in court_data
+        and not is_point_within_county_bounds(
+            court_data.get('latitude'),
+            court_data.get('longitude'),
+            court_data.get('county_slug'),
+        )
+    ):
+        county_name = county_name_for_slug(court_data.get('county_slug')) or str(court_data.get('county_slug') or '').strip()
+        if county_name:
+            errors.append(f'Coordinates are outside {county_name} County bounds.')
+        else:
+            errors.append('Coordinates are outside the selected county bounds.')
 
     return court_data, errors
 

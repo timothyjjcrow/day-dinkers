@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from backend.app import db
 from backend.models import CheckIn, PlaySession
+from backend.routes.chat import _authorize_socket_join
 from backend.time_utils import utcnow_naive
 
 
@@ -35,6 +36,27 @@ def _create_game(client, token, court_id):
         'date_time': (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
     }, headers={'Authorization': f'Bearer {token}'})
     return json.loads(res.data)['game']
+
+
+def _make_friends(client, requester_token, requester_id, recipient_token, recipient_id):
+    sent = client.post('/api/auth/friends/request', json={
+        'friend_id': recipient_id,
+    }, headers={'Authorization': f'Bearer {requester_token}'})
+    assert sent.status_code == 201
+
+    pending = client.get('/api/auth/friends/pending', headers={
+        'Authorization': f'Bearer {recipient_token}',
+    })
+    assert pending.status_code == 200
+    requests = json.loads(pending.data)['requests']
+    request_row = next((r for r in requests if r['user']['id'] == requester_id), None)
+    assert request_row is not None
+
+    accepted = client.post('/api/auth/friends/respond', json={
+        'friendship_id': request_row['id'],
+        'action': 'accept',
+    }, headers={'Authorization': f'Bearer {recipient_token}'})
+    assert accepted.status_code == 200
 
 
 # ── Chat Tests ─────────────────────────────────────
@@ -167,10 +189,10 @@ def test_session_chat_requires_session_id(client):
 
 
 def test_direct_message(client):
-    token1 = _auth(client, 'dm1', 'dm1@test.com')
-    token2 = _auth(client, 'dm2', 'dm2@test.com')
-    reg2 = client.post('/api/auth/login', json={'email': 'dm2@test.com', 'password': 'password123'})
-    uid2 = json.loads(reg2.data)['user']['id']
+    token1, user1 = _auth_with_user(client, 'dm1', 'dm1@test.com')
+    token2, user2 = _auth_with_user(client, 'dm2', 'dm2@test.com')
+    uid2 = user2['id']
+    _make_friends(client, token1, user1['id'], token2, uid2)
 
     res = client.post('/api/chat/send', json={
         'content': 'Hey!', 'recipient_id': uid2, 'msg_type': 'direct',
@@ -181,6 +203,37 @@ def test_direct_message(client):
         headers={'Authorization': f'Bearer {token1}'})
     data = json.loads(res.data)
     assert len(data['messages']) == 1
+    assert 'email' not in data['messages'][0]['sender']
+
+
+def test_direct_message_requires_friendship_for_send_and_history(client):
+    token1, _ = _auth_with_user(client, 'dm_block_1', 'dm_block_1@test.com')
+    _, user2 = _auth_with_user(client, 'dm_block_2', 'dm_block_2@test.com')
+
+    send = client.post('/api/chat/send', json={
+        'content': 'Should not send',
+        'recipient_id': user2['id'],
+        'msg_type': 'direct',
+    }, headers={'Authorization': f'Bearer {token1}'})
+    assert send.status_code == 403
+
+    fetch = client.get(
+        f'/api/chat/direct/{user2["id"]}',
+        headers={'Authorization': f'Bearer {token1}'},
+    )
+    assert fetch.status_code == 403
+
+
+def test_socket_user_room_join_requires_matching_user_token(client, app):
+    token1, user1 = _auth_with_user(client, 'socket_room_u1', 'socket_room_u1@test.com')
+    _, user2 = _auth_with_user(client, 'socket_room_u2', 'socket_room_u2@test.com')
+
+    with app.app_context():
+        _, forbidden_error = _authorize_socket_join(f'user_{user2["id"]}', token1)
+        assert forbidden_error == 'Forbidden room'
+
+        _, allowed_error = _authorize_socket_join(f'user_{user1["id"]}', token1)
+        assert allowed_error is None
 
 
 # ── Presence Tests ─────────────────────────────────
@@ -199,6 +252,7 @@ def test_check_in_out(client):
     data = json.loads(res.data)
     assert len(data['active']) == 1
     assert data['active'][0]['count'] == 1
+    assert 'email' not in data['active'][0]['users'][0]
 
     # Check out
     res = client.post('/api/presence/checkout', json={},

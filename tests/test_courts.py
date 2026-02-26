@@ -56,6 +56,23 @@ def test_add_court(client):
     assert court['court_type'] == 'dedicated'
 
 
+def test_add_court_infers_county_from_coordinates(client):
+    token = _auth(client)
+    res = client.post(
+        '/api/courts',
+        json={
+            'name': 'Oakland Inferred County Court',
+            'latitude': 37.8044,
+            'longitude': -122.2712,
+            'city': 'Oakland',
+        },
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 201
+    court = json.loads(res.data)['court']
+    assert court['county_slug'] == 'alameda'
+
+
 def test_add_court_validates_coordinates(client):
     token = _auth(client)
     res = client.post(
@@ -73,14 +90,32 @@ def test_add_court_validates_coordinates(client):
     assert 'Latitude must be between -90 and 90.' in data['errors']
 
 
+def test_add_court_rejects_coordinates_outside_explicit_county(client):
+    token = _auth(client)
+    res = client.post(
+        '/api/courts',
+        json={
+            'name': 'Wrong County Court',
+            'latitude': 37.8044,
+            'longitude': -122.2712,
+            'county_slug': 'humboldt',
+        },
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 400
+    data = json.loads(res.data)
+    assert 'error' in data
+    assert 'Humboldt County' in data['error']
+
+
 def test_add_court_normalizes_county_slug(client):
     token = _auth(client)
     res = client.post(
         '/api/courts',
         json={
             'name': 'County Normalization Court',
-            'latitude': 40.81,
-            'longitude': -124.16,
+            'latitude': 34.0522,
+            'longitude': -118.2437,
             'county_slug': 'Los Angeles',
         },
         headers={'Authorization': f'Bearer {token}'},
@@ -111,6 +146,13 @@ def test_add_court_rejects_invalid_court_type(client):
 def test_get_court_detail(client):
     token = _auth(client)
     court = _seed_court(client, token)
+    checkin = client.post(
+        '/api/presence/checkin',
+        json={'court_id': court['id']},
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert checkin.status_code == 201
+
     res = client.get(f'/api/courts/{court["id"]}')
     assert res.status_code == 200
     data = json.loads(res.data)['court']
@@ -119,6 +161,8 @@ def test_get_court_detail(client):
     assert 'busyness' in data
     assert 'checked_in_users' in data
     assert 'upcoming_games' in data
+    assert len(data['checked_in_users']) == 1
+    assert 'email' not in data['checked_in_users'][0]
 
 
 def test_search_courts(client):
@@ -282,6 +326,23 @@ def test_update_court_supports_location_and_amenities(client):
     assert updated['has_ball_machine'] is True
     assert updated['verified'] is True
     assert updated['num_courts'] == 6
+
+
+def test_update_court_auto_corrects_county_for_coordinates(client):
+    token = _auth(client)
+    _set_admin(client, 'court@test.com')
+    court = _seed_court(client, token)
+    res = client.put(
+        f'/api/courts/{court["id"]}',
+        json={
+            'latitude': 37.8044,
+            'longitude': -122.2712,
+        },
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert res.status_code == 200
+    updated = json.loads(res.data)['court']
+    assert updated['county_slug'] == 'alameda'
 
 
 def test_update_court_rejects_invalid_field_values(client):

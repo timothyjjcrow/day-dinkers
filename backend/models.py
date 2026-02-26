@@ -31,6 +31,10 @@ class User(db.Model):
     losses = db.Column(db.Integer, default=0)
     games_played = db.Column(db.Integer, default=0)
     elo_rating = db.Column(db.Float, default=1200.0)
+    failed_login_attempts = db.Column(db.Integer, default=0, nullable=False)
+    locked_until = db.Column(db.DateTime, nullable=True)
+    password_reset_token_hash = db.Column(db.String(128), nullable=True)
+    password_reset_token_expires_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     def to_dict(self):
@@ -43,6 +47,12 @@ class User(db.Model):
             'games_played': self.games_played, 'elo_rating': self.elo_rating,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+    def to_public_dict(self):
+        """Public-safe user payload for non-account endpoints."""
+        data = self.to_dict()
+        data.pop('email', None)
+        return data
 
 
 class Court(db.Model):
@@ -152,7 +162,7 @@ class Game(db.Model):
             'recurring': self.recurring,
             'status': self.status,
             'court': self.court.to_dict() if self.court else None,
-            'creator': self.creator.to_dict() if self.creator else None,
+            'creator': self.creator.to_public_dict() if self.creator else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -174,7 +184,7 @@ class GamePlayer(db.Model):
             'user_id': self.user_id,
             'rsvp_status': self.rsvp_status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'user': self.user.to_dict() if self.user else None,
+            'user': self.user.to_public_dict() if self.user else None,
         }
 
 
@@ -210,7 +220,7 @@ class PlaySession(db.Model):
             'game_type': self.game_type, 'skill_level': self.skill_level,
             'max_players': self.max_players, 'visibility': self.visibility,
             'notes': self.notes, 'status': self.status,
-            'creator': self.creator.to_dict() if self.creator else None,
+            'creator': self.creator.to_public_dict() if self.creator else None,
             'court': self.court.to_dict() if self.court else None,
             'players': [p.to_dict() for p in self.players],
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -225,6 +235,10 @@ class PlaySessionPlayer(db.Model):
     status = db.Column(db.String(20), default='joined')  # joined, invited, waitlisted
     joined_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
+    __table_args__ = (
+        db.UniqueConstraint('session_id', 'user_id', name='uq_play_session_player_session_user'),
+    )
+
     user = db.relationship('User', backref='session_participations')
 
     def to_dict(self):
@@ -232,7 +246,7 @@ class PlaySessionPlayer(db.Model):
             'id': self.id, 'session_id': self.session_id,
             'user_id': self.user_id, 'status': self.status,
             'joined_at': self.joined_at.isoformat() if self.joined_at else None,
-            'user': self.user.to_dict() if self.user else None,
+            'user': self.user.to_public_dict() if self.user else None,
         }
 
 
@@ -302,7 +316,7 @@ class Message(db.Model):
             'recipient_id': self.recipient_id, 'content': self.content,
             'msg_type': self.msg_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'sender': self.sender.to_dict() if self.sender else None,
+            'sender': self.sender.to_public_dict() if self.sender else None,
         }
 
 
@@ -353,6 +367,33 @@ class Notification(db.Model):
             'read': self.read,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class RateLimitBucket(db.Model):
+    """Database-backed counters for rate limiting across instances."""
+    id = db.Column(db.Integer, primary_key=True)
+    scope = db.Column(db.String(300), nullable=False)
+    actor_key = db.Column(db.String(120), nullable=False)
+    window_started_at = db.Column(db.DateTime, nullable=False)
+    window_seconds = db.Column(db.Integer, nullable=False)
+    request_count = db.Column(db.Integer, default=0, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+    updated_at = db.Column(
+        db.DateTime,
+        default=lambda: utcnow_naive(),
+        onupdate=lambda: utcnow_naive(),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'scope',
+            'actor_key',
+            'window_started_at',
+            name='uq_rate_limit_scope_actor_window',
+        ),
+        db.Index('ix_rate_limit_bucket_expires_at', 'expires_at'),
+    )
 
 
 class CourtReport(db.Model):
@@ -491,8 +532,8 @@ class CourtUpdateSubmission(db.Model):
             'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
             'auto_applied': self.auto_applied,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'submitted_by': self.user.to_dict() if self.user else None,
-            'reviewed_by': self.reviewer.to_dict() if self.reviewer else None,
+            'submitted_by': self.user.to_public_dict() if self.user else None,
+            'reviewed_by': self.reviewer.to_public_dict() if self.reviewer else None,
         }
         if include_payload:
             data['payload'] = _safe_json(self.payload_json, {})
@@ -585,7 +626,7 @@ class Tournament(db.Model):
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'host_user': self.host_user.to_dict() if self.host_user else None,
+            'host_user': self.host_user.to_public_dict() if self.host_user else None,
             'court': self.court.to_dict() if self.court else None,
             'registered_count': registered_count,
             'checked_in_count': checked_in_count,
@@ -638,7 +679,7 @@ class TournamentParticipant(db.Model):
             'points': self.points,
             'checked_in_at': self.checked_in_at.isoformat() if self.checked_in_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'user': self.user.to_dict() if self.user else None,
+            'user': self.user.to_public_dict() if self.user else None,
         }
 
 
@@ -674,7 +715,7 @@ class TournamentResult(db.Model):
             'losses': self.losses,
             'points': self.points,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'user': self.user.to_dict() if self.user else None,
+            'user': self.user.to_public_dict() if self.user else None,
             'court': self.court.to_dict() if self.court else None,
             'tournament': {
                 'id': self.tournament.id,
@@ -763,7 +804,7 @@ class MatchPlayer(db.Model):
             'user_id': self.user_id, 'team': self.team,
             'elo_before': self.elo_before, 'elo_after': self.elo_after,
             'elo_change': self.elo_change, 'confirmed': self.confirmed,
-            'user': self.user.to_dict() if self.user else None,
+            'user': self.user.to_public_dict() if self.user else None,
         }
 
 
@@ -776,7 +817,8 @@ class RankedQueue(db.Model):
     joined_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
 
     __table_args__ = (
-        db.UniqueConstraint('user_id', 'court_id', name='uq_ranked_queue_user_court'),
+        db.UniqueConstraint('user_id', name='uq_ranked_queue_user'),
+        db.Index('ix_ranked_queue_court_joined_at', 'court_id', 'joined_at'),
     )
 
     user = db.relationship('User', backref='queue_entries')
@@ -787,7 +829,7 @@ class RankedQueue(db.Model):
             'id': self.id, 'user_id': self.user_id, 'court_id': self.court_id,
             'match_type': self.match_type,
             'joined_at': self.joined_at.isoformat() if self.joined_at else None,
-            'user': self.user.to_dict() if self.user else None,
+            'user': self.user.to_public_dict() if self.user else None,
         }
 
 
@@ -834,7 +876,7 @@ class RankedLobby(db.Model):
             'team1': [p for p in players_list if p['team'] == 1],
             'team2': [p for p in players_list if p['team'] == 2],
             'court': self.court.to_dict() if self.court else None,
-            'created_by': self.created_by.to_dict() if self.created_by else None,
+            'created_by': self.created_by.to_public_dict() if self.created_by else None,
         }
 
 
@@ -862,5 +904,5 @@ class RankedLobbyPlayer(db.Model):
             'team': self.team,
             'acceptance_status': self.acceptance_status,
             'responded_at': self.responded_at.isoformat() if self.responded_at else None,
-            'user': self.user.to_dict() if self.user else None,
+            'user': self.user.to_public_dict() if self.user else None,
         }

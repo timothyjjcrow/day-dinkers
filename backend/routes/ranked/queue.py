@@ -1,5 +1,6 @@
 """Ranked queue management routes."""
 from flask import request, jsonify
+from sqlalchemy.exc import IntegrityError
 from backend.app import db
 from backend.models import RankedQueue, CheckIn, Court
 from backend.auth_utils import login_required
@@ -66,7 +67,21 @@ def join_queue():
         match_type=match_type,
     )
     db.session.add(entry)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        existing_any = RankedQueue.query.filter_by(
+            user_id=request.current_user.id,
+        ).first()
+        if existing_any:
+            if existing_any.court_id == court_id:
+                return jsonify({'error': 'Already in queue at this court', 'entry': existing_any.to_dict()}), 409
+            return jsonify({
+                'error': 'Already in queue at another court',
+                'entry': existing_any.to_dict(),
+            }), 409
+        return jsonify({'error': 'Could not join queue right now. Please retry.'}), 409
     _emit_ranked_update(court_id=court_id, reason='queue_join')
     return jsonify({'message': 'Joined queue', 'entry': entry.to_dict()}), 201
 

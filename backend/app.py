@@ -1,5 +1,5 @@
 import os
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO
 from flask_cors import CORS
@@ -52,6 +52,28 @@ def _run_lightweight_migrations():
             connection.execute(text(
                 'CREATE UNIQUE INDEX IF NOT EXISTS ix_user_google_sub ON "user" (google_sub)'
             ))
+        if 'failed_login_attempts' not in user_columns:
+            connection.execute(text(
+                'ALTER TABLE "user" ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0'
+            ))
+        if 'locked_until' not in user_columns:
+            connection.execute(text(
+                'ALTER TABLE "user" ADD COLUMN locked_until TIMESTAMP'
+            ))
+        if 'password_reset_token_hash' not in user_columns:
+            connection.execute(text(
+                'ALTER TABLE "user" ADD COLUMN password_reset_token_hash VARCHAR(128)'
+            ))
+        if 'password_reset_token_expires_at' not in user_columns:
+            connection.execute(text(
+                'ALTER TABLE "user" ADD COLUMN password_reset_token_expires_at TIMESTAMP'
+            ))
+        connection.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_user_locked_until ON "user" (locked_until)'
+        ))
+        connection.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_user_password_reset_token_hash ON "user" (password_reset_token_hash)'
+        ))
 
         if 'court' in table_names:
             if 'county_slug' not in court_columns:
@@ -87,16 +109,31 @@ def _run_lightweight_migrations():
                 'ON message (session_id, msg_type, created_at)'
             ))
 
-        # Ranked queue: ensure one entry per user per court
+        # Ranked queue: ensure one active queue entry per user
         if 'ranked_queue' in table_names:
             connection.execute(text(
                 'DELETE FROM ranked_queue WHERE id NOT IN ('
-                '  SELECT MIN(id) FROM ranked_queue GROUP BY user_id, court_id'
+                '  SELECT MAX(id) FROM ranked_queue GROUP BY user_id'
                 ')'
             ))
             connection.execute(text(
-                'CREATE UNIQUE INDEX IF NOT EXISTS ix_ranked_queue_user_court '
-                'ON ranked_queue (user_id, court_id)'
+                'CREATE UNIQUE INDEX IF NOT EXISTS ix_ranked_queue_user '
+                'ON ranked_queue (user_id)'
+            ))
+            connection.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_ranked_queue_court_joined_at '
+                'ON ranked_queue (court_id, joined_at)'
+            ))
+
+        if 'play_session_player' in table_names:
+            connection.execute(text(
+                'DELETE FROM play_session_player WHERE id NOT IN ('
+                '  SELECT MIN(id) FROM play_session_player GROUP BY session_id, user_id'
+                ')'
+            ))
+            connection.execute(text(
+                'CREATE UNIQUE INDEX IF NOT EXISTS ix_play_session_player_session_user '
+                'ON play_session_player (session_id, user_id)'
             ))
 
         # Performance indexes for ranked queries
@@ -152,11 +189,50 @@ def _run_lightweight_migrations():
             ))
 
 
+def _repair_court_county_assignments():
+    """Keep court county slugs aligned with coordinate bounds."""
+    from backend.models import Court
+    from backend.services.california_county_bounds import (
+        is_point_within_county_bounds,
+        resolve_county_slug_for_point,
+    )
+
+    updated = 0
+    removed = 0
+    courts = Court.query.all()
+    for court in courts:
+        lat = getattr(court, 'latitude', None)
+        lng = getattr(court, 'longitude', None)
+        if lat is None or lng is None:
+            continue
+
+        if is_point_within_county_bounds(lat, lng, court.county_slug):
+            continue
+
+        resolved_slug = resolve_county_slug_for_point(lat, lng, preferred_slug='')
+        if resolved_slug:
+            if resolved_slug != court.county_slug:
+                court.county_slug = resolved_slug
+                updated += 1
+        else:
+            db.session.delete(court)
+            removed += 1
+
+    if updated or removed:
+        db.session.commit()
+
+
 def create_app(config_name='development'):
     app = Flask(__name__)
     app.config.from_object(config[config_name])
 
     allowed_origins = _parse_allowed_origins(app.config.get('CORS_ALLOWED_ORIGINS', '*'))
+    if str(config_name).strip().lower() == 'production':
+        secret_key = str(app.config.get('SECRET_KEY') or '').strip()
+        if not secret_key or secret_key == 'dev-secret-key-change-in-prod':
+            raise RuntimeError('SECRET_KEY must be set to a non-default value in production')
+        if allowed_origins == '*':
+            raise RuntimeError('CORS_ALLOWED_ORIGINS must be explicitly set in production')
 
     db.init_app(app)
     socketio.init_app(
@@ -165,6 +241,33 @@ def create_app(config_name='development'):
         async_mode=app.config.get('SOCKETIO_ASYNC_MODE', 'threading'),
     )
     CORS(app, resources={r'/api/*': {'origins': allowed_origins}})
+
+    @app.before_request
+    def _enforce_origin_for_mutating_api_requests():
+        if request.method in {'GET', 'HEAD', 'OPTIONS'}:
+            return None
+        if not request.path.startswith('/api/'):
+            return None
+
+        origin = str(request.headers.get('Origin') or '').strip()
+        if not origin:
+            return None
+
+        configured_origins = _parse_allowed_origins(
+            app.config.get('CORS_ALLOWED_ORIGINS', '*')
+        )
+        if configured_origins != '*' and origin not in configured_origins:
+            return jsonify({'error': 'Invalid request origin'}), 403
+
+        auth_header = str(request.headers.get('Authorization') or '').strip()
+        if not auth_header:
+            return None
+
+        csrf_header = request.headers.get('X-CSRF-Token')
+        from backend.auth_utils import csrf_token_matches
+        if not csrf_token_matches(auth_header, csrf_header):
+            return jsonify({'error': 'Invalid CSRF token'}), 403
+        return None
 
     from backend.routes.auth import auth_bp
     from backend.routes.courts import courts_bp
@@ -194,5 +297,6 @@ def create_app(config_name='development'):
         from backend import models  # noqa: F401
         db.create_all()
         _run_lightweight_migrations()
+        _repair_court_county_assignments()
 
     return app

@@ -116,7 +116,7 @@ def check_in():
     db.session.commit()
 
     _broadcast_presence_update({
-        'user': request.current_user.to_dict(),
+        'user': request.current_user.to_public_dict(),
         'court_id': court_id, 'action': 'checkin'
     })
 
@@ -141,7 +141,7 @@ def check_out():
     db.session.commit()
 
     _broadcast_presence_update({
-        'user': request.current_user.to_dict(),
+        'user': request.current_user.to_public_dict(),
         'court_id': court_id, 'action': 'checkout'
     })
 
@@ -181,7 +181,7 @@ def toggle_looking_for_game():
     db.session.commit()
 
     _broadcast_presence_update({
-        'user': request.current_user.to_dict(),
+        'user': request.current_user.to_public_dict(),
         'court_id': active.court_id,
         'action': 'lfg_toggle',
         'looking_for_game': active.looking_for_game,
@@ -222,7 +222,7 @@ def get_active_checkins():
         if cid not in result:
             result[cid] = {'court_id': cid, 'count': 0, 'users': []}
         result[cid]['count'] += 1
-        result[cid]['users'].append(ci.user.to_dict())
+        result[cid]['users'].append(ci.user.to_public_dict())
     return jsonify({'active': list(result.values())})
 
 
@@ -236,7 +236,7 @@ def get_friends_presence():
         CheckIn.checked_out_at.is_(None)
     ).all()
     result = [{
-        'user': ci.user.to_dict(),
+        'user': ci.user.to_public_dict(),
         'court_id': ci.court_id,
         'checked_in_at': ci.checked_in_at.isoformat(),
     } for ci in active]

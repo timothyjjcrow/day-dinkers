@@ -190,6 +190,39 @@ def test_session_waitlist_and_auto_promotion(client):
     assert 'session_spot_opened' in notif_types
 
 
+def test_join_session_twice_returns_existing_membership(client):
+    host_token, _ = _register(client, 'sess_dupe_host', 'sess_dupe_host@test.com')
+    guest_token, _ = _register(client, 'sess_dupe_guest', 'sess_dupe_guest@test.com')
+    court = _create_court(client, host_token, 'Duplicate Join Court')
+    session = _create_session(client, host_token, court['id'], max_players=4)
+    session_id = session['id']
+
+    first_join = client.post(
+        f'/api/sessions/{session_id}/join',
+        json={},
+        headers={'Authorization': f'Bearer {guest_token}'},
+    )
+    assert first_join.status_code == 200
+    assert json.loads(first_join.data)['waitlisted'] is False
+
+    second_join = client.post(
+        f'/api/sessions/{session_id}/join',
+        json={},
+        headers={'Authorization': f'Bearer {guest_token}'},
+    )
+    assert second_join.status_code == 200
+    second_payload = json.loads(second_join.data)
+    assert second_payload['message'] == 'Already joined'
+    assert second_payload['waitlisted'] is False
+
+    detail = client.get(f'/api/sessions/{session_id}')
+    assert detail.status_code == 200
+    players = json.loads(detail.data)['session']['players']
+    guest_rows = [p for p in players if p['user']['username'] == 'sess_dupe_guest']
+    assert len(guest_rows) == 1
+    assert guest_rows[0]['status'] == 'joined'
+
+
 def test_create_recurring_series(client):
     host_token, _ = _register(client, 'series_host', 'series_host@test.com')
     court = _create_court(client, host_token, 'Series Court')

@@ -168,34 +168,50 @@ def confirm_match(match_id):
     db.session.flush()
 
     all_confirmed = all(p.confirmed for p in match.players)
+    did_complete = False
     if all_confirmed:
-        if should_apply_elo_for_match(match):
-            _apply_elo(match)
-        else:
-            for participant in match.players:
-                baseline = participant.elo_before or participant.user.elo_rating
-                participant.elo_after = baseline
-                participant.elo_change = 0
-        match.status = 'completed'
-        match.completed_at = utcnow_naive()
-        advance_tournament_after_completed_match(match)
+        completed_at = utcnow_naive()
+        completion_claimed = Match.query.filter(
+            Match.id == match_id,
+            Match.status == 'pending_confirmation',
+        ).update({
+            Match.status: 'completed',
+            Match.completed_at: completed_at,
+        }, synchronize_session=False)
 
-        for p in match.players:
-            won = (p.team == match.winner_team)
-            sign = '+' if (p.elo_change or 0) >= 0 else ''
-            db.session.add(Notification(
-                user_id=p.user_id, notif_type='match_result',
-                content=(
-                    f'{"🏆 Win" if won else "❌ Loss"} — '
-                    f'{match.team1_score}-{match.team2_score} | '
-                    f'ELO {sign}{p.elo_change:.0f} → {p.elo_after:.0f}'
-                ),
-                reference_id=match.id,
-            ))
+        if completion_claimed:
+            did_complete = True
+            match.status = 'completed'
+            match.completed_at = completed_at
+
+            if should_apply_elo_for_match(match):
+                _apply_elo(match)
+            else:
+                for participant in match.players:
+                    baseline = participant.elo_before or participant.user.elo_rating
+                    participant.elo_after = baseline
+                    participant.elo_change = 0
+
+            advance_tournament_after_completed_match(match)
+
+            for p in match.players:
+                won = (p.team == match.winner_team)
+                sign = '+' if (p.elo_change or 0) >= 0 else ''
+                db.session.add(Notification(
+                    user_id=p.user_id, notif_type='match_result',
+                    content=(
+                        f'{"🏆 Win" if won else "❌ Loss"} — '
+                        f'{match.team1_score}-{match.team2_score} | '
+                        f'ELO {sign}{p.elo_change:.0f} → {p.elo_after:.0f}'
+                    ),
+                    reference_id=match.id,
+                ))
 
     db.session.commit()
+    db.session.refresh(match)
+    all_confirmed = all(p.confirmed for p in match.players)
     _emit_ranked_update(court_id=match.court_id, reason='match_confirmation_updated')
-    if all_confirmed:
+    if did_complete:
         _emit_notification_update(court_id=match.court_id, reason='match_completed')
     return jsonify({
         'match': match.to_dict(),

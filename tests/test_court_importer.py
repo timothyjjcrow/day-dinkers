@@ -59,3 +59,45 @@ def test_import_courts_payload_forces_county_slug(app):
         court = Court.query.filter_by(name='Temescal Court').first()
         assert court is not None
         assert court.county_slug == 'alameda'
+
+
+def test_import_courts_payload_corrects_out_of_bounds_county(app):
+    with app.app_context():
+        payload = [{
+            'name': 'County Correction Court',
+            'city': 'San Diego',
+            'state': 'CA',
+            'county_slug': 'humboldt',
+            'latitude': 32.747603,
+            'longitude': -116.991209,
+            'court_type': 'dedicated',
+        }]
+        result = import_courts_payload(payload, commit=True)
+        assert result['created'] == 1
+        assert result['out_of_bounds_corrected'] == 1
+        assert result['out_of_bounds_skipped'] == 0
+
+        court = Court.query.filter_by(name='County Correction Court').first()
+        assert court is not None
+        assert court.county_slug == 'san-diego'
+
+
+def test_import_courts_payload_skips_unresolvable_out_of_bounds(app):
+    with app.app_context():
+        payload = [{
+            'name': 'Out Of State Court',
+            'city': 'Somewhere',
+            'state': 'CA',
+            'county_slug': 'humboldt',
+            'latitude': 17.130364,
+            'longitude': -61.849449,
+            'court_type': 'shared',
+        }]
+        result = import_courts_payload(payload, commit=True)
+        assert result['created'] == 0
+        assert result['updated'] == 0
+        assert result['out_of_bounds_corrected'] == 0
+        assert result['out_of_bounds_skipped'] == 1
+
+        court = Court.query.filter_by(name='Out Of State Court').first()
+        assert court is None

@@ -10,7 +10,11 @@ const Chat = {
 
     init() {
         try {
-            Chat.socket = io({ transports: ['websocket', 'polling'] });
+            const token = localStorage.getItem('token');
+            Chat.socket = io({
+                transports: ['websocket', 'polling'],
+                auth: token ? { token } : {},
+            });
 
             Chat.socket.on('connect', () => {
                 console.log('Socket connected');
@@ -153,11 +157,12 @@ const Chat = {
     },
 
     joinRoom(room) {
+        const token = localStorage.getItem('token');
         if (Chat.currentRoom) {
             Chat.socket?.emit('leave', { room: Chat.currentRoom });
         }
         Chat.currentRoom = room;
-        Chat.socket?.emit('join', { room });
+        Chat.socket?.emit('join', { room, token });
     },
 
     // Open the bottom chat panel for a court

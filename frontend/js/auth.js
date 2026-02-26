@@ -4,13 +4,30 @@
 const Auth = {
     googleInitAttempts: 0,
 
+    _showAuthForm(formId) {
+        const allFormIds = ['login-form', 'register-form', 'reset-request-form', 'reset-confirm-form'];
+        allFormIds.forEach((id) => {
+            const form = document.getElementById(id);
+            if (form) form.style.display = id === formId ? 'block' : 'none';
+        });
+    },
+
+    _clearResetMessages() {
+        const ids = [
+            'reset-request-error',
+            'reset-request-status',
+            'reset-confirm-error',
+            'reset-confirm-status',
+        ];
+        ids.forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '';
+        });
+    },
+
     showModal() {
         document.getElementById('auth-modal').style.display = 'flex';
-        document.getElementById('login-error').textContent = '';
-        document.getElementById('register-error').textContent = '';
-        Auth._setGoogleError('');
-        Auth.googleInitAttempts = 0;
-        Auth.prepareGoogleSignIn();
+        Auth.switchTab('login');
     },
 
     hideModal() {
@@ -18,11 +35,15 @@ const Auth = {
     },
 
     switchTab(tab) {
-        document.getElementById('login-form').style.display = tab === 'login' ? 'block' : 'none';
-        document.getElementById('register-form').style.display = tab === 'register' ? 'block' : 'none';
+        Auth._showAuthForm(tab === 'login' ? 'login-form' : 'register-form');
+        document.getElementById('login-error').textContent = '';
+        document.getElementById('register-error').textContent = '';
+        Auth._clearResetMessages();
+        Auth._setGoogleError('');
         document.querySelectorAll('.auth-tab').forEach((btn, i) => {
             btn.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register'));
         });
+        Auth.googleInitAttempts = 0;
         if (tab === 'login') {
             Auth.prepareGoogleSignIn();
         } else {
@@ -31,9 +52,37 @@ const Auth = {
         }
     },
 
+    showResetRequestForm() {
+        Auth._showAuthForm('reset-request-form');
+        Auth._clearResetMessages();
+        Auth._setGoogleError('');
+        document.querySelectorAll('.auth-tab').forEach((btn) => btn.classList.remove('active'));
+        const wrapper = document.getElementById('google-auth-wrapper');
+        if (wrapper) wrapper.style.display = 'none';
+    },
+
+    showResetConfirmForm(prefillToken = '') {
+        Auth._showAuthForm('reset-confirm-form');
+        Auth._clearResetMessages();
+        Auth._setGoogleError('');
+        document.querySelectorAll('.auth-tab').forEach((btn) => btn.classList.remove('active'));
+        const wrapper = document.getElementById('google-auth-wrapper');
+        if (wrapper) wrapper.style.display = 'none';
+        const tokenInput = document.querySelector('#reset-confirm-form input[name="token"]');
+        if (tokenInput && prefillToken && !tokenInput.value) {
+            tokenInput.value = prefillToken;
+        }
+    },
+
     _finishAuth(res, welcomeMessage) {
+        if (typeof API !== 'undefined' && typeof API.clearCsrfToken === 'function') {
+            API.clearCsrfToken();
+        }
         localStorage.setItem('token', res.token);
         localStorage.setItem('user', JSON.stringify(res.user));
+        if (typeof API !== 'undefined' && typeof API.primeCsrfToken === 'function') {
+            API.primeCsrfToken();
+        }
         Auth.hideModal();
         Auth.updateUI(res.user);
         if (typeof LocationService !== 'undefined' && typeof LocationService.syncWithServerStatus === 'function') {
@@ -150,9 +199,62 @@ const Auth = {
         }
     },
 
+    async requestPasswordReset(e) {
+        e.preventDefault();
+        const form = e.target;
+        const email = String(form.email.value || '').trim();
+        const errorEl = document.getElementById('reset-request-error');
+        const statusEl = document.getElementById('reset-request-status');
+        if (errorEl) errorEl.textContent = '';
+        if (statusEl) statusEl.textContent = '';
+
+        try {
+            const res = await API.post('/api/auth/password-reset/request', { email });
+            if (statusEl) {
+                statusEl.textContent = res.message || 'If an account exists, reset instructions have been sent.';
+            }
+            if (res.reset_token) {
+                Auth.showResetConfirmForm(res.reset_token);
+                const confirmStatus = document.getElementById('reset-confirm-status');
+                if (confirmStatus) {
+                    confirmStatus.textContent = 'Reset token auto-filled for this environment.';
+                }
+            }
+        } catch (err) {
+            if (errorEl) errorEl.textContent = err.message || 'Unable to request password reset';
+        }
+    },
+
+    async confirmPasswordReset(e) {
+        e.preventDefault();
+        const form = e.target;
+        const payload = {
+            token: String(form.token.value || '').trim(),
+            new_password: form.new_password.value,
+        };
+        const errorEl = document.getElementById('reset-confirm-error');
+        const statusEl = document.getElementById('reset-confirm-status');
+        if (errorEl) errorEl.textContent = '';
+        if (statusEl) statusEl.textContent = '';
+
+        try {
+            await API.post('/api/auth/password-reset/confirm', payload);
+            if (statusEl) statusEl.textContent = 'Password reset successful. You can now sign in.';
+            const loginEmail = document.querySelector('#login-form input[name="email"]');
+            if (loginEmail) loginEmail.value = String(form.email.value || '').trim();
+            App.toast('Password reset successful');
+            Auth.switchTab('login');
+        } catch (err) {
+            if (errorEl) errorEl.textContent = err.message || 'Unable to reset password';
+        }
+    },
+
     logout() {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
+        if (typeof API !== 'undefined' && typeof API.clearCsrfToken === 'function') {
+            API.clearCsrfToken();
+        }
         if (typeof LocationService !== 'undefined' && typeof LocationService.clearCheckedInCourt === 'function') {
             LocationService.clearCheckedInCourt();
         }
@@ -184,6 +286,9 @@ const Auth = {
             const res = await API.get('/api/auth/profile');
             // Token is valid — update stored user data and show profile button
             localStorage.setItem('user', JSON.stringify(res.user));
+            if (typeof API !== 'undefined' && typeof API.primeCsrfToken === 'function') {
+                API.primeCsrfToken();
+            }
             Auth.updateUI(res.user);
             if (typeof LocationService !== 'undefined' && typeof LocationService.syncWithServerStatus === 'function') {
                 LocationService.syncWithServerStatus();
@@ -197,6 +302,9 @@ const Auth = {
             // Token is stale/invalid — clear session silently
             localStorage.removeItem('token');
             localStorage.removeItem('user');
+            if (typeof API !== 'undefined' && typeof API.clearCsrfToken === 'function') {
+                API.clearCsrfToken();
+            }
             if (typeof LocationService !== 'undefined' && typeof LocationService.clearCheckedInCourt === 'function') {
                 LocationService.clearCheckedInCourt();
             }

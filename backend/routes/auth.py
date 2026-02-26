@@ -1,15 +1,24 @@
+import hashlib
 import re
 import secrets
 import time
+from datetime import datetime, timezone, timedelta
 
 import requests
 from flask import Blueprint, request, jsonify, current_app
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
 from backend.app import db
-from backend.models import User, Friendship, Notification, PlaySession, PlaySessionPlayer, CheckIn
-from backend.auth_utils import generate_token, login_required
+from backend.models import (
+    User, Friendship, Notification, PlaySession, PlaySessionPlayer, CheckIn,
+    RateLimitBucket,
+)
+from backend.auth_utils import generate_token, login_required, csrf_token_for_bearer
+from backend.time_utils import utcnow_naive
 
 auth_bp = Blueprint('auth', __name__)
+_RATE_LIMIT_PRUNE_INTERVAL_SECONDS = 300
+_last_rate_limit_prune_ts = 0.0
 
 _GOOGLE_TOKEN_INFO_URL = 'https://oauth2.googleapis.com/tokeninfo'
 _ALLOWED_GOOGLE_ISSUERS = {'accounts.google.com', 'https://accounts.google.com'}
@@ -105,6 +114,166 @@ def _verify_google_id_token(id_token):
     return token_info, None
 
 
+def _client_ip_key():
+    forwarded_for = str(request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+    if forwarded_for:
+        return forwarded_for[:80]
+    return str(request.remote_addr or 'unknown')[:80]
+
+
+def _window_started_at(now, window_seconds):
+    window = max(1, int(window_seconds))
+    now_epoch = int(now.timestamp())
+    window_epoch = now_epoch - (now_epoch % window)
+    return datetime.fromtimestamp(window_epoch, tz=timezone.utc).replace(tzinfo=None)
+
+
+def _prune_expired_rate_limits(now):
+    global _last_rate_limit_prune_ts
+    now_ts = float(now.timestamp())
+    if now_ts - _last_rate_limit_prune_ts < _RATE_LIMIT_PRUNE_INTERVAL_SECONDS:
+        return
+    _last_rate_limit_prune_ts = now_ts
+    RateLimitBucket.query.filter(
+        RateLimitBucket.expires_at < now,
+    ).delete(synchronize_session=False)
+    db.session.commit()
+
+
+def _consume_rate_limit(scope, max_requests, window_seconds):
+    if max_requests is None or int(max_requests) <= 0:
+        return None
+    if window_seconds is None or int(window_seconds) <= 0:
+        return None
+
+    max_requests_int = int(max_requests)
+    window_seconds_int = int(window_seconds)
+    now = utcnow_naive()
+    actor_key = _client_ip_key()
+    window_start = _window_started_at(now, window_seconds_int)
+    window_end = window_start + timedelta(seconds=window_seconds_int)
+    expires_at = window_end + timedelta(seconds=window_seconds_int)
+
+    try:
+        _prune_expired_rate_limits(now)
+    except Exception:
+        db.session.rollback()
+
+    for _ in range(3):
+        bucket = RateLimitBucket.query.filter_by(
+            scope=str(scope),
+            actor_key=actor_key,
+            window_started_at=window_start,
+        ).first()
+        if not bucket:
+            bucket = RateLimitBucket(
+                scope=str(scope),
+                actor_key=actor_key,
+                window_started_at=window_start,
+                window_seconds=window_seconds_int,
+                request_count=1,
+                expires_at=expires_at,
+            )
+            db.session.add(bucket)
+            try:
+                db.session.commit()
+                return None
+            except IntegrityError:
+                db.session.rollback()
+                continue
+
+        current_count = int(bucket.request_count or 0)
+        if current_count >= max_requests_int:
+            retry_after = max(1, int((window_end - now).total_seconds()) + 1)
+            return retry_after
+
+        bucket.request_count = current_count + 1
+        bucket.window_seconds = window_seconds_int
+        if not bucket.expires_at or bucket.expires_at < expires_at:
+            bucket.expires_at = expires_at
+        try:
+            db.session.commit()
+            return None
+        except IntegrityError:
+            db.session.rollback()
+            continue
+
+    return 1
+
+
+def _password_complexity_error(raw_password):
+    password = str(raw_password or '')
+    if len(password) < 8:
+        return 'Password must be at least 8 characters long'
+    if not re.search(r'[A-Za-z]', password) or not re.search(r'\d', password):
+        return 'Password must include at least one letter and one number'
+    return None
+
+
+def _lockout_threshold():
+    raw_value = current_app.config.get('AUTH_LOCKOUT_THRESHOLD', 5)
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 5
+    return max(1, parsed)
+
+
+def _lockout_minutes():
+    raw_value = current_app.config.get('AUTH_LOCKOUT_MINUTES', 15)
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 15
+    return max(1, parsed)
+
+
+def _password_reset_ttl_minutes():
+    raw_value = current_app.config.get('PASSWORD_RESET_TOKEN_TTL_MINUTES', 30)
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 30
+    return max(1, parsed)
+
+
+def _hash_reset_token(raw_token):
+    return hashlib.sha256(str(raw_token or '').encode('utf-8')).hexdigest()
+
+
+def _clear_login_lock_state(user):
+    changed = False
+    if user.failed_login_attempts:
+        user.failed_login_attempts = 0
+        changed = True
+    if user.locked_until is not None:
+        user.locked_until = None
+        changed = True
+    return changed
+
+
+def _active_lockout_retry_seconds(user):
+    if not user or not user.locked_until:
+        return 0
+    now = utcnow_naive()
+    if user.locked_until <= now:
+        return 0
+    remaining = (user.locked_until - now).total_seconds()
+    return max(1, int(remaining))
+
+
+def _record_failed_login_attempt(user):
+    now = utcnow_naive()
+    if user.locked_until and user.locked_until <= now:
+        user.locked_until = None
+        user.failed_login_attempts = 0
+
+    attempts = int(user.failed_login_attempts or 0) + 1
+    user.failed_login_attempts = attempts
+    if attempts >= _lockout_threshold():
+        user.locked_until = now + timedelta(minutes=_lockout_minutes())
+
+
 def _find_or_create_google_user(token_info):
     google_sub = str(token_info.get('sub') or '').strip()
     email = str(token_info.get('email') or '').strip().lower()
@@ -152,6 +321,15 @@ def google_config():
 
 @auth_bp.route('/google', methods=['POST'])
 def google_login():
+    rate_window = current_app.config.get('AUTH_RATE_LIMIT_WINDOW_SECONDS', 60)
+    rate_max = current_app.config.get('AUTH_GOOGLE_RATE_LIMIT_PER_WINDOW', 30)
+    retry_after = _consume_rate_limit('google_login', rate_max, rate_window)
+    if retry_after:
+        return jsonify({
+            'error': 'Too many Google login attempts. Please try again later.',
+            'retry_after_seconds': retry_after,
+        }), 429
+
     data = request.get_json() or {}
     id_token = str(data.get('id_token') or '').strip()
     if not id_token:
@@ -179,6 +357,9 @@ def register():
 
     username = str(data['username']).strip()
     email = str(data['email']).strip().lower()
+    password_error = _password_complexity_error(data.get('password'))
+    if password_error:
+        return jsonify({'error': password_error}), 400
 
     if User.query.filter_by(username=username).first():
         return jsonify({'error': 'Username already taken'}), 409
@@ -208,15 +389,139 @@ def login():
         return jsonify({'error': 'Email and password are required'}), 400
 
     email = str(data['email']).strip().lower()
+    rate_window = current_app.config.get('AUTH_RATE_LIMIT_WINDOW_SECONDS', 60)
+    rate_max = current_app.config.get('AUTH_LOGIN_RATE_LIMIT_PER_WINDOW', 30)
+    retry_after = _consume_rate_limit(f'login:{email}', rate_max, rate_window)
+    if retry_after:
+        return jsonify({
+            'error': 'Too many login attempts. Please try again later.',
+            'retry_after_seconds': retry_after,
+        }), 429
+
     user = User.query.filter_by(email=email).first()
+    if user:
+        locked_retry_after = _active_lockout_retry_seconds(user)
+        if locked_retry_after:
+            return jsonify({
+                'error': 'Account is temporarily locked due to repeated failed logins.',
+                'retry_after_seconds': locked_retry_after,
+            }), 423
+
     if not user or not check_password_hash(user.password_hash, data['password']):
+        if user:
+            _record_failed_login_attempt(user)
+            db.session.commit()
+            locked_retry_after = _active_lockout_retry_seconds(user)
+            if locked_retry_after:
+                return jsonify({
+                    'error': 'Account is temporarily locked due to repeated failed logins.',
+                    'retry_after_seconds': locked_retry_after,
+                }), 423
         return jsonify({'error': 'Invalid email or password'}), 401
 
+    profile_changed = _clear_login_lock_state(user)
     if _maybe_grant_admin_from_config(user):
+        profile_changed = True
+    if profile_changed:
         db.session.commit()
 
     token = generate_token(user.id)
     return jsonify({'token': token, 'user': user.to_dict()})
+
+
+@auth_bp.route('/password-reset/request', methods=['POST'])
+def request_password_reset():
+    rate_window = current_app.config.get('AUTH_RATE_LIMIT_WINDOW_SECONDS', 60)
+    rate_max = current_app.config.get('PASSWORD_RESET_REQUEST_RATE_LIMIT_PER_WINDOW', 10)
+    retry_after = _consume_rate_limit('password_reset_request', rate_max, rate_window)
+    if retry_after:
+        return jsonify({
+            'error': 'Too many password reset requests. Please try again later.',
+            'retry_after_seconds': retry_after,
+        }), 429
+
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid JSON payload'}), 400
+
+    email = str(data.get('email') or '').strip().lower()
+    response_payload = {
+        'message': 'If an account exists for that email, password reset instructions have been sent.',
+    }
+    if not email:
+        return jsonify(response_payload)
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify(response_payload)
+
+    reset_token = secrets.token_urlsafe(32)
+    user.password_reset_token_hash = _hash_reset_token(reset_token)
+    user.password_reset_token_expires_at = utcnow_naive() + timedelta(
+        minutes=_password_reset_ttl_minutes(),
+    )
+    db.session.add(Notification(
+        user_id=user.id,
+        notif_type='password_reset_requested',
+        content='A password reset was requested for your account.',
+        reference_id=user.id,
+    ))
+    db.session.commit()
+
+    if current_app.config.get('TESTING'):
+        response_payload['reset_token'] = reset_token
+    return jsonify(response_payload)
+
+
+@auth_bp.route('/password-reset/confirm', methods=['POST'])
+def confirm_password_reset():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid JSON payload'}), 400
+
+    reset_token = str(data.get('token') or '').strip()
+    new_password = data.get('new_password')
+    if not reset_token or not str(new_password or '').strip():
+        return jsonify({'error': 'Reset token and new password are required'}), 400
+
+    password_error = _password_complexity_error(new_password)
+    if password_error:
+        return jsonify({'error': password_error}), 400
+
+    token_hash = _hash_reset_token(reset_token)
+    user = User.query.filter_by(password_reset_token_hash=token_hash).first()
+    if not user:
+        return jsonify({'error': 'Invalid or expired reset token'}), 400
+
+    now = utcnow_naive()
+    if not user.password_reset_token_expires_at or user.password_reset_token_expires_at <= now:
+        user.password_reset_token_hash = None
+        user.password_reset_token_expires_at = None
+        db.session.commit()
+        return jsonify({'error': 'Invalid or expired reset token'}), 400
+
+    user.password_hash = generate_password_hash(str(new_password))
+    user.password_reset_token_hash = None
+    user.password_reset_token_expires_at = None
+    _clear_login_lock_state(user)
+    db.session.add(Notification(
+        user_id=user.id,
+        notif_type='password_reset_completed',
+        content='Your password was reset successfully.',
+        reference_id=user.id,
+    ))
+    db.session.commit()
+    return jsonify({'message': 'Password reset successful'})
+
+
+@auth_bp.route('/csrf', methods=['GET'])
+@login_required
+def get_csrf_token():
+    auth_header = request.headers.get('Authorization', '')
+    token = csrf_token_for_bearer(auth_header)
+    if not token:
+        return jsonify({'error': 'Unable to generate CSRF token'}), 400
+    return jsonify({'csrf_token': token})
 
 
 @auth_bp.route('/profile', methods=['GET'])
@@ -291,8 +596,7 @@ def get_user_profile(user_id):
     user = db.session.get(User, user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
-    profile = user.to_dict()
-    del profile['email']  # Don't expose email publicly
+    profile = user.to_public_dict()
     profile['total_checkins'] = CheckIn.query.filter_by(user_id=user.id).count()
     return jsonify({'user': profile})
 
@@ -308,7 +612,7 @@ def get_friends():
     friends = []
     for f in friendships:
         friend = f.friend if f.user_id == user_id else f.user
-        friends.append(friend.to_dict())
+        friends.append(friend.to_public_dict())
     return jsonify({'friends': friends})
 
 
@@ -361,7 +665,7 @@ def get_pending_requests():
         friend_id=request.current_user.id, status='pending'
     ).all()
     requests_list = [{
-        'id': f.id, 'user': f.user.to_dict(), 'created_at': f.created_at.isoformat()
+        'id': f.id, 'user': f.user.to_public_dict(), 'created_at': f.created_at.isoformat()
     } for f in pending]
     return jsonify({'requests': requests_list})
 
@@ -369,13 +673,28 @@ def get_pending_requests():
 @auth_bp.route('/users/search', methods=['GET'])
 @login_required
 def search_users():
+    rate_window = current_app.config.get('AUTH_RATE_LIMIT_WINDOW_SECONDS', 60)
+    rate_max = current_app.config.get('USER_SEARCH_RATE_LIMIT_PER_WINDOW', 60)
+    retry_after = _consume_rate_limit(
+        f'user_search:{request.current_user.id}',
+        rate_max,
+        rate_window,
+    )
+    if retry_after:
+        return jsonify({
+            'error': 'Too many search requests. Please try again later.',
+            'retry_after_seconds': retry_after,
+        }), 429
+
     q = request.args.get('q', '')
     if len(q) < 2:
         return jsonify({'users': []})
     users = User.query.filter(
         (User.username.ilike(f'%{q}%')) | (User.name.ilike(f'%{q}%'))
     ).limit(20).all()
-    return jsonify({'users': [u.to_dict() for u in users if u.id != request.current_user.id]})
+    return jsonify({
+        'users': [u.to_public_dict() for u in users if u.id != request.current_user.id]
+    })
 
 
 @auth_bp.route('/notifications', methods=['GET'])

@@ -5,6 +5,10 @@ from pathlib import Path
 
 from backend.app import db
 from backend.models import Court
+from backend.services.california_county_bounds import (
+    is_point_within_county_bounds,
+    resolve_county_slug_for_point,
+)
 from backend.services.court_payloads import (
     DEFAULT_COUNTY_SLUG,
     apply_court_changes,
@@ -48,6 +52,8 @@ def import_courts_payload(courts_payload, county_slug=None, commit=True):
     forced_county_slug = normalize_county_slug(county_slug, fallback='') if county_slug else ''
     normalized = []
     errors = []
+    out_of_bounds_corrected = 0
+    out_of_bounds_skipped = 0
 
     for idx, raw in enumerate(courts_payload):
         if not isinstance(raw, dict):
@@ -59,11 +65,33 @@ def import_courts_payload(courts_payload, county_slug=None, commit=True):
         elif not payload.get('county_slug'):
             payload['county_slug'] = DEFAULT_COUNTY_SLUG
 
-        court_data, item_errors = normalize_court_payload(payload, partial=False)
+        court_data, item_errors = normalize_court_payload(
+            payload,
+            partial=False,
+            validate_county_bounds=False,
+        )
         if item_errors:
             title = payload.get('name') or f'item #{idx + 1}'
             errors.append(f'{title}: {", ".join(item_errors)}')
             continue
+
+        if not is_point_within_county_bounds(
+            court_data.get('latitude'),
+            court_data.get('longitude'),
+            court_data.get('county_slug'),
+        ):
+            resolved_slug = resolve_county_slug_for_point(
+                court_data.get('latitude'),
+                court_data.get('longitude'),
+                preferred_slug=court_data.get('county_slug'),
+            )
+            if resolved_slug:
+                if resolved_slug != court_data.get('county_slug'):
+                    out_of_bounds_corrected += 1
+                court_data['county_slug'] = resolved_slug
+            else:
+                out_of_bounds_skipped += 1
+                continue
         normalized.append(court_data)
 
     if errors:
@@ -109,6 +137,8 @@ def import_courts_payload(courts_payload, county_slug=None, commit=True):
         'created': created,
         'updated': updated,
         'duplicate_input_rows_ignored': duplicate_input_count,
+        'out_of_bounds_corrected': out_of_bounds_corrected,
+        'out_of_bounds_skipped': out_of_bounds_skipped,
         'counties': target_counties,
     }
 

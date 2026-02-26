@@ -22,14 +22,21 @@ def _auth(token):
 
 
 def _create_court(client, token, name='Ranked Court', county_slug=None):
+    slug = str(county_slug or 'humboldt').strip().lower()
     payload = {
         'name': name,
         'latitude': 40.80,
         'longitude': -124.16,
         'city': 'Eureka',
     }
+    if slug == 'alameda':
+        payload.update({
+            'latitude': 37.8044,
+            'longitude': -122.2712,
+            'city': 'Oakland',
+        })
     if county_slug:
-        payload['county_slug'] = county_slug
+        payload['county_slug'] = slug
     res = client.post('/api/courts', json=payload, headers=_auth(token))
     return json.loads(res.data)['court']
 
@@ -83,6 +90,41 @@ def test_join_queue_requires_checkin_at_same_court(client):
         'match_type': 'doubles',
     }, headers=_auth(token))
     assert joined.status_code == 201
+
+
+def test_joining_queue_at_new_court_replaces_old_entry(client):
+    token, user_id = _register(client, 'queue_move_u1', 'queue_move_u1@test.com')
+    first_court = _create_court(client, token, 'Queue Move Court 1')
+    second_court = _create_court(
+        client,
+        token,
+        'Queue Move Court 2',
+        county_slug='alameda',
+    )
+
+    assert _checkin(client, token, first_court['id']).status_code == 201
+    first_join = client.post('/api/ranked/queue/join', json={
+        'court_id': first_court['id'],
+        'match_type': 'doubles',
+    }, headers=_auth(token))
+    assert first_join.status_code == 201
+
+    assert _checkin(client, token, second_court['id']).status_code == 201
+    second_join = client.post('/api/ranked/queue/join', json={
+        'court_id': second_court['id'],
+        'match_type': 'doubles',
+    }, headers=_auth(token))
+    assert second_join.status_code == 201
+
+    first_queue = client.get(f'/api/ranked/queue/{first_court["id"]}')
+    assert first_queue.status_code == 200
+    first_queue_user_ids = [entry['user_id'] for entry in json.loads(first_queue.data)['queue']]
+    assert user_id not in first_queue_user_ids
+
+    second_queue = client.get(f'/api/ranked/queue/{second_court["id"]}')
+    assert second_queue.status_code == 200
+    second_queue_user_ids = [entry['user_id'] for entry in json.loads(second_queue.data)['queue']]
+    assert user_id in second_queue_user_ids
 
 
 def test_court_challenge_requires_all_players_checked_in(client):
@@ -922,3 +964,60 @@ def test_court_summary_endpoint(client):
     assert 'pending_lobbies' in data
     assert 'leaderboard' in data
     assert len(data['matches']) >= 1
+
+
+def test_reconfirm_completed_match_does_not_change_elo(client, app):
+    t1, id1 = _register(client, 'reconfirm_u1', 'reconfirm_u1@test.com')
+    t2, id2 = _register(client, 'reconfirm_u2', 'reconfirm_u2@test.com')
+    court = _create_court(client, t1, 'Reconfirm ELO Court')
+
+    match_res = _create_match(
+        client,
+        t1,
+        court['id'],
+        team1=[id1],
+        team2=[id2],
+        match_type='singles',
+    )
+    assert match_res.status_code == 201
+    match_id = json.loads(match_res.data)['match']['id']
+
+    submit = client.post(
+        f'/api/ranked/match/{match_id}/score',
+        json={'team1_score': 11, 'team2_score': 8},
+        headers=_auth(t1),
+    )
+    assert submit.status_code == 200
+    assert json.loads(submit.data)['pending_confirmation'] is True
+
+    finalize = client.post(
+        f'/api/ranked/match/{match_id}/confirm',
+        json={},
+        headers=_auth(t2),
+    )
+    assert finalize.status_code == 200
+    assert json.loads(finalize.data)['all_confirmed'] is True
+
+    with app.app_context():
+        user1 = db.session.get(User, id1)
+        user2 = db.session.get(User, id2)
+        finalized_state = (
+            user1.elo_rating, user1.games_played, user1.wins, user1.losses,
+            user2.elo_rating, user2.games_played, user2.wins, user2.losses,
+        )
+
+    reconfirm = client.post(
+        f'/api/ranked/match/{match_id}/confirm',
+        json={},
+        headers=_auth(t1),
+    )
+    assert reconfirm.status_code == 400
+
+    with app.app_context():
+        user1 = db.session.get(User, id1)
+        user2 = db.session.get(User, id2)
+        current_state = (
+            user1.elo_rating, user1.games_played, user1.wins, user1.losses,
+            user2.elo_rating, user2.games_played, user2.wins, user2.losses,
+        )
+        assert current_state == finalized_state

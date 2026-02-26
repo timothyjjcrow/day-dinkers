@@ -11,6 +11,11 @@ from backend.models import (
 from backend.auth_utils import login_required, admin_required
 from backend.time_utils import utcnow_naive
 from backend.services.california_counties import CALIFORNIA_COUNTIES
+from backend.services.california_county_bounds import (
+    county_name_for_slug,
+    is_point_within_county_bounds,
+    resolve_county_slug_for_point,
+)
 from backend.services.court_payloads import (
     normalize_court_payload, apply_court_changes,
     normalize_county_slug, DEFAULT_COUNTY_SLUG,
@@ -64,7 +69,54 @@ def _is_admin_user(user):
 
 def _county_name_from_slug(slug):
     cleaned = normalize_county_slug(slug, fallback=DEFAULT_COUNTY_SLUG)
+    official_name = county_name_for_slug(cleaned)
+    if official_name:
+        return official_name
     return ' '.join(part.capitalize() for part in cleaned.split('-') if part) or 'Unknown'
+
+
+def _enforce_county_bounds(court_data, existing_court=None, explicit_county=False):
+    lat = court_data.get('latitude')
+    lng = court_data.get('longitude')
+    slug = court_data.get('county_slug')
+
+    if existing_court is not None:
+        if lat is None:
+            lat = existing_court.latitude
+        if lng is None:
+            lng = existing_court.longitude
+        if not slug:
+            slug = existing_court.county_slug
+
+    if lat is None or lng is None:
+        return None
+
+    if not slug:
+        inferred_slug = resolve_county_slug_for_point(
+            lat,
+            lng,
+            preferred_slug=DEFAULT_COUNTY_SLUG,
+        )
+        if inferred_slug:
+            court_data['county_slug'] = inferred_slug
+            slug = inferred_slug
+
+    if not slug:
+        return 'Unable to resolve county for the provided coordinates.'
+
+    if is_point_within_county_bounds(lat, lng, slug):
+        return None
+
+    suggested_slug = resolve_county_slug_for_point(lat, lng, preferred_slug=slug)
+    if suggested_slug and not explicit_county:
+        court_data['county_slug'] = suggested_slug
+        return None
+
+    expected_county = county_name_for_slug(slug) or _county_name_from_slug(slug)
+    if suggested_slug and suggested_slug != slug:
+        suggested_county = county_name_for_slug(suggested_slug) or _county_name_from_slug(suggested_slug)
+        return f'Coordinates are outside {expected_county} County bounds. Try {suggested_county} County.'
+    return f'Coordinates are outside {expected_county} County bounds.'
 
 
 def _serialize_report(report):
@@ -227,18 +279,50 @@ def get_courts():
         query = query.filter_by(lighted=True)
 
     courts = query.all()
+    court_ids = [court.id for court in courts]
+    active_players_by_court = {}
+    open_sessions_by_court = {}
+
+    if court_ids:
+        active_rows = db.session.query(
+            CheckIn.court_id,
+            func.count(CheckIn.id),
+        ).filter(
+            CheckIn.court_id.in_(court_ids),
+            CheckIn.checked_out_at.is_(None),
+        ).group_by(
+            CheckIn.court_id,
+        ).all()
+        active_players_by_court = {
+            int(row[0]): int(row[1] or 0)
+            for row in active_rows
+        }
+
+        now = utcnow_naive()
+        open_rows = db.session.query(
+            PlaySession.court_id,
+            func.count(PlaySession.id),
+        ).filter(
+            PlaySession.court_id.in_(court_ids),
+            PlaySession.status == 'active',
+            (
+                (PlaySession.session_type != 'now')
+                | PlaySession.end_time.is_(None)
+                | (PlaySession.end_time > now)
+            ),
+        ).group_by(
+            PlaySession.court_id,
+        ).all()
+        open_sessions_by_court = {
+            int(row[0]): int(row[1] or 0)
+            for row in open_rows
+        }
 
     results = []
     for court in courts:
         court_dict = court.to_dict()
-        active_checkins = CheckIn.query.filter_by(
-            court_id=court.id, checked_out_at=None
-        ).count()
-        court_dict['active_players'] = active_checkins
-
-        # Count active open-to-play sessions at this court
-        session_count = _active_play_sessions_query(court_id=court.id).count()
-        court_dict['open_sessions'] = session_count
+        court_dict['active_players'] = active_players_by_court.get(court.id, 0)
+        court_dict['open_sessions'] = open_sessions_by_court.get(court.id, 0)
 
         if lat is not None and lng is not None:
             dist = haversine_distance(lat, lng, court.latitude, court.longitude)
@@ -312,16 +396,23 @@ def resolve_county():
     if lat is None or lng is None:
         return jsonify({'error': 'lat and lng query parameters are required'}), 400
 
-    candidates = (
-        db.session.query(
-            Court.id,
-            Court.name,
-            Court.county_slug,
-            Court.latitude,
-            Court.longitude,
-        )
-        .all()
-    )
+    county_slug = resolve_county_slug_for_point(lat, lng, preferred_slug='')
+    if county_slug:
+        return jsonify({
+            'county_slug': county_slug,
+            'county_name': _county_name_from_slug(county_slug),
+            'nearest_court_id': None,
+            'nearest_court_name': None,
+            'distance_miles': None,
+        })
+
+    candidates = db.session.query(
+        Court.id,
+        Court.name,
+        Court.county_slug,
+        Court.latitude,
+        Court.longitude,
+    ).all()
     if not candidates:
         return jsonify({'error': 'No courts available to resolve county'}), 404
 
@@ -356,7 +447,7 @@ def get_court(court_id):
     court_dict['active_players'] = len(active_checkins)
     court_dict['checked_in_users'] = []
     for ci in active_checkins:
-        user_data = ci.user.to_dict()
+        user_data = ci.user.to_public_dict()
         user_data['looking_for_game'] = ci.looking_for_game
         user_data['checked_in_at'] = ci.checked_in_at.isoformat()
         court_dict['checked_in_users'].append(user_data)
@@ -417,6 +508,13 @@ def add_court():
     court_data, errors = normalize_court_payload(data, partial=False)
     if errors:
         return jsonify({'error': errors[0], 'errors': errors}), 400
+    bounds_error = _enforce_county_bounds(
+        court_data,
+        existing_court=None,
+        explicit_county=('county_slug' in data),
+    )
+    if bounds_error:
+        return jsonify({'error': bounds_error, 'errors': [bounds_error]}), 400
 
     court = Court(**court_data)
     db.session.add(court)
@@ -436,6 +534,13 @@ def update_court(court_id):
         return jsonify({'error': errors[0], 'errors': errors}), 400
     if not court_data:
         return jsonify({'error': 'No valid court fields were provided'}), 400
+    bounds_error = _enforce_county_bounds(
+        court_data,
+        existing_court=court,
+        explicit_county=('county_slug' in court_data),
+    )
+    if bounds_error:
+        return jsonify({'error': bounds_error, 'errors': [bounds_error]}), 400
 
     apply_court_changes(court, court_data)
     db.session.commit()

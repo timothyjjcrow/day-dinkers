@@ -1,7 +1,10 @@
 """Tests for authentication routes."""
 import json
+from datetime import timedelta
 
-from backend.models import User
+from backend.app import db
+from backend.models import User, RateLimitBucket
+from backend.time_utils import utcnow_naive
 
 
 class _FakeGoogleResponse:
@@ -42,6 +45,16 @@ def test_register_duplicate_username(client):
     assert res.status_code == 409
 
 
+def test_register_rejects_weak_password(client):
+    res = client.post('/api/auth/register', json={
+        'username': 'weakpw',
+        'email': 'weakpw@test.com',
+        'password': 'abcdefg',
+    })
+    assert res.status_code == 400
+    assert 'Password must' in json.loads(res.data)['error']
+
+
 def test_login(client):
     client.post('/api/auth/register', json={
         'username': 'loginuser', 'email': 'login@test.com', 'password': 'password123',
@@ -62,6 +75,257 @@ def test_login_bad_password(client):
         'email': 'bad@test.com', 'password': 'wrong',
     })
     assert res.status_code == 401
+
+
+def test_login_rate_limit_returns_429(client):
+    client.application.config['AUTH_RATE_LIMIT_WINDOW_SECONDS'] = 60
+    client.application.config['AUTH_LOGIN_RATE_LIMIT_PER_WINDOW'] = 2
+
+    client.post('/api/auth/register', json={
+        'username': 'ratelimitlogin',
+        'email': 'ratelimitlogin@test.com',
+        'password': 'password123',
+    })
+
+    bad_one = client.post('/api/auth/login', json={
+        'email': 'ratelimitlogin@test.com',
+        'password': 'wrong-pass-1',
+    })
+    assert bad_one.status_code == 401
+
+    bad_two = client.post('/api/auth/login', json={
+        'email': 'ratelimitlogin@test.com',
+        'password': 'wrong-pass-2',
+    })
+    assert bad_two.status_code == 401
+
+    limited = client.post('/api/auth/login', json={
+        'email': 'ratelimitlogin@test.com',
+        'password': 'wrong-pass-3',
+    })
+    assert limited.status_code == 429
+    limited_payload = json.loads(limited.data)
+    assert limited_payload['retry_after_seconds'] >= 1
+
+
+def test_login_rate_limit_persists_counters_in_database(client):
+    client.application.config['AUTH_RATE_LIMIT_WINDOW_SECONDS'] = 60
+    client.application.config['AUTH_LOGIN_RATE_LIMIT_PER_WINDOW'] = 10
+    client.application.config['AUTH_LOCKOUT_THRESHOLD'] = 20
+
+    register = client.post('/api/auth/register', json={
+        'username': 'ratelimitdb',
+        'email': 'ratelimitdb@test.com',
+        'password': 'password123',
+    })
+    assert register.status_code == 201
+
+    headers = {'X-Forwarded-For': '198.51.100.61'}
+    first = client.post('/api/auth/login', json={
+        'email': 'ratelimitdb@test.com',
+        'password': 'wrong-1',
+    }, headers=headers)
+    assert first.status_code == 401
+
+    with client.application.app_context():
+        rows = RateLimitBucket.query.filter_by(
+            scope='login:ratelimitdb@test.com',
+            actor_key='198.51.100.61',
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].request_count == 1
+
+    second = client.post('/api/auth/login', json={
+        'email': 'ratelimitdb@test.com',
+        'password': 'wrong-2',
+    }, headers=headers)
+    assert second.status_code == 401
+
+    with client.application.app_context():
+        rows = RateLimitBucket.query.filter_by(
+            scope='login:ratelimitdb@test.com',
+            actor_key='198.51.100.61',
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].request_count == 2
+
+
+def test_login_lockout_after_repeated_failures(client):
+    client.application.config['AUTH_RATE_LIMIT_WINDOW_SECONDS'] = 60
+    client.application.config['AUTH_LOGIN_RATE_LIMIT_PER_WINDOW'] = 30
+    client.application.config['AUTH_LOCKOUT_THRESHOLD'] = 3
+    client.application.config['AUTH_LOCKOUT_MINUTES'] = 5
+
+    register = client.post('/api/auth/register', json={
+        'username': 'lockoutuser',
+        'email': 'lockout@test.com',
+        'password': 'password123',
+    })
+    assert register.status_code == 201
+
+    headers = {'X-Forwarded-For': '198.51.100.45'}
+    fail_one = client.post('/api/auth/login', json={
+        'email': 'lockout@test.com',
+        'password': 'bad-pass-1',
+    }, headers=headers)
+    assert fail_one.status_code == 401
+
+    fail_two = client.post('/api/auth/login', json={
+        'email': 'lockout@test.com',
+        'password': 'bad-pass-2',
+    }, headers=headers)
+    assert fail_two.status_code == 401
+
+    locked = client.post('/api/auth/login', json={
+        'email': 'lockout@test.com',
+        'password': 'bad-pass-3',
+    }, headers=headers)
+    assert locked.status_code == 423
+    locked_payload = json.loads(locked.data)
+    assert locked_payload['retry_after_seconds'] >= 1
+
+    still_locked = client.post('/api/auth/login', json={
+        'email': 'lockout@test.com',
+        'password': 'password123',
+    }, headers=headers)
+    assert still_locked.status_code == 423
+
+    with client.application.app_context():
+        user = User.query.filter_by(email='lockout@test.com').first()
+        assert user is not None
+        user.locked_until = utcnow_naive() - timedelta(minutes=1)
+        user.failed_login_attempts = 0
+        db.session.commit()
+
+    unlocked = client.post('/api/auth/login', json={
+        'email': 'lockout@test.com',
+        'password': 'password123',
+    }, headers=headers)
+    assert unlocked.status_code == 200
+
+
+def test_password_reset_request_is_generic_for_unknown_email(client):
+    res = client.post('/api/auth/password-reset/request', json={
+        'email': 'notfound@example.com',
+    })
+    assert res.status_code == 200
+    payload = json.loads(res.data)
+    assert 'If an account exists' in payload['message']
+    assert 'reset_token' not in payload
+
+
+def test_password_reset_flow_updates_password_and_invalidates_token(client):
+    register = client.post('/api/auth/register', json={
+        'username': 'resetuser',
+        'email': 'resetuser@test.com',
+        'password': 'password123',
+    })
+    assert register.status_code == 201
+
+    requested = client.post('/api/auth/password-reset/request', json={
+        'email': 'resetuser@test.com',
+    })
+    assert requested.status_code == 200
+    request_payload = json.loads(requested.data)
+    assert request_payload.get('reset_token')
+    reset_token = request_payload['reset_token']
+
+    confirm = client.post('/api/auth/password-reset/confirm', json={
+        'token': reset_token,
+        'new_password': 'newpassword456',
+    })
+    assert confirm.status_code == 200
+
+    old_login = client.post('/api/auth/login', json={
+        'email': 'resetuser@test.com',
+        'password': 'password123',
+    })
+    assert old_login.status_code == 401
+
+    new_login = client.post('/api/auth/login', json={
+        'email': 'resetuser@test.com',
+        'password': 'newpassword456',
+    })
+    assert new_login.status_code == 200
+
+    reused = client.post('/api/auth/password-reset/confirm', json={
+        'token': reset_token,
+        'new_password': 'anotherpass789',
+    })
+    assert reused.status_code == 400
+
+
+def test_password_reset_rejects_expired_token(client):
+    register = client.post('/api/auth/register', json={
+        'username': 'resetexpireduser',
+        'email': 'resetexpired@test.com',
+        'password': 'password123',
+    })
+    assert register.status_code == 201
+
+    requested = client.post('/api/auth/password-reset/request', json={
+        'email': 'resetexpired@test.com',
+    })
+    assert requested.status_code == 200
+    reset_token = json.loads(requested.data).get('reset_token')
+    assert reset_token
+
+    with client.application.app_context():
+        user = User.query.filter_by(email='resetexpired@test.com').first()
+        assert user is not None
+        user.password_reset_token_expires_at = utcnow_naive() - timedelta(minutes=1)
+        db.session.commit()
+
+    confirm = client.post('/api/auth/password-reset/confirm', json={
+        'token': reset_token,
+        'new_password': 'newpassword456',
+    })
+    assert confirm.status_code == 400
+
+
+def test_password_reset_clears_account_lockout(client):
+    client.application.config['AUTH_RATE_LIMIT_WINDOW_SECONDS'] = 60
+    client.application.config['AUTH_LOGIN_RATE_LIMIT_PER_WINDOW'] = 30
+    client.application.config['AUTH_LOCKOUT_THRESHOLD'] = 2
+    client.application.config['AUTH_LOCKOUT_MINUTES'] = 10
+
+    register = client.post('/api/auth/register', json={
+        'username': 'resetlockuser',
+        'email': 'resetlock@test.com',
+        'password': 'password123',
+    })
+    assert register.status_code == 201
+
+    headers = {'X-Forwarded-For': '198.51.100.46'}
+    fail_one = client.post('/api/auth/login', json={
+        'email': 'resetlock@test.com',
+        'password': 'bad-pass-1',
+    }, headers=headers)
+    assert fail_one.status_code == 401
+    fail_two = client.post('/api/auth/login', json={
+        'email': 'resetlock@test.com',
+        'password': 'bad-pass-2',
+    }, headers=headers)
+    assert fail_two.status_code == 423
+
+    requested = client.post('/api/auth/password-reset/request', json={
+        'email': 'resetlock@test.com',
+    })
+    assert requested.status_code == 200
+    reset_token = json.loads(requested.data).get('reset_token')
+    assert reset_token
+
+    confirmed = client.post('/api/auth/password-reset/confirm', json={
+        'token': reset_token,
+        'new_password': 'freshpass123',
+    })
+    assert confirmed.status_code == 200
+
+    unlocked_login = client.post('/api/auth/login', json={
+        'email': 'resetlock@test.com',
+        'password': 'freshpass123',
+    }, headers=headers)
+    assert unlocked_login.status_code == 200
 
 
 def test_get_profile(client):
@@ -233,6 +497,33 @@ def test_search_users(client):
     assert res.status_code == 200
 
 
+def test_search_users_rate_limit_returns_429(client):
+    reg = client.post('/api/auth/register', json={
+        'username': 'searchratelimit',
+        'email': 'searchratelimit@test.com',
+        'password': 'password123',
+        'name': 'Rate Limit Search',
+    })
+    token = json.loads(reg.data)['token']
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'X-Forwarded-For': '203.0.113.123',
+    }
+
+    client.application.config['AUTH_RATE_LIMIT_WINDOW_SECONDS'] = 60
+    client.application.config['USER_SEARCH_RATE_LIMIT_PER_WINDOW'] = 2
+
+    first = client.get('/api/auth/users/search?q=sea', headers=headers)
+    assert first.status_code == 200
+    second = client.get('/api/auth/users/search?q=sea', headers=headers)
+    assert second.status_code == 200
+
+    limited = client.get('/api/auth/users/search?q=sea', headers=headers)
+    assert limited.status_code == 429
+    payload = json.loads(limited.data)
+    assert payload['retry_after_seconds'] >= 1
+
+
 def test_notifications(client):
     reg = client.post('/api/auth/register', json={
         'username': 'notifuser', 'email': 'notif@test.com', 'password': 'password123',
@@ -376,3 +667,60 @@ def test_admin_emails_config_sets_admin_on_register_and_login(client):
         promoted_user = User.query.filter_by(email='normal@test.com').first()
         assert promoted_user is not None
         assert promoted_user.is_admin is True
+
+
+def test_mutating_api_rejects_disallowed_origin(client):
+    client.application.config['CORS_ALLOWED_ORIGINS'] = 'https://allowed.example'
+    res = client.post('/api/auth/register', json={
+        'username': 'originblocked',
+        'email': 'originblocked@test.com',
+        'password': 'password123',
+    }, headers={'Origin': 'https://evil.example'})
+    assert res.status_code == 403
+
+    allowed = client.post('/api/auth/register', json={
+        'username': 'originallowed',
+        'email': 'originallowed@test.com',
+        'password': 'password123',
+    }, headers={'Origin': 'https://allowed.example'})
+    assert allowed.status_code == 201
+
+
+def test_authenticated_mutation_requires_csrf_token_with_origin(client):
+    client.application.config['CORS_ALLOWED_ORIGINS'] = 'https://allowed.example'
+    register = client.post('/api/auth/register', json={
+        'username': 'csrfuser',
+        'email': 'csrfuser@test.com',
+        'password': 'password123',
+    })
+    assert register.status_code == 201
+    token = json.loads(register.data)['token']
+
+    base_headers = {
+        'Authorization': f'Bearer {token}',
+        'Origin': 'https://allowed.example',
+    }
+
+    missing_csrf = client.post('/api/auth/notifications/read', json={}, headers=base_headers)
+    assert missing_csrf.status_code == 403
+    assert json.loads(missing_csrf.data)['error'] == 'Invalid CSRF token'
+
+    csrf = client.get('/api/auth/csrf', headers={
+        'Authorization': f'Bearer {token}',
+    })
+    assert csrf.status_code == 200
+    csrf_token = json.loads(csrf.data).get('csrf_token')
+    assert csrf_token
+
+    bad_csrf = client.post('/api/auth/notifications/read', json={}, headers={
+        **base_headers,
+        'X-CSRF-Token': 'bad-csrf-token',
+    })
+    assert bad_csrf.status_code == 403
+    assert json.loads(bad_csrf.data)['error'] == 'Invalid CSRF token'
+
+    ok = client.post('/api/auth/notifications/read', json={}, headers={
+        **base_headers,
+        'X-CSRF-Token': csrf_token,
+    })
+    assert ok.status_code == 200

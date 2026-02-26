@@ -1,10 +1,13 @@
+import re
+
 from flask import Blueprint, request, jsonify
 from flask_socketio import emit, join_room, leave_room
 from backend.app import db, socketio
-from backend.models import Message, Game, PlaySession, PlaySessionPlayer, Friendship
-from backend.auth_utils import login_required
+from backend.models import Message, Game, PlaySession, PlaySessionPlayer, Friendship, User
+from backend.auth_utils import login_required, get_user_from_token
 
 chat_bp = Blueprint('chat', __name__)
+_ROOM_PATTERN = re.compile(r'^(court|session|user|game)_(\d+)$')
 
 
 def _get_friend_ids(user_id):
@@ -18,6 +21,22 @@ def _get_friend_ids(user_id):
     return friend_ids
 
 
+def _are_friends(user_a_id, user_b_id):
+    if user_a_id == user_b_id:
+        return True
+    return Friendship.query.filter(
+        (
+            (Friendship.user_id == user_a_id)
+            & (Friendship.friend_id == user_b_id)
+        )
+        | (
+            (Friendship.user_id == user_b_id)
+            & (Friendship.friend_id == user_a_id)
+        ),
+        Friendship.status == 'accepted',
+    ).first() is not None
+
+
 def _can_view_session(session, current_user_id):
     if session.visibility != 'friends':
         return True
@@ -26,6 +45,36 @@ def _can_view_session(session, current_user_id):
     if PlaySessionPlayer.query.filter_by(session_id=session.id, user_id=current_user_id).first():
         return True
     return session.creator_id in _get_friend_ids(current_user_id)
+
+
+def _authorize_socket_join(room, token):
+    user = get_user_from_token(token)
+    if not user:
+        return None, 'Authentication required'
+
+    room_match = _ROOM_PATTERN.match(room)
+    if not room_match:
+        return None, 'Invalid room'
+
+    room_type = room_match.group(1)
+    room_id = int(room_match.group(2))
+
+    if room_type == 'user' and room_id != user.id:
+        return None, 'Forbidden room'
+
+    if room_type == 'session':
+        session = db.session.get(PlaySession, room_id)
+        if not session:
+            return None, 'Session not found'
+        if not _can_view_session(session, user.id):
+            return None, 'Forbidden room'
+
+    if room_type == 'game':
+        game = db.session.get(Game, room_id)
+        if not game:
+            return None, 'Game not found'
+
+    return user, None
 
 
 @chat_bp.route('/court/<int:court_id>', methods=['GET'])
@@ -55,6 +104,11 @@ def get_session_messages(session_id):
 @login_required
 def get_direct_messages(user_id):
     me = request.current_user.id
+    other_user = db.session.get(User, user_id)
+    if not other_user:
+        return jsonify({'error': 'User not found'}), 404
+    if not _are_friends(me, user_id):
+        return jsonify({'error': 'Direct messages are limited to friends'}), 403
     messages = Message.query.filter(
         Message.msg_type == 'direct',
         ((Message.sender_id == me) & (Message.recipient_id == user_id))
@@ -134,6 +188,13 @@ def send_message():
     elif msg_type == 'direct':
         if not recipient_id:
             return jsonify({'error': 'Recipient ID is required for direct messages'}), 400
+        if recipient_id == request.current_user.id:
+            return jsonify({'error': 'Cannot send direct messages to yourself'}), 400
+        recipient = db.session.get(User, recipient_id)
+        if not recipient:
+            return jsonify({'error': 'Recipient not found'}), 404
+        if not _are_friends(request.current_user.id, recipient_id):
+            return jsonify({'error': 'Direct messages are limited to friends'}), 403
 
     msg = Message(
         sender_id=request.current_user.id,
@@ -163,10 +224,16 @@ def send_message():
 # WebSocket event handlers
 @socketio.on('join')
 def on_join(data):
-    room = data.get('room', '')
-    if room:
-        join_room(room)
-        emit('status', {'message': f'Joined {room}'}, room=room)
+    payload = data if isinstance(data, dict) else {}
+    room = str(payload.get('room') or '').strip()
+    token = payload.get('token') or request.args.get('token') or ''
+    _, error = _authorize_socket_join(room, token)
+    if error:
+        emit('status', {'error': error})
+        return
+
+    join_room(room)
+    emit('status', {'message': f'Joined {room}'})
 
 
 @socketio.on('leave')
