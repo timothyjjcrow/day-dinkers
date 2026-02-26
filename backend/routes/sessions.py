@@ -1,6 +1,7 @@
 """Open-to-Play sessions — create, join, schedule, invite."""
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, current_app, request, jsonify
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from backend.app import db
 from backend.models import (
@@ -102,6 +103,40 @@ def _complete_expired_now_sessions():
     db.session.commit()
 
 
+def _scheduled_session_retention_days():
+    raw_days = current_app.config.get('SCHEDULED_SESSION_RETENTION_DAYS', 3)
+    try:
+        parsed_days = int(raw_days)
+    except (TypeError, ValueError):
+        parsed_days = 3
+    return max(1, parsed_days)
+
+
+def _complete_stale_scheduled_sessions():
+    """Complete scheduled sessions whose occurrence finished beyond retention."""
+    cutoff = utcnow_naive() - timedelta(days=_scheduled_session_retention_days())
+    reference_time = func.coalesce(
+        PlaySession.end_time,
+        PlaySession.start_time,
+        PlaySession.created_at,
+    )
+    stale = PlaySession.query.filter(
+        PlaySession.status == 'active',
+        PlaySession.session_type == 'scheduled',
+        reference_time <= cutoff,
+    ).all()
+    if not stale:
+        return
+    for session in stale:
+        session.status = 'completed'
+    db.session.commit()
+
+
+def _expire_stale_sessions():
+    _complete_expired_now_sessions()
+    _complete_stale_scheduled_sessions()
+
+
 def _active_sessions_query():
     now = utcnow_naive()
     return PlaySession.query.filter(
@@ -132,7 +167,7 @@ def _serialize_session(session):
 @sessions_bp.route('', methods=['GET'])
 def get_sessions():
     """List active sessions, filtered by visibility for the requester."""
-    _complete_expired_now_sessions()
+    _expire_stale_sessions()
     court_id = request.args.get('court_id', type=int)
     session_type = request.args.get('type', '')  # 'now', 'scheduled', or ''
     visibility_filter = (request.args.get('visibility') or 'all').strip().lower()
@@ -182,7 +217,7 @@ def get_sessions():
 @login_required
 def get_my_sessions():
     """Get sessions the current user created or joined."""
-    _complete_expired_now_sessions()
+    _expire_stale_sessions()
     uid = request.current_user.id
 
     # Sessions I created
@@ -421,7 +456,7 @@ def create_session():
 @sessions_bp.route('/<int:session_id>', methods=['GET'])
 def get_session(session_id):
     """Get session details."""
-    _complete_expired_now_sessions()
+    _expire_stale_sessions()
     session = db.session.get(PlaySession, session_id)
     if not session:
         return jsonify({'error': 'Session not found'}), 404
@@ -435,7 +470,7 @@ def get_session(session_id):
 @login_required
 def join_session(session_id):
     """Join an open-to-play session."""
-    _complete_expired_now_sessions()
+    _expire_stale_sessions()
     session = db.session.get(PlaySession, session_id)
     if not session:
         return jsonify({'error': 'Session not found'}), 404

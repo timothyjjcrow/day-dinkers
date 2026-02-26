@@ -111,6 +111,47 @@ def test_now_session_duration_sets_times_and_expires(client, app):
         assert refreshed.status == 'completed'
 
 
+def test_scheduled_session_is_hidden_after_retention_window(client, app):
+    token, _ = _register(client, 'sched_retention', 'sched_retention@test.com')
+    court = _create_court(client, token, 'Scheduled Retention Court')
+    headers = {'Authorization': f'Bearer {token}'}
+
+    start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+    end = start + timedelta(hours=2)
+    create = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': start.isoformat(),
+        'end_time': end.isoformat(),
+        'max_players': 4,
+    }, headers=headers)
+    assert create.status_code == 201
+    session_id = json.loads(create.data)['session']['id']
+
+    from backend.app import db
+    from backend.models import PlaySession
+    from backend.time_utils import utcnow_naive
+
+    with app.app_context():
+        retention_days = int(app.config.get('SCHEDULED_SESSION_RETENTION_DAYS', 3) or 3)
+        aged_days = max(2, retention_days + 1)
+        stale_end = utcnow_naive() - timedelta(days=aged_days)
+        stale_start = stale_end - timedelta(hours=2)
+        stale_session = db.session.get(PlaySession, session_id)
+        stale_session.start_time = stale_start
+        stale_session.end_time = stale_end
+        db.session.commit()
+
+    mine = client.get('/api/sessions/my', headers=headers)
+    assert mine.status_code == 200
+    visible_ids = [item['id'] for item in json.loads(mine.data)['sessions']]
+    assert session_id not in visible_ids
+
+    with app.app_context():
+        refreshed = db.session.get(PlaySession, session_id)
+        assert refreshed.status == 'completed'
+
+
 def test_sessions_visibility_and_skill_filters(client):
     token_a, _ = _register(client, 'sess_a', 'sess_a@test.com')
     token_b, uid_b = _register(client, 'sess_b', 'sess_b@test.com')
