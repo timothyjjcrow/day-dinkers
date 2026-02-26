@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from backend.app import db
-from backend.models import CheckIn, PlaySession
+from backend.models import CheckIn, Message, PlaySession
 from backend.routes.chat import _authorize_socket_join
 from backend.time_utils import utcnow_naive
 
@@ -92,6 +92,67 @@ def test_court_chat(client):
         headers={'Authorization': f'Bearer {token}'})
     data = json.loads(res.data)
     assert len(data['messages']) == 1
+
+
+def test_court_chat_prunes_messages_older_than_retention_window(client, app):
+    token, user = _auth_with_user(client, 'chatretention', 'chatretention@test.com')
+    court = _create_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    with app.app_context():
+        stale = Message(
+            sender_id=user['id'],
+            court_id=court['id'],
+            msg_type='court',
+            content='stale-court-message',
+            created_at=utcnow_naive() - timedelta(days=8),
+        )
+        fresh = Message(
+            sender_id=user['id'],
+            court_id=court['id'],
+            msg_type='court',
+            content='fresh-court-message',
+            created_at=utcnow_naive() - timedelta(days=1),
+        )
+        db.session.add(stale)
+        db.session.add(fresh)
+        db.session.commit()
+
+    res = client.get(f'/api/chat/court/{court["id"]}', headers=headers)
+    assert res.status_code == 200
+    messages = json.loads(res.data)['messages']
+    contents = [m['content'] for m in messages]
+    assert 'fresh-court-message' in contents
+    assert 'stale-court-message' not in contents
+
+    with app.app_context():
+        stale_row = Message.query.filter_by(content='stale-court-message').first()
+        assert stale_row is None
+
+
+def test_court_chat_returns_latest_messages_in_ascending_order(client, app):
+    token, user = _auth_with_user(client, 'chatlatest', 'chatlatest@test.com')
+    court = _create_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    with app.app_context():
+        base_time = utcnow_naive() - timedelta(minutes=10)
+        for i in range(105):
+            db.session.add(Message(
+                sender_id=user['id'],
+                court_id=court['id'],
+                msg_type='court',
+                content=f'court-msg-{i}',
+                created_at=base_time + timedelta(seconds=i),
+            ))
+        db.session.commit()
+
+    res = client.get(f'/api/chat/court/{court["id"]}', headers=headers)
+    assert res.status_code == 200
+    messages = json.loads(res.data)['messages']
+    assert len(messages) == 100
+    assert messages[0]['content'] == 'court-msg-5'
+    assert messages[-1]['content'] == 'court-msg-104'
 
 
 def test_session_chat_is_scoped_and_separate_from_court_chat(client):

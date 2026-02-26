@@ -1097,7 +1097,7 @@ const MapView = {
         const senderName = MapView._escapeHtml(isMe ? 'You' : (sender.name || sender.username));
         const content = MapView._escapeHtml(msg.content || '');
         return `
-        <div class="chat-msg ${isMe ? 'chat-msg-me' : ''}">
+        <div class="chat-msg ${isMe ? 'chat-msg-me' : ''}" data-msg-id="${msg.id}">
             <div class="chat-msg-header">
                 <strong>${senderName}</strong>
                 <span class="chat-msg-time">${time}</span>

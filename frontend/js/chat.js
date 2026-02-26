@@ -7,6 +7,8 @@ const Chat = {
     rankedRefreshTimer: null,
     presenceRefreshTimer: null,
     notificationRefreshTimer: null,
+    MAX_RENDERED_MESSAGES: 120,
+    SCROLL_BOTTOM_THRESHOLD_PX: 48,
 
     init() {
         try {
@@ -27,25 +29,23 @@ const Chat = {
                     && Sessions.currentSessionId
                     && Number(msg.session_id) === Number(Sessions.currentSessionId);
                 if (sessionChat && msg.msg_type === 'session' && inActiveSession) {
-                    const existing = sessionChat.querySelector(`[data-msg-id="${msg.id}"]`);
-                    if (!existing) {
-                        sessionChat.insertAdjacentHTML('beforeend', Sessions._renderChatMsg(msg));
-                        sessionChat.scrollTop = sessionChat.scrollHeight;
-                    }
+                    Chat._appendRenderedMessage(
+                        sessionChat,
+                        Sessions._renderChatMsg(msg),
+                        msg.id,
+                    );
                 }
 
                 // Court chat panel (bottom popup)
                 const courtChat = document.getElementById('chat-messages');
                 if (courtChat && courtChat.style.display !== 'none' && msg.msg_type === 'court') {
-                    courtChat.insertAdjacentHTML('beforeend', Chat._renderMsg(msg));
-                    courtChat.scrollTop = courtChat.scrollHeight;
+                    Chat._appendRenderedMessage(courtChat, Chat._renderMsg(msg), msg.id);
                 }
 
                 // Full-page court chat
                 const fpChat = document.getElementById('fullpage-chat-messages');
                 if (fpChat && msg.msg_type === 'court') {
-                    fpChat.insertAdjacentHTML('beforeend', MapView._renderChatMsg(msg));
-                    fpChat.scrollTop = fpChat.scrollHeight;
+                    Chat._appendRenderedMessage(fpChat, MapView._renderChatMsg(msg), msg.id);
                 }
             });
 
@@ -156,6 +156,43 @@ const Chat = {
         </div>`;
     },
 
+    _isNearBottom(container) {
+        const delta = container.scrollHeight - (container.scrollTop + container.clientHeight);
+        return delta <= Chat.SCROLL_BOTTOM_THRESHOLD_PX;
+    },
+
+    _removePlaceholder(container) {
+        const first = container.firstElementChild;
+        if (!first) return;
+        if (first.tagName === 'P' && first.classList.contains('muted')) {
+            first.remove();
+        }
+    },
+
+    _trimRenderedMessages(container) {
+        const messages = container.querySelectorAll('.chat-msg');
+        const overflow = messages.length - Chat.MAX_RENDERED_MESSAGES;
+        if (overflow <= 0) return;
+        for (let i = 0; i < overflow; i += 1) {
+            messages[i].remove();
+        }
+    },
+
+    _appendRenderedMessage(container, html, messageId = null) {
+        if (!container) return;
+        const safeId = Number(messageId);
+        if (Number.isFinite(safeId) && container.querySelector(`[data-msg-id="${safeId}"]`)) {
+            return;
+        }
+        const stickToBottom = Chat._isNearBottom(container);
+        Chat._removePlaceholder(container);
+        container.insertAdjacentHTML('beforeend', html);
+        Chat._trimRenderedMessages(container);
+        if (stickToBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
+    },
+
     joinRoom(room) {
         const token = localStorage.getItem('token');
         if (Chat.currentRoom) {
@@ -189,6 +226,7 @@ const Chat = {
         try {
             const res = await API.get(`/api/chat/court/${courtId}`);
             container.innerHTML = (res.messages || []).map(m => Chat._renderMsg(m)).join('') || '<p class="muted">No messages yet</p>';
+            Chat._trimRenderedMessages(container);
             container.scrollTop = container.scrollHeight;
         } catch { container.innerHTML = '<p class="muted">Unable to load messages</p>'; }
     },

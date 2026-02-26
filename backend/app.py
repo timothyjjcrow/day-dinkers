@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse
 from flask import Flask, send_from_directory, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO
@@ -26,6 +27,47 @@ def _parse_allowed_origins(raw_origins):
 
     origins = [origin.strip() for origin in raw_text.split(',') if origin.strip()]
     return origins or '*'
+
+
+def _canonical_origin(raw_origin):
+    text = str(raw_origin or '').strip()
+    if not text or text == '*':
+        return ''
+    candidate = text if '://' in text else f'https://{text}'
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        return ''
+    if not parsed.hostname:
+        return ''
+    try:
+        _ = parsed.port
+    except ValueError:
+        return ''
+    return f'{parsed.scheme}://{parsed.netloc}'
+
+
+def _derive_production_allowed_origins():
+    candidates = []
+    for key in ('CORS_ALLOWED_ORIGINS', 'PUBLIC_APP_URL', 'FRONTEND_URL', 'RENDER_EXTERNAL_URL'):
+        raw_value = os.environ.get(key, '')
+        if not raw_value:
+            continue
+        parts = [part.strip() for part in str(raw_value).split(',') if part.strip()]
+        candidates.extend(parts)
+
+    render_hostname = str(os.environ.get('RENDER_EXTERNAL_HOSTNAME') or '').strip()
+    if render_hostname:
+        candidates.append(f'https://{render_hostname}')
+
+    origins = []
+    seen = set()
+    for raw in candidates:
+        origin = _canonical_origin(raw)
+        if not origin or origin in seen:
+            continue
+        seen.add(origin)
+        origins.append(origin)
+    return origins
 
 
 def _run_lightweight_migrations():
@@ -232,7 +274,11 @@ def create_app(config_name='development'):
         if not secret_key or secret_key == 'dev-secret-key-change-in-prod':
             raise RuntimeError('SECRET_KEY must be set to a non-default value in production')
         if allowed_origins == '*':
-            raise RuntimeError('CORS_ALLOWED_ORIGINS must be explicitly set in production')
+            derived_origins = _derive_production_allowed_origins()
+            if not derived_origins:
+                raise RuntimeError('CORS_ALLOWED_ORIGINS must be explicitly set in production')
+            allowed_origins = derived_origins
+            app.config['CORS_ALLOWED_ORIGINS'] = ','.join(derived_origins)
 
     db.init_app(app)
     socketio.init_app(

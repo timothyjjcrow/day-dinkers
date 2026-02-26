@@ -1,10 +1,12 @@
 import re
+from datetime import timedelta
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, current_app, request, jsonify
 from flask_socketio import emit, join_room, leave_room
 from backend.app import db, socketio
 from backend.models import Message, Game, PlaySession, PlaySessionPlayer, Friendship, User
 from backend.auth_utils import login_required, get_user_from_token
+from backend.time_utils import utcnow_naive
 
 chat_bp = Blueprint('chat', __name__)
 _ROOM_PATTERN = re.compile(r'^(court|session|user|game)_(\d+)$')
@@ -47,6 +49,43 @@ def _can_view_session(session, current_user_id):
     return session.creator_id in _get_friend_ids(current_user_id)
 
 
+def _chat_retention_days():
+    raw_days = current_app.config.get('CHAT_RETENTION_DAYS', 7)
+    try:
+        parsed_days = int(raw_days)
+    except (TypeError, ValueError):
+        parsed_days = 7
+    return max(1, parsed_days)
+
+
+def _chat_fetch_limit():
+    raw_limit = current_app.config.get('CHAT_FETCH_LIMIT', 100)
+    try:
+        parsed_limit = int(raw_limit)
+    except (TypeError, ValueError):
+        parsed_limit = 100
+    return max(20, min(parsed_limit, 500))
+
+
+def _prune_stale_chat_messages():
+    cutoff = utcnow_naive() - timedelta(days=_chat_retention_days())
+    deleted = Message.query.filter(Message.created_at < cutoff).delete(
+        synchronize_session=False,
+    )
+    if deleted:
+        db.session.commit()
+
+
+def _recent_messages(query):
+    limit = _chat_fetch_limit()
+    rows = query.order_by(
+        Message.created_at.desc(),
+        Message.id.desc(),
+    ).limit(limit).all()
+    rows.reverse()
+    return rows
+
+
 def _authorize_socket_join(room, token):
     user = get_user_from_token(token)
     if not user:
@@ -80,40 +119,45 @@ def _authorize_socket_join(room, token):
 @chat_bp.route('/court/<int:court_id>', methods=['GET'])
 @login_required
 def get_court_messages(court_id):
-    messages = Message.query.filter_by(
-        court_id=court_id, msg_type='court'
-    ).order_by(Message.created_at.asc()).limit(100).all()
+    _prune_stale_chat_messages()
+    messages = _recent_messages(
+        Message.query.filter_by(court_id=court_id, msg_type='court')
+    )
     return jsonify({'messages': [m.to_dict() for m in messages]})
 
 
 @chat_bp.route('/session/<int:session_id>', methods=['GET'])
 @login_required
 def get_session_messages(session_id):
+    _prune_stale_chat_messages()
     session = db.session.get(PlaySession, session_id)
     if not session:
         return jsonify({'error': 'Session not found'}), 404
     if not _can_view_session(session, request.current_user.id):
         return jsonify({'error': 'Session chat is private'}), 403
-    messages = Message.query.filter_by(
-        session_id=session_id, msg_type='session'
-    ).order_by(Message.created_at.asc()).limit(100).all()
+    messages = _recent_messages(
+        Message.query.filter_by(session_id=session_id, msg_type='session')
+    )
     return jsonify({'messages': [m.to_dict() for m in messages]})
 
 
 @chat_bp.route('/direct/<int:user_id>', methods=['GET'])
 @login_required
 def get_direct_messages(user_id):
+    _prune_stale_chat_messages()
     me = request.current_user.id
     other_user = db.session.get(User, user_id)
     if not other_user:
         return jsonify({'error': 'User not found'}), 404
     if not _are_friends(me, user_id):
         return jsonify({'error': 'Direct messages are limited to friends'}), 403
-    messages = Message.query.filter(
-        Message.msg_type == 'direct',
-        ((Message.sender_id == me) & (Message.recipient_id == user_id))
-        | ((Message.sender_id == user_id) & (Message.recipient_id == me))
-    ).order_by(Message.created_at.asc()).limit(100).all()
+    messages = _recent_messages(
+        Message.query.filter(
+            Message.msg_type == 'direct',
+            ((Message.sender_id == me) & (Message.recipient_id == user_id))
+            | ((Message.sender_id == user_id) & (Message.recipient_id == me))
+        )
+    )
     return jsonify({'messages': [m.to_dict() for m in messages]})
 
 
@@ -121,21 +165,25 @@ def get_direct_messages(user_id):
 @login_required
 def get_game_messages(game_id):
     """Legacy game chat compatibility endpoint."""
+    _prune_stale_chat_messages()
     game = db.session.get(Game, game_id)
     if not game:
         return jsonify({'error': 'Game not found'}), 404
 
-    messages = Message.query.filter(
-        Message.msg_type == 'game',
-        Message.court_id == game.court_id,
-        Message.created_at >= game.created_at,
-    ).order_by(Message.created_at.asc()).limit(100).all()
+    messages = _recent_messages(
+        Message.query.filter(
+            Message.msg_type == 'game',
+            Message.court_id == game.court_id,
+            Message.created_at >= game.created_at,
+        )
+    )
     return jsonify({'messages': [m.to_dict() for m in messages]})
 
 
 @chat_bp.route('/send', methods=['POST'])
 @login_required
 def send_message():
+    _prune_stale_chat_messages()
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         return jsonify({'error': 'Invalid JSON payload'}), 400
