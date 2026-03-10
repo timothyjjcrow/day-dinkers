@@ -2065,6 +2065,18 @@ select::-ms-expand {
 .tournament-actions .btn-danger {
   margin-left: auto;
 }
+.tournament-actions-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.tournament-actions-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
 
 /* ── Tournament Bracket Grid ──────────────────── */
 .tournament-round-grid {
@@ -4044,6 +4056,52 @@ select::-ms-expand {
   margin-top: 12px;
   text-align: center;
 }
+.profile-section-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+}
+.profile-section-empty p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.profile-section-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profile-section-actions .btn-sm {
+  flex: 1 1 150px;
+}
+.profile-edit-modal {
+  max-width: 560px;
+}
+.profile-edit-modal h2 {
+  margin-bottom: 6px;
+  padding-right: 28px;
+}
+.profile-edit-intro {
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+.profile-edit-modal textarea {
+  min-height: 120px;
+}
+.profile-edit-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.profile-edit-actions .btn-secondary,
+.profile-edit-actions .btn-primary {
+  flex: 1 1 160px;
+}
 
 .friend-card {
   display: flex;
@@ -4107,13 +4165,27 @@ select::-ms-expand {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.friend-request-card + .friend-request-card {
+  margin-top: 8px;
+}
+.friend-request-card .friend-info {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 .friend-actions {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
+}
+.friend-actions .btn-sm {
+  flex: 1 1 110px;
 }
 .friend-search {
   margin-top: 10px;
@@ -4147,6 +4219,34 @@ select::-ms-expand {
 }
 .search-result-main strong {
   font-size: 14px;
+}
+.search-result-helper {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.search-result-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.search-result-chip-friend {
+  background: #dcfce7;
+  color: #166534;
+}
+.search-result-chip-pending {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.search-result-chip-muted {
+  background: #f1f5f9;
+  color: #475569;
 }
 .search-result-card .friend-actions {
   width: 100%;
@@ -5002,15 +5102,16 @@ input.flatpickr-input[readonly] {
 /* ── Notifications Dropdown ────────────────────── */
 .dropdown {
   position: fixed;
-  top: var(--header-height);
+  top: calc(var(--header-height) + 8px);
   right: 8px;
-  width: 320px;
-  max-height: 400px;
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - var(--header-height) - 24px));
   background: var(--bg-card);
-  border-radius: var(--radius);
+  border-radius: 18px;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border);
   z-index: 2000;
+  overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -5018,6 +5119,8 @@ input.flatpickr-input[readonly] {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -5026,27 +5129,40 @@ input.flatpickr-input[readonly] {
 }
 .dropdown-header h3 {
   font-size: 15px;
+  margin: 0;
 }
 .dropdown-list {
+  padding-bottom: var(--safe-bottom);
+}
+.dropdown-list-state {
+  padding: 18px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 .notif-item {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 .notif-item:hover {
   background: var(--bg);
 }
 .notif-item.unread {
-  background: var(--primary-light);
+  background: #f0fdf4;
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 .notif-item p {
   font-size: 13px;
-  margin-bottom: 2px;
+  margin-bottom: 0;
+  line-height: 1.45;
 }
 .notif-time {
+  display: block;
   font-size: 11px;
   color: var(--text-muted);
+  margin-top: 4px;
 }
 
 /* ── Chat Panel (DMs) ─────────────────────────── */
@@ -5274,15 +5390,25 @@ input.flatpickr-input[readonly] {
 
 /* ── Friend Picker (modals) ────────────────────── */
 .friend-picker {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
   max-height: 200px;
   overflow-y: auto;
+}
+.friend-picker .muted {
+  margin: 0;
 }
 .friend-pick-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 0;
+  padding: 8px 0;
   cursor: pointer;
+}
+.friend-pick-item + .friend-pick-item {
+  border-top: 1px solid var(--border);
 }
 .friend-pick-avatar {
   width: 28px;
@@ -5297,7 +5423,65 @@ input.flatpickr-input[readonly] {
   justify-content: center;
 }
 .friend-pick-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
   font-size: 14px;
+}
+.friend-pick-name strong {
+  font-size: 14px;
+  line-height: 1.3;
+}
+.friend-pick-name .muted {
+  font-size: 12px;
+}
+.tournament-invite-selection {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+}
+.tournament-invite-selection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.tournament-invite-selection-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.tournament-invite-selection-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tournament-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+.tournament-selected-chip strong {
+  font-size: 12px;
+}
+.tournament-selected-chip .muted {
+  font-size: 11px;
+}
+.tournament-selected-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 /* ── Calendar (sessions) ──────────────────────── */

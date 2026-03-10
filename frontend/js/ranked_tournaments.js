@@ -6,6 +6,8 @@ Object.assign(Ranked, {
     currentTournamentId: null,
     currentTournamentCourtId: null,
     _tournamentInviteSelection: new Set(),
+    _tournamentInviteKnownUsers: new Map(),
+    _tournamentInviteSearchQuery: '',
 
     _formatTournamentDate(value) {
         if (!value) return 'TBD';
@@ -118,6 +120,55 @@ Object.assign(Ranked, {
 
     _resetTournamentInviteSelection() {
         Ranked._tournamentInviteSelection = new Set();
+        Ranked._tournamentInviteKnownUsers = new Map();
+        Ranked._tournamentInviteSearchQuery = '';
+    },
+
+    _rememberTournamentInviteUser(user) {
+        const userId = Number(user?.id) || 0;
+        if (!userId) return;
+        Ranked._tournamentInviteKnownUsers.set(userId, {
+            id: userId,
+            name: user?.name || user?.username || 'Player',
+            username: user?.username || '',
+        });
+    },
+
+    _selectedTournamentInviteUsers() {
+        return Ranked._selectedTournamentInviteIds().map(userId => (
+            Ranked._tournamentInviteKnownUsers.get(userId) || {
+                id: userId,
+                name: `Player ${userId}`,
+                username: '',
+            }
+        ));
+    },
+
+    _renderTournamentInviteSummary() {
+        const countEl = document.getElementById('tournament-invite-selection-count');
+        const listEl = document.getElementById('tournament-invite-selection-list');
+        const sendBtn = document.getElementById('tournament-send-invites-btn');
+        const selectedUsers = Ranked._selectedTournamentInviteUsers();
+        const count = selectedUsers.length;
+        if (countEl) {
+            countEl.textContent = count === 1 ? '1 player selected' : `${count} players selected`;
+        }
+        if (listEl) {
+            listEl.innerHTML = count
+                ? selectedUsers.map(user => `
+                    <span class="tournament-selected-chip">
+                        <strong>${Ranked._e(user.name || user.username || 'Player')}</strong>
+                        ${user.username ? `<span class="muted">@${Ranked._e(user.username)}</span>` : ''}
+                    </span>
+                `).join('')
+                : '<p class="tournament-selected-empty">No players selected yet. Pick friends or search by name to build your invite list.</p>';
+        }
+        if (sendBtn) {
+            sendBtn.disabled = count === 0;
+            sendBtn.textContent = count > 0
+                ? `Send ${count} Invite${count === 1 ? '' : 's'}`
+                : 'Send Invites';
+        }
     },
 
     _toggleTournamentInviteUser(userId, checked) {
@@ -125,6 +176,7 @@ Object.assign(Ranked, {
         if (!numericId) return;
         if (checked) Ranked._tournamentInviteSelection.add(numericId);
         else Ranked._tournamentInviteSelection.delete(numericId);
+        Ranked._renderTournamentInviteSummary();
     },
 
     _selectedTournamentInviteIds() {
@@ -137,11 +189,16 @@ Object.assign(Ranked, {
         return friends.map(friend => {
             const selected = Ranked._tournamentInviteSelection.has(friend.id);
             const safeName = Ranked._e(friend.name || friend.username || 'Player');
+            const safeUsername = Ranked._e(friend.username || '');
+            Ranked._rememberTournamentInviteUser(friend);
             return `
                 <label class="friend-pick-item">
                     <input type="checkbox" ${selected ? 'checked' : ''} onchange="Ranked._toggleTournamentInviteUser(${friend.id}, this.checked)">
                     <span class="friend-pick-avatar">${Ranked._e((safeName[0] || '?').toUpperCase())}</span>
-                    <span class="friend-pick-name">${safeName}</span>
+                    <span class="friend-pick-name">
+                        <strong>${safeName}</strong>
+                        ${safeUsername ? `<span class="muted">@${safeUsername}</span>` : ''}
+                    </span>
                 </label>
             `;
         }).join('');
@@ -151,8 +208,9 @@ Object.assign(Ranked, {
         const container = document.getElementById(resultsContainerId);
         if (!container) return;
         const q = String(query || '').trim();
+        Ranked._tournamentInviteSearchQuery = q;
         if (q.length < 2) {
-            container.innerHTML = '';
+            container.innerHTML = '<p class="muted">Search by name or username to invite more players.</p>';
             return;
         }
         try {
@@ -167,11 +225,15 @@ Object.assign(Ranked, {
                 const selected = Ranked._tournamentInviteSelection.has(user.id);
                 const safeName = Ranked._e(user.name || user.username || 'Player');
                 const safeUsername = Ranked._e(user.username || '');
+                Ranked._rememberTournamentInviteUser(user);
                 return `
                     <label class="friend-pick-item">
                         <input type="checkbox" ${selected ? 'checked' : ''} onchange="Ranked._toggleTournamentInviteUser(${user.id}, this.checked)">
                         <span class="friend-pick-avatar">${Ranked._e((safeName[0] || '?').toUpperCase())}</span>
-                        <span class="friend-pick-name">${safeName} <span class="muted">@${safeUsername}</span></span>
+                        <span class="friend-pick-name">
+                            <strong>${safeName}</strong>
+                            <span class="muted">@${safeUsername}</span>
+                        </span>
                     </label>
                 `;
             }).join('');
@@ -458,8 +520,8 @@ Object.assign(Ranked, {
         return sizes.find(size => size >= parsed) || parsed;
     },
 
-    _tournamentReadinessHTML(tournament) {
-        if (String(tournament.status || '') !== 'upcoming') return '';
+    _tournamentReadinessSummary(tournament) {
+        if (String(tournament.status || '') !== 'upcoming') return null;
         const participants = (tournament.participants || []).filter(p =>
             ['registered', 'checked_in'].includes(String(p.participant_status || ''))
         );
@@ -490,7 +552,32 @@ Object.assign(Ranked, {
         const graceLabel = graceEndsAt && !Number.isNaN(graceEndsAt.getTime())
             ? graceEndsAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
             : '';
-        const readinessPill = blockers.length ? 'Needs Attention' : 'Ready';
+        return {
+            registeredCount,
+            checkedInCount,
+            readyCount,
+            minParticipants,
+            missingCheckIns,
+            nextBracketSize,
+            blockers,
+            graceLabel,
+            readinessClass: blockers.length ? 'tournament-readiness-warning' : 'tournament-readiness-ready',
+            readinessPill: blockers.length ? 'Needs Attention' : 'Ready',
+        };
+    },
+
+    _tournamentReadinessHTML(tournament) {
+        const summary = Ranked._tournamentReadinessSummary(tournament);
+        if (!summary) return '';
+        const {
+            registeredCount,
+            readyCount,
+            nextBracketSize,
+            blockers,
+            graceLabel,
+            readinessClass,
+            readinessPill,
+        } = summary;
         return `
             <div class="tournament-readiness-card ${readinessClass}">
                 <div class="tournament-readiness-header">
@@ -585,6 +672,8 @@ Object.assign(Ranked, {
         const maxPlayers = Number(tournament.max_players || 0);
         const fillPct = maxPlayers ? Math.min(100, Math.round((registered / maxPlayers) * 100)) : 0;
         const statusValue = String(tournament.status || 'upcoming').toLowerCase();
+        const readiness = Ranked._tournamentReadinessSummary(tournament);
+        const startBlocked = isHost && readiness && readiness.blockers.length > 0;
 
         const actions = [];
         if (tournament.status === 'upcoming' && !my && tournament.access_mode === 'open') {
@@ -595,7 +684,7 @@ Object.assign(Ranked, {
             actions.push(`<button class="btn-danger btn-sm" onclick="Ranked.respondTournamentInvite(${tournament.id}, 'decline')">Decline</button>`);
         }
         if (tournament.status === 'upcoming' && my && tournament.check_in_required && !my.checked_in_at && my.participant_status === 'registered') {
-            actions.push(`<button class="btn-primary btn-sm" onclick="Ranked.checkInTournament(${tournament.id})">Check In</button>`);
+            actions.push(`<button class="btn-primary btn-sm" onclick="Ranked.checkInTournament(${tournament.id}, event)">Check In</button>`);
         }
         if (
             tournament.status === 'upcoming'
@@ -607,10 +696,23 @@ Object.assign(Ranked, {
         }
         if (tournament.status === 'upcoming' && isHost) {
             actions.push(`<button class="btn-secondary btn-sm" onclick="Ranked.openTournamentInviteModal(${tournament.id})">Invite Players</button>`);
-            actions.push(`<button class="btn-primary btn-sm" onclick="Ranked.startTournament(${tournament.id})">Start Tournament</button>`);
+            actions.push(`<button class="btn-primary btn-sm" onclick="Ranked.startTournament(${tournament.id})"${startBlocked ? ' disabled' : ''}>${startBlocked ? 'Start When Ready' : 'Start Tournament'}</button>`);
         }
         if (isHost && ['upcoming', 'live'].includes(String(tournament.status || ''))) {
             actions.push(`<button class="btn-danger btn-sm" onclick="Ranked.cancelTournament(${tournament.id})">Cancel</button>`);
+        }
+        const actionNotes = [];
+        if (startBlocked) {
+            actionNotes.push('Start unlocks automatically once the current readiness blockers are cleared.');
+        }
+        if (
+            tournament.status === 'upcoming'
+            && my
+            && tournament.check_in_required
+            && !my.checked_in_at
+            && my.participant_status === 'registered'
+        ) {
+            actionNotes.push('Tournament check-in only works after you check in at this court. Once you are on-site, come back here and tap Check In.');
         }
 
         const closeButton = isInline
@@ -668,6 +770,9 @@ Object.assign(Ranked, {
                     ` : ''}
                     ${Ranked._tournamentReadinessHTML(tournament)}
                     ${actions.length ? `<div class="tournament-actions">${actions.join('')}</div>` : ''}
+                    ${actionNotes.length
+                        ? `<div class="tournament-actions-notes">${actionNotes.map(note => `<p class="tournament-actions-note">${Ranked._e(note)}</p>`).join('')}</div>`
+                        : ''}
                 </div>
 
                 <div class="ranked-sub-section">
@@ -760,13 +865,21 @@ Object.assign(Ranked, {
         }
     },
 
-    async checkInTournament(tournamentId) {
+    async checkInTournament(tournamentId, event) {
+        const btn = Ranked._disableBtn(event);
         try {
             await API.post(`/api/ranked/tournaments/${tournamentId}/check-in`, {});
             App.toast('Checked in for tournament.');
             Ranked.refreshOpenTournamentModal();
         } catch (err) {
-            App.toast(err.message || 'Tournament check-in failed', 'error');
+            const message = String(err?.message || '');
+            if (message.toLowerCase().includes('check in at this court first')) {
+                App.toast('Check in at the court first, then come back here to confirm your tournament check-in.', 'error');
+            } else {
+                App.toast(message || 'Tournament check-in failed', 'error');
+            }
+        } finally {
+            if (btn) btn.disabled = false;
         }
     },
 
@@ -840,7 +953,16 @@ Object.assign(Ranked, {
             <div class="modal-content tournament-invite-modal">
                 <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none';Ranked.refreshOpenTournamentModal()">&times;</button>
                 <h2>Invite Players</h2>
-                <p class="muted" style="margin-bottom:12px">Select friends or search for players to invite.</p>
+                <p class="muted" style="margin-bottom:12px">Select friends or search for players to invite. You can mix both lists before sending.</p>
+                <div class="tournament-invite-selection">
+                    <div class="tournament-invite-selection-header">
+                        <strong>Selected Players</strong>
+                        <span id="tournament-invite-selection-count" class="tournament-invite-selection-count">0 players selected</span>
+                    </div>
+                    <div id="tournament-invite-selection-list" class="tournament-invite-selection-list">
+                        <p class="tournament-selected-empty">No players selected yet. Pick friends or search by name to build your invite list.</p>
+                    </div>
+                </div>
                 <div class="tournament-create-section">
                     <span class="tournament-create-section-label">Friends</span>
                     <div class="friend-picker">${Ranked._friendInviteOptionsHtml()}</div>
@@ -848,29 +970,48 @@ Object.assign(Ranked, {
                 <div class="tournament-create-section">
                     <span class="tournament-create-section-label">Search Players</span>
                     <div class="form-group" style="margin-bottom:0">
-                        <input type="text" placeholder="Search by name..." oninput="Ranked.searchTournamentUsers(this.value, 'tournament-search-results')">
-                        <div id="tournament-search-results" class="friend-picker"></div>
+                        <input type="text" placeholder="Search by name or username..." oninput="Ranked.searchTournamentUsers(this.value, 'tournament-search-results')">
+                        <div id="tournament-search-results" class="friend-picker"><p class="muted">Search by name or username to invite more players.</p></div>
                     </div>
                 </div>
-                <button class="btn-primary btn-full" style="min-height:44px;font-size:14px" onclick="Ranked.sendTournamentInvites(${tournamentId})">Send Invites</button>
+                <button id="tournament-send-invites-btn" class="btn-primary btn-full" style="min-height:44px;font-size:14px" disabled onclick="Ranked.sendTournamentInvites(${tournamentId}, event)">Send Invites</button>
             </div>
         `;
+        Ranked._renderTournamentInviteSummary();
     },
 
-    async sendTournamentInvites(tournamentId) {
+    async sendTournamentInvites(tournamentId, event) {
+        const btn = Ranked._disableBtn(event);
         const userIds = Ranked._selectedTournamentInviteIds();
         if (!userIds.length) {
             App.toast('Select at least one player', 'error');
+            if (btn) btn.disabled = false;
             return;
         }
         try {
-            await API.post(`/api/ranked/tournaments/${tournamentId}/invite`, { user_ids: userIds });
-            App.toast('Invites sent.');
+            const res = await API.post(`/api/ranked/tournaments/${tournamentId}/invite`, { user_ids: userIds });
+            const invitedCount = Array.isArray(res?.invited_ids) ? res.invited_ids.length : 0;
+            const skippedCount = Array.isArray(res?.skipped_ids) ? res.skipped_ids.length : 0;
+            if (invitedCount > 0) {
+                const suffix = skippedCount
+                    ? ` ${skippedCount} already joined and ${skippedCount === 1 ? 'was' : 'were'} skipped.`
+                    : '';
+                App.toast(`Invited ${invitedCount} player${invitedCount === 1 ? '' : 's'}.${suffix}`);
+            } else if (skippedCount > 0) {
+                App.toast(`Everyone selected is already in this tournament. Nothing new was sent.`, 'error');
+                return;
+            } else {
+                App.toast('No new invites were sent.', 'error');
+                return;
+            }
             const modal = document.getElementById('match-modal');
             if (modal) modal.style.display = 'none';
             Ranked.refreshOpenTournamentModal();
         } catch (err) {
             App.toast(err.message || 'Failed to send invites', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+            Ranked._renderTournamentInviteSummary();
         }
     },
 

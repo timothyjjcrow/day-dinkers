@@ -699,9 +699,38 @@ def search_users():
     users = User.query.filter(
         (User.username.ilike(f'%{q}%')) | (User.name.ilike(f'%{q}%'))
     ).limit(20).all()
-    return jsonify({
-        'users': [u.to_public_dict() for u in users if u.id != request.current_user.id]
-    })
+    visible_users = [u for u in users if u.id != request.current_user.id]
+    visible_ids = [u.id for u in visible_users]
+    relationship_by_user_id = {}
+
+    if visible_ids:
+        friendships = Friendship.query.filter(
+            ((Friendship.user_id == request.current_user.id) & Friendship.friend_id.in_(visible_ids))
+            | (Friendship.user_id.in_(visible_ids) & (Friendship.friend_id == request.current_user.id))
+        ).all()
+        for friendship in friendships:
+            other_user_id = friendship.friend_id if friendship.user_id == request.current_user.id else friendship.user_id
+            if friendship.status == 'accepted':
+                relationship_by_user_id[other_user_id] = {'connection_state': 'friend'}
+            elif friendship.status == 'pending':
+                if friendship.user_id == request.current_user.id:
+                    relationship_by_user_id[other_user_id] = {'connection_state': 'pending_outgoing'}
+                else:
+                    relationship_by_user_id[other_user_id] = {
+                        'connection_state': 'pending_incoming',
+                        'friendship_id': friendship.id,
+                    }
+
+    payload = []
+    for user in visible_users:
+        item = user.to_public_dict()
+        relationship = relationship_by_user_id.get(user.id, {})
+        item['connection_state'] = relationship.get('connection_state', 'none')
+        if relationship.get('friendship_id'):
+            item['friendship_id'] = relationship['friendship_id']
+        payload.append(item)
+
+    return jsonify({'users': payload})
 
 
 @auth_bp.route('/notifications', methods=['GET'])

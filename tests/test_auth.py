@@ -487,6 +487,10 @@ def test_friend_request_flow(client):
 
 def test_search_users(client):
     reg = client.post('/api/auth/register', json={
+        'username': 'searchowner', 'email': 'searchowner@test.com',
+        'password': 'password123', 'name': 'Search Owner',
+    })
+    client.post('/api/auth/register', json={
         'username': 'searchable', 'email': 'search@test.com',
         'password': 'password123', 'name': 'Find Me',
     })
@@ -495,6 +499,84 @@ def test_search_users(client):
         headers={'Authorization': f'Bearer {token}'},
     )
     assert res.status_code == 200
+    users = json.loads(res.data)['users']
+    usernames = {user['username'] for user in users}
+    assert 'searchable' in usernames
+    assert 'searchowner' not in usernames
+    searchable = next(user for user in users if user['username'] == 'searchable')
+    assert searchable['connection_state'] == 'none'
+
+
+def test_search_users_includes_relationship_state(client):
+    owner = client.post('/api/auth/register', json={
+        'username': 'searchowner2', 'email': 'searchowner2@test.com',
+        'password': 'password123', 'name': 'Search Owner Two',
+    })
+    accepted = client.post('/api/auth/register', json={
+        'username': 'searchfriend', 'email': 'searchfriend@test.com',
+        'password': 'password123', 'name': 'Search Friend',
+    })
+    outgoing = client.post('/api/auth/register', json={
+        'username': 'searchoutgoing', 'email': 'searchoutgoing@test.com',
+        'password': 'password123', 'name': 'Search Outgoing',
+    })
+    incoming = client.post('/api/auth/register', json={
+        'username': 'searchincoming', 'email': 'searchincoming@test.com',
+        'password': 'password123', 'name': 'Search Incoming',
+    })
+    neutral = client.post('/api/auth/register', json={
+        'username': 'searchneutral', 'email': 'searchneutral@test.com',
+        'password': 'password123', 'name': 'Search Neutral',
+    })
+
+    owner_token = json.loads(owner.data)['token']
+    accepted_token = json.loads(accepted.data)['token']
+    outgoing_id = json.loads(outgoing.data)['user']['id']
+    incoming_id = json.loads(incoming.data)['user']['id']
+    accepted_id = json.loads(accepted.data)['user']['id']
+
+    send_accepted = client.post('/api/auth/friends/request',
+        json={'friend_id': accepted_id},
+        headers={'Authorization': f'Bearer {owner_token}'},
+    )
+    assert send_accepted.status_code == 201
+    pending_for_accepted = client.get('/api/auth/friends/pending',
+        headers={'Authorization': f'Bearer {accepted_token}'},
+    )
+    accepted_request = json.loads(pending_for_accepted.data)['requests'][0]
+    accept_res = client.post('/api/auth/friends/respond',
+        json={'friendship_id': accepted_request['id'], 'action': 'accept'},
+        headers={'Authorization': f'Bearer {accepted_token}'},
+    )
+    assert accept_res.status_code == 200
+
+    outgoing_res = client.post('/api/auth/friends/request',
+        json={'friend_id': outgoing_id},
+        headers={'Authorization': f'Bearer {owner_token}'},
+    )
+    assert outgoing_res.status_code == 201
+
+    incoming_token = json.loads(incoming.data)['token']
+    incoming_res = client.post('/api/auth/friends/request',
+        json={'friend_id': json.loads(owner.data)['user']['id']},
+        headers={'Authorization': f'Bearer {incoming_token}'},
+    )
+    assert incoming_res.status_code == 201
+
+    res = client.get('/api/auth/users/search?q=search',
+        headers={'Authorization': f'Bearer {owner_token}'},
+    )
+    assert res.status_code == 200
+    users = {
+        user['username']: user
+        for user in json.loads(res.data)['users']
+    }
+
+    assert users['searchfriend']['connection_state'] == 'friend'
+    assert users['searchoutgoing']['connection_state'] == 'pending_outgoing'
+    assert users['searchincoming']['connection_state'] == 'pending_incoming'
+    assert users['searchincoming']['friendship_id'] > 0
+    assert users['searchneutral']['connection_state'] == 'none'
 
 
 def test_search_users_rate_limit_returns_429(client):

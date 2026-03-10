@@ -237,8 +237,7 @@ const App = {
         App.currentScreen = screen;
 
         // Close dropdowns
-        const dd = document.getElementById('notifications-dropdown');
-        if (dd) dd.style.display = 'none';
+        App.hideNotifications();
 
         if (screen === 'main' && App.currentMainTab === 'map') {
             setTimeout(() => { if (MapView.map) MapView.map.invalidateSize(); }, 100);
@@ -504,20 +503,33 @@ const App = {
         } catch {}
     },
 
+    hideNotifications() {
+        const dropdown = document.getElementById('notifications-dropdown');
+        if (dropdown) dropdown.style.display = 'none';
+    },
+
     toggleNotifications() {
         const dd = document.getElementById('notifications-dropdown');
+        if (!dd) return;
         const open = dd.style.display === 'block';
-        dd.style.display = open ? 'none' : 'block';
-        if (!open) App._loadNotifications();
+        if (open) {
+            App.hideNotifications();
+            return;
+        }
+        dd.style.display = 'block';
+        App._loadNotifications();
     },
 
     async _loadNotifications() {
         const list = document.getElementById('notifications-list');
-        list.innerHTML = '<div class="loading">Loading...</div>';
+        list.innerHTML = '<div class="dropdown-list-state">Loading notifications...</div>';
         try {
             const res = await API.get('/api/auth/notifications');
             const notifs = res.notifications || [];
-            if (!notifs.length) { list.innerHTML = '<p class="muted" style="padding:16px">No notifications</p>'; return; }
+            if (!notifs.length) {
+                list.innerHTML = '<div class="dropdown-list-state">You\'re all caught up.</div>';
+                return;
+            }
             list.innerHTML = notifs.map(n => {
                 const isFriendNotif = ['friend_request', 'friend_accepted'].includes(n.notif_type);
                 const isSessionNotif = ['session_invite', 'session_join', 'session_spot_opened'].includes(n.notif_type);
@@ -529,18 +541,18 @@ const App = {
                 const isProfileNotif = ['court_update_result', 'court_report_result'].includes(n.notif_type);
                 let onclick = '';
                 if (isSessionNotif && n.reference_id) {
-                    onclick = `onclick="document.getElementById('notifications-dropdown').style.display='none'; Sessions.openDetail(${n.reference_id});"`;
+                    onclick = `onclick="App.hideNotifications(); Sessions.openDetail(${n.reference_id});"`;
                 }
-                else if (isCourtNotif && n.reference_id) onclick = `onclick="App.openCourtDetails(${n.reference_id}); document.getElementById('notifications-dropdown').style.display='none';"`;
-                else if (isFriendNotif) onclick = `onclick="App.setMainTab('profile'); document.getElementById('notifications-dropdown').style.display='none';"`;
-                else if (isProfileNotif) onclick = `onclick="App.setMainTab('profile'); document.getElementById('notifications-dropdown').style.display='none';"`;
+                else if (isCourtNotif && n.reference_id) onclick = `onclick="App.hideNotifications(); App.openCourtDetails(${n.reference_id});"`;
+                else if (isFriendNotif) onclick = `onclick="App.hideNotifications(); App.setMainTab('profile');"`;
+                else if (isProfileNotif) onclick = `onclick="App.hideNotifications(); App.setMainTab('profile');"`;
                 else if (isMatchNotif || isChallengeNotif) {
                     onclick = `onclick="App.openRankedActionFromNotification('${n.notif_type}', ${Number(n.reference_id) || 'null'});"`;
                 }
                 else if (isTournamentNotif) {
                     onclick = `onclick="App.openTournamentActionFromNotification('${n.notif_type}', ${Number(n.reference_id) || 'null'});"`;
                 }
-                else if (isAdminNotif) onclick = `onclick="App.showScreen('admin'); document.getElementById('notifications-dropdown').style.display='none';"`;
+                else if (isAdminNotif) onclick = `onclick="App.hideNotifications(); App.showScreen('admin');"`;
                 return `
                 <div class="notif-item ${n.read ? '' : 'unread'}" ${onclick} style="${onclick ? 'cursor:pointer' : ''}">
                     <p>${n.content}</p>
@@ -549,12 +561,13 @@ const App = {
             }).join('');
             const unread = notifs.filter(n => !n.read).length;
             App._setNotificationBadge(unread);
-        } catch { list.innerHTML = '<p class="muted">Unable to load</p>'; }
+        } catch {
+            list.innerHTML = '<div class="dropdown-list-state">Unable to load notifications right now.</div>';
+        }
     },
 
     async openRankedActionFromNotification(notifType, referenceId = null) {
-        const dropdown = document.getElementById('notifications-dropdown');
-        if (dropdown) dropdown.style.display = 'none';
+        App.hideNotifications();
 
         try {
             let courtId = null;
@@ -578,8 +591,7 @@ const App = {
     },
 
     async openTournamentActionFromNotification(notifType, referenceId = null) {
-        const dropdown = document.getElementById('notifications-dropdown');
-        if (dropdown) dropdown.style.display = 'none';
+        App.hideNotifications();
 
         let tournamentId = null;
         let courtId = null;
@@ -758,6 +770,16 @@ const App = {
         document.addEventListener('click', (e) => {
             const picker = document.getElementById('county-picker');
             if (picker && !picker.contains(e.target)) App.closeCountyPicker();
+            const notifDropdown = document.getElementById('notifications-dropdown');
+            const notifButton = document.getElementById('btn-notifications');
+            if (
+                notifDropdown
+                && notifDropdown.style.display === 'block'
+                && !notifDropdown.contains(e.target)
+                && !(notifButton && notifButton.contains(e.target))
+            ) {
+                App.hideNotifications();
+            }
             const suggestions = document.getElementById('search-suggestions');
             const searchInput = document.getElementById('mobile-search-input');
             if (suggestions && !suggestions.contains(e.target) && e.target !== searchInput) {

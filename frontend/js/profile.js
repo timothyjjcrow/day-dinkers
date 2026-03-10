@@ -2,6 +2,10 @@
  * Profile page — full-page view with stats, friends, and edit functionality.
  */
 const Profile = {
+    _searchTimer: null,
+    _searchRequestSeq: 0,
+    _activeSearchQuery: '',
+
     async load() {
         const container = document.getElementById('profile-page-content');
         const token = localStorage.getItem('token');
@@ -107,7 +111,7 @@ const Profile = {
                     <h3>Friends</h3>
                     <div id="profile-friends-list">Loading...</div>
                     <div class="friend-search">
-                        <input type="text" id="friend-search-input" placeholder="Search players..." oninput="Profile.searchUsers(this.value)">
+                        <input type="text" id="friend-search-input" placeholder="Search players by name or username..." oninput="Profile.queueSearchUsers(this.value)">
                         <div id="friend-search-results"></div>
                     </div>
                 </div>
@@ -143,11 +147,12 @@ const Profile = {
         </div>
 
         <!-- Edit Profile Modal -->
-        <div id="edit-profile-modal" class="modal" style="display:none">
-            <div class="modal-content">
+        <div id="edit-profile-modal" class="modal" style="display:none" onclick="if (event.target === this) Profile.hideEdit()">
+            <div class="modal-content profile-edit-modal">
                 <button class="modal-close" onclick="Profile.hideEdit()">&times;</button>
                 <h2>Edit Profile</h2>
-                <form onsubmit="Profile.save(event)">
+                <p class="muted profile-edit-intro">Keep your profile current so invites, messages, and ranked matches feel more personal.</p>
+                <form class="profile-edit-form" onsubmit="Profile.save(event)">
                     <div class="form-group"><label>Display Name</label><input type="text" name="name" value="${Profile._ea(user.name || '')}"></div>
                     <div class="form-group"><label>Bio</label><textarea name="bio" rows="3">${Profile._e(user.bio || '')}</textarea></div>
                     <div class="form-row">
@@ -180,7 +185,10 @@ const Profile = {
                             <option value="evening" ${user.preferred_times === 'evening' ? 'selected' : ''}>Evening</option>
                         </select>
                     </div>
-                    <button type="submit" class="btn-primary btn-full">Save Changes</button>
+                    <div class="profile-edit-actions">
+                        <button type="button" class="btn-secondary" onclick="Profile.hideEdit()">Cancel</button>
+                        <button type="submit" class="btn-primary">Save Changes</button>
+                    </div>
                 </form>
             </div>
         </div>`;
@@ -406,7 +414,15 @@ const Profile = {
             const res = await API.get('/api/sessions/my');
             const sessions = (res.sessions || []).slice(0, 5);
             if (!sessions.length) {
-                el.innerHTML = '<p class="muted">No active or upcoming sessions. <a href="#" onclick="App.setMainTab(\'map\')">Browse courts</a></p>';
+                el.innerHTML = `
+                    <div class="profile-section-empty">
+                        <p>No active or upcoming sessions yet. Browse courts to find a game nearby or schedule one with your preferred time and format.</p>
+                        <div class="profile-section-actions">
+                            <button class="btn-secondary btn-sm" onclick="App.setMainTab('map')">Browse Courts</button>
+                            <button class="btn-primary btn-sm" onclick="Sessions.showCreateModal()">Schedule Open to Play</button>
+                        </div>
+                    </div>
+                `;
                 return;
             }
             el.innerHTML = sessions.map(s => {
@@ -436,39 +452,131 @@ const Profile = {
         } catch { el.innerHTML = '<p class="muted">Unable to load sessions</p>'; }
     },
 
+    queueSearchUsers(query) {
+        const el = document.getElementById('friend-search-results');
+        if (!el) return;
+        const normalized = String(query || '');
+        Profile._activeSearchQuery = normalized;
+        if (Profile._searchTimer) {
+            window.clearTimeout(Profile._searchTimer);
+            Profile._searchTimer = null;
+        }
+        if (normalized.trim().length < 2) {
+            el.innerHTML = '';
+            return;
+        }
+        el.innerHTML = '<p class="search-result-helper">Searching players...</p>';
+        Profile._searchTimer = window.setTimeout(() => {
+            Profile.searchUsers(normalized);
+        }, 180);
+    },
+
+    refreshSearchUsers() {
+        const input = document.getElementById('friend-search-input');
+        const query = (input && typeof input.value === 'string') ? input.value : Profile._activeSearchQuery;
+        if (!query || query.trim().length < 2) return;
+        Profile.searchUsers(query);
+    },
+
+    _searchStatusMeta(user) {
+        const state = String(user?.connection_state || 'none');
+        if (state === 'friend') {
+            return { label: 'Friend', className: 'search-result-chip search-result-chip-friend' };
+        }
+        if (state === 'pending_incoming') {
+            return { label: 'Incoming request', className: 'search-result-chip search-result-chip-pending' };
+        }
+        if (state === 'pending_outgoing') {
+            return { label: 'Request sent', className: 'search-result-chip search-result-chip-muted' };
+        }
+        return null;
+    },
+
+    _searchActionsHTML(user) {
+        const userId = Number(user?.id) || 0;
+        const friendshipId = Number(user?.friendship_id) || 0;
+        const state = String(user?.connection_state || 'none');
+        if (state === 'friend') {
+            return `
+                <button class="btn-secondary btn-sm" onclick="Ranked.viewPlayer(${userId})">Profile</button>
+                <button class="btn-secondary btn-sm" onclick="Chat.openDirectByUser(${userId})">Message</button>
+            `;
+        }
+        if (state === 'pending_incoming' && friendshipId) {
+            return `
+                <button class="btn-secondary btn-sm" onclick="Ranked.viewPlayer(${userId})">Profile</button>
+                <button class="btn-primary btn-sm" onclick="Profile.respondRequest(${friendshipId}, 'accept')">Accept</button>
+                <button class="btn-secondary btn-sm" onclick="Profile.respondRequest(${friendshipId}, 'decline')">Decline</button>
+            `;
+        }
+        if (state === 'pending_outgoing') {
+            return `
+                <button class="btn-secondary btn-sm" onclick="Ranked.viewPlayer(${userId})">Profile</button>
+                <button class="btn-primary btn-sm" disabled>Request Sent</button>
+            `;
+        }
+        return `
+            <button class="btn-secondary btn-sm" onclick="Ranked.viewPlayer(${userId})">Profile</button>
+            <button class="btn-primary btn-sm" onclick="Profile.addFriend(${userId})">Add Friend</button>
+        `;
+    },
+
     async searchUsers(query) {
         const el = document.getElementById('friend-search-results');
-        if (query.length < 2) { el.innerHTML = ''; return; }
+        if (!el) return;
+        const normalized = String(query || '').trim();
+        Profile._activeSearchQuery = normalized;
+        if (normalized.length < 2) {
+            el.innerHTML = '';
+            return;
+        }
+        const requestSeq = ++Profile._searchRequestSeq;
         try {
-            const res = await API.get(`/api/auth/users/search?q=${encodeURIComponent(query)}`);
-            el.innerHTML = res.users.map(u => `
+            const res = await API.get(`/api/auth/users/search?q=${encodeURIComponent(normalized)}`);
+            if (requestSeq !== Profile._searchRequestSeq) return;
+            el.innerHTML = res.users.map(u => {
+                const statusMeta = Profile._searchStatusMeta(u);
+                return `
                 <div class="search-result-card">
                     <div class="search-result-main">
                         <strong>${Profile._e(u.name || u.username)}</strong>
                         <span class="muted">@${Profile._e(u.username)}</span>
+                        ${statusMeta ? `<span class="${statusMeta.className}">${statusMeta.label}</span>` : ''}
                     </div>
                     <div class="friend-actions">
-                        <button class="btn-secondary btn-sm" onclick="Ranked.viewPlayer(${u.id})">Profile</button>
-                        <button class="btn-primary btn-sm" onclick="Profile.addFriend(${u.id})">Add Friend</button>
+                        ${Profile._searchActionsHTML(u)}
                     </div>
                 </div>
-            `).join('') || '<p class="muted">No players found</p>';
-        } catch { el.innerHTML = ''; }
+            `;
+            }).join('') || '<p class="search-result-helper">No players found.</p>';
+        } catch {
+            if (requestSeq !== Profile._searchRequestSeq) return;
+            el.innerHTML = '<p class="search-result-helper">Unable to search right now.</p>';
+        }
     },
 
     async addFriend(userId) {
         try {
             await API.post('/api/auth/friends/request', { friend_id: userId });
             App.toast('Friend request sent!');
+            Profile.refreshSearchUsers();
         } catch { App.toast('Could not send request', 'error'); }
     },
 
     async respondRequest(friendshipId, action) {
+        const activeQuery = Profile._activeSearchQuery;
         try {
             await API.post('/api/auth/friends/respond', { friendship_id: friendshipId, action });
             App.toast(action === 'accept' ? 'Friend added!' : 'Request declined');
             Profile.load();
-            setTimeout(() => Profile.loadExtras(), 300);
+            setTimeout(() => {
+                Profile.loadExtras();
+                const input = document.getElementById('friend-search-input');
+                if (input && activeQuery) {
+                    input.value = activeQuery;
+                    Profile.queueSearchUsers(activeQuery);
+                }
+            }, 300);
         } catch { App.toast('Failed to respond', 'error'); }
     },
 
