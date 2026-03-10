@@ -6373,7 +6373,7 @@ input.flatpickr-input[readonly] {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   flex: 1;
-  padding: 14px 12px calc(28px + var(--safe-bottom));
+  padding: 0 12px calc(28px + var(--safe-bottom));
   scrollbar-width: none;
 }
 .court-scrollable-page::-webkit-scrollbar {
@@ -6724,9 +6724,9 @@ input.flatpickr-input[readonly] {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 2px 2px 12px;
-  margin-bottom: 2px;
-  background: linear-gradient(180deg, rgba(241, 245, 249, 0.98), rgba(241, 245, 249, 0.92) 72%, rgba(241, 245, 249, 0));
+  padding: 8px 2px 10px;
+  margin-bottom: 4px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(248, 250, 252, 0.98) 72%, rgba(248, 250, 252, 0.94));
   backdrop-filter: blur(10px);
   scrollbar-width: none;
   scroll-snap-type: x proximity;

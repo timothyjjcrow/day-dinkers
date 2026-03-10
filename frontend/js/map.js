@@ -29,6 +29,7 @@ const MapView = {
     scheduleBannerLoadPromise: null,
     scheduleBannerCountySlug: null,
     courtPageScrollHandler: null,
+    courtPageScrollAnimationFrame: null,
 
     init() {
         MapView.map = L.map('map', {
@@ -316,7 +317,42 @@ const MapView = {
         const elRect = el.getBoundingClientRect();
         const stickyOffset = stickyNav ? stickyNav.getBoundingClientRect().height + 8 : 0;
         const nextScrollTop = root.scrollTop + (elRect.top - rootRect.top) - stickyOffset;
-        root.scrollTop = Math.max(0, nextScrollTop);
+        MapView._animateCourtPageScroll(root, nextScrollTop);
+    },
+
+    _animateCourtPageScroll(root, nextScrollTop) {
+        if (!root) return;
+        const targetScrollTop = Math.round(Math.max(0, nextScrollTop));
+        if (MapView.courtPageScrollAnimationFrame) {
+            cancelAnimationFrame(MapView.courtPageScrollAnimationFrame);
+            MapView.courtPageScrollAnimationFrame = null;
+        }
+        const prefersReducedMotion = window.matchMedia
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (prefersReducedMotion) {
+            root.scrollTop = targetScrollTop;
+            return;
+        }
+        const startScrollTop = root.scrollTop;
+        const distance = targetScrollTop - startScrollTop;
+        if (Math.abs(distance) < 4) {
+            root.scrollTop = targetScrollTop;
+            return;
+        }
+        const durationMs = Math.min(420, Math.max(180, Math.abs(distance) * 0.22));
+        const easeOutCubic = progress => 1 - Math.pow(1 - progress, 3);
+        const startTime = performance.now();
+        const step = now => {
+            const progress = Math.min(1, (now - startTime) / durationMs);
+            root.scrollTop = startScrollTop + (distance * easeOutCubic(progress));
+            if (progress < 1) {
+                MapView.courtPageScrollAnimationFrame = requestAnimationFrame(step);
+            } else {
+                root.scrollTop = targetScrollTop;
+                MapView.courtPageScrollAnimationFrame = null;
+            }
+        };
+        MapView.courtPageScrollAnimationFrame = requestAnimationFrame(step);
     },
 
     _setActiveCourtSection(sectionId, sourceButton = null) {
@@ -372,6 +408,10 @@ const MapView = {
         if (MapView.courtPageScrollHandler) {
             window.removeEventListener('resize', MapView.courtPageScrollHandler);
         }
+        if (MapView.courtPageScrollAnimationFrame) {
+            cancelAnimationFrame(MapView.courtPageScrollAnimationFrame);
+        }
+        MapView.courtPageScrollAnimationFrame = null;
         MapView.courtPageScrollHandler = null;
     },
 
