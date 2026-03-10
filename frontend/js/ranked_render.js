@@ -6,6 +6,7 @@ Object.assign(Ranked, {
 
     _renderLeaderboard(players, options = {}) {
         const scopeLabel = Ranked._e(options.scopeLabel || 'Court');
+        const scopeDescription = Ranked._e(options.scopeDescription || '');
         const currentUser = Ranked._currentUser();
         const currentUserId = Number(currentUser.id) || 0;
         const allPlayers = players || [];
@@ -36,6 +37,7 @@ Object.assign(Ranked, {
                     </div>
                     <span class="muted">${allPlayers.length} ranked player${allPlayers.length === 1 ? '' : 's'}</span>
                 </div>
+                ${scopeDescription ? `<p class="muted ranked-scope-note">${scopeDescription}</p>` : ''}
                 ${featuredCards ? `<div class="leaderboard-podium">${featuredCards}</div>` : ''}
                 ${rows
                     ? `<div class="ranked-leaderboard-list leaderboard-ranked-list">${rows}</div>`
@@ -65,15 +67,17 @@ Object.assign(Ranked, {
             : '--';
         const eloClass = elo >= 1400 ? 'elo-high' : elo >= 1200 ? 'elo-mid' : 'elo-low';
         const rankClass = rank === 1 ? 'rank-first' : rank === 2 ? 'rank-second' : rank === 3 ? 'rank-third' : '';
-        const tier = elo >= 1500
-            ? 'Diamond'
-            : elo >= 1400
-                ? 'Platinum'
-                : elo >= 1300
-                    ? 'Gold'
-                    : elo >= 1200
-                        ? 'Silver'
-                        : 'Bronze';
+        const tier = (typeof App !== 'undefined' && typeof App.getEloTier === 'function')
+            ? App.getEloTier(elo).name
+            : (elo >= 1500
+                ? 'Diamond'
+                : elo >= 1400
+                    ? 'Platinum'
+                    : elo >= 1300
+                        ? 'Gold'
+                        : elo >= 1200
+                            ? 'Silver'
+                            : 'Bronze');
 
         const actionHTML = showChallenge
             ? (isCurrentUser

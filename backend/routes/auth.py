@@ -654,6 +654,13 @@ def respond_friend_request():
         return jsonify({'error': 'Friend request not found'}), 404
 
     friendship.status = 'accepted' if action == 'accept' else 'declined'
+    if friendship.status == 'accepted':
+        db.session.add(Notification(
+            user_id=friendship.user_id,
+            notif_type='friend_accepted',
+            content=f'{request.current_user.username} accepted your friend request',
+            reference_id=request.current_user.id,
+        ))
     db.session.commit()
     return jsonify({'message': f'Friend request {friendship.status}'})
 

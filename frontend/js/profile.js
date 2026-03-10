@@ -89,7 +89,7 @@ const Profile = {
                 <div class="profile-section">
                     <h3>⚔️ Match History</h3>
                     <div id="profile-match-history">Loading...</div>
-                    <button class="btn-secondary btn-sm" onclick="App.setMainTab('sessions')" style="margin-top:8px">Find a Court</button>
+                    <button class="btn-secondary btn-sm" onclick="App.setMainTab('map')" style="margin-top:8px">Browse Courts</button>
                 </div>
                 <div class="profile-section">
                     <h3>🏆 Tournament Results</h3>
@@ -98,6 +98,10 @@ const Profile = {
                 <div class="profile-section">
                     <h3>🟢 My Sessions</h3>
                     <div id="profile-upcoming-sessions">Loading...</div>
+                </div>
+                <div class="profile-section">
+                    <h3>Messages</h3>
+                    <div id="profile-message-threads">Loading...</div>
                 </div>
                 <div class="profile-section">
                     <h3>Friends</h3>
@@ -190,16 +194,19 @@ const Profile = {
     },
 
     _eloTier(elo) {
-        if (elo >= 1800) return { name: 'Diamond', icon: '💎', class: 'elo-diamond' };
-        if (elo >= 1600) return { name: 'Platinum', icon: '🏆', class: 'elo-platinum' };
-        if (elo >= 1400) return { name: 'Gold', icon: '🥇', class: 'elo-gold' };
+        if (typeof App !== 'undefined' && typeof App.getEloTier === 'function') {
+            return App.getEloTier(elo);
+        }
+        if (elo >= 1500) return { name: 'Diamond', icon: '💎', class: 'elo-diamond' };
+        if (elo >= 1400) return { name: 'Platinum', icon: '🏆', class: 'elo-platinum' };
+        if (elo >= 1300) return { name: 'Gold', icon: '🥇', class: 'elo-gold' };
         if (elo >= 1200) return { name: 'Silver', icon: '🥈', class: 'elo-silver' };
-        if (elo >= 1000) return { name: 'Bronze', icon: '🥉', class: 'elo-bronze' };
-        return { name: 'Unranked', icon: '⭐', class: 'elo-unranked' };
+        return { name: 'Bronze', icon: '🥉', class: 'elo-bronze' };
     },
 
     async loadExtras() {
         Profile._loadFriends();
+        Profile._loadMessageThreads();
         Profile._loadPendingRequests();
         Profile._loadUpcomingSessions();
         Profile._loadMatchHistory();
@@ -298,23 +305,75 @@ const Profile = {
         const el = document.getElementById('profile-friends-list');
         if (!el) return;
         try {
-            const res = await API.get('/api/auth/friends');
-            if (!res.friends.length) {
+            const [friendsRes, presenceRes] = await Promise.all([
+                API.get('/api/auth/friends'),
+                API.get('/api/presence/friends').catch(() => ({ friends_presence: [] })),
+            ]);
+            const friends = friendsRes.friends || [];
+            const presenceRows = presenceRes.friends_presence || [];
+            const presenceByUserId = new Map(
+                presenceRows.map(row => [Number(row.user?.id || row.user_id), row])
+            );
+            if (!friends.length) {
                 el.innerHTML = '<p class="muted">No friends yet. Search for players to connect!</p>';
                 return;
             }
-            el.innerHTML = res.friends.map(f => `
+            el.innerHTML = friends.map(f => {
+                const presence = presenceByUserId.get(Number(f.id));
+                const presenceLabel = presence
+                    ? '<span class="friend-presence-chip">Checked in now</span>'
+                    : '';
+                return `
                 <div class="friend-card">
-                    <div class="friend-avatar">${Profile._e((f.name || f.username)[0].toUpperCase())}</div>
-                    <div class="friend-info">
-                        <strong>${Profile._e(f.name || f.username)}</strong>
-                        <span class="muted">@${Profile._e(f.username)}</span>
+                    <div class="friend-card-main">
+                        <div class="friend-avatar">${Profile._e((f.name || f.username)[0].toUpperCase())}</div>
+                        <div class="friend-info">
+                            <strong>${Profile._e(f.name || f.username)}</strong>
+                            <span class="muted">@${Profile._e(f.username)}</span>
+                            ${presenceLabel}
+                        </div>
+                        ${f.skill_level ? `<span class="tag tag-skill">${f.skill_level}</span>` : ''}
                     </div>
-                    ${f.skill_level ? `<span class="tag tag-skill">${f.skill_level}</span>` : ''}
-                    <button class="btn-secondary btn-sm" onclick="Ranked.openScheduledChallengeModal(${f.id}, 'friends_challenge')">⚔️ Ranked</button>
+                    <div class="friend-card-actions">
+                        <button class="btn-secondary btn-sm" onclick="Ranked.viewPlayer(${f.id})">Profile</button>
+                        <button class="btn-secondary btn-sm" onclick="Chat.openDirectByUser(${f.id})">Message</button>
+                        <button class="btn-secondary btn-sm" onclick="Ranked.openScheduledChallengeModal(${f.id}, 'friends_challenge')">⚔️ Ranked</button>
+                    </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         } catch { el.innerHTML = '<p class="muted">Sign in to see friends</p>'; }
+    },
+
+    async _loadMessageThreads() {
+        const el = document.getElementById('profile-message-threads');
+        if (!el) return;
+        try {
+            const res = await API.get('/api/chat/direct/threads?limit=8');
+            const threads = res.threads || [];
+            if (!threads.length) {
+                el.innerHTML = '<p class="muted">No direct conversations yet. Start one from a friend card or player profile.</p>';
+                return;
+            }
+            el.innerHTML = threads.map(thread => {
+                const user = thread.user || {};
+                const safeName = Profile._e(user.name || user.username || 'Friend');
+                const preview = Profile._e(thread.last_message_preview || 'Open conversation');
+                const timeLabel = Profile._relativeTime(thread.last_message_at);
+                return `
+                    <button class="dm-thread-card" onclick="Chat.openDirectByUser(${Number(user.id) || 0})">
+                        <span class="friend-avatar">${Profile._e((safeName[0] || '?').toUpperCase())}</span>
+                        <span class="dm-thread-main">
+                            <strong>${safeName}</strong>
+                            <span class="muted">${preview}</span>
+                        </span>
+                        <span class="dm-thread-time">${Profile._e(timeLabel)}</span>
+                    </button>
+                `;
+            }).join('');
+        } catch {
+            el.innerHTML = '<p class="muted">Unable to load conversations.</p>';
+        }
     },
 
     async _loadPendingRequests() {
@@ -347,7 +406,7 @@ const Profile = {
             const res = await API.get('/api/sessions/my');
             const sessions = (res.sessions || []).slice(0, 5);
             if (!sessions.length) {
-                el.innerHTML = '<p class="muted">No active or upcoming sessions. <a href="#" onclick="App.setMainTab(\'sessions\')">Browse open sessions</a></p>';
+                el.innerHTML = '<p class="muted">No active or upcoming sessions. <a href="#" onclick="App.setMainTab(\'map\')">Browse courts</a></p>';
                 return;
             }
             el.innerHTML = sessions.map(s => {
@@ -384,8 +443,14 @@ const Profile = {
             const res = await API.get(`/api/auth/users/search?q=${encodeURIComponent(query)}`);
             el.innerHTML = res.users.map(u => `
                 <div class="search-result-card">
-                    <span>${Profile._e(u.name || u.username)} (@${Profile._e(u.username)})</span>
-                    <button class="btn-primary btn-sm" onclick="Profile.addFriend(${u.id})">Add Friend</button>
+                    <div class="search-result-main">
+                        <strong>${Profile._e(u.name || u.username)}</strong>
+                        <span class="muted">@${Profile._e(u.username)}</span>
+                    </div>
+                    <div class="friend-actions">
+                        <button class="btn-secondary btn-sm" onclick="Ranked.viewPlayer(${u.id})">Profile</button>
+                        <button class="btn-primary btn-sm" onclick="Profile.addFriend(${u.id})">Add Friend</button>
+                    </div>
                 </div>
             `).join('') || '<p class="muted">No players found</p>';
         } catch { el.innerHTML = ''; }
@@ -461,5 +526,19 @@ const Profile = {
             }
         } catch {}
         return '';
+    },
+
+    _relativeTime(isoValue) {
+        if (!isoValue) return '';
+        const ts = new Date(isoValue).getTime();
+        if (!Number.isFinite(ts)) return '';
+        const diffMs = Date.now() - ts;
+        const diffMinutes = Math.floor(diffMs / 60000);
+        if (diffMinutes < 1) return 'now';
+        if (diffMinutes < 60) return `${diffMinutes}m`;
+        const diffHours = Math.floor(diffMinutes / 60);
+        if (diffHours < 24) return `${diffHours}h`;
+        const diffDays = Math.floor(diffHours / 24);
+        return `${diffDays}d`;
     },
 };

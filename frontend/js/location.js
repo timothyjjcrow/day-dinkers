@@ -374,6 +374,7 @@ const LocationService = {
         }
 
         const regionEl = document.querySelector('.nav-region');
+        if (!regionEl) return;
         if (nearest && nearestDist < 5000) { // Within 5km
             const distStr = nearestDist < 1000
                 ? `${Math.round(nearestDist)}m`
@@ -480,10 +481,9 @@ const LocationService = {
             }
         }
 
-        if (typeof App !== 'undefined'
-            && App.currentView === 'sessions'
-            && typeof Sessions !== 'undefined'
+        if (typeof Sessions !== 'undefined'
             && typeof Sessions.load === 'function'
+            && document.getElementById('sessions-list')
         ) {
             Sessions.load();
         }

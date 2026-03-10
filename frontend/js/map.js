@@ -18,6 +18,8 @@ const MapView = {
     myCheckinStatus: null, // { checked_in: bool, court_id }
     friendsPresence: [],  // [{user, court_id, checked_in_at}]
     friendMarkers: [],
+    nearbyModeEnabled: false,
+    nearbyRadiusMiles: 25,
     scheduleBannerOpen: false,
     scheduleBannerDays: [],
     scheduleBannerItems: [],
@@ -68,7 +70,11 @@ const MapView = {
         if (pref !== 'enabled') return;
         navigator.geolocation?.getCurrentPosition(pos => {
             const { latitude, longitude } = pos.coords;
+            if (typeof LocationService !== 'undefined') {
+                LocationService.lastPosition = { lat: latitude, lng: longitude, accuracy: pos.coords.accuracy || null };
+            }
             MapView._placeUserDot(latitude, longitude);
+            MapView.loadCourts();
         }, () => {}, { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 });
     },
 
@@ -130,7 +136,7 @@ const MapView = {
         const fitToCourts = !!options.fitToCourts;
         try {
             const courtsUrl = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
-                ? App.buildCourtsQuery()
+                ? App.buildCourtsQuery(MapView._courtQueryParams())
                 : '/api/courts';
             const [res] = await Promise.all([
                 API.get(courtsUrl),
@@ -157,11 +163,22 @@ const MapView = {
         if (!el) return;
         const filtered = MapView._filterCourts(MapView.courts);
         const total = MapView.courts.length;
+        const nearbyLabel = MapView.nearbyModeEnabled
+            ? ` within ${MapView.nearbyRadiusMiles} mi`
+            : '';
         if (MapView.activeFilters.size > 0 && filtered.length !== total) {
-            el.textContent = `${filtered.length} of ${total}`;
+            el.textContent = `${filtered.length} of ${total}${nearbyLabel}`;
         } else {
-            el.textContent = `${total} courts`;
+            el.textContent = `${total} courts${nearbyLabel}`;
         }
+    },
+
+    _courtQueryParams(extraParams = {}) {
+        const params = { ...(extraParams || {}) };
+        if (MapView.nearbyModeEnabled) {
+            params.radius = MapView.nearbyRadiusMiles;
+        }
+        return params;
     },
 
     _setLastUpdated() {
@@ -282,6 +299,22 @@ const MapView = {
     closeDayPopup() {
         const popup = document.getElementById('schedule-day-popup');
         if (popup) popup.style.display = 'none';
+    },
+
+    scrollToCourtSection(sectionId, sourceButton = null) {
+        document.querySelectorAll('.court-sticky-nav-btn').forEach(btn => {
+            const isActive = sourceButton
+                ? btn === sourceButton
+                : btn.dataset.target === sectionId;
+            btn.classList.toggle('active', isActive);
+            if (isActive) {
+                btn.setAttribute('aria-current', 'true');
+            } else {
+                btn.removeAttribute('aria-current');
+            }
+        });
+        const el = document.getElementById(sectionId);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     },
 
     _renderDayPopupBody(dayKey, courtId) {
@@ -658,8 +691,19 @@ const MapView = {
             : '';
 
         const token = localStorage.getItem('token');
+        const myStatus = MapView.myCheckinStatus || {};
+        const amCheckedInHere = !!(myStatus.checked_in && Number(myStatus.court_id) === Number(court.id));
+        const checkedInElsewhere = !!(myStatus.checked_in && !amCheckedInHere);
+        const currentCourtName = checkedInElsewhere
+            ? MapView._escapeHtml(MapView._checkedInCourtName(myStatus.court_id))
+            : '';
         const checkinBtn = token
-            ? `<button class="btn-primary btn-sm" onclick="MapView.checkIn(${court.id})">Check In</button>`
+            ? (amCheckedInHere
+                ? '<button class="btn-secondary btn-sm" disabled>Checked In Here</button>'
+                : `<button class="btn-primary btn-sm" onclick="MapView.checkIn(${court.id})">${checkedInElsewhere ? 'Switch Check-In' : 'Check In'}</button>`)
+            : '';
+        const checkinNote = checkedInElsewhere
+            ? `<div class="popup-checkin-note">You're checked in at ${currentCourtName || 'another court'}. Switching courts will end any active Looking to Play session there.</div>`
             : '';
 
         return `
@@ -676,6 +720,7 @@ const MapView = {
             ${court.fees ? `<div class="popup-fees">${courtFees}</div>` : ''}
             ${court.hours ? `<div class="popup-hours">🕐 ${courtHours}</div>` : ''}
             ${friendsAtCourt.length > 0 ? `<div class="popup-friends">👥 ${safeFriendNames}</div>` : ''}
+            ${checkinNote}
             <div class="popup-amenities">${amenities.join(' ')}</div>
             <div class="popup-actions">
                 <button class="btn-primary btn-sm" onclick="App.openCourtDetails(${court.id})">Details</button>
@@ -683,6 +728,23 @@ const MapView = {
                 <a class="btn-secondary btn-sm" href="${MapView._formatDirectionsUrl(court.latitude, court.longitude)}" target="_blank" rel="noopener noreferrer">Directions</a>
             </div>
         </div>`;
+    },
+
+    _checkedInCourtName(courtId) {
+        const targetCourtId = Number(courtId) || 0;
+        if (!targetCourtId) return 'another court';
+        if (typeof LocationService !== 'undefined'
+            && LocationService.checkedInCourtSnapshot
+            && Number(LocationService.checkedInCourtSnapshot.id) === targetCourtId
+        ) {
+            return LocationService.checkedInCourtSnapshot.name || 'another court';
+        }
+        const cachedCourt = (MapView.courts || []).find(c => Number(c.id) === targetCourtId);
+        if (cachedCourt) return cachedCourt.name || 'another court';
+        if (MapView.currentCourtData && Number(MapView.currentCourtData.id) === targetCourtId) {
+            return MapView.currentCourtData.name || 'another court';
+        }
+        return 'another court';
     },
 
     _filterCourts(courts) {
@@ -719,6 +781,10 @@ const MapView = {
 
     _syncFilterChips() {
         const filtered = MapView._filterCourts(MapView.courts);
+        const nearbyBtn = document.getElementById('nearby-filter');
+        if (nearbyBtn) {
+            nearbyBtn.classList.toggle('active', MapView.nearbyModeEnabled);
+        }
         document.querySelectorAll('.filter-chip').forEach(btn => {
             const f = btn.dataset.filter;
             if (!f) return;
@@ -838,7 +904,7 @@ const MapView = {
         MapView._showSuggestions(query);
         try {
             const url = (typeof App !== 'undefined' && typeof App.buildCourtsQuery === 'function')
-                ? App.buildCourtsQuery({ search: query })
+                ? App.buildCourtsQuery(MapView._courtQueryParams({ search: query }))
                 : `/api/courts?search=${encodeURIComponent(query)}`;
             const res = await API.get(url);
             MapView.courts = res.courts || [];
@@ -920,13 +986,44 @@ const MapView = {
         return `${before}<strong>${match}</strong>${after}`;
     },
 
-    locateUser() {
-        if (!navigator.geolocation) return;
+    async toggleNearbyMode() {
+        if (MapView.nearbyModeEnabled) {
+            MapView.nearbyModeEnabled = false;
+            MapView._syncFilterChips();
+            MapView.loadCourts({ fitToCourts: true });
+            return;
+        }
+        const pos = typeof LocationService !== 'undefined' ? LocationService.lastPosition : null;
+        if (pos?.lat && pos?.lng) {
+            MapView.nearbyModeEnabled = true;
+            MapView._syncFilterChips();
+            MapView.loadCourts({ fitToCourts: true });
+            return;
+        }
+        MapView.locateUser({ enableNearbyMode: true });
+    },
+
+    locateUser(options = {}) {
+        if (!navigator.geolocation) {
+            App.toast('Geolocation is not supported on this device.', 'error');
+            return;
+        }
         navigator.geolocation.getCurrentPosition(pos => {
             const { latitude, longitude } = pos.coords;
+            if (typeof LocationService !== 'undefined') {
+                LocationService.lastPosition = { lat: latitude, lng: longitude, accuracy: pos.coords.accuracy || null };
+            }
             MapView.map.flyTo([latitude, longitude], 13, { duration: 0.8 });
             MapView._placeUserDot(latitude, longitude);
-        });
+            MapView.loadCourts({ fitToCourts: false });
+            if (options.enableNearbyMode) {
+                MapView.nearbyModeEnabled = true;
+                MapView._syncFilterChips();
+                MapView.loadCourts({ fitToCourts: true });
+            }
+        }, () => {
+            App.toast('Location permission was denied.', 'error');
+        }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
     },
 
     _placeUserDot(lat, lng) {
@@ -997,6 +1094,7 @@ const MapView = {
             if (pageContainer) pageContainer.innerHTML = MapView._courtPageHTML(court, sessions);
 
             Ranked.loadCourtRanked(court.id);
+            Ranked.loadMatchHistory(null, court.id);
             App._loadLeaderboardInline(court.id);
             MapView._loadCourtChat(court.id);
 
@@ -1017,6 +1115,7 @@ const MapView = {
             const pageContainer = document.getElementById('court-page-content');
             if (pageContainer) pageContainer.innerHTML = MapView._courtPageHTML(court, sessions);
             Ranked.loadCourtRanked(court.id);
+            Ranked.loadMatchHistory(null, court.id, { silent: true });
             App._loadLeaderboardInline(court.id);
             MapView._loadCourtChat(court.id);
         } catch {}
@@ -1203,10 +1302,25 @@ const MapView = {
             </div>` : '';
 
         const scheduleDaysHTML = MapView._courtScheduleDaysHTML(court.id);
+        const communityInfoHTML = MapView._communityInfoHTML(court.community_info || {});
+        const communityImagesHTML = MapView._imageGalleryHTML(court.images || []);
+        const communityEventsHTML = MapView._eventCardsHTML(court.upcoming_events || []);
+        const busynessHTML = MapView._busynessChart(court.busyness || {});
+        const stickyNav = `
+            <div class="court-sticky-nav">
+                <button type="button" class="court-sticky-nav-btn active" data-target="court-live-inline" aria-current="true" onclick="MapView.scrollToCourtSection('court-live-inline', this)">Live Now</button>
+                <button type="button" class="court-sticky-nav-btn" data-target="court-schedule-inline" onclick="MapView.scrollToCourtSection('court-schedule-inline', this)">Schedule</button>
+                <button type="button" class="court-sticky-nav-btn" data-target="court-ranked-inline" onclick="MapView.scrollToCourtSection('court-ranked-inline', this)">Competitive</button>
+                <button type="button" class="court-sticky-nav-btn" data-target="court-info-inline" onclick="MapView.scrollToCourtSection('court-info-inline', this)">About</button>
+                <button type="button" class="court-sticky-nav-btn" data-target="court-community-inline" onclick="MapView.scrollToCourtSection('court-community-inline', this)">Community</button>
+                <button type="button" class="court-sticky-nav-btn" data-target="court-chat-inline" onclick="MapView.scrollToCourtSection('court-chat-inline', this)">Chat</button>
+            </div>
+        `;
 
         const sections = [
+            stickyNav,
             photoHtml,
-            `<div class="court-page-section">
+            `<div class="court-page-section" id="court-live-inline">
                 ${checkinBtnHTML}
                 <div id="court-live-status" class="court-live-status ${players > 0 ? 'active' : ''}">
                     ${MapView._liveStatusInnerHTML(court, players)}
@@ -1214,7 +1328,7 @@ const MapView = {
                 <div id="court-match-banner">${liveSections.matchBannerHTML}</div>
             </div>`,
             checkedInSection,
-            `<div class="court-page-section">
+            `<div class="court-page-section" id="court-schedule-inline">
                 <div class="section-header">
                     <h4>Schedule</h4>
                     <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule Game</button>
@@ -1225,7 +1339,14 @@ const MapView = {
             `<div class="court-page-section" id="court-ranked-inline">
                 <div id="court-ranked-section"><div class="loading">Loading ranked...</div></div>
             </div>`,
-            `<div class="court-page-section">
+            `<div class="court-page-section" id="court-recent-games-inline">
+                <div class="section-header">
+                    <h4>Recent Games</h4>
+                    <span class="muted">Latest ranked results at this court</span>
+                </div>
+                <div id="match-history-content"><div class="loading">Loading recent games...</div></div>
+            </div>`,
+            `<div class="court-page-section" id="court-info-inline">
                 <h4>Court Info</h4>
                 ${court.description ? `<p class="court-desc">${safeDescription}</p>` : ''}
                 <div class="court-info-grid">
@@ -1247,6 +1368,30 @@ const MapView = {
                     ${safeWebsiteHref ? `<a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🌐 Website</a>` : ''}
                 </div>
             </div>`,
+            `<div class="court-page-section" id="court-community-inline">
+                <div class="section-header">
+                    <h4>Community</h4>
+                    <span class="muted">Community notes, photos, events, and busyness trends</span>
+                </div>
+                <div class="court-community-grid">
+                    <div class="court-community-card">
+                        <h5>Best Times</h5>
+                        ${busynessHTML}
+                    </div>
+                    <div class="court-community-card">
+                        <h5>Community Notes</h5>
+                        ${communityInfoHTML}
+                    </div>
+                    <div class="court-community-card court-community-card-wide">
+                        <h5>Upcoming Events</h5>
+                        ${communityEventsHTML}
+                    </div>
+                    <div class="court-community-card court-community-card-wide">
+                        <h5>Community Photos</h5>
+                        ${communityImagesHTML}
+                    </div>
+                </div>
+            </div>`,
             `<div class="court-page-section" id="court-leaderboard-inline">
                 <div class="section-header">
                     <h4>Leaderboard</h4>
@@ -1254,7 +1399,7 @@ const MapView = {
                 </div>
                 <div id="leaderboard-content" class="compact-leaderboard-list"><div class="loading">Loading...</div></div>
             </div>`,
-            `<div class="court-page-section court-chat-section">
+            `<div class="court-page-section court-chat-section" id="court-chat-inline">
                 <h4>Court Chat</h4>
                 <div id="court-chat-messages" class="court-chat-messages"></div>
                 <form class="court-chat-form" onsubmit="MapView.sendCourtChat(event)">
@@ -1313,17 +1458,19 @@ const MapView = {
         const safeRecord = MapView._escapeHtml(record);
         const safeTimeAgo = MapView._escapeHtml(timeAgo);
 
-        // Add Friend button for non-self, non-friend, logged-in users
-        let actionBtn = '';
+        let socialActionBtn = '';
         if (!isMe && currentUserId) {
             if (isFriend) {
-                actionBtn = '<span class="friend-indicator" title="Friend">👥</span>';
+                socialActionBtn = `<button class="btn-add-friend" onclick="event.stopPropagation(); Chat.openDirectByUser(${user.id})" title="Message this player">💬 Message</button>`;
             } else {
-                actionBtn = `<button class="btn-add-friend" onclick="event.stopPropagation(); MapView.sendFriendRequest(${user.id})" title="Add Friend">➕ Add</button>`;
+                socialActionBtn = `<button class="btn-add-friend" onclick="event.stopPropagation(); MapView.sendFriendRequest(${user.id})" title="Add Friend">➕ Add</button>`;
             }
         }
         const challengeBtn = (enableChallenge && !isMe && currentUserId && amCheckedInHere)
             ? `<button class="btn-add-friend" onclick="event.stopPropagation(); Ranked.challengeCheckedInPlayer(${courtId}, ${user.id})" title="Challenge this player">⚔️ Challenge</button>`
+            : '';
+        const profileBtn = (!isMe && currentUserId)
+            ? `<button class="btn-add-friend" onclick="event.stopPropagation(); Ranked.viewPlayer(${user.id})" title="View player profile">👤 Profile</button>`
             : '';
 
         return `
@@ -1339,7 +1486,8 @@ const MapView = {
             </div>
             ${isLookingToPlay ? '<span class="lfg-badge">🎯 Looking to Play</span>' : ''}
             ${challengeBtn}
-            ${actionBtn}
+            ${profileBtn}
+            ${socialActionBtn}
         </div>`;
     },
 
@@ -1720,6 +1868,20 @@ const MapView = {
     async checkIn(courtId) {
         const token = localStorage.getItem('token');
         if (!token) { Auth.showModal(); return; }
+        await MapView.refreshMyStatus();
+        const myStatus = MapView.myCheckinStatus || {};
+        if (myStatus.checked_in && Number(myStatus.court_id) === Number(courtId)) {
+            App.toast("You're already checked in here.");
+            return;
+        }
+        if (myStatus.checked_in && Number(myStatus.court_id) !== Number(courtId)) {
+            const currentCourtName = MapView._checkedInCourtName(myStatus.court_id);
+            const nextCourtName = MapView._checkedInCourtName(courtId);
+            const confirmed = confirm(
+                `You're currently checked in at ${currentCourtName}. Switch your check-in to ${nextCourtName}? This will end any active Looking to Play session at your current court.`
+            );
+            if (!confirmed) return;
+        }
         try {
             await API.post('/api/presence/checkin', { court_id: courtId });
             if (typeof LocationService !== 'undefined' && typeof LocationService.setCheckedInCourt === 'function') {

@@ -4,6 +4,22 @@
 const Auth = {
     googleInitAttempts: 0,
 
+    _restoreRealtimeServices() {
+        if (typeof Chat !== 'undefined' && typeof Chat.refreshAuth === 'function') {
+            Chat.refreshAuth();
+        }
+        if (typeof LocationService === 'undefined') return;
+        const prefKey = (typeof App !== 'undefined' && App.locationPrefKey)
+            ? App.locationPrefKey
+            : 'location_tracking_pref';
+        const pref = localStorage.getItem(prefKey);
+        if (pref === 'enabled' && typeof LocationService.start === 'function') {
+            LocationService.start();
+        } else if (typeof LocationService.syncWithServerStatus === 'function') {
+            LocationService.syncWithServerStatus();
+        }
+    },
+
     _showAuthForm(formId) {
         const allFormIds = ['login-form', 'register-form', 'reset-request-form', 'reset-confirm-form'];
         allFormIds.forEach((id) => {
@@ -85,9 +101,7 @@ const Auth = {
         }
         Auth.hideModal();
         Auth.updateUI(res.user);
-        if (typeof LocationService !== 'undefined' && typeof LocationService.syncWithServerStatus === 'function') {
-            LocationService.syncWithServerStatus();
-        }
+        Auth._restoreRealtimeServices();
         App.loadFriendsCache();
         App.refreshReviewerAccess();
         if (typeof App.refreshNotificationBadge === 'function') {
@@ -255,6 +269,15 @@ const Auth = {
         if (typeof API !== 'undefined' && typeof API.clearCsrfToken === 'function') {
             API.clearCsrfToken();
         }
+        if (typeof Chat !== 'undefined' && typeof Chat.close === 'function') {
+            Chat.close();
+        }
+        if (typeof Chat !== 'undefined' && typeof Chat.refreshAuth === 'function') {
+            Chat.refreshAuth();
+        }
+        if (typeof LocationService !== 'undefined' && typeof LocationService.stop === 'function') {
+            LocationService.stop();
+        }
         if (typeof LocationService !== 'undefined' && typeof LocationService.clearCheckedInCourt === 'function') {
             LocationService.clearCheckedInCourt();
         }
@@ -273,6 +296,12 @@ const Auth = {
 
         if (!token || !user) {
             // No session at all — show sign-in button, stay on map
+            if (typeof Chat !== 'undefined' && typeof Chat.refreshAuth === 'function') {
+                Chat.refreshAuth();
+            }
+            if (typeof LocationService !== 'undefined' && typeof LocationService.stop === 'function') {
+                LocationService.stop();
+            }
             if (typeof LocationService !== 'undefined' && typeof LocationService.clearCheckedInCourt === 'function') {
                 LocationService.clearCheckedInCourt();
             }
@@ -290,9 +319,7 @@ const Auth = {
                 API.primeCsrfToken();
             }
             Auth.updateUI(res.user);
-            if (typeof LocationService !== 'undefined' && typeof LocationService.syncWithServerStatus === 'function') {
-                LocationService.syncWithServerStatus();
-            }
+            Auth._restoreRealtimeServices();
             App.loadFriendsCache();
             App.refreshReviewerAccess();
             if (typeof App.refreshNotificationBadge === 'function') {
@@ -304,6 +331,12 @@ const Auth = {
             localStorage.removeItem('user');
             if (typeof API !== 'undefined' && typeof API.clearCsrfToken === 'function') {
                 API.clearCsrfToken();
+            }
+            if (typeof Chat !== 'undefined' && typeof Chat.refreshAuth === 'function') {
+                Chat.refreshAuth();
+            }
+            if (typeof LocationService !== 'undefined' && typeof LocationService.stop === 'function') {
+                LocationService.stop();
             }
             if (typeof LocationService !== 'undefined' && typeof LocationService.clearCheckedInCourt === 'function') {
                 LocationService.clearCheckedInCourt();

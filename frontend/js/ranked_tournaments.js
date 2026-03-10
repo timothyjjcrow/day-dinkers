@@ -212,7 +212,7 @@ Object.assign(Ranked, {
             <div class="modal-content tournament-create-modal">
                 <button class="modal-close" onclick="document.getElementById('match-modal').style.display='none'">&times;</button>
                 <h2>Create Tournament</h2>
-                <p class="muted" style="margin-bottom:12px">Single-elimination bracket. Set up your tournament details below.</p>
+                <p class="muted" style="margin-bottom:12px">Singles, single-elimination tournament. Starting requires a power-of-two ready field (4, 8, 16, ...), and seeding follows ready-player order.</p>
                 <input type="hidden" id="tournament-fixed-court" value="${hasCourtId ? courtId : ''}">
                 <form onsubmit="Ranked.createTournament(event)">
                     <div class="tournament-create-section">
@@ -268,7 +268,7 @@ Object.assign(Ranked, {
                             </label>
                             <label>
                                 <input type="checkbox" id="tournament-affects-elo" checked>
-                                Affects ELO
+                                Affects ranked ELO and record
                             </label>
                         </div>
                     </div>
@@ -447,6 +447,74 @@ Object.assign(Ranked, {
         `;
     },
 
+    _isPowerOfTwo(value) {
+        const parsed = Number(value) || 0;
+        return Number.isInteger(parsed) && parsed > 0 && (parsed & (parsed - 1)) === 0;
+    },
+
+    _nextBracketSize(value) {
+        const parsed = Number(value) || 0;
+        const sizes = [4, 8, 16, 32, 64, 128];
+        return sizes.find(size => size >= parsed) || parsed;
+    },
+
+    _tournamentReadinessHTML(tournament) {
+        if (String(tournament.status || '') !== 'upcoming') return '';
+        const participants = (tournament.participants || []).filter(p =>
+            ['registered', 'checked_in'].includes(String(p.participant_status || ''))
+        );
+        const registeredCount = participants.length;
+        const checkedInCount = participants.filter(p =>
+            p.checked_in_at || String(p.participant_status || '') === 'checked_in'
+        ).length;
+        const readyCount = tournament.check_in_required ? checkedInCount : registeredCount;
+        const minParticipants = Number(tournament.min_participants || 0);
+        const missingCheckIns = tournament.check_in_required
+            ? participants.filter(p => !(p.checked_in_at || String(p.participant_status || '') === 'checked_in'))
+            : [];
+        const nextBracketSize = Ranked._nextBracketSize(Math.max(readyCount, minParticipants, 4));
+        const blockers = [];
+        if (readyCount < minParticipants) {
+            blockers.push(`Need ${Math.max(minParticipants - readyCount, 0)} more ready player${Math.max(minParticipants - readyCount, 0) === 1 ? '' : 's'} to meet the minimum.`);
+        }
+        if (missingCheckIns.length) {
+            blockers.push(`${missingCheckIns.length} registered player${missingCheckIns.length === 1 ? '' : 's'} still need to check in.`);
+        }
+        if (readyCount >= minParticipants && readyCount > 0 && !Ranked._isPowerOfTwo(readyCount)) {
+            blockers.push(`Single-elimination starts with ${nextBracketSize} ready players. You currently have ${readyCount}.`);
+        }
+        const readinessClass = blockers.length ? 'tournament-readiness-warning' : 'tournament-readiness-ready';
+        const graceEndsAt = tournament.start_time && Number(tournament.no_show_grace_minutes || 0) >= 0
+            ? new Date(new Date(tournament.start_time).getTime() + (Number(tournament.no_show_grace_minutes || 0) * 60000))
+            : null;
+        const graceLabel = graceEndsAt && !Number.isNaN(graceEndsAt.getTime())
+            ? graceEndsAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+            : '';
+        const readinessPill = blockers.length ? 'Needs Attention' : 'Ready';
+        return `
+            <div class="tournament-readiness-card ${readinessClass}">
+                <div class="tournament-readiness-header">
+                    <div>
+                        <strong>${blockers.length ? 'Not Ready Yet' : 'Ready To Start'}</strong>
+                        <span class="muted">${readyCount} ready / ${registeredCount} registered</span>
+                    </div>
+                    <span class="tournament-readiness-pill">${readinessPill}</span>
+                </div>
+                <div class="tournament-readiness-grid">
+                    <span class="tournament-readiness-chip">Format: Singles, single elimination</span>
+                    <span class="tournament-readiness-chip">Check-in: ${tournament.check_in_required ? 'Required' : 'Not required'}</span>
+                    <span class="tournament-readiness-chip">Seeding: Ready-player order</span>
+                    <span class="tournament-readiness-chip">${tournament.affects_elo ? 'Ranked ELO + record update' : 'Exhibition only'}</span>
+                    ${graceLabel ? `<span class="tournament-readiness-chip">No-show grace ends: ${Ranked._e(graceLabel)}</span>` : ''}
+                    <span class="tournament-readiness-chip">Next valid bracket size: ${nextBracketSize}</span>
+                </div>
+                ${blockers.length
+                    ? `<ul class="tournament-readiness-list">${blockers.map(item => `<li>${Ranked._e(item)}</li>`).join('')}</ul>`
+                    : '<p class="muted" style="margin:8px 0 0">All current start requirements are satisfied.</p>'}
+            </div>
+        `;
+    },
+
     _renderTournamentMatchCard(match, currentUserId) {
         const m = match || {};
         const t1 = Ranked._teamNames(m.team1 || []);
@@ -598,6 +666,7 @@ Object.assign(Ranked, {
                             </div>
                         </div>
                     ` : ''}
+                    ${Ranked._tournamentReadinessHTML(tournament)}
                     ${actions.length ? `<div class="tournament-actions">${actions.join('')}</div>` : ''}
                 </div>
 
@@ -709,7 +778,19 @@ Object.assign(Ranked, {
             if (Ranked.currentCourtId) Ranked.loadCourtRanked(Ranked.currentCourtId);
             Ranked.refreshOpenTournamentModal();
         } catch (err) {
-            App.toast(err.message || 'Could not start tournament', 'error');
+            const payload = err?.payload || {};
+            if (Array.isArray(payload.missing_player_ids) && payload.missing_player_ids.length) {
+                const graceEndsAt = payload.grace_ends_at
+                    ? new Date(payload.grace_ends_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                    : '';
+                const suffix = graceEndsAt ? ` Grace ends at ${graceEndsAt}.` : '';
+                App.toast(`${payload.missing_player_ids.length} player${payload.missing_player_ids.length === 1 ? '' : 's'} still need to check in.${suffix}`, 'error');
+            } else if (payload.participant_count) {
+                App.toast(`Tournament needs a power-of-two ready field. You currently have ${payload.participant_count}.`, 'error');
+            } else {
+                App.toast(err.message || 'Could not start tournament', 'error');
+            }
+            Ranked.refreshOpenTournamentModal();
         }
     },
 

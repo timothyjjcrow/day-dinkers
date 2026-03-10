@@ -616,6 +616,9 @@ const Sessions = {
         const calendarBtn = !isNow
             ? `<button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.downloadCalendar(${session.id})">Add to Calendar</button>`
             : '';
+        const inviteBtn = isMine
+            ? `<button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.inviteFriends(${session.id})">Invite</button>`
+            : '';
 
         return `
         <article class="session-card ${isNow ? 'session-active' : ''}" onclick="Sessions.openDetail(${session.id})">
@@ -651,7 +654,7 @@ const Sessions = {
             <div class="session-card-actions" onclick="event.stopPropagation()">
                 ${actionBtn}
                 <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); App.openCourtDetails(${session.court_id});">View Court</button>
-                <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); Sessions.inviteFriends(${session.id})">Invite</button>
+                ${inviteBtn}
                 ${calendarBtn}
             </div>
         </article>`;
@@ -801,7 +804,6 @@ const Sessions = {
         } else {
             actionBtns = `<button class="btn-primary btn-sm" onclick="Sessions.joinSession(${session.id})">✅ ${isFull ? 'Join Waitlist' : 'Join'}</button>`;
         }
-        actionBtns += `<button class="btn-secondary btn-sm" onclick="Sessions.inviteFriends(${session.id})">👥 Invite</button>`;
         if (!isNow) actionBtns += `<button class="btn-secondary btn-sm" onclick="Sessions.downloadCalendar(${session.id})">🗓 Calendar</button>`;
         if (isMine && series) {
             actionBtns += `<button class="btn-danger btn-sm" onclick="Sessions.cancelSeries(${series.id}, ${session.id})">Cancel Series</button>`;
@@ -901,12 +903,10 @@ const Sessions = {
                 <button class="btn-secondary" onclick="Sessions.inviteFriends(${session.id})">👥 Invite Friends</button>`;
         } else if (amJoined || amWaitlisted) {
             actionBtns = `
-                <button class="btn-danger" onclick="Sessions.leaveSession(${session.id})">${amWaitlisted ? 'Leave Waitlist' : 'Leave Session'}</button>
-                <button class="btn-secondary" onclick="Sessions.inviteFriends(${session.id})">👥 Invite Friends</button>`;
+                <button class="btn-danger" onclick="Sessions.leaveSession(${session.id})">${amWaitlisted ? 'Leave Waitlist' : 'Leave Session'}</button>`;
         } else {
             actionBtns = `
-                <button class="btn-primary" onclick="Sessions.joinSession(${session.id})">✅ ${isFull ? 'Join Waitlist' : 'Join Session'}</button>
-                <button class="btn-secondary" onclick="Sessions.inviteFriends(${session.id})">👥 Invite Friends</button>`;
+                <button class="btn-primary" onclick="Sessions.joinSession(${session.id})">✅ ${isFull ? 'Join Waitlist' : 'Join Session'}</button>`;
         }
         if (!isNow) {
             actionBtns += `
@@ -1300,11 +1300,10 @@ const Sessions = {
         const startInput = document.getElementById('session-start-time');
         if (!startInput) return;
 
-        // When launched from a selected schedule day, default to the next day.
         const contextualStart = new Date(
             scheduleDay.getFullYear(),
             scheduleDay.getMonth(),
-            scheduleDay.getDate() + 1,
+            scheduleDay.getDate(),
             18,
             30,
             0,

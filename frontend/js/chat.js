@@ -20,6 +20,14 @@ const Chat = {
 
             Chat.socket.on('connect', () => {
                 console.log('Socket connected');
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                const userId = Number(user.id) || 0;
+                if (userId) {
+                    Chat.socket.emit('join', { room: `user_${userId}`, token: localStorage.getItem('token') || '' });
+                }
+                if (Chat.currentRoom) {
+                    Chat.socket.emit('join', { room: Chat.currentRoom, token: localStorage.getItem('token') || '' });
+                }
             });
 
             Chat.socket.on('new_message', (msg) => {
@@ -36,14 +44,34 @@ const Chat = {
                     );
                 }
 
-                // Court chat panel (bottom popup)
-                const courtChat = document.getElementById('chat-messages');
-                if (courtChat && courtChat.style.display !== 'none' && msg.msg_type === 'court') {
-                    Chat._appendRenderedMessage(courtChat, Chat._renderMsg(msg), msg.id);
+                const panel = document.getElementById('chat-panel');
+                const panelMessages = document.getElementById('chat-messages');
+                const panelType = panel?.dataset?.type || '';
+                const panelCourtId = Number(panel?.dataset?.courtId) || 0;
+                const panelSessionId = Number(panel?.dataset?.sessionId) || 0;
+                const panelUserId = Number(panel?.dataset?.userId) || 0;
+
+                if (panel && panel.style.display !== 'none' && panelMessages) {
+                    if (panelType === 'court'
+                        && msg.msg_type === 'court'
+                        && Number(msg.court_id) === panelCourtId
+                    ) {
+                        Chat._appendRenderedMessage(panelMessages, Chat._renderMsg(msg), msg.id);
+                    } else if (panelType === 'session'
+                        && msg.msg_type === 'session'
+                        && Number(msg.session_id) === panelSessionId
+                    ) {
+                        Chat._appendRenderedMessage(panelMessages, Sessions._renderChatMsg(msg), msg.id);
+                    } else if (panelType === 'direct'
+                        && msg.msg_type === 'direct'
+                        && Chat._panelMatchesDirectMessage(msg, panelUserId)
+                    ) {
+                        Chat._appendRenderedMessage(panelMessages, Chat._renderMsg(msg), msg.id);
+                    }
                 }
 
                 // Full-page court chat
-                const fpChat = document.getElementById('fullpage-chat-messages');
+                const fpChat = document.getElementById('court-chat-messages');
                 if (fpChat && msg.msg_type === 'court') {
                     Chat._appendRenderedMessage(fpChat, MapView._renderChatMsg(msg), msg.id);
                 }
@@ -55,6 +83,17 @@ const Chat = {
         } catch (err) {
             console.log('Socket.IO not available:', err);
         }
+    },
+
+    refreshAuth() {
+        if (!Chat.socket) return;
+        Chat.socket.auth = localStorage.getItem('token')
+            ? { token: localStorage.getItem('token') }
+            : {};
+        if (Chat.socket.connected) {
+            Chat.socket.disconnect();
+        }
+        Chat.socket.connect();
     },
 
     _queuePresenceRefresh(data = {}) {
@@ -156,6 +195,16 @@ const Chat = {
         </div>`;
     },
 
+    _panelMatchesDirectMessage(msg, otherUserId) {
+        const targetUserId = Number(otherUserId) || 0;
+        const currentUserId = Number(JSON.parse(localStorage.getItem('user') || '{}').id) || 0;
+        if (!targetUserId || !currentUserId) return false;
+        return (
+            (Number(msg.sender_id) === targetUserId && Number(msg.recipient_id) === currentUserId)
+            || (Number(msg.sender_id) === currentUserId && Number(msg.recipient_id) === targetUserId)
+        );
+    },
+
     _isNearBottom(container) {
         const delta = container.scrollHeight - (container.scrollTop + container.clientHeight);
         return delta <= Chat.SCROLL_BOTTOM_THRESHOLD_PX;
@@ -215,8 +264,59 @@ const Chat = {
     // Open session chat
     openSession(sessionId, sessionTitle) {
         Chat.joinRoom(`session_${sessionId}`);
-        // Could open a bottom panel or navigate to session view
-        App.showView('sessions');
+        document.getElementById('chat-panel').style.display = 'flex';
+        document.getElementById('chat-title').textContent = `💬 ${sessionTitle || 'Session Chat'}`;
+        document.getElementById('chat-panel').dataset.sessionId = sessionId;
+        document.getElementById('chat-panel').dataset.type = 'session';
+        const container = document.getElementById('chat-messages');
+        if (container) container.innerHTML = '<div class="loading">Loading messages...</div>';
+        Sessions._loadSessionChat?.(sessionId);
+    },
+
+    async _loadDirectMessages(userId) {
+        const container = document.getElementById('chat-messages');
+        const token = localStorage.getItem('token');
+        if (!container) return;
+        if (!token) { container.innerHTML = '<p class="muted">Sign in to chat</p>'; return; }
+        try {
+            const res = await API.get(`/api/chat/direct/${userId}`);
+            container.innerHTML = (res.messages || []).map(m => Chat._renderMsg(m)).join('') || '<p class="muted">No messages yet</p>';
+            Chat._trimRenderedMessages(container);
+            container.scrollTop = container.scrollHeight;
+        } catch (err) {
+            container.innerHTML = `<p class="muted">${err.message || 'Unable to load messages'}</p>`;
+        }
+    },
+
+    openDirect(userId, userDisplayName) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+        if (Chat.currentRoom) {
+            Chat.socket?.emit('leave', { room: Chat.currentRoom });
+            Chat.currentRoom = null;
+        }
+        const panel = document.getElementById('chat-panel');
+        panel.style.display = 'flex';
+        panel.dataset.type = 'direct';
+        panel.dataset.userId = String(userId);
+        delete panel.dataset.courtId;
+        delete panel.dataset.sessionId;
+        document.getElementById('chat-title').textContent = `💬 ${userDisplayName || 'Direct Message'}`;
+        Chat._loadDirectMessages(userId);
+    },
+
+    async openDirectByUser(userId) {
+        const token = localStorage.getItem('token');
+        if (!token) { Auth.showModal(); return; }
+        const targetUserId = Number(userId) || 0;
+        if (!targetUserId) return;
+        try {
+            const res = await API.get(`/api/auth/profile/${targetUserId}`);
+            const user = res.user || {};
+            Chat.openDirect(targetUserId, user.name || user.username || 'Direct Message');
+        } catch (err) {
+            App.toast(err.message || 'Unable to open direct messages', 'error');
+        }
     },
 
     async _loadCourtMessages(courtId) {
@@ -244,19 +344,39 @@ const Chat = {
         const data = { content, msg_type: type };
         if (type === 'court') data.court_id = parseInt(panel.dataset.courtId);
         if (type === 'session') data.session_id = parseInt(panel.dataset.sessionId);
+        if (type === 'direct') data.recipient_id = parseInt(panel.dataset.userId);
 
         try {
             await API.post('/api/chat/send', data);
             input.value = '';
             if (type === 'court') Chat._loadCourtMessages(parseInt(panel.dataset.courtId));
+            if (type === 'direct') Chat._loadDirectMessages(parseInt(panel.dataset.userId));
         } catch { App.toast('Failed to send', 'error'); }
     },
 
     close() {
+        const restoreRoom = (typeof App !== 'undefined'
+            && App.currentScreen === 'court-details'
+            && typeof MapView !== 'undefined'
+            && MapView.currentCourtId)
+            ? `court_${MapView.currentCourtId}`
+            : ((typeof Sessions !== 'undefined' && Sessions.currentSessionId)
+                ? `session_${Sessions.currentSessionId}`
+                : '');
         document.getElementById('chat-panel').style.display = 'none';
         if (Chat.currentRoom) {
             Chat.socket?.emit('leave', { room: Chat.currentRoom });
             Chat.currentRoom = null;
+        }
+        const panel = document.getElementById('chat-panel');
+        if (panel) {
+            delete panel.dataset.type;
+            delete panel.dataset.courtId;
+            delete panel.dataset.sessionId;
+            delete panel.dataset.userId;
+        }
+        if (restoreRoom && localStorage.getItem('token')) {
+            Chat.joinRoom(restoreRoom);
         }
     },
 };

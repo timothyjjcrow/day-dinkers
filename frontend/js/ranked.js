@@ -238,7 +238,15 @@ const Ranked = {
                 Ranked._setHtmlIfChanged(container, emptyHtml);
                 return;
             }
-            Ranked._setHtmlIfChanged(container, Ranked._renderLeaderboard(lb));
+            const scopeDescription = courtId
+                ? 'Global ELO for players who have completed ranked matches at this court.'
+                : (countySlug
+                    ? 'Global ELO for players active in this county.'
+                    : 'Global ranked standings.');
+            Ranked._setHtmlIfChanged(container, Ranked._renderLeaderboard(lb, {
+                scopeLabel: courtId ? 'Court' : (countySlug ? 'County' : 'Global'),
+                scopeDescription,
+            }));
         } catch {
             if (!silent || !container.innerHTML.trim()) {
                 container.innerHTML = '<p class="error">Failed to load leaderboard</p>';
@@ -551,12 +559,21 @@ const Ranked = {
             const safeTimes = Ranked._e(u.preferred_times || 'Not set');
             const safeSkill = u.skill_level ? Ranked._e(String(u.skill_level)) : 'Not set';
             const elo = Math.round(Number(u.elo_rating) || 1200);
+            const eloTier = (typeof App !== 'undefined' && typeof App.getEloTier === 'function')
+                ? App.getEloTier(elo)
+                : { name: 'Bronze', icon: '🥉', class: 'elo-bronze' };
             const wins = Number(u.wins) || 0;
             const losses = Number(u.losses) || 0;
             const games = Number(u.games_played) || 0;
             const totalCheckins = Number(u.total_checkins) || 0;
             const winRate = games > 0 ? `${Math.round((wins / games) * 100)}%` : '--';
             const initials = Ranked._e((u.name || u.username || '?').split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase());
+            const isFriend = App.friendIds.includes(targetUserId);
+            const secondaryAction = isCurrentUser
+                ? `<button class="btn-secondary btn-sm" onclick="document.getElementById('match-modal').style.display='none'; App.setMainTab('profile');">Open My Profile</button>`
+                : (isFriend
+                    ? `<button class="btn-secondary btn-sm" onclick="Chat.openDirectByUser(${targetUserId})">Message</button>`
+                    : `<button class="btn-secondary btn-sm" onclick="MapView.sendFriendRequest(${targetUserId})">Add Friend</button>`);
 
             modal.style.display = 'flex';
             modal.innerHTML = `
@@ -570,7 +587,7 @@ const Ranked = {
                         <div class="profile-username">@${safeUsername}</div>
                     </div>
                     <div class="profile-tags">
-                        <span class="tag tag-elo">ELO ${elo}</span>
+                        <span class="tag tag-elo ${eloTier.class}">${eloTier.icon} ELO ${elo} — ${Ranked._e(eloTier.name)}</span>
                         <span class="tag">Skill ${safeSkill}</span>
                     </div>
                 </div>
@@ -591,9 +608,8 @@ const Ranked = {
                     ${safeBio ? `<p style="margin-top:8px">${safeBio}</p>` : '<p class="muted" style="margin-top:8px">No bio added yet.</p>'}
                 </div>
                 <div class="create-match-actions" style="justify-content:flex-end;">
-                    ${isCurrentUser
-                        ? `<button class="btn-secondary btn-sm" onclick="document.getElementById('match-modal').style.display='none'; App.setMainTab('profile');">Open My Profile</button>`
-                        : `<button class="btn-secondary btn-sm" onclick="Ranked.openScheduledChallengeModal(${targetUserId}, 'leaderboard_challenge')">Challenge</button>`}
+                    ${secondaryAction}
+                    ${!isCurrentUser ? `<button class="btn-secondary btn-sm" onclick="Ranked.openScheduledChallengeModal(${targetUserId}, 'leaderboard_challenge')">Challenge</button>` : ''}
                 </div>
             </div>`;
         } catch {

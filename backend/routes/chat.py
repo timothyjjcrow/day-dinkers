@@ -161,6 +161,47 @@ def get_direct_messages(user_id):
     return jsonify({'messages': [m.to_dict() for m in messages]})
 
 
+@chat_bp.route('/direct/threads', methods=['GET'])
+@login_required
+def get_direct_threads():
+    _prune_stale_chat_messages()
+    me = request.current_user.id
+    limit = request.args.get('limit', type=int) or 12
+    limit = max(1, min(limit, 50))
+
+    rows = Message.query.filter(
+        Message.msg_type == 'direct',
+        ((Message.sender_id == me) | (Message.recipient_id == me)),
+    ).order_by(
+        Message.created_at.desc(),
+        Message.id.desc(),
+    ).limit(_chat_fetch_limit()).all()
+
+    threads = []
+    seen = set()
+    for message in rows:
+        other_user_id = message.recipient_id if message.sender_id == me else message.sender_id
+        if not other_user_id or other_user_id in seen:
+            continue
+        if not _are_friends(me, other_user_id):
+            continue
+        other_user = db.session.get(User, other_user_id)
+        if not other_user:
+            continue
+        seen.add(other_user_id)
+        threads.append({
+            'user': other_user.to_public_dict(),
+            'last_message': message.to_dict(),
+            'last_message_preview': message.content[:120],
+            'last_message_at': message.created_at.isoformat() if message.created_at else None,
+            'last_message_from_me': message.sender_id == me,
+        })
+        if len(threads) >= limit:
+            break
+
+    return jsonify({'threads': threads})
+
+
 @chat_bp.route('/game/<int:game_id>', methods=['GET'])
 @login_required
 def get_game_messages(game_id):

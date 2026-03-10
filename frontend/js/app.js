@@ -3,7 +3,7 @@
  */
 const App = {
     currentScreen: 'main',   // 'main' | 'court-details' | 'admin'
-    currentMainTab: 'map',   // 'map' | 'sessions' | 'profile'
+    currentMainTab: 'map',   // 'map' | 'profile'
     currentCourtTab: 'court-info', // 'court-info' | 'ranked' | 'leaderboard'
 
     /** Legacy getter: maps new screen/tab system to old view names */
@@ -19,6 +19,15 @@ const App = {
     selectedCountySlug: 'humboldt',
     counties: [],
     isReviewer: false,
+
+    getEloTier(rawElo) {
+        const elo = Math.round(Number(rawElo) || 1200);
+        if (elo >= 1500) return { name: 'Diamond', icon: '💎', class: 'elo-diamond' };
+        if (elo >= 1400) return { name: 'Platinum', icon: '🏆', class: 'elo-platinum' };
+        if (elo >= 1300) return { name: 'Gold', icon: '🥇', class: 'elo-gold' };
+        if (elo >= 1200) return { name: 'Silver', icon: '🥈', class: 'elo-silver' };
+        return { name: 'Bronze', icon: '🥉', class: 'elo-bronze' };
+    },
 
     // ── County Helpers ──────────────────────────────────────────
 
@@ -49,6 +58,19 @@ const App = {
         const params = new URLSearchParams();
         const countySlug = App.getSelectedCountySlug();
         if (countySlug) params.set('county_slug', countySlug);
+        const hasExplicitLat = Object.prototype.hasOwnProperty.call(extraParams || {}, 'lat');
+        const hasExplicitLng = Object.prototype.hasOwnProperty.call(extraParams || {}, 'lng');
+        const lastPosition = typeof LocationService !== 'undefined'
+            ? (LocationService.lastPosition || null)
+            : null;
+        if (!hasExplicitLat && !hasExplicitLng && lastPosition) {
+            const lat = Number(lastPosition.lat);
+            const lng = Number(lastPosition.lng);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                params.set('lat', String(lat));
+                params.set('lng', String(lng));
+            }
+        }
         Object.entries(extraParams || {}).forEach(([key, value]) => {
             if (value === undefined || value === null) return;
             const str = String(value);
@@ -278,15 +300,39 @@ const App = {
                 if (section) section.classList.add('court-page-section-empty');
             } else {
                 const top5 = lb.slice(0, 5);
-                courtLb.innerHTML = top5.map(player =>
+                const cards = top5.map(player =>
                     Ranked._leaderboardCardHTML(player, {
                         currentUserId: Number(Ranked._currentUser().id) || 0,
                         showChallenge: false,
                         compact: true,
                     })
                 ).join('');
+                courtLb.innerHTML = `
+                    <p class="muted ranked-scope-note">Global ELO for players who have completed ranked matches at this court.</p>
+                    ${cards}
+                `;
             }
         } catch { courtLb.innerHTML = '<p class="muted">Unable to load.</p>'; }
+    },
+
+    _renderTournamentLeaderboardRows(players = []) {
+        if (!players.length) {
+            return '<p class="muted">No tournament standings yet.</p>';
+        }
+        return `
+            <div class="tournament-standings-list">
+                ${players.map(player => `
+                    <div class="tournament-standing-row">
+                        <div class="tournament-standing-rank">#${Number(player.rank) || '-'}</div>
+                        <div class="tournament-standing-main">
+                            <strong>${Ranked._e(player.name || player.username || 'Player')}</strong>
+                            <span class="muted">${Number(player.points) || 0} pts · ${Number(player.titles) || 0} titles · ${Number(player.wins) || 0}W-${Number(player.losses) || 0}L</span>
+                        </div>
+                        <span class="tournament-standing-meta">${Number(player.tournaments_played) || 0} played</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
     },
 
     async openLeaderboardPopup(courtId) {
@@ -297,25 +343,36 @@ const App = {
         popup.style.display = 'flex';
 
         try {
-            const [courtRes, countyRes, historyRes] = await Promise.all([
+            const [courtRes, countyRes, historyRes, tournamentRes] = await Promise.all([
                 API.get(`/api/ranked/leaderboard?court_id=${courtId}`),
                 API.get(`/api/ranked/leaderboard?county_slug=${encodeURIComponent(App.getSelectedCountySlug())}`),
                 API.get(`/api/ranked/history?court_id=${courtId}&limit=30`),
+                API.get(`/api/ranked/tournaments/leaderboard?court_id=${courtId}&limit=10`),
             ]);
             const courtLb = courtRes.leaderboard || [];
             const countyLb = countyRes.leaderboard || [];
             const matches = historyRes.matches || [];
+            const tournamentLb = tournamentRes.leaderboard || [];
 
             let html = '';
             html += '<h4 style="margin:0 0 8px">Court Standings</h4>';
             html += courtLb.length
-                ? Ranked._renderLeaderboard(courtLb, { scopeLabel: 'Court' })
+                ? Ranked._renderLeaderboard(courtLb, {
+                    scopeLabel: 'Court',
+                    scopeDescription: 'Global ELO for players who have completed ranked matches at this court.',
+                })
                 : '<p class="muted">No ranked players at this court yet.</p>';
 
             html += '<h4 style="margin:16px 0 8px">County Standings</h4>';
             html += countyLb.length
-                ? Ranked._renderLeaderboard(countyLb, { scopeLabel: 'County' })
+                ? Ranked._renderLeaderboard(countyLb, {
+                    scopeLabel: 'County',
+                    scopeDescription: 'Global ELO for players active in this county.',
+                })
                 : '<p class="muted">No ranked players in this county yet.</p>';
+
+            html += '<h4 style="margin:16px 0 8px">Tournament Standings</h4>';
+            html += App._renderTournamentLeaderboardRows(tournamentLb);
 
             if (matches.length) {
                 html += '<h4 style="margin:16px 0 8px">Recent Games</h4>';
@@ -360,7 +417,7 @@ const App = {
     /** Legacy compatibility: maps old showView calls to new navigation */
     showView(view) {
         if (view === 'map') { App.setMainTab('map'); }
-        else if (view === 'sessions') { App.setMainTab('sessions'); }
+        else if (view === 'sessions') { App.setMainTab('map'); }
         else if (view === 'profile') { App.setMainTab('profile'); }
         else if (view === 'ranked') {
             // If we have a court open, switch to its ranked tab
@@ -463,18 +520,20 @@ const App = {
             if (!notifs.length) { list.innerHTML = '<p class="muted" style="padding:16px">No notifications</p>'; return; }
             list.innerHTML = notifs.map(n => {
                 const isFriendNotif = ['friend_request', 'friend_accepted'].includes(n.notif_type);
-                const isSessionNotif = ['session_invite', 'session_join'].includes(n.notif_type);
-                const isCourtNotif = ['court_invite', 'checkin_notify'].includes(n.notif_type);
+                const isSessionNotif = ['session_invite', 'session_join', 'session_spot_opened'].includes(n.notif_type);
+                const isCourtNotif = ['court_invite', 'checkin'].includes(n.notif_type);
                 const isMatchNotif = ['match_confirm', 'match_rejected', 'match_result', 'match_cancelled', 'elo_change'].includes(n.notif_type);
                 const isChallengeNotif = (n.notif_type || '').startsWith('ranked_challenge');
                 const isTournamentNotif = (n.notif_type || '').startsWith('tournament_');
-                const isAdminNotif = ['court_update_approved', 'court_update_rejected'].includes(n.notif_type);
+                const isAdminNotif = ['court_update_approved', 'court_update_rejected', 'court_update_review', 'court_report_review'].includes(n.notif_type);
+                const isProfileNotif = ['court_update_result', 'court_report_result'].includes(n.notif_type);
                 let onclick = '';
                 if (isSessionNotif && n.reference_id) {
                     onclick = `onclick="document.getElementById('notifications-dropdown').style.display='none'; Sessions.openDetail(${n.reference_id});"`;
                 }
                 else if (isCourtNotif && n.reference_id) onclick = `onclick="App.openCourtDetails(${n.reference_id}); document.getElementById('notifications-dropdown').style.display='none';"`;
                 else if (isFriendNotif) onclick = `onclick="App.setMainTab('profile'); document.getElementById('notifications-dropdown').style.display='none';"`;
+                else if (isProfileNotif) onclick = `onclick="App.setMainTab('profile'); document.getElementById('notifications-dropdown').style.display='none';"`;
                 else if (isMatchNotif || isChallengeNotif) {
                     onclick = `onclick="App.openRankedActionFromNotification('${n.notif_type}', ${Number(n.reference_id) || 'null'});"`;
                 }
