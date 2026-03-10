@@ -600,6 +600,10 @@ select::-ms-expand {
   overflow: hidden;
 }
 
+body.screen-court-details #location-consent-banner {
+  display: none !important;
+}
+
 /* ── Tab Bar ───────────────────────────────────── */
 .tab-bar {
   display: flex;
@@ -5783,6 +5787,10 @@ input.flatpickr-input[readonly] {
 
 /* ── Responsive Desktop ────────────────────────── */
 @media (min-width: 640px) {
+  .court-hero-stats,
+  .court-live-summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
   .court-info-grid {
     grid-template-columns: 1fr 1fr 1fr;
   }
@@ -6365,27 +6373,272 @@ input.flatpickr-input[readonly] {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   flex: 1;
-  padding-bottom: 24px;
+  padding: 14px 12px calc(28px + var(--safe-bottom));
+  scrollbar-width: none;
+}
+.court-scrollable-page::-webkit-scrollbar {
+  display: none;
 }
 .court-page-section {
   padding: 18px 16px;
-  border-bottom: 1px solid var(--border);
-  scroll-margin-top: 76px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  scroll-margin-top: 88px;
 }
 .court-page-section:last-child {
-  border-bottom: none;
+  margin-bottom: 0;
 }
-.court-page-section h4 {
+.court-page-section h4,
+.court-page-section h5 {
   margin: 0;
 }
 .court-page-section-empty {
   display: none;
 }
 
+.section-header-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.court-section-subtitle {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.section-header.section-header-tight {
+  margin-bottom: 8px;
+  align-items: flex-start;
+}
+.section-header.section-header-tight h5 {
+  font-size: 14px;
+  font-weight: 700;
+}
+.court-section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.court-page-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.court-hero-media {
+  position: relative;
+  min-height: 208px;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 52%, #22c55e 100%);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
+}
+.court-hero-media img {
+  width: 100%;
+  height: 208px;
+  object-fit: cover;
+}
+.court-hero-media.no-photo {
+  display: flex;
+  align-items: stretch;
+}
+.court-hero-placeholder {
+  min-height: 208px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 18px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(34, 197, 94, 0.82));
+  color: #fff;
+}
+.court-hero-placeholder strong {
+  font-size: 18px;
+  font-weight: 700;
+}
+.court-hero-placeholder span {
+  max-width: 280px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.86);
+  line-height: 1.5;
+}
+.court-hero-media-top {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+.court-hero-panel {
+  border: 1px solid rgba(187, 247, 208, 0.6);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.9), rgba(255, 255, 255, 0.98) 76%);
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+.court-hero-chip-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.court-hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid #dbe5f0;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+}
+.court-hero-chip.success {
+  border-color: #bbf7d0;
+  background: #dcfce7;
+  color: #166534;
+}
+.court-hero-chip.warn {
+  border-color: #fde68a;
+  background: #fef3c7;
+  color: #92400e;
+}
+.court-hero-media-top .court-hero-chip {
+  background: rgba(248, 250, 252, 0.94);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
+}
+.court-hero-address {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+.court-hero-summary {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #0f172a;
+  margin-bottom: 12px;
+}
+.court-hero-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.court-hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: rgba(255, 255, 255, 0.88);
+}
+.court-hero-stat strong {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text);
+}
+.court-hero-stat span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.court-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.court-hero-actions > * {
+  flex: 1 1 110px;
+}
+
+.court-empty-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+  margin-top: 10px;
+}
+.court-empty-card strong {
+  font-size: 14px;
+}
+.court-empty-card p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.court-empty-card-compact {
+  margin-top: 0;
+}
+.court-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.court-empty-actions > * {
+  flex: 1 1 140px;
+}
+
+.court-inline-note {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.court-inline-note strong {
+  color: var(--text);
+}
+
+.court-live-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+.court-live-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: #f8fafc;
+}
+.court-live-summary-item strong {
+  font-size: 17px;
+  color: var(--text);
+}
+.court-live-summary-item span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* Compact schedule on court page */
 .court-schedule-days {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   overflow-x: auto;
   padding: 4px 0;
   -webkit-overflow-scrolling: touch;
@@ -6471,12 +6724,10 @@ input.flatpickr-input[readonly] {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 10px 0 8px;
-  margin-bottom: 6px;
-  background: linear-gradient(180deg, rgba(241, 245, 249, 0.98), rgba(241, 245, 249, 0.9));
+  padding: 2px 2px 12px;
+  margin-bottom: 2px;
+  background: linear-gradient(180deg, rgba(241, 245, 249, 0.98), rgba(241, 245, 249, 0.92) 72%, rgba(241, 245, 249, 0));
   backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(226, 232, 240, 0.82);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
   scrollbar-width: none;
   scroll-snap-type: x proximity;
 }
@@ -6547,6 +6798,34 @@ input.flatpickr-input[readonly] {
 .court-community-card-wide {
   grid-column: 1 / -1;
   min-height: 0;
+}
+.court-community-prompt {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.92), #fff);
+}
+
+.court-page-section.court-chat-section {
+  margin: 0 0 12px;
+  padding: 18px 16px;
+}
+.court-chat-guest {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.court-chat-guest p {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.court-help-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.court-contact > * {
+  flex: 1 1 140px;
 }
 
 .popup-checkin-note {

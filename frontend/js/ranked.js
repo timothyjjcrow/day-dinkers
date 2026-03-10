@@ -507,7 +507,7 @@ const Ranked = {
         if (!container) return;
         const silent = !!options.silent;
         if (!silent || !container.innerHTML.trim()) {
-            container.innerHTML = '<div class="loading">Loading match history...</div>';
+            container.innerHTML = `<div class="loading">${courtId ? 'Loading recent games...' : 'Loading match history...'}</div>`;
         }
 
         let url = '/api/ranked/history?';
@@ -524,6 +524,11 @@ const Ranked = {
         try {
             const res = await API.get(url);
             const matches = res.matches || [];
+            if (courtId) {
+                Ranked._setRecentMatchesForCourt(courtId, matches);
+                Ranked.renderRecentGamesForCourt(courtId);
+                return;
+            }
             if (!matches.length) {
                 Ranked._setHtmlIfChanged(container, '<p class="muted">No match history yet</p>');
                 return;
@@ -531,7 +536,7 @@ const Ranked = {
             Ranked._setHtmlIfChanged(container, matches.map(m => Ranked._renderMatchHistory(m)).join(''));
         } catch {
             if (!silent || !container.innerHTML.trim()) {
-                container.innerHTML = '<p class="error">Failed to load history</p>';
+                container.innerHTML = `<p class="error">${courtId ? 'Failed to load recent games' : 'Failed to load history'}</p>`;
             }
         }
     },

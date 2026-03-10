@@ -235,9 +235,20 @@ const App = {
         document.getElementById('court-details-screen').style.display = screen === 'court-details' ? 'flex' : 'none';
         document.getElementById('admin-view').style.display = screen === 'admin' ? 'flex' : 'none';
         App.currentScreen = screen;
+        document.body.classList.toggle('screen-main', screen === 'main');
+        document.body.classList.toggle('screen-court-details', screen === 'court-details');
+        document.body.classList.toggle('screen-admin', screen === 'admin');
 
         // Close dropdowns
         App.hideNotifications();
+
+        if (
+            screen !== 'court-details'
+            && typeof MapView !== 'undefined'
+            && typeof MapView._teardownCourtPageUi === 'function'
+        ) {
+            MapView._teardownCourtPageUi();
+        }
 
         if (screen === 'main' && App.currentMainTab === 'map') {
             setTimeout(() => { if (MapView.map) MapView.map.invalidateSize(); }, 100);
@@ -640,7 +651,9 @@ const App = {
             // Open the court update modal instead for now
             const courtId = MapView.currentCourtId;
             if (courtId) {
-                const court = MapView.courts.find(c => c.id === courtId);
+                const court = (MapView.currentCourtData && Number(MapView.currentCourtData.id) === Number(courtId))
+                    ? MapView.currentCourtData
+                    : MapView.courts.find(c => c.id === courtId);
                 const courtName = court ? court.name : 'Court';
                 CourtUpdates.openModal(courtId, courtName);
             }
