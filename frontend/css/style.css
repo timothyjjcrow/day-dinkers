@@ -3898,6 +3898,13 @@ body.screen-court-details #location-consent-banner {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.12);
 }
+
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]),
+  textarea {
+    font-size: 16px !important;
+  }
+}
 .live-badge-sm {
   font-size: 11px;
   font-weight: 600;
