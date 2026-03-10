@@ -304,8 +304,19 @@ const MapView = {
 
     scrollToCourtSection(sectionId, sourceButton = null) {
         MapView._setActiveCourtSection(sectionId, sourceButton);
+        const root = document.getElementById('court-page-content');
         const el = document.getElementById(sectionId);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (!el) return;
+        if (!root) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+        }
+        const stickyNav = root.querySelector('.court-sticky-nav');
+        const rootRect = root.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const stickyOffset = stickyNav ? stickyNav.getBoundingClientRect().height + 8 : 0;
+        const nextScrollTop = root.scrollTop + (elRect.top - rootRect.top) - stickyOffset;
+        root.scrollTop = Math.max(0, nextScrollTop);
     },
 
     _setActiveCourtSection(sectionId, sourceButton = null) {
