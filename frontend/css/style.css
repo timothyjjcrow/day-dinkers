@@ -5052,30 +5052,38 @@ input.flatpickr-input[readonly] {
 /* ── Chat Panel (DMs) ─────────────────────────── */
 .chat-panel {
   position: fixed;
-  bottom: 0;
+  bottom: calc(12px + var(--safe-bottom));
   right: 12px;
-  width: 320px;
-  max-height: 400px;
-  height: min(400px, calc(100vh - 96px));
-  min-height: 260px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 96px));
+  height: min(420px, calc(100vh - 96px));
+  min-height: 280px;
   background: var(--bg-card);
-  border-radius: var(--radius) var(--radius) 0 0;
+  border-radius: 18px;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border);
   z-index: 1500;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.96));
 }
 .chat-header h3 {
   font-size: 14px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .panel-close {
   background: none;
@@ -5083,6 +5091,7 @@ input.flatpickr-input[readonly] {
   font-size: 20px;
   cursor: pointer;
   padding: 4px;
+  flex-shrink: 0;
 }
 .chat-messages {
   flex: 1;
@@ -5098,14 +5107,45 @@ input.flatpickr-input[readonly] {
   gap: 6px;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
+  background: var(--bg-card);
 }
 .chat-input input {
   flex: 1;
+  min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-family: inherit;
+}
+.chat-input .btn-primary {
+  flex-shrink: 0;
+}
+
+@media (max-width: 1100px) {
+  .chat-panel {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    max-height: min(460px, calc(100vh - 120px));
+    height: min(460px, calc(100vh - 120px));
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: min(72vh, calc(100vh - 92px));
+    height: min(72vh, calc(100vh - 92px));
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    border-radius: 18px 18px 0 0;
+  }
 }
 
 /* ── Toast ─────────────────────────────────────── */

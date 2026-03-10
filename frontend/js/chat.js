@@ -75,6 +75,9 @@ const Chat = {
                 if (fpChat && msg.msg_type === 'court') {
                     Chat._appendRenderedMessage(fpChat, MapView._renderChatMsg(msg), msg.id);
                 }
+                if (msg.msg_type === 'direct') {
+                    Chat._refreshProfileThreads();
+                }
             });
 
             Chat.socket.on('presence_update', (data) => Chat._queuePresenceRefresh(data));
@@ -94,6 +97,14 @@ const Chat = {
             Chat.socket.disconnect();
         }
         Chat.socket.connect();
+    },
+
+    _refreshProfileThreads() {
+        const threadsEl = document.getElementById('profile-message-threads');
+        if (!threadsEl || typeof Profile === 'undefined' || typeof Profile._loadMessageThreads !== 'function') {
+            return;
+        }
+        Profile._loadMessageThreads();
     },
 
     _queuePresenceRefresh(data = {}) {
@@ -350,7 +361,10 @@ const Chat = {
             await API.post('/api/chat/send', data);
             input.value = '';
             if (type === 'court') Chat._loadCourtMessages(parseInt(panel.dataset.courtId));
-            if (type === 'direct') Chat._loadDirectMessages(parseInt(panel.dataset.userId));
+            if (type === 'direct') {
+                Chat._loadDirectMessages(parseInt(panel.dataset.userId));
+                Chat._refreshProfileThreads();
+            }
         } catch { App.toast('Failed to send', 'error'); }
     },
 
