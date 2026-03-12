@@ -291,6 +291,27 @@ def test_proximity_search(client):
     assert 'distance' in data['courts'][0]
 
 
+def test_location_distance_does_not_hide_selected_county_without_radius(client):
+    token = _auth(client)
+    _seed_court(client, token, name='Humboldt Court')
+    _seed_court(
+        client, token,
+        name='Alameda Court With Distance',
+        county_slug='alameda',
+        city='Oakland',
+        latitude=37.8044,
+        longitude=-122.2712,
+    )
+
+    res = client.get('/api/courts?county_slug=alameda&lat=40.80&lng=-124.16')
+    assert res.status_code == 200
+    data = json.loads(res.data)
+    assert data['county_slug'] == 'alameda'
+    assert len(data['courts']) == 1
+    assert data['courts'][0]['name'] == 'Alameda Court With Distance'
+    assert 'distance' in data['courts'][0]
+
+
 def test_update_court(client):
     token = _auth(client)
     _set_admin(client, 'court@test.com')

@@ -251,7 +251,7 @@ def get_courts():
     _cleanup_stale_checkins()
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
-    radius = request.args.get('radius', 50, type=float)
+    radius = request.args.get('radius', type=float)
     indoor = request.args.get('indoor', type=str)
     lighted = request.args.get('lighted', type=str)
     search = request.args.get('search', '')
@@ -260,6 +260,7 @@ def get_courts():
     county_slug = normalize_county_slug(raw_county, fallback=DEFAULT_COUNTY_SLUG)
     if raw_county.lower() == 'all':
         county_slug = ''
+    has_location = lat is not None and lng is not None
 
     query = Court.query
     if county_slug:
@@ -324,15 +325,15 @@ def get_courts():
         court_dict['active_players'] = active_players_by_court.get(court.id, 0)
         court_dict['open_sessions'] = open_sessions_by_court.get(court.id, 0)
 
-        if lat is not None and lng is not None:
+        if has_location:
             dist = haversine_distance(lat, lng, court.latitude, court.longitude)
-            if dist <= radius:
+            if radius is None or dist <= radius:
                 court_dict['distance'] = round(dist, 1)
                 results.append(court_dict)
         else:
             results.append(court_dict)
 
-    if lat is not None:
+    if has_location:
         results.sort(key=lambda c: c.get('distance', 9999))
     return jsonify({
         'courts': results,
