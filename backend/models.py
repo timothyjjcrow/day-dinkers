@@ -349,6 +349,21 @@ class ActivityLog(db.Model):
 
 # ── Notifications ─────────────────────────────────────────────────────
 
+class MessageReadReceipt(db.Model):
+    """Tracks per-user read position per message thread for inbox unread counts."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    thread_type = db.Column(db.String(20), nullable=False)  # 'session' or 'direct'
+    thread_ref_id = db.Column(db.Integer, nullable=False)  # session_id or other_user_id
+    last_read_message_id = db.Column(db.Integer, default=0, nullable=False)
+    updated_at = db.Column(db.DateTime, default=lambda: utcnow_naive())
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'thread_type', 'thread_ref_id',
+                            name='uq_message_read_receipt'),
+    )
+
+
 class Notification(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)

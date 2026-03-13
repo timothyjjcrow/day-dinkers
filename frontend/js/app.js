@@ -241,6 +241,7 @@ const App = {
 
         // Close dropdowns
         App.hideNotifications();
+        if (typeof Inbox !== 'undefined') Inbox.hide();
 
         if (
             screen !== 'court-details'
@@ -527,6 +528,7 @@ const App = {
             App.hideNotifications();
             return;
         }
+        if (typeof Inbox !== 'undefined') Inbox.hide();
         dd.style.display = 'block';
         App._loadNotifications();
     },
@@ -687,7 +689,11 @@ const App = {
 
     refreshLiveUiNow() {
         const token = localStorage.getItem('token');
-        if (!token) { App._setNotificationBadge(0); return; }
+        if (!token) {
+            App._setNotificationBadge(0);
+            if (typeof Inbox !== 'undefined') Inbox._setBadge(0);
+            return;
+        }
 
         App.refreshNotificationBadge();
 
@@ -758,6 +764,7 @@ const App = {
         MapView.init();
         App.initCountyPicker();
         Chat.init();
+        if (typeof Inbox !== 'undefined') Inbox.init();
 
         // Auth check
         Auth.checkAuth();
@@ -792,6 +799,16 @@ const App = {
                 && !(notifButton && notifButton.contains(e.target))
             ) {
                 App.hideNotifications();
+            }
+            const inboxDropdown = document.getElementById('inbox-dropdown');
+            const inboxButton = document.getElementById('btn-inbox');
+            if (
+                inboxDropdown
+                && inboxDropdown.style.display === 'block'
+                && !inboxDropdown.contains(e.target)
+                && !(inboxButton && inboxButton.contains(e.target))
+            ) {
+                if (typeof Inbox !== 'undefined') Inbox.hide();
             }
             const suggestions = document.getElementById('search-suggestions');
             const searchInput = document.getElementById('mobile-search-input');

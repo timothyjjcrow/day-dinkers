@@ -5187,6 +5187,120 @@ input.flatpickr-input[readonly] {
   margin-top: 4px;
 }
 
+/* ── Inbox Dropdown ───────────────────────────── */
+.inbox-dropdown {
+  right: auto;
+  left: 8px;
+}
+@media (min-width: 520px) {
+  .inbox-dropdown { left: auto; right: 48px; }
+}
+.inbox-tabs {
+  display: flex;
+  gap: 2px;
+}
+.inbox-tab {
+  background: none;
+  border: none;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.inbox-tab:hover { background: var(--bg); }
+.inbox-tab.active {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.inbox-thread {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: background 0.15s;
+}
+.inbox-thread:hover { background: var(--bg); }
+.inbox-thread-unread-row {
+  background: #f0fdf4;
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.inbox-thread-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--primary-light);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.inbox-thread-avatar-session {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+.inbox-thread-avatar-session svg {
+  width: 16px;
+  height: 16px;
+}
+.inbox-thread-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.inbox-thread-name {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-thread-preview {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-thread-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.inbox-thread-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.inbox-thread-unread {
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
 /* ── Chat Panel (DMs) ─────────────────────────── */
 .chat-panel {
   position: fixed;

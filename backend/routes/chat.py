@@ -4,7 +4,10 @@ from datetime import timedelta
 from flask import Blueprint, current_app, request, jsonify
 from flask_socketio import emit, join_room, leave_room
 from backend.app import db, socketio
-from backend.models import Message, Game, PlaySession, PlaySessionPlayer, Friendship, User
+from backend.models import (
+    Message, Game, PlaySession, PlaySessionPlayer, Friendship, User,
+    MessageReadReceipt,
+)
 from backend.auth_utils import login_required, get_user_from_token
 from backend.time_utils import utcnow_naive
 
@@ -308,6 +311,174 @@ def send_message():
         socketio.emit('new_message', msg_dict, room=f'user_{msg.recipient_id}')
 
     return jsonify({'message': msg_dict}), 201
+
+
+# ── Inbox Endpoints ────────────────────────────────────────────────────
+
+def _user_session_ids(user_id):
+    creator = {row[0] for row in db.session.query(PlaySession.id).filter(
+        PlaySession.creator_id == user_id).all()}
+    player = {row[0] for row in db.session.query(PlaySessionPlayer.session_id).filter(
+        PlaySessionPlayer.user_id == user_id).all()}
+    return creator | player
+
+
+def _read_receipt_map(user_id):
+    rows = MessageReadReceipt.query.filter_by(user_id=user_id).all()
+    return {(r.thread_type, r.thread_ref_id): r.last_read_message_id for r in rows}
+
+
+def _build_dm_threads(user_id, receipt_map):
+    rows = _recent_messages(Message.query.filter(
+        Message.msg_type == 'direct',
+        (Message.sender_id == user_id) | (Message.recipient_id == user_id),
+    ))
+    rows.reverse()  # newest first for dedup
+
+    threads, seen = [], set()
+    for msg in rows:
+        other_id = msg.recipient_id if msg.sender_id == user_id else msg.sender_id
+        if not other_id or other_id in seen:
+            continue
+        if not _are_friends(user_id, other_id):
+            continue
+        other = db.session.get(User, other_id)
+        if not other:
+            continue
+        seen.add(other_id)
+        last_read = receipt_map.get(('direct', other_id), 0)
+        unread = Message.query.filter(
+            Message.msg_type == 'direct', Message.sender_id == other_id,
+            Message.recipient_id == user_id, Message.id > last_read,
+        ).count()
+        threads.append({
+            'thread_type': 'direct', 'thread_ref_id': other_id,
+            'name': other.name or other.username,
+            'subtitle': f'@{other.username}',
+            'last_message_preview': msg.content[:120],
+            'last_message_at': msg.created_at.isoformat() if msg.created_at else None,
+            'unread_count': unread,
+            'user': other.to_public_dict(),
+        })
+        if len(threads) >= 20:
+            break
+    return threads
+
+
+def _build_session_threads(user_id, receipt_map):
+    session_ids = _user_session_ids(user_id)
+    if not session_ids:
+        return []
+    threads = []
+    for sid in session_ids:
+        last_msg = Message.query.filter(
+            Message.session_id == sid, Message.msg_type == 'session',
+        ).order_by(Message.created_at.desc()).first()
+        if not last_msg:
+            continue
+        session = db.session.get(PlaySession, sid)
+        if not session:
+            continue
+        last_read = receipt_map.get(('session', sid), 0)
+        unread = Message.query.filter(
+            Message.session_id == sid, Message.msg_type == 'session',
+            Message.sender_id != user_id, Message.id > last_read,
+        ).count()
+        court_name = session.court.name if session.court else 'Court'
+        game_type = (session.game_type or 'open').replace('_', ' ').title()
+        threads.append({
+            'thread_type': 'session', 'thread_ref_id': sid,
+            'name': f'{court_name} Session',
+            'subtitle': game_type,
+            'last_message_preview': last_msg.content[:120],
+            'last_message_at': last_msg.created_at.isoformat() if last_msg.created_at else None,
+            'unread_count': unread,
+            'session_id': sid,
+        })
+    return threads
+
+
+@chat_bp.route('/inbox', methods=['GET'])
+@login_required
+def get_inbox():
+    me = request.current_user.id
+    thread_filter = request.args.get('filter', 'all')
+    _prune_stale_chat_messages()
+    receipt_map = _read_receipt_map(me)
+    threads = []
+    if thread_filter in ('all', 'direct'):
+        threads.extend(_build_dm_threads(me, receipt_map))
+    if thread_filter in ('all', 'sessions'):
+        threads.extend(_build_session_threads(me, receipt_map))
+    threads.sort(key=lambda t: t.get('last_message_at') or '', reverse=True)
+    return jsonify({
+        'threads': threads[:30],
+        'total_unread': sum(t.get('unread_count', 0) for t in threads),
+    })
+
+
+@chat_bp.route('/inbox/unread-count', methods=['GET'])
+@login_required
+def get_inbox_unread_count():
+    me = request.current_user.id
+    receipt_map = _read_receipt_map(me)
+    total = 0
+    dm_senders = db.session.query(Message.sender_id).filter(
+        Message.msg_type == 'direct', Message.recipient_id == me,
+    ).distinct().all()
+    for (sender_id,) in dm_senders:
+        last_read = receipt_map.get(('direct', sender_id), 0)
+        total += Message.query.filter(
+            Message.msg_type == 'direct', Message.sender_id == sender_id,
+            Message.recipient_id == me, Message.id > last_read,
+        ).count()
+    for sid in _user_session_ids(me):
+        last_read = receipt_map.get(('session', sid), 0)
+        total += Message.query.filter(
+            Message.msg_type == 'session', Message.session_id == sid,
+            Message.sender_id != me, Message.id > last_read,
+        ).count()
+    return jsonify({'unread_count': total})
+
+
+@chat_bp.route('/inbox/read', methods=['POST'])
+@login_required
+def mark_inbox_thread_read():
+    me = request.current_user.id
+    data = request.get_json(silent=True) or {}
+    thread_type = str(data.get('thread_type', '')).strip()
+    try:
+        thread_ref_id = int(data.get('thread_ref_id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'thread_ref_id is required'}), 400
+    if thread_type not in ('direct', 'session'):
+        return jsonify({'error': 'Invalid thread_type'}), 400
+    if thread_type == 'direct':
+        latest = Message.query.filter(
+            Message.msg_type == 'direct',
+            ((Message.sender_id == me) & (Message.recipient_id == thread_ref_id))
+            | ((Message.sender_id == thread_ref_id) & (Message.recipient_id == me)),
+        ).order_by(Message.id.desc()).first()
+    else:
+        latest = Message.query.filter(
+            Message.msg_type == 'session', Message.session_id == thread_ref_id,
+        ).order_by(Message.id.desc()).first()
+    if not latest:
+        return jsonify({'ok': True})
+    receipt = MessageReadReceipt.query.filter_by(
+        user_id=me, thread_type=thread_type, thread_ref_id=thread_ref_id,
+    ).first()
+    if receipt:
+        receipt.last_read_message_id = latest.id
+        receipt.updated_at = utcnow_naive()
+    else:
+        receipt = MessageReadReceipt(
+            user_id=me, thread_type=thread_type,
+            thread_ref_id=thread_ref_id, last_read_message_id=latest.id,
+        )
+        db.session.add(receipt)
+    db.session.commit()
+    return jsonify({'ok': True})
 
 
 # WebSocket event handlers

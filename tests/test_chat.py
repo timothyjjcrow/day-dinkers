@@ -297,6 +297,173 @@ def test_socket_user_room_join_requires_matching_user_token(client, app):
         assert allowed_error is None
 
 
+# ── Inbox Tests ────────────────────────────────────
+
+def test_inbox_returns_dm_threads(client):
+    token1, user1 = _auth_with_user(client, 'inbox_dm1', 'inbox_dm1@test.com')
+    token2, user2 = _auth_with_user(client, 'inbox_dm2', 'inbox_dm2@test.com')
+    _make_friends(client, token1, user1['id'], token2, user2['id'])
+
+    client.post('/api/chat/send', json={
+        'content': 'Hello from inbox test', 'recipient_id': user2['id'], 'msg_type': 'direct',
+    }, headers={'Authorization': f'Bearer {token1}'})
+
+    res = client.get('/api/chat/inbox', headers={'Authorization': f'Bearer {token1}'})
+    assert res.status_code == 200
+    data = json.loads(res.data)
+    assert len(data['threads']) >= 1
+    dm_thread = next(t for t in data['threads'] if t['thread_type'] == 'direct')
+    assert dm_thread['thread_ref_id'] == user2['id']
+    assert dm_thread['last_message_preview'] == 'Hello from inbox test'
+
+
+def test_inbox_returns_session_threads(client):
+    token, user = _auth_with_user(client, 'inbox_sess', 'inbox_sess@test.com')
+    court = _create_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+    start = utcnow_naive() + timedelta(hours=2)
+    end = start + timedelta(hours=1)
+    sess_res = client.post('/api/sessions', json={
+        'court_id': court['id'], 'session_type': 'scheduled',
+        'start_time': start.isoformat(), 'end_time': end.isoformat(),
+    }, headers=headers)
+    session_id = json.loads(sess_res.data)['session']['id']
+
+    client.post('/api/chat/send', json={
+        'content': 'Session chat msg', 'msg_type': 'session', 'session_id': session_id,
+    }, headers=headers)
+
+    res = client.get('/api/chat/inbox', headers=headers)
+    assert res.status_code == 200
+    data = json.loads(res.data)
+    session_threads = [t for t in data['threads'] if t['thread_type'] == 'session']
+    assert len(session_threads) >= 1
+    assert session_threads[0]['thread_ref_id'] == session_id
+
+
+def test_inbox_filter_direct_only(client):
+    token1, user1 = _auth_with_user(client, 'inbox_filt1', 'inbox_filt1@test.com')
+    token2, user2 = _auth_with_user(client, 'inbox_filt2', 'inbox_filt2@test.com')
+    court = _create_court(client, token1)
+    headers1 = {'Authorization': f'Bearer {token1}'}
+    _make_friends(client, token1, user1['id'], token2, user2['id'])
+
+    client.post('/api/chat/send', json={
+        'content': 'DM msg', 'recipient_id': user2['id'], 'msg_type': 'direct',
+    }, headers=headers1)
+
+    start = utcnow_naive() + timedelta(hours=2)
+    sess_res = client.post('/api/sessions', json={
+        'court_id': court['id'], 'session_type': 'scheduled',
+        'start_time': start.isoformat(),
+        'end_time': (start + timedelta(hours=1)).isoformat(),
+    }, headers=headers1)
+    session_id = json.loads(sess_res.data)['session']['id']
+    client.post('/api/chat/send', json={
+        'content': 'Session msg', 'msg_type': 'session', 'session_id': session_id,
+    }, headers=headers1)
+
+    res = client.get('/api/chat/inbox?filter=direct', headers=headers1)
+    data = json.loads(res.data)
+    assert all(t['thread_type'] == 'direct' for t in data['threads'])
+
+
+def test_inbox_unread_count(client):
+    token1, user1 = _auth_with_user(client, 'inbox_unread1', 'inbox_unread1@test.com')
+    token2, user2 = _auth_with_user(client, 'inbox_unread2', 'inbox_unread2@test.com')
+    _make_friends(client, token1, user1['id'], token2, user2['id'])
+
+    for i in range(3):
+        client.post('/api/chat/send', json={
+            'content': f'Unread msg {i}', 'recipient_id': user1['id'], 'msg_type': 'direct',
+        }, headers={'Authorization': f'Bearer {token2}'})
+
+    res = client.get('/api/chat/inbox/unread-count',
+                     headers={'Authorization': f'Bearer {token1}'})
+    assert res.status_code == 200
+    data = json.loads(res.data)
+    assert data['unread_count'] == 3
+
+
+def test_inbox_mark_read_resets_unread(client):
+    token1, user1 = _auth_with_user(client, 'inbox_mark1', 'inbox_mark1@test.com')
+    token2, user2 = _auth_with_user(client, 'inbox_mark2', 'inbox_mark2@test.com')
+    _make_friends(client, token1, user1['id'], token2, user2['id'])
+
+    client.post('/api/chat/send', json={
+        'content': 'Before read', 'recipient_id': user1['id'], 'msg_type': 'direct',
+    }, headers={'Authorization': f'Bearer {token2}'})
+
+    before = client.get('/api/chat/inbox/unread-count',
+                        headers={'Authorization': f'Bearer {token1}'})
+    assert json.loads(before.data)['unread_count'] >= 1
+
+    mark = client.post('/api/chat/inbox/read', json={
+        'thread_type': 'direct', 'thread_ref_id': user2['id'],
+    }, headers={'Authorization': f'Bearer {token1}'})
+    assert mark.status_code == 200
+
+    after = client.get('/api/chat/inbox/unread-count',
+                       headers={'Authorization': f'Bearer {token1}'})
+    assert json.loads(after.data)['unread_count'] == 0
+
+
+def test_inbox_mark_read_invalid_type(client):
+    token = _auth(client, 'inbox_invalid', 'inbox_invalid@test.com')
+    res = client.post('/api/chat/inbox/read', json={
+        'thread_type': 'court', 'thread_ref_id': 1,
+    }, headers={'Authorization': f'Bearer {token}'})
+    assert res.status_code == 400
+
+
+def test_inbox_excludes_court_messages(client):
+    token = _auth(client, 'inbox_nocourt', 'inbox_nocourt@test.com')
+    court = _create_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    client.post('/api/chat/send', json={
+        'content': 'Public court msg', 'court_id': court['id'], 'msg_type': 'court',
+    }, headers=headers)
+
+    res = client.get('/api/chat/inbox', headers=headers)
+    data = json.loads(res.data)
+    court_threads = [t for t in data['threads'] if t.get('thread_type') == 'court']
+    assert len(court_threads) == 0
+
+
+def test_inbox_session_unread_from_other_user(client):
+    token1, user1 = _auth_with_user(client, 'inbox_su1', 'inbox_su1@test.com')
+    token2, user2 = _auth_with_user(client, 'inbox_su2', 'inbox_su2@test.com')
+    court = _create_court(client, token1)
+    headers1 = {'Authorization': f'Bearer {token1}'}
+    headers2 = {'Authorization': f'Bearer {token2}'}
+
+    start = utcnow_naive() + timedelta(hours=2)
+    sess_res = client.post('/api/sessions', json={
+        'court_id': court['id'], 'session_type': 'scheduled',
+        'start_time': start.isoformat(),
+        'end_time': (start + timedelta(hours=1)).isoformat(),
+    }, headers=headers1)
+    session_id = json.loads(sess_res.data)['session']['id']
+
+    client.post(f'/api/sessions/{session_id}/join', json={}, headers=headers2)
+
+    client.post('/api/chat/send', json={
+        'content': 'Other user msg', 'msg_type': 'session', 'session_id': session_id,
+    }, headers=headers2)
+
+    res = client.get('/api/chat/inbox/unread-count', headers=headers1)
+    data = json.loads(res.data)
+    assert data['unread_count'] >= 1
+
+    client.post('/api/chat/inbox/read', json={
+        'thread_type': 'session', 'thread_ref_id': session_id,
+    }, headers=headers1)
+
+    res2 = client.get('/api/chat/inbox/unread-count', headers=headers1)
+    assert json.loads(res2.data)['unread_count'] == 0
+
+
 # ── Presence Tests ─────────────────────────────────
 def test_check_in_out(client):
     token = _auth(client, 'presuser', 'pres@test.com')

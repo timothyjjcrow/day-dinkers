@@ -78,6 +78,10 @@ const Chat = {
                 if (msg.msg_type === 'direct') {
                     Chat._refreshProfileThreads();
                 }
+                if ((msg.msg_type === 'direct' || msg.msg_type === 'session')
+                    && typeof Inbox !== 'undefined') {
+                    Inbox.refreshBadge();
+                }
             });
 
             Chat.socket.on('presence_update', (data) => Chat._queuePresenceRefresh(data));
@@ -188,6 +192,11 @@ const Chat = {
             } else if (typeof App !== 'undefined' && typeof App.refreshNotificationBadge === 'function') {
                 App.refreshNotificationBadge();
             }
+            if (typeof Inbox !== 'undefined') {
+                const inboxDd = document.getElementById('inbox-dropdown');
+                if (inboxDd && inboxDd.style.display === 'block') Inbox._loadThreads();
+                else Inbox.refreshBadge();
+            }
             if (typeof App !== 'undefined' && App.currentView === 'ranked' && typeof Ranked !== 'undefined') {
                 Ranked.loadPendingConfirmations();
             }
@@ -282,6 +291,7 @@ const Chat = {
         const container = document.getElementById('chat-messages');
         if (container) container.innerHTML = '<div class="loading">Loading messages...</div>';
         Sessions._loadSessionChat?.(sessionId);
+        if (typeof Inbox !== 'undefined') Inbox.markRead('session', sessionId);
     },
 
     async _loadDirectMessages(userId) {
@@ -314,6 +324,7 @@ const Chat = {
         delete panel.dataset.sessionId;
         document.getElementById('chat-title').textContent = `💬 ${userDisplayName || 'Direct Message'}`;
         Chat._loadDirectMessages(userId);
+        if (typeof Inbox !== 'undefined') Inbox.markRead('direct', userId);
     },
 
     async openDirectByUser(userId) {

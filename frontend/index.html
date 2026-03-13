@@ -41,6 +41,10 @@
             </div>
         </div>
         <div class="header-right">
+            <button class="header-icon-btn" id="btn-inbox" onclick="Inbox.toggle()" title="Messages">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span class="badge" id="inbox-badge" style="display:none">0</span>
+            </button>
             <button class="header-icon-btn" id="btn-notifications" onclick="App.toggleNotifications()" title="Notifications">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                 <span class="badge" id="notif-badge" style="display:none">0</span>
@@ -500,6 +504,19 @@
         <div id="notifications-list" class="dropdown-list"></div>
     </div>
 
+    <!-- Messages Inbox Dropdown -->
+    <div id="inbox-dropdown" class="dropdown inbox-dropdown" style="display:none">
+        <div class="dropdown-header">
+            <h3>Messages</h3>
+            <div class="inbox-tabs">
+                <button class="inbox-tab active" data-filter="all" onclick="Inbox.setFilter('all')">All</button>
+                <button class="inbox-tab" data-filter="direct" onclick="Inbox.setFilter('direct')">Direct</button>
+                <button class="inbox-tab" data-filter="sessions" onclick="Inbox.setFilter('sessions')">Sessions</button>
+            </div>
+        </div>
+        <div id="inbox-thread-list" class="dropdown-list"></div>
+    </div>
+
     <!-- Chat Panel (DMs) -->
     <div id="chat-panel" class="chat-panel" style="display:none">
         <div class="chat-header">
@@ -553,6 +570,7 @@
     <script src="js/map.js"></script>
     <script src="js/sessions.js"></script>
     <script src="js/chat.js"></script>
+    <script src="js/inbox.js"></script>
     <script src="js/profile.js"></script>
     <script src="js/location.js"></script>
     <script src="js/ranked.js"></script>
