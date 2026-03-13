@@ -1394,10 +1394,14 @@ const MapView = {
         const safeCourtName = MapView._escapeHtml(court.name || '');
         const safeAddressLine = MapView._escapeHtml(MapView._courtAddressLine(court));
         const safeDescription = MapView._escapeHtml(court.description || '');
-        const safeSurfaceType = MapView._escapeHtml(court.surface_type || 'Unknown');
-        const safeFees = MapView._escapeHtml(court.fees || 'Unknown');
-        const safeSkillLevels = MapView._escapeHtml((court.skill_levels || 'all').replace(/,/g, ', '));
-        const safeHours = MapView._escapeHtml(court.hours || '');
+        const safeSurfaceType = MapView._escapeHtml(court.surface_type || 'Not listed');
+        const safeFees = MapView._escapeHtml(court.fees || 'Not listed');
+        const safeSkillLevels = MapView._escapeHtml(
+            court.skill_levels && String(court.skill_levels).toLowerCase() !== 'all'
+                ? String(court.skill_levels).replace(/,/g, ', ')
+                : 'All skill levels'
+        );
+        const safeHours = MapView._escapeHtml(court.hours || 'Not listed');
         const safeOpenPlaySchedule = MapView._escapeHtml(court.open_play_schedule || '');
         const safePhoneLabel = MapView._escapeHtml(court.phone || '');
         const safePhoneHref = MapView._safeTel(court.phone || '');
@@ -1410,18 +1414,19 @@ const MapView = {
         const nowMs = Date.now();
 
         const amenities = [];
-        if (court.has_restrooms) amenities.push('<span class="amenity">🚻 Restrooms</span>');
-        if (court.has_parking) amenities.push('<span class="amenity">🅿️ Parking</span>');
-        if (court.has_water) amenities.push('<span class="amenity">💧 Water</span>');
-        if (court.lighted) amenities.push('<span class="amenity">💡 Lighted</span>');
-        if (court.nets_provided) amenities.push('<span class="amenity">🥅 Nets Provided</span>');
-        if (court.paddle_rental) amenities.push('<span class="amenity">🏓 Paddle Rental</span>');
-        if (court.has_pro_shop) amenities.push('<span class="amenity">🛒 Pro Shop</span>');
-        if (court.has_ball_machine) amenities.push('<span class="amenity">⚙️ Ball Machine</span>');
-        if (court.wheelchair_accessible) amenities.push('<span class="amenity">♿ Accessible</span>');
+        if (court.has_restrooms) amenities.push('<span class="amenity">Restrooms</span>');
+        if (court.has_parking) amenities.push('<span class="amenity">Parking</span>');
+        if (court.has_water) amenities.push('<span class="amenity">Water</span>');
+        if (court.lighted) amenities.push('<span class="amenity">Lighted</span>');
+        if (court.nets_provided) amenities.push('<span class="amenity">Nets provided</span>');
+        if (court.paddle_rental) amenities.push('<span class="amenity">Paddle rental</span>');
+        if (court.has_pro_shop) amenities.push('<span class="amenity">Pro shop</span>');
+        if (court.has_ball_machine) amenities.push('<span class="amenity">Ball machine</span>');
+        if (court.wheelchair_accessible) amenities.push('<span class="amenity">Accessible</span>');
 
-        const typeLabel = court.court_type === 'dedicated' ? 'Dedicated Pickleball' :
-                          court.court_type === 'converted' ? 'Converted (tennis lines)' : 'Shared Facility';
+        const typeLabel = court.court_type === 'dedicated' ? 'Dedicated Pickleball'
+            : court.court_type === 'converted' ? 'Converted (tennis lines)'
+                : 'Shared Facility';
         const safeTypeLabel = MapView._escapeHtml(typeLabel);
         const scheduledSessions = sessions
             .filter(session => session && session.session_type === 'scheduled')
@@ -1434,95 +1439,22 @@ const MapView = {
         const nextScheduledSession = futureScheduledSessions[0] || null;
 
         const liveSections = MapView._buildLiveCourtSections(
-            court, sessions, currentUser.id, amCheckedInHere,
+            court,
+            sessions,
+            currentUser.id,
+            amCheckedInHere,
             { playerCardOptions: { enableChallenge: true } },
         );
         const nowSessions = liveSections.nowSessions;
         const players = liveSections.activePlayers;
 
         const checkinBtnHTML = MapView._checkinBarHTML({
-            courtId: court.id, safeCourtName, amCheckedInHere,
-            currentUserId: currentUser.id, nowSessions,
+            courtId: court.id,
+            safeCourtName,
+            amCheckedInHere,
+            currentUserId: currentUser.id,
+            nowSessions,
         });
-
-        const heroSummaryParts = [];
-        if (nextScheduledSession) {
-            heroSummaryParts.push(`Next game ${MapView._escapeHtml(MapView._formatCourtDateTime(nextScheduledSession.start_time))}`);
-        } else {
-            heroSummaryParts.push('No scheduled games in the next 7 days');
-        }
-        if (friendCount > 0) {
-            heroSummaryParts.push(`${friendCount} friend${friendCount === 1 ? '' : 's'} at this court`);
-        } else if (pendingUpdatesCount > 0) {
-            heroSummaryParts.push(`${pendingUpdatesCount} community update${pendingUpdatesCount === 1 ? '' : 's'} pending review`);
-        }
-        const heroSummaryText = heroSummaryParts.join(' · ');
-
-        const heroChips = [
-            `<span class="court-hero-chip ${players > 0 ? 'success' : ''}">${players > 0 ? `${players} here now` : 'Quiet right now'}</span>`,
-            `<span class="court-hero-chip">${court.indoor ? 'Indoor' : 'Outdoor'}</span>`,
-            `<span class="court-hero-chip">${safeTypeLabel}</span>`,
-            safeFees && safeFees !== 'Unknown' ? `<span class="court-hero-chip">${safeFees}</span>` : '',
-        ].filter(Boolean).join('');
-
-        const heroMediaChips = [
-            court.verified ? '<span class="court-hero-chip success">Verified</span>' : '',
-            pendingUpdatesCount > 0
-                ? `<span class="court-hero-chip warn">${pendingUpdatesCount} pending update${pendingUpdatesCount === 1 ? '' : 's'}</span>`
-                : '',
-        ].filter(Boolean).join('');
-
-        const heroHtml = `
-            <div class="court-page-hero">
-                <div class="court-hero-media ${safePhotoUrl ? '' : 'no-photo'}">
-                    ${safePhotoUrl
-                        ? `<img src="${safePhotoUrl}" alt="${safePhotoAlt}" loading="lazy" onerror="this.remove()">`
-                        : `<div class="court-hero-placeholder"><strong>${safeCourtName}</strong><span>Community photos help players confirm they're at the right court.</span></div>`}
-                    ${heroMediaChips ? `<div class="court-hero-media-top">${heroMediaChips}</div>` : ''}
-                </div>
-                <div class="court-hero-panel">
-                    ${heroChips ? `<div class="court-hero-chip-row">${heroChips}</div>` : ''}
-                    ${safeAddressLine ? `<p class="court-hero-address">${safeAddressLine}</p>` : ''}
-                    <p class="court-hero-summary">${heroSummaryText}</p>
-                    <div class="court-hero-stats">
-                        <div class="court-hero-stat">
-                            <strong>${court.num_courts || 0}</strong>
-                            <span>Courts</span>
-                        </div>
-                        <div class="court-hero-stat">
-                            <strong>${checkedIn.length}</strong>
-                            <span>Checked In</span>
-                        </div>
-                        <div class="court-hero-stat">
-                            <strong>${futureScheduledSessions.length}</strong>
-                            <span>Upcoming</span>
-                        </div>
-                        <div class="court-hero-stat">
-                            <strong>${Number(court.recent_visitors) || 0}</strong>
-                            <span>Visited Today</span>
-                        </div>
-                    </div>
-                    <div class="court-hero-actions">
-                        <a href="${safeDirectionsHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">Directions</a>
-                        <button type="button" class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule</button>
-                        <button type="button" class="btn-secondary btn-sm" onclick="MapView.shareCurrentCourt()">Share</button>
-                    </div>
-                </div>
-            </div>`;
-
-        const checkedInSection = `
-            <div class="court-page-section" id="court-players-section">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>Who's Here</h4>
-                        <p class="court-section-subtitle">${checkedIn.length
-                            ? 'Players who are currently checked in at this court.'
-                            : 'No one is checked in yet. Be the first to get the run started.'}</p>
-                    </div>
-                    <span id="court-player-count" class="player-count-badge">${checkedIn.length}</span>
-                </div>
-                <div id="court-players-live">${liveSections.playersHTML}</div>
-            </div>`;
 
         const scheduleDaysHTML = MapView._courtScheduleDaysHTML(court.id);
         const communityInfoHTML = MapView._communityInfoHTML(court.community_info || {});
@@ -1533,34 +1465,123 @@ const MapView = {
             && !Object.keys(court.community_info || {}).length
             && !(court.images || []).length
             && !(court.upcoming_events || []).length;
+
+        const totalOpenSessions = nowSessions.length + futureScheduledSessions.length;
+        const heroHeadline = players > 0
+            ? `${players} player${players === 1 ? '' : 's'} active now`
+            : 'Quiet right now';
+        const heroSummaryParts = [
+            `${court.num_courts || 0} court${Number(court.num_courts || 0) === 1 ? '' : 's'}`,
+            nextScheduledSession
+                ? `Next game ${MapView._escapeHtml(MapView._formatCourtDateTime(nextScheduledSession.start_time))}`
+                : 'No games this week',
+        ];
+        if (friendCount > 0) {
+            heroSummaryParts.push(`${friendCount} friend${friendCount === 1 ? '' : 's'} here`);
+        } else if (pendingUpdatesCount > 0) {
+            heroSummaryParts.push(`${pendingUpdatesCount} update${pendingUpdatesCount === 1 ? '' : 's'} pending review`);
+        }
+        const heroSummaryText = heroSummaryParts.join(' · ');
+        const heroChips = [
+            players > 0 ? `<span class="court-hero-chip success">${players} here now</span>` : '',
+            `<span class="court-hero-chip">${court.indoor ? 'Indoor' : 'Outdoor'}</span>`,
+            `<span class="court-hero-chip">${safeTypeLabel}</span>`,
+            safeFees !== 'Not listed' ? `<span class="court-hero-chip">${safeFees}</span>` : '',
+        ].filter(Boolean).join('');
+        const heroMediaChips = [
+            court.verified ? '<span class="court-hero-chip success">Verified</span>' : '',
+            pendingUpdatesCount > 0
+                ? `<span class="court-hero-chip warn">${pendingUpdatesCount} pending update${pendingUpdatesCount === 1 ? '' : 's'}</span>`
+                : '',
+        ].filter(Boolean).join('');
+        const scheduleSummaryText = nextScheduledSession
+            ? `Next session ${MapView._escapeHtml(MapView._formatCourtDateTime(nextScheduledSession.start_time))}.`
+            : 'No sessions are posted yet.';
+        const amenitiesSummaryText = amenities.length
+            ? `${amenities.length} amenit${amenities.length === 1 ? 'y' : 'ies'} listed`
+            : 'No amenities listed yet';
+        const accessSummaryText = [
+            court.hours ? 'Hours listed' : 'Hours not listed',
+            court.open_play_schedule ? 'Open play notes available' : 'No open play notes yet',
+            safeSkillLevels,
+        ].join(' · ');
+        const communitySummaryText = communityIsEmpty
+            ? 'No local tips have been added yet.'
+            : 'Best times, local notes, photos, and events from players.';
         const communityPromptHtml = (communityIsEmpty || pendingUpdatesCount > 0) ? `
             <div class="court-community-card court-community-card-wide court-community-prompt">
-                <h5>${communityIsEmpty ? 'Help the next player' : 'Community updates in flight'}</h5>
+                <h5>${communityIsEmpty ? 'Add local context' : 'Updates in review'}</h5>
                 <p class="muted">${communityIsEmpty
-                    ? 'This court page still needs local notes, photos, and crowd patterns. Suggest an update after your next visit.'
-                    : `${pendingUpdatesCount} community update${pendingUpdatesCount === 1 ? '' : 's'} ${pendingUpdatesCount === 1 ? 'is' : 'are'} currently pending review.`}</p>
+                    ? 'Photos, access notes, and crowd patterns make this court much easier to trust.'
+                    : `${pendingUpdatesCount} update${pendingUpdatesCount === 1 ? '' : 's'} ${pendingUpdatesCount === 1 ? 'is' : 'are'} waiting for review. Add another only if something else changed.`}</p>
                 <div class="court-hero-actions">
-                    <button type="button" class="btn-primary btn-sm" onclick="App.toggleUpdatesSheet()">Suggest Court Update</button>
+                    <button type="button" class="btn-primary btn-sm" onclick="App.toggleUpdatesSheet()">Suggest Update</button>
                     <button type="button" class="btn-secondary btn-sm" onclick="MapView.shareCurrentCourt()">Share Court</button>
                 </div>
             </div>` : '';
+        const guideFooterHtml = `
+            <div class="court-guide-footer">
+                <div class="section-header-copy">
+                    <h5>Help keep this page current</h5>
+                    <p class="court-section-subtitle">${pendingUpdatesCount > 0
+                        ? `${pendingUpdatesCount} update${pendingUpdatesCount === 1 ? '' : 's'} already waiting for review. Add another only if something else changed.`
+                        : 'Report closures, missing amenities, or better photos after your next visit.'}</p>
+                </div>
+                <div class="court-bottom-actions">
+                    <button class="btn-secondary court-bottom-action-btn court-report-btn" onclick="MapView.reportCurrentCourt()">Report Problem</button>
+                    <button class="btn-primary court-bottom-action-btn" onclick="App.toggleUpdatesSheet()">Suggest Update</button>
+                </div>
+            </div>`;
         const schedulePreviewHtml = futureScheduledSessions.length
-            ? `<div class="court-section-stack">${Sessions.renderMiniCards(futureScheduledSessions.slice(0, 3))}</div>`
-            : `<div class="court-empty-card">
-                    <strong>No open sessions scheduled yet</strong>
-                    <p>Post a game and this court will show upcoming runs for the week.</p>
-                    <div class="court-empty-actions">
-                        <button type="button" class="btn-primary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule Game</button>
-                        <button type="button" class="btn-secondary btn-sm" onclick="Ranked.openCourtScheduledChallenge(${court.id})">Ranked Challenge</button>
-                    </div>
-                </div>`;
+            ? `<div class="court-section-stack">${Sessions.renderMiniCards(futureScheduledSessions.slice(0, 2))}</div>`
+            : '<div class="court-inline-note court-inline-note-compact">No upcoming sessions yet. Use the button above to post the next run.</div>';
+        const sessionsDisclosureMeta = totalOpenSessions > 0
+            ? `${totalOpenSessions} active or upcoming`
+            : 'None yet';
+        const playersDisclosureMeta = checkedIn.length > 0
+            ? `${checkedIn.length} checked in`
+            : 'None yet';
+        const sessionsOpenAttr = totalOpenSessions > 0 ? ' open' : '';
+        const playersOpenAttr = checkedIn.length > 0 ? ' open' : '';
+
+        const heroHtml = `
+            <div class="court-quick-info">
+                ${safePhotoUrl ? `<div class="court-quick-photo"><img src="${safePhotoUrl}" alt="${safePhotoAlt}" loading="lazy" onerror="this.parentElement.remove()"></div>` : ''}
+                <div class="court-quick-stats">
+                    <div class="court-quick-stat"><strong>${court.num_courts || 0}</strong><span>Courts</span></div>
+                    <div class="court-quick-stat ${players > 0 ? 'stat-active' : ''}"><strong>${players}</strong><span>Here</span></div>
+                    <div class="court-quick-stat"><strong>${futureScheduledSessions.length}</strong><span>Upcoming</span></div>
+                    ${friendCount > 0 ? `<div class="court-quick-stat"><strong>${friendCount}</strong><span>Friends</span></div>` : ''}
+                </div>
+                <div class="court-quick-chips">
+                    <span class="court-qchip">${court.indoor ? 'Indoor' : 'Outdoor'}</span>
+                    <span class="court-qchip">${court.court_type === 'dedicated' ? 'Dedicated' : court.court_type === 'converted' ? 'Converted' : 'Shared'}</span>
+                    ${safeFees !== 'Not listed' ? `<span class="court-qchip">${safeFees}</span>` : '<span class="court-qchip">Free</span>'}
+                    ${court.lighted ? '<span class="court-qchip">Lighted</span>' : ''}
+                    ${court.verified ? '<span class="court-qchip court-qchip-ok">Verified</span>' : ''}
+                </div>
+                <div class="court-quick-actions">
+                    <a href="${safeDirectionsHref}" target="_blank" rel="noopener noreferrer" class="court-qaction">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
+                        Directions
+                    </a>
+                    <button type="button" class="court-qaction" onclick="MapView.shareCurrentCourt()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                        Share
+                    </button>
+                    <button type="button" class="court-qaction" onclick="App.toggleUpdatesSheet()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Update
+                    </button>
+                </div>
+            </div>`;
+
         const stickyNav = `
             <div class="court-sticky-nav">
-                <button type="button" class="court-sticky-nav-btn active" data-target="court-live-inline" aria-current="true" onclick="MapView.scrollToCourtSection('court-live-inline', this)">Live Now</button>
+                <button type="button" class="court-sticky-nav-btn active" data-target="court-live-inline" aria-current="true" onclick="MapView.scrollToCourtSection('court-live-inline', this)">Play</button>
                 <button type="button" class="court-sticky-nav-btn" data-target="court-schedule-inline" onclick="MapView.scrollToCourtSection('court-schedule-inline', this)">Schedule</button>
-                <button type="button" class="court-sticky-nav-btn" data-target="court-ranked-inline" onclick="MapView.scrollToCourtSection('court-ranked-inline', this)">Competitive</button>
-                <button type="button" class="court-sticky-nav-btn" data-target="court-info-inline" onclick="MapView.scrollToCourtSection('court-info-inline', this)">About</button>
-                <button type="button" class="court-sticky-nav-btn" data-target="court-community-inline" onclick="MapView.scrollToCourtSection('court-community-inline', this)">Community</button>
+                <button type="button" class="court-sticky-nav-btn" data-target="court-ranked-inline" onclick="MapView.scrollToCourtSection('court-ranked-inline', this)">Ranked</button>
+                <button type="button" class="court-sticky-nav-btn" data-target="court-info-inline" onclick="MapView.scrollToCourtSection('court-info-inline', this)">Details</button>
                 <button type="button" class="court-sticky-nav-btn" data-target="court-chat-inline" onclick="MapView.scrollToCourtSection('court-chat-inline', this)">Chat</button>
             </div>
         `;
@@ -1568,174 +1589,114 @@ const MapView = {
         const sections = [
             stickyNav,
             heroHtml,
-            `<div class="court-page-section" id="court-live-inline">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>Live Now</h4>
-                        <p class="court-section-subtitle">${players > 0
-                            ? `${players} player${players === 1 ? '' : 's'} currently at the court.`
-                            : 'Check in or post a session so other players know this court is active.'}</p>
-                    </div>
-                    <span class="player-count-badge">${players}</span>
+            `<div class="court-page-section court-section-compact" id="court-live-inline">
+                <div class="court-section-hdr">
+                    <h4>Play${players > 0 ? ` <span class="court-count-badge">${players} active</span>` : ''}</h4>
                 </div>
                 ${checkinBtnHTML}
                 <div id="court-live-status" class="court-live-status ${players > 0 ? 'active' : ''}">
                     ${MapView._liveStatusInnerHTML(court, players)}
                 </div>
                 <div id="court-match-banner">${liveSections.matchBannerHTML}</div>
-                <div class="court-live-summary">
-                    <div class="court-live-summary-item"><strong>${players}</strong><span>Here now</span></div>
-                    <div class="court-live-summary-item"><strong>${nowSessions.length}</strong><span>Looking to play</span></div>
-                    <div class="court-live-summary-item"><strong>${futureScheduledSessions.length}</strong><span>Upcoming</span></div>
-                    <div class="court-live-summary-item"><strong>${Number(court.recent_visitors) || 0}</strong><span>Visited today</span></div>
-                </div>
-                <div class="court-sub-section">
-                    <div class="section-header section-header-tight">
-                        <div class="section-header-copy">
-                            <h5>Open-to-Play Sessions</h5>
-                            <p class="court-section-subtitle">Current looking-to-play posts and scheduled runs at this court.</p>
-                        </div>
-                    </div>
-                    <div id="court-sessions-live" class="court-section-stack">${liveSections.sessionsHTML}</div>
-                </div>
+                <details class="court-inline-disclosure"${sessionsOpenAttr}>
+                    <summary>
+                        <span class="court-inline-disclosure-main">
+                            <span class="court-inline-disclosure-title">Sessions</span>
+                            <span class="court-inline-disclosure-meta">${totalOpenSessions > 0 ? `${totalOpenSessions} active or upcoming` : 'None yet'}</span>
+                        </span>
+                        <span class="court-inline-disclosure-count">${totalOpenSessions}</span>
+                    </summary>
+                    <div id="court-sessions-live" class="court-inline-disclosure-body">${liveSections.sessionsHTML}</div>
+                </details>
+                <details class="court-inline-disclosure" id="court-players-section"${playersOpenAttr}>
+                    <summary>
+                        <span class="court-inline-disclosure-main">
+                            <span class="court-inline-disclosure-title">Players</span>
+                            <span class="court-inline-disclosure-meta">${checkedIn.length > 0 ? `${checkedIn.length} checked in` : 'None'}</span>
+                        </span>
+                        <span id="court-player-count" class="court-inline-disclosure-count">${checkedIn.length}</span>
+                    </summary>
+                    <div id="court-players-live" class="court-inline-disclosure-body">${liveSections.playersHTML}</div>
+                </details>
             </div>`,
-            checkedInSection,
-            `<div class="court-page-section" id="court-schedule-inline">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>Schedule</h4>
-                        <p class="court-section-subtitle">${nextScheduledSession
-                            ? `Next game ${MapView._escapeHtml(MapView._formatCourtDateTime(nextScheduledSession.start_time))}.`
-                            : 'No games are scheduled in the next 7 days yet.'}</p>
-                    </div>
-                    <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${court.id})">Schedule Game</button>
+            `<div class="court-page-section court-section-compact" id="court-schedule-inline">
+                <div class="court-section-hdr">
+                    <h4>Schedule</h4>
+                    <button class="btn-primary btn-xs" onclick="Sessions.showCreateModal(${court.id})">+ New</button>
                 </div>
                 ${scheduleDaysHTML}
-                ${court.open_play_schedule ? `<div class="court-inline-note"><strong>Open play notes:</strong> ${safeOpenPlaySchedule}</div>` : ''}
+                ${court.open_play_schedule ? `<div class="court-compact-note"><strong>Open play:</strong> ${safeOpenPlaySchedule}</div>` : ''}
                 ${schedulePreviewHtml}
                 <div id="court-session-detail-view"></div>
             </div>`,
-            `<div class="court-page-section" id="court-ranked-inline">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>Competitive Play</h4>
-                        <p class="court-section-subtitle">Queue up, challenge players, and see the ranked scene at this court.</p>
+            `<div class="court-page-section court-section-compact" id="court-ranked-inline">
+                <div class="court-section-hdr"><h4>Ranked</h4></div>
+                <div id="court-ranked-section"><div class="loading">Loading...</div></div>
+                <div class="court-inline-grid">
+                    <div class="court-sub-card court-inline-panel" id="court-leaderboard-inline">
+                        <div class="court-section-hdr">
+                            <h5>Top Players</h5>
+                            <button class="btn-secondary btn-xs" onclick="App.openLeaderboardPopup(${court.id})">View All</button>
+                        </div>
+                        <div id="leaderboard-content" class="compact-leaderboard-list"><div class="loading">Loading...</div></div>
+                    </div>
+                    <div class="court-sub-card court-inline-panel" id="court-recent-games-inline">
+                        <h5>Recent Games</h5>
+                        <div id="match-history-content"><div class="loading">Loading...</div></div>
                     </div>
                 </div>
-                <div id="court-ranked-section"><div class="loading">Loading competitive play...</div></div>
             </div>`,
-            `<div class="court-page-section" id="court-recent-games-inline">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>Recent Games</h4>
-                        <p class="court-section-subtitle">Court-level ranked results and recent momentum.</p>
-                    </div>
+            `<div class="court-page-section court-section-compact" id="court-info-inline">
+                <div class="court-section-hdr"><h4>Details</h4></div>
+                ${court.description ? `<p class="court-desc-compact">${safeDescription}</p>` : ''}
+                <div class="court-detail-grid">
+                    <div class="court-detail-item"><span>Setting</span><strong>${court.indoor ? 'Indoor' : 'Outdoor'}</strong></div>
+                    <div class="court-detail-item"><span>Courts</span><strong>${court.num_courts || 0}</strong></div>
+                    <div class="court-detail-item"><span>Surface</span><strong>${safeSurfaceType}</strong></div>
+                    <div class="court-detail-item"><span>Fees</span><strong>${safeFees}</strong></div>
+                    <div class="court-detail-item"><span>Type</span><strong>${safeTypeLabel}</strong></div>
+                    <div class="court-detail-item"><span>Levels</span><strong>${safeSkillLevels}</strong></div>
                 </div>
-                <div id="match-history-content"><div class="loading">Loading recent games...</div></div>
-            </div>`,
-            `<div class="court-page-section" id="court-leaderboard-inline">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>Leaderboard</h4>
-                        <p class="court-section-subtitle">See who has the strongest ranked track record at this court.</p>
-                    </div>
-                    <button class="btn-secondary btn-sm" onclick="App.openLeaderboardPopup(${court.id})">Full Leaderboard</button>
+                ${safeHours ? `<div class="court-compact-note"><strong>Hours:</strong> ${MapView._escapeHtml(safeHours)}</div>` : ''}
+                ${amenities.length ? `<div class="court-amenity-row">${amenities.join('')}</div>` : ''}
+                <div class="court-contact-row">
+                    <button type="button" class="court-qaction" onclick="MapView.copyCurrentCourtAddress()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                        Address
+                    </button>
+                    ${court.phone ? `<a href="tel:${safePhoneHref}" class="court-qaction"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg> Call</a>` : ''}
+                    ${safeWebsiteHref ? `<a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" class="court-qaction"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg> Website</a>` : ''}
                 </div>
-                <div id="leaderboard-content" class="compact-leaderboard-list"><div class="loading">Loading...</div></div>
-            </div>`,
-            `<div class="court-page-section" id="court-info-inline">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>About the Court</h4>
-                        <p class="court-section-subtitle">Hours, amenities, access notes, and contact details before you head out.</p>
-                    </div>
-                </div>
-                ${court.description ? `<p class="court-desc">${safeDescription}</p>` : ''}
-                <div class="court-info-grid">
-                    <div class="info-item"><span class="info-label">Type</span><span>${court.indoor ? '🏢 Indoor' : '☀️ Outdoor'}</span></div>
-                    <div class="info-item"><span class="info-label">Courts</span><span>${court.num_courts}</span></div>
-                    <div class="info-item"><span class="info-label">Surface</span><span>${safeSurfaceType}</span></div>
-                    <div class="info-item"><span class="info-label">Setup</span><span>${typeLabel}</span></div>
-                    <div class="info-item"><span class="info-label">Fees</span><span>${safeFees}</span></div>
-                    <div class="info-item"><span class="info-label">Skill Levels</span><span>${safeSkillLevels}</span></div>
-                    ${court.hours ? `<div class="info-item info-item-full"><span class="info-label">Hours</span><span>${safeHours}</span></div>` : ''}
-                </div>
-                ${court.open_play_schedule ? `<div class="court-sub-section"><strong>Open Play Schedule</strong><p class="schedule-text">${safeOpenPlaySchedule}</p></div>` : ''}
-                <div class="court-sub-section">
-                    <strong>Amenities</strong>
-                    <div class="amenities-grid">${amenities.join('') || '<span class="muted">No amenities listed</span>'}</div>
-                </div>
-                <div class="court-contact">
-                    <button type="button" class="btn-secondary btn-sm" onclick="MapView.copyCurrentCourtAddress()">📍 Copy Address</button>
-                    <a href="${safeDirectionsHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🧭 Directions</a>
-                    ${court.phone ? `<a href="tel:${safePhoneHref}" class="btn-secondary btn-sm">📞 ${safePhoneLabel}</a>` : ''}
-                    ${safeWebsiteHref ? `<a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm">🌐 Website</a>` : ''}
-                </div>
-                ${pendingUpdatesCount > 0
-                    ? `<div class="court-inline-note"><strong>Heads up:</strong> ${pendingUpdatesCount} community update${pendingUpdatesCount === 1 ? '' : 's'} ${pendingUpdatesCount === 1 ? 'is' : 'are'} waiting to be reviewed for this court.</div>`
-                    : ''}
-            </div>`,
-            `<div class="court-page-section" id="court-community-inline">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>Community</h4>
-                        <p class="court-section-subtitle">Photos, notes, events, and crowd patterns shared by local players.</p>
-                    </div>
-                </div>
-                <div class="court-community-grid">
-                    <div class="court-community-card">
-                        <h5>Best Times</h5>
+                <details class="court-guide-accordion" id="court-community-inline">
+                    <summary><span class="court-guide-summary-title">Local Tips & Community</span></summary>
+                    <div class="court-guide-accordion-body">
                         ${busynessHTML}
-                    </div>
-                    <div class="court-community-card">
-                        <h5>Community Notes</h5>
                         ${communityInfoHTML}
-                    </div>
-                    <div class="court-community-card court-community-card-wide">
-                        <h5>Upcoming Events</h5>
                         ${communityEventsHTML}
-                    </div>
-                    <div class="court-community-card court-community-card-wide">
-                        <h5>Community Photos</h5>
                         ${communityImagesHTML}
                     </div>
-                    ${communityPromptHtml}
+                </details>
+                ${pendingUpdatesCount > 0 ? `<p class="court-pending-note">${pendingUpdatesCount} update${pendingUpdatesCount === 1 ? '' : 's'} pending review</p>` : ''}
+                <div class="court-footer-row">
+                    <button class="court-qaction" onclick="MapView.reportCurrentCourt()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        Report Issue
+                    </button>
+                    <button class="court-qaction" onclick="App.toggleUpdatesSheet()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Suggest Update
+                    </button>
                 </div>
             </div>`,
-            `<div class="court-page-section court-chat-section" id="court-chat-inline">
-                <div class="section-header">
-                    <div class="section-header-copy">
-                        <h4>Court Chat</h4>
-                        <p class="court-section-subtitle">Coordinate arrivals, open play, and quick court updates with players here.</p>
-                    </div>
-                </div>
+            `<div class="court-page-section court-section-compact court-chat-section" id="court-chat-inline">
+                <div class="court-section-hdr"><h4>Chat</h4></div>
                 <div id="court-chat-messages" class="court-chat-messages"></div>
                 ${hasToken
                     ? `<form class="court-chat-form" onsubmit="MapView.sendCourtChat(event)">
-                            <input type="text" id="court-chat-input" placeholder="Message players here..." autocomplete="off">
-                            <button type="submit" class="btn-primary btn-sm">Send</button>
+                            <input type="text" id="court-chat-input" placeholder="Message..." autocomplete="off">
+                            <button type="submit" class="btn-primary btn-xs">Send</button>
                         </form>`
-                    : `<div class="court-chat-guest">
-                            <p>Sign in to see court chat and coordinate games with other players.</p>
-                            <div class="court-empty-actions">
-                                <button type="button" class="btn-primary btn-sm" onclick="Auth.showModal()">Sign In to Join Chat</button>
-                                <button type="button" class="btn-secondary btn-sm" onclick="MapView.shareCurrentCourt()">Share Court</button>
-                            </div>
-                        </div>`}
-            </div>`,
-            `<div class="court-page-section court-help-section">
-                <div class="court-help-card">
-                    <div class="section-header-copy">
-                        <h4>Keep This Court Accurate</h4>
-                        <p class="court-section-subtitle">${pendingUpdatesCount > 0
-                            ? `${pendingUpdatesCount} community update${pendingUpdatesCount === 1 ? '' : 's'} ${pendingUpdatesCount === 1 ? 'is' : 'are'} already pending review. Add another only if something else changed.`
-                            : 'Report closures, add new photos, and suggest better hours or amenities after your next visit.'}</p>
-                    </div>
-                    <div class="court-bottom-actions">
-                        <button class="btn-secondary court-bottom-action-btn court-report-btn" onclick="MapView.reportCurrentCourt()">Report a Problem</button>
-                        <button class="btn-primary court-bottom-action-btn" onclick="App.toggleUpdatesSheet()">Suggest a Court Update</button>
-                    </div>
-                </div>
+                    : `<div class="court-chat-signin"><button type="button" class="btn-primary btn-xs" onclick="Auth.showModal()">Sign In to Chat</button></div>`}
             </div>`,
         ];
 
@@ -1835,30 +1796,30 @@ const MapView = {
 
         let sessionsHTML = '';
         if (nowSessions.length > 0) {
-            sessionsHTML += '<h5 class="session-sub-heading">🎯 Looking to Play Now</h5>';
+            sessionsHTML += '<h5 class="session-sub-heading">Looking to Play Now</h5>';
             sessionsHTML += Sessions.renderMiniCards(nowSessions);
         }
         if (scheduledSessions.length > 0) {
-            sessionsHTML += '<h5 class="session-sub-heading" style="margin-top:10px">📅 Scheduled</h5>';
+            sessionsHTML += '<h5 class="session-sub-heading" style="margin-top:10px">Scheduled Sessions</h5>';
             sessionsHTML += Sessions.renderMiniCards(scheduledSessions);
         }
         if (!allSessions.length) {
-            sessionsHTML = '<p class="muted">No looking-to-play sessions yet. Be the first to start one!</p>';
+            sessionsHTML = '<p class="muted">No live or scheduled sessions yet. Start one so other players know this court is active.</p>';
         }
 
         let playersHTML = '';
         if (checkedIn.length === 0) {
-            playersHTML = '<p class="muted">No one checked in right now. Be the first!</p>';
+            playersHTML = '<p class="muted">No one is checked in right now. Check in to show this court is active.</p>';
         } else {
             if (lookingToPlayPlayers.length > 0) {
-                playersHTML += `<div class="lfg-group"><h5>🎯 Looking to Play Now (${lookingToPlayPlayers.length})</h5>`;
+                playersHTML += `<div class="lfg-group"><h5>Looking to Play (${lookingToPlayPlayers.length})</h5>`;
                 playersHTML += lookingToPlayPlayers.map(u => MapView._playerCard(
                     u, true, currentUserId, court.id, amCheckedInHere, playerCardOptions
                 )).join('');
                 playersHTML += '</div>';
             }
             if (otherPlayers.length > 0) {
-                playersHTML += `<div class="players-group"><h5>🏓 At the Court (${otherPlayers.length})</h5>`;
+                playersHTML += `<div class="players-group"><h5>Checked In (${otherPlayers.length})</h5>`;
                 playersHTML += otherPlayers.map(u => MapView._playerCard(
                     u, false, currentUserId, court.id, amCheckedInHere, playerCardOptions
                 )).join('');
@@ -1868,9 +1829,9 @@ const MapView = {
 
         let matchBannerHTML = '';
         if (lookingToPlayPlayers.length >= 4) {
-            matchBannerHTML = '<div class="match-ready-banner">🎉 4+ players looking to play now! Start a doubles match!</div>';
+            matchBannerHTML = '<div class="match-ready-banner">Four or more players are ready. Start a doubles match.</div>';
         } else if (lookingToPlayPlayers.length >= 2) {
-            matchBannerHTML = `<div class="match-ready-banner singles">🎾 ${lookingToPlayPlayers.length} players looking to play now — enough for singles!</div>`;
+            matchBannerHTML = `<div class="match-ready-banner singles">${lookingToPlayPlayers.length} players are ready now. That is enough for singles.</div>`;
         }
 
         return {
@@ -1936,47 +1897,26 @@ const MapView = {
 
     _checkinBarHTML({ courtId, safeCourtName, amCheckedInHere, currentUserId, nowSessions }) {
         if (!amCheckedInHere) {
-            return `
-                <div class="checkin-status-bar">
-                    <button class="btn-primary btn-full" onclick="MapView.checkIn(${courtId})">Check In at ${safeCourtName}</button>
-                    <p class="checkin-hint">Check in first, then choose how many hours you're looking to play.</p>
-                </div>`;
+            return `<div class="checkin-compact">
+                <button class="btn-primary btn-full" onclick="MapView.checkIn(${courtId})">Check In</button>
+            </div>`;
         }
-
         const myNowSession = MapView._nowSessionByCreator(nowSessions, currentUserId);
         const activeDuration = MapView._nowSessionDurationMinutes(myNowSession);
         const durationButtons = MapView._quickPlayDurations()
-            .map(minutes => `
-                <button
-                    class="session-quick-btn ${activeDuration === minutes ? 'active' : ''}"
-                    onclick="MapView.startLookingToPlayNow(${courtId}, ${minutes})"
-                >${MapView._formatQuickDuration(minutes)}</button>
-            `)
+            .map(minutes => `<button class="session-quick-btn ${activeDuration === minutes ? 'active' : ''}" onclick="MapView.startLookingToPlayNow(${courtId}, ${minutes})">${MapView._formatQuickDuration(minutes)}</button>`)
             .join('');
-        const helpText = myNowSession
-            ? `You're looking to play now${MapView._nowSessionEndsText(myNowSession)}. Tap a duration to update.`
-            : 'Start a Looking to Play session now:';
-
-        return `
-            <div class="checkin-status-bar checked-in">
-                <div class="checkin-status-info">
-                    <span class="checkin-dot"></span>
-                    <span>You're checked in here</span>
-                </div>
-                <div class="checkin-actions">
-                    <button class="btn-sm btn-secondary" onclick="MapView.checkOut(${courtId})">Check Out</button>
-                </div>
-                <div class="checkin-play-controls">
-                    <div class="checkin-play-header">
-                        <span>Looking to Play</span>
-                        <button class="btn-secondary btn-sm" onclick="Sessions.showCreateModal(${courtId})">Schedule Game</button>
-                    </div>
-                    <p class="checkin-play-help">${helpText}</p>
-                    <div class="session-duration-buttons checkin-duration-buttons">
-                        ${durationButtons}
-                    </div>
-                </div>
-            </div>`;
+        const endsText = myNowSession ? MapView._nowSessionEndsText(myNowSession) : '';
+        return `<div class="checkin-compact checked-in">
+            <div class="checkin-compact-top">
+                <span class="checkin-active-label"><span class="checkin-dot"></span> Checked in${endsText}</span>
+                <button class="btn-xs btn-secondary" onclick="MapView.checkOut(${courtId})">Check Out</button>
+            </div>
+            <div class="checkin-duration-row">
+                <span class="checkin-dur-label">Playing:</span>
+                <div class="session-duration-buttons checkin-duration-buttons">${durationButtons}</div>
+            </div>
+        </div>`;
     },
 
     async sendFriendRequest(userId) {
