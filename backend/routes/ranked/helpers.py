@@ -266,6 +266,16 @@ def _expire_stale_items(court_id=None):
         lobby_query = lobby_query.filter(RankedLobby.court_id == court_id)
     lobby_query.update({'status': 'expired'}, synchronize_session=False)
 
+    # Expire lobbies whose scheduled time has passed
+    past_scheduled_query = RankedLobby.query.filter(
+        RankedLobby.status.in_(['pending_acceptance', 'ready']),
+        RankedLobby.scheduled_for.isnot(None),
+        RankedLobby.scheduled_for <= now,
+    )
+    if court_id:
+        past_scheduled_query = past_scheduled_query.filter(RankedLobby.court_id == court_id)
+    past_scheduled_query.update({'status': 'expired'}, synchronize_session=False)
+
     match_query = Match.query.filter(
         Match.status == 'in_progress',
         Match.created_at < match_cutoff,
@@ -277,9 +287,14 @@ def _expire_stale_items(court_id=None):
 
 def _categorize_court_lobbies(court_id):
     """Return (ready, scheduled, pending) lobby lists for a court."""
+    now = utcnow_naive()
     all_lobbies = RankedLobby.query.filter(
         RankedLobby.court_id == court_id,
         RankedLobby.status.in_(['pending_acceptance', 'ready']),
+        db.or_(
+            RankedLobby.scheduled_for.is_(None),
+            RankedLobby.scheduled_for > now,
+        ),
     ).order_by(
         RankedLobby.scheduled_for.asc(),
         RankedLobby.created_at.desc(),

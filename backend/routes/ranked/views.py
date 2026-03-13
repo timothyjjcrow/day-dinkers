@@ -8,9 +8,29 @@ from backend.models import (
 )
 from backend.auth_utils import login_required
 from backend.routes.ranked import ranked_bp
-from backend.routes.ranked.helpers import _lobby_to_dict, _categorize_court_lobbies
+from backend.routes.ranked.helpers import (
+    _lobby_to_dict, _categorize_court_lobbies, _expire_stale_items,
+)
 from backend.services.court_payloads import normalize_county_slug
 from backend.time_utils import utcnow_naive
+
+_TOURNAMENT_PAST_GRACE_HOURS = 1
+
+
+def _cleanup_past_tournaments():
+    """Cancel 'upcoming' tournaments whose start time is well past."""
+    now = utcnow_naive()
+    cutoff = now - timedelta(hours=_TOURNAMENT_PAST_GRACE_HOURS)
+    stale = Tournament.query.filter(
+        Tournament.status == 'upcoming',
+        Tournament.start_time < cutoff,
+    ).all()
+    if not stale:
+        return
+    for t in stale:
+        t.status = 'cancelled'
+        t.cancelled_at = now
+    db.session.commit()
 
 
 def _requested_county_slug():
@@ -133,6 +153,8 @@ def get_court_summary(court_id):
     Consolidates queue, active matches, lobbies, and mini leaderboard
     into one response — replacing 5 separate API calls with 1.
     """
+    _cleanup_past_tournaments()
+    _expire_stale_items(court_id=court_id)
     court = db.session.get(Court, court_id)
     if not court:
         return jsonify({'error': 'Court not found'}), 404

@@ -1,7 +1,7 @@
 """Open-to-Play sessions — create, join, schedule, invite."""
 from datetime import datetime, timedelta
 from flask import Blueprint, current_app, request, jsonify
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from backend.app import db
 from backend.models import (
@@ -139,13 +139,23 @@ def _expire_stale_sessions():
 
 def _active_sessions_query():
     now = utcnow_naive()
+    now_ok = and_(
+        PlaySession.session_type == 'now',
+        or_(PlaySession.end_time.is_(None), PlaySession.end_time > now),
+    )
+    scheduled_ok = and_(
+        PlaySession.session_type == 'scheduled',
+        or_(
+            and_(PlaySession.end_time.isnot(None), PlaySession.end_time > now),
+            and_(PlaySession.end_time.is_(None), or_(
+                PlaySession.start_time.is_(None),
+                PlaySession.start_time > now,
+            )),
+        ),
+    )
     return PlaySession.query.filter(
         PlaySession.status == 'active',
-        (
-            (PlaySession.session_type != 'now')
-            | PlaySession.end_time.is_(None)
-            | (PlaySession.end_time > now)
-        ),
+        or_(now_ok, scheduled_ok),
     )
 
 

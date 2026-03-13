@@ -3,7 +3,8 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from backend.app import db
-from backend.models import User
+from backend.models import User, PlaySession, Tournament, RankedLobby, RankedLobbyPlayer
+from backend.time_utils import utcnow_naive
 
 
 def _auth_user(client, username='courtuser', email='court@test.com'):
@@ -798,3 +799,259 @@ def test_non_reviewer_cannot_bulk_review(client):
         headers={'Authorization': f'Bearer {reviewer_token}'},
     )
     assert allowed_updates.status_code == 200
+
+
+# ── Past scheduled items cleanup from courts ─────────────────────────
+
+
+def test_past_scheduled_session_hidden_from_court_detail(client, app):
+    """Scheduled sessions whose time has passed should not appear on court."""
+    token = _auth(client)
+    court = _seed_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    future_start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+    future_end = future_start + timedelta(hours=2)
+    create = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': future_start.isoformat(),
+        'end_time': future_end.isoformat(),
+        'max_players': 4,
+    }, headers=headers)
+    assert create.status_code == 201
+    session_id = json.loads(create.data)['session']['id']
+
+    detail = client.get(f'/api/courts/{court["id"]}')
+    assert detail.status_code == 200
+    session_ids = [s['id'] for s in json.loads(detail.data)['court']['play_sessions']]
+    assert session_id in session_ids
+
+    with app.app_context():
+        ps = db.session.get(PlaySession, session_id)
+        ps.start_time = utcnow_naive() - timedelta(hours=4)
+        ps.end_time = utcnow_naive() - timedelta(hours=2)
+        db.session.commit()
+
+    detail_after = client.get(f'/api/courts/{court["id"]}')
+    assert detail_after.status_code == 200
+    court_data = json.loads(detail_after.data)['court']
+    session_ids_after = [s['id'] for s in court_data['play_sessions']]
+    assert session_id not in session_ids_after
+
+
+def test_past_scheduled_session_hidden_from_court_list(client, app):
+    """Past scheduled sessions should not count toward open_sessions on list."""
+    token = _auth(client)
+    court = _seed_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    future_start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+    future_end = future_start + timedelta(hours=2)
+    create = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': future_start.isoformat(),
+        'end_time': future_end.isoformat(),
+        'max_players': 4,
+    }, headers=headers)
+    assert create.status_code == 201
+
+    list_res = client.get('/api/courts')
+    courts = json.loads(list_res.data)['courts']
+    target = next(c for c in courts if c['id'] == court['id'])
+    assert target['open_sessions'] == 1
+
+    session_id = json.loads(create.data)['session']['id']
+    with app.app_context():
+        ps = db.session.get(PlaySession, session_id)
+        ps.start_time = utcnow_naive() - timedelta(hours=4)
+        ps.end_time = utcnow_naive() - timedelta(hours=2)
+        db.session.commit()
+
+    list_after = client.get('/api/courts')
+    courts_after = json.loads(list_after.data)['courts']
+    target_after = next(c for c in courts_after if c['id'] == court['id'])
+    assert target_after['open_sessions'] == 0
+
+
+def test_past_scheduled_session_no_end_time_hidden(client, app):
+    """Scheduled session with no end_time should hide once start_time passes."""
+    token = _auth(client)
+    court = _seed_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    future_start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+    create = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': future_start.isoformat(),
+        'max_players': 4,
+    }, headers=headers)
+    assert create.status_code == 201
+    session_id = json.loads(create.data)['session']['id']
+
+    with app.app_context():
+        ps = db.session.get(PlaySession, session_id)
+        ps.start_time = utcnow_naive() - timedelta(hours=1)
+        db.session.commit()
+
+    detail = client.get(f'/api/courts/{court["id"]}')
+    court_data = json.loads(detail.data)['court']
+    session_ids = [s['id'] for s in court_data['play_sessions']]
+    assert session_id not in session_ids
+
+
+def test_active_scheduled_session_still_shown(client, app):
+    """Scheduled session currently in progress (start < now < end) stays visible."""
+    token = _auth(client)
+    court = _seed_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    future_start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+    future_end = future_start + timedelta(hours=3)
+    create = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': future_start.isoformat(),
+        'end_time': future_end.isoformat(),
+        'max_players': 4,
+    }, headers=headers)
+    assert create.status_code == 201
+    session_id = json.loads(create.data)['session']['id']
+
+    with app.app_context():
+        ps = db.session.get(PlaySession, session_id)
+        ps.start_time = utcnow_naive() - timedelta(hours=1)
+        ps.end_time = utcnow_naive() + timedelta(hours=2)
+        db.session.commit()
+
+    detail = client.get(f'/api/courts/{court["id"]}')
+    court_data = json.loads(detail.data)['court']
+    session_ids = [s['id'] for s in court_data['play_sessions']]
+    assert session_id in session_ids
+
+
+def test_past_tournament_auto_cancelled_in_court_summary(client, app):
+    """Upcoming tournaments past their start time should be auto-cancelled."""
+    token = _auth(client)
+    court = _seed_court(client, token)
+
+    with app.app_context():
+        user = User.query.filter_by(email='court@test.com').first()
+        t = Tournament(
+            court_id=court['id'],
+            host_user_id=user.id,
+            name='Past Tournament',
+            start_time=utcnow_naive() - timedelta(hours=3),
+            status='upcoming',
+            max_players=8,
+            min_participants=4,
+        )
+        db.session.add(t)
+        db.session.commit()
+        tournament_id = t.id
+
+    summary = client.get(f'/api/ranked/court/{court["id"]}/summary')
+    assert summary.status_code == 200
+    data = json.loads(summary.data)
+    upcoming_ids = [t['id'] for t in data['tournaments_upcoming']]
+    assert tournament_id not in upcoming_ids
+
+    with app.app_context():
+        t = db.session.get(Tournament, tournament_id)
+        assert t.status == 'cancelled'
+        assert t.cancelled_at is not None
+
+
+def test_future_tournament_still_shown_in_court_summary(client, app):
+    """Upcoming tournaments with future start_time should still appear."""
+    token = _auth(client)
+    court = _seed_court(client, token)
+
+    with app.app_context():
+        user = User.query.filter_by(email='court@test.com').first()
+        t = Tournament(
+            court_id=court['id'],
+            host_user_id=user.id,
+            name='Future Tournament',
+            start_time=utcnow_naive() + timedelta(hours=24),
+            status='upcoming',
+            max_players=8,
+            min_participants=4,
+        )
+        db.session.add(t)
+        db.session.commit()
+        tournament_id = t.id
+
+    summary = client.get(f'/api/ranked/court/{court["id"]}/summary')
+    assert summary.status_code == 200
+    data = json.loads(summary.data)
+    upcoming_ids = [t['id'] for t in data['tournaments_upcoming']]
+    assert tournament_id in upcoming_ids
+
+
+def test_past_scheduled_lobby_hidden_from_court_summary(client, app):
+    """Ranked lobbies whose scheduled_for time has passed should not appear."""
+    token = _auth(client)
+    court = _seed_court(client, token)
+
+    with app.app_context():
+        user = User.query.filter_by(email='court@test.com').first()
+        lobby = RankedLobby(
+            court_id=court['id'],
+            created_by_id=user.id,
+            match_type='singles',
+            source='scheduled_challenge',
+            scheduled_for=utcnow_naive() - timedelta(hours=2),
+            status='ready',
+        )
+        db.session.add(lobby)
+        db.session.flush()
+        db.session.add(RankedLobbyPlayer(
+            lobby_id=lobby.id, user_id=user.id, team=1,
+            acceptance_status='accepted',
+        ))
+        db.session.commit()
+        lobby_id = lobby.id
+
+    summary = client.get(f'/api/ranked/court/{court["id"]}/summary')
+    assert summary.status_code == 200
+    data = json.loads(summary.data)
+    all_lobby_ids = (
+        [l['id'] for l in data['ready_lobbies']]
+        + [l['id'] for l in data['scheduled_lobbies']]
+        + [l['id'] for l in data['pending_lobbies']]
+    )
+    assert lobby_id not in all_lobby_ids
+
+
+def test_past_scheduled_session_marked_completed_by_cleanup(client, app):
+    """Cleanup should mark past scheduled sessions as completed in the DB."""
+    token = _auth(client)
+    court = _seed_court(client, token)
+    headers = {'Authorization': f'Bearer {token}'}
+
+    future_start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+    future_end = future_start + timedelta(hours=2)
+    create = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': future_start.isoformat(),
+        'end_time': future_end.isoformat(),
+        'max_players': 4,
+    }, headers=headers)
+    assert create.status_code == 201
+    session_id = json.loads(create.data)['session']['id']
+
+    with app.app_context():
+        ps = db.session.get(PlaySession, session_id)
+        ps.start_time = utcnow_naive() - timedelta(hours=4)
+        ps.end_time = utcnow_naive() - timedelta(hours=2)
+        db.session.commit()
+
+    client.get(f'/api/courts/{court["id"]}')
+
+    with app.app_context():
+        ps = db.session.get(PlaySession, session_id)
+        assert ps.status == 'completed'

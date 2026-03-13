@@ -39,17 +39,32 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return R * 2 * math.asin(math.sqrt(a))
 
 
-def _active_play_sessions_query(court_id=None):
-    """Active sessions, excluding timed 'now' sessions that have ended."""
+def _session_not_past_filter():
+    """Filter that excludes sessions whose effective end time has passed."""
     now = utcnow_naive()
+    now_ok = and_(
+        PlaySession.session_type == 'now',
+        or_(PlaySession.end_time.is_(None), PlaySession.end_time > now),
+    )
+    scheduled_ok = and_(
+        PlaySession.session_type == 'scheduled',
+        or_(
+            and_(PlaySession.end_time.isnot(None), PlaySession.end_time > now),
+            and_(PlaySession.end_time.is_(None), or_(
+                PlaySession.start_time.is_(None),
+                PlaySession.start_time > now,
+            )),
+        ),
+    )
+    return or_(now_ok, scheduled_ok)
+
+
+def _active_play_sessions_query(court_id=None):
+    """Active sessions, excluding sessions whose time has passed."""
     query = PlaySession.query.filter(PlaySession.status == 'active')
     if court_id is not None:
         query = query.filter(PlaySession.court_id == court_id)
-    return query.filter(
-        (PlaySession.session_type != 'now')
-        | PlaySession.end_time.is_(None)
-        | (PlaySession.end_time > now)
-    )
+    return query.filter(_session_not_past_filter())
 
 
 def _serialize_submission(submission, include_payload=False, redact_data_urls=False):
@@ -249,6 +264,7 @@ def _review_report(report, action):
 @courts_bp.route('', methods=['GET'])
 def get_courts():
     _cleanup_stale_checkins()
+    _cleanup_past_scheduled_sessions()
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
     radius = request.args.get('radius', type=float)
@@ -299,18 +315,13 @@ def get_courts():
             for row in active_rows
         }
 
-        now = utcnow_naive()
         open_rows = db.session.query(
             PlaySession.court_id,
             func.count(PlaySession.id),
         ).filter(
             PlaySession.court_id.in_(court_ids),
             PlaySession.status == 'active',
-            (
-                (PlaySession.session_type != 'now')
-                | PlaySession.end_time.is_(None)
-                | (PlaySession.end_time > now)
-            ),
+            _session_not_past_filter(),
         ).group_by(
             PlaySession.court_id,
         ).all()
@@ -437,6 +448,7 @@ def resolve_county():
 
 @courts_bp.route('/<int:court_id>', methods=['GET'])
 def get_court(court_id):
+    _cleanup_past_scheduled_sessions()
     court = db.session.get(Court, court_id)
     if not court:
         return jsonify({'error': 'Court not found'}), 404
@@ -903,6 +915,23 @@ def get_court_busyness(court_id):
     if not court:
         return jsonify({'error': 'Court not found'}), 404
     return jsonify({'busyness': _get_busyness(court_id)})
+
+
+def _cleanup_past_scheduled_sessions():
+    """Mark past scheduled sessions as completed so they stop appearing."""
+    now = utcnow_naive()
+    effective_end = func.coalesce(PlaySession.end_time, PlaySession.start_time)
+    stale = PlaySession.query.filter(
+        PlaySession.status == 'active',
+        PlaySession.session_type == 'scheduled',
+        effective_end.isnot(None),
+        effective_end <= now,
+    ).all()
+    if not stale:
+        return
+    for session in stale:
+        session.status = 'completed'
+    db.session.commit()
 
 
 def _cleanup_stale_checkins():
