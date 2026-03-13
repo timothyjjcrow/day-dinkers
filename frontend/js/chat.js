@@ -31,8 +31,8 @@ const Chat = {
             });
 
             Chat.socket.on('new_message', (msg) => {
-                // Session detail chat is scoped to the active session room.
-                const sessionChat = document.getElementById('session-chat-messages');
+                const sessionChatAll = document.querySelectorAll('#session-chat-messages');
+                const sessionChat = Array.from(sessionChatAll).find(c => c.offsetParent !== null) || sessionChatAll[0] || null;
                 const inActiveSession = typeof Sessions !== 'undefined'
                     && Sessions.currentSessionId
                     && Number(msg.session_id) === Number(Sessions.currentSessionId);

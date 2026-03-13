@@ -702,6 +702,7 @@ const Sessions = {
         const modal = document.getElementById('match-modal');
         if (modal) {
             modal.style.display = 'none';
+            modal.innerHTML = '';
             modal.onclick = null;
         }
         if (Sessions._detailEscHandler) {
@@ -994,7 +995,8 @@ const Sessions = {
     },
 
     async _loadSessionChat(sessionId) {
-        const container = document.getElementById('session-chat-messages');
+        const containers = document.querySelectorAll('#session-chat-messages');
+        const container = Array.from(containers).find(c => c.offsetParent !== null) || containers[0];
         if (!container) return;
         const token = localStorage.getItem('token');
         if (!token) {
@@ -1038,8 +1040,9 @@ const Sessions = {
 
     async sendChat(e, sessionId) {
         e.preventDefault();
-        const input = document.getElementById('session-chat-text');
-        const content = input.value.trim();
+        const form = e.target;
+        const input = form.querySelector('#session-chat-text') || document.getElementById('session-chat-text');
+        const content = (input?.value || '').trim();
         if (!content) return;
         const token = localStorage.getItem('token');
         if (!token) { Auth.showModal(); return; }
