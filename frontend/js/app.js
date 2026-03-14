@@ -95,11 +95,12 @@ const App = {
 
     // ── State & County Picker ─────────────────────────────────
 
+    _pickerMode: 'county', // 'county' | 'state'
+
     async initCountyPicker() {
         const select = document.getElementById('county-select');
         if (select) select.innerHTML = '<option value="">Loading...</option>';
 
-        // Load states
         let states = [];
         try {
             const statesRes = await API.get('/api/courts/states');
@@ -110,20 +111,10 @@ const App = {
         }
         App.states = states;
 
-        // Populate state dropdown
-        const stateSelect = document.getElementById('state-select');
-        if (stateSelect) {
-            stateSelect.innerHTML = states.map(s =>
-                `<option value="${s.abbr}">${s.name} (${s.court_count})</option>`
-            ).join('');
-            stateSelect.value = App.getSelectedStateAbbr();
-            if (!states.some(s => s.abbr === App.getSelectedStateAbbr()) && states.length) {
-                App.selectedStateAbbr = states[0].abbr;
-                stateSelect.value = states[0].abbr;
-            }
+        if (!states.some(s => s.abbr === App.getSelectedStateAbbr()) && states.length) {
+            App.selectedStateAbbr = states[0].abbr;
         }
 
-        // Load counties for selected state
         await App._loadCountiesForState(App.getSelectedStateAbbr());
     },
 
@@ -160,6 +151,7 @@ const App = {
         });
         if (select) select.value = selected;
 
+        App._updateStateBtn();
         App._renderCountyPickerList();
         App._updateCountyPickerLabel();
     },
@@ -170,6 +162,7 @@ const App = {
         const isOpen = dd.style.display !== 'none';
         dd.style.display = isOpen ? 'none' : 'block';
         if (!isOpen) {
+            App._showPickerPanel('county');
             const input = document.getElementById('county-picker-search');
             if (input) { input.value = ''; input.focus(); }
             App._renderCountyPickerList();
@@ -181,8 +174,36 @@ const App = {
         if (dd) dd.style.display = 'none';
     },
 
+    showStatePicker() {
+        App._showPickerPanel('state');
+        const input = document.getElementById('state-picker-search');
+        if (input) { input.value = ''; input.focus(); }
+        App._renderStatePickerList();
+    },
+
+    showCountyPanel() {
+        App._showPickerPanel('county');
+        const input = document.getElementById('county-picker-search');
+        if (input) { input.value = ''; input.focus(); }
+        App._renderCountyPickerList();
+    },
+
+    _showPickerPanel(mode) {
+        App._pickerMode = mode;
+        const countyPanel = document.getElementById('picker-county-panel');
+        const statePanel = document.getElementById('picker-state-panel');
+        const stateBtn = document.getElementById('picker-state-btn');
+        if (countyPanel) countyPanel.style.display = mode === 'county' ? '' : 'none';
+        if (statePanel) statePanel.style.display = mode === 'state' ? '' : 'none';
+        if (stateBtn) stateBtn.style.display = mode === 'county' ? '' : 'none';
+    },
+
     filterCountyList(query) {
         App._renderCountyPickerList(query);
+    },
+
+    filterStateList(query) {
+        App._renderStatePickerList(query);
     },
 
     _renderCountyPickerList(query) {
@@ -205,6 +226,36 @@ const App = {
         }).join('') || '<div class="county-empty">No counties match</div>';
     },
 
+    _renderStatePickerList(query) {
+        const list = document.getElementById('state-picker-list');
+        if (!list) return;
+        const q = (query || '').toLowerCase().trim();
+        const filtered = q
+            ? App.states.filter(s => s.name.toLowerCase().includes(q) || s.abbr.toLowerCase().includes(q))
+            : App.states;
+        const selectedAbbr = App.getSelectedStateAbbr();
+
+        let html = `<button type="button" class="county-item picker-back-btn" onclick="App.showCountyPanel()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M15 18l-6-6 6-6"/></svg>
+            <span>Back to counties</span>
+        </button>`;
+
+        html += filtered.map(s => {
+            const active = s.abbr === selectedAbbr ? ' county-item-active' : '';
+            return `<button type="button" class="county-item${active}" onclick="App.selectStateFromPicker('${s.abbr}')">
+                <span class="county-item-name">${s.name}</span>
+                <span class="county-count">${s.court_count}</span>
+            </button>`;
+        }).join('') || '<div class="county-empty">No states match</div>';
+
+        list.innerHTML = html;
+    },
+
+    _updateStateBtn() {
+        const label = document.getElementById('picker-state-btn-label');
+        if (label) label.textContent = App.getSelectedStateName();
+    },
+
     _updateCountyPickerLabel() {
         const label = document.getElementById('county-picker-label');
         if (!label) return;
@@ -218,6 +269,11 @@ const App = {
         App.onCountyChange(slug);
         App._updateCountyPickerLabel();
         App._renderCountyPickerList();
+    },
+
+    selectStateFromPicker(stateAbbr) {
+        App.onStateChange(stateAbbr);
+        App.showCountyPanel();
     },
 
     onStateChange(stateAbbr) {
@@ -270,13 +326,10 @@ const App = {
                     if (showToast) App.toast('Could not determine county.', 'error');
                     return;
                 }
-                // Find the state for this county from the court data
                 const court = res.nearest_court_state || '';
                 if (court) {
-                    const stateSelect = document.getElementById('state-select');
                     App.selectedStateAbbr = court;
                     localStorage.setItem(App.statePrefKey, court);
-                    if (stateSelect) stateSelect.value = court;
                     await App._loadCountiesForState(court);
                 }
                 App.setSelectedCounty(res.county_slug, { persist: true, reloadCourts, fitMap, showToast });
