@@ -7,10 +7,14 @@ config_name = os.environ.get('FLASK_ENV', 'development')
 app = create_app(config_name)
 
 with app.app_context():
-    from backend.services.court_seeder import seed_courts
+    from backend.services.court_seeder import seed_courts, seed_missing_states
     count = seed_courts()
     if count:
         print(f"Seeded {count} pickleball courts across all states")
+    else:
+        added = seed_missing_states()
+        if added:
+            print(f"Added {added} courts from new states")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))

@@ -7,7 +7,7 @@ from backend.services.court_importer import (
     list_county_files, list_state_dirs,
 )
 from backend.services.court_payloads import DEFAULT_COUNTY_SLUG
-from backend.services.court_seeder import seed_courts
+from backend.services.court_seeder import seed_courts, seed_missing_states
 
 
 def _env_bool(name, default=False):
@@ -42,6 +42,10 @@ if _env_bool('AUTO_SEED_COURTS', False):
         seeded = seed_courts()
         if seeded:
             print(f"Seeded {seeded} courts")
+        else:
+            added = seed_missing_states()
+            if added:
+                print(f"Added {added} courts from new states")
 
 
 if _env_bool('AUTO_SYNC_COURTS', False):
