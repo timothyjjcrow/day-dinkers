@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "boise",
+    "state": "ID",
+    "verified": false,
+    "name": "Terrace Lakes",
+    "description": "Come play pickleball at Terrace Lakes in Garden Valley, ID! There are 3 outdoor courts. These are dedicated courts with permanent lines and nets. A one-time fee is required to play. Amenities include lights.",
+    "address": "101 Holiday Dr",
+    "city": "Garden Valley",
+    "zip_code": "83622",
+    "latitude": 44.151283,
+    "longitude": -115.982953,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "fees": "Fee required",
+    "website": "http://www.terracelakes.com/",
+    "photo_url": "https://cdn.filestackcontent.com/ELFhKGAR5u4gY6kEsejS",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "has_pro_shop": true
+  }
+]

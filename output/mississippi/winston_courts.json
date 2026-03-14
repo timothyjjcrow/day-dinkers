@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "winston",
+    "state": "MS",
+    "verified": false,
+    "name": "Ivy Park",
+    "description": "4 courts inside tennis courts, open daily til 10pm",
+    "address": "74 Ivy Park Dr",
+    "city": "Louisville",
+    "latitude": 33.136677,
+    "longitude": -89.054437,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+16627737896",
+    "email": "louisvillecoliseum@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/wTzcl7LRKmMFfd2NNdTg",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "adams",
+    "state": "MS",
+    "verified": false,
+    "name": "Duncan Park Tennis Center",
+    "description": "Come play pickleball at Duncan Park Tennis Center in Natchez, MS! There are 8 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free. Amenities include lights, a pro shop or equipment store, restrooms, and water.",
+    "address": "57 Duncan Park Rd",
+    "city": "Natchez",
+    "latitude": 31.543305,
+    "longitude": -91.390707,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+16014454927",
+    "website": "https://www.natchez.ms.us/480/Duncan-Park-Tennis-Club",
+    "photo_url": "https://cdn.filestackcontent.com/9lPPHcTETXKknQl0XcTI",
+    "has_restrooms": true,
+    "has_water": true,
+    "has_pro_shop": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

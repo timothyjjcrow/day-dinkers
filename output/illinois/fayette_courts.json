@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "fayette",
+    "state": "IL",
+    "verified": false,
+    "name": "YMCA Of Fayette County",
+    "description": "YMCA Of Fayette County is a place to play pickleball in Vandalia, IL. There is 1 indoor court. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "710 Rock Island Ave",
+    "city": "Vandalia",
+    "zip_code": "62471",
+    "latitude": 38.969254,
+    "longitude": -89.119464,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Members only",
+    "phone": "6182831258",
+    "website": "http://www.fayetteymca.com/",
+    "photo_url": "https://cdn.filestackcontent.com/k6rh0s1cTFutROmtfY1d",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

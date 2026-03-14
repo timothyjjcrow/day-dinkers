@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "beauregard parish",
+    "state": "LA",
+    "verified": false,
+    "name": "West Park",
+    "description": "West Park is a place to play pickleball in DeRidder, LA. There are 4 outdoor hard and concrete courts. The lines are permanent, but you'll need to bring your own net. The facility includes amenities like restrooms, lights, and trainers or lessons. The courts are free.",
+    "address": "415 Park Rd",
+    "city": "DeRidder",
+    "zip_code": "70634",
+    "latitude": 30.855973,
+    "longitude": -93.278284,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard, Concrete",
+    "fees": "Free",
+    "phone": "3372029740",
+    "photo_url": "https://cdn.filestackcontent.com/O5DG86JRieaIB7W2tgfA",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

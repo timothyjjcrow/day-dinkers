@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "howard",
+    "state": "IA",
+    "verified": false,
+    "name": "Evans Park",
+    "description": "Four new dedicated pickleball courts with permanent nets and two marked courts with portable nets on the new tennis court.  These courts were opened in September of 2022.  Club is Pickleball Cresco.  Club website is https://pickleballcresco.wixsite.com/pickleballcresco.  You can contact the Cresco Chamber at 563-547-3434 for more info or club contacts.  Indoor play at the Cresco Fitness Center during the cold weather months (there is a fee for indoor play only).",
+    "address": "514 S Elm St",
+    "city": "Cresco",
+    "zip_code": "52136",
+    "latitude": 43.367185,
+    "longitude": -92.117014,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "open_play_schedule": "M,W and Friday Mornings at 9 AM and M-F evenings beginning at 5:30 PM.",
+    "fees": "Free",
+    "phone": "+15635473434",
+    "website": "https://pickleballcresco.wixsite.com/pickleballcresco",
+    "email": "pb002cresco@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/lPQE08JRIWiESiyfAlJ1",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

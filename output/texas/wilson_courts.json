@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "wilson",
+    "state": "TX",
+    "verified": false,
+    "name": "Floresville Event Center",
+    "description": "Come play pickleball at Floresville Event Center in Floresville, TX! There are 2 indoor hard courts. The lines are permanent, but you'll need to bring your own net. The facility includes amenities like restrooms and water. The courts are free.",
+    "address": "600 State Highway 97 W",
+    "city": "Floresville",
+    "zip_code": "78114",
+    "latitude": 29.115289,
+    "longitude": -98.168434,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "(830) 393-7070",
+    "website": "https://www.floresvilletx.gov/community/event-center/",
+    "email": "facilitiessup@floresvilletx.gov",
+    "photo_url": "https://cdn.filestackcontent.com/Mrtd8WkTcqem0ILXDRHA",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "hours": "Friday 8 am\u20135 pm"
+  }
+]

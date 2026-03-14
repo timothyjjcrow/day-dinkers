@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "polk",
+    "state": "AR",
+    "verified": false,
+    "name": "Aubrey Tapley Park",
+    "description": "As of 11-20-23 there are no pickleball courts at this park, only 2 tennis courts that do not have pickleball lines. The city is planning to build courts at some point but no plan or funding yet.",
+    "address": "2562 US Hwy 71",
+    "city": "Mena",
+    "latitude": 34.589912,
+    "longitude": -94.204488,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+14793943141",
+    "website": "https://cityofmena.org/aubrey-tapley-park/",
+    "photo_url": "https://cdn.filestackcontent.com/NWG8S3euQ9yVIO4YMCMA",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "polk",
+    "state": "AR",
+    "verified": false,
+    "name": "UA Rich Mountain Community College",
+    "description": "Courts under construction. Will be open on November 2023.",
+    "address": "1100 College Drive",
+    "city": "Mena",
+    "latitude": 34.591048,
+    "longitude": -94.220281,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+14793947622",
+    "website": "https://www.uarichmountain.edu/index.html",
+    "photo_url": "https://cdn.filestackcontent.com/c7B1J6tR9WbTMjydAQqw",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

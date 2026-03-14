@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "scotland",
+    "state": "NC",
+    "verified": false,
+    "name": "Laurel Hill Community Center",
+    "description": "Laurel Hill Community Center is a place to play pickleball in Laurel Hill, NC. There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "14940 Church Street",
+    "city": "Laurel Hill",
+    "latitude": 34.809705,
+    "longitude": -79.542366,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "910-773-1930",
+    "website": "https://www.scotlandcounty.org/482/Laurel-Hill-Community-Center",
+    "email": "jtownsend@scotlandcounty.org",
+    "photo_url": "https://cdn.filestackcontent.com/mQFSSkHJQQuHN0DiwqyX",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]

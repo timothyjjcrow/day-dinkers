@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "lawrence",
+    "state": "OH",
+    "verified": false,
+    "name": "Etna Park",
+    "description": "Etna Park is a place to play pickleball in Ironton, OH. There are 6 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "315 Etna St",
+    "city": "Ironton",
+    "zip_code": "45638",
+    "latitude": 38.539278,
+    "longitude": -82.68805,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "7405329241",
+    "photo_url": "https://cdn.filestackcontent.com/nxOcWzuuTbywoHk5HZgG",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

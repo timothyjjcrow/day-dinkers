@@ -1,0 +1,39 @@
+[
+  {
+    "county_slug": "lawrence",
+    "state": "AR",
+    "verified": false,
+    "name": "Stewart Park",
+    "description": "Stewart Park is one of the most popular places to play pickleball in Walnut Ridge, AR. There are 4 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "1102 NE 2nd St",
+    "city": "Walnut Ridge",
+    "latitude": 36.073253,
+    "longitude": -90.946011,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/KLuA32UMRD2wuH2WnK8G",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "lawrence",
+    "state": "AR",
+    "verified": false,
+    "name": "Walnut Ridge High School",
+    "description": "Walnut Ridge High School is one of the most popular places to play pickleball in Walnut Ridge, AR. The court surface is wood. You'll need to bring your own net. Players have access to restrooms, water, and wheelchair accessibility.",
+    "address": "508 E Free St",
+    "city": "Walnut Ridge",
+    "zip_code": "72476",
+    "latitude": 36.06296,
+    "longitude": -90.956601,
+    "indoor": false,
+    "surface_type": "Wood",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": false,
+    "skill_levels": "beginner"
+  }
+]

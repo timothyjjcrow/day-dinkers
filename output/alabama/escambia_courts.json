@@ -1,0 +1,41 @@
+[
+  {
+    "county_slug": "escambia",
+    "state": "AL",
+    "verified": false,
+    "name": "Dogwood Hills",
+    "description": "Dogwood Hills is a place to play pickleball in Brewton, AL. There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts cannot be reserved. The courts are free.",
+    "address": "2385 Douglas Avenue",
+    "city": "Brewton",
+    "latitude": 31.14748,
+    "longitude": -87.07046,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+12518091748",
+    "website": "https://www.cityofbrewton.org/Living-in-Brewton/Parks",
+    "photo_url": "https://cdn.filestackcontent.com/uWF0xfOToCna85yne51Z",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "escambia",
+    "state": "AL",
+    "verified": false,
+    "name": "RT Johnson Park",
+    "description": "Come play pickleball at RT Johnson Park in East Brewton, AL! There are 4 outdoor asphalt courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. Players have access to lights.",
+    "address": "799 Williamson St",
+    "city": "East Brewton",
+    "latitude": 31.086892,
+    "longitude": -87.070834,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

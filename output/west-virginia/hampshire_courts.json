@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "hampshire",
+    "state": "WV",
+    "verified": false,
+    "name": "Avalon Resort Pickleball Club",
+    "description": "Avalon Resort Pickleball Club is a place to play pickleball in Paw Paw, WV. There are 5 outdoor asphalt courts. The lines are permanent, and portable nets are available. The facility includes amenities like food, restrooms, and adaptive programming. The courts are free.",
+    "address": "223 Avalon Ln",
+    "city": "Paw Paw",
+    "latitude": 39.456629,
+    "longitude": -78.463783,
+    "indoor": false,
+    "num_courts": 5,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+13049475600",
+    "website": "https://www.avalon-resort.com",
+    "email": "information@avalon-resort.com",
+    "photo_url": "https://cdn.filestackcontent.com/yqeYUmtSKKaHVD05b9Cg",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

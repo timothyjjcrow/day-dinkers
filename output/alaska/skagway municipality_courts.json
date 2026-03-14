@@ -1,0 +1,16 @@
+[
+  {
+    "county_slug": "skagway municipality",
+    "state": "AK",
+    "verified": false,
+    "name": "Bogus Fields",
+    "description": "This court does not exist and is exists only for testing. It's not a pickleball court. Please do not come here expecting to play pickleball.",
+    "address": "Skagway",
+    "city": "Skagway",
+    "latitude": 59.457178,
+    "longitude": -135.314535,
+    "indoor": false,
+    "photo_url": "https://cdn.filestackcontent.com/XlQDBpcqSqHgkkOikd3A",
+    "skill_levels": "intermediate"
+  }
+]

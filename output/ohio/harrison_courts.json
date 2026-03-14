@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "harrison",
+    "state": "OH",
+    "verified": false,
+    "name": "Barr Memorial Center",
+    "description": "Games are just pickup, first come first serve.  Very laid back. Lots of fun and exercise!",
+    "address": "322 W Main St",
+    "city": "Scio",
+    "latitude": 40.400223,
+    "longitude": -81.086973,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+17409456811",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  }
+]

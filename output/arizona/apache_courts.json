@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "apache",
+    "state": "AZ",
+    "verified": false,
+    "name": "Hopi Veterans Memorial Center",
+    "description": "Hopi Veterans Memorial Center is a place to play pickleball in Window Rock, AZ. There is 1 indoor wood court. The lines are permanent, but you'll need to bring your own net. Players have access to restrooms. The court is free.",
+    "address": "123 AZ-264",
+    "city": "Window Rock",
+    "latitude": 35.662495,
+    "longitude": -109.062423,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "website": "https://www.hopi-nsn.gov/tribal-services/department-of-community",
+    "photo_url": "https://cdn.filestackcontent.com/ng6RyJ8QQQasWBtqwUfj",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

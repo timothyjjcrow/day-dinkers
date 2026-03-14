@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "stone",
+    "state": "MS",
+    "verified": false,
+    "name": "Westside Community Center",
+    "description": "Westside Community Center is a place to play pickleball in Perkinston, MS. There are 2 indoor concrete courts. The lines are permanent, and portable nets are available. A membership is required to play. Players have access to restrooms, water, and wheelchair accessibility.",
+    "address": "45 Magnolia Rd",
+    "city": "Perkinston",
+    "zip_code": "39573",
+    "latitude": 30.801975,
+    "longitude": -89.285874,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Members only",
+    "website": "https://www.wccperk.org/",
+    "photo_url": "https://cdn.filestackcontent.com/0L5ITEm0TPOVQdmgGyul",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

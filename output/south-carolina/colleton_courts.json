@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "colleton",
+    "state": "SC",
+    "verified": false,
+    "name": "Colleton County Recreation Center",
+    "description": "Come play pickleball at Colleton County Recreation Center in Walterboro, SC! There are 2 indoor hard courts. The lines are permanent, and portable nets are available. Players have access to restrooms and water. A one-time fee is required to play.",
+    "address": "280 Recreation Ln",
+    "city": "Walterboro",
+    "zip_code": "29488",
+    "latitude": 32.93578,
+    "longitude": -80.634986,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Fee required \u2014 $1",
+    "phone": "8435383031",
+    "website": "http://rec.colletoncounty.org/",
+    "photo_url": "https://cdn.filestackcontent.com/nGVZfuVIRFSlRXWrgcKL",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

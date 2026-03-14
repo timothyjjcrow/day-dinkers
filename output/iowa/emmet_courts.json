@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "emmet",
+    "state": "IA",
+    "verified": false,
+    "name": "RWC Regional Wellness Center",
+    "description": "RWC Regional Wellness Center is one of the most popular places to play pickleball in Estherville, IA. There are 4 indoor courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. You can reserve the courts. Amenities include restrooms, lights, locker rooms, and water.",
+    "address": "415 S 18th St",
+    "city": "Estherville",
+    "zip_code": "51334",
+    "latitude": 43.397522,
+    "longitude": -94.818407,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 4,
+    "open_play_schedule": "Call ahead to confirm availability and level of play.",
+    "fees": "Fee required \u2014 Day passes available.",
+    "phone": "7123628484",
+    "website": "https://yourrwc.org/",
+    "email": "bgrems72@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/BbvGHzfmRrCvclr1xyJj",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

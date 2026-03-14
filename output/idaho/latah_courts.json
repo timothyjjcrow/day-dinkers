@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "latah",
+    "state": "ID",
+    "verified": false,
+    "name": "Ghormley Park",
+    "description": "Ghormley Park is one of the most popular places to play pickleball in Moscow, ID. There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility is wheelchair accessible.",
+    "address": "504 Home St",
+    "city": "Moscow",
+    "zip_code": "83843",
+    "latitude": 46.731307,
+    "longitude": -117.010657,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "5094323773",
+    "website": "https://www.ci.moscow.id.us/Facilities/Facility/Details/Ghormley",
+    "photo_url": "https://cdn.filestackcontent.com/Q91W0HfSOuLANfsvCoOQ",
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "hours": "8am - 5pm",
+    "has_parking": true,
+    "has_restrooms": true
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "noble",
+    "state": "OK",
+    "verified": false,
+    "name": "Noble County Family YMCA",
+    "description": "Come play pickleball at Noble County Family YMCA in Perry, OK! There are 2 indoor wood courts. The lines are permanent, and portable nets are available. A membership is required to play. Players have access to restrooms, water, and wheelchair accessibility.",
+    "address": "107 N 7th St",
+    "city": "Perry",
+    "zip_code": "73077",
+    "latitude": 36.283987,
+    "longitude": -97.288201,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Members only",
+    "phone": "5803364411",
+    "website": "https://nocoymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/04luEo6SXaffTbYoft9Q",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

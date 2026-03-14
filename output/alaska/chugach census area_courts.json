@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "chugach census area",
+    "state": "AK",
+    "verified": false,
+    "name": "George H Gilson Middle School",
+    "description": "Monday and Wednesday nights.\n6 to 8 pm and longer\nCheck Valdez Civic Center website for updated schedule.",
+    "address": "357 Robe River Dr",
+    "city": "Valdez",
+    "latitude": 61.138022,
+    "longitude": -146.360106,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+19078352244",
+    "website": "https://www.valdezcityschools.org/Domain/9",
+    "photo_url": "https://cdn.filestackcontent.com/KD0ZLyZkTku2JOyX6O0P",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

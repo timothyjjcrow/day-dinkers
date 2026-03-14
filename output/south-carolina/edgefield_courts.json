@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "edgefield",
+    "state": "SC",
+    "verified": false,
+    "name": "Edgefield Gym",
+    "description": "Lessons are offered free on particular days.  Pickleball Peeps of Edgefield",
+    "address": "380 Church St",
+    "city": "Edgefield",
+    "zip_code": "29824",
+    "latitude": 33.793485,
+    "longitude": -81.92826,
+    "indoor": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "open_play_schedule": "Follow Pickleball Peeps of Edgefield on Facebook",
+    "fees": "Free",
+    "phone": "8036372621",
+    "website": "https://edgefieldcounty.sc.gov/recreation/",
+    "photo_url": "https://cdn.filestackcontent.com/GPye2adQTOX1kXsqJK74",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

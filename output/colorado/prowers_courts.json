@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "prowers",
+    "state": "CO",
+    "verified": false,
+    "name": "Dunshaughlin Community Centre",
+    "description": "Come play pickleball at Dunshaughlin Community Centre in Holly, CO! There are 3 indoor wood courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. Amenities include restrooms.",
+    "address": "Drumree Rd",
+    "city": "Holly",
+    "latitude": 38.07883,
+    "longitude": -102.1325,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "phone": "(01) 825 8863",
+    "website": "http://www.dunshaughlincommunitycentre.ie/",
+    "photo_url": "https://cdn.filestackcontent.com/jMenhCICTyekWi7wopJO",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "hours": "6am \u2013 10pm"
+  }
+]

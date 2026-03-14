@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "bedford",
+    "state": "TN",
+    "verified": false,
+    "name": "H. V. Griffin Park",
+    "description": "H. V. Griffin Park is one of the most popular places to play pickleball in Shelbyville, TN. There are 6 hard courts. 4 are outdoors and 2 are indoors. The lines are permanent, but you'll need to bring your own net. A one-time fee is required to play. Players have access to restrooms, water, and lights.",
+    "address": "Shelbyville",
+    "city": "Shelbyville",
+    "latitude": 35.382661,
+    "longitude": -86.459209,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Fee required",
+    "phone": "9316849780",
+    "website": "https://www.shelbyvilletn.org/departments/parks___recreation_center/index.php",
+    "photo_url": "https://cdn.filestackcontent.com/SQRsRCG5SACMtElv4UO2",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

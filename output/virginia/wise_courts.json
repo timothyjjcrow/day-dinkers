@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "wise",
+    "state": "VA",
+    "verified": false,
+    "name": "Bullitt Park",
+    "description": "There are 2 additional courts on the basketball courts when not in use with portable nets.",
+    "address": "301 E 1st St N",
+    "city": "Big Stone Gap",
+    "latitude": 36.866724,
+    "longitude": -82.780283,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "https://bigstonegap.com/parks-trails/bullitt-park/",
+    "photo_url": "https://cdn.filestackcontent.com/rllnJ9cNRDi0rSkEn5Ja",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

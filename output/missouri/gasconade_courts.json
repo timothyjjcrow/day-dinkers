@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "gasconade",
+    "state": "MO",
+    "verified": false,
+    "name": "Hermann City Park",
+    "description": "There is a court marked to use the tennis net and additional marking for using your own net. Please join in if you see anyone on the courts we welcome everyone.\n\nThey have 4 permanent pickleball courts in addition to the tennis courts.",
+    "address": "1220 Gasconade St",
+    "city": "Hermann",
+    "zip_code": "65041",
+    "latitude": 38.697194,
+    "longitude": -91.442382,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "open_play_schedule": "There is a morning group that plays in the day, time determined by the weather. We play Mon. thru Sat. The evening group plays Tue. & Thur. evenings and Sunday afternoon.",
+    "fees": "Free",
+    "phone": "5734865400",
+    "website": "http://www.hermannmo.com/",
+    "photo_url": "https://cdn.filestackcontent.com/3xKhmnU8RgiBcQesaLUl",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

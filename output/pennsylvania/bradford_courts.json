@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "bradford",
+    "state": "PA",
+    "verified": false,
+    "name": "River Valley Regional YMCA Bradford County Branch",
+    "description": "River Valley Regional YMCA Bradford County Branch is a place to play pickleball in Towanda, PA. There is 1 indoor wood court. The lines are permanent, and portable nets are available. The facility includes amenities like food, locker rooms, restrooms, water, youth programming, lights, and wheelchair accessibility. A membership is required to play.",
+    "address": "9 College Avenue",
+    "city": "Towanda",
+    "latitude": 41.760886,
+    "longitude": -76.44552,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "fees": "Members only",
+    "phone": "+15702689622",
+    "website": "https://www.rvrymca.org/bradford-county",
+    "photo_url": "https://cdn.filestackcontent.com/zDItzZMBQcuWd2fLuAJK",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "court_type": "dedicated",
+    "hours": "7am - 8pm"
+  }
+]

@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "lyon",
+    "state": "MN",
+    "verified": false,
+    "name": "Marshall Area YMCA",
+    "description": "Come play pickleball at Marshall Area YMCA in Marshall, MN! There are 6 indoor wood courts. The lines are permanent, and portable nets are available. A membership is required to play. Players have access to wheelchair accessibility, youth programming, locker rooms, restrooms, and water.",
+    "address": "S A St",
+    "city": "Marshall",
+    "zip_code": "56258",
+    "latitude": 44.44389,
+    "longitude": -95.786538,
+    "indoor": true,
+    "num_courts": 6,
+    "surface_type": "Wood",
+    "fees": "Members only \u2014 Guest Fees are available",
+    "phone": "+15075329622",
+    "website": "http://www.marshallareaymca.org/",
+    "email": "sanderson@marshallareaymca.org",
+    "photo_url": "https://cdn.filestackcontent.com/ZU4wbtNjR2uruJ1AXZSb",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

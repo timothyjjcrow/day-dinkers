@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "merrick",
+    "state": "NE",
+    "verified": false,
+    "name": "central City Pickleball Courts",
+    "description": "Come play pickleball at central City Pickleball Courts in Central City, NE! There are 2 outdoor courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "13th Ave",
+    "city": "Central City",
+    "zip_code": "68826",
+    "latitude": 41.115044,
+    "longitude": -97.995819,
+    "indoor": false,
+    "num_courts": 2,
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/GOgABK0VT0yBgonye4yN",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

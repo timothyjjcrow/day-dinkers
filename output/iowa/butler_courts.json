@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "butler",
+    "state": "IA",
+    "verified": false,
+    "name": "Wilder Park",
+    "description": "No lines painted. Paddles and balls in locker by camp host",
+    "address": "22301 Hwy 3",
+    "city": "Allison",
+    "zip_code": "50602",
+    "latitude": 42.748364,
+    "longitude": -92.784205,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://www.visitwilderpark.com/",
+    "photo_url": "https://cdn.filestackcontent.com/I5rmkAKkTTSI46DIcC3S",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "shared"
+  }
+]

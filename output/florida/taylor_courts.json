@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "taylor",
+    "state": "FL",
+    "verified": false,
+    "name": "Taylor County Sports Complex",
+    "description": "Taylor County Sports Complex is a place to play pickleball in Perry, FL. There are 2 outdoor courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. Players have access to restrooms and water.",
+    "address": "1685 US 19 N",
+    "city": "Perry",
+    "zip_code": "32347",
+    "latitude": 30.13778,
+    "longitude": -83.608437,
+    "indoor": false,
+    "num_courts": 2,
+    "fees": "Free",
+    "phone": "8505843029",
+    "website": "http://www.taylorcountygov.com/",
+    "photo_url": "https://cdn.filestackcontent.com/4CtiM8v9Td6y2yU6hKuv",
+    "has_restrooms": true,
+    "has_water": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "8am - 5pm"
+  }
+]

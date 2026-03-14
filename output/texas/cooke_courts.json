@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "cooke",
+    "state": "TX",
+    "verified": false,
+    "name": "Lake Kiowa Lodge",
+    "description": "Come play pickleball at Lake Kiowa Lodge in Gainesville, TX! There are 4 courts. 3 are outdoors and 1 is indoors. The lines are permanent, but you'll need to bring your own net. The courts are private.",
+    "address": "905 Kiowa Dr E",
+    "city": "Gainesville",
+    "zip_code": "76240",
+    "latitude": 33.565354,
+    "longitude": -97.005759,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Private",
+    "phone": "9405800064",
+    "photo_url": "https://cdn.filestackcontent.com/dhsZDex2SaiMWh5lZF17",
+    "nets_provided": false,
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "cooke",
+    "state": "TX",
+    "verified": false,
+    "name": "North Central Texas College",
+    "description": "North Central Texas College is a place to play pickleball in Gainesville, TX. There are 8 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "1525 W California St",
+    "city": "Gainesville",
+    "zip_code": "76240",
+    "latitude": 33.61916,
+    "longitude": -97.165595,
+    "indoor": false,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "http://www.nctc.edu/",
+    "photo_url": "https://cdn.filestackcontent.com/1UrodWnJS5xkHBVuSSvR",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

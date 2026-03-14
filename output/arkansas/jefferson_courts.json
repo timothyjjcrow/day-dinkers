@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "jefferson",
+    "state": "AR",
+    "verified": false,
+    "name": "D.R.B. Blues & Wellness Plaza",
+    "description": "D.R.B. Blues & Wellness Plaza is a place to play pickleball in Pine Bluff, AR. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include restrooms, water, youth programming, lights, trainers or lessons, wheelchair accessibility, and adaptive programming.",
+    "address": "221 S Main St",
+    "city": "Pine Bluff",
+    "latitude": 34.227616,
+    "longitude": -92.003064,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+18705431820",
+    "website": "https://cityofpinebluff-ar.gov",
+    "email": "ecdhomes@cityofpinebluff-ar.gov",
+    "photo_url": "https://cdn.filestackcontent.com/GXeK15d2TzGeuAld9EOj",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

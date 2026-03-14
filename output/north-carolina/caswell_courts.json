@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "caswell",
+    "state": "NC",
+    "verified": false,
+    "name": "Caswell County Rec & Parks",
+    "description": "Come play pickleball at Caswell County Rec & Parks in Yanceyville, NC! There are 6 outdoor asphalt courts. The lines are permanent, and portable nets are available. The courts are free. Players have access to restrooms, water, and lights.",
+    "address": "228 County Park Rd",
+    "city": "Yanceyville",
+    "zip_code": "27379",
+    "latitude": 36.407324,
+    "longitude": -79.332874,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "3366944449",
+    "website": "https://www.caswellcountync.gov/parks-and-recreation",
+    "photo_url": "https://cdn.filestackcontent.com/CeowDwdfR0SkWguwlElY",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

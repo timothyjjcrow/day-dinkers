@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "mineral",
+    "state": "CO",
+    "verified": false,
+    "name": "Virginia Christensen Multi Use Facility",
+    "description": "Virginia Christensen Multi Use Facility is a place to play pickleball in Creede, CO. There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. A one-time fee is required to play.",
+    "address": "409 La Garita St",
+    "city": "Creede",
+    "zip_code": "81130",
+    "latitude": 37.849946,
+    "longitude": -106.924858,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "phone": "7196582729",
+    "website": "https://www.colorado.gov/pacific/creede/parks-and-recreation-2",
+    "photo_url": "https://cdn.filestackcontent.com/gj1iEcr7S2G4N1RLuHA1",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

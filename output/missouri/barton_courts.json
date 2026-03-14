@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "barton",
+    "state": "MO",
+    "verified": false,
+    "name": "Lamar Methodist Church",
+    "description": "Lamar Methodist Church is a place to play pickleball in Lamar, MO. There are 2 indoor carpet courts. Tape lines have been laid, and portable nets are available. Amenities include restrooms. The courts are free.",
+    "address": "Poplar St",
+    "city": "Lamar",
+    "latitude": 37.496728,
+    "longitude": -94.274566,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Carpet",
+    "open_play_schedule": "Enter on the back side of the church through the double door of the Family Life Center on Mill St.",
+    "fees": "Free",
+    "phone": "+14172140889",
+    "website": "https://www.lumc.church/",
+    "email": "janeannmoyer@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/ls8N1WT3ScGRN1UCA73w",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  }
+]

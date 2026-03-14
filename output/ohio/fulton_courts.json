@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "fulton",
+    "state": "OH",
+    "verified": false,
+    "name": "Wauseon Homecoming Park",
+    "description": "Wauseon Homecoming Park is a place to play pickleball in Wauseon, OH. There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "715 Lawrence Ave",
+    "city": "Wauseon",
+    "latitude": 41.540826,
+    "longitude": -84.15048,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+14193355041",
+    "website": "https://www.cityofwauseon.com/our-parks",
+    "photo_url": "https://cdn.filestackcontent.com/atvi950EQku6494fLVKY",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "has_restrooms": true
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "surry",
+    "state": "VA",
+    "verified": false,
+    "name": "Bacon\u2019s Castle Baptist Church",
+    "description": "Bacon\u2019s Castle Baptist Church is one of the most popular places to play pickleball in Surry, VA. There are 2 indoor hard courts. The lines are permanent, and portable nets are available. Amenities include restrooms and water. A membership is required to play. Reservations are available.",
+    "address": "86 Bacons Castle Trail",
+    "city": "Surry",
+    "latitude": 37.105763,
+    "longitude": -76.728707,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "phone": "7573576331",
+    "website": "http://www.baconscastle.com",
+    "email": "Info@baconscastle.com",
+    "photo_url": "https://cdn.filestackcontent.com/migP0eRuSbSx6fwsGGfI",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

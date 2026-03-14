@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "fremont",
+    "state": "CO",
+    "verified": false,
+    "name": "Rouse Park",
+    "description": "If the weather is bad then we play at the Abbey. If you are on their email list they will send you an email when they are playing at the Abbey. If not, contact them. We olay everyday at 1:00 unless the weather is bad then Peg will send out an email for an alternate time.",
+    "address": "935 Dewey St",
+    "city": "Ca\u00f1on City",
+    "zip_code": "81212",
+    "latitude": 38.433807,
+    "longitude": -105.21144,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Acrylic",
+    "open_play_schedule": "9:00 everyday",
+    "fees": "Free",
+    "phone": "7194290269",
+    "website": "https://ccrec.colorado.gov/facilities/rouse-park",
+    "email": "pegdavison3@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/T4YanRoTf2ZkB58aJkuC",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

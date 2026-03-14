@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "pratt",
+    "state": "KS",
+    "verified": false,
+    "name": "Blythe Family Fitness",
+    "description": "Blythe Family Fitness is a place to play pickleball in Pratt, KS. There are 2 indoor courts. The lines are permanent, and portable nets are available. Players have access to restrooms and water. A membership is required to play.",
+    "address": "219 W 5th St",
+    "city": "Pratt",
+    "zip_code": "67124",
+    "latitude": 37.641699,
+    "longitude": -98.741047,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "6203882123",
+    "website": "https://blythefamilyfitness.org/",
+    "photo_url": "https://cdn.filestackcontent.com/gZvEW0ZERCiNmPO467e6",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

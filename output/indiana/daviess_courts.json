@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "daviess",
+    "state": "IN",
+    "verified": false,
+    "name": "Longfellow Park",
+    "description": "Longfellow Park is one of the most popular places to play pickleball in Washington, IN. There are 8 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms and lights. The courts are free.",
+    "address": "800 Longfellow Drive",
+    "city": "Washington",
+    "latitude": 38.666334,
+    "longitude": -87.185083,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/9FKZ8tlpQluMCYekyvwW",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "franklin",
+    "state": "ID",
+    "verified": false,
+    "name": "Preston Idaho Pickleball Courts",
+    "description": "The posted rules state \"First come first serve\" NO RESERVATTIONS\". Courts are open from dawn to 10 PM.  The nets are usually removed during the winter. \n\nNo rules stated for rotating in new players or ending play after a specific time or number of games.",
+    "address": "98 W 2nd N St",
+    "city": "Preston",
+    "latitude": 42.100909,
+    "longitude": -111.878235,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard, Acrylic",
+    "fees": "Free",
+    "phone": "+12088521817",
+    "website": "https://prestonidaho.net",
+    "photo_url": "https://cdn.filestackcontent.com/5U4wPkhKTzupwezkPUk4",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated",
+    "hours": "Friday 8am - 5pm"
+  }
+]

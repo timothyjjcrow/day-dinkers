@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "san juan",
+    "state": "UT",
+    "verified": false,
+    "name": "Central Park",
+    "description": "Come play pickleball at Central Park in Blanding, UT! There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts cannot be reserved. The courts are free. The facility includes amenities like restrooms.",
+    "address": "233 South 100 West",
+    "city": "Blanding",
+    "latitude": 37.622067,
+    "longitude": -109.479372,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/Fpvf8n3CQnShP76w94oL",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

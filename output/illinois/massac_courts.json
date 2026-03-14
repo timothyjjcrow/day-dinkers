@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "massac",
+    "state": "IL",
+    "verified": false,
+    "name": "Franklin Park",
+    "description": "Franklin Park is one of the most popular places to play pickleball in Metropolis, IL. There are 2 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Players have access to lights. The courts are free.",
+    "address": "312 W 4th St",
+    "city": "Metropolis",
+    "latitude": 37.152057,
+    "longitude": -88.736251,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "open_play_schedule": "Court and park are open from 6:00 A.M. until 10:00 P.M. The facility is lighted.",
+    "fees": "Free",
+    "website": "https://www.metropolisil.gov/page/city-parks/",
+    "photo_url": "https://cdn.filestackcontent.com/fBzPidW6Tpil51ZKSFgP",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

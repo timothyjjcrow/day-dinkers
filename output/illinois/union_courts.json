@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "union",
+    "state": "IL",
+    "verified": false,
+    "name": "Pickleball Quad, Anna City Park",
+    "description": "Come play pickleball at Pickleball Quad, Anna City Park in Anna, IL! There are 5 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms. The courts are free.",
+    "address": "Anna City Park",
+    "city": "Anna",
+    "latitude": 37.455051,
+    "longitude": -89.245096,
+    "indoor": false,
+    "num_courts": 5,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "http://cityofanna.org/",
+    "photo_url": "https://cdn.filestackcontent.com/PIEL4k6S06zVkSxtVU7Q",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Friday, 9am to 4pm"
+  }
+]

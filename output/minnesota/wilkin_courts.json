@@ -1,0 +1,41 @@
+[
+  {
+    "county_slug": "wilkin",
+    "state": "MN",
+    "verified": false,
+    "name": "BreckenridgeHigh School",
+    "description": "Come play pickleball at BreckenridgeHigh School in Breckenridge, MN! There are 4 indoor wood courts. You\u2019ll have to create your own lines, but portable nets are available. A one-time fee is required to play. The facility includes amenities like restrooms.",
+    "address": "710 13th St N",
+    "city": "Breckenridge",
+    "latitude": 46.270714,
+    "longitude": -96.57512,
+    "indoor": true,
+    "num_courts": 4,
+    "surface_type": "Wood",
+    "fees": "Fee required \u2014 $10\n\nhttps://breckenridgeisd.revtrak.net/rw-community-education/#/list",
+    "photo_url": "https://cdn.filestackcontent.com/MnkytGulS0yTG8O7hgJs",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "court_type": "shared"
+  },
+  {
+    "county_slug": "wilkin",
+    "state": "MN",
+    "verified": false,
+    "name": "Breckenridge Pickleball Courts",
+    "description": "Breckenridge Pickleball Courts is one of the most popular places to play pickleball in Breckenridge, MN. There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like lights. The courts are free.",
+    "address": "1400 Beede Avenue",
+    "city": "Breckenridge",
+    "latitude": 46.26822,
+    "longitude": -96.575225,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/ozM3C9RuQuY46HhDzhbA",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

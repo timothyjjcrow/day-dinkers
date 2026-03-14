@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "keokuk",
+    "state": "IA",
+    "verified": false,
+    "name": "Legion Park Sigourney",
+    "description": "Legion Park Sigourney is a place to play pickleball in Sigourney, IA. There are 2 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "1020 W Spring St",
+    "city": "Sigourney",
+    "zip_code": "52591",
+    "latitude": 41.332276,
+    "longitude": -92.218177,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "6416223080",
+    "photo_url": "https://cdn.filestackcontent.com/sBD0osksT52pWUDZ0bNK",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

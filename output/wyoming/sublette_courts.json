@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "sublette",
+    "state": "WY",
+    "verified": false,
+    "name": "Pinedale Aquatic Center",
+    "description": "Come play pickleball at Pinedale Aquatic Center in Pinedale, WY! There are 6 hard courts. 4 are outdoors and 2 are indoors. The lines are permanent, and portable nets are available. Players have access to restrooms. A one-time fee is required to play.",
+    "address": "535 N Tyler Ave",
+    "city": "Pinedale",
+    "zip_code": "82941",
+    "latitude": 42.8713,
+    "longitude": -109.86025,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Fee required",
+    "phone": "+13073672832",
+    "website": "http://www.pinedaleaquatic.com/",
+    "photo_url": "https://cdn.filestackcontent.com/0y7g5nXLQQWtOs2dSbMw",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "bracken",
+    "state": "KY",
+    "verified": false,
+    "name": "Appleman Park",
+    "description": "Appleman Park is a place to play pickleball in Augusta, KY. There are 4 outdoor asphalt courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "200 West Park Street",
+    "city": "Augusta",
+    "latitude": 38.773113,
+    "longitude": -84.009571,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/JIKJgwgVTLG8MoAmoTZ2",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

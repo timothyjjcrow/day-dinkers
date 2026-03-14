@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "franklin",
+    "state": "AR",
+    "verified": false,
+    "name": "Ozark Community Center",
+    "description": "Ozark Community Center is a place to play pickleball in Ozark, AR. There are 2 indoor courts. The lines are permanent, and portable nets are available. Amenities include restrooms. A one-time fee is required to play.",
+    "address": "609 N 29th St",
+    "city": "Ozark",
+    "zip_code": "72949",
+    "latitude": 35.493325,
+    "longitude": -93.857489,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "phone": "4796670864",
+    "website": "http://www.facebook.com/ozarkarcommunitycenter",
+    "photo_url": "https://cdn.filestackcontent.com/mNenAPUQNCTnYcn4I26W",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

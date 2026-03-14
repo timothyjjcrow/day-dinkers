@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "rappahannock",
+    "state": "VA",
+    "verified": false,
+    "name": "Rappahannock County Park",
+    "description": "Rappahannock County Park is a place to play pickleball in Washington, VA. There are 2 outdoor asphalt courts. The lines are permanent, and portable nets are available. The facility includes amenities like water and restrooms. The courts are free.",
+    "address": "7 Park Lane",
+    "city": "Washington",
+    "latitude": 38.710816,
+    "longitude": -78.153113,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+15406755330",
+    "website": "https://www.rappahannockcountyva.gov/",
+    "photo_url": "https://cdn.filestackcontent.com/JcZSkzYfQTGVK3o5Jy9F",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

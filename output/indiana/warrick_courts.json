@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "warrick",
+    "state": "IN",
+    "verified": false,
+    "name": "Rivertown Pickleball of Southern Indiana - Newburgh",
+    "description": "The Rivertown Pickleball of Southern Indiana 10 outdoor courts surface (Acrytech CushionX) is the same 4mm cushioned surface that the pros play on. Court hours are 6 am \u2013 10 pm seasonally, with the exception of planned special events and leagues listed on the website Event Calendar.",
+    "address": "5300 Vann Rd",
+    "city": "Newburgh",
+    "latitude": 37.98403,
+    "longitude": -87.343092,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 10,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "website": "https://www.rivertownpickleball.com/",
+    "photo_url": "https://cdn.filestackcontent.com/UZM4f8cQNqdhroPkaRz2",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

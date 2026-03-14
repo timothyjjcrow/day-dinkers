@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "madison",
+    "state": "MT",
+    "verified": false,
+    "name": "Ennis MT Pickleball Club",
+    "description": "Ennis Pickleball Club welcomes visitors year round (weather depending).   If the sun is shining and we can scrape the snow off the court, then we are playing.   Games every morning from 10am in the winter, from 9am in the Summer.",
+    "address": "Ennis High School",
+    "city": "Ennis",
+    "latitude": 45.346772,
+    "longitude": -111.733391,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://ennispickleball.com",
+    "email": "ennismtpickleball@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/CqfooB5tQuOIDbZvbunj",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

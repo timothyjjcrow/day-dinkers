@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "morris",
+    "state": "KS",
+    "verified": false,
+    "name": "Council Grove Life Center",
+    "description": "Council Grove Life Center is a place to play pickleball in Council Grove, KS. There are 2 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "300 N Union St",
+    "city": "Council Grove",
+    "zip_code": "66846",
+    "latitude": 38.665992,
+    "longitude": -96.487388,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "7857090308",
+    "website": "http://www.cglifecenter.com/",
+    "photo_url": "https://cdn.filestackcontent.com/L2VNLCKTieT7xDFYIGgS",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,39 @@
+[
+  {
+    "county_slug": "kearney",
+    "state": "NE",
+    "verified": false,
+    "name": "American Legion Park",
+    "description": "American Legion Park is one of the most popular places to play pickleball in Minden, NE. There are 4 outdoor concrete courts. These are dedicated courts with permanent lines and nets.",
+    "address": "508 East 9th Street",
+    "city": "Minden",
+    "latitude": 40.503132,
+    "longitude": -98.945073,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "photo_url": "https://cdn.filestackcontent.com/sEVirOCTXycidpoAWqFw",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "kearney",
+    "state": "NE",
+    "verified": false,
+    "name": "Jaycee Park",
+    "description": "Come play pickleball at Jaycee Park in Minden, NE! There are 2 outdoor asphalt courts. The lines are permanent, but you'll need to bring your own net. The courts are free. The courts cannot be reserved.",
+    "address": "200-246 E Campbell St",
+    "city": "Minden",
+    "latitude": 40.491774,
+    "longitude": -98.950556,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/NJ6tqTUvTHe9R6PyS6At",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

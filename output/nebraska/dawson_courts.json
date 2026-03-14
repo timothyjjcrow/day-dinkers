@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "dawson",
+    "state": "NE",
+    "verified": false,
+    "name": "Lexington Racquet Center",
+    "description": "Lexington Racquet Center is a place to play pickleball in Lexington, NE. There are 8 indoor hard courts. The lines are permanent, and portable nets are available. The courts are free. The facility includes amenities like restrooms, water, and youth programming.",
+    "address": "1110 Park Street",
+    "city": "Lexington",
+    "latitude": 40.786654,
+    "longitude": -99.753619,
+    "indoor": true,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+13083242498",
+    "website": "https://cityoflex.com/parks-and-recreation/",
+    "photo_url": "https://cdn.filestackcontent.com/x3JCfCJFTKuyIx2hsPxL",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "hours": "8 AM\u20135 PM"
+  }
+]

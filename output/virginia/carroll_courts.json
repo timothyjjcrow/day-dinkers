@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "carroll",
+    "state": "VA",
+    "verified": false,
+    "name": "Carroll County Wellness Center",
+    "description": "Come play pickleball at Carroll County Wellness Center in Hillsville, VA! There are 2 indoor courts. The lines are permanent, and portable nets are available. Amenities include restrooms and water. A one-time fee is required to play.",
+    "address": "164 Carter Pines Ln",
+    "city": "Hillsville",
+    "zip_code": "24343",
+    "latitude": 36.767302,
+    "longitude": -80.729153,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "phone": "2762377124",
+    "website": "http://www.carrollwc.org/",
+    "photo_url": "https://cdn.filestackcontent.com/a3c0FlPFQtGmI5UuhDWg",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

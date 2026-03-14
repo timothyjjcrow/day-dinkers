@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "custer",
+    "state": "MT",
+    "verified": false,
+    "name": "Centra",
+    "description": "Centra is a place to play pickleball in Miles City, MT. There are 2 indoor courts. Tape lines have been laid, and portable nets are available. You can reserve the courts. A membership is required to play.",
+    "address": "2715 Dickinson Street",
+    "city": "Miles City",
+    "latitude": 46.404356,
+    "longitude": -105.827424,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only \u2014 $10.00 without membership",
+    "phone": "4068746286",
+    "website": "Https://www.milescc.edu/CampusServiceslCentra",
+    "email": "TurckM@milescc.edu",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "shared"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "webster",
+    "state": "IA",
+    "verified": false,
+    "name": "Fort Dodge Pickleball",
+    "description": "Fort Dodge Pickleball is a place to play pickleball in Fort Dodge, IA. There are 4 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "1111 N 32nd St",
+    "city": "Fort Dodge",
+    "latitude": 42.516793,
+    "longitude": -94.147307,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/uT3yEE81RjOXRfSwEQWV",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

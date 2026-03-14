@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "lincoln",
+    "state": "WA",
+    "verified": false,
+    "name": "Wilbur Pickleball courts",
+    "description": "Wilbur Pickleball courts is one of the most popular places to play pickleball in Wilbur, WA. There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like lights and water. The courts are free.",
+    "address": "SW Alder St & Southwest Railroad Avenue",
+    "city": "Wilbur",
+    "latitude": 47.758182,
+    "longitude": -118.707403,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "5093887257",
+    "email": "tomlilly1@gmail.com",
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

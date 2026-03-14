@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "sarasota",
+    "state": "NY",
+    "verified": false,
+    "name": "North Port somewhere but not here",
+    "description": "This is a private HOA community please remove us from your website. Per Management.",
+    "address": "North Port",
+    "city": "Mineral Springs",
+    "latitude": 27.044224,
+    "longitude": -82.235925,
+    "indoor": false,
+    "fees": "Private",
+    "phone": "+19414932302",
+    "website": "http://divosta.com/",
+    "email": "cburch@castlegroup.com",
+    "photo_url": "https://cdn.filestackcontent.com/3thCVjs9SIGJbGlzv5ss",
+    "skill_levels": "advanced"
+  }
+]

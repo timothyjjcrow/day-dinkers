@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "richland",
+    "state": "IL",
+    "verified": false,
+    "name": "The Drey at Musgrove PArk",
+    "description": "Come play pickleball at The Drey at Musgrove PArk in Olney, IL! There are 8 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. You can\u2019t reserve the courts. Players have access to lights and wheelchair accessibility.",
+    "address": "1111 N Silver St",
+    "city": "Olney",
+    "latitude": 38.741598,
+    "longitude": -88.080859,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/NBCyRvZgTIuVqb8R0wiO",
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

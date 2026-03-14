@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "grant",
+    "state": "ND",
+    "verified": false,
+    "name": "Carson Tennis Court",
+    "description": "Come play pickleball at Carson Tennis Court in Carson, ND! There are 2 indoor wood courts. The lines are permanent, and portable nets are available. The courts are free. You can\u2019t reserve the courts. Players have access to restrooms.",
+    "address": "Carson",
+    "city": "Carson",
+    "latitude": 46.417784,
+    "longitude": -101.564865,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "1-701-400-5758",
+    "photo_url": "https://cdn.filestackcontent.com/hNmjTOZsQHmUsmYP7MNf",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

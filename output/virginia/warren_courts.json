@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "warren",
+    "state": "VA",
+    "verified": false,
+    "name": "Gertrude E Miller Community Park",
+    "description": "Come play pickleball at Gertrude E Miller Community Park in Front Royal, VA! There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like lights. The courts are free.",
+    "address": "905 Stadium Dr",
+    "city": "Front Royal",
+    "latitude": 38.930672,
+    "longitude": -78.190065,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "https://warrencountyva.gov/397/Gertrude-E-Miller-Community-Park",
+    "photo_url": "https://cdn.filestackcontent.com/EyRWy8EOSGm39TUgXSlZ",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "has_restrooms": true
+  },
+  {
+    "county_slug": "warren",
+    "state": "VA",
+    "verified": false,
+    "name": "Gertrude E. Miller Pickleball Courts (Bing Crosby Stadium)",
+    "description": "Come play pickleball at Gertrude E. Miller Pickleball Courts (Bing Crosby Stadium) in Front Royal, VA! There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "Little League Lane",
+    "city": "Front Royal",
+    "latitude": 38.930235,
+    "longitude": -78.187918,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/0nGQ4gRgTEqLNsFWuUah",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

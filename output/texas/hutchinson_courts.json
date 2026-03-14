@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "hutchinson",
+    "state": "TX",
+    "verified": false,
+    "name": "Borger Community Activity Center",
+    "description": "Come play pickleball at Borger Community Activity Center in Borger, TX! There are 4 indoor wood courts. The lines are permanent, and portable nets are available. The courts are free. Players have access to restrooms, water, wheelchair accessibility, and lights.",
+    "address": "1301 Roosevelt St",
+    "city": "Borger",
+    "latitude": 35.653805,
+    "longitude": -101.405653,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+18064574218",
+    "website": "http://www.fpctx.edu/Students/BCAC_Home.htm",
+    "photo_url": "https://cdn.filestackcontent.com/0MHVRKHfSUaCRnN2vZoa",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

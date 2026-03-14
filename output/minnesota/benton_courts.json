@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "benton",
+    "state": "MN",
+    "verified": false,
+    "name": "Val Smith Park",
+    "description": "Val Smith Park is one of the most popular places to play pickleball in Sartell, MN. There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like restrooms. The courts are free.",
+    "address": "Val Smith Park",
+    "city": "Sartell",
+    "latitude": 45.617956,
+    "longitude": -94.192002,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "http://www.sartellmn.com/",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "person",
+    "state": "NC",
+    "verified": false,
+    "name": "Huck Sansbury Park Tennis Courts",
+    "description": "Huck Sansbury Park Tennis Courts is a place to play pickleball in Roxboro, NC. There are 2 outdoor hard courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. Players have access to restrooms and lights.",
+    "address": "311 S Morgan St",
+    "city": "Roxboro",
+    "zip_code": "27573",
+    "latitude": 36.395491,
+    "longitude": -78.993091,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "3365971755",
+    "photo_url": "https://cdn.filestackcontent.com/vYVyug3TOavy3yO4kXGY",
+    "has_restrooms": true,
+    "skill_levels": "advanced",
+    "court_type": "dedicated"
+  }
+]

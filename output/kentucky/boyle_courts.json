@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "boyle",
+    "state": "KY",
+    "verified": false,
+    "name": "Jackson Park",
+    "description": "Jackson Park is one of the most popular places to play pickleball in Danville, KY. There are 6 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "802 Park Dr",
+    "city": "Danville",
+    "latitude": 37.652821,
+    "longitude": -84.779659,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "https://www.danvilleky.org/317/Programs",
+    "photo_url": "https://cdn.filestackcontent.com/R2kOm3JiQ526bVeWpygs",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

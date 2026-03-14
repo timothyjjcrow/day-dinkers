@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "greenbrier",
+    "state": "WV",
+    "verified": false,
+    "name": "Hollowell Park",
+    "description": "Hollowell Park is a place to play pickleball in Lewisburg, WV. There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like lights.",
+    "address": "186 Matthews St",
+    "city": "Lewisburg",
+    "latitude": 37.81389,
+    "longitude": -80.44353,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "https://www.mypacer.com/routes/333844/hollowell-park-walking-and-running-lewisburg-west-virginia-usa",
+    "photo_url": "https://cdn.filestackcontent.com/16q8W4MVSaWaa1hDhTOQ",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

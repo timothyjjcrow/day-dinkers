@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "roane",
+    "state": "TN",
+    "verified": false,
+    "name": "Kingston City Park Pickleball courts",
+    "description": "Come play pickleball at Kingston City Park Pickleball courts in Kingston, TN! There are 6 outdoor asphalt courts. The lines are permanent, and portable nets are available. Amenities include lights. The courts are free.",
+    "address": "333 W Race St",
+    "city": "Kingston",
+    "latitude": 35.878653,
+    "longitude": -84.524984,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/xjcfT7okSVWgRAjwh9xi",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

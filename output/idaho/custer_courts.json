@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "custer",
+    "state": "ID",
+    "verified": false,
+    "name": "Sawtooth Valley Pickleball Assoc.",
+    "description": "Must call to schedule court time",
+    "address": "210 School Rd",
+    "city": "Stanley",
+    "latitude": 44.211726,
+    "longitude": -114.938617,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard, Concrete",
+    "open_play_schedule": "must call in order to schedule a time to play",
+    "fees": "Private \u2014 donations appreciated",
+    "phone": "2082868258",
+    "email": "pickleball@svpba.org",
+    "photo_url": "https://cdn.filestackcontent.com/8zmnAOWhQkKNZkm6c9qs",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

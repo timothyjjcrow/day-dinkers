@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "mcdowell",
+    "state": "WV",
+    "verified": false,
+    "name": "Linkous Park",
+    "description": "Linkous Park is one of the most popular places to play pickleball in Welch, WV. There are 4 outdoor asphalt courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "Linkous Park Dr",
+    "city": "Welch",
+    "latitude": 37.428176,
+    "longitude": -81.585465,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/Snk9MLvcS46VmuJ4perJ",
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "mcdowell",
+    "state": "WV",
+    "verified": false,
+    "name": "MacD Pickleball Club",
+    "description": "MacD Pickleball Club is a place to play pickleball in Welch, WV. There is 1 indoor asphalt court. This is a dedicated court with a permanent net and lines. A membership is required to play.",
+    "address": "Linkous Park",
+    "city": "Welch",
+    "latitude": 37.42662,
+    "longitude": -81.584231,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "fees": "Members only",
+    "phone": "+13046872759",
+    "email": "jay@picklesavvy.com",
+    "photo_url": "https://cdn.filestackcontent.com/roTl3dZcTXWf0kjKHlST",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "meriwether",
+    "state": "GA",
+    "verified": false,
+    "name": "The Frank C. Ruzycki Center for Theraeputic Recreation",
+    "description": "The Frank C. Ruzycki Center for Theraeputic Recreation is one of the most popular places to play pickleball in Warm Springs, GA. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. The facility includes amenities like locker rooms, restrooms, water, and adaptive programming.",
+    "address": "6135 Roosevelt Highway",
+    "city": "Warm Springs",
+    "latitude": 32.887882,
+    "longitude": -84.692122,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "email": "misslisa.ctr@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/kQ5ggG95SzuVkOQsf0Az",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

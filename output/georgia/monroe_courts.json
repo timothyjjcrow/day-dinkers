@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "monroe",
+    "state": "GA",
+    "verified": false,
+    "name": "Country Club Park",
+    "description": "These are brand new courts with a Grand Opening on April 7, 2025.  These are part of the Forsyth City Parks system and are open to the public.  No fees.  The nearest street address to use with GPS is 400 Country Club Dr., Forsyth, GA 31029.  The courts' parking area is just 200 yards east of the golf course parking.  The new city Splash Pad facility is also adjacent to the golf course and pickleball courts.  Open 7 days.  No lighting at this time.",
+    "address": "22RR+2W Forsyth",
+    "city": "Forsyth",
+    "latitude": 33.040113,
+    "longitude": -83.957733,
+    "indoor": false,
+    "num_courts": 16,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/9BQRtSzQgeJp7HYJDX3X",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

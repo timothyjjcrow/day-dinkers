@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "seward",
+    "state": "NE",
+    "verified": false,
+    "name": "Moffitt Park Pickleball Courts",
+    "description": "Come play pickleball at Moffitt Park Pickleball Courts in Seward, NE! There are 2 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "117 S 14th St",
+    "city": "Seward",
+    "zip_code": "68434",
+    "latitude": 40.907693,
+    "longitude": -97.108858,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "4026430459",
+    "photo_url": "https://cdn.filestackcontent.com/MByifQzQHemRMbos3Jm5",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

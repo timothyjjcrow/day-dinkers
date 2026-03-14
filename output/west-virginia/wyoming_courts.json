@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "wyoming",
+    "state": "WV",
+    "verified": false,
+    "name": "Palisades Park",
+    "description": "Come play pickleball at Palisades Park in Pineville, WV! There are 2 outdoor asphalt courts. The lines are permanent, but you'll need to bring your own net. Amenities include restrooms. The courts are free.",
+    "address": "119 Park St",
+    "city": "Pineville",
+    "zip_code": "24874",
+    "latitude": 37.5821,
+    "longitude": -81.5358,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "https://visitwv.com/venue/pinevilles-palisades-park-2/",
+    "photo_url": "https://cdn.filestackcontent.com/hHXfjhsxTamLdmbyS17p",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

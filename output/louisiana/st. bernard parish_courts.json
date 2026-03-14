@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "st. bernard parish",
+    "state": "LA",
+    "verified": false,
+    "name": "Val Riess Complex",
+    "description": "Come play pickleball at Val Riess Complex in Chalmette, LA! There are 6 indoor wood courts. The lines are permanent, and portable nets are available. The courts are free. Players have access to restrooms and water.",
+    "address": "1101 Magistrate St",
+    "city": "Chalmette",
+    "zip_code": "70043",
+    "latitude": 29.951811,
+    "longitude": -89.944791,
+    "indoor": true,
+    "num_courts": 6,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+15042784295",
+    "website": "http://www.visitstbernard.com/listings/play/val-riess-recreation-complex#.V8iGYLl97lM",
+    "email": "info@visitstbernard.com",
+    "photo_url": "https://cdn.filestackcontent.com/dSxOA79uQZyJRCCXCbKV",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

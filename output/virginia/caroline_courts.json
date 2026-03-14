@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "caroline",
+    "state": "VA",
+    "verified": false,
+    "name": "YMCA Caroline Family",
+    "description": "YMCA Caroline Family is one of the most popular places to play pickleball in Ruther Glen, VA. There are 3 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play. You can reserve the courts.",
+    "address": "17422 Library Blvd",
+    "city": "Ruther Glen",
+    "zip_code": "22546",
+    "latitude": 38.022377,
+    "longitude": -77.520562,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Members only",
+    "phone": "8044489622",
+    "photo_url": "https://cdn.filestackcontent.com/wkC76ilvQYWMFCqhkOIQ",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

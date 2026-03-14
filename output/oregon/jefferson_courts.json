@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "jefferson",
+    "state": "OR",
+    "verified": false,
+    "name": "Crooked River Ranch",
+    "description": "Crooked River Ranch is a place to play pickleball in Crooked River Ranch, OR. There are 6 outdoor courts. The lines are permanent, but you'll need to bring your own net. A membership is required to play.",
+    "address": "SW Clubhouse Rd",
+    "city": "Crooked River Ranch",
+    "zip_code": "97760",
+    "latitude": 44.425107,
+    "longitude": -121.236381,
+    "indoor": false,
+    "num_courts": 6,
+    "fees": "Members only",
+    "phone": "3609100139",
+    "website": "https://www.crookedriverranch.com/",
+    "photo_url": "https://cdn.filestackcontent.com/dWVpJhL2Sfm824QwiMBZ",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

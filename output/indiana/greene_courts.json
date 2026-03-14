@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "greene",
+    "state": "IN",
+    "verified": false,
+    "name": "Humphreys Park",
+    "description": "Humphreys Park is a place to play pickleball in Linton, IN. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "1351 E",
+    "city": "Linton",
+    "latitude": 39.03736,
+    "longitude": -87.149682,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+18128476710",
+    "website": "https://www.cityoflinton.com/department/division.php?structureid=38",
+    "photo_url": "https://cdn.filestackcontent.com/1goBchpSxqYgOLi5352c",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

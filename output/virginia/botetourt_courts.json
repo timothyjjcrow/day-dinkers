@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "botetourt",
+    "state": "VA",
+    "verified": false,
+    "name": "Botetourt Family YMCA",
+    "description": "Botetourt Family YMCA is a place to play pickleball in Daleville, VA. There are 3 indoor courts. The lines are permanent, and portable nets are available. Reservations are available. Players have access to lights. A membership is required to play.",
+    "address": "115 Shenandoah Ave",
+    "city": "Daleville",
+    "zip_code": "24083",
+    "latitude": 37.414244,
+    "longitude": -79.914187,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "fees": "Members only",
+    "phone": "9669622",
+    "website": "http://www.ymcavbr.org/botetourt",
+    "photo_url": "https://cdn.filestackcontent.com/Hcp0cbPHSmmsVm7EGXxH",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

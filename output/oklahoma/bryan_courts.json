@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "bryan",
+    "state": "OK",
+    "verified": false,
+    "name": "Dixon Durant Park",
+    "description": "Come play pickleball at Dixon Durant Park in Durant, OK! There are 8 outdoor hard courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like lights. The courts are free.",
+    "address": "1020 North 10th Avenue",
+    "city": "Durant",
+    "latitude": 34.00199,
+    "longitude": -96.38352,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "https://durant.org/161/Parks-and-Recreation",
+    "photo_url": "https://cdn.filestackcontent.com/91YleV5ZRRaaW6Kn8Rww",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "has_parking": true,
+    "has_restrooms": true,
+    "wheelchair_accessible": true
+  }
+]

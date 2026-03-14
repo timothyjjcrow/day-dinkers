@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "lawrence",
+    "state": "TN",
+    "verified": false,
+    "name": "Lawrenceburg High School",
+    "description": "There are also 6 tennis courts right beside the pickleball courts.",
+    "address": "1620 Springer Rd",
+    "city": "Lawrenceburg",
+    "latitude": 35.256977,
+    "longitude": -87.315396,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://www.columbiastate.edu/campus-life/outdoor-recreation.html",
+    "photo_url": "https://cdn.filestackcontent.com/t6pJlSdqSJqXDjREzSHo",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

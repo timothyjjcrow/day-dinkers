@@ -1,0 +1,16 @@
+[
+  {
+    "county_slug": "murray",
+    "state": "GA",
+    "verified": false,
+    "name": "Gladden Middle School",
+    "description": "Gladden Middle School is a place to play pickleball in Chatsworth, GA. There are 4 indoor courts.",
+    "address": "Gladden Middle School",
+    "city": "Chatsworth",
+    "latitude": 34.780023,
+    "longitude": -84.779488,
+    "indoor": true,
+    "num_courts": 4,
+    "skill_levels": "beginner,intermediate"
+  }
+]

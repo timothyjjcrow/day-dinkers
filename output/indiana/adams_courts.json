@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "adams",
+    "state": "IN",
+    "verified": false,
+    "name": "Decatur Parks and Rec Center",
+    "description": "Decatur Parks and Rec Center is one of the most popular places to play pickleball in Decatur, IN. There are 8 asphalt courts. 6 are outdoors and 2 are indoors. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include restrooms, water, and lights.",
+    "address": "231 East Monroe Street",
+    "city": "Decatur",
+    "latitude": 40.832352,
+    "longitude": -84.920506,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "2607242520",
+    "website": "https://daparks.com",
+    "photo_url": "https://cdn.filestackcontent.com/XvYVUhGjTIylP7e17OHD",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

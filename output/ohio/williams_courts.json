@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "williams",
+    "state": "OH",
+    "verified": false,
+    "name": "East End Park",
+    "description": "Come play pickleball at East End Park in Bryan, OH! There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. Players have access to lights. The courts are free.",
+    "address": "1400 East High Street",
+    "city": "Bryan",
+    "latitude": 41.475062,
+    "longitude": -84.530759,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+14196336030",
+    "website": "https://www.cityofbryan.com/parks-recreation/",
+    "email": "parks-rec@cityofbryan.com",
+    "photo_url": "https://cdn.filestackcontent.com/HLvNpwRSRVSe2hefiVXz",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

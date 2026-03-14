@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "schley",
+    "state": "GA",
+    "verified": false,
+    "name": "Ellaville Pickleball Courts",
+    "description": "Ellaville Pickleball Courts is one of the most popular places to play pickleball in Ellaville, GA. There are 2 outdoor hard courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. Players have access to lights. The courts are free.",
+    "address": "161 Perry Dr",
+    "city": "Ellaville",
+    "latitude": 32.23803,
+    "longitude": -84.316299,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

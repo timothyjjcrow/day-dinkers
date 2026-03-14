@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "bedford",
+    "state": "PA",
+    "verified": false,
+    "name": "Church of Jesus Christ of Latter day Saints",
+    "description": "Come play pickleball at Church of Jesus Christ of Latter day Saints in Bedford, PA! There is 1 indoor carpet court. Tape lines have been laid, and portable nets are available. The court is private. Players have access to restrooms.",
+    "address": "160 Donahue Manor Rd",
+    "city": "Bedford",
+    "latitude": 40.014516,
+    "longitude": -78.491399,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Carpet",
+    "fees": "Private",
+    "phone": "+18018080603",
+    "email": "brightspotinfo@gmail.com",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "court_type": "shared"
+  }
+]

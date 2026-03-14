@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "osage",
+    "state": "KS",
+    "verified": false,
+    "name": "Overbrook Pickleball Courts",
+    "description": "The courts are at the end of Brady Pkwy next to the playground.",
+    "address": "Overbrook",
+    "city": "Overbrook",
+    "latitude": 38.780561,
+    "longitude": -95.557203,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

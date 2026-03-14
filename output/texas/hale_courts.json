@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "hale",
+    "state": "TX",
+    "verified": false,
+    "name": "Hood Park",
+    "description": "Hood Park is a place to play pickleball in Plainview, TX. There are 2 outdoor concrete courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. Players have access to lights.",
+    "address": "3300 W 16th St",
+    "city": "Plainview",
+    "latitude": 34.198467,
+    "longitude": -101.743486,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://www.plainviewtx.org/Facilities/Facility/Details/MB-Hood-Park-3",
+    "photo_url": "https://cdn.filestackcontent.com/DXqT5YYOQXuUuqxMczl4",
+    "court_type": "dedicated",
+    "has_restrooms": true
+  }
+]

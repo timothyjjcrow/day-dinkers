@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "frederick",
+    "state": "VA",
+    "verified": false,
+    "name": "Clearbrook Park",
+    "description": "Courts may be reserved in advance by calling Frederick County Parks & Recreation at: 540-665-5578.",
+    "address": "Community Dr",
+    "city": "Clearbrook",
+    "latitude": 39.25367,
+    "longitude": -78.09495,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+15406655678",
+    "photo_url": "https://cdn.filestackcontent.com/rZJdIZn0RZigszsKo0bb",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "frederick",
+    "state": "VA",
+    "verified": false,
+    "name": "Sherando Park",
+    "description": "Sherando Park is a place to play pickleball in Stephens City, VA. There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include restrooms.",
+    "address": "225 Lakeview Circle",
+    "city": "Stephens City",
+    "latitude": 39.073805,
+    "longitude": -78.184067,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "https://www.fcva.us/departments/parks-recreation/parks/sherando-park",
+    "photo_url": "https://cdn.filestackcontent.com/LYoSZ6S5m7cNxefWuC9Q",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "heard",
+    "state": "GA",
+    "verified": false,
+    "name": "Franklin Pickleball Courts",
+    "description": "Come play pickleball at Franklin Pickleball Courts in Franklin, GA! There are 2 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms, wheelchair accessibility, and lights. The courts are free.",
+    "address": "101 Glover Road",
+    "city": "Franklin",
+    "latitude": 33.278008,
+    "longitude": -85.10383,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "7706303258",
+    "email": "Tenawainwright@yahoo.com",
+    "photo_url": "https://cdn.filestackcontent.com/P7gS15BDTGDP1a5yHdUQ",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

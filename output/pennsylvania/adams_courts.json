@@ -1,0 +1,18 @@
+[
+  {
+    "county_slug": "adams",
+    "state": "PA",
+    "verified": false,
+    "name": "AB",
+    "description": "Come play pickleball at AB in Barlow, PA! There are 12 courts. 9 are outdoors and 3 are indoors. These are dedicated courts with permanent lines and nets. The courts are private.",
+    "address": "Main Street",
+    "city": "Barlow",
+    "latitude": 39.779576,
+    "longitude": -77.23328,
+    "indoor": false,
+    "num_courts": 12,
+    "fees": "Private",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

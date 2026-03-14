@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "mercer",
+    "state": "IL",
+    "verified": false,
+    "name": "Mercer County YMCA",
+    "description": "Come play pickleball at Mercer County YMCA in Aledo, IL! There is 1 indoor court. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "400 N College Ave",
+    "city": "Aledo",
+    "zip_code": "61231",
+    "latitude": 41.20416,
+    "longitude": -90.749172,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Members only",
+    "phone": "3095822503",
+    "website": "http://www.mercercountyymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/eYK5uZUZTZSSQ4TJ0f6h",
+    "nets_provided": true,
+    "court_type": "dedicated",
+    "hours": "Saturday 7am - 4pm"
+  }
+]

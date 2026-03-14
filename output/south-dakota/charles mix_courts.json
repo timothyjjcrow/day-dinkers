@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "charles mix",
+    "state": "SD",
+    "verified": false,
+    "name": "Pad 71",
+    "description": "Pad 71 is a place to play pickleball in United States, SD. There is 1 indoor concrete court. Tape lines have been laid, and portable nets are available. Players have access to water, restrooms, and lights. A membership is required to play. The court cannot be reserved.",
+    "address": "SD-46",
+    "city": "United States",
+    "latitude": 43.081735,
+    "longitude": -98.307701,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Members only",
+    "phone": "6054811741",
+    "website": "https://www.hiddengem-campground.com/services-1",
+    "email": "Hiddengem70@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/uSRF1GSSUW1k5YoKcyGl",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

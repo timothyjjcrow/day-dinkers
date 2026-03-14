@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "brookings",
+    "state": "SD",
+    "verified": false,
+    "name": "Miller Wellness Center",
+    "description": "Miller Wellness Center is a place to play pickleball in Brookings, SD. There are 3 indoor wood courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms. A membership is required to play.",
+    "address": "1440 N Campus Dr",
+    "city": "Brookings",
+    "latitude": 44.318673,
+    "longitude": -96.780553,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Members only \u2014 Or day pass",
+    "phone": "+16056979355",
+    "website": "https://www.sdstate.edu/miller-wellness-center",
+    "photo_url": "https://cdn.filestackcontent.com/Afxt1qGdRomC3ugmzkcY",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

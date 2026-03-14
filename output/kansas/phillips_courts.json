@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "phillips",
+    "state": "KS",
+    "verified": false,
+    "name": "Prairie View City Park",
+    "description": "Come play pickleball at Prairie View City Park in Prairie View, KS! There is 1 outdoor concrete court. The lines are permanent, but you'll need to bring your own net. The court is free.",
+    "address": "308 Main St",
+    "city": "Prairie View",
+    "zip_code": "67664",
+    "latitude": 39.832151,
+    "longitude": -99.573803,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://www.opkansas.org/park/prairie-view-park/",
+    "photo_url": "https://cdn.filestackcontent.com/nQUlLkTtToyIstNbMSaE",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

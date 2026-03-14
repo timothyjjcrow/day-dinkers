@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "juneau city and borough",
+    "state": "AK",
+    "verified": false,
+    "name": "Cope Park",
+    "description": "Come play pickleball at Cope Park in Juneau, AK! There are 4 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. Players have access to restrooms and water. The courts are free.",
+    "address": "Cope Park Rd",
+    "city": "Juneau",
+    "latitude": 58.304821,
+    "longitude": -134.415942,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+19495824500",
+    "website": "https://www.saddleback.edu/",
+    "photo_url": "https://cdn.filestackcontent.com/V3xiJwtT8mXkljkEOhkV",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "advanced",
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]

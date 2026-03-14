@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "adair",
+    "state": "OK",
+    "verified": false,
+    "name": "Edna M Carson Park",
+    "description": "Two caged in courts with decent lighting at night",
+    "address": "1155 W Hickory St",
+    "city": "Stilwell",
+    "latitude": 35.815675,
+    "longitude": -94.640515,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/usHNSiJyQk6uBUdGlKCw",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

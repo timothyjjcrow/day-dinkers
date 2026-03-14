@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "menominee",
+    "state": "MI",
+    "verified": false,
+    "name": "Menominee YMCA",
+    "description": "Menominee YMCA is a place to play pickleball in Menominee, MI. There are 3 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "1600 W Dr",
+    "city": "Menominee",
+    "zip_code": "49858",
+    "latitude": 45.113377,
+    "longitude": -87.636639,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Members only",
+    "website": "http://mmymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/F0HEDhmQsu03I2eK77aw",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

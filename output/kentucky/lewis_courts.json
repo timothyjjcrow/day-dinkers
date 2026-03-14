@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "lewis",
+    "state": "KY",
+    "verified": false,
+    "name": "Lewis County Central Elementary",
+    "description": "Come play pickleball at Lewis County Central Elementary in Vanceburg, KY! There are 2 indoor wood courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms.",
+    "address": "86 Walter Street",
+    "city": "Vanceburg",
+    "latitude": 38.59708,
+    "longitude": -83.322216,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "phone": "+16067962831",
+    "website": "https://www.lewis.kyschools.us/lewiscountycentralelementary_home.aspx",
+    "photo_url": "https://cdn.filestackcontent.com/kXfxULXfStWRZYPGMjEU",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

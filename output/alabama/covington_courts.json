@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "covington",
+    "state": "AL",
+    "verified": false,
+    "name": "Fruita Community Center",
+    "description": "Fruita Community Center is one of the most popular places to play pickleball in Opp, AL. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. Amenities include restrooms. A one-time fee is required to play.",
+    "address": "324 N. Coulson St. Play",
+    "city": "Opp",
+    "latitude": 31.284356,
+    "longitude": -86.263772,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "phone": "+19708580360",
+    "photo_url": "https://cdn.filestackcontent.com/EidjRt5SMSlnmJozwnJp",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

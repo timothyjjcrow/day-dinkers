@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "ohio",
+    "state": "IN",
+    "verified": false,
+    "name": "Shiner Community Park",
+    "description": "Shiner Community Park is a place to play pickleball in Rising Sun, IN. There are 5 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. Players have access to restrooms, water, and wheelchair accessibility.",
+    "address": "401 Shiner Blvd",
+    "city": "Rising Sun",
+    "latitude": 38.950412,
+    "longitude": -84.86545,
+    "indoor": false,
+    "num_courts": 5,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+18124382700",
+    "photo_url": "https://cdn.filestackcontent.com/Jdw3eInRWWNj7G3LaVJg",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

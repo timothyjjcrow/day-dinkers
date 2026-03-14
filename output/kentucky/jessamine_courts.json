@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "jessamine",
+    "state": "KY",
+    "verified": false,
+    "name": "901 Tennent Drive",
+    "description": "901 Tennent Drive is a place to play pickleball in Wilmore, KY. There are 4 outdoor concrete courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "901 Tennent Dr",
+    "city": "Wilmore",
+    "latitude": 37.868144,
+    "longitude": -84.652637,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "jessamine",
+    "state": "KY",
+    "verified": false,
+    "name": "Top Seed Tennis Club",
+    "description": "Top Seed Tennis Club is one of the most popular places to play pickleball in Nicholasville, KY. There are 8 indoor hard courts. These are dedicated courts with permanent lines and nets. A one-time fee is required to play. The facility includes amenities like restrooms.",
+    "address": "777 E Brannon Rd",
+    "city": "Nicholasville",
+    "latitude": 37.953575,
+    "longitude": -84.519016,
+    "indoor": true,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "fees": "Fee required",
+    "phone": "+18595237474",
+    "website": "https://topseedtennis.net/",
+    "photo_url": "https://cdn.filestackcontent.com/uLRT5WlBRXuA7VUxtMsT",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "has_pro_shop": true
+  }
+]

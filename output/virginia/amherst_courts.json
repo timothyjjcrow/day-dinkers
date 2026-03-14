@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "amherst",
+    "state": "VA",
+    "verified": false,
+    "name": "Sweet Briar College",
+    "description": "Sweet Briar College is a place to play pickleball in Amherst, VA. There are 17 hard courts. 14 are outdoors and 3 are indoors. You'll need to bring your own net. The courts are private. Players have access to restrooms and lights.",
+    "address": "134 Chapel Rd",
+    "city": "Amherst",
+    "latitude": 37.556735,
+    "longitude": -79.081011,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 17,
+    "surface_type": "Hard",
+    "fees": "Private",
+    "phone": "4346654025",
+    "website": "http://www.sbc.edu/",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner"
+  }
+]

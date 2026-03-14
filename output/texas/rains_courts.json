@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "rains",
+    "state": "TX",
+    "verified": false,
+    "name": "Amoraflora",
+    "description": "Come play pickleball at Amoraflora in Point, TX! There is 1 outdoor hard court. This is a dedicated court with a permanent net and lines. The court is private.",
+    "address": "Rum Point Drive",
+    "city": "Point",
+    "latitude": 32.931509,
+    "longitude": -95.871354,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Hard",
+    "fees": "Private",
+    "photo_url": "https://cdn.filestackcontent.com/nNBdtWuKS5mn0Ar54Fho",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

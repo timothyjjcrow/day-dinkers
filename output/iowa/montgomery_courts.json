@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "montgomery",
+    "state": "IA",
+    "verified": false,
+    "name": "Montgomery County Family YMCA",
+    "description": "Come play pickleball at Montgomery County Family YMCA in Red Oak, IA! There are 4 indoor hard courts. Tape lines have been laid, and portable nets are available. A membership is required to play. Players have access to restrooms, water, and locker rooms. Reservations are available.",
+    "address": "101 E Cherry St",
+    "city": "Red Oak",
+    "zip_code": "51566",
+    "latitude": 41.019456,
+    "longitude": -95.231562,
+    "indoor": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Members only \u2014 Memberships and guest passes vary",
+    "phone": "7126232161",
+    "website": "http://www.mcymca.com/",
+    "photo_url": "https://cdn.filestackcontent.com/MyTaVdfHR66lQj2qlhYR",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

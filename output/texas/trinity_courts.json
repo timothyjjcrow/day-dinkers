@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "trinity",
+    "state": "TX",
+    "verified": false,
+    "name": "Westwood Shores Pickleball & Tennis",
+    "description": "Westwood Shores Pickleball & Tennis is one of the most popular places to play pickleball in Trinity, TX. There are 6 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like restrooms and lights. A membership is required to play.",
+    "address": "14 Westwood E",
+    "city": "Trinity",
+    "latitude": 30.934031,
+    "longitude": -95.332815,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Concrete",
+    "fees": "Members only",
+    "photo_url": "https://cdn.filestackcontent.com/g1FtC1QsS7SOSr9Jir6E",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

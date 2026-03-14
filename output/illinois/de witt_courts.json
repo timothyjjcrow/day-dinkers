@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "de witt",
+    "state": "IL",
+    "verified": false,
+    "name": "Rotary Park",
+    "description": "Rotary Park is a place to play pickleball in Clinton, IL. There are 6 outdoor courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like restrooms.",
+    "address": "900 S Quincy St",
+    "city": "Clinton",
+    "zip_code": "61727",
+    "latitude": 40.145803,
+    "longitude": -88.961497,
+    "indoor": false,
+    "num_courts": 6,
+    "fees": "Free",
+    "website": "https://allparx.com/places/rotary-park-34/",
+    "photo_url": "https://cdn.filestackcontent.com/HgekTs7tRNO13U4FhS0O",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

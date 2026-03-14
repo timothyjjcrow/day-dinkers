@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "alcorn",
+    "state": "MS",
+    "verified": false,
+    "name": "Shiloh Ridge Athletic Club",
+    "description": "Shiloh Ridge Athletic Club is one of the most popular places to play pickleball in Corinth, MS. There are 4 outdoor clay courts. The lines are permanent, but you'll need to bring your own net. Players have access to food, restrooms, and lights. A membership is required to play.",
+    "address": "3303 Shiloh Ridge Rd",
+    "city": "Corinth",
+    "zip_code": "38834",
+    "latitude": 34.95985,
+    "longitude": -88.484772,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Clay",
+    "fees": "Members only",
+    "phone": "6622868000",
+    "website": "http://clubatshilohridge.com/",
+    "photo_url": "https://cdn.filestackcontent.com/AXPpWi0ATlSQNqpNLrWj",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "rio blanco",
+    "state": "CO",
+    "verified": false,
+    "name": "School Administration Building",
+    "description": "School Administration Building is one of the most popular places to play pickleball in Meeker, CO. There is 1 indoor court. The lines are permanent, but you'll need to bring your own net. The court cannot be reserved. The court is free.",
+    "address": "555 Garfield St",
+    "city": "Meeker",
+    "zip_code": "81641",
+    "latitude": 40.039893,
+    "longitude": -107.913741,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Free",
+    "phone": "9708783403",
+    "website": "https://www.meeker.k12.co.us/",
+    "photo_url": "https://cdn.filestackcontent.com/XfWZ8uirSnWdEgbrCbZK",
+    "nets_provided": false,
+    "skill_levels": "advanced",
+    "court_type": "dedicated"
+  }
+]

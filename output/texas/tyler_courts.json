@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "tyler",
+    "state": "TX",
+    "verified": false,
+    "name": "Woodville United Meth. Church",
+    "description": "Woodville United Meth. Church is one of the most popular places to play pickleball in Woodville, TX. There are 2 indoor concrete courts. The lines are permanent, but you'll need to bring your own net. Amenities include restrooms and water. The courts are private.",
+    "address": "508 W Blf",
+    "city": "Woodville",
+    "zip_code": "75979",
+    "latitude": 30.775372,
+    "longitude": -94.420571,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Private",
+    "phone": "4092001302",
+    "photo_url": "https://cdn.filestackcontent.com/KXqEix5DQ0exVEBPo5Bl",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

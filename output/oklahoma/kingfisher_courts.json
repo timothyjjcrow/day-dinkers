@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "kingfisher",
+    "state": "OK",
+    "verified": false,
+    "name": "Shaw Park",
+    "description": "Shaw Park is one of the most popular places to play pickleball in Kingfisher, OK. There are 4 outdoor concrete courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. Amenities include lights, restrooms, and wheelchair accessibility.",
+    "address": "829 South 11th Street",
+    "city": "Kingfisher",
+    "latitude": 35.852986,
+    "longitude": -97.938436,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

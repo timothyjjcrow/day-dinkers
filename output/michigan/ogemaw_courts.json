@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "ogemaw",
+    "state": "MI",
+    "verified": false,
+    "name": "West Branch Rec Center",
+    "description": "West Branch Rec Center is one of the most popular places to play pickleball in West Branch, MI. There are 2 indoor courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. Amenities include food, restrooms, water, and wheelchair accessibility.",
+    "address": "619 Parkway Dr",
+    "city": "West Branch",
+    "zip_code": "48661",
+    "latitude": 44.268534,
+    "longitude": -84.228224,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "phone": "9893454450",
+    "website": "http://www.westbranchreccenter.weebly.com/",
+    "photo_url": "https://cdn.filestackcontent.com/3i3nG7aBQnKOYVSghA6I",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

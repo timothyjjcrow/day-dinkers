@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "kalkaska",
+    "state": "MI",
+    "verified": false,
+    "name": "Kaliseum",
+    "description": "Kaliseum is a place to play pickleball in Kalkaska, MI. There are 3 indoor hard courts. The lines are permanent, and portable nets are available. Players have access to food, locker rooms, restrooms, water, and lights. A one-time fee is required to play.",
+    "address": "1900 Fairgrounds Road",
+    "city": "Kalkaska",
+    "latitude": 44.742265,
+    "longitude": -85.187896,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Fee required \u2014 $6 per person during drop-in times - $25 private court 1 hour - $45 private court 2 hours",
+    "phone": "+12312585913",
+    "website": "https://www.kaliseum.org/multi-sport",
+    "email": "kaliseum@kalkaskacounty.org",
+    "photo_url": "https://cdn.filestackcontent.com/UFihWaenT6SDLaNhoWAp",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

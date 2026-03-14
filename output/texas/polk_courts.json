@@ -1,0 +1,38 @@
+[
+  {
+    "county_slug": "polk",
+    "state": "TX",
+    "verified": false,
+    "name": "BCV",
+    "description": "BCV is one of the most popular places to play pickleball in Schwab City, TX. There is 1 outdoor court. The lines are permanent, and portable nets are available. The court is private.",
+    "address": "Alto Boquete",
+    "city": "Schwab City",
+    "latitude": 30.58466,
+    "longitude": -94.83602,
+    "indoor": false,
+    "num_courts": 1,
+    "fees": "Private",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "polk",
+    "state": "TX",
+    "verified": false,
+    "name": "Matthews Park",
+    "description": "Matthews Park is a place to play pickleball in Livingston, TX. There are 4 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Players have access to lights. The courts are free.",
+    "address": "702 W Matthews St",
+    "city": "Livingston",
+    "latitude": 30.703021,
+    "longitude": -94.940044,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/njZS82vOS3SoAVvQemdZ",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "muhlenberg",
+    "state": "KY",
+    "verified": false,
+    "name": "Sue & Brown Badgett Center",
+    "description": "Sue & Brown Badgett Center is a place to play pickleball in Greenville, KY. There are 4 indoor courts. You\u2019ll have to create your own lines, but portable nets are available. The courts are free. The courts can be reserved.",
+    "address": "200 County Park Dr",
+    "city": "Greenville",
+    "latitude": 37.226738,
+    "longitude": -87.18838,
+    "indoor": true,
+    "num_courts": 4,
+    "fees": "Free",
+    "phone": "2703771900",
+    "website": "http://www.mcparks.org/",
+    "photo_url": "https://cdn.filestackcontent.com/Tmj29fTKRUuBlUUFdhkP",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "shared"
+  }
+]

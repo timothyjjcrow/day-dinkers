@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "bladen",
+    "state": "NC",
+    "verified": false,
+    "name": "Bladen county parks and rec",
+    "description": "Bladen county parks and rec is a place to play pickleball in Elizabethtown, NC. There is 1 indoor wood court. The lines are permanent, and portable nets are available. The court is free. The facility includes amenities like restrooms, water, lights, and trainers or lessons.",
+    "address": "803 W King St",
+    "city": "Elizabethtown",
+    "latitude": 34.629817,
+    "longitude": -78.614756,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "9108626770",
+    "photo_url": "https://cdn.filestackcontent.com/t2RcoUZ1SuCLAa9Ew9qf",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "dawson",
+    "state": "GA",
+    "verified": false,
+    "name": "Rock Creek Sports Complex",
+    "description": "Rock Creek Sports Complex is one of the most popular places to play pickleball in Dawsonville, GA. There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms, water, lights, and wheelchair accessibility. The courts are free.",
+    "address": "445 Martin Rd",
+    "city": "Dawsonville",
+    "latitude": 34.364349,
+    "longitude": -84.119847,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7063443646",
+    "website": "http://www.dawsoncounty.org/",
+    "photo_url": "https://cdn.filestackcontent.com/nfFUTNjNRqKz4mxFcRHC",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "dawson",
+    "state": "GA",
+    "verified": false,
+    "name": "Veterans Memorial Park",
+    "description": "See Facebook group for more information and schedules: https://www.facebook.com/groups/1195630540522136",
+    "address": "186 Recreation Rd",
+    "city": "Dawsonville",
+    "latitude": 34.439364,
+    "longitude": -84.101334,
+    "indoor": false,
+    "num_courts": 2,
+    "website": "https://www.dawsoncountyga.gov/parksrec/page/veterans-memorial-park",
+    "photo_url": "https://cdn.filestackcontent.com/bKZ09I8zTXip4i5lATY3",
+    "skill_levels": "beginner"
+  }
+]

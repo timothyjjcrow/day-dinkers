@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "palo pinto",
+    "state": "TX",
+    "verified": false,
+    "name": "The Harbor",
+    "description": "The Harbor is one of the most popular places to play pickleball in Graford, TX. There are 2 outdoor courts. The lines are permanent, but you'll need to bring your own net. Players have access to restrooms and water. A membership is required to play.",
+    "address": "1381 Falls Creek Dr",
+    "city": "Graford",
+    "zip_code": "76449",
+    "latitude": 32.882114,
+    "longitude": -98.438245,
+    "indoor": false,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "8065448337",
+    "website": "http://www.thecliffsresort.com/",
+    "photo_url": "https://cdn.filestackcontent.com/N3zxGtsARBeYEj1P0o8T",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

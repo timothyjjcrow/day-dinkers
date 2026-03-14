@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "sussex",
+    "state": "VA",
+    "verified": false,
+    "name": "Jarratt Pickleball Courts",
+    "description": "Jarratt Pickleball Courts is a place to play pickleball in Jarratt, VA. There are 2 outdoor hard courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "9436 Mayes Street",
+    "city": "Jarratt",
+    "latitude": 36.804024,
+    "longitude": -77.466567,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/k5UfRWSzRoCeU7f5Xdl0",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

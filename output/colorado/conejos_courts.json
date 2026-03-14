@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "conejos",
+    "state": "CO",
+    "verified": false,
+    "name": "Manassa, Colorado",
+    "description": "Manassa, Colorado is one of the most popular places to play pickleball in Manassa, CO. The court surface is concrete. You'll need to bring your own net. The courts are free.",
+    "address": "Main St",
+    "city": "Manassa",
+    "zip_code": "81141",
+    "latitude": 37.173995,
+    "longitude": -105.944766,
+    "indoor": false,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "7195889820",
+    "nets_provided": false,
+    "skill_levels": "beginner"
+  }
+]

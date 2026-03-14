@@ -1,0 +1,40 @@
+[
+  {
+    "county_slug": "brewster",
+    "state": "TX",
+    "verified": false,
+    "name": "Fort Pena Colorado Park",
+    "description": "Fort Pena Colorado Park is a place to play pickleball in Marathon, TX. There is 1 outdoor concrete court. Tape lines have been laid, but you'll need to bring your own net. The court is free.",
+    "address": "801 Northeast 1st Street",
+    "city": "Marathon",
+    "latitude": 30.206657,
+    "longitude": -103.237195,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/XSg6GImqQQePhpiDadFD",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  },
+  {
+    "county_slug": "brewster",
+    "state": "TX",
+    "verified": false,
+    "name": "Terlingua Ghost Town",
+    "description": "Nice pickleball court located in the beautiful Ghost town of Terlingua, Texas right in the middle of the desert located near Big Bend National Park.",
+    "address": "400 Ivey Rd",
+    "city": "Terlingua",
+    "latitude": 29.321041,
+    "longitude": -103.613684,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/zyxyUgX4SDGtzn3d2wQY",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

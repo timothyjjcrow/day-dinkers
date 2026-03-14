@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "bibb",
+    "state": "AL",
+    "verified": false,
+    "name": "BMC Wellness Center",
+    "description": "Come play pickleball at BMC Wellness Center in Centreville, AL! There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. A membership is required to play. You can reserve the courts. Amenities include restrooms, locker rooms, and water.",
+    "address": "285 Hospital Dr",
+    "city": "Centreville",
+    "latitude": 32.948513,
+    "longitude": -87.148698,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "open_play_schedule": "Court Availability\nView scheduled closures and additional Saturday availability on our calendar. Pickleball court times past 2:00pm on Saturdays will also be added here. Reservations are not available online, so please call or visit the front desk to book during these hours.\nWalk-ins are always welcome. Make sure to check before you come out so you\u2019re ready to play",
+    "fees": "Members only \u2014 NON MEMBER ACCESS Court reservations made online are priced by the hour at $20 and include up to four guests. Youth ages 10 and older count toward the total number of players.Everyone p",
+    "phone": "2059263360",
+    "website": "https://www.bmcwellness.com/",
+    "photo_url": "https://cdn.filestackcontent.com/RP0K3XKrQ7OTpEloq1KH",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

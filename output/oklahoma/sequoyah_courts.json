@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "sequoyah",
+    "state": "OK",
+    "verified": false,
+    "name": "Bulldog Park",
+    "description": "These are at the tennis courts just west of the Muldrow High School. The courts were recently repainted (Summer 2024) and 2 of the 3 original tennis courts were replaced with 4 pickleball courts! Open to the public any time except school days from 8 to 5 (and the office told me after 4pm was OK). There are floodlights that you can turn on at night (please remember to turn them off when done), and the entire thing has a high fence (individual courts are not fenced). The nets are nice and new. Bring a broom to sweep off bugs, your own water, and a chair to rest in.",
+    "address": "801 W Shawntel Smith Blvd",
+    "city": "Muldrow",
+    "latitude": 35.399494,
+    "longitude": -94.612518,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/cCeJhrpfTVqFD2KFwMJ5",
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

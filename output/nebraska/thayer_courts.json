@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "thayer",
+    "state": "NE",
+    "verified": false,
+    "name": "Willard Park",
+    "description": "Come play pickleball at Willard Park in Hebron, NE! There are 2 outdoor hard courts. The lines are permanent, and portable nets are available. The courts cannot be reserved. The courts are free.",
+    "address": "South 4th Street",
+    "city": "Hebron",
+    "latitude": 40.162397,
+    "longitude": -97.590342,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "4027681584",
+    "website": "https://www.hebronnebraska.us/296/Willard-Park",
+    "photo_url": "https://cdn.filestackcontent.com/fBDokUtvSHPEH6cYtoi0",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "has_restrooms": true
+  }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "graham",
+    "state": "NC",
+    "verified": false,
+    "name": "Historic Tapoco Lodge",
+    "description": "Come play pickleball at Historic Tapoco Lodge in Robbinsville, NC! There are 2 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The facility includes amenities like restrooms. The courts are free.",
+    "address": "14981 Tapoco Road",
+    "city": "Robbinsville",
+    "latitude": 35.443777,
+    "longitude": -83.93843,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "828 498 2800",
+    "website": "https://tapoco.com/",
+    "photo_url": "https://cdn.filestackcontent.com/T6D3gMHEQqGpTee6O6AQ",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "graham",
+    "state": "NC",
+    "verified": false,
+    "name": "Mountain View School Campground And Sanctuary",
+    "description": "Mountain View School Campground And Sanctuary is one of the most popular places to play pickleball in Robbinsville, NC. There is 1 outdoor court. You\u2019ll have to create your own lines and bring your own net. The court is free.",
+    "address": "Mountain Dr",
+    "city": "Robbinsville",
+    "zip_code": "28771",
+    "latitude": 35.326101,
+    "longitude": -83.766879,
+    "indoor": false,
+    "num_courts": 1,
+    "fees": "Free",
+    "phone": "8284982308",
+    "photo_url": "https://cdn.filestackcontent.com/FysFbNySmubSzqYuKrPg",
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

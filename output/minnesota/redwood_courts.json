@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "redwood",
+    "state": "MN",
+    "verified": false,
+    "name": "Redwood Outdoor Courts",
+    "description": "Redwood Outdoor Courts is a place to play pickleball in Redwood Falls, MN. There are 2 outdoor concrete courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. You can\u2019t reserve the courts. The facility includes amenities like wheelchair accessibility and restrooms.",
+    "address": "202 South Gould Street",
+    "city": "Redwood Falls",
+    "latitude": 44.540287,
+    "longitude": -95.108237,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "5074304009",
+    "email": "elwayberg8@gmail.com",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "beaver",
+    "state": "OK",
+    "verified": false,
+    "name": "Beaver Tennis Courts",
+    "description": "Beaver Tennis Courts is a place to play pickleball in Beaver, OK. There are 4 outdoor hard courts. Tape lines have been laid, but you'll need to bring your own net. The courts are free. Amenities include water and lights.",
+    "address": "608 Ave J",
+    "city": "Beaver",
+    "latitude": 36.811463,
+    "longitude": -100.527348,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "open_play_schedule": "Wednesdays at 6 pm. Play at old gym on bad weather days.",
+    "fees": "Free",
+    "phone": "5806254597",
+    "email": "ttrippet@trippetkee.com",
+    "photo_url": "https://cdn.filestackcontent.com/LbyhnBqTTtq4uCgHGCWh",
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

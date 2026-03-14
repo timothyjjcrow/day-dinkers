@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "san miguel",
+    "state": "CO",
+    "verified": false,
+    "name": "Norwood Park and Recreation District",
+    "description": "Norwood Park and Recreation District is a place to play pickleball in Norwood, CO. There are 4 clay courts. 2 are indoors and 2 are outdoors. The lines are permanent, but you'll need to bring your own net. The courts are free. Players have access to restrooms.",
+    "address": "1225 Summit St 1670",
+    "city": "Norwood",
+    "zip_code": "81423",
+    "latitude": 38.132075,
+    "longitude": -108.294069,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Clay",
+    "fees": "Free",
+    "phone": "9704284207",
+    "website": "http://www.norwoodparkandrec.org/",
+    "photo_url": "https://cdn.filestackcontent.com/7A1VfcLpQVuZUOv4Abeg",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

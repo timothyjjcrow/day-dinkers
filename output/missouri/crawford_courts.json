@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "crawford",
+    "state": "MO",
+    "verified": false,
+    "name": "Steelville Community Park",
+    "description": "Full sun - no shade. We have a full size basketball court next to the pickleball courts. In the basketball court area, there is a tennis backboard on the perimeter fence.",
+    "address": "Steelville City Park",
+    "city": "Steelville",
+    "latitude": 37.973776,
+    "longitude": -91.336974,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "http://steelville.com/parks-and-recreation/community-park-recreation-area/",
+    "photo_url": "https://cdn.filestackcontent.com/SrzxA9hTqmhotD8IGeKQ",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]

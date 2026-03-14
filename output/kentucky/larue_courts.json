@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "larue",
+    "state": "KY",
+    "verified": false,
+    "name": "Creek front Park",
+    "description": "Creek front Park is a place to play pickleball in Hodgenville, KY. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. Players have access to restrooms.",
+    "address": "250 Tonieville Rd",
+    "city": "Hodgenville",
+    "latitude": 37.578762,
+    "longitude": -85.743611,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Public park , open dawn to dusk.",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/y6Lr9oWLQx0BGbo0qE39",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

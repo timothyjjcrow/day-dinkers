@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "louisa",
+    "state": "IA",
+    "verified": false,
+    "name": "Columbus Community High School",
+    "description": "Columbus Community High School is one of the most popular places to play pickleball in Columbus Junction, IA. There are 2 outdoor wood courts. You\u2019ll have to create your own lines and bring your own net. The facility includes amenities like restrooms. A membership is required to play.",
+    "address": "1004 Colton St",
+    "city": "Columbus Junction",
+    "zip_code": "52738",
+    "latitude": 41.270187,
+    "longitude": -91.366968,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Members only",
+    "website": "http://www.columbuscsd.com/",
+    "photo_url": "https://cdn.filestackcontent.com/5pfpPAvkRZ2m8NsZGaA0",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

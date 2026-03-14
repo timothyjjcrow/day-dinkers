@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "waseca",
+    "state": "MN",
+    "verified": false,
+    "name": "Oak Park",
+    "description": "Come play pickleball at Oak Park in Waseca, MN! There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "527 6th Ave SE",
+    "city": "Waseca",
+    "zip_code": "56093",
+    "latitude": 44.073805,
+    "longitude": -93.499085,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "http://ci.waseca.mn.us/",
+    "photo_url": "https://cdn.filestackcontent.com/46MtBzhtS0mbYZdvkd5b",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "hours": "Mon - Fri 8:00am - 4:30pm Website Disclaimer Government Websites by CivicPlus\u00ae Login",
+    "has_water": true
+  }
+]

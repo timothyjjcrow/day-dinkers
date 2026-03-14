@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "wagoner",
+    "state": "OK",
+    "verified": false,
+    "name": "First Baptist Church of Wagoner",
+    "description": "Come play pickleball at First Baptist Church of Wagoner in Wagoner, OK! There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "401 NE 2nd St",
+    "city": "Wagoner",
+    "zip_code": "74467",
+    "latitude": 35.96167,
+    "longitude": -95.37324,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Free",
+    "phone": "9184855261",
+    "website": "https://fbcwagoner.com/",
+    "photo_url": "https://cdn.filestackcontent.com/Jvs4phxtSTSpEWlJO9Qr",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

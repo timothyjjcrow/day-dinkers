@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "duchesne",
+    "state": "UT",
+    "verified": false,
+    "name": "Roosevelt Central Park",
+    "description": "Roosevelt Central Park is a place to play pickleball in Roosevelt, UT. There are 5 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts cannot be reserved. The courts are free. The facility includes amenities like restrooms and lights.",
+    "address": "25 N State St",
+    "city": "Roosevelt",
+    "latitude": 40.301027,
+    "longitude": -109.992175,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 5,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+14358237236",
+    "website": "https://www.rooseveltcity.com/155/Parks",
+    "photo_url": "https://cdn.filestackcontent.com/MWWSPy5zQw2SVWclB10h",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]

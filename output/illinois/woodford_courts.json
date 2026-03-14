@@ -1,0 +1,39 @@
+[
+  {
+    "county_slug": "woodford",
+    "state": "IL",
+    "verified": false,
+    "name": "Grant Memorial Park",
+    "description": "Grant Memorial Park is a place to play pickleball in Washburn, IL. There are 4 outdoor concrete courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "200 W Parkside Dr",
+    "city": "Washburn",
+    "zip_code": "61570",
+    "latitude": 40.916663,
+    "longitude": -89.293633,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "3092387527",
+    "website": "https://allparx.com/places/grant-memorial-park/",
+    "photo_url": "https://cdn.filestackcontent.com/f1JuqksbR8mieWQiZ2pr",
+    "nets_provided": false,
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "woodford",
+    "state": "IL",
+    "verified": false,
+    "name": "Washburn Illinois",
+    "description": "Washburn Illinois is one of the most popular places to play pickleball in Cazenovia, IL. There is 1 outdoor court. You\u2019ll need to create your own lines and bring your own net. Players have access to lights.",
+    "address": "Main St",
+    "city": "Cazenovia",
+    "zip_code": "61545",
+    "latitude": 40.851199,
+    "longitude": -89.272213,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 1,
+    "court_type": "shared"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "murray",
+    "state": "OK",
+    "verified": false,
+    "name": "Crossway Church",
+    "description": "Come play pickleball at Crossway Church in Sulphur, OK! There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. The courts are private. Amenities include lights.",
+    "address": "W Broadway Ave",
+    "city": "Sulphur",
+    "zip_code": "73086",
+    "latitude": 34.506228,
+    "longitude": -96.980013,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 2,
+    "fees": "Private",
+    "website": "http://crosswayok.com/",
+    "photo_url": "https://cdn.filestackcontent.com/VTQHOYfKRfiwLpEH3LVL",
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "webster",
+    "state": "NE",
+    "verified": false,
+    "name": "Blue Hill Senior Community Center",
+    "description": "Blue Hill Senior Community Center is a place to play pickleball in Blue Hill, NE. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. Players have access to lights.",
+    "address": "501 S Sycamore St",
+    "city": "Blue Hill",
+    "latitude": 40.328232,
+    "longitude": -98.44925,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+14027563500",
+    "website": "https://www.bluehillne.com/community-senior-center",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "has_restrooms": true
+  }
+]

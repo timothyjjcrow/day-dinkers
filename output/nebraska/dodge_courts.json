@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "dodge",
+    "state": "NE",
+    "verified": false,
+    "name": "Fremont Family YMCA",
+    "description": "Fremont Family YMCA is one of the most popular places to play pickleball in Fremont, NE. There are 6 hard courts. 2 are outdoors and 4 are indoors. The lines are permanent, and portable nets are available. Players have access to restrooms, water, and lights. A membership is required to play. Reservations are available.",
+    "address": "810 N Lincoln Ave",
+    "city": "Fremont",
+    "zip_code": "68025",
+    "latitude": 41.436295,
+    "longitude": -96.477419,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "phone": "(402) 721-6952",
+    "website": "http://www.fremontfamilyymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/Wm0q8HBjR7m7izzwwaRC",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "6 am - 8 pm"
+  }
+]

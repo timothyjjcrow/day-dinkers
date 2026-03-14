@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "webster",
+    "state": "MO",
+    "verified": false,
+    "name": "Marshfield Rotary Park",
+    "description": "Come play pickleball at Marshfield Rotary Park in Marshfield, MO! There are 4 outdoor courts. Amenities include restrooms, water, and lights.",
+    "address": "726 S Marshall St",
+    "city": "Marshfield",
+    "zip_code": "65706",
+    "latitude": 37.332157,
+    "longitude": -92.906865,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "phone": "4174682310",
+    "website": "http://www.marshfieldmo.gov/",
+    "photo_url": "https://cdn.filestackcontent.com/Bm3XZxuDR0qpuYs7IHrR",
+    "has_restrooms": true,
+    "has_water": true,
+    "skill_levels": "beginner,intermediate",
+    "hours": "Monday through Friday 8 am to 4:30 pm. Quick Links Bid Opportunities How Are We Doing? Sports Registration Visitors /QuickLinks.aspx Helpful Links Home Site Map Contact Us Accessibility Copyright Notices Privacy Policy /QuickLinks.aspx Government Websites by CivicPlus\u00ae Loading Loading Do Not Show Again Close Arrow Left Arrow Right [] Slideshow Left Arrow Slideshow Right Arrow"
+  }
+]

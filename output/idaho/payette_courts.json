@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "payette",
+    "state": "ID",
+    "verified": false,
+    "name": "Mesa park",
+    "description": "Tennis courts with pickleball lines on court",
+    "address": "200 NE 12th St",
+    "city": "Fruitland",
+    "latitude": 44.023073,
+    "longitude": -116.910462,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+12084523542",
+    "website": "https://www.payettecountyrec.org/home",
+    "photo_url": "https://cdn.filestackcontent.com/81TL46OJQDSmyFvPoYU0",
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

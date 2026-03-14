@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "huerfano",
+    "state": "CO",
+    "verified": false,
+    "name": "La Veta Pickleball court",
+    "description": "La Veta Pickleball court is one of the most popular places to play pickleball in La Veta, CO. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms. The courts are free.",
+    "address": "Park St",
+    "city": "La Veta",
+    "zip_code": "81055",
+    "latitude": 37.509967,
+    "longitude": -105.009672,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+14057146253",
+    "photo_url": "https://cdn.filestackcontent.com/CDwK1Q9ScWQeB6QnKE7c",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

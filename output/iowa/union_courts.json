@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "union",
+    "state": "IA",
+    "verified": false,
+    "name": "Southwestern Community College",
+    "description": "Southwestern Community College is one of the most popular places to play pickleball in Creston, IA. There are 4 outdoor hard courts. You\u2019ll have to create your own lines and bring your own net. The courts are private. The facility includes amenities like lights.",
+    "address": "1501 W Townline St",
+    "city": "Creston",
+    "zip_code": "50801",
+    "latitude": 41.072257,
+    "longitude": -94.376673,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Private",
+    "phone": "6417827081",
+    "website": "http://www.swcciowa.edu/",
+    "photo_url": "https://cdn.filestackcontent.com/7rEIHpWuSRCAhH3AGyKj",
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "shared"
+  }
+]

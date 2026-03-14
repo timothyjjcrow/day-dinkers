@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "wallowa",
+    "state": "OR",
+    "verified": false,
+    "name": "Enterprise Christian Church",
+    "description": "Come play pickleball at Enterprise Christian Church in Enterprise, OR! There is 1 indoor wood court. Tape lines have been laid, but you'll need to bring your own net. The court is free.",
+    "address": "85035 Joseph Hwy",
+    "city": "Enterprise",
+    "latitude": 45.422035,
+    "longitude": -117.256454,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "open_play_schedule": "Winter play",
+    "fees": "Free",
+    "website": "http://www.enterprisechristianchurch.org/",
+    "photo_url": "https://cdn.filestackcontent.com/iCChJ8rkTcuWnMeP0pcq",
+    "nets_provided": false,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "shared"
+  },
+  {
+    "county_slug": "wallowa",
+    "state": "OR",
+    "verified": false,
+    "name": "Enterprise City Park",
+    "description": "As of 6/18/2023 there are just two TENNIS courts at this location",
+    "address": "301 SW 2nd St",
+    "city": "Enterprise",
+    "zip_code": "97828",
+    "latitude": 45.42393,
+    "longitude": -117.279964,
+    "indoor": false,
+    "open_play_schedule": "Summer play",
+    "fees": "Free",
+    "phone": "5413981174",
+    "website": "http://www.enterpriseoregon.org/",
+    "photo_url": "https://cdn.filestackcontent.com/oQhEaT6RhqNauB0320qZ",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

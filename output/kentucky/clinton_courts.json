@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "clinton",
+    "state": "KY",
+    "verified": false,
+    "name": "Mike B courts",
+    "description": "Come play pickleball at Mike B courts in Albany, KY! There are 2 concrete courts. 1 is outdoors and 1 is indoors. These are dedicated courts with permanent lines and nets. The courts are private.",
+    "address": "Albany",
+    "city": "Albany",
+    "latitude": 36.690899,
+    "longitude": -85.134678,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Private",
+    "photo_url": "https://cdn.filestackcontent.com/3cuhvPRRQLOOUrNXJaOA",
+    "nets_provided": true,
+    "skill_levels": "advanced",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "clinton",
+    "state": "KY",
+    "verified": false,
+    "name": "Mountain View Park Court",
+    "description": "Mountain View Park Court is a place to play pickleball in Albany, KY. There is 1 outdoor concrete court. This is a dedicated court with a permanent net and lines. The court is free. Amenities include restrooms and water.",
+    "address": "39 Cs-1031",
+    "city": "Albany",
+    "latitude": 36.715647,
+    "longitude": -85.136512,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "http://www.clintoncoky.com/listing/mountain-view-recreational-park/",
+    "photo_url": "https://cdn.filestackcontent.com/Qn38Ea6fSdWafMcxG5TX",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

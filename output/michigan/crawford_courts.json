@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "crawford",
+    "state": "MI",
+    "verified": false,
+    "name": "Kirtland College",
+    "description": "Come play pickleball at Kirtland College in Grayling, MI! There are 8 indoor hard courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. The facility includes amenities like restrooms.",
+    "address": "4800 W 4 Mile Rd",
+    "city": "Grayling",
+    "latitude": 44.601666,
+    "longitude": -84.706298,
+    "indoor": true,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "open_play_schedule": "No pickleball when the College is closed.",
+    "fees": "Fee required",
+    "phone": "9892755181",
+    "website": "https://www.kirtland.edu/?utm_campaign=gmb",
+    "photo_url": "https://cdn.filestackcontent.com/CBHnH7NR3aIcWdQ4NlQg",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

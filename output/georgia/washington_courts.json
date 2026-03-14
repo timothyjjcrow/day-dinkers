@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "washington",
+    "state": "GA",
+    "verified": false,
+    "name": "Freedom Fighters of Georgia Inc.",
+    "description": "Freedom Fighters of Georgia Inc. is a place to play pickleball in Davisboro, GA. There is 1 outdoor court. The lines are permanent, but you'll need to bring your own net. A membership is required to play.",
+    "address": "2503 Breezy Hill Rd",
+    "city": "Davisboro",
+    "zip_code": "31018",
+    "latitude": 32.971431,
+    "longitude": -82.565748,
+    "indoor": false,
+    "num_courts": 1,
+    "fees": "Members only",
+    "phone": "4783574660",
+    "photo_url": "https://cdn.filestackcontent.com/tGcwuvzWTnqRrZz5PweS",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

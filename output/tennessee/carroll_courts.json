@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "carroll",
+    "state": "TN",
+    "verified": false,
+    "name": "McKenzie Park",
+    "description": "McKenzie Park is one of the most popular places to play pickleball in McKenzie, TN. There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. Amenities include lights. The courts are free.",
+    "address": "McKenzie Park",
+    "city": "McKenzie",
+    "latitude": 36.148765,
+    "longitude": -88.514828,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/uQictAoeReSntxGKCBjZ",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

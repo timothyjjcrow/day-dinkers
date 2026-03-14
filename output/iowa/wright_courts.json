@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "wright",
+    "state": "IA",
+    "verified": false,
+    "name": "Belmond tennis/pickleball courts",
+    "description": "Belmond tennis/pickleball courts is a place to play pickleball in Belmond, IA. There are 4 outdoor asphalt and hard courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like restrooms and lights. The courts cannot be reserved.",
+    "address": "908 1st Street Southeast",
+    "city": "Belmond",
+    "latitude": 42.84416,
+    "longitude": -93.605988,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt, Hard",
+    "open_play_schedule": "Open",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/hVLcCbrT2GwjoAXriqFC",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "coos",
+    "state": "NH",
+    "verified": false,
+    "name": "Errol Consolidated School",
+    "description": "Not available while school is in session.",
+    "address": "99 Main Street",
+    "city": "Errol",
+    "latitude": 44.78047,
+    "longitude": -71.134718,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/IxughlfyS823CIr47NLP",
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "coos",
+    "state": "NH",
+    "verified": false,
+    "name": "Horne Field  Tennis Courts",
+    "description": "Come play pickleball at Horne Field Tennis Courts in Berlin, NH! There is 1 outdoor hard court. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The court is free.",
+    "address": "Horne St",
+    "city": "Berlin",
+    "zip_code": "03570",
+    "latitude": 44.48384,
+    "longitude": -71.16514,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "6037230679",
+    "website": "http://www.berlinnh.gov/",
+    "photo_url": "https://cdn.filestackcontent.com/iSmIjoukS8GWpabp9kKC",
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "warren",
+    "state": "IL",
+    "verified": false,
+    "name": "Warren County YMCA",
+    "description": "Warren County YMCA is one of the most popular places to play pickleball in Monmouth, IL. There are 2 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "700 W Harlem Ave",
+    "city": "Monmouth",
+    "zip_code": "61462",
+    "latitude": 40.92107,
+    "longitude": -90.655405,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "3097343183",
+    "website": "http://www.warrencountyymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/bG95VOXBS9WCog9FABak",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

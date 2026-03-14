@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "custer",
+    "state": "SD",
+    "verified": false,
+    "name": "Custer YMCA",
+    "description": "Custer YMCA is a place to play pickleball in Custer, SD. There is 1 indoor wood court. The lines are permanent, and portable nets are available. The court can be reserved. Players have access to lights, water, restrooms, and locker rooms.",
+    "address": "644 Crook St",
+    "city": "Custer",
+    "latitude": 43.767714,
+    "longitude": -103.598093,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "phone": "+16056735134",
+    "website": "https://rcymca.org/locations/custer-ymca/custer-ymca/",
+    "email": "connie@rcymca.org",
+    "photo_url": "https://cdn.filestackcontent.com/N9bBxz0Q9aeOtuuSB4RM",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

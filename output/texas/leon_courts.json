@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "leon",
+    "state": "TX",
+    "verified": false,
+    "name": "Buffalo First Baptist Church",
+    "description": "Come play pickleball at Buffalo First Baptist Church in Buffalo, TX! There are 3 indoor hard courts. Tape lines have been laid, and portable nets are available. Players have access to lights. The courts are free. Reservations are not available.",
+    "address": "600 E Commerce St",
+    "city": "Buffalo",
+    "latitude": 31.463169,
+    "longitude": -96.060846,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "9033224332",
+    "website": "https://fbcbuffalo.org/home",
+    "photo_url": "https://cdn.filestackcontent.com/SRizhq4RVKeVCYo8MiQO",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  }
+]

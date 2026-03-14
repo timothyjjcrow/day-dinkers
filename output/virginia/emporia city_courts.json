@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "emporia city",
+    "state": "VA",
+    "verified": false,
+    "name": "Family YMCA of Emporia-Greensville",
+    "description": "Family YMCA of Emporia-Greensville is one of the most popular places to play pickleball in Emporia, VA. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. A membership is required to play. Reservations are not available. Players have access to locker rooms, restrooms, water, and lights.",
+    "address": "212 Weaver Avenue",
+    "city": "Emporia",
+    "latitude": 36.699993,
+    "longitude": -77.539634,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "open_play_schedule": "Select times (See calendar on website) \n\nhttps://www.emporiagreensvilleymca.org",
+    "fees": "Members only \u2014 YMCA membership",
+    "phone": "4343489622",
+    "website": "https://www.emporiagreensvilleymca.org",
+    "photo_url": "https://cdn.filestackcontent.com/399hqWMARuudEKjTv0vY",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

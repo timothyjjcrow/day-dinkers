@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "douglas",
+    "state": "IL",
+    "verified": false,
+    "name": "Villa Grove Community Recreation Center",
+    "description": "Come play pickleball at Villa Grove Community Recreation Center in Villa Grove, IL! There are 2 indoor wood courts. Tape lines have been laid, and portable nets are available. Reservations are available. Players have access to food, locker rooms, restrooms, water, youth programming, lights, and wheelchair accessibility.",
+    "address": "912 S Sycamore St",
+    "city": "Villa Grove",
+    "latitude": 39.853333,
+    "longitude": -88.161177,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "open_play_schedule": "We have scheduled weekday open gym for pickleball 7am-10am and evenings 5pm-8pm. However, unless reserved, the gym is always open and nets available.",
+    "phone": "+12178324900",
+    "website": "https://villagrove.recdesk.com/Community/Home",
+    "email": "robert.rea@villagrove.org",
+    "photo_url": "https://cdn.filestackcontent.com/Nz5iNRh4RcegTl4hM0Se",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

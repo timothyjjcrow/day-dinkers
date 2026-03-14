@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "somerset",
+    "state": "ME",
+    "verified": false,
+    "name": "Warsaw Middle School",
+    "description": "Warsaw Middle School is a place to play pickleball in Pittsfield, ME. There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "167 School St",
+    "city": "Pittsfield",
+    "zip_code": "04967",
+    "latitude": 44.787663,
+    "longitude": -69.391804,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Free",
+    "phone": "+12074875145",
+    "website": "https://www.msad53.org/our-schools/warsaw-middle-school",
+    "photo_url": "https://cdn.filestackcontent.com/MlZ2b4VAQgqBJzlyUkSB",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

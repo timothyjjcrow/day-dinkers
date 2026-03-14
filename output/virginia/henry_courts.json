@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "henry",
+    "state": "VA",
+    "verified": false,
+    "name": "MHC Parks and Rec Center",
+    "description": "MHC Parks and Rec Center is one of the most popular places to play pickleball in Collinsville, VA. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. The courts are free. The facility includes amenities like restrooms.",
+    "address": "395 West John Redd Boulevard",
+    "city": "Collinsville",
+    "latitude": 36.723673,
+    "longitude": -79.917428,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "2766344600",
+    "website": "https://www.henrycountyva.gov/313/Drop-In-Activites",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

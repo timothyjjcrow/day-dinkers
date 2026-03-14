@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "rock",
+    "state": "MN",
+    "verified": false,
+    "name": "Luverne Pickleball Courts",
+    "description": "One court dedicated to pickleball. 2 courts are on a tennis court with portable Nets.",
+    "address": "307 S Fairview Dr",
+    "city": "Luverne",
+    "latitude": 43.663535,
+    "longitude": -96.212762,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/bRu8P6q2R0iSSqOWrz0q",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "dade",
+    "state": "GA",
+    "verified": false,
+    "name": "Dade County Sports Complex",
+    "description": "Dade County Sports Complex is a place to play pickleball in Trenton, GA. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Amenities include lights, restrooms, and water. The courts are free.",
+    "address": "Dade County Sports Complex",
+    "city": "Trenton",
+    "latitude": 34.835951,
+    "longitude": -85.528828,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://www.dadecounty-ga.gov/Facilities/Facility/Details/Dade-County-Sports-Complex-1",
+    "photo_url": "https://cdn.filestackcontent.com/Dtgi2MxTWm8VsbN7iHJL",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]

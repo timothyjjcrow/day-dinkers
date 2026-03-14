@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "cimarron",
+    "state": "OK",
+    "verified": false,
+    "name": "City Park",
+    "description": "Come play pickleball at City Park in Boise City, OK! There is 1 outdoor concrete court. The lines are permanent, but you'll need to bring your own net. The court is free.",
+    "address": "1104 N Logan Ave",
+    "city": "Boise City",
+    "latitude": 36.736482,
+    "longitude": -102.511794,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "6204531029",
+    "website": "https://www.theboisecitynews.com/",
+    "photo_url": "https://cdn.filestackcontent.com/Yzzu2SdT1ONdIePmfjTA",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

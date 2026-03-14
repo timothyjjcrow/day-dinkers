@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "lamoille",
+    "state": "VT",
+    "verified": false,
+    "name": "Cambridge Community Center",
+    "description": "Cambridge Community Center is one of the most popular places to play pickleball in Jeffersonville, VT. There are 4 indoor courts. The lines are permanent, and portable nets are available. The courts are private. The facility includes amenities like lights.",
+    "address": "22 Old Main St",
+    "city": "Jeffersonville",
+    "zip_code": "05464",
+    "latitude": 44.646839,
+    "longitude": -72.826725,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 4,
+    "fees": "Private",
+    "phone": "8026445028",
+    "website": "https://www.thecambridgecc.com",
+    "email": "info@cambridgevtcommunitycenter.com",
+    "photo_url": "https://cdn.filestackcontent.com/A9XzGwQOQjGkamt1hXLU",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

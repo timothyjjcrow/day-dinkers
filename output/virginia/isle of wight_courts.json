@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "isle of wight",
+    "state": "VA",
+    "verified": false,
+    "name": "Luter Family YMCA",
+    "description": "YMCA membership required for use of courts inside the gymnasium",
+    "address": "259 James Street",
+    "city": "Smithfield",
+    "latitude": 36.983227,
+    "longitude": -76.639117,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Members only",
+    "phone": "+17573654060",
+    "website": "https://www.ymcavp.org/locations/luter-family-ymca",
+    "photo_url": "https://cdn.filestackcontent.com/ViuY7NbxTPilri9i3qyT",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "isle of wight",
+    "state": "VA",
+    "verified": false,
+    "name": "Riverview Park",
+    "description": "This court appears to be part of the YMCA, however it is not, this is a PUBLIC court belonging to Isle of Wight parks and rec.",
+    "address": "255 James St",
+    "city": "Smithfield",
+    "latitude": 36.983132,
+    "longitude": -76.638338,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/X2iMhRhtRL2IzPRIdMBh",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

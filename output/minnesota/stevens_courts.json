@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "stevens",
+    "state": "MN",
+    "verified": false,
+    "name": "Chokio Community",
+    "description": "Come play pickleball at Chokio Community in Chokio, MN! There are 2 outdoor concrete courts. You\u2019ll have to create your own lines, but portable nets are available. The courts are free. The facility includes amenities like lights.",
+    "address": "311 West 1st Street Chokio",
+    "city": "Chokio",
+    "latitude": 45.572591,
+    "longitude": -96.176155,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+13203247188",
+    "email": "mdeneui@fedtel.net",
+    "photo_url": "https://cdn.filestackcontent.com/Sp48xclTEiwDebALvUod",
+    "nets_provided": true,
+    "court_type": "shared"
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "allamakee",
+    "state": "IA",
+    "verified": false,
+    "name": "Waukon Wellness Center",
+    "description": "Waukon Wellness Center is a place to play pickleball in Waukon, IA. There are 3 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play. Players have access to restrooms and lights.",
+    "address": "1301 3rd Ave NW",
+    "city": "Waukon",
+    "zip_code": "52172",
+    "latitude": 43.274242,
+    "longitude": -91.494026,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "fees": "Members only",
+    "phone": "5635680074",
+    "website": "https://waukonwellness.com/",
+    "photo_url": "https://cdn.filestackcontent.com/RI3E7NxNQJqmkbdrqyfG",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

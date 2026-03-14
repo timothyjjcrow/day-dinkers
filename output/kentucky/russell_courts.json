@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "russell",
+    "state": "KY",
+    "verified": false,
+    "name": "Russell Springs City Park",
+    "description": "Russell Springs City Park is one of the most popular places to play pickleball in Russell Springs, KY. There are 2 outdoor hard and concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include lights and restrooms.",
+    "address": "130 Milton Heights",
+    "city": "Russell Springs",
+    "latitude": 37.064233,
+    "longitude": -85.080852,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard, Concrete",
+    "fees": "Free",
+    "phone": "+12708669996",
+    "website": "https://russellsprings.net/rs-city-park/",
+    "photo_url": "https://cdn.filestackcontent.com/qk5bfBFpQuq5R7aUGewH",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

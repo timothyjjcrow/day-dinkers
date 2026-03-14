@@ -1,0 +1,17 @@
+[
+  {
+    "county_slug": "brantley",
+    "state": "GA",
+    "verified": false,
+    "name": "Schlatterville Courts",
+    "description": "Schlatterville Courts is one of the most popular places to play pickleball in Hoboken, GA. The courts are private.",
+    "address": "US Hwy 82",
+    "city": "Hoboken",
+    "zip_code": "31542",
+    "latitude": 31.180104,
+    "longitude": -82.144978,
+    "indoor": false,
+    "fees": "Private",
+    "skill_levels": "intermediate"
+  }
+]

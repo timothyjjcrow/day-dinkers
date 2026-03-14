@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "grant",
+    "state": "AR",
+    "verified": false,
+    "name": "Sheridan Pickleball Court",
+    "description": "Sheridan Pickleball Court is a place to play pickleball in Sheridan, AR. There are 2 outdoor acrylic and concrete courts. These are dedicated courts with permanent lines and nets. Players have access to lights and restrooms. The courts are free.",
+    "address": "1511 South Rose Street",
+    "city": "Sheridan",
+    "latitude": 34.294196,
+    "longitude": -92.418706,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Acrylic, Concrete",
+    "fees": "Free",
+    "phone": "8709427000",
+    "website": "https://sheridanark.com",
+    "photo_url": "https://cdn.filestackcontent.com/RJNX76MeSH2JwwkzpXx9",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "ripley",
+    "state": "MO",
+    "verified": false,
+    "name": "Riverfront Park",
+    "description": "Riverfront Park is one of the most popular places to play pickleball in Doniphan, MO. There are 4 outdoor asphalt courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "124 Jefferson St",
+    "city": "Doniphan",
+    "zip_code": "63935",
+    "latitude": 36.61756,
+    "longitude": -90.82915,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "5739962623",
+    "website": "https://www.doniphan.org/",
+    "photo_url": "https://cdn.filestackcontent.com/FKsl1NPKTglV8mLOuwwF",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

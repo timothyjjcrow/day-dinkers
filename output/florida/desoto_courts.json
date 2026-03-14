@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "desoto",
+    "state": "FL",
+    "verified": false,
+    "name": "Storybook Park",
+    "description": "Storybook Park is one of the most popular places to play pickleball in Arcadia, FL. There are 4 outdoor hard courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. The facility includes amenities like lights.",
+    "address": "185 W Winifred St",
+    "city": "Arcadia",
+    "latitude": 27.225836,
+    "longitude": -81.857236,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+18634942000",
+    "website": "https://arcadia-fl.gov/departments/public-works/parks-division/",
+    "photo_url": "https://cdn.filestackcontent.com/yJhPa2olTAamIfX21CWT",
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "shared",
+    "has_restrooms": true
+  }
+]

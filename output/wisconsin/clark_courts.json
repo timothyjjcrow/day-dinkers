@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "clark",
+    "state": "WI",
+    "verified": false,
+    "name": "Dorchester Memorial Park",
+    "description": "Drive Thru  Weekly RV ,Tent\n camping sites, Restrooms,SHOWERS,LOCAL RESTAURANTS. BALLPARK,VOLLYBALL FISHING ,WALKING PATHS.RENTAL SHELTERS",
+    "address": "Dorchester",
+    "city": "Dorchester",
+    "latitude": 45.003024,
+    "longitude": -90.335691,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/KPVqHYi3RvolVyim2YAG",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "clark",
+    "state": "WI",
+    "verified": false,
+    "name": "Marquerite Listeman Park",
+    "description": "Restrooms are available in the park, but about a 100-yard walk.",
+    "address": "1402 Lloyd St",
+    "city": "Neillsville",
+    "latitude": 44.566934,
+    "longitude": -90.587569,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/InRpWCmGRTe2ehk0PrLk",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

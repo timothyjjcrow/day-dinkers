@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "sullivan",
+    "state": "IN",
+    "verified": false,
+    "name": "Sullivan City Park",
+    "description": "Come play pickleball at Sullivan City Park in Sullivan, IN! There are 6 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms, water, and lights. The courts are free.",
+    "address": "629 S Main St",
+    "city": "Sullivan",
+    "zip_code": "47882",
+    "latitude": 39.086318,
+    "longitude": -87.405567,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "8122686243",
+    "website": "https://discoversullivan.com/",
+    "photo_url": "https://cdn.filestackcontent.com/hxoUPHVaRjHwwr4WV0Ln",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

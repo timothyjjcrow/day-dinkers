@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "texas",
+    "state": "OK",
+    "verified": false,
+    "name": "Fowler Park",
+    "description": "Fowler Park is a place to play pickleball in Guymon, OK. There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include lights.",
+    "address": "North Ellison Street",
+    "city": "Guymon",
+    "latitude": 36.686869,
+    "longitude": -101.480278,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/iPi7YYaXSWajTtwO8pMh",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "san patricio",
+    "state": "TX",
+    "verified": false,
+    "name": "Portland Community Center",
+    "description": "Portland Community Center is one of the most popular places to play pickleball in Portland, TX. There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. Amenities include lights. A one-time fee is required to play.",
+    "address": "Billy G Webb",
+    "city": "Portland",
+    "zip_code": "78374",
+    "latitude": 27.892306,
+    "longitude": -97.314893,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "phone": "3617774670",
+    "website": "http://www.portlandtx.com/",
+    "photo_url": "https://cdn.filestackcontent.com/eHmAhySFRraazHYFcMkn",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

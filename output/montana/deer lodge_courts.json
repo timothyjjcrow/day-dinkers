@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "deer lodge",
+    "state": "MT",
+    "verified": false,
+    "name": "Anaconda Technology Center Gym",
+    "description": "Anaconda Technology Center Gym is a place to play pickleball in Anaconda, MT. There is 1 indoor court. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "1410 W Park Ave",
+    "city": "Anaconda",
+    "zip_code": "59711",
+    "latitude": 46.133237,
+    "longitude": -112.971699,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Members only",
+    "phone": "4065633408",
+    "website": "https://smeltercitycrossfit.com/",
+    "photo_url": "https://cdn.filestackcontent.com/F9igqyQJQReYyJspP7Zq",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

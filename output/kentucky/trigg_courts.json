@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "trigg",
+    "state": "KY",
+    "verified": false,
+    "name": "Prizer Point",
+    "description": "Located across from the pool house. Does not have kitchen lines or regulation length courts.",
+    "address": "1701 Prizer Point Rd",
+    "city": "Canton",
+    "latitude": 36.909867,
+    "longitude": -87.99104,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

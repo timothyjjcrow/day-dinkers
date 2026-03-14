@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "geary",
+    "state": "KS",
+    "verified": false,
+    "name": "Twelfth Street Community Center",
+    "description": "Twelfth Street Community Center is a place to play pickleball in Junction City, KS. There are 3 indoor hard courts. The lines are permanent, and portable nets are available. Amenities include restrooms and water. The courts are free.",
+    "address": "1002 W 12th St",
+    "city": "Junction City",
+    "zip_code": "66441",
+    "latitude": 39.034881,
+    "longitude": -96.846734,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7852384210",
+    "website": "http://www.junctioncity-ks.gov/",
+    "photo_url": "https://cdn.filestackcontent.com/FBK7rzNpS02foctOzmBC",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

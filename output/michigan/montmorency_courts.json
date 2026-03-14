@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "montmorency",
+    "state": "MI",
+    "verified": false,
+    "name": "Lewiston Pickleball Courts",
+    "description": "Four dedicated pickleball courts with permanent nets and four more courts with temporary nets. We use the Team Reach app to view the calendar to see days and times to play and to sign up if playing that day. The Team Reach code is L1234",
+    "address": "2929 Olsen St",
+    "city": "Lewiston",
+    "latitude": 44.88306,
+    "longitude": -84.306408,
+    "indoor": false,
+    "num_courts": 8,
+    "surface_type": "Hard, Asphalt",
+    "fees": "Free",
+    "website": "https://www.facebook.com/LewistonPickleball/",
+    "photo_url": "https://cdn.filestackcontent.com/vVb942xSqOOo07G45RVA",
+    "has_restrooms": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

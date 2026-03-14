@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "white",
+    "state": "IN",
+    "verified": false,
+    "name": "Sculptures Sports & Fitness Center",
+    "description": "Sculptures Sports & Fitness Center is one of the most popular places to play pickleball in Monticello, IN. There are 6 indoor concrete courts. The lines are permanent, and portable nets are available. Amenities include locker rooms, restrooms, lights, and water. A one-time fee is required to play.",
+    "address": "728 N 6th St",
+    "city": "Monticello",
+    "zip_code": "47960",
+    "latitude": 40.752792,
+    "longitude": -86.775379,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Concrete",
+    "fees": "Fee required \u2014 10.00",
+    "phone": "5745835060",
+    "website": "http://www.sculpturesfitness.com/",
+    "photo_url": "https://cdn.filestackcontent.com/jncuatbxRCqe9Bc0hClL",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

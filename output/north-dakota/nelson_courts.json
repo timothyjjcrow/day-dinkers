@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "nelson",
+    "state": "ND",
+    "verified": false,
+    "name": "Mcville Auditorium",
+    "description": "Mcville Auditorium is one of the most popular places to play pickleball in McVille, ND. There is 1 indoor court. The lines are permanent, but you'll need to bring your own net. The court is free.",
+    "address": "120 N Hamlin St",
+    "city": "McVille",
+    "zip_code": "58254",
+    "latitude": 47.764818,
+    "longitude": -98.180474,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Free",
+    "phone": "7013224343",
+    "photo_url": "https://cdn.filestackcontent.com/zjoIcj0TD2GLEJ4NwGdQ",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

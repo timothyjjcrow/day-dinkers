@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "plaquemines parish",
+    "state": "LA",
+    "verified": false,
+    "name": "Belle Chasse Multi-Purpose Building",
+    "description": "Belle Chasse Multi-Purpose Building is one of the most popular places to play pickleball in Belle Chasse, LA. There are 4 indoor acrylic and hard courts. Tape lines have been laid, and portable nets are available. The courts are free. You can\u2019t reserve the courts. Players have access to restrooms, water, and wheelchair accessibility.",
+    "address": "333 F Edward Hebert Boulevard",
+    "city": "Belle Chasse",
+    "latitude": 29.896759,
+    "longitude": -89.979145,
+    "indoor": true,
+    "num_courts": 4,
+    "surface_type": "Acrylic, Hard",
+    "open_play_schedule": "Scheduled only for July 2024 on Wed.",
+    "fees": "Free",
+    "phone": "5049346960",
+    "website": "https://www.plaqueminesparish.com/213/Arts-Parks-Recreation",
+    "email": "Recreation@ppgov.net",
+    "photo_url": "https://cdn.filestackcontent.com/vIkqegfQRqAf1wbeRirQ",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "union",
+    "state": "TN",
+    "verified": false,
+    "name": "Sunset Bay H.O.A.",
+    "description": "Sunset Bay H.O.A. is one of the most popular places to play pickleball in Sharps Chapel, TN. There are 4 outdoor courts. These are dedicated courts with permanent lines and nets. The courts are private.",
+    "address": "195 Sunset Vw",
+    "city": "Sharps Chapel",
+    "zip_code": "37866",
+    "latitude": 36.306638,
+    "longitude": -83.876339,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Private",
+    "phone": "8652783806",
+    "website": "http://www.sunsetbaypoa.com/",
+    "photo_url": "https://cdn.filestackcontent.com/ajUbSPKPQvi4pEaDH2kH",
+    "nets_provided": true,
+    "court_type": "dedicated",
+    "hours": "8am to 5pm"
+  }
+]

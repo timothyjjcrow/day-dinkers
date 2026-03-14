@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "bryan",
+    "state": "GA",
+    "verified": false,
+    "name": "Timber Trail Park",
+    "description": "Timber Trail Park is a place to play pickleball in Richmond Hill, GA. There are 11 outdoor hard courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms, water, and lights. The courts are free.",
+    "address": "185 Richmond Hill Trail",
+    "city": "Richmond Hill",
+    "latitude": 31.950915,
+    "longitude": -81.295189,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 11,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "9127564075",
+    "website": "https://www.bryancountyga.org/government/departments-h-z/parks-recreation/south-bryan-recreation/facilities-helpful-links",
+    "photo_url": "https://cdn.filestackcontent.com/xcb0copDTMe3yY3sOCj6",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

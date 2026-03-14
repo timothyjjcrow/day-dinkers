@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "jefferson",
+    "state": "OH",
+    "verified": false,
+    "name": "Martin Luther King Jr. Recreation Center",
+    "description": "Come play pickleball at Martin Luther King Jr. Recreation Center in Steubenville, OH! There are 3 outdoor courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "905 Market Street",
+    "city": "Steubenville",
+    "latitude": 40.361963,
+    "longitude": -80.620875,
+    "indoor": false,
+    "num_courts": 3,
+    "fees": "Free",
+    "phone": "7402836000",
+    "website": "https://www.cityofsteubenville.us/government/departments/parks_and_recreation.php",
+    "photo_url": "https://cdn.filestackcontent.com/Jlc3yfs0RqC34lUdZLd6",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Thur 8am-8pm",
+    "has_restrooms": true
+  }
+]

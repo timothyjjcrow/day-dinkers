@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "mingo",
+    "state": "WV",
+    "verified": false,
+    "name": "Larry Joe Harless Community Center",
+    "description": "Larry Joe Harless Community Center is a place to play pickleball in Gilbert, WV. There are 2 outdoor clay courts. You\u2019ll have to create your own lines and bring your own net. The courts are private. Amenities include food, restrooms, water, wheelchair accessibility, and lights.",
+    "address": "202 Larry Joe Harless Dr",
+    "city": "Gilbert",
+    "latitude": 37.611569,
+    "longitude": -81.863848,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Clay",
+    "fees": "Private",
+    "phone": "3046642600",
+    "website": "http://www.ljhcc.org/",
+    "photo_url": "https://cdn.filestackcontent.com/GJHhILsmRKmg9ohLwIzX",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

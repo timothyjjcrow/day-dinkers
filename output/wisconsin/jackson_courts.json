@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "jackson",
+    "state": "WI",
+    "verified": false,
+    "name": "Lunda Community Center",
+    "description": "Lunda Community Center is a place to play pickleball in Black River Falls, WI. There are 5 indoor wood courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms. A membership is required to play.",
+    "address": "405 State Hwy 54",
+    "city": "Black River Falls",
+    "zip_code": "54615",
+    "latitude": 44.294993,
+    "longitude": -90.852477,
+    "indoor": true,
+    "num_courts": 5,
+    "surface_type": "Wood",
+    "fees": "Members only",
+    "website": "http://www.lundacommunitycenter.com/",
+    "photo_url": "https://cdn.filestackcontent.com/q3DQilTuQ6KUB9d1GGXf",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

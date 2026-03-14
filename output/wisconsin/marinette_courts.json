@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "marinette",
+    "state": "WI",
+    "verified": false,
+    "name": "Marinette Community Center",
+    "description": "Come play pickleball at Marinette Community Center in Marinette, WI! There are 3 indoor hard courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. The facility includes amenities like restrooms. Reservations are available.",
+    "address": "2000 Alice Ln",
+    "city": "Marinette",
+    "zip_code": "54143",
+    "latitude": 45.092404,
+    "longitude": -87.632581,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Fee required",
+    "phone": "7157325222",
+    "website": "http://www.marinette.wi.us/",
+    "photo_url": "https://cdn.filestackcontent.com/jHotg6ZKTDm64emA0FZZ",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "30 am to 4 pm",
+    "has_parking": true
+  }
+]

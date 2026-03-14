@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "wabash",
+    "state": "IL",
+    "verified": false,
+    "name": "Mount Carmel City Park",
+    "description": "Mount Carmel City Park is one of the most popular places to play pickleball in Mount Carmel, IL. There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms, water, and lights. The courts are free.",
+    "address": "700 Park Rd",
+    "city": "Mount Carmel",
+    "zip_code": "62863",
+    "latitude": 38.442816,
+    "longitude": -87.778618,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/yHEHoYLzS5qpI0ED7i2J",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

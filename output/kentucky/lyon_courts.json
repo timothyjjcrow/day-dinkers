@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "lyon",
+    "state": "KY",
+    "verified": false,
+    "name": "Eddyville Tennis/Pickleball Courts",
+    "description": "We have two recently resurfaced tennis court with one pickleball court overlayed on each one. The courts have lights and are located next door to the City Swimming pool. Courts are available on a first come, first serve, basis. You will need to bring your own balls and paddles. Email Lyoncountypickleball@gmail.com for more information.",
+    "address": "301 Mulberry St",
+    "city": "Eddyville",
+    "latitude": 37.100502,
+    "longitude": -88.072879,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Asphalt, Acrylic",
+    "fees": "Free",
+    "phone": "270 338 2226",
+    "email": "Lyoncountypickleball@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/5SxqaXq8Sae4Zsbd0w3h",
+    "has_restrooms": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

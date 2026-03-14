@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "park",
+    "state": "MT",
+    "verified": false,
+    "name": "Livingston Civic Center",
+    "description": "Come play pickleball at Livingston Civic Center in Livingston, MT! There are 3 indoor wood courts. The lines are permanent, and portable nets are available. Players have access to restrooms and water. A one-time fee is required to play.",
+    "address": "229 River Dr",
+    "city": "Livingston",
+    "zip_code": "59047",
+    "latitude": 45.655155,
+    "longitude": -110.556593,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "website": "https://www.livingstonmontana.org/rec",
+    "photo_url": "https://cdn.filestackcontent.com/dkdpLr3yTq2QxGzJx5On",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

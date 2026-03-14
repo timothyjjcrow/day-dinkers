@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "pike",
+    "state": "IL",
+    "verified": false,
+    "name": "Crossroads Center",
+    "description": "Crossroads Center is one of the most popular places to play pickleball in Pittsfield, IL. There are 3 indoor wood courts. The lines are permanent, but you'll need to bring your own net. The courts are free. Amenities include restrooms and water.",
+    "address": "125 West Jefferson Street",
+    "city": "Pittsfield",
+    "latitude": 39.60877,
+    "longitude": -90.807308,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+12172854129",
+    "website": "http://fccpittsfield.org/event/1098236-2018-04-09-crossroads-center-rental/",
+    "photo_url": "https://cdn.filestackcontent.com/LZeMNIdjSQxrS8wAdple",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

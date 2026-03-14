@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "nemaha",
+    "state": "NE",
+    "verified": false,
+    "name": "American Legion Park",
+    "description": "American Legion Park is one of the most popular places to play pickleball in Auburn, NE. There are 3 outdoor concrete courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The facility includes amenities like lights, restrooms, and water. The courts are free.",
+    "address": "910 10th Street",
+    "city": "Auburn",
+    "latitude": 40.395134,
+    "longitude": -95.838047,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Saturday Mornings Starting at 8",
+    "fees": "Free",
+    "phone": "4022743420",
+    "website": "https://auburn.ne.gov/city-hall/",
+    "photo_url": "https://cdn.filestackcontent.com/Rt0QfcapSCVdBAkkjWPA",
+    "has_restrooms": true,
+    "has_water": true,
+    "court_type": "dedicated"
+  }
+]

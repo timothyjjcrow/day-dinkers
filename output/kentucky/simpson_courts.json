@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "simpson",
+    "state": "KY",
+    "verified": false,
+    "name": "Jim Roberts Park",
+    "description": "Come play pickleball at Jim Roberts Park in Franklin, KY! There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms. The courts are free.",
+    "address": "1190 Community Park Dr",
+    "city": "Franklin",
+    "latitude": 36.730995,
+    "longitude": -86.549606,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+12705868999",
+    "website": "https://fsparksandrec.recdesk.com/Community/Facility/Detail?facilityId=34",
+    "photo_url": "https://cdn.filestackcontent.com/8yP3IAkYTdmJMKeg1I7f",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

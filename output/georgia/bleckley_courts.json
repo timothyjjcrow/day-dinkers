@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "bleckley",
+    "state": "GA",
+    "verified": false,
+    "name": "Bleckley Pickleball Association Complex (BPAC)",
+    "description": "Restrooms are open during organized events. To view the organized play opportunities, go to the Bleckley Pickleball Association (BPA) website at www.bleckleypickleball.org.",
+    "address": "259 Peter St NE",
+    "city": "Cochran",
+    "latitude": 32.391149,
+    "longitude": -83.343447,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 13,
+    "surface_type": "Acrylic, Hard, Asphalt",
+    "fees": "Free",
+    "phone": "+14789342821",
+    "website": "https://www.bleckleypickleball.org",
+    "email": "info@bleckleypickleball.org",
+    "photo_url": "https://cdn.filestackcontent.com/b9XDuBpTRTGVla4nEOCT",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

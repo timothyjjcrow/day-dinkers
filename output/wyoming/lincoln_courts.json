@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "lincoln",
+    "state": "WY",
+    "verified": false,
+    "name": "Star Valley Ranch Assoc. courts",
+    "description": "Star Valley Ranch Assoc. courts is a place to play pickleball in Star Valley Ranch, WY. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "199 Vista Dr",
+    "city": "Star Valley Ranch",
+    "latitude": 42.978177,
+    "longitude": -110.969257,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/FW7fZ7DwSRqzFdCmQT3b",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "lincoln",
+    "state": "WY",
+    "verified": false,
+    "name": "Star Valley Ranch Rv Resort",
+    "description": "Star Valley Ranch Rv Resort is one of the most popular places to play pickleball in Thayne, WY. There are 16 outdoor concrete courts. These are dedicated courts with permanent lines and nets. You can\u2019t reserve the courts. The facility includes amenities like restrooms. A one-time fee is required to play.",
+    "address": "3522 S Muddy String Rd",
+    "city": "Thayne",
+    "zip_code": "83127",
+    "latitude": 42.9697,
+    "longitude": -110.96441,
+    "indoor": false,
+    "num_courts": 16,
+    "surface_type": "Concrete",
+    "fees": "Fee required \u2014 Fee is $10 person per day",
+    "website": "http://starvalleyranchresort.com/",
+    "photo_url": "https://cdn.filestackcontent.com/5XhV0mUVRn2xra7f8lTE",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

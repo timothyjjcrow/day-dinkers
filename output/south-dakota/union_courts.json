@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "union",
+    "state": "SD",
+    "verified": false,
+    "name": "United Sports Academy",
+    "description": "United Sports Academy is a place to play pickleball in North Sioux City, SD. There are 4 indoor courts. The lines are permanent, and portable nets are available. Amenities include lights. A membership is required to play.",
+    "address": "300 Centennial Dr",
+    "city": "North Sioux City",
+    "zip_code": "57049",
+    "latitude": 42.528914,
+    "longitude": -96.48912,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 4,
+    "fees": "Members only",
+    "website": "http://www.usportsacad.com/",
+    "photo_url": "https://cdn.filestackcontent.com/PVr45prmTcGAsQlBXJVj",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

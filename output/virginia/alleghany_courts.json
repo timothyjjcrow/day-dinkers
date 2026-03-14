@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "alleghany",
+    "state": "VA",
+    "verified": false,
+    "name": "Altamont Park",
+    "description": "Come play pickleball at Altamont Park in Covington, VA! There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms and water. The courts are free.",
+    "address": "708 Dolly Ann Dr",
+    "city": "Covington",
+    "zip_code": "24426",
+    "latitude": 37.781446,
+    "longitude": -79.977232,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "5408636622",
+    "photo_url": "https://cdn.filestackcontent.com/HaU2FNP4Q6uYmuD4GH40",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

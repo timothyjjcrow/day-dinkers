@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "logan",
+    "state": "OH",
+    "verified": false,
+    "name": "Kaleidoscope ParK",
+    "description": "Kaleidoscope ParK is a place to play pickleball in Bellefontaine, OH. There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. You can\u2019t reserve the courts. The courts are free. Amenities include restrooms.",
+    "address": "Kaliedoscope Park",
+    "city": "Bellefontaine",
+    "latitude": 40.366638,
+    "longitude": -83.75002,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "open_play_schedule": "Open dawn to dusk",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/HGbo8ay3RtWtKsHksAc2",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

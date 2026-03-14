@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "pipestone",
+    "state": "MN",
+    "verified": false,
+    "name": "Pipestone City Courts",
+    "description": "Fencing between individual courts. Also has a windbreaker netting around it.",
+    "address": "798 6th St SE",
+    "city": "Pipestone",
+    "latitude": 43.995091,
+    "longitude": -96.307481,
+    "indoor": false,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/VvoFBe95TKmFojjbCKvq",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

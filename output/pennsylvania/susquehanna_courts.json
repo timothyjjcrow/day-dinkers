@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "susquehanna",
+    "state": "PA",
+    "verified": false,
+    "name": "Montrose Memorial Park",
+    "description": "Come play pickleball at Montrose Memorial Park in Montrose, PA! There are 3 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like restrooms and water.",
+    "address": "261 Jackson St",
+    "city": "Montrose",
+    "zip_code": "18801",
+    "latitude": 41.830699,
+    "longitude": -75.87892,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "5703960620",
+    "photo_url": "https://cdn.filestackcontent.com/XnD6dBBjS7eTvYXv04Nx",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "madison",
+    "state": "MO",
+    "verified": false,
+    "name": "Fredericktown Rockwall Pickleball Courts",
+    "description": "6 outdoor courts with permanent nets and permanent line and lighting\ufffc",
+    "address": "601 Benson Street",
+    "city": "Fredericktown",
+    "latitude": 37.553432,
+    "longitude": -90.297908,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "https://www.facebook.com/share/X2i6NViMW1UvzWGv/?mibextid=K35XfP",
+    "photo_url": "https://cdn.filestackcontent.com/nGdQOyiStqOukD9mLslw",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

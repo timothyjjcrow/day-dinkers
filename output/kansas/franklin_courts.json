@@ -1,0 +1,38 @@
+[
+  {
+    "county_slug": "franklin",
+    "state": "KS",
+    "verified": false,
+    "name": "Goppert Recreation Center",
+    "description": "Goppert Recreation Center is one of the most popular places to play pickleball in Ottawa, KS. You'll need to bring your own net. The courts are free.",
+    "address": "705 W 15th St 517",
+    "city": "Ottawa",
+    "zip_code": "66067",
+    "latitude": 38.594516,
+    "longitude": -95.277827,
+    "indoor": false,
+    "fees": "Free",
+    "phone": "7852421939",
+    "nets_provided": false,
+    "skill_levels": "beginner"
+  },
+  {
+    "county_slug": "franklin",
+    "state": "KS",
+    "verified": false,
+    "name": "Taylor's court",
+    "description": "Come play pickleball at Taylor's court in Ottawa, KS! There are 6 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts cannot be reserved. The courts are free.",
+    "address": "517 E 3rd St",
+    "city": "Ottawa",
+    "latitude": 38.614553,
+    "longitude": -95.262118,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/lHbFR2T0TUmYmoBpf2Vn",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "fayette",
+    "state": "PA",
+    "verified": false,
+    "name": "Uniontown YMCA",
+    "description": "Come play pickleball at Uniontown YMCA in Uniontown, PA! There are 3 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "1 Ymca Ln",
+    "city": "Uniontown",
+    "zip_code": "15401",
+    "latitude": 39.896879,
+    "longitude": -79.74042,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Members only",
+    "phone": "7244382584",
+    "website": "http://www.uniontownymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/ezHsz1LZSpDuSQ8hZ3rw",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "5 AM \u2013 9 PM"
+  }
+]

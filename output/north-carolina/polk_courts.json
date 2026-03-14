@@ -1,0 +1,41 @@
+[
+  {
+    "county_slug": "polk",
+    "state": "NC",
+    "verified": false,
+    "name": "Green Creek Community Center",
+    "description": "Come play pickleball at Green Creek Community Center in Tryon, NC! There is 1 indoor court. The lines are permanent, but you'll need to bring your own net. The court is private.",
+    "address": "534 Coxe Rd",
+    "city": "Tryon",
+    "zip_code": "28782",
+    "latitude": 35.230318,
+    "longitude": -82.05041,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Private",
+    "photo_url": "https://cdn.filestackcontent.com/75pglebcT7qaiFQdUB0j",
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "polk",
+    "state": "NC",
+    "verified": false,
+    "name": "Polk Co. Rec.",
+    "description": "Polk Co. Rec. is a place to play pickleball in Columbus, NC. There is 1 indoor court. The lines are permanent, and portable nets are available. The court is free.",
+    "address": "105 N Peak St",
+    "city": "Columbus",
+    "zip_code": "28722",
+    "latitude": 35.254304,
+    "longitude": -82.199434,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Free",
+    "phone": "8288948199",
+    "photo_url": "https://cdn.filestackcontent.com/XN6gPFIqRhWqTRS1kQlP",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "madison",
+    "state": "NC",
+    "verified": false,
+    "name": "Mars Hill Recreation Park",
+    "description": "This is a school district tennis court complex with four pickleball courts painted over two of the four tennis courts. Portable nets are provided.",
+    "address": "690 Park Dr",
+    "city": "Mars Hill",
+    "zip_code": "28754",
+    "latitude": 35.820467,
+    "longitude": -82.559367,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "open_play_schedule": "Closed for school use between 3-6pm.",
+    "fees": "Free",
+    "website": "http://www.townofmarshill.org/",
+    "email": "mhtb272@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/tAZoauTAyodJAZKuGgFg",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated",
+    "has_water": true
+  }
+]

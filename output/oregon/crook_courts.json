@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "crook",
+    "state": "OR",
+    "verified": false,
+    "name": "Ochoco Creek Park",
+    "description": "Ochoco Creek Park is a place to play pickleball in Prineville, OR. There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms, water, and lights. The courts are free.",
+    "address": "430 NE Juniper St",
+    "city": "Prineville",
+    "latitude": 44.303821,
+    "longitude": -120.83565,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+15414471209",
+    "website": "http://ccprd.org/",
+    "photo_url": "https://cdn.filestackcontent.com/LuFyw3xCRfKFPXt4IhIG",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

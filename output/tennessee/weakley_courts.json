@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "weakley",
+    "state": "TN",
+    "verified": false,
+    "name": "UTM Campus Rec Outdoor Pickleball Courts",
+    "description": "UTM Campus Rec Outdoor Pickleball Courts is one of the most popular places to play pickleball in Martin, TN. There are 6 outdoor concrete courts. The lines are permanent, and portable nets are available. The facility includes amenities like lights and water. The courts are free.",
+    "address": "3 Pat Head Summitt Dr",
+    "city": "Martin",
+    "latitude": 36.342508,
+    "longitude": -88.868164,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/1SSxMh5uQoSUoh7DJFol",
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

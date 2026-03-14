@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "jasper",
+    "state": "TX",
+    "verified": false,
+    "name": "Rayburn Country Resort",
+    "description": "Come play pickleball at Rayburn Country Resort in Brookeland, TX! There are 8 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. A one-time fee is required to play. Players have access to restrooms.",
+    "address": "2376 Wingate Blvd",
+    "city": "Brookeland",
+    "latitude": 31.072646,
+    "longitude": -94.022375,
+    "indoor": false,
+    "num_courts": 8,
+    "surface_type": "Asphalt",
+    "fees": "Fee required",
+    "phone": "4094893784",
+    "website": "http://rayburncountryresort.com/",
+    "photo_url": "https://cdn.filestackcontent.com/x9FUVNJJREaeX4PWKPgo",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

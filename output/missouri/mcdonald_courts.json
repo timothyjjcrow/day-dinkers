@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "mcdonald",
+    "state": "MO",
+    "verified": false,
+    "name": "Picaholics AA",
+    "description": "Picaholics AA is one of the most popular places to play pickleball in Noel, MO. There is 1 indoor concrete court. This is a dedicated court with a permanent net and lines. The court is private. Players have access to food, restrooms, lights, wheelchair accessibility, water, adaptive programming, youth programming, and trainers or lessons.",
+    "address": "93 Reagan Hollow Road",
+    "city": "Noel",
+    "latitude": 36.548771,
+    "longitude": -94.507248,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Private \u2014 Text 480-662-1567",
+    "phone": "+14806621567",
+    "website": "https://picaholicsaa.com/",
+    "email": "Jimmy@thefloatingdoor.com",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

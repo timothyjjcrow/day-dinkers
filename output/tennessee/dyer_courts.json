@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "dyer",
+    "state": "TN",
+    "verified": false,
+    "name": "First Methodist Church-family Life Center",
+    "description": "First Methodist Church-family Life Center is one of the most popular places to play pickleball in Dyersburg, TN. There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. A membership is required to play.",
+    "address": "100 McGaughey St",
+    "city": "Dyersburg",
+    "zip_code": "38024",
+    "latitude": 36.034272,
+    "longitude": -89.385424,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "7312856454",
+    "website": "https://fumcdyersburg.com/",
+    "photo_url": "https://cdn.filestackcontent.com/93Znc5pTfqdf0Qzrfcq5",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

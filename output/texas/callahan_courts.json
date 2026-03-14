@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "callahan",
+    "state": "TX",
+    "verified": false,
+    "name": "Hanner Sports Complex",
+    "description": "Hanner Sports Complex is one of the most popular places to play pickleball in Clyde, TX. There are 8 outdoor concrete courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "500 North Hays Road",
+    "city": "Clyde",
+    "latitude": 32.414612,
+    "longitude": -99.528162,
+    "indoor": false,
+    "num_courts": 8,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "3258934234",
+    "photo_url": "https://cdn.filestackcontent.com/PkB8zE5YQBadnQrsG0VH",
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

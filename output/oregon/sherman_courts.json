@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "sherman",
+    "state": "OR",
+    "verified": false,
+    "name": "Wasco School Events Center",
+    "description": "Come play pickleball at Wasco School Events Center in Wasco, OR! There are 2 indoor courts. The lines are permanent, and portable nets are available. Players have access to lights. The courts are free.",
+    "address": "903 Barnett St",
+    "city": "Wasco",
+    "zip_code": "97065",
+    "latitude": 45.593441,
+    "longitude": -120.695623,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 2,
+    "fees": "Free",
+    "phone": "+15419936838",
+    "website": "https://wascoschooleventscenter.wordpress.com/",
+    "photo_url": "https://cdn.filestackcontent.com/AIk86F6UTwu1ndstK7Tv",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "has_restrooms": true
+  }
+]

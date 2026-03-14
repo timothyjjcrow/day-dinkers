@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "wabaunsee",
+    "state": "KS",
+    "verified": false,
+    "name": "Alta Vista Park",
+    "description": "Portable net is available for check out at the City Office on Main Street",
+    "address": "702 Logan St",
+    "city": "Alta Vista",
+    "latitude": 38.865822,
+    "longitude": -96.487701,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+17854996620",
+    "website": "https://altavistaks.com/",
+    "photo_url": "https://cdn.filestackcontent.com/pKhcJxiRJyUHaDrSQ4Pr",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

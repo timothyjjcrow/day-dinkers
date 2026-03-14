@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "perry",
+    "state": "PA",
+    "verified": false,
+    "name": "Lynn Sheaffer Dum Memorial Park",
+    "description": "Come play pickleball at Lynn Sheaffer Dum Memorial Park in Elliottsburg, PA! There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like restrooms. The courts are free.",
+    "address": "2471 Shermans Valley Rd",
+    "city": "Elliottsburg",
+    "latitude": 40.384128,
+    "longitude": -77.297087,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/zADWL8wOR5yBfbKi3RTs",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "perry",
+    "state": "PA",
+    "verified": false,
+    "name": "Veterans Memorial Park",
+    "description": "Newly painted dedicated pickleball courts",
+    "address": "201 N Front St",
+    "city": "Newport",
+    "zip_code": "17074",
+    "latitude": 40.48069,
+    "longitude": -77.132426,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/xhsP7osSbWtLQe67lNXP",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

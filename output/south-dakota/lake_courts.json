@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "lake",
+    "state": "SD",
+    "verified": false,
+    "name": "Madison Community Center",
+    "description": "Madison Community Center is a place to play pickleball in Madison, SD. There are 8 outdoor courts. You\u2019ll have to create your own lines and bring your own net. The courts are private. Amenities include restrooms, water, and wheelchair accessibility.",
+    "address": "505 NE 11th St",
+    "city": "Madison",
+    "zip_code": "57042",
+    "latitude": 44.016977,
+    "longitude": -97.107687,
+    "indoor": false,
+    "num_courts": 8,
+    "fees": "Private",
+    "website": "https://www.madisoncommunitycenter.com/",
+    "photo_url": "https://cdn.filestackcontent.com/H6Lsq6s8ThyPAeawEA2W",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

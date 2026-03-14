@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "johnson",
+    "state": "KY",
+    "verified": false,
+    "name": "Rucker Park",
+    "description": "Fenced area with single court. This court is under a tree and my require leaf blowing in the fall in order to play. No lighting after dark.",
+    "address": "260 Millers Creek Rd",
+    "city": "Van Lear",
+    "latitude": 37.769226,
+    "longitude": -82.752735,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "open_play_schedule": "Daytime -always open",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/vzRnPFrGRcSv4uj53Iui",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

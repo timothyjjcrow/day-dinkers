@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "saline",
+    "state": "IL",
+    "verified": false,
+    "name": "Harrisburg Township Pickleball Courts",
+    "description": "Come play pickleball at Harrisburg Township Pickleball Courts in Harrisburg, IL! There are 4 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like lights and restrooms.",
+    "address": "921 W Poplar St",
+    "city": "Harrisburg",
+    "zip_code": "62946",
+    "latitude": 37.738665,
+    "longitude": -88.554823,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "6182522111",
+    "website": "http://www.harrisburgpark.net/",
+    "photo_url": "https://cdn.filestackcontent.com/UMPKiuvpTzKkO6Txl24e",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Mon-Fri 08:00 AM to 4:00 PM close lightbox"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "broadwater",
+    "state": "MT",
+    "verified": false,
+    "name": "Townsend Tennis Courts",
+    "description": "Townsend Tennis Courts is a place to play pickleball in Townsend, MT. There are 3 concrete courts. 2 are outdoors and 1 is indoors. The lines are permanent, and portable nets are available. The courts are free. The facility includes amenities like restrooms.",
+    "address": "131 S Harrison",
+    "city": "Townsend",
+    "zip_code": "59644",
+    "latitude": 46.322314,
+    "longitude": -111.510468,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/8kY7c7hZTwmsMn9B4Mkv",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "little river",
+    "state": "AR",
+    "verified": false,
+    "name": "Ashdown City Park",
+    "description": "Come play pickleball at Ashdown City Park in Ashdown, AR! There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include restrooms and lights.",
+    "address": "1211 Gordon Drive",
+    "city": "Ashdown",
+    "latitude": 33.673517,
+    "longitude": -94.141608,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "8708982907",
+    "photo_url": "https://cdn.filestackcontent.com/LXLL70xSfSZ6SFXGE8Kw",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

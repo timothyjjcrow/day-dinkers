@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "fairfield",
+    "state": "SC",
+    "verified": false,
+    "name": "Fairfield County Parks and Recreation",
+    "description": "Fairfield County Parks and Recreation is one of the most popular places to play pickleball in Winnsboro, SC. There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "836 US Hwy 321",
+    "city": "Winnsboro",
+    "zip_code": "29180",
+    "latitude": 34.404362,
+    "longitude": -81.101854,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "8034027194",
+    "photo_url": "https://cdn.filestackcontent.com/ECot4jhRnyolzIIIPRjA",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

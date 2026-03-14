@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "harney",
+    "state": "OR",
+    "verified": false,
+    "name": "Geno's Youth Center",
+    "description": "Geno's Youth Center is one of the most popular places to play pickleball in Burns, OR. There are 3 indoor hard courts. The lines are permanent, and portable nets are available. A one-time fee is required to play.",
+    "address": "310 N Birch Ave",
+    "city": "Burns",
+    "latitude": 43.588624,
+    "longitude": -119.052752,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Fee required \u2014 $40 Monthly, $5 Drop In",
+    "phone": "+15415737036",
+    "website": "https://www.genosyouthcenter.com",
+    "email": "kidsclubharneycounty@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/LJoVQI7R96jAu7kDpiQp",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

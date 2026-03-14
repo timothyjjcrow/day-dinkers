@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "hardin",
+    "state": "IA",
+    "verified": false,
+    "name": "Steamboat Rock",
+    "description": "Steamboat Rock is a place to play pickleball in Steamboat Rock, IA. There are 4 wood courts. 2 are outdoors and 2 are indoors. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "107 3rd St",
+    "city": "Steamboat Rock",
+    "latitude": 42.408191,
+    "longitude": -93.064236,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/hHkOaaBSxK1RLPpgPFR1",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

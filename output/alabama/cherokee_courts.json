@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "cherokee",
+    "state": "AL",
+    "verified": false,
+    "name": "Centre city tennis courts",
+    "description": "Come play pickleball at Centre city tennis courts in Centre, AL! There are 6 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Amenities include lights, restrooms, and wheelchair accessibility. The courts cannot be reserved. The courts are free.",
+    "address": "500 Park Street",
+    "city": "Centre",
+    "latitude": 34.15642,
+    "longitude": -85.671109,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "2569273511",
+    "website": "https://www.cityofcentre.com/city-swimming-pool/",
+    "photo_url": "https://cdn.filestackcontent.com/33sT3mAQZW3Tf41Ilvpf",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "hours": "Saturday 10 am \u2013 5 pm"
+  }
+]

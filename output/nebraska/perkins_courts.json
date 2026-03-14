@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "perkins",
+    "state": "NE",
+    "verified": false,
+    "name": "Grant Tennis Courts",
+    "description": "Grant Tennis Courts is a place to play pickleball in Grant, NE. The court surface is concrete. You\u2019ll have to create your own lines and bring your own net. The courts are free.",
+    "address": "8th St",
+    "city": "Grant",
+    "zip_code": "69140",
+    "latitude": 40.846896,
+    "longitude": -101.72536,
+    "indoor": false,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "0000000000",
+    "photo_url": "https://cdn.filestackcontent.com/FUf3153qR0GNVXI4nwfa",
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

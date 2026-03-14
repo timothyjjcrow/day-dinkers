@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "livingston",
+    "state": "IL",
+    "verified": false,
+    "name": "Pontiac Community Recreation Center",
+    "description": "Pontiac Community Recreation Center is one of the most popular places to play pickleball in Pontiac, IL. There are 3 indoor courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "900 N Elm St",
+    "city": "Pontiac",
+    "zip_code": "61764",
+    "latitude": 40.885499,
+    "longitude": -88.618909,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Free",
+    "phone": "8158446818",
+    "website": "http://www.pontiac.org/parksandrec",
+    "photo_url": "https://cdn.filestackcontent.com/cn4Xb5XJTfehQSNchLvS",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

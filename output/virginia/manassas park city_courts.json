@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "manassas park city",
+    "state": "VA",
+    "verified": false,
+    "name": "Manassas Park Community Center",
+    "description": "Manassas Park Community Center is a place to play pickleball in Manassas Park, VA. There are 3 indoor courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms, water, and lights. The courts are private.",
+    "address": "99 Adams St",
+    "city": "Manassas Park",
+    "zip_code": "20111",
+    "latitude": 38.783251,
+    "longitude": -77.462287,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "fees": "Private",
+    "phone": "7033358872",
+    "website": "http://www.manassasparkcommunitycenter.com/",
+    "photo_url": "https://cdn.filestackcontent.com/KUyjqSETTWWgN1efQOPQ",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "8am-4pm",
+    "has_parking": true
+  }
+]

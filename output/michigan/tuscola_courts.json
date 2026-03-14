@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "tuscola",
+    "state": "MI",
+    "verified": false,
+    "name": "Cass City Public Park",
+    "description": "Cass City Public Park is one of the most popular places to play pickleball in Cass City, MI. There are 2 outdoor concrete courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "Scott Mccullough Dr",
+    "city": "Cass City",
+    "latitude": 43.603079,
+    "longitude": -83.167184,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "http://casscity.org/",
+    "photo_url": "https://cdn.filestackcontent.com/GZcj6wUXR24E1UgtzNMo",
+    "nets_provided": false,
+    "court_type": "dedicated",
+    "hours": "Monday-Friday Office Hours: 8:00am-4:30pm Lobby Hours: 9:00am-4:00pm Closed Daily From 12:00-1:00pm Phone: 989-872-2911 Copyright 2026 \u00a9Village of Cass City.",
+    "has_water": true
+  }
+]

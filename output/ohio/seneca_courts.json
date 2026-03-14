@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "seneca",
+    "state": "OH",
+    "verified": false,
+    "name": "Buckley St Courts",
+    "description": "Come play pickleball at Buckley St Courts in Fostoria, OH! There are 4 outdoor courts. These are dedicated courts with permanent lines and nets. You can\u2019t reserve the courts. The courts are free.",
+    "address": "800-928 Buckley St",
+    "city": "Fostoria",
+    "latitude": 41.167119,
+    "longitude": -83.405392,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Free",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "seneca",
+    "state": "OH",
+    "verified": false,
+    "name": "Hedges-Boyer Park",
+    "description": "2 designated pickleball courts, 1 tennis court with pickleball lines",
+    "address": "491 Coe St",
+    "city": "Tiffin",
+    "latitude": 41.106768,
+    "longitude": -83.1582,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+14194485408",
+    "website": "https://www.tiffinohio.gov/departments/parks-rec",
+    "photo_url": "https://cdn.filestackcontent.com/Yp6kHpwTR7yGNaSN8Yyg",
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

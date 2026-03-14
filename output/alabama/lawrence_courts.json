@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "lawrence",
+    "state": "AL",
+    "verified": false,
+    "name": "Moulton Recreation Center",
+    "description": "Come play pickleball at Moulton Recreation Center in Moulton, AL! There are 3 indoor wood courts. The lines are permanent, and portable nets are available. The courts are free. Amenities include restrooms, water, and wheelchair accessibility.",
+    "address": "13550 Court St",
+    "city": "Moulton",
+    "zip_code": "35650",
+    "latitude": 34.481424,
+    "longitude": -87.305818,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "website": "http://cityofmoultonal.com/parks_recreation/parks_rec.html",
+    "photo_url": "https://cdn.filestackcontent.com/exoKTKNpSUyjR3tWcxfO",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -20,6 +20,9 @@ from backend.services.court_payloads import (
     normalize_court_payload, apply_court_changes,
     normalize_county_slug, DEFAULT_COUNTY_SLUG,
 )
+from backend.services.states import (
+    STATES, STATE_BY_ABBR, state_name_for_abbr, normalize_state_slug,
+)
 from backend.services.court_updates import (
     analyze_submission, apply_payload_to_court,
     normalize_submission_payload, safe_json_loads, should_auto_apply,
@@ -272,13 +275,25 @@ def get_courts():
     lighted = request.args.get('lighted', type=str)
     search = request.args.get('search', '')
     city = request.args.get('city', '')
+    raw_state = (request.args.get('state') or '').strip()
     raw_county = (request.args.get('county_slug') or '').strip()
-    county_slug = normalize_county_slug(raw_county, fallback=DEFAULT_COUNTY_SLUG)
+    county_slug = normalize_county_slug(raw_county, fallback='')
     if raw_county.lower() == 'all':
         county_slug = ''
+    state_abbr = ''
+    if raw_state and raw_state.lower() != 'all':
+        slug = normalize_state_slug(raw_state)
+        entry = STATE_BY_ABBR.get(raw_state.upper())
+        if entry:
+            state_abbr = entry['abbr']
+        elif slug:
+            from backend.services.states import SLUG_TO_ABBR
+            state_abbr = SLUG_TO_ABBR.get(slug, '')
     has_location = lat is not None and lng is not None
 
     query = Court.query
+    if state_abbr:
+        query = query.filter(Court.state == state_abbr)
     if county_slug:
         query = query.filter(Court.county_slug == county_slug)
     if search:
@@ -349,56 +364,114 @@ def get_courts():
     return jsonify({
         'courts': results,
         'county_slug': county_slug or 'all',
+        'state': state_abbr or 'all',
     })
 
 
 @courts_bp.route('/counties', methods=['GET'])
 def get_counties():
+    raw_state = (request.args.get('state') or '').strip()
+    state_filter = ''
+    if raw_state and raw_state.lower() != 'all':
+        entry = STATE_BY_ABBR.get(raw_state.upper())
+        if entry:
+            state_filter = entry['abbr']
+        else:
+            slug = normalize_state_slug(raw_state)
+            if slug:
+                from backend.services.states import SLUG_TO_ABBR
+                state_filter = SLUG_TO_ABBR.get(slug, '')
+
+    base_query = db.session.query(
+        Court.county_slug.label('county_slug'),
+        Court.state.label('state'),
+        func.count(Court.id).label('court_count'),
+    ).filter(Court.county_slug.isnot(None))
+
+    if state_filter:
+        base_query = base_query.filter(Court.state == state_filter)
+
     rows = (
-        db.session.query(
-            Court.county_slug.label('county_slug'),
-            func.count(Court.id).label('court_count'),
-        )
-        .filter(Court.county_slug.isnot(None))
-        .group_by(Court.county_slug)
+        base_query
+        .group_by(Court.county_slug, Court.state)
         .order_by(Court.county_slug.asc())
         .all()
     )
-    counts_by_slug = {}
+
+    counties = []
+    seen = set()
+
+    if not state_filter or state_filter == 'CA':
+        ca_counts = {
+            normalize_county_slug(r.county_slug, fallback=''): int(r.court_count or 0)
+            for r in rows if (r.state or 'CA') == 'CA'
+        }
+        for county in CALIFORNIA_COUNTIES:
+            slug = county['slug']
+            count = ca_counts.get(slug, 0)
+            counties.append({
+                'slug': slug,
+                'name': county['name'],
+                'state': 'CA',
+                'state_name': 'California',
+                'court_count': count,
+                'has_courts': count > 0,
+            })
+            seen.add((slug, 'CA'))
+
     for row in rows:
         slug = normalize_county_slug(row.county_slug, fallback='')
         if not slug:
             continue
-        counts_by_slug[slug] = int(row.court_count or 0)
-
-    counties = []
-    seen = set()
-    for county in CALIFORNIA_COUNTIES:
-        slug = county['slug']
-        count = counts_by_slug.get(slug, 0)
-        counties.append({
-            'slug': slug,
-            'name': county['name'],
-            'court_count': count,
-            'has_courts': count > 0,
-        })
-        seen.add(slug)
-
-    for slug in sorted(counts_by_slug):
-        if slug in seen:
+        state = row.state or 'CA'
+        if (slug, state) in seen:
             continue
-        count = counts_by_slug.get(slug, 0)
+        count = int(row.court_count or 0)
         counties.append({
             'slug': slug,
             'name': _county_name_from_slug(slug),
+            'state': state,
+            'state_name': state_name_for_abbr(state),
             'court_count': count,
             'has_courts': count > 0,
         })
+        seen.add((slug, state))
+
+    counties.sort(key=lambda c: c['name'])
 
     return jsonify({
         'counties': counties,
         'default_county_slug': DEFAULT_COUNTY_SLUG,
+        'state_filter': state_filter or 'all',
     })
+
+
+@courts_bp.route('/states', methods=['GET'])
+def get_states():
+    """Return all states that have courts in the database."""
+    rows = (
+        db.session.query(
+            Court.state.label('state'),
+            func.count(Court.id).label('court_count'),
+        )
+        .filter(Court.state.isnot(None))
+        .group_by(Court.state)
+        .order_by(Court.state.asc())
+        .all()
+    )
+    states = []
+    for row in rows:
+        abbr = row.state or ''
+        if not abbr:
+            continue
+        name = state_name_for_abbr(abbr) or abbr
+        states.append({
+            'abbr': abbr,
+            'name': name,
+            'court_count': int(row.court_count or 0),
+        })
+    states.sort(key=lambda s: s['name'])
+    return jsonify({'states': states})
 
 
 @courts_bp.route('/resolve-county', methods=['GET'])
@@ -422,6 +495,7 @@ def resolve_county():
         Court.id,
         Court.name,
         Court.county_slug,
+        Court.state,
         Court.latitude,
         Court.longitude,
     ).all()
@@ -437,11 +511,13 @@ def resolve_county():
             nearest_dist = dist
 
     county_slug = normalize_county_slug(getattr(nearest, 'county_slug', ''), fallback=DEFAULT_COUNTY_SLUG)
+    nearest_state = getattr(nearest, 'state', '') or 'CA'
     return jsonify({
         'county_slug': county_slug,
         'county_name': _county_name_from_slug(county_slug),
         'nearest_court_id': nearest.id,
         'nearest_court_name': nearest.name,
+        'nearest_court_state': nearest_state,
         'distance_miles': round(nearest_dist or 0, 1),
     })
 

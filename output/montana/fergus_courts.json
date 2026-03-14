@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "fergus",
+    "state": "MT",
+    "verified": false,
+    "name": "Symmes Park",
+    "description": "Symmes Park is one of the most popular places to play pickleball in Lewistown, MT. There are 6 outdoor concrete courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms. The courts are free.",
+    "address": "201 Ridgelawn Avenue",
+    "city": "Lewistown",
+    "latitude": 47.071828,
+    "longitude": -109.415478,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Open play all day",
+    "fees": "Free",
+    "phone": "4065353045",
+    "website": "https://lewistownpickleball.com",
+    "email": "recreation@ci.lewistown.mt.us",
+    "photo_url": "https://cdn.filestackcontent.com/jL7zMmsmTLyfD25R2BQX",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

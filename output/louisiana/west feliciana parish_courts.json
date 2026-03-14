@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "west feliciana parish",
+    "state": "LA",
+    "verified": false,
+    "name": "West Feliciana Parish Parks",
+    "description": "3 additional lined courts under basketball arena. West Feliciana Pickleball Club members will be provided with temporary nets, others will need to supply nets",
+    "address": "10226 W Feliciana Pkwy",
+    "city": "Saint Francisville",
+    "latitude": 30.81104,
+    "longitude": -91.377957,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard, Acrylic",
+    "open_play_schedule": "There is Open Play whenever the park is open. The general skill level ranges from 2.5 - 3.5. Morning play is the most popular time.",
+    "fees": "Free",
+    "phone": "+12257848447",
+    "website": "http://www.wfprec.com/",
+    "email": "wfpparkrec@wfparish.org",
+    "photo_url": "https://cdn.filestackcontent.com/RulPbivmT7OYhMY8D5XU",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

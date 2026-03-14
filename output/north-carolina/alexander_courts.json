@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "alexander",
+    "state": "NC",
+    "verified": false,
+    "name": "Jaycee Park",
+    "description": "Come play pickleball at Jaycee Park in Township of Taylorsville, NC! There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "167 Jaycee Park Loop",
+    "city": "Township of Taylorsville",
+    "latitude": 35.937665,
+    "longitude": -81.186551,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "8286329332",
+    "website": "https://alexandercountync.gov/departments/parks-and-recreation/",
+    "photo_url": "https://cdn.filestackcontent.com/GT2xxYfkRMGqfXMw3ZtW",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated",
+    "hours": "10am\u20136pm",
+    "has_restrooms": true
+  }
+]

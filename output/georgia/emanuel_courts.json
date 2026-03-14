@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "emanuel",
+    "state": "GA",
+    "verified": false,
+    "name": "Harmon Park",
+    "description": "Come play pickleball at Harmon Park in Swainsboro, GA! There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms and lights. The courts are free. Reservations are not available.",
+    "address": "100 West Meadowlake Parkway",
+    "city": "Swainsboro",
+    "latitude": 32.575987,
+    "longitude": -82.324264,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "open_play_schedule": "24 HR",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/rdYTLJaTOjtyWmDvcBbA",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "seminole",
+    "state": "OK",
+    "verified": false,
+    "name": "Wewoka Public Schools",
+    "description": "Come play pickleball at Wewoka Public Schools in Wewoka, OK! The court surface is asphalt. You\u2019ll have to create your own lines and bring your own net. The facility includes amenities like restrooms.",
+    "address": "1121 S Okfuskee Ave",
+    "city": "Wewoka",
+    "zip_code": "74884",
+    "latitude": 35.147667,
+    "longitude": -96.495518,
+    "indoor": false,
+    "surface_type": "Asphalt",
+    "phone": "4052575473",
+    "website": "https://www.wps.k12.ok.us/",
+    "photo_url": "https://cdn.filestackcontent.com/QJC2cQJTWu7EgzwNgRN2",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

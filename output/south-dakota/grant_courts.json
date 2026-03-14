@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "grant",
+    "state": "SD",
+    "verified": false,
+    "name": "Flynn Park",
+    "description": "Come play pickleball at Flynn Park in Milbank, SD! There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms and water. The courts are free.",
+    "address": "999-947 E Virgil Ave",
+    "city": "Milbank",
+    "latitude": 45.221756,
+    "longitude": -96.624525,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/9D1Dgm8fQFpRA6pk0GWA",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

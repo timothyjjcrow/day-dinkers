@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "coffee",
+    "state": "GA",
+    "verified": false,
+    "name": "Wheeler Park",
+    "description": "Come play pickleball at Wheeler Park in Douglas, GA! There are 2 outdoor hard courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. Amenities include restrooms, water, and lights. The courts cannot be reserved. The courts are free.",
+    "address": "400 N Wheeler Ave",
+    "city": "Douglas",
+    "zip_code": "31533",
+    "latitude": 31.513481,
+    "longitude": -82.856509,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+19123845978",
+    "website": "https://cityofdouglasga.gov/321/Wheeler-Park",
+    "photo_url": "https://cdn.filestackcontent.com/J5Qy1AOwSeWbX7n2YDk4",
+    "has_restrooms": true,
+    "has_water": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

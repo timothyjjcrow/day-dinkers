@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "billings",
+    "state": "ND",
+    "verified": false,
+    "name": "Point to Point Park",
+    "description": "Come play pickleball at Point to Point Park in Medora, ND! There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms, food, and wheelchair accessibility. The courts are free.",
+    "address": "424 Six th street",
+    "city": "Medora",
+    "latitude": 46.912701,
+    "longitude": -103.520247,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "18006336721",
+    "website": "https://medora.com/pointtopoint/",
+    "email": "medora@medora.com",
+    "photo_url": "https://cdn.filestackcontent.com/1nSjX66gR42k3P23cRka",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

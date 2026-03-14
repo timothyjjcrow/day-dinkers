@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "floyd",
+    "state": "KY",
+    "verified": false,
+    "name": "Archer Park",
+    "description": "4 Permanent Pickleball Courts with permanent lines and painted surfaces. The nets are permanent tennis nets. 4 additional courts that have taped lines, chalk lines, and with no different surface paint, that also have tennis nets that are permanent.",
+    "address": "66 Archer Park Rd",
+    "city": "Prestonsburg",
+    "latitude": 37.66453,
+    "longitude": -82.78527,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "open_play_schedule": "Park closes at 10pm and may have different winter hours.",
+    "fees": "Free",
+    "phone": "6068866390",
+    "website": "https://prestonsburgky.org/",
+    "photo_url": "https://cdn.filestackcontent.com/rlfwHFLStmOKWS4iqEOm",
+    "has_restrooms": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

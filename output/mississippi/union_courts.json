@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "union",
+    "state": "MS",
+    "verified": false,
+    "name": "BNA Tennis and Pickleball Park",
+    "description": "BNA Tennis and Pickleball Park is one of the most popular places to play pickleball in New Albany, MS. There are 4 outdoor asphalt courts. The lines are permanent, and portable nets are available. The courts are free. Amenities include restrooms, lights, wheelchair accessibility, trainers or lessons, a pro shop or equipment store, and water.",
+    "address": "Tallahatcie Trail",
+    "city": "New Albany",
+    "latitude": 34.489237,
+    "longitude": -89.019497,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+12282189920",
+    "website": "https://www.facebook.com/bnaparktennis/?paipv=0&eav=AfYMITPvk8xQKz_VaUOgpq66V55jblTKkDtbQtTe5QrmJR5Der4BijfLe3G4rQGX-7k&_rdr",
+    "photo_url": "https://cdn.filestackcontent.com/JxFD84WSkWKwGtTEUtX2",
+    "has_restrooms": true,
+    "has_water": true,
+    "has_pro_shop": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "kinney",
+    "state": "TX",
+    "verified": false,
+    "name": "Fort Clark Springs",
+    "description": "Fort Clark Springs is one of the most popular places to play pickleball in Fort Clark Springs, TX. There are 2 outdoor acrylic courts. The lines are permanent, and portable nets are available. Amenities include food, a pro shop or equipment store, and restrooms. Reservations are available.",
+    "address": "Pecan Road",
+    "city": "Fort Clark Springs",
+    "latitude": 29.292055,
+    "longitude": -100.423039,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Acrylic",
+    "phone": "8145536950",
+    "website": "https://www.fortclark.com/",
+    "email": "Maryann.oliver@ymail.com",
+    "photo_url": "https://cdn.filestackcontent.com/WLgR3FKNT6Wigq6S2LEg",
+    "has_restrooms": true,
+    "has_pro_shop": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

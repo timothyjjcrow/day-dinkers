@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "lamoure",
+    "state": "ND",
+    "verified": false,
+    "name": "Kulm City Park Sports Court",
+    "description": "Kulm City Park Sports Court is a place to play pickleball in Kulm, ND. There is 1 outdoor concrete court. The lines are permanent, but you'll need to bring your own net. Amenities include restrooms and wheelchair accessibility. The court is free.",
+    "address": "217 2nd Ave SE",
+    "city": "Kulm",
+    "zip_code": "58456",
+    "latitude": 46.299941,
+    "longitude": -98.946399,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "7016472303",
+    "photo_url": "https://cdn.filestackcontent.com/UduLIqrvRLmSX74bYBMB",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

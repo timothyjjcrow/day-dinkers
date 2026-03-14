@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "tioga",
+    "state": "NY",
+    "verified": false,
+    "name": "Tioga County Boys And Girls Club",
+    "description": "Tioga County Boys And Girls Club is a place to play pickleball in Owego, NY. There are 4 indoor wood courts. The lines are permanent, and portable nets are available. You can\u2019t reserve the courts. Players have access to restrooms. A one-time fee is required to play.",
+    "address": "201 Erie St",
+    "city": "Owego",
+    "zip_code": "13827",
+    "latitude": 42.10924,
+    "longitude": -76.25603,
+    "indoor": true,
+    "num_courts": 4,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "phone": "6076870690",
+    "website": "https://www.tiogabgca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/xN6Fb75URmGUinqNMIT6",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "wayne",
+    "state": "IL",
+    "verified": false,
+    "name": "Community of Christ Church",
+    "description": "Community of Christ Church is one of the most popular places to play pickleball in Fairfield, IL. There are 2 indoor courts. Tape lines have been laid, and portable nets are available. The facility includes amenities like restrooms and water. A one-time fee is required to play.",
+    "address": "503 S Windsor Ln",
+    "city": "Fairfield",
+    "zip_code": "62837",
+    "latitude": 38.376171,
+    "longitude": -88.377166,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "website": "http://www.cofchrist.org/",
+    "photo_url": "https://cdn.filestackcontent.com/cfyWFPDvTgCqrw0miUUv",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "edgecombe",
+    "state": "NC",
+    "verified": false,
+    "name": "Edgecombe County Public Schools Family Resource Center",
+    "description": "Edgecombe County Public Schools Family Resource Center is one of the most popular places to play pickleball in Tarboro, NC. There are 2 outdoor concrete and hard courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free.",
+    "address": "710 Panola St",
+    "city": "Tarboro",
+    "latitude": 35.90176,
+    "longitude": -77.53287,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete, Hard",
+    "open_play_schedule": "Open to the public daily.",
+    "fees": "Free",
+    "website": "https://www.ecps.us/page/family-resource-center",
+    "photo_url": "https://cdn.filestackcontent.com/tY2pwDwISTOuCshTNjqI",
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

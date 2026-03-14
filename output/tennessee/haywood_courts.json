@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "haywood",
+    "state": "TN",
+    "verified": false,
+    "name": "College  Hill",
+    "description": "Come play pickleball at College Hill in Brownsville, TN! There are 2 outdoor asphalt courts. The lines are permanent, and portable nets are available. Players have access to lights and restrooms. The courts are free.",
+    "address": "127 N Grand Ave",
+    "city": "Brownsville",
+    "latitude": 35.596242,
+    "longitude": -89.272068,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/doG9vNhXS8KflUAXNyXQ",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

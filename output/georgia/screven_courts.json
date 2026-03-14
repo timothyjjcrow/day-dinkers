@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "screven",
+    "state": "GA",
+    "verified": false,
+    "name": "Screven County Rec Department",
+    "description": "Come play pickleball at Screven County Rec Department in Sylvania, GA! There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "Q89C+WC Sylvania",
+    "city": "Sylvania",
+    "latitude": 32.769778,
+    "longitude": -81.678931,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+19128632388",
+    "website": "https://screvenrec.com",
+    "email": "sscrd@planters.net",
+    "photo_url": "https://cdn.filestackcontent.com/JbpfMAQc6mDLhpbBlK2g",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

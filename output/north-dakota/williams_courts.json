@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "williams",
+    "state": "ND",
+    "verified": false,
+    "name": "Arc Parks and Recreation",
+    "description": "Arc Parks and Recreation is one of the most popular places to play pickleball in Williston, ND. There are 12 hard courts. 6 are outdoors and 6 are indoors. The lines are permanent, and portable nets are available. A one-time fee is required to play. The courts can be reserved. Amenities include lights, locker rooms, restrooms, water, and youth programming.",
+    "address": "822 18th Street East",
+    "city": "Williston",
+    "latitude": 48.160843,
+    "longitude": -103.609314,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 12,
+    "surface_type": "Hard",
+    "fees": "Fee required",
+    "phone": "7015729272",
+    "website": "https://www.willistonparks.com/",
+    "photo_url": "https://cdn.filestackcontent.com/DnUY4WPmQjGkga6pNtrb",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "effingham",
+    "state": "GA",
+    "verified": false,
+    "name": "Springfield Elementary School",
+    "description": "Springfield Elementary School is a place to play pickleball in Springfield, GA. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "300 Old Dixie Hwy S",
+    "city": "Springfield",
+    "latitude": 32.382584,
+    "longitude": -81.319682,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+19127543326",
+    "website": "https://ses.effinghamschools.com/",
+    "photo_url": "https://cdn.filestackcontent.com/2cPCoYRyQL22vVYtCY6E",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

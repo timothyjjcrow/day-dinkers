@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "lake",
+    "state": "OR",
+    "verified": false,
+    "name": "Dog Lake private",
+    "description": "This is a private court owners are willing to play with travelers provided they make prearranged appointment. The owners are rated 3.5 and 4.0.",
+    "address": "84940 Dog Lake Rd",
+    "city": "Lakeview",
+    "latitude": 42.080952,
+    "longitude": -120.705406,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Contact owner this is private court by scheduling an appointment only",
+    "fees": "Private",
+    "phone": "5414171119",
+    "email": "Vdbchildress@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/Vl37Rw1eTPSUKFaOXcwh",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

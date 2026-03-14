@@ -1,0 +1,38 @@
+[
+  {
+    "county_slug": "cherokee",
+    "state": "OK",
+    "verified": false,
+    "name": "Kaufmann Park Courts",
+    "description": "Come play pickleball at Kaufmann Park Courts in Tahlequah, OK! There are 2 outdoor hard courts. The court lines are permanent. The courts are free.",
+    "address": "230 E 1st St",
+    "city": "Tahlequah",
+    "latitude": 35.903017,
+    "longitude": -94.971051,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/AqKJJnnyQTCXlOzcAyYz",
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "cherokee",
+    "state": "OK",
+    "verified": false,
+    "name": "Markoma Gym",
+    "description": "Come play pickleball at Markoma Gym in Tahlequah, OK! There are 2 outdoor concrete courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "1501 Graham Ave",
+    "city": "Tahlequah",
+    "latitude": 35.895276,
+    "longitude": -94.992143,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

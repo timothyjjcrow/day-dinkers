@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "decatur",
+    "state": "IA",
+    "verified": false,
+    "name": "Court 1",
+    "description": "Court 1 is one of the most popular places to play pickleball in Lamoni, IA. There are 7 outdoor concrete courts. You\u2019ll have to create your own lines, but portable nets are available. Players have access to lights, water, youth programming, and restrooms. The courts are private.",
+    "address": "35 University Place",
+    "city": "Lamoni",
+    "latitude": 40.616398,
+    "longitude": -93.924923,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 7,
+    "surface_type": "Concrete",
+    "fees": "Private",
+    "phone": "+19135537509",
+    "email": "tnssdude@yahoo.com",
+    "photo_url": "https://cdn.filestackcontent.com/HS3AIA3GTJ2BwvjSlfFd",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "court_type": "shared"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "mcdonough",
+    "state": "IL",
+    "verified": false,
+    "name": "YMCA Of Mcdonough County",
+    "description": "YMCA Of Mcdonough County is a place to play pickleball in Macomb, IL. There are 2 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "400 E Calhoun St",
+    "city": "Macomb",
+    "zip_code": "61455",
+    "latitude": 40.461601,
+    "longitude": -90.666812,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "3098332129",
+    "website": "http://macombymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/9SczdzTEQAW7tJkvRxNK",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

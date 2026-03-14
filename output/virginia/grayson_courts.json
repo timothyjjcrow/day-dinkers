@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "grayson",
+    "state": "VA",
+    "verified": false,
+    "name": "Grayson County Recreation Park",
+    "description": "Grayson County Recreation Park is one of the most popular places to play pickleball in Independence, VA. There are 3 outdoor hard courts. The lines are permanent, and portable nets are available. You can\u2019t reserve the courts. The courts are free. The facility includes amenities like restrooms and water.",
+    "address": "85 Country Park Lane",
+    "city": "Independence",
+    "latitude": 36.62491,
+    "longitude": -81.125204,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "2767733841",
+    "website": "http://www.graysonrecpark.com/",
+    "email": "Kweatherman@graysoncountyva.gov",
+    "photo_url": "https://cdn.filestackcontent.com/Fgyi1JeQE25O6c1yOWwO",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

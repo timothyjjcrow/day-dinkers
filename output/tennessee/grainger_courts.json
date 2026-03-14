@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "grainger",
+    "state": "TN",
+    "verified": false,
+    "name": "Harris Court Park",
+    "description": "Harris Court Park is a place to play pickleball in Bean Station, TN. There is 1 outdoor concrete court. This is a dedicated court with a permanent net and lines. The court is free. Players have access to restrooms and water. You can\u2019t reserve the court.",
+    "address": "785 Main Street",
+    "city": "Bean Station",
+    "latitude": 36.344301,
+    "longitude": -83.283859,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "8659933177",
+    "website": "https://www.beanstation.info/home",
+    "email": "Benwaller@townofbeanstation.com",
+    "photo_url": "https://cdn.filestackcontent.com/JkMECIRhQtOd4xsYLJh5",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

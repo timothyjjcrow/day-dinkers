@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "green lake",
+    "state": "WI",
+    "verified": false,
+    "name": "Faith Lutheran School",
+    "description": "Faith Lutheran School is a place to play pickleball in Markesan, WI. There is 1 indoor court. The lines are permanent, but you'll need to bring your own net. A membership is required to play.",
+    "address": "N1529 State Road 73",
+    "city": "Markesan",
+    "zip_code": "53946",
+    "latitude": 43.68503,
+    "longitude": -89.03222,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Members only",
+    "phone": "7155597195",
+    "photo_url": "https://cdn.filestackcontent.com/lHBECF83SyKKvLJd5eWO",
+    "nets_provided": false,
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "green lake",
+    "state": "WI",
+    "verified": false,
+    "name": "Turning Point",
+    "description": "Come play pickleball at Turning Point in Princeton, WI! The court surface is concrete. You\u2019ll have to create your own lines and bring your own net. Players have access to restrooms and water. The courts are free.",
+    "address": "State Hwy 73",
+    "city": "Princeton",
+    "zip_code": "54968",
+    "latitude": 43.893226,
+    "longitude": -89.168037,
+    "indoor": false,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "9202915343",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  }
+]

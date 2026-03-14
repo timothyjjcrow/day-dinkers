@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "burke",
+    "state": "ND",
+    "verified": false,
+    "name": "The Court",
+    "description": "The Court is one of the most popular places to play pickleball in Bowbells, ND. There is 1 outdoor asphalt court. The lines are permanent, and portable nets are available. The court is free.",
+    "address": "200 Railway St SW",
+    "city": "Bowbells",
+    "latitude": 48.803383,
+    "longitude": -102.248374,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/FZ1AuiC1QCqIFq15JW8W",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

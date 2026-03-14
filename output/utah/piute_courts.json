@@ -1,0 +1,16 @@
+[
+  {
+    "county_slug": "piute",
+    "state": "UT",
+    "verified": false,
+    "name": "Suspicious Courts UT",
+    "description": "This court does not exist and is exists only for testing. It's actually a gas station. Please do not come here expecting to play pickleball.",
+    "address": "15 S Main St",
+    "city": "Junction",
+    "latitude": 38.236546,
+    "longitude": -112.219624,
+    "indoor": false,
+    "photo_url": "https://cdn.filestackcontent.com/7FCfPDwFRuCdGyYMXE2u",
+    "skill_levels": "intermediate"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "rabun",
+    "state": "GA",
+    "verified": false,
+    "name": "Sky Valley City Park",
+    "description": "Come play pickleball at Sky Valley City Park in Dillard, GA! There are 3 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. A membership is required to play.",
+    "address": "1386 Sky Valley Way",
+    "city": "Dillard",
+    "zip_code": "30537",
+    "latitude": 34.981164,
+    "longitude": -83.319702,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Asphalt",
+    "fees": "Members only",
+    "photo_url": "https://cdn.filestackcontent.com/jcXt7UXyRUG3FJnl3F4b",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "humphreys",
+    "state": "TN",
+    "verified": false,
+    "name": "McEwen Sports Field",
+    "description": "Come play pickleball at McEwen Sports Field in McEwen, TN! There are 2 outdoor asphalt courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. The facility includes amenities like restrooms.",
+    "address": "905 St Patrick St",
+    "city": "McEwen",
+    "latitude": 36.110559,
+    "longitude": -87.649743,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/v9T5BYTlGIS4focYdQGi",
+    "has_restrooms": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

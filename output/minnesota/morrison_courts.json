@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "morrison",
+    "state": "MN",
+    "verified": false,
+    "name": "Scandia Valley Township",
+    "description": "Scandia Valley Township is one of the most popular places to play pickleball in Cushing, MN. There are 4 outdoor courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "3518 320th St",
+    "city": "Cushing",
+    "zip_code": "56443",
+    "latitude": 46.223396,
+    "longitude": -94.588258,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Free",
+    "phone": "7636708711",
+    "photo_url": "https://cdn.filestackcontent.com/YKUqPiWcQ2uwZTMGR82k",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

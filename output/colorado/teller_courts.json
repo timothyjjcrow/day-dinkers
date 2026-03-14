@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "teller",
+    "state": "CO",
+    "verified": false,
+    "name": "Meadow Woods Sports Complex",
+    "description": "Come play pickleball at Meadow Woods Sports Complex in Woodland Park, CO! There are 2 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. You can\u2019t reserve the courts. The facility includes amenities like restrooms and lights. The courts are free.",
+    "address": "2000 Evergreen Heights Dr",
+    "city": "Woodland Park",
+    "zip_code": "80863",
+    "latitude": 39.002549,
+    "longitude": -105.073764,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7196860371",
+    "website": "https://city-woodlandpark.org/parks-and-recreation/",
+    "email": "tgalbreath@city-woodlandpark.org",
+    "photo_url": "https://cdn.filestackcontent.com/6gczcQfPRO5EIu9XGtWv",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "30 am to 5 pm"
+  }
+]

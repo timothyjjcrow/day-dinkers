@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "clay",
+    "state": "KS",
+    "verified": false,
+    "name": "Clay Center Dexter Park",
+    "description": "Clay Center Dexter Park is one of the most popular places to play pickleball in Clay Center, KS. There is 1 outdoor concrete court. This is a dedicated court with a permanent net and lines. The facility includes amenities like restrooms. The court is free.",
+    "address": "600 Grant Ave",
+    "city": "Clay Center",
+    "latitude": 39.374097,
+    "longitude": -97.123204,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/95te71TmRgaV5jrSj2wB",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

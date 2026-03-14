@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "searcy",
+    "state": "AR",
+    "verified": false,
+    "name": "Searcy County Arkansas Civic Center",
+    "description": "As of February 2025 the facility has 1 outdoor dedicated pickleball court with permanent net and painted lines, 2 indoor courts with taped lines and portable nets, and two outdoor tennis courts (currently dedicated to tennis).  There are paddles and balls available for free usage from the facility during daytime hours. We plan to add another dedicated outdoor pickleball court in the spring/summer of 2025. This facility also has an outdoor community pool, indoor and outdoor basketball courts, a paved walking/jogging track, playground equipment, a covered pavilion with picnic tables, softball fields, and an area for soccer with permanent goals.",
+    "address": "515 Zack Rd",
+    "city": "Marshall",
+    "latitude": 35.914825,
+    "longitude": -92.657504,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete, Hard",
+    "fees": "Free",
+    "website": "https://searcycountyarkansas.org/attractions/searcy-county-civic-center/",
+    "photo_url": "https://cdn.filestackcontent.com/LmtL8YYwQe6srIBSE4pD",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,40 @@
+[
+  {
+    "county_slug": "bee",
+    "state": "TX",
+    "verified": false,
+    "name": "Beeville Country Club",
+    "description": "Non members are welcomed.  Seasonal fee is required to play.  Can play a few times as guest of club member.",
+    "address": "1 Country Club Pl",
+    "city": "Beeville",
+    "latitude": 28.446036,
+    "longitude": -97.770528,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Private \u2014 Non members pay a seasonal fee to play",
+    "phone": "+13613187919",
+    "website": "https://www.beevillecountryclub.com/tennis.html",
+    "photo_url": "https://cdn.filestackcontent.com/6uKqm1e7S0yToVH6gOdc",
+    "court_type": "dedicated",
+    "has_ball_machine": true
+  },
+  {
+    "county_slug": "bee",
+    "state": "TX",
+    "verified": false,
+    "name": "Coastal Bend Community Collage",
+    "description": "No restrooms.  Currently, lights present on 2 courts but not working.  Courts do have cracks and pits.",
+    "address": "College Drive",
+    "city": "Beeville",
+    "latitude": 28.435485,
+    "longitude": -97.758938,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/N7zREl3RZq6NjouxKhaA",
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  }
+]

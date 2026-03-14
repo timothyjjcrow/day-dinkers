@@ -1,0 +1,29 @@
+[
+  {
+    "county_slug": "jones",
+    "state": "GA",
+    "verified": false,
+    "name": "Jones County Pickleball Club @ Morris Bank Park",
+    "description": "Come play pickleball at Jones County Pickleball Club @ Morris Bank Park in Gray, GA! There are 14 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Reservations are available. The courts are free. The facility includes amenities like restrooms, water, wheelchair accessibility, lights, and food.",
+    "address": "166 Recreation Rd",
+    "city": "Gray",
+    "latitude": 32.983402,
+    "longitude": -83.520087,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 14,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "4789722360",
+    "website": "https://www.jonescountyga.org/parks-and-rec",
+    "email": "jonescountypickleball@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/y6WajChQ3qFOocLwXBta",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Friday 8am \u2013 5pm"
+  }
+]

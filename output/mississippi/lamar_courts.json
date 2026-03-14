@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "lamar",
+    "state": "MS",
+    "verified": false,
+    "name": "Lamar County Center for Technical Education",
+    "description": "Lamar County Center for Technical Education is a place to play pickleball in Purvis, MS. There are 2 outdoor concrete courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The facility includes amenities like lights. The courts are free.",
+    "address": "41 College Dr",
+    "city": "Purvis",
+    "zip_code": "39475",
+    "latitude": 31.151838,
+    "longitude": -89.416404,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "6014020857",
+    "website": "https://lccte.lamarcountyschools.org/",
+    "photo_url": "https://cdn.filestackcontent.com/1ARDZqQRIGmnuuGG3U8d",
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

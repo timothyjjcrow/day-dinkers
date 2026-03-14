@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "kit carson",
+    "state": "CO",
+    "verified": false,
+    "name": "Farm Credit Pavilion @ Kit Carson County Fairgrounds",
+    "description": "Come play pickleball at Farm Credit Pavilion @ Kit Carson County Fairgrounds in Burlington, CO! There are 4 indoor concrete courts. Tape lines have been laid, and portable nets are available. The facility includes amenities like restrooms and lights. The courts are free.",
+    "address": "815 15th St",
+    "city": "Burlington",
+    "latitude": 39.310071,
+    "longitude": -102.269663,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/FN8QZ1PRewLoxIMw9Ygu",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "shared"
+  }
+]

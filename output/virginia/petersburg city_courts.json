@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "petersburg city",
+    "state": "VA",
+    "verified": false,
+    "name": "Petersburg Family YMCA",
+    "description": "Petersburg Family YMCA is one of the most popular places to play pickleball in Petersburg, VA. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. Reservations are available. Amenities include restrooms, water, and wheelchair accessibility.",
+    "address": "120 Madison St N",
+    "city": "Petersburg",
+    "zip_code": "23803",
+    "latitude": 37.230714,
+    "longitude": -77.398642,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "website": "https://www.ymcarichmond.org/locations/petersburg-family-ymca",
+    "photo_url": "https://cdn.filestackcontent.com/wvmztl6TR2qUNgwprV4i",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

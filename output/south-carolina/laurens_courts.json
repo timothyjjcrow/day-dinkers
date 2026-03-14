@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "laurens",
+    "state": "SC",
+    "verified": false,
+    "name": "Lauren\u2019s County Recreation Park",
+    "description": "Lauren\u2019s County Recreation Park is one of the most popular places to play pickleball in Laurens, SC. There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Players have access to lights. The courts are free.",
+    "address": "409 State Rd S-30-854",
+    "city": "Laurens",
+    "latitude": 34.503314,
+    "longitude": -81.953324,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/OvZrJsWwTCOLR8KHignf",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

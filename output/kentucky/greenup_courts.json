@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "greenup",
+    "state": "KY",
+    "verified": false,
+    "name": "City of Greenup",
+    "description": "City of Greenup is a place to play pickleball in Greenup, KY. There is 1 outdoor concrete court. This is a dedicated court with a permanent net and lines. The court is free.",
+    "address": "1006 Walnut Street",
+    "city": "Greenup",
+    "latitude": 38.574313,
+    "longitude": -82.83251,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "6065854155",
+    "email": "tylor_hampton@yahoo.com",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

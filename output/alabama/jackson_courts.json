@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "jackson",
+    "state": "AL",
+    "verified": false,
+    "name": "Scottsboro Pickleball Center",
+    "description": "Come play pickleball at Scottsboro Pickleball Center in Scottsboro, AL! There are 4 outdoor concrete courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. Players have access to lights and restrooms. The courts are free.",
+    "address": "Bynum Park",
+    "city": "Scottsboro",
+    "latitude": 34.656761,
+    "longitude": -86.04361,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "256-652-4060",
+    "photo_url": "https://cdn.filestackcontent.com/KGpVy2wrQD6KDwpMyGVk",
+    "has_restrooms": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

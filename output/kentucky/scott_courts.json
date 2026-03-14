@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "scott",
+    "state": "KY",
+    "verified": false,
+    "name": "Scott County Pavilion",
+    "description": "Scott County Pavilion is a place to play pickleball in Georgetown, KY. There is 1 indoor wood court. The lines are permanent, but you'll need to bring your own net. Players have access to food, restrooms, water, and wheelchair accessibility. A one-time fee is required to play.",
+    "address": "140 Pavilion Dr",
+    "city": "Georgetown",
+    "zip_code": "40324",
+    "latitude": 38.232404,
+    "longitude": -84.542988,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "photo_url": "https://cdn.filestackcontent.com/55pFAkL2TtOeU7Xm5L5c",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

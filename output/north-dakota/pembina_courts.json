@@ -1,0 +1,18 @@
+[
+  {
+    "county_slug": "pembina",
+    "state": "ND",
+    "verified": false,
+    "name": "Pinafore Park",
+    "description": "Pinafore Park is a place to play pickleball in Cavalier, ND. You'll need to bring your own net. The courts are free.",
+    "address": "Elm Ln",
+    "city": "Cavalier",
+    "zip_code": "58220",
+    "latitude": 48.777349,
+    "longitude": -97.650481,
+    "indoor": false,
+    "fees": "Free",
+    "phone": "0000000000",
+    "nets_provided": false
+  }
+]

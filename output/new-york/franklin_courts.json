@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "franklin",
+    "state": "NY",
+    "verified": false,
+    "name": "West St Arena, Malone",
+    "description": "West St Arena, Malone is a place to play pickleball in Malone, NY. There are 2 indoor courts. The lines are permanent, and portable nets are available. Reservations are available. Amenities include lights. The courts are private.",
+    "address": "129 West St",
+    "city": "Malone",
+    "zip_code": "12953",
+    "latitude": 44.859811,
+    "longitude": -74.297387,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 2,
+    "fees": "Private \u2014 $2.00 per person",
+    "phone": "5185692550",
+    "email": "ambleside1960@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/VSRt1EjTfWXJkB55OWkg",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

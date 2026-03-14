@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "mifflin",
+    "state": "PA",
+    "verified": false,
+    "name": "Mifflin County Middle School",
+    "description": "Mifflin County Middle School is a place to play pickleball in Lewistown, PA. There are 6 outdoor asphalt courts. The lines are permanent, but you'll need to bring your own net. The courts are free. Players have access to restrooms.",
+    "address": "Manor Dr",
+    "city": "Lewistown",
+    "zip_code": "17044",
+    "latitude": 40.594443,
+    "longitude": -77.563321,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "7179946446",
+    "website": "https://www.mcsdk12.org/mcms/",
+    "photo_url": "https://cdn.filestackcontent.com/tBYear4S4KKQ64oVmRYj",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

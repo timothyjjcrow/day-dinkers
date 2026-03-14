@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "cleburne",
+    "state": "AL",
+    "verified": false,
+    "name": "Heflin Recreation Center",
+    "description": "Heflin Recreation Center is a place to play pickleball in Heflin, AL. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms, water, and wheelchair accessibility. The courts are free.",
+    "address": "1228 Coleman Street",
+    "city": "Heflin",
+    "latitude": 33.642891,
+    "longitude": -85.584059,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "2564635434",
+    "website": "https://www.cityofheflin.org/departments/heflin-parks-and-recreation",
+    "photo_url": "https://cdn.filestackcontent.com/CQtLF1kBRKekweJjaFyQ",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

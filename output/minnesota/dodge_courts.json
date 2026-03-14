@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "dodge",
+    "state": "MN",
+    "verified": false,
+    "name": "Veterans Memorial Park",
+    "description": "The portable nets are in place everyday of the week from dawn to dusk.",
+    "address": "7th St NW",
+    "city": "Kasson",
+    "zip_code": "55944",
+    "latitude": 44.036175,
+    "longitude": -92.751518,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "phone": "5076347755",
+    "website": "http://www.cityofkasson.com/",
+    "photo_url": "https://cdn.filestackcontent.com/Z5eae9lUQRmajjXi1GVc",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "hours": "Thursday 8AM to 5PM"
+  }
+]

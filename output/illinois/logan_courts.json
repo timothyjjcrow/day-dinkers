@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "logan",
+    "state": "IL",
+    "verified": false,
+    "name": "Lincoln Park District",
+    "description": "Come play pickleball at Lincoln Park District in Lincoln, IL! There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. A one-time fee is required to play.",
+    "address": "1400 Primm Rd",
+    "city": "Lincoln",
+    "zip_code": "62656",
+    "latitude": 40.133636,
+    "longitude": -89.355396,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "website": "https://lincolnparkdistrict.com/",
+    "photo_url": "https://cdn.filestackcontent.com/r4njlmslRsmu6UHlISaF",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "logan",
+    "state": "IL",
+    "verified": false,
+    "name": "Mount Pulaski North Park",
+    "description": "Mount Pulaski North Park is a place to play pickleball in Mount Pulaski, IL. There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Players have access to lights. The courts are free.",
+    "address": "222 E Flora Ave",
+    "city": "Mount Pulaski",
+    "latitude": 40.018674,
+    "longitude": -89.28461,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/bcbhD1kdTvKd4CpfqzHm",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

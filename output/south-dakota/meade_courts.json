@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "meade",
+    "state": "SD",
+    "verified": false,
+    "name": "Sturgis Community Center",
+    "description": "Sturgis Community Center is a place to play pickleball in Sturgis, SD. There are 4 outdoor courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms, water, and wheelchair accessibility. The courts are private.",
+    "address": "1401 Lazelle St",
+    "city": "Sturgis",
+    "zip_code": "57785",
+    "latitude": 44.416556,
+    "longitude": -103.516095,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Private",
+    "website": "http://www.sturgis-sd.gov/community-center",
+    "photo_url": "https://cdn.filestackcontent.com/EHy3zYsR66JvzXuS2xvl",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

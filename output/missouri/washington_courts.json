@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "washington",
+    "state": "MO",
+    "verified": false,
+    "name": "Kingston High School",
+    "description": "Kingston High School is one of the most popular places to play pickleball in Cadet, MO. There is 1 outdoor wood court. You\u2019ll have to create your own lines and bring your own net. The facility includes amenities like restrooms. The court is free.",
+    "address": "10047 Diamond Rd",
+    "city": "Cadet",
+    "latitude": 38.064529,
+    "longitude": -90.744212,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/TPr4HtlR226311kQmGkR",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

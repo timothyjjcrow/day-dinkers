@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "logan",
+    "state": "OK",
+    "verified": false,
+    "name": "Guthrie Pickleball Courts",
+    "description": "Guthrie Pickleball Courts is a place to play pickleball in Guthrie, OK. There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like lights and wheelchair accessibility.",
+    "address": "719 S 1st St",
+    "city": "Guthrie",
+    "latitude": 35.870971,
+    "longitude": -97.426905,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/kH4by3VUT0a9d25KeeGV",
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

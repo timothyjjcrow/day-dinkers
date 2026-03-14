@@ -1,0 +1,39 @@
+[
+  {
+    "county_slug": "reynolds",
+    "state": "MO",
+    "verified": false,
+    "name": "Fabricated Fields",
+    "description": "This court does not exist and is exists only for testing. It's not a pickleball court. Please do not come here expecting to play pickleball.",
+    "address": "Centerville",
+    "city": "Centerville",
+    "latitude": 37.435048,
+    "longitude": -90.958457,
+    "indoor": false,
+    "photo_url": "https://cdn.filestackcontent.com/PRFN1AOGRGaZrJi5lhVC"
+  },
+  {
+    "county_slug": "reynolds",
+    "state": "MO",
+    "verified": false,
+    "name": "Wilderness Lodge",
+    "description": "Come play pickleball at Wilderness Lodge in Lesterville, MO! There are 4 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Players have access to food, restrooms, and water. You can reserve the courts. The courts are private.",
+    "address": "2331 County Road 342 (Peola Road) Lesterville",
+    "city": "Lesterville",
+    "latitude": 37.419335,
+    "longitude": -90.83367,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Private \u2014 Courts always open to our guests. For day passes just call and book your time.",
+    "phone": "+15733071141",
+    "website": "https://enjoywilderness.com/",
+    "email": "info@enjoywilderness.com",
+    "photo_url": "https://cdn.filestackcontent.com/5FbZfqzDRxagok34SfBf",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

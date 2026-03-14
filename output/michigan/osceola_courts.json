@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "osceola",
+    "state": "MI",
+    "verified": false,
+    "name": "Evart Heritage Park",
+    "description": "Evart Heritage Park is one of the most popular places to play pickleball in Evart, MI. There is 1 outdoor asphalt court. This is a dedicated court with a permanent net and lines. The court is free.",
+    "address": "North Cedar Street & West 4th Street",
+    "city": "Evart",
+    "latitude": 43.904475,
+    "longitude": -85.265805,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "email": "borla80@aol.com",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

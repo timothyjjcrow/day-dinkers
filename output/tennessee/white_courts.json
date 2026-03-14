@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "white",
+    "state": "TN",
+    "verified": false,
+    "name": "Sparta White County Activity Center",
+    "description": "Must be 50 and over",
+    "address": "321 East Bronson Street",
+    "city": "Sparta",
+    "latitude": 35.928333,
+    "longitude": -85.454027,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+19318363663",
+    "website": "https://spartawhitecountyseniorcenter.wordpress.com/",
+    "photo_url": "https://cdn.filestackcontent.com/XyzchvoCS96bPWzPpOlA",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

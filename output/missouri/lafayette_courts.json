@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "lafayette",
+    "state": "MO",
+    "verified": false,
+    "name": "Higginsville Community Center",
+    "description": "Come play pickleball at Higginsville Community Center in Higginsville, MO! There are 3 indoor wood courts. The lines are permanent, and portable nets are available. Players have access to restrooms and water. The courts are free.",
+    "address": "2101 Walnut St",
+    "city": "Higginsville",
+    "zip_code": "64037",
+    "latitude": 39.073997,
+    "longitude": -93.718427,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "website": "https://www.higginsvilleparksandrec.com/",
+    "photo_url": "https://cdn.filestackcontent.com/WOyUBFM8RImFVbsNEriM",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

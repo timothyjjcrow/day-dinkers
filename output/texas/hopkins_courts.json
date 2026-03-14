@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "hopkins",
+    "state": "TX",
+    "verified": false,
+    "name": "Sulphur Springs Pickleball Courts",
+    "description": "Limited seating.",
+    "address": "612 Lincoln Dr",
+    "city": "Sulphur Springs",
+    "latitude": 33.124953,
+    "longitude": -95.620196,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Lights close at midnight.",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/dUtoCIdvQOOvz1jBxCAm",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

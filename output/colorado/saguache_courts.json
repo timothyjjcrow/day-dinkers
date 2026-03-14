@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "saguache",
+    "state": "CO",
+    "verified": false,
+    "name": "Baca Grande POA Tennis/Pickleball Courts",
+    "description": "Baca Grande POA Tennis/Pickleball Courts is a place to play pickleball in Crestone, CO. There are 4 outdoor courts. The lines are permanent, but you'll need to bring your own net. You can reserve the courts. A membership is required to play.",
+    "address": "4496-4498 Ridgecrest",
+    "city": "Crestone",
+    "latitude": 37.925702,
+    "longitude": -105.653664,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Members only",
+    "phone": "4327707170",
+    "website": "https://bacapoa.org/",
+    "email": "wallrobert7@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/cnAtDiATZycC2SQ11SLQ",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

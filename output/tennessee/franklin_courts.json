@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "franklin",
+    "state": "TN",
+    "verified": false,
+    "name": "Winchester City Park",
+    "description": "One dedicated outdoor pickleball court with permanent pickleball net.",
+    "address": "251 Old Estill Springs Road",
+    "city": "Winchester",
+    "latitude": 35.206261,
+    "longitude": -86.126185,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "https://www.winchester-tn.com/",
+    "photo_url": "https://cdn.filestackcontent.com/t7s28usDR8eCtIt7enLD",
+    "has_restrooms": true,
+    "has_water": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated",
+    "hours": "Monday - Friday from 8:00am - 4:30pm 931-967-2532 Facebook Twitter City of Winchester 7 South High Street Winchester, TN 37398 Government Websites by CivicPlus\u00ae Login"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "amelia",
+    "state": "VA",
+    "verified": false,
+    "name": "Amelia War Memorial",
+    "description": "Amelia War Memorial is a place to play pickleball in Amelia Court House, VA. There are 3 indoor courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "16330 Dunn St",
+    "city": "Amelia Court House",
+    "zip_code": "23002",
+    "latitude": 37.339452,
+    "longitude": -77.979527,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Free",
+    "phone": "5402193475",
+    "website": "http://www.ameliacova.com/",
+    "photo_url": "https://cdn.filestackcontent.com/P4QdkQIeSIinW73Ik6C5",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "tyler",
+    "state": "WV",
+    "verified": false,
+    "name": "Sistersville City Park",
+    "description": "Newly built in 2024, outdoor courts are fenced, and adjacent to a children\u2019s playground and outdoor pool.",
+    "address": "820 Chelsea St",
+    "city": "Sistersville",
+    "latitude": 39.562517,
+    "longitude": -80.997683,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+13046521578",
+    "website": "https://www.cityofsistersville.com/park",
+    "photo_url": "https://cdn.filestackcontent.com/GjwbJugxScSgsfG8Qi1y",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

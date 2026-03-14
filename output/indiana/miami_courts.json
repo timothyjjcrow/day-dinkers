@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "miami",
+    "state": "IN",
+    "verified": false,
+    "name": "Peru Pickelball Courts",
+    "description": "Peru Pickelball Courts is a place to play pickleball in Peru, IN. There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Reservations are not available. The courts are free. Players have access to lights and restrooms.",
+    "address": "75 West Canal Street",
+    "city": "Peru",
+    "latitude": 40.749838,
+    "longitude": -86.069427,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+17654739880",
+    "email": "barbtdavidt@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/zl90siwT5SCi6uit6uyw",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "richland",
+    "state": "MT",
+    "verified": false,
+    "name": "Richland County Sports Complex",
+    "description": "Richland County Sports Complex is a place to play pickleball in Sidney, MT. There is 1 indoor concrete and hard court. The lines are permanent, and portable nets are available. You can reserve the court. A one-time fee is required to play. Amenities include restrooms and food.",
+    "address": "1281 South Central Avenue",
+    "city": "Sidney",
+    "latitude": 47.704698,
+    "longitude": -104.165934,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Concrete, Hard",
+    "fees": "Fee required \u2014 $5/hr per person (Min charge $20/hr)",
+    "phone": "406-489-3285",
+    "website": "https://www.facebook.com/groups/6066745460024942",
+    "photo_url": "https://cdn.filestackcontent.com/vkdznrSpT9VrX3BzGMof",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

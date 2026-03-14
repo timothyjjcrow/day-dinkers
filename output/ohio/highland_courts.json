@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "highland",
+    "state": "OH",
+    "verified": false,
+    "name": "Hillsboro Ohio Railroad Park",
+    "description": "www.hillsboropickleball.org",
+    "address": "231 Railroad Street",
+    "city": "Hillsboro",
+    "latitude": 39.205941,
+    "longitude": -83.616291,
+    "indoor": false,
+    "num_courts": 13,
+    "surface_type": "Asphalt",
+    "open_play_schedule": "Visit www.hillsboropickleball.org for        Program Information, including clinics and leagues.",
+    "fees": "Free",
+    "website": "https://www.hillsboropickleball.org/",
+    "email": "hillsboropickleball@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/h2TwR8NCTL28GccjvRJJ",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

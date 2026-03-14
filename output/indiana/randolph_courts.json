@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "randolph",
+    "state": "IN",
+    "verified": false,
+    "name": "Union City Harter Park",
+    "description": "Union City Harter Park is one of the most popular places to play pickleball in Union City, IN. There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms. The courts are free.",
+    "address": "1650 W Division St",
+    "city": "Union City",
+    "latitude": 40.202958,
+    "longitude": -84.831662,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/JmpEmHULTnefPgUI9jnk",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

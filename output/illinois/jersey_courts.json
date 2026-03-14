@@ -1,0 +1,41 @@
+[
+  {
+    "county_slug": "jersey",
+    "state": "IL",
+    "verified": false,
+    "name": "Grafton Pickleball Club",
+    "description": "Grafton Pickleball Club is a place to play pickleball in Grafton, IL. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "1203 Grafton Hills Drive",
+    "city": "Grafton",
+    "latitude": 38.98583,
+    "longitude": -90.420042,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/mJQqffdhQqyEQVZqsZnW",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "jersey",
+    "state": "IL",
+    "verified": false,
+    "name": "Wittman Park",
+    "description": "Wittman Park is a place to play pickleball in Jerseyville, IL. There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "305 N Jefferson St",
+    "city": "Jerseyville",
+    "latitude": 39.122316,
+    "longitude": -90.327464,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://jerseyville-il.us/business_detail_T10_R10.php",
+    "photo_url": "https://cdn.filestackcontent.com/c4HIQ2xsRhiCcjMaVV5i",
+    "nets_provided": true,
+    "court_type": "dedicated",
+    "has_parking": true,
+    "has_restrooms": true
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "martinsville city",
+    "state": "VA",
+    "verified": false,
+    "name": "Spruce Street Park",
+    "description": "Spruce Street Park is a place to play pickleball in Martinsville, VA. There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. Players have access to lights. The courts are free.",
+    "address": "1905 Dundee Ln",
+    "city": "Martinsville",
+    "latitude": 36.662246,
+    "longitude": -79.834467,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/No2mOn8PTIKLZs1dPfgY",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "winston",
+    "state": "AL",
+    "verified": false,
+    "name": "Meek Baptist Church",
+    "description": "Come play pickleball at Meek Baptist Church in Arley, AL! There are 2 indoor hard courts. The lines are permanent, and portable nets are available. The courts cannot be reserved. The courts are private.",
+    "address": "360 Helicon Rd",
+    "city": "Arley",
+    "latitude": 34.083064,
+    "longitude": -87.207002,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Private",
+    "phone": "2056134442",
+    "website": "https://www.meekbc.com/",
+    "photo_url": "https://cdn.filestackcontent.com/ypRoHncUTeO5TunmZMVq",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

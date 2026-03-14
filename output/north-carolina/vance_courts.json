@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "vance",
+    "state": "NC",
+    "verified": false,
+    "name": "Henderson Family YMCA",
+    "description": "Henderson Family YMCA is a place to play pickleball in Henderson, NC. There is 1 indoor court. The lines are permanent, and portable nets are available. A membership is required to play. You can reserve the court.",
+    "address": "380 Ruin Creek Rd",
+    "city": "Henderson",
+    "zip_code": "27536",
+    "latitude": 36.333174,
+    "longitude": -78.447648,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Members only",
+    "phone": "+12524382144",
+    "website": "http://www.hendersonymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/DCjVN0LQThCi3OIQVFm3",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

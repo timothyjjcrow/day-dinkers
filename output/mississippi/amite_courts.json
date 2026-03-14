@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "amite",
+    "state": "MS",
+    "verified": false,
+    "name": "Liberty Baptist Church",
+    "description": "Indoor court in multi-purpose gym.\n\n2 exterior courts are part of multi-purpose area.",
+    "address": "147 Holmes St",
+    "city": "Liberty",
+    "latitude": 31.157475,
+    "longitude": -90.809818,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Schedule with Susan McGehee",
+    "fees": "Private",
+    "phone": "+16014720017",
+    "website": "https://libertybaptistchurchlibertyms.com/",
+    "email": "susantmcgehee@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/1Drg6Lu3TOGBcN6Zyzp7",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "court_type": "shared"
+  }
+]

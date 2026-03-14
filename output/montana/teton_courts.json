@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "teton",
+    "state": "MT",
+    "verified": false,
+    "name": "Choteau Lions Club Recreational Courts",
+    "description": "Choteau Lions Club Recreational Courts is one of the most popular places to play pickleball in Choteau, MT. There are 4 outdoor acrylic and concrete courts. The lines are permanent, and portable nets are available. The facility is wheelchair accessible. The courts are free.",
+    "address": "11 1st Ave SW",
+    "city": "Choteau",
+    "latitude": 47.81061,
+    "longitude": -112.183429,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Acrylic, Concrete",
+    "open_play_schedule": "Sunrise to sunset",
+    "fees": "Free",
+    "website": "https://choteaulions.club",
+    "email": "pickleball@choteaulions.club",
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

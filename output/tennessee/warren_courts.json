@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "warren",
+    "state": "TN",
+    "verified": false,
+    "name": "McMinnville Civic Center",
+    "description": "3 outdoor and indoor courts with permanent nets",
+    "address": "500 Garfield St",
+    "city": "McMinnville",
+    "zip_code": "37110",
+    "latitude": 35.692051,
+    "longitude": -85.787798,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Concrete, Wood",
+    "open_play_schedule": "check playtime scheduler",
+    "fees": "Fee required",
+    "phone": "9314731212",
+    "website": "https://www.mcminnvilletn.gov/departments/parks_and_recreation/civic_center_complex.php",
+    "photo_url": "https://cdn.filestackcontent.com/9JdWswpIQAGVUeK7v5Me",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

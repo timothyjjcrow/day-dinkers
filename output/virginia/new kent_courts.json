@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "new kent",
+    "state": "VA",
+    "verified": false,
+    "name": "Pine Fork Park",
+    "description": "Come play pickleball at Pine Fork Park in Quinton, VA! There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms and lights. The courts are free.",
+    "address": "7600 Bristlecone Boulevard",
+    "city": "Quinton",
+    "latitude": 37.509946,
+    "longitude": -77.097949,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+18049669861",
+    "website": "https://www.co.new-kent.va.us/Facilities/Facility/Details/Pine-Fork-Park-15",
+    "photo_url": "https://cdn.filestackcontent.com/ylPeFFjgSi2pzJMatQS3",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

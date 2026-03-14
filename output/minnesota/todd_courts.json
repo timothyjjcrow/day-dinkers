@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "todd",
+    "state": "MN",
+    "verified": false,
+    "name": "Staples Community Center",
+    "description": "Staples Community Center is a place to play pickleball in Staples, MN. There are 2 indoor hard courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. The facility includes amenities like restrooms.",
+    "address": "Staples Park Department",
+    "city": "Staples",
+    "latitude": 46.358178,
+    "longitude": -94.795451,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Fee required \u2014 $3.00/day for Resident and $5.00/day for Non-Resident",
+    "phone": "(218) 894-2553",
+    "website": "https://staples.govoffice.com/staples_community_center",
+    "photo_url": "https://cdn.filestackcontent.com/Cp2xkGK2QCuQ5KNZUyl8",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Friday 8am-11am"
+  }
+]

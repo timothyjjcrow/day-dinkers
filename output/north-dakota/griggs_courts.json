@@ -1,0 +1,19 @@
+[
+  {
+    "county_slug": "griggs",
+    "state": "ND",
+    "verified": false,
+    "name": "Red Willow Ministries",
+    "description": "Red Willow Ministries is one of the most popular places to play pickleball in Binford, ND. You\u2019ll have to create your own lines and bring your own net. A membership is required to play.",
+    "address": "1651 Jacob Dr",
+    "city": "Binford",
+    "zip_code": "58416",
+    "latitude": 47.649456,
+    "longitude": -98.368943,
+    "indoor": false,
+    "fees": "Members only",
+    "website": "http://www.redwillowministries.com/",
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

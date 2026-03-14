@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "audrain",
+    "state": "MO",
+    "verified": false,
+    "name": "Mexico Area Family YMCA",
+    "description": "Mexico Area Family YMCA is a place to play pickleball in Mexico, MO. There are 7 courts. 3 are indoors and 4 are outdoors. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. A membership is required to play. The courts can be reserved. The facility includes amenities like restrooms.",
+    "address": "1127 Adams St",
+    "city": "Mexico",
+    "zip_code": "65265",
+    "latitude": 39.160516,
+    "longitude": -91.896307,
+    "indoor": false,
+    "num_courts": 7,
+    "fees": "Members only",
+    "phone": "5735811540",
+    "website": "http://www.mexicoymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/IBcfH57xStGv0kdarxIQ",
+    "has_restrooms": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "giles",
+    "state": "TN",
+    "verified": false,
+    "name": "Pulaski Recreation Center",
+    "description": "Pulaski Recreation Center is a place to play pickleball in Pulaski, TN. There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "333 E College St",
+    "city": "Pulaski",
+    "zip_code": "38478",
+    "latitude": 35.195533,
+    "longitude": -87.028536,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Free",
+    "phone": "9012997978",
+    "photo_url": "https://cdn.filestackcontent.com/EMweRr24Sr2Pvg9YO0B6",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

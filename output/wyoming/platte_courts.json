@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "platte",
+    "state": "WY",
+    "verified": false,
+    "name": "Old Junior High Gym",
+    "description": "Come play pickleball at Old Junior High Gym in Wheatland, WY! There are 3 indoor wood courts. The lines are permanent, and portable nets are available. The courts are free. The facility includes amenities like lights, restrooms, and water. The courts cannot be reserved.",
+    "address": "1150 Pine Street",
+    "city": "Wheatland",
+    "latitude": 42.057554,
+    "longitude": -104.956682,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+13073310576",
+    "website": "https://plattecountyrecreation.leagueapps.com/locations",
+    "email": "steve@plattecountyrecreation.com",
+    "photo_url": "https://cdn.filestackcontent.com/Ntl346Y3TnCegf0dSG3F",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

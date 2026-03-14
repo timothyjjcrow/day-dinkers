@@ -1,0 +1,16 @@
+[
+  {
+    "county_slug": "logan",
+    "state": "KS",
+    "verified": false,
+    "name": "Counterfeit Courts",
+    "description": "This court does not exist and is exists only for testing. It's not a pickleball court. Please do not come here expecting to play pickleball.",
+    "address": "Winona",
+    "city": "Winona",
+    "latitude": 39.063341,
+    "longitude": -101.244325,
+    "indoor": false,
+    "photo_url": "https://cdn.filestackcontent.com/7MNo3AJPRV2og0erdxlA",
+    "skill_levels": "beginner"
+  }
+]

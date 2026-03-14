@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "anderson",
+    "state": "KY",
+    "verified": false,
+    "name": "Lawrenceburg Pickleball Courts",
+    "description": "Lawrenceburg Pickleball Courts is one of the most popular places to play pickleball in Lawrenceburg, KY. There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. The courts cannot be reserved.",
+    "address": "753 West Broadway Street",
+    "city": "Lawrenceburg",
+    "latitude": 38.021738,
+    "longitude": -84.90747,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/fHFZp3pRRyNn8KjnvLWe",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

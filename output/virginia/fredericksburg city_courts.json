@@ -1,0 +1,19 @@
+[
+  {
+    "county_slug": "fredericksburg city",
+    "state": "VA",
+    "verified": false,
+    "name": "MWU",
+    "description": "MWU is one of the most popular places to play pickleball in Hazel Hill, VA. There are 2 indoor courts. Tape lines have been laid, and portable nets are available. A one-time fee is required to play.",
+    "address": "Hanover St",
+    "city": "Hazel Hill",
+    "latitude": 38.29762,
+    "longitude": -77.466809,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

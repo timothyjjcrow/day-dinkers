@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "columbia",
+    "state": "AR",
+    "verified": false,
+    "name": "Central Baptist Church",
+    "description": "Central Baptist Church is one of the most popular places to play pickleball in Magnolia, AR. There are 3 indoor courts. The lines are permanent, and portable nets are available. A one-time fee is required to play.",
+    "address": "207 W Union St",
+    "city": "Magnolia",
+    "zip_code": "71753",
+    "latitude": 33.268201,
+    "longitude": -93.241356,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Fee required",
+    "phone": "8707610707",
+    "website": "http://www.cbcmagnolia.org/",
+    "photo_url": "https://cdn.filestackcontent.com/nqeWEeNtST6CbxwRyM4b",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

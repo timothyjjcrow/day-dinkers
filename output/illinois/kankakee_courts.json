@@ -1,0 +1,41 @@
+[
+  {
+    "county_slug": "kankakee",
+    "state": "IL",
+    "verified": false,
+    "name": "Beckman Park",
+    "description": "Beckman Park is among Kankakee, IL's most popular places to play pickleball. There are 3 pickleball courts made with Sport Court's SportGame Pickleball surface, the official surface of USA Pickleball. The courts are open to the public and free to use. To learn more about the safest pickleball surface on the market visit, https://www.courtofsport.com/pickleball-courts/.",
+    "address": "1602 Cobb Blvd",
+    "city": "Kankakee",
+    "latitude": 41.102897,
+    "longitude": -87.846709,
+    "indoor": false,
+    "num_courts": 3,
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/4DBY7dt3RRuYj3GcWXEW",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "kankakee",
+    "state": "IL",
+    "verified": false,
+    "name": "Kankakee Area YMCA",
+    "description": "Come play pickleball at Kankakee Area YMCA in Kankakee, IL! There are 4 courts. 2 are indoors and 2 are outdoors. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "1075 Kennedy Dr",
+    "city": "Kankakee",
+    "zip_code": "60901",
+    "latitude": 41.132472,
+    "longitude": -87.878738,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Members only",
+    "phone": "8159331741",
+    "website": "http://k3ymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/QC0Lcf0QFqjmuSLxj3mC",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

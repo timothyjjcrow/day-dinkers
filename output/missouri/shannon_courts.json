@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "shannon",
+    "state": "MO",
+    "verified": false,
+    "name": "Eminence Elementary School",
+    "description": "Eminence Elementary School is one of the most popular places to play pickleball in Eminence, MO. There are 2 indoor concrete courts. The lines are permanent, but you'll need to bring your own net. The courts are private.",
+    "address": "State Hwy 106",
+    "city": "Eminence",
+    "zip_code": "65466",
+    "latitude": 37.150878,
+    "longitude": -91.314167,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Private",
+    "photo_url": "https://cdn.filestackcontent.com/qmIOWLKSkmnAqGeGVZch",
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

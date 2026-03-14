@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "hancock",
+    "state": "WV",
+    "verified": false,
+    "name": "Starvaggi Park",
+    "description": "Restrooms open during pool season.",
+    "address": "136 Starvaggi Drive",
+    "city": "Weirton",
+    "latitude": 40.412812,
+    "longitude": -80.528815,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "3047978500",
+    "website": "https://www.cityofweirton.com/183/Parks-Recreation",
+    "photo_url": "https://cdn.filestackcontent.com/syxkYcXpSkKACiM74zqo",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

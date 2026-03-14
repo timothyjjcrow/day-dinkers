@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "cass",
+    "state": "IA",
+    "verified": false,
+    "name": "Sunnyside Park",
+    "description": "Come play pickleball at Sunnyside Park in Atlantic, IA! There are 4 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "1000 Sunnyside Ln",
+    "city": "Atlantic",
+    "zip_code": "50022",
+    "latitude": 41.400841,
+    "longitude": -95.027678,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7122433542",
+    "website": "https://www.atlanticiowa.com/atlantic/city-departments/parks-recreation/parks/sunnyside-park/",
+    "photo_url": "https://cdn.filestackcontent.com/47SAXZATVKtPG3fiY7cY",
+    "nets_provided": false,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

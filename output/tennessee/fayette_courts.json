@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "fayette",
+    "state": "TN",
+    "verified": false,
+    "name": "Mt Zion Church Rossville",
+    "description": "Come play pickleball at Mt Zion Church Rossville in Rossville, TN! There is 1 indoor acrylic court. This is a dedicated court with a permanent net and lines. Amenities include restrooms, water, and wheelchair accessibility. The court is free.",
+    "address": "45 Good Springs Loop",
+    "city": "Rossville",
+    "latitude": 35.113028,
+    "longitude": -89.480705,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "phone": "+19012332046",
+    "website": "https://www.facebook.com/p/Mt-Zion-MB-Church-Rossville-100070180394498/",
+    "email": "mrsrita88@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/K2cVbECkSUiqF4hV35fI",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

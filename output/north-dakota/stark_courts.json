@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "stark",
+    "state": "ND",
+    "verified": false,
+    "name": "West River Community Center",
+    "description": "2 tennis courts with pickleball lines painted on each side of the tennis net (4 pickleball courts total)",
+    "address": "2004 Fairway St",
+    "city": "Dickinson",
+    "zip_code": "58601",
+    "latitude": 46.88878,
+    "longitude": -102.815973,
+    "indoor": true,
+    "num_courts": 4,
+    "fees": "Fee required",
+    "phone": "7014562070",
+    "website": "https://westrivercommunitycenter.com/",
+    "photo_url": "https://cdn.filestackcontent.com/P1geePvQzeko69C1IC1j",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "has_ball_machine": true
+  }
+]

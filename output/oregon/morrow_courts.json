@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "morrow",
+    "state": "OR",
+    "verified": false,
+    "name": "Irrigon A.C. Houghton Elem School",
+    "description": "Come play pickleball at Irrigon A.C. Houghton Elem School in Irrigon, OR! There are 2 outdoor hard courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free.",
+    "address": "305 10th St NE",
+    "city": "Irrigon",
+    "zip_code": "97844",
+    "latitude": 45.897016,
+    "longitude": -119.488901,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "5418804051",
+    "website": "https://ach.morrow.k12.or.us/",
+    "photo_url": "https://cdn.filestackcontent.com/KQl6rhx3Qr2qnidx53hw",
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

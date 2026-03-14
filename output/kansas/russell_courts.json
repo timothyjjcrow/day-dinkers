@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "russell",
+    "state": "KS",
+    "verified": false,
+    "name": "Russell Recreation Commission",
+    "description": "Russell Recreation Commission is a place to play pickleball in Russell, KS. There are 4 hard courts. 2 are outdoors and 2 are indoors. These are dedicated courts with permanent lines and nets. Players have access to lights. The courts are free.",
+    "address": "701 Fairway Dr",
+    "city": "Russell",
+    "latitude": 38.892194,
+    "longitude": -98.839907,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7854836966",
+    "website": "https://russellks.myrec.com/info/default.aspx",
+    "email": "director@russellrec.com",
+    "photo_url": "https://cdn.filestackcontent.com/uphq0Fu6RFWyu9r3xFjY",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "faribault",
+    "state": "MN",
+    "verified": false,
+    "name": "Faribault County Fitness Center",
+    "description": "Faribault County Fitness Center is a place to play pickleball in Blue Earth, MN. There are 2 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "320 White Oak Rd",
+    "city": "Blue Earth",
+    "latitude": 43.649203,
+    "longitude": -94.098465,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "5075263376",
+    "website": "https://becity.org/fitness-center/",
+    "photo_url": "https://cdn.filestackcontent.com/vi89rhUqTaqUrvYnvjnk",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "morgan",
+    "state": "WV",
+    "verified": false,
+    "name": "David Henry Memorial Park",
+    "description": "Come play pickleball at David Henry Memorial Park in Berkeley Springs, WV! There are 2 outdoor clay courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms. The courts are free.",
+    "address": "95 Biser St",
+    "city": "Berkeley Springs",
+    "latitude": 39.621356,
+    "longitude": -78.227589,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Clay",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/d8jgEKwXSVBPpk9MxhSA",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

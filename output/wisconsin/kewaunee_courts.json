@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "kewaunee",
+    "state": "WI",
+    "verified": false,
+    "name": "Algoma Community Wellness Center",
+    "description": "Algoma Community Wellness Center is a place to play pickleball in Algoma, WI. There are 3 indoor wood courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "1715 Division St",
+    "city": "Algoma",
+    "latitude": 44.596488,
+    "longitude": -87.445476,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Members only",
+    "phone": "9204877001",
+    "website": "https://algomawolves.org/algoma-community-wellness-center/",
+    "photo_url": "https://cdn.filestackcontent.com/jzcjbzJbTBariOgqzd4n",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "eaton",
+    "state": "MI",
+    "verified": false,
+    "name": "Eaton Rapids Pickleball Courts",
+    "description": "Come play pickleball at Eaton Rapids Pickleball Courts in Eaton Rapids, MI! There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include restrooms.",
+    "address": "805 State St",
+    "city": "Eaton Rapids",
+    "latitude": 42.51135,
+    "longitude": -84.634806,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/9J3s4K5eQiWwMuarMiLj",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "franklin",
+    "state": "IL",
+    "verified": false,
+    "name": "Bob Burton Memorial Tennis Courts",
+    "description": "Bob Burton Memorial Tennis Courts is a place to play pickleball in West Frankfort, IL. There is 1 outdoor concrete court. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The facility includes amenities like restrooms. The court is free.",
+    "address": "1102 E Cleveland St",
+    "city": "West Frankfort",
+    "zip_code": "62896",
+    "latitude": 37.89187,
+    "longitude": -88.914169,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/lOF3gly3SK2tOsQSiofn",
+    "has_restrooms": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "franklin",
+    "state": "IL",
+    "verified": false,
+    "name": "Miners Memorial Park",
+    "description": "Come play pickleball at Miners Memorial Park in Sesser, IL! There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like lights. The courts are free. You can\u2019t reserve the courts.",
+    "address": "301S Park street",
+    "city": "Sesser",
+    "latitude": 38.08964,
+    "longitude": -89.05454,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/qUo7hQ08QWaM3wr0DEJi",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

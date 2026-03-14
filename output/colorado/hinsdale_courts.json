@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "hinsdale",
+    "state": "CO",
+    "verified": false,
+    "name": "Lake City Armory",
+    "description": "Lake City Armory is one of the most popular places to play pickleball in Lake City, CO. There are 3 indoor wood courts. The lines are permanent, and portable nets are available. Reservations are available. The courts are free. Players have access to restrooms, water, and wheelchair accessibility.",
+    "address": "230 N Bluff St",
+    "city": "Lake City",
+    "zip_code": "81235",
+    "latitude": 38.029103,
+    "longitude": -107.318127,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "9376723025",
+    "website": "https://sitesixarmory.com/",
+    "photo_url": "https://cdn.filestackcontent.com/I7YwoT70Rz2CB7OaGkil",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

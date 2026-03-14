@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "crawford",
+    "state": "WI",
+    "verified": false,
+    "name": "Hoffman Hall Recreation Center",
+    "description": "Come play pickleball at Hoffman Hall Recreation Center in Prairie du Chien, WI! There are 3 outdoor courts. The lines are permanent, but you'll need to bring your own net. Players have access to lights.",
+    "address": "1600 S Wacouta Ave",
+    "city": "Prairie du Chien",
+    "zip_code": "53821",
+    "latitude": 43.031288,
+    "longitude": -91.141716,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "phone": "6083062985",
+    "website": "https://pdc.recdesk.com/Community/Home",
+    "email": "rschmidt@prairieduchien-wi.gov",
+    "photo_url": "https://cdn.filestackcontent.com/AejpXOmxQtm86OMewev9",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

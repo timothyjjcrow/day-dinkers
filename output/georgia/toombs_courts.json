@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "toombs",
+    "state": "GA",
+    "verified": false,
+    "name": "Vidalia Recreation Department",
+    "description": "Vidalia Recreation Department is a place to play pickleball in Vidalia, GA. There are 8 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like restrooms and lights.",
+    "address": "102 Stockyard Rd",
+    "city": "Vidalia",
+    "zip_code": "30474",
+    "latitude": 32.209626,
+    "longitude": -82.386342,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "https://www.vidaliaga.gov/parksrec",
+    "photo_url": "https://cdn.filestackcontent.com/QOPC86JJQraFv6bJLxGs",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

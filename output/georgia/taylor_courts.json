@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "taylor",
+    "state": "GA",
+    "verified": false,
+    "name": "Richard Parks Tennis Courts",
+    "description": "Richard Parks Tennis Courts is one of the most popular places to play pickleball in Reynolds, GA. There are 2 outdoor asphalt courts. You\u2019ll have to create your own lines and bring your own net. The courts are free. The facility includes amenities like restrooms.",
+    "address": "5 Armory Dr",
+    "city": "Reynolds",
+    "zip_code": "31076",
+    "latitude": 32.560883,
+    "longitude": -84.101601,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "4783912461",
+    "photo_url": "https://cdn.filestackcontent.com/ULWUtOLEQmGRsovnYoTE",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "shared"
+  }
+]

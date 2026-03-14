@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "sumter",
+    "state": "GA",
+    "verified": false,
+    "name": "The Columns at Boone Park",
+    "description": "The Columns at Boone Park is a place to play pickleball in Americus, GA. There are 8 outdoor hard courts. These are dedicated courts with permanent lines and nets. The facility includes amenities like lights. The courts are free.",
+    "address": "408 Rucker Street",
+    "city": "Americus",
+    "latitude": 32.09008,
+    "longitude": -84.238806,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "2299244878",
+    "website": "http://www.scprd.org",
+    "photo_url": "https://cdn.filestackcontent.com/2ZEztmPwRgSu1MN792Vt",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

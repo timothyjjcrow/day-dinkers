@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "huntingdon",
+    "state": "PA",
+    "verified": false,
+    "name": "Huntingdon Community Center",
+    "description": "Huntingdon Community Center is one of the most popular places to play pickleball in Huntingdon, PA. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. Players have access to restrooms, water, youth programming, and wheelchair accessibility. The courts are private.",
+    "address": "310 5th St",
+    "city": "Huntingdon",
+    "zip_code": "16652",
+    "latitude": 40.485955,
+    "longitude": -78.011215,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Private \u2014 $5",
+    "phone": "+18146434241",
+    "website": "https://www.huntcommunitycenter.org/pickleballform.html",
+    "photo_url": "https://cdn.filestackcontent.com/6ucdxO6OQimxXLUkzzcr",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

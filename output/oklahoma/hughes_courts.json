@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "hughes",
+    "state": "OK",
+    "verified": false,
+    "name": "Stuart School",
+    "description": "Come play pickleball at Stuart School in Stuart, OK! There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. The facility includes amenities like restrooms and water. The courts are free.",
+    "address": "8837 4th St",
+    "city": "Stuart",
+    "zip_code": "74570",
+    "latitude": 34.898169,
+    "longitude": -96.094084,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Free",
+    "phone": "9184240362",
+    "website": "http://www.stuart.k12.ok.us/",
+    "photo_url": "https://cdn.filestackcontent.com/ksnWrI8xSbKLCjhRyzeo",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

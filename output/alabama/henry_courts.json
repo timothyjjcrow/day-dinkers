@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "henry",
+    "state": "AL",
+    "verified": false,
+    "name": "Douglas Park",
+    "description": "Come play pickleball at Douglas Park in Headland, AL! There are 2 outdoor hard courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts cannot be reserved. The facility includes amenities like restrooms and water. The courts are free.",
+    "address": "312 E Main St",
+    "city": "Headland",
+    "zip_code": "36345",
+    "latitude": 31.360394,
+    "longitude": -85.353366,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+13347855600",
+    "website": "https://www.headlandalabama.org/community/parks-facilities/douglas-park",
+    "photo_url": "https://cdn.filestackcontent.com/5KHWFuwqRvWImRnijRLk",
+    "has_restrooms": true,
+    "has_water": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "kodiak island borough",
+    "state": "AK",
+    "verified": false,
+    "name": "Ice Rink & Baranof Park",
+    "description": "Ice Rink & Baranof Park is a place to play pickleball in Kodiak, AK. There are 2 outdoor courts. The lines are permanent, and portable nets are available. A one-time fee is required to play.",
+    "address": "1222 Chichenof St",
+    "city": "Kodiak",
+    "zip_code": "99615",
+    "latitude": 57.796264,
+    "longitude": -152.388211,
+    "indoor": false,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "phone": "9075391508",
+    "photo_url": "https://cdn.filestackcontent.com/n63zTgKZQQm94KxLz5oS",
+    "nets_provided": true,
+    "skill_levels": "advanced",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "kodiak island borough",
+    "state": "AK",
+    "verified": false,
+    "name": "North Star School",
+    "description": "North Star School is a place to play pickleball in Kodiak, AK. There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. A membership is required to play.",
+    "address": "961 Mallard Way",
+    "city": "Kodiak",
+    "zip_code": "99615",
+    "latitude": 57.821429,
+    "longitude": -152.365177,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "9075391508",
+    "website": "https://www.kibsd.org/northstar/",
+    "photo_url": "https://cdn.filestackcontent.com/JfZKndKlRLuqidLAJfLz",
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

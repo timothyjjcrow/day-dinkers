@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "lewis",
+    "state": "TN",
+    "verified": false,
+    "name": "Natchez Trace RV Campground",
+    "description": "Natchez Trace RV Campground is a place to play pickleball in Hohenwald, TN. There are 2 outdoor courts. The lines are permanent, but you'll need to bring your own net. A one-time fee is required to play. Players have access to lights.",
+    "address": "1362 Napier Rd",
+    "city": "Hohenwald",
+    "zip_code": "38462",
+    "latitude": 35.434102,
+    "longitude": -87.47622,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "phone": "9317963212",
+    "website": "https://thousandtrails.com/tennessee/natchez-trace-rv-campground/",
+    "photo_url": "https://cdn.filestackcontent.com/zHOmL0BBQnwsoKw3gbNA",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated",
+    "has_restrooms": true
+  }
+]

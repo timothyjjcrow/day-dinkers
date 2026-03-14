@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "vinton",
+    "state": "OH",
+    "verified": false,
+    "name": "Vinton County Middle School",
+    "description": "Vinton County Middle School is one of the most popular places to play pickleball in McArthur, OH. There is 1 indoor court. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "63780 Locker Plant Rd",
+    "city": "McArthur",
+    "zip_code": "45651",
+    "latitude": 39.252981,
+    "longitude": -82.495031,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Members only",
+    "website": "https://www.vinton.k12.oh.us/vintoncountymiddleschool_home.aspx",
+    "photo_url": "https://cdn.filestackcontent.com/BUNJfkOURsuT1XMlpB6o",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

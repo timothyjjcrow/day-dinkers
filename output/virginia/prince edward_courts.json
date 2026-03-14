@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "prince edward",
+    "state": "VA",
+    "verified": false,
+    "name": "Prince Edward High School",
+    "description": "Prince Edward High School is a place to play pickleball in Farmville, VA. There are 6 outdoor courts. You\u2019ll have to create your own lines and bring your own net. A membership is required to play.",
+    "address": "1482 Zion Hill Rd",
+    "city": "Farmville",
+    "zip_code": "23901",
+    "latitude": 37.266208,
+    "longitude": -78.399605,
+    "indoor": false,
+    "num_courts": 6,
+    "fees": "Members only",
+    "phone": "4346079668",
+    "photo_url": "https://cdn.filestackcontent.com/fHyO9qqiSEeyZDvLfvOD",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "shared"
+  },
+  {
+    "county_slug": "prince edward",
+    "state": "VA",
+    "verified": false,
+    "name": "Worsham Baptist Church",
+    "description": "Worsham Baptist Church is a place to play pickleball in Farmville, VA. There are 3 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "6708 Farmville Rd",
+    "city": "Farmville",
+    "zip_code": "23901",
+    "latitude": 37.224122,
+    "longitude": -78.441782,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Members only",
+    "phone": "434392345",
+    "website": "http://www.worshambaptistchurch.org/",
+    "photo_url": "https://cdn.filestackcontent.com/KLR8VEyITb2HGUqg9iY0",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

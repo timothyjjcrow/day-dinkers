@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "greene",
+    "state": "VA",
+    "verified": false,
+    "name": "Greene County Community Park",
+    "description": "Greene County Community Park is a place to play pickleball in Ruckersville, VA. There are 3 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. A one-time fee is required to play.",
+    "address": "512 Jeri Allen Way",
+    "city": "Ruckersville",
+    "latitude": 38.274531,
+    "longitude": -78.417614,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Fee required \u2014 $3.00/session",
+    "phone": "+14344226059",
+    "website": "http://www.playgreene.com/",
+    "photo_url": "https://cdn.filestackcontent.com/gjPkw2gcRGWKsK7fgLr3",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

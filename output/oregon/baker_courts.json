@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "baker",
+    "state": "OR",
+    "verified": false,
+    "name": "Baker County YMCA Gymnasium",
+    "description": "Baker County YMCA Gymnasium is one of the most popular places to play pickleball in Baker City, OR. There are 3 indoor wood courts. Tape lines have been laid, and portable nets are available. Amenities include restrooms and water. A one-time fee is required to play.",
+    "address": "2010 Church St",
+    "city": "Baker City",
+    "latitude": 44.779291,
+    "longitude": -117.831628,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Fee required \u2014 $2 per person",
+    "phone": "5415239622",
+    "website": "https://www.bakerymca.org/",
+    "email": "Poberlander32@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/9mA2Mgy2Q6GieLODcDy4",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "shared"
+  }
+]

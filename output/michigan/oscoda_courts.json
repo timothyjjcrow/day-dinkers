@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "oscoda",
+    "state": "MI",
+    "verified": false,
+    "name": "Fairview Pickleball Club",
+    "description": "Come play pickleball at Fairview Pickleball Club in Fairview, MI! There are 2 outdoor asphalt courts. The lines are permanent, but you'll need to bring your own net. You can\u2019t reserve the courts. Amenities include restrooms and water. The courts are free.",
+    "address": "Boney Park",
+    "city": "Fairview",
+    "latitude": 44.724479,
+    "longitude": -84.04717,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/TZgY2sPlRxWCjKHyUqTn",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

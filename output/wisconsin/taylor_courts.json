@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "taylor",
+    "state": "WI",
+    "verified": false,
+    "name": "First Baptist Church Gym",
+    "description": "First Baptist Church Gym is a place to play pickleball in Medford, WI. There are 3 indoor hard courts. Tape lines have been laid, and portable nets are available. The courts are free. The facility includes amenities like restrooms, water, and wheelchair accessibility.",
+    "address": "751 Grace Way",
+    "city": "Medford",
+    "latitude": 45.155006,
+    "longitude": -90.335971,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "https://www.fbcmedford.com",
+    "photo_url": "https://cdn.filestackcontent.com/7RHWi7HmSxuyjBUqP7A9",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

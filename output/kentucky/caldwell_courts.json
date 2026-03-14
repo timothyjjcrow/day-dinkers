@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "caldwell",
+    "state": "KY",
+    "verified": false,
+    "name": "Princeton City/ County Park",
+    "description": "Come play pickleball at Princeton City/ County Park in Princeton, KY! There are 4 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "200 Baker Hill Road",
+    "city": "Princeton",
+    "latitude": 37.120326,
+    "longitude": -87.862312,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Open play",
+    "fees": "Free",
+    "phone": "270-365-9575",
+    "website": "https://www.princetonky.us/parks-and-recreations",
+    "photo_url": "https://cdn.filestackcontent.com/05SdlzBnTpOPghKG9zgd",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

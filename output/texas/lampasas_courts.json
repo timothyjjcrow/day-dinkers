@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "lampasas",
+    "state": "TX",
+    "verified": false,
+    "name": "Putters and gutters Lampasas",
+    "description": "Putters and gutters Lampasas is a place to play pickleball in Lampasas, TX. There are 2 indoor wood courts. The lines are permanent, and portable nets are available. The courts are free. You can reserve the courts.",
+    "address": "2341 Hwy 281",
+    "city": "Lampasas",
+    "latitude": 31.047249,
+    "longitude": -98.180158,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "512-564-5224",
+    "website": "https://puttersandgutters.com/pickleball/",
+    "photo_url": "https://cdn.filestackcontent.com/W7ndgyXnTcu0uKNHY5W5",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

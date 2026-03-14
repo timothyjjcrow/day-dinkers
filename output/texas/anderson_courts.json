@@ -1,0 +1,18 @@
+[
+  {
+    "county_slug": "anderson",
+    "state": "TX",
+    "verified": false,
+    "name": "Johnson/Wakefield",
+    "description": "Johnson/Wakefield is a place to play pickleball in Frankston, TX. There is 1 outdoor court. This is a dedicated court with a permanent net and lines. The court is private.",
+    "address": "Frankston",
+    "city": "Frankston",
+    "latitude": 32.052661,
+    "longitude": -95.506346,
+    "indoor": false,
+    "num_courts": 1,
+    "fees": "Private",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

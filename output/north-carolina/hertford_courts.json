@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "hertford",
+    "state": "NC",
+    "verified": false,
+    "name": "Beechwood Country Club",
+    "description": "Beechwood Country Club is one of the most popular places to play pickleball in Ahoskie, NC. There are 3 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Players have access to food and restrooms. A membership is required to play.",
+    "address": "205 Country Club Rd",
+    "city": "Ahoskie",
+    "zip_code": "27910",
+    "latitude": 36.364896,
+    "longitude": -77.00863,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Asphalt",
+    "fees": "Members only",
+    "phone": "2523329707",
+    "website": "http://www.beechwoodcc.com/",
+    "photo_url": "https://cdn.filestackcontent.com/hhpmwbNFTE2HFWLZe0lC",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

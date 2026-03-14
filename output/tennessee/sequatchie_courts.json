@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "sequatchie",
+    "state": "TN",
+    "verified": false,
+    "name": "John Griswold Recreation Park",
+    "description": "John Griswold Recreation Park is a place to play pickleball in Dunlap, TN. There are 5 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "209 John Burch Rd W",
+    "city": "Dunlap",
+    "latitude": 35.342982,
+    "longitude": -85.416739,
+    "indoor": false,
+    "num_courts": 5,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/KnlANzjWRxiBkYyeChNY",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

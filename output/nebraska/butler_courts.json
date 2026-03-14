@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "butler",
+    "state": "NE",
+    "verified": false,
+    "name": "David City Auditorium",
+    "description": "Come play pickleball at David City Auditorium in David City, NE! There is 1 indoor wood court. The lines are permanent, and portable nets are available. The court is free.",
+    "address": "699 Kansas St",
+    "city": "David City",
+    "latitude": 41.245313,
+    "longitude": -97.12586,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+14023673914",
+    "website": "https://www.davidcityne.com/vnews/display.v/ART/5d9e4a1e1586c",
+    "photo_url": "https://cdn.filestackcontent.com/7rnYCoySYK8lBfRFkHw5",
+    "nets_provided": true,
+    "court_type": "dedicated",
+    "has_parking": true,
+    "has_restrooms": true
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "coffey",
+    "state": "KS",
+    "verified": false,
+    "name": "Jones Park",
+    "description": "Come play pickleball at Jones Park in Gridley, KS! There are 2 outdoor courts. The lines are permanent, but you'll need to bring your own net. The courts are free. Players have access to restrooms.",
+    "address": "307 Main St",
+    "city": "Gridley",
+    "zip_code": "66852",
+    "latitude": 38.096698,
+    "longitude": -95.882735,
+    "indoor": false,
+    "num_courts": 2,
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/S8xwdrz3QViIoEUD5AIO",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

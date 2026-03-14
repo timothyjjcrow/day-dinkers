@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "elbert",
+    "state": "GA",
+    "verified": false,
+    "name": "McWilliams park",
+    "description": "McWilliams park is a place to play pickleball in Elberton, GA. There are 8 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Amenities include lights. The courts are free.",
+    "address": "1041 Mobley Hill Rd",
+    "city": "Elberton",
+    "latitude": 34.089606,
+    "longitude": -82.832273,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "7062130749",
+    "website": "https://www.elbertparksandrecreation.com",
+    "photo_url": "https://cdn.filestackcontent.com/CZ8uyYrUSLSz5WrHIkrp",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

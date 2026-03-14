@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "perry",
+    "state": "AR",
+    "verified": false,
+    "name": "Perryville City Park",
+    "description": "Perryville City Park is a place to play pickleball in Perryville, AR. There are 3 outdoor hard courts. These are dedicated courts with permanent lines and nets. Amenities include lights. The courts are free.",
+    "address": "801 AR-10",
+    "city": "Perryville",
+    "latitude": 34.997522,
+    "longitude": -92.795741,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "https://www.cityofperryville.com/641/PickleballTennis",
+    "photo_url": "https://cdn.filestackcontent.com/ZA1ruX5T2bmnljqNt4tw",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

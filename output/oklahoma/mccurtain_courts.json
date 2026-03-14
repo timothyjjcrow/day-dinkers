@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "mccurtain",
+    "state": "OK",
+    "verified": false,
+    "name": "Pickle, Putt, Pour",
+    "description": "Pickle, Putt, Pour is one of the most popular places to play pickleball in Broken Bow, OK. There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Amenities include food, restrooms, water, lights, and trainers or lessons. A one-time fee is required to play.",
+    "address": "242 Stevens Gap Road",
+    "city": "Broken Bow",
+    "latitude": 34.165379,
+    "longitude": -94.754123,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Fee required \u2014 5$",
+    "phone": "2086703086",
+    "website": "https://pickleputtpour.com",
+    "email": "Jjones@oubremedical.com",
+    "photo_url": "https://cdn.filestackcontent.com/0rnkRe0yRTCzQLQQMfmD",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

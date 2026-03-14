@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "gregory",
+    "state": "SD",
+    "verified": false,
+    "name": "Gregory SD Pickleball Courts",
+    "description": "Come play pickleball at Gregory SD Pickleball Courts in Gregory, SD! There are 4 outdoor acrylic and hard courts. These are dedicated courts with permanent lines and nets. Players have access to lights. The courts are free.",
+    "address": "215 E 12th St",
+    "city": "Gregory",
+    "latitude": 43.239054,
+    "longitude": -99.431187,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Acrylic, Hard",
+    "fees": "Free",
+    "phone": "+16058358790",
+    "email": "laura@cityofgregory.com",
+    "photo_url": "https://cdn.filestackcontent.com/EhbS4tIFQaifKAhyidtD",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "owyhee",
+    "state": "ID",
+    "verified": false,
+    "name": "Marsing Elementary School",
+    "description": "Come play pickleball at Marsing Elementary School in Marsing, ID! There are 2 indoor wood courts. The lines are permanent, and portable nets are available. Players have access to restrooms.",
+    "address": "207 8th Ave W",
+    "city": "Marsing",
+    "latitude": 43.542597,
+    "longitude": -116.813155,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "phone": "+12086495411",
+    "website": "https://es.marsingschools.org/",
+    "photo_url": "https://cdn.filestackcontent.com/YJ6jQ9oCSh6bEjN2Dzv4",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

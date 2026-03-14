@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "cloud",
+    "state": "KS",
+    "verified": false,
+    "name": "Pickleball Palooza on Main Street",
+    "description": "Pickleball Palooza on Main Street is one of the most popular places to play pickleball in Glasco, KS. There is 1 outdoor hard court. This is a dedicated court with a permanent net and lines. You can\u2019t reserve the court. The court is free.",
+    "address": "Main Street",
+    "city": "Glasco",
+    "latitude": 39.361112,
+    "longitude": -97.841493,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7855682166",
+    "website": "https://facebook.com/events/s/pickleball-palooza-a-city-of-g/595",
+    "photo_url": "https://cdn.filestackcontent.com/PbCqXaxXQwWJXRbRb9sf",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

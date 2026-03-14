@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "switzerland",
+    "state": "IN",
+    "verified": false,
+    "name": "Ogle Park",
+    "description": "Ogle Park is one of the most popular places to play pickleball in Vevay, IN. There are 3 outdoor clay and concrete courts. These are dedicated courts with permanent lines and nets. Players have access to water and restrooms. The courts are free.",
+    "address": "100 Ferry street Ferry St",
+    "city": "Vevay",
+    "latitude": 38.745643,
+    "longitude": -85.064542,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Clay, Concrete",
+    "fees": "Free",
+    "phone": "+18124273131",
+    "website": "https://vevaytownhall.org/contact/",
+    "photo_url": "https://cdn.filestackcontent.com/5d3tRUDCQnOcAQocMzG6",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

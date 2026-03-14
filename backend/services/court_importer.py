@@ -16,8 +16,8 @@ from backend.services.court_payloads import (
     normalize_court_payload,
 )
 
-
 COURT_DATA_DIR = Path(__file__).resolve().parent.parent / 'data' / 'courts' / 'ca'
+OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / 'output'
 
 
 def _identity_key(court_data):
@@ -44,7 +44,43 @@ def list_county_files():
     return sorted(path.stem for path in COURT_DATA_DIR.glob('*.json') if path.is_file())
 
 
-def import_courts_payload(courts_payload, county_slug=None, commit=True):
+def load_state_file(state_slug):
+    """Load the combined courts file for a state from output/<state>/."""
+    state_dir = OUTPUT_DIR / state_slug
+    combined_path = state_dir / f'{state_slug}_courts.json'
+    if combined_path.exists():
+        with combined_path.open('r', encoding='utf-8') as handle:
+            payload = json.load(handle)
+        if isinstance(payload, list):
+            return payload
+    # Fallback: load and merge all county files in the state directory
+    if not state_dir.exists():
+        raise FileNotFoundError(f'State data directory not found: {state_dir}')
+    all_courts = []
+    for county_file in sorted(state_dir.glob('*_courts.json')):
+        if county_file.name == f'{state_slug}_courts.json':
+            continue
+        with county_file.open('r', encoding='utf-8') as handle:
+            data = json.load(handle)
+        if isinstance(data, list):
+            all_courts.extend(data)
+    if not all_courts:
+        raise FileNotFoundError(f'No court data files found in: {state_dir}')
+    return all_courts
+
+
+def list_state_dirs():
+    """List state slugs that have data directories in output/."""
+    if not OUTPUT_DIR.exists():
+        return []
+    return sorted(
+        d.name for d in OUTPUT_DIR.iterdir()
+        if d.is_dir() and not d.name.startswith('.')
+    )
+
+
+def import_courts_payload(courts_payload, county_slug=None, commit=True,
+                          skip_bounds_check=False):
     """Validate and upsert courts. Returns import stats."""
     if not isinstance(courts_payload, list):
         raise ValueError('Court payload must be a list.')
@@ -75,7 +111,7 @@ def import_courts_payload(courts_payload, county_slug=None, commit=True):
             errors.append(f'{title}: {", ".join(item_errors)}')
             continue
 
-        if not is_point_within_county_bounds(
+        if not skip_bounds_check and not is_point_within_county_bounds(
             court_data.get('latitude'),
             court_data.get('longitude'),
             court_data.get('county_slug'),
@@ -155,3 +191,18 @@ def import_county_from_file(file_path, county_slug=None, commit=True):
 def import_county_slug(county_slug, commit=True):
     payload, normalized_slug = load_county_file(county_slug)
     return import_courts_payload(payload, county_slug=normalized_slug, commit=commit)
+
+
+def import_state(state_slug, commit=True):
+    """Import all courts for a state from its output directory.
+
+    Non-CA states skip county bounds validation since we only have
+    California bounds data.
+    """
+    payload = load_state_file(state_slug)
+    skip_bounds = (state_slug != 'california')
+    return import_courts_payload(
+        payload,
+        commit=commit,
+        skip_bounds_check=skip_bounds,
+    )

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "edwards",
+    "state": "IL",
+    "verified": false,
+    "name": "West Salem Charles St. Park",
+    "description": "West Salem Charles St. Park is one of the most popular places to play pickleball in West Salem, IL. There are 2 outdoor concrete courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "S Charles St",
+    "city": "West Salem",
+    "zip_code": "62476",
+    "latitude": 38.519038,
+    "longitude": -88.009805,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "6183087514",
+    "photo_url": "https://cdn.filestackcontent.com/OpGU9rinQJugDIKqGfc4",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

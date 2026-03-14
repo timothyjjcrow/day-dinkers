@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "walsh",
+    "state": "ND",
+    "verified": false,
+    "name": "Minto City Park",
+    "description": "Minto City Park is one of the most popular places to play pickleball in Minto, ND. There is 1 outdoor concrete court. This is a dedicated court with a permanent net and lines. The court is free.",
+    "address": "826 2nd St",
+    "city": "Minto",
+    "latitude": 48.284196,
+    "longitude": -97.373026,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+17012483231",
+    "photo_url": "https://cdn.filestackcontent.com/Onm4vrv6T1iaq1IdRuaK",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

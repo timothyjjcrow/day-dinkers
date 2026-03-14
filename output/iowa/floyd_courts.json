@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "floyd",
+    "state": "IA",
+    "verified": false,
+    "name": "Sportsmen\u2019s Park",
+    "description": "Sportsmen\u2019s Park is a place to play pickleball in Charles City, IA. There are 2 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. Players have access to lights.",
+    "address": "15th Avenue",
+    "city": "Charles City",
+    "latitude": 43.07702,
+    "longitude": -92.66897,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/WFDHOhk2TRarI6Y6EBP9",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

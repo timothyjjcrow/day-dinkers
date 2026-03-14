@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "palo alto",
+    "state": "IA",
+    "verified": false,
+    "name": "Soper Park",
+    "description": "Soper Park is one of the most popular places to play pickleball in Emmetsburg, IA. There is 1 outdoor concrete court. This is a dedicated court with a permanent net and lines. The court is free.",
+    "address": "601-699 Lake St",
+    "city": "Emmetsburg",
+    "latitude": 43.115172,
+    "longitude": -94.679573,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/NRmMNagmSd6HdCLFIQiX",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

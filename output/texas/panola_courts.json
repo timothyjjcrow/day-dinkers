@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "panola",
+    "state": "TX",
+    "verified": false,
+    "name": "Central Baptist",
+    "description": "Central Baptist is a place to play pickleball in Carthage, TX. There is 1 indoor hard court. The lines are permanent, and portable nets are available. You can\u2019t reserve the court. The court is private.",
+    "address": "220 West Sabine St Carthage",
+    "city": "Carthage",
+    "latitude": 32.156717,
+    "longitude": -94.340378,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Hard",
+    "fees": "Private",
+    "phone": "903-692-1975",
+    "website": "http://Centralcarthage.com",
+    "photo_url": "https://cdn.filestackcontent.com/WuhQjfn0SNqhGGDhEM7g",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

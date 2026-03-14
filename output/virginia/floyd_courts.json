@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "floyd",
+    "state": "VA",
+    "verified": false,
+    "name": "Green Acres Resort",
+    "description": "Green Acres Resort is one of the most popular places to play pickleball in Floyd, VA. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Players have access to lights, restrooms, and water. The courts are private.",
+    "address": "400 Baker Street Floyd",
+    "city": "Floyd",
+    "latitude": 36.90832,
+    "longitude": -80.31386,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Private \u2014 $10 for 2 hours",
+    "phone": "+15407454273",
+    "website": "https://greenacresresort.com",
+    "email": "rptondi@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/tsXu22pCRJkvhOUWoMMZ",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

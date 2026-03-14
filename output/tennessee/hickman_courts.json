@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "hickman",
+    "state": "TN",
+    "verified": false,
+    "name": "Paddle Creek Resort",
+    "description": "Come play pickleball at Paddle Creek Resort in Bon Aqua, TN! There are 3 indoor clay courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include restrooms.",
+    "address": "7480 Tennessee 100",
+    "city": "Bon Aqua",
+    "latitude": 35.933317,
+    "longitude": -87.209814,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Clay",
+    "fees": "Free",
+    "website": "https://wilkevacationhome.lodgify.com/",
+    "photo_url": "https://cdn.filestackcontent.com/TcoKvCs2TtN5RqYW2nAh",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

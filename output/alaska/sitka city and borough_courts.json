@@ -1,0 +1,41 @@
+[
+  {
+    "county_slug": "sitka city and borough",
+    "state": "AK",
+    "verified": false,
+    "name": "Cescent Harbor Park",
+    "description": "Come play pickleball at Cescent Harbor Park in Sitka, AK! There is 1 outdoor asphalt court. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The court is free. You can\u2019t reserve the court.",
+    "address": "810 Lincoln St",
+    "city": "Sitka",
+    "latitude": 57.050707,
+    "longitude": -135.323798,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/QyjwKz1pROColfrapFtK",
+    "skill_levels": "advanced",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "sitka city and borough",
+    "state": "AK",
+    "verified": false,
+    "name": "The Hames Center",
+    "description": "Come play pickleball at The Hames Center in Sitka, AK! There are 2 indoor courts. The lines are permanent, and portable nets are available. A one-time fee is required to play.",
+    "address": "121 John Brady Dr",
+    "city": "Sitka",
+    "latitude": 57.052727,
+    "longitude": -135.322163,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Fee required",
+    "phone": "9077387529",
+    "website": "http://www.hamescenter.org/",
+    "photo_url": "https://cdn.filestackcontent.com/jtnqgvsKSVpQME6xo6KG",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Mon 5am-9am"
+  }
+]

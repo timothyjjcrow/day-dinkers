@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "colbert",
+    "state": "AL",
+    "verified": false,
+    "name": "Gattman Park",
+    "description": "The gym has other activities but play time scould change as seasonal sports begin or end.",
+    "address": "901 Gattman Park Dr",
+    "city": "Muscle Shoals",
+    "latitude": 34.737169,
+    "longitude": -87.65873,
+    "indoor": true,
+    "num_courts": 6,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+12568262605",
+    "photo_url": "https://cdn.filestackcontent.com/YROwhgkXTi2ORrmvpV9z",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

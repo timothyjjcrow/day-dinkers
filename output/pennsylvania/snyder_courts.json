@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "snyder",
+    "state": "PA",
+    "verified": false,
+    "name": "Middlecreek Area Community Center",
+    "description": "Come play pickleball at Middlecreek Area Community Center in Beaver Springs, PA! There are 3 indoor wood courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. Amenities include restrooms, water, and wheelchair accessibility.",
+    "address": "67 Elm St.",
+    "city": "Beaver Springs",
+    "latitude": 40.74362,
+    "longitude": -77.20809,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "phone": "+15706582276",
+    "website": "http://www.maccrec.org",
+    "photo_url": "https://cdn.filestackcontent.com/dVGJ6iR6Tmzdz8kdVtSg",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

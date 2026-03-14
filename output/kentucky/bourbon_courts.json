@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "bourbon",
+    "state": "KY",
+    "verified": false,
+    "name": "Bourbon County YMCA",
+    "description": "Bourbon County YMCA is a place to play pickleball in Paris, KY. There are 5 courts. 3 are indoors and 2 are outdoors. The lines are permanent, but you'll need to bring your own net. A membership is required to play. Amenities include restrooms and water.",
+    "address": "917 Main St",
+    "city": "Paris",
+    "zip_code": "40361",
+    "latitude": 38.208788,
+    "longitude": -84.253427,
+    "indoor": false,
+    "num_courts": 5,
+    "fees": "Members only",
+    "phone": "8593211541",
+    "photo_url": "https://cdn.filestackcontent.com/fKTXTIDgQ1aUWiklFSfg",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

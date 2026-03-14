@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "campbell",
+    "state": "WY",
+    "verified": false,
+    "name": "Campbell County Rec Center",
+    "description": "Campbell County Rec Center is a place to play pickleball in Gillette, WY. There are 4 indoor wood courts. The lines are permanent, and portable nets are available. Amenities include restrooms, water, locker rooms, youth programming, lights, and wheelchair accessibility. A one-time fee is required to play.",
+    "address": "250 W Shoshone Ave",
+    "city": "Gillette",
+    "zip_code": "82718",
+    "latitude": 44.254941,
+    "longitude": -105.508007,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Wood",
+    "fees": "Fee required \u2014 Daily Drop-In, Memberships Available",
+    "phone": "3076828527",
+    "website": "http://www.ccprd.com/",
+    "photo_url": "https://cdn.filestackcontent.com/R1urE8CTIyCpG0lOj9nH",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

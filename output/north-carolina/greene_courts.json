@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "greene",
+    "state": "NC",
+    "verified": false,
+    "name": "Greene Ridge Racquet Club",
+    "description": "Greene Ridge Racquet Club is a place to play pickleball in Snow Hill, NC. There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. You can reserve the courts. Amenities include a pro shop or equipment store, restrooms, trainers or lessons, and water. A membership is required to play.",
+    "address": "609 Kingold Boulevard",
+    "city": "Snow Hill",
+    "latitude": 35.443827,
+    "longitude": -77.671888,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "open_play_schedule": "Open 8:00 am until dark. We use Group Me to schedule Open Play.",
+    "fees": "Members only \u2014 $34 a month for single membership or $44 for family \n\n$10 for guest fee - show up, call, or email to play\n\nrltaylor10s@gmail.com",
+    "phone": "2525311758",
+    "website": "https://www.facebook.com/share/19WpJm27Lp/?mibextid=wwXIfr",
+    "email": "rltaylor10s@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/4CxVpIXZRi6DYBNjBUNr",
+    "has_restrooms": true,
+    "has_water": true,
+    "has_pro_shop": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

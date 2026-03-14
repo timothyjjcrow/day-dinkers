@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "marshall",
+    "state": "TN",
+    "verified": false,
+    "name": "Lewisburg Recreation Center",
+    "description": "Lewisburg Recreation Center is a place to play pickleball in Lewisburg, TN. There are 6 indoor wood courts. The lines are permanent, and portable nets are available. The facility includes amenities like food, restrooms, water, wheelchair accessibility, and trainers or lessons. A one-time fee is required to play.",
+    "address": "1551 Mooresville Hwy",
+    "city": "Lewisburg",
+    "zip_code": "37091",
+    "latitude": 35.449241,
+    "longitude": -86.813442,
+    "indoor": true,
+    "num_courts": 6,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "phone": "+12519794212",
+    "website": "https://lewisburgparksrecandfitness.com/",
+    "photo_url": "https://cdn.filestackcontent.com/UIE2gbeDQZ2YnhxyClOq",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "hours": "7am-5pm"
+  }
+]

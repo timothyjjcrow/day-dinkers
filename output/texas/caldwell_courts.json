@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "caldwell",
+    "state": "TX",
+    "verified": false,
+    "name": "First Methodist Lockhart Gym",
+    "description": "Come play pickleball at First Methodist Lockhart Gym in Lockhart, TX! There is 1 indoor hard court. Tape lines have been laid, and portable nets are available. The court cannot be reserved. The facility includes amenities like water, restrooms, and wheelchair accessibility. The court is free.",
+    "address": "313 W San Antonio St",
+    "city": "Lockhart",
+    "latitude": 29.885036,
+    "longitude": -97.675583,
+    "indoor": true,
+    "num_courts": 1,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "9729212790",
+    "website": "https://firstmethodistlockhart.org/",
+    "email": "Matt@fmlockhart.org",
+    "photo_url": "https://cdn.filestackcontent.com/jNNLGN4dTJWEqNnCchG8",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "shared",
+    "hours": "Mon.-Thu. 9:00 am - 1:00 pm Office Number: 512-398-3232 313 W San Antonio St. Lockhart TX 78644 Across from Lockhart City Hall"
+  }
+]

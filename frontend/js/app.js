@@ -1,5 +1,5 @@
 /**
- * Main application controller — screen/tab navigation, county, notifications, init.
+ * Main application controller — screen/tab navigation, state/county, notifications, init.
  */
 const App = {
     currentScreen: 'main',   // 'main' | 'court-details' | 'admin'
@@ -16,8 +16,11 @@ const App = {
     friendsList: [],
     locationPrefKey: 'location_tracking_pref',
     countyPrefKey: 'selected_county_slug',
+    statePrefKey: 'selected_state_abbr',
     selectedCountySlug: 'humboldt',
+    selectedStateAbbr: 'CA',
     counties: [],
+    states: [],
     isReviewer: false,
 
     getEloTier(rawElo) {
@@ -47,6 +50,7 @@ const App = {
     },
 
     getSelectedCountySlug() { return App.selectedCountySlug || 'humboldt'; },
+    getSelectedStateAbbr() { return App.selectedStateAbbr || 'CA'; },
 
     getSelectedCountyName() {
         const slug = App.getSelectedCountySlug();
@@ -54,9 +58,17 @@ const App = {
         return match?.name || App._countyNameFromSlug(slug);
     },
 
+    getSelectedStateName() {
+        const abbr = App.getSelectedStateAbbr();
+        const match = App.states.find(s => s.abbr === abbr);
+        return match?.name || abbr;
+    },
+
     buildCourtsQuery(extraParams = {}) {
         const params = new URLSearchParams();
         const countySlug = App.getSelectedCountySlug();
+        const stateAbbr = App.getSelectedStateAbbr();
+        if (stateAbbr) params.set('state', stateAbbr);
         if (countySlug) params.set('county_slug', countySlug);
         const hasExplicitLat = Object.prototype.hasOwnProperty.call(extraParams || {}, 'lat');
         const hasExplicitLng = Object.prototype.hasOwnProperty.call(extraParams || {}, 'lng');
@@ -81,40 +93,69 @@ const App = {
         return query ? `/api/courts?${query}` : '/api/courts';
     },
 
-    // ── County Picker ───────────────────────────────────────────
+    // ── State & County Picker ─────────────────────────────────
 
     async initCountyPicker() {
         const select = document.getElementById('county-select');
         if (select) select.innerHTML = '<option value="">Loading...</option>';
 
+        // Load states
+        let states = [];
+        try {
+            const statesRes = await API.get('/api/courts/states');
+            states = statesRes.states || [];
+        } catch { states = []; }
+        if (!states.length) {
+            states = [{ abbr: 'CA', name: 'California', court_count: 0 }];
+        }
+        App.states = states;
+
+        // Populate state dropdown
+        const stateSelect = document.getElementById('state-select');
+        if (stateSelect) {
+            stateSelect.innerHTML = states.map(s =>
+                `<option value="${s.abbr}">${s.name} (${s.court_count})</option>`
+            ).join('');
+            stateSelect.value = App.getSelectedStateAbbr();
+            if (!states.some(s => s.abbr === App.getSelectedStateAbbr()) && states.length) {
+                App.selectedStateAbbr = states[0].abbr;
+                stateSelect.value = states[0].abbr;
+            }
+        }
+
+        // Load counties for selected state
+        await App._loadCountiesForState(App.getSelectedStateAbbr());
+    },
+
+    async _loadCountiesForState(stateAbbr) {
         let counties = [];
         try {
-            const res = await API.get('/api/courts/counties');
+            const res = await API.get(`/api/courts/counties?state=${stateAbbr}`);
             counties = res.counties || [];
-            if (!App._normalizeCountySlug(localStorage.getItem(App.countyPrefKey))) {
-                const defaultSlug = App._normalizeCountySlug(res.default_county_slug);
-                if (defaultSlug) App.selectedCountySlug = defaultSlug;
-            }
         } catch { counties = []; }
 
         if (!counties.length) {
             const fallbackSlug = App.getSelectedCountySlug();
-            counties = [{ slug: fallbackSlug, name: App._countyNameFromSlug(fallbackSlug), court_count: 0 }];
+            counties = [{ slug: fallbackSlug, name: App._countyNameFromSlug(fallbackSlug), court_count: 0, state: stateAbbr }];
         }
 
         App.counties = counties;
 
+        const select = document.getElementById('county-select');
         if (select) {
             select.innerHTML = counties.map(c =>
-                `<option value="${c.slug}">${c.name} County (${c.court_count})</option>`
+                `<option value="${c.slug}">${c.name} (${c.court_count})</option>`
             ).join('');
         }
 
         let selected = App.getSelectedCountySlug();
-        if (!counties.some(c => c.slug === selected)) selected = counties[0].slug;
+        if (!counties.some(c => c.slug === selected)) {
+            const firstWithCourts = counties.find(c => c.court_count > 0);
+            selected = firstWithCourts ? firstWithCourts.slug : counties[0].slug;
+        }
         App.setSelectedCounty(selected, {
             persist: true,
-            reloadCourts: selected !== App.getSelectedCountySlug(),
+            reloadCourts: true,
             fitMap: true, showToast: false,
         });
         if (select) select.value = selected;
@@ -158,7 +199,7 @@ const App = {
                 ? `<span class="county-count">${c.court_count}</span>`
                 : '<span class="county-count county-count-zero">0</span>';
             return `<button type="button" class="county-item${active}" onclick="App.selectCountyFromPicker('${c.slug}')">
-                <span class="county-item-name">${c.name} County</span>
+                <span class="county-item-name">${c.name}</span>
                 ${hasCourtsBadge}
             </button>`;
         }).join('') || '<div class="county-empty">No counties match</div>';
@@ -166,7 +207,10 @@ const App = {
 
     _updateCountyPickerLabel() {
         const label = document.getElementById('county-picker-label');
-        if (label) label.textContent = App.getSelectedCountyName() + ' County';
+        if (!label) return;
+        const stateName = App.getSelectedStateName();
+        const countyName = App.getSelectedCountyName();
+        label.textContent = `${stateName} — ${countyName}`;
     },
 
     selectCountyFromPicker(slug) {
@@ -174,6 +218,13 @@ const App = {
         App.onCountyChange(slug);
         App._updateCountyPickerLabel();
         App._renderCountyPickerList();
+    },
+
+    onStateChange(stateAbbr) {
+        if (stateAbbr === App.selectedStateAbbr) return;
+        App.selectedStateAbbr = stateAbbr;
+        localStorage.setItem(App.statePrefKey, stateAbbr);
+        App._loadCountiesForState(stateAbbr);
     },
 
     setSelectedCounty(rawSlug, { persist = true, reloadCourts = true, fitMap = false, showToast = false } = {}) {
@@ -195,7 +246,7 @@ const App = {
                 LocationService._refreshCourts();
             }
         }
-        if (showToast) App.toast(`Switched to ${App.getSelectedCountyName()} County`);
+        if (showToast) App.toast(`Switched to ${App.getSelectedCountyName()}`);
     },
 
     onCountyChange(countySlug) {
@@ -218,6 +269,15 @@ const App = {
                 if (!res?.county_slug) {
                     if (showToast) App.toast('Could not determine county.', 'error');
                     return;
+                }
+                // Find the state for this county from the court data
+                const court = res.nearest_court_state || '';
+                if (court) {
+                    const stateSelect = document.getElementById('state-select');
+                    App.selectedStateAbbr = court;
+                    localStorage.setItem(App.statePrefKey, court);
+                    if (stateSelect) stateSelect.value = court;
+                    await App._loadCountiesForState(court);
                 }
                 App.setSelectedCounty(res.county_slug, { persist: true, reloadCourts, fitMap, showToast });
             } catch (err) {
@@ -756,6 +816,8 @@ const App = {
     init() {
         const savedCounty = App._normalizeCountySlug(localStorage.getItem(App.countyPrefKey));
         if (savedCounty) App.selectedCountySlug = savedCounty;
+        const savedState = (localStorage.getItem(App.statePrefKey) || '').trim().toUpperCase();
+        if (savedState) App.selectedStateAbbr = savedState;
 
         // Start on main screen, map tab
         App.showScreen('main');

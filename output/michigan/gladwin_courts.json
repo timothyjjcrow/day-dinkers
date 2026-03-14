@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "gladwin",
+    "state": "MI",
+    "verified": false,
+    "name": "Bac - Beaverton Activity Center",
+    "description": "Come play pickleball at Bac - Beaverton Activity Center in Beaverton, MI! There are 3 indoor wood courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. The facility includes amenities like food, restrooms, and water.",
+    "address": "106 Tonkin St M 18",
+    "city": "Beaverton",
+    "zip_code": "48612",
+    "latitude": 43.880246,
+    "longitude": -84.486891,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "phone": "9894359821",
+    "website": "http://beavertonactivitycenter.com/",
+    "photo_url": "https://cdn.filestackcontent.com/fx0F3ka8SxuUrEEdMVwj",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "franklin parish",
+    "state": "LA",
+    "verified": false,
+    "name": "River of Life Gym",
+    "description": "River of Life Gym is a place to play pickleball in Winnsboro, LA. There are 2 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "127 Ellis Ln",
+    "city": "Winnsboro",
+    "zip_code": "71295",
+    "latitude": 32.127264,
+    "longitude": -91.704935,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "3182377987",
+    "website": "https://www.riveroflifewinnsboro.com/",
+    "photo_url": "https://cdn.filestackcontent.com/9pt8vQInRXCH1flbxKgz",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "franklin parish",
+    "state": "LA",
+    "verified": false,
+    "name": "Temple Baptist Church",
+    "description": "Temple Baptist Church is one of the most popular places to play pickleball in Winnsboro, LA. There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. The courts are private.",
+    "address": "287 Taylor Ave",
+    "city": "Winnsboro",
+    "zip_code": "71295",
+    "latitude": 32.16733,
+    "longitude": -91.7307,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Private",
+    "phone": "3182377987",
+    "photo_url": "https://cdn.filestackcontent.com/VgmRGSS7Tz2snc55buXI",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

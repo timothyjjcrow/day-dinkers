@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "fulton",
+    "state": "AR",
+    "verified": false,
+    "name": "Omaha Health & Fitness Club",
+    "description": "Omaha Health & Fitness Club is a place to play pickleball in Cherokee Village, AR. There are 3 indoor hard courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms. A one-time fee is required to play.",
+    "address": "20 Omaha Circle",
+    "city": "Cherokee Village",
+    "latitude": 36.299736,
+    "longitude": -91.602018,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Fee required",
+    "phone": "+18702573555",
+    "website": "https://cvsid.org/",
+    "photo_url": "https://cdn.filestackcontent.com/PSIINuHQJCcB38JhyfwW",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "8am- 4pm"
+  }
+]

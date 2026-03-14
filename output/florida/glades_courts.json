@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "glades",
+    "state": "FL",
+    "verified": false,
+    "name": "The Glades RV Resort",
+    "description": "The Glades RV Resort is a place to play pickleball in Moore Haven, FL. There are 6 outdoor acrylic courts. These are dedicated courts with permanent lines and nets. You can\u2019t reserve the courts. Players have access to restrooms. A one-time fee is required to play.",
+    "address": "1679 Indian Hills Dr",
+    "city": "Moore Haven",
+    "zip_code": "33471",
+    "latitude": 26.774726,
+    "longitude": -81.228903,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Acrylic",
+    "fees": "Fee required",
+    "phone": "+14056580332",
+    "website": "https://www.thegladesresort.com/",
+    "email": "nhretired19@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/SssFnxQxTTiWa8XAPWMv",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "hours": "Mon 9am - 5pm"
+  }
+]

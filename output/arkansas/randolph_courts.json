@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "randolph",
+    "state": "AR",
+    "verified": false,
+    "name": "Pocahontas Community Center",
+    "description": "Pocahontas Community Center is a place to play pickleball in Pocahontas, AR. There are 3 indoor wood courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms, water, and lights. The courts are free.",
+    "address": "298 Geneva Drive",
+    "city": "Pocahontas",
+    "latitude": 36.267439,
+    "longitude": -90.963656,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "website": "https://pocahontassportsandrecreation.sportngin.com/page/show/4812868-community-center",
+    "photo_url": "https://cdn.filestackcontent.com/9B8G1seMRvaP3eBqd3HZ",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "hours": "10am-11am"
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "blount",
+    "state": "AL",
+    "verified": false,
+    "name": "McDaniel Gym",
+    "description": "Come play pickleball at McDaniel Gym in Oneonta, AL! There are 3 indoor wood courts. The lines are permanent, and portable nets are available. You can\u2019t reserve the courts. The courts are free. Amenities include restrooms, water, and lights.",
+    "address": "420 Jim Fretwell Drive",
+    "city": "Oneonta",
+    "latitude": 33.94665,
+    "longitude": -86.471414,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "2054463127",
+    "website": "https://oneontaal.recdesk.com/Community/Facility/Detail?facilityId=7",
+    "email": "Mholt@matrix-ind.com",
+    "photo_url": "https://cdn.filestackcontent.com/Da0vb1jjQbq02UJAUNzp",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

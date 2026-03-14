@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "early",
+    "state": "GA",
+    "verified": false,
+    "name": "Blakely Pickleball Courts",
+    "description": "These are brand new pickleball courts overlayed acrylic over old tennis courts.",
+    "address": "310 Meadowbrook Dr",
+    "city": "Blakely",
+    "latitude": 31.383176,
+    "longitude": -84.946883,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/BxYLVFB8TsuchFnPXqz4",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

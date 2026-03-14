@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "sabine",
+    "state": "TX",
+    "verified": false,
+    "name": "Hemphill City Park",
+    "description": "Come play pickleball at Hemphill City Park in Hemphill, TX! There are 2 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free. Players have access to lights.",
+    "address": "329 Lillian St",
+    "city": "Hemphill",
+    "zip_code": "75948",
+    "latitude": 31.339639,
+    "longitude": -93.844019,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "9362757867",
+    "photo_url": "https://cdn.filestackcontent.com/9crAAX2RS4Kdmfzojm5S",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

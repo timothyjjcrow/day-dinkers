@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "jefferson davis parish",
+    "state": "LA",
+    "verified": false,
+    "name": "Franklin Park",
+    "description": "Come play pickleball at Franklin Park in Jennings, LA! There are 6 outdoor acrylic courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms and lights. The courts are free.",
+    "address": "West Division Street",
+    "city": "Jennings",
+    "latitude": 30.220624,
+    "longitude": -92.671826,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "phone": "+13373295627",
+    "website": "https://www.cityofjennings.com/parks-recreation-2/",
+    "email": "cajuntrikker@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/lf5mwe4eTWOoovFfSkK9",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "county_slug": "rush",
+    "state": "IN",
+    "verified": false,
+    "name": "Rushville Pickle-Barn",
+    "description": "Come play pickleball at Rushville Pickle-Barn in Rushville, IN! There are 3 hard courts. 1 is outdoors and 2 are indoors. The lines are permanent, and portable nets are available. The courts can be reserved. The courts are free. Players have access to food, restrooms, water, lights, trainers or lessons, and wheelchair accessibility.",
+    "address": "1340 S Ruth St",
+    "city": "Rushville",
+    "latitude": 39.593332,
+    "longitude": -85.435456,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "open_play_schedule": "Courts available after hours by appointment",
+    "fees": "Free",
+    "phone": "+13176960149",
+    "website": "https://www.facebook.com/share/1EULy5cCiV/",
+    "email": "shawnhart2024@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/YOFLNekmTNqzGwjBwDS2",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

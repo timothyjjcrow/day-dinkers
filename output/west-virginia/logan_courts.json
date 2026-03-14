@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "logan",
+    "state": "WV",
+    "verified": false,
+    "name": "Chief Logan Recreational Center",
+    "description": "Come play pickleball at Chief Logan Recreational Center in Logan, WV! There are 2 indoor courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. A membership is required to play.",
+    "address": "505 Conference Center Dr",
+    "city": "Logan",
+    "zip_code": "25601",
+    "latitude": 37.895848,
+    "longitude": -82.038078,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "+13048558591",
+    "website": "http://www.chiefloganreccenter.org/",
+    "photo_url": "https://cdn.filestackcontent.com/lm0l0d0nSMOFXiRnuH7h",
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

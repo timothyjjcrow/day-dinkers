@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "wharton",
+    "state": "TX",
+    "verified": false,
+    "name": "El Campo Lost Lagoon",
+    "description": "Come play pickleball at El Campo Lost Lagoon in El Campo, TX! There is 1 outdoor concrete court. This is a dedicated court with a permanent net and lines. The court is private. Amenities include lights, water, and restrooms. You can\u2019t reserve the court.",
+    "address": "691 Co Rd 451",
+    "city": "El Campo",
+    "latitude": 29.22141,
+    "longitude": -96.258466,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Very new to the public!",
+    "fees": "Private \u2014 Must buy a day pass. $25 Summer Season (Includes access to water park, slides and all other amenities) $10 Winter Season!",
+    "phone": "+19792751600",
+    "website": "https://eclostlagoon.com/",
+    "email": "kasey@eclostlagoon.com",
+    "photo_url": "https://cdn.filestackcontent.com/uCdmGdT2RPePklZc9yqw",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

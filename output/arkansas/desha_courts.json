@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "desha",
+    "state": "AR",
+    "verified": false,
+    "name": "Pickleball Kingdom Little Rock",
+    "description": "Pickleball Kingdom Little Rock is one of the most popular places to play pickleball in Arkansas City, AR. There are 11 indoor hard courts. These are dedicated courts with permanent lines and nets. A membership is required to play. Players have access to restrooms, locker rooms, food, lights, trainers or lessons, wheelchair accessibility, water, youth programming, and a pro shop or equipment store. The courts can be reserved.",
+    "address": "Arkansas City",
+    "city": "Arkansas City",
+    "latitude": 33.608048,
+    "longitude": -91.20622,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 11,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "phone": "+15012488120",
+    "website": "https://pickleballkingdom.com/little-rock-ar/",
+    "email": "info@pickleballkingdomlittlerock.com",
+    "photo_url": "https://cdn.filestackcontent.com/A0h7uCkVSGWWWYA9g4XI",
+    "has_restrooms": true,
+    "has_water": true,
+    "has_pro_shop": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

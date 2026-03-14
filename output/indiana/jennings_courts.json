@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "jennings",
+    "state": "IN",
+    "verified": false,
+    "name": "North Vernon City Park",
+    "description": "Come play pickleball at North Vernon City Park in North Vernon, IN! There are 2 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "604 North State Street",
+    "city": "North Vernon",
+    "latitude": 39.01104,
+    "longitude": -85.632567,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+18123469371",
+    "website": "http://www.nvpr.org/",
+    "photo_url": "https://cdn.filestackcontent.com/Y9aBquEzTbeGOZAytYXu",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

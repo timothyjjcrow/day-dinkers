@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "braxton",
+    "state": "WV",
+    "verified": false,
+    "name": "Burnsville Courts",
+    "description": "Beautiful Setting in scenic Central West Virginia.",
+    "address": "230 Kanawha Ave",
+    "city": "Burnsville",
+    "latitude": 38.859202,
+    "longitude": -80.656791,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "3046445632",
+    "email": "Johnnastalnaker@aol.com",
+    "photo_url": "https://cdn.filestackcontent.com/yrF6ocjnSuVUPdm2BIwg",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

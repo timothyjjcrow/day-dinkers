@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "carbon",
+    "state": "MT",
+    "verified": false,
+    "name": "Field School Park",
+    "description": "Field School Park is a place to play pickleball in Red Lodge, MT. There are 2 outdoor wood courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "Veterans Memorial Civic Center",
+    "city": "Red Lodge",
+    "latitude": 45.184229,
+    "longitude": -109.249304,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "5034358710",
+    "website": "https://www.redlodgemountain.com/venue/red-lodge-civic-center/",
+    "photo_url": "https://cdn.filestackcontent.com/Knj4yVY3QFS3XnF09wRP",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "carbon",
+    "state": "MT",
+    "verified": false,
+    "name": "Red Lodge Pickleball",
+    "description": "Come play pickleball at Red Lodge Pickleball in Red Lodge, MT! There are 2 outdoor courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "9th St",
+    "city": "Red Lodge",
+    "zip_code": "59068",
+    "latitude": 45.188853,
+    "longitude": -109.24865,
+    "indoor": false,
+    "num_courts": 2,
+    "fees": "Free",
+    "website": "http://www.bgcofcarboncounty.org/",
+    "photo_url": "https://cdn.filestackcontent.com/gvoDcksxS2uoO1DprJlc",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

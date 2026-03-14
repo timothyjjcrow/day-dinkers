@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "somervell",
+    "state": "TX",
+    "verified": false,
+    "name": "Massey's BBQ",
+    "description": "\ud83c\udfd3 Pickleball Fun at Massey\u2019s BBQ! \ud83c\udfd3Looking for a fun day with the family? Our pickleball courts are located right by the Massey's BBQ Glen Rose pavilion! \ud83c\udf1e Bring the whole crew \u2013 there\u2019s plenty of room for kids to play while you enjoy a few rounds on the court. Afterward, refuel with some of our mouth-watering BBQ and try our NEW MENU. We have something for every appetite.  It\u2019s the perfect spot for food, family, and fun! \ud83d\udc37\n\nCome on out and make some memories at Massey's!",
+    "address": "2192 State Hwy 144",
+    "city": "Glen Rose",
+    "latitude": 32.26767,
+    "longitude": -97.731877,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard, Concrete",
+    "fees": "Private \u2014 Massey's BBQ requires reservations.",
+    "phone": "+12544432001",
+    "website": "https://www.facebook.com/masseysbbq/",
+    "email": "toddmassey123@yahoo.com",
+    "photo_url": "https://cdn.filestackcontent.com/PyMRribTJaNbx9Z9wHG4",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "morgan",
+    "state": "TN",
+    "verified": false,
+    "name": "Abner Ross Community Center",
+    "description": "Port a potty in area.",
+    "address": "110 Corinne Ave",
+    "city": "Deer Lodge",
+    "latitude": 36.201987,
+    "longitude": -84.764756,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "open_play_schedule": "Let me know when you\u2019d like to play!",
+    "fees": "Free",
+    "website": "https://www.facebook.com/p/Deer-Lodge-Abner-Ross-Memorial-Center-100067518371472/",
+    "email": "Pdbw0103@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/bl8OHBnRS1WXX1pFg5pE",
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

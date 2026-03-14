@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "lonoke",
+    "state": "AR",
+    "verified": false,
+    "name": "Veterans Park Community Center",
+    "description": "Veterans Park Community Center is one of the most popular places to play pickleball in Cabot, AR. There are 4 indoor acrylic courts. The lines are permanent, and portable nets are available. Amenities include restrooms, water, and lights. The courts are free.",
+    "address": "508 N Lincoln St",
+    "city": "Cabot",
+    "latitude": 34.975744,
+    "longitude": -92.009303,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "phone": "5016051506",
+    "website": "https://cabotparks.com/213/Rates",
+    "photo_url": "https://cdn.filestackcontent.com/1rHGGkJrRzyMWUQQN4oV",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

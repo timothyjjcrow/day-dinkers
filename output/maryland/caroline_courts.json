@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "caroline",
+    "state": "MD",
+    "verified": false,
+    "name": "General James F. Fretterd Community Center",
+    "description": "Come play pickleball at General James F. Fretterd Community Center in Denton, MD! There are 2 outdoor hard courts. You\u2019ll have to create your own lines and bring your own net. A membership is required to play.",
+    "address": "107 S 4th St",
+    "city": "Denton",
+    "zip_code": "21629",
+    "latitude": 38.883892,
+    "longitude": -75.831033,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "phone": "4104793060",
+    "photo_url": "https://cdn.filestackcontent.com/gEqGsuT5RyiEY6C7baBO",
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "shared"
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "logan",
+    "state": "ND",
+    "verified": false,
+    "name": "Maureen Groth",
+    "description": "Maureen Groth is a place to play pickleball in Gackle, ND. There are 2 outdoor courts. The lines are permanent, but you'll need to bring your own net. The courts are private.",
+    "address": "300 3rd Ave W",
+    "city": "Gackle",
+    "zip_code": "58442",
+    "latitude": 46.627896,
+    "longitude": -99.146882,
+    "indoor": false,
+    "num_courts": 2,
+    "fees": "Private",
+    "phone": "7012690442",
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

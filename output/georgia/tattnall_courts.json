@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "tattnall",
+    "state": "GA",
+    "verified": false,
+    "name": "Glennville Recreation Department",
+    "description": "Glennville Recreation Department is a place to play pickleball in Glennville, GA. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like restrooms and lights.",
+    "address": "320 Veterans Dr",
+    "city": "Glennville",
+    "latitude": 31.948163,
+    "longitude": -81.955569,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+19126542613",
+    "website": "https://glennvillerec.recdesk.com/Community/Home",
+    "photo_url": "https://cdn.filestackcontent.com/EMJUxp00RUOPHe9Ecpng",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

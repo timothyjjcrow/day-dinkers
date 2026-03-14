@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "tipton",
+    "state": "IN",
+    "verified": false,
+    "name": "C. W. Mount Community Center and Banquet Facility",
+    "description": "C. W. Mount Community Center and Banquet Facility is a place to play pickleball in Tipton, IN. There are 3 indoor wood courts. The lines are permanent, and portable nets are available. Players have access to restrooms and water. A one-time fee is required to play.",
+    "address": "341 W Jefferson St",
+    "city": "Tipton",
+    "zip_code": "46072",
+    "latitude": 40.282041,
+    "longitude": -86.045797,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "phone": "7656759578",
+    "website": "http://www.cwmount.com/",
+    "photo_url": "https://cdn.filestackcontent.com/paO3PwfAT2iXFzugYVMV",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

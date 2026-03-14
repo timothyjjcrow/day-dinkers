@@ -1,0 +1,30 @@
+[
+  {
+    "county_slug": "barbour",
+    "state": "AL",
+    "verified": false,
+    "name": "Eufaula Community Center",
+    "description": "Come play pickleball at Eufaula Community Center in Eufaula, AL! There are 11 asphalt and concrete courts. 8 are outdoors and 3 are indoors. These are dedicated courts with permanent lines and nets. Players have access to restrooms, water, lights, and wheelchair accessibility. The courts are free.",
+    "address": "750 Lake Dr",
+    "city": "Eufaula",
+    "zip_code": "36027",
+    "latitude": 31.91715,
+    "longitude": -85.141802,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 11,
+    "surface_type": "Asphalt, Concrete",
+    "open_play_schedule": "The indoor use schedule is variable for the reason stated in the opening narrative description above.",
+    "fees": "Free",
+    "phone": "3346890272",
+    "website": "http://eufaularecreation.com/",
+    "email": "jhlunsford@eufaularecreaton.com",
+    "photo_url": "https://cdn.filestackcontent.com/XaWpPgRVybFMDHaeTBfg",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

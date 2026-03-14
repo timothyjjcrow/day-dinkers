@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "clinton",
+    "state": "OH",
+    "verified": false,
+    "name": "Wilmington RV Resort",
+    "description": "Wilmington RV Resort is a place to play pickleball in Wilmington, OH. There is 1 outdoor court. The lines are permanent, but you'll need to bring your own net. A membership is required to play.",
+    "address": "1786 State Rte 380",
+    "city": "Wilmington",
+    "zip_code": "45177",
+    "latitude": 39.459034,
+    "longitude": -83.941105,
+    "indoor": false,
+    "num_courts": 1,
+    "fees": "Members only",
+    "website": "https://thousandtrails.com/ohio/wilmington-rv-resort/?utm_source=yext&utm_medium=directory&utm_campaign=Yext%20Directory%20Listing",
+    "photo_url": "https://cdn.filestackcontent.com/SfXNsqffTf2s51ytTxv2",
+    "nets_provided": false,
+    "court_type": "dedicated",
+    "has_restrooms": true
+  }
+]

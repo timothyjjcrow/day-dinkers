@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "paulding",
+    "state": "OH",
+    "verified": false,
+    "name": "Mac Gym",
+    "description": "Come play pickleball at Mac Gym in Antwerp, OH! There are 3 indoor wood courts. The lines are permanent, but you'll need to bring your own net. A one-time fee is required to play. Players have access to restrooms.",
+    "address": "204 Archer Dr",
+    "city": "Antwerp",
+    "zip_code": "45813",
+    "latitude": 41.181834,
+    "longitude": -84.742795,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "website": "http://www.macgymohio.com/",
+    "photo_url": "https://cdn.filestackcontent.com/JSFIRW42Rm2dYyQxfUwg",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "court_type": "dedicated"
+  }
+]

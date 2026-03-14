@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "dillon",
+    "state": "SC",
+    "verified": false,
+    "name": "Dillon High School",
+    "description": "Beside the high School. You can use the parking lot next to the tennis courts accessible from 301. These courts are open to the public",
+    "address": "1730 U.S. 301",
+    "city": "Dillon",
+    "latitude": 34.433611,
+    "longitude": -79.3543,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "open_play_schedule": "N/A",
+    "fees": "Free",
+    "phone": "+1 843-774-1230",
+    "website": "https://www.dillon.k12.sc.us/schools/dillon_high_school",
+    "photo_url": "https://cdn.filestackcontent.com/zc9b6WXIQGW4siX5cHOJ",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,41 @@
+[
+  {
+    "county_slug": "marshall",
+    "state": "WV",
+    "verified": false,
+    "name": "Bishop Donahue",
+    "description": "Bishop Donahue is one of the most popular places to play pickleball in McMechen, WV. There are 3 indoor courts. The lines are permanent, and portable nets are available. A membership is required to play. Amenities include lights.",
+    "address": "325 Logan St",
+    "city": "McMechen",
+    "zip_code": "26040",
+    "latitude": 39.992417,
+    "longitude": -80.730722,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "fees": "Members only",
+    "phone": "3043128631",
+    "photo_url": "https://cdn.filestackcontent.com/F8BX5C2GQriLtNKPNnXB",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "marshall",
+    "state": "WV",
+    "verified": false,
+    "name": "East End Park",
+    "description": "East End Park is one of the most popular places to play pickleball in Moundsville, WV. There are 2 outdoor asphalt courts. These are dedicated courts with permanent lines and nets.",
+    "address": "East End Park",
+    "city": "Moundsville",
+    "latitude": 39.922226,
+    "longitude": -80.729903,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "photo_url": "https://cdn.filestackcontent.com/ZAwkNeeSheoIxtEhIWqh",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

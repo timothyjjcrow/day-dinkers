@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "mitchell",
+    "state": "IA",
+    "verified": false,
+    "name": "Osage Pickleball",
+    "description": "Come play pickleball at Osage Pickleball in Osage, IA! There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "912 Davidson Dr",
+    "city": "Osage",
+    "latitude": 43.276523,
+    "longitude": -92.808394,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/3iT16AtRRaW8WGDY657d",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "johnson",
+    "state": "AR",
+    "verified": false,
+    "name": "Marvin L Vinson - Multi Purpose Building",
+    "description": "Marvin L Vinson - Multi Purpose Building is one of the most popular places to play pickleball in Clarksville, AR. There are 6 indoor courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "1611 W Oakland St",
+    "city": "Clarksville",
+    "zip_code": "72830",
+    "latitude": 35.468497,
+    "longitude": -93.481848,
+    "indoor": true,
+    "num_courts": 6,
+    "fees": "Free",
+    "phone": "4797741475",
+    "website": "https://www.clarksvillear.gov/marvin-vinson-center.html",
+    "photo_url": "https://cdn.filestackcontent.com/8cQOtzqSwqvMK7UYSfIy",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "7 am - 5 pm"
+  }
+]

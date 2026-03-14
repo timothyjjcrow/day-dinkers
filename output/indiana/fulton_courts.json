@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "fulton",
+    "state": "IN",
+    "verified": false,
+    "name": "Elks Lodge",
+    "description": "Elks Lodge is one of the most popular places to play pickleball in Rochester, IN. There are 2 outdoor hard courts. The lines are permanent, and portable nets are available. A membership is required to play.",
+    "address": "2506 Country Club Dr S",
+    "city": "Rochester",
+    "latitude": 41.045679,
+    "longitude": -86.169057,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "phone": "(574) 223-3704",
+    "website": "https://www.elks.org/",
+    "photo_url": "https://cdn.filestackcontent.com/4NVGUF4RRcSwKVftQ1KQ",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

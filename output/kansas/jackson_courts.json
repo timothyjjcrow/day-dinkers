@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "jackson",
+    "state": "KS",
+    "verified": false,
+    "name": "Holton Pickleball Courts",
+    "description": "Holton Pickleball Courts is a place to play pickleball in Holton, KS. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "711 Nebraska Avenue",
+    "city": "Holton",
+    "latitude": 39.469175,
+    "longitude": -95.742446,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/CDYm6SrEQDO9eOpkGp6Q",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

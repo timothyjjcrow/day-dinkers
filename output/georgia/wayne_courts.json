@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "wayne",
+    "state": "GA",
+    "verified": false,
+    "name": "Cracker Williams Park",
+    "description": "Come play pickleball at Cracker Williams Park in Jesup, GA! There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. Players have access to restrooms, water, and lights. The courts are free.",
+    "address": "245 E Bay St",
+    "city": "Jesup",
+    "zip_code": "31546",
+    "latitude": 31.600612,
+    "longitude": -81.883459,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "9124275916",
+    "website": "https://www.waynecountyga.us/",
+    "photo_url": "https://cdn.filestackcontent.com/vIcWpwXuTW6BWzOe1eb3",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "washington",
+    "state": "NE",
+    "verified": false,
+    "name": "Blair Family YMCA",
+    "description": "Come play pickleball at Blair Family YMCA in Blair, NE! There are 2 indoor hard courts. The lines are permanent, and portable nets are available. Reservations are available. The facility includes amenities like lights. A membership is required to play.",
+    "address": "1278 Wilbur St",
+    "city": "Blair",
+    "zip_code": "68008",
+    "latitude": 41.534932,
+    "longitude": -96.129894,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "phone": "4025339622",
+    "website": "http://www.blairymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/PAddOlqSe3sOqYVivmJg",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

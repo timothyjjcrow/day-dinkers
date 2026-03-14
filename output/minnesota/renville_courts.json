@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "renville",
+    "state": "MN",
+    "verified": false,
+    "name": "Splash Island court",
+    "description": "Splash Island court is one of the most popular places to play pickleball in Bird Island, MN. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms, wheelchair accessibility, and water. The courts are free.",
+    "address": "320 S 11th St",
+    "city": "Bird Island",
+    "latitude": 44.76533,
+    "longitude": -94.901789,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/S3YJhUXQXycWJVprPtCQ",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

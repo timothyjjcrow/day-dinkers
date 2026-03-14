@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "hyde",
+    "state": "NC",
+    "verified": false,
+    "name": "Ocracoke Youth Center",
+    "description": "At the end of Horse Pen Road, it looks like a black paved lot on Google maps",
+    "address": "Horse Pen Road",
+    "city": "Ocracoke",
+    "latitude": 35.111157,
+    "longitude": -75.971223,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt, Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/E7QchsoTothrWvcUyRoA",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

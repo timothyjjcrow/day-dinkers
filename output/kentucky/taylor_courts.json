@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "taylor",
+    "state": "KY",
+    "verified": false,
+    "name": "Campbellsville Pickleball Courts",
+    "description": "Come play pickleball at Campbellsville Pickleball Courts in Campbellsville, KY! There are 6 outdoor acrylic, hard, and concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. Reservations are not available.",
+    "address": "199 Miller Park Drive",
+    "city": "Campbellsville",
+    "latitude": 37.355689,
+    "longitude": -85.352286,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Acrylic, Hard, Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/x2wRtLkpQpaLuQ5RH0Mb",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

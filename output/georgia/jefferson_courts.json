@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "jefferson",
+    "state": "GA",
+    "verified": false,
+    "name": "North Jefferson Family YMCA",
+    "description": "North Jefferson Family YMCA is a place to play pickleball in Wrens, GA. You\u2019ll have to create your own lines and bring your own net. A membership is required to play.",
+    "address": "3001 State Rte 17",
+    "city": "Wrens",
+    "zip_code": "30833",
+    "latitude": 33.231737,
+    "longitude": -82.406394,
+    "indoor": false,
+    "fees": "Members only",
+    "phone": "7065472653",
+    "website": "https://thefamilyy.org/branch/north-jefferson/",
+    "photo_url": "https://cdn.filestackcontent.com/MvVsCV0sS5yahXzVHGhB",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  }
+]

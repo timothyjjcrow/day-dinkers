@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "converse",
+    "state": "WY",
+    "verified": false,
+    "name": "Bartling Park",
+    "description": "Bartling Park is a place to play pickleball in Douglas, WY. There are 4 outdoor hard and asphalt courts. These are dedicated courts with permanent lines and nets. Reservations are not available. The courts are free.",
+    "address": "1045 Jefferson St",
+    "city": "Douglas",
+    "zip_code": "82633",
+    "latitude": 42.745789,
+    "longitude": -105.377669,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard, Asphalt",
+    "fees": "Free",
+    "website": "https://www.cityofdouglas.org/facilities/facility/details/Bartling-Park-19",
+    "photo_url": "https://cdn.filestackcontent.com/16cxODNS4G29DsQhq23n",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "has_parking": true,
+    "has_restrooms": true,
+    "wheelchair_accessible": true
+  }
+]

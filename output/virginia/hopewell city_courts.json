@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "hopewell city",
+    "state": "VA",
+    "verified": false,
+    "name": "Hopewell Community Center",
+    "description": "Hopewell Community Center is one of the most popular places to play pickleball in Hopewell, VA. There are 5 courts. 3 are indoors and 2 are outdoors. The lines are permanent, but you'll need to bring your own net. The courts are private. Players have access to restrooms, water, and lights.",
+    "address": "100 W City Point Rd",
+    "city": "Hopewell",
+    "zip_code": "23860",
+    "latitude": 37.301333,
+    "longitude": -77.289677,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 5,
+    "fees": "Private",
+    "phone": "8045412353",
+    "photo_url": "https://cdn.filestackcontent.com/cAx41P0RHmBErlrxOQxw",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

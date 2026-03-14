@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "clare",
+    "state": "MI",
+    "verified": false,
+    "name": "Brookwood Athletic Complex",
+    "description": "Come play pickleball at Brookwood Athletic Complex in Clare, MI! There are 2 outdoor acrylic courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. A one-time fee is required to play.",
+    "address": "Woodlawn Ave",
+    "city": "Clare",
+    "zip_code": "48617",
+    "latitude": 43.827021,
+    "longitude": -84.778305,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Acrylic",
+    "fees": "Fee required",
+    "phone": "9893867541",
+    "website": "https://www.cityofclare.org/government/dept/ParksRecFiles/2021/Master%20Plan%202022-2026.docx%20draft.pdf",
+    "photo_url": "https://cdn.filestackcontent.com/7ONkWRcdRj65igrQ1ySe",
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

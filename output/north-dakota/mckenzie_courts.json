@@ -1,0 +1,40 @@
+[
+  {
+    "county_slug": "mckenzie",
+    "state": "ND",
+    "verified": false,
+    "name": "Katie's Court",
+    "description": "Katie's Court is one of the most popular places to play pickleball in Watford City, ND. There are 2 outdoor concrete courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free.",
+    "address": "200 8th St NE",
+    "city": "Watford City",
+    "latitude": 47.80227,
+    "longitude": -103.269572,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "open_play_schedule": "Open to all",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/phN8tpySdyr83KditTmQ",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "mckenzie",
+    "state": "ND",
+    "verified": false,
+    "name": "Rough Rider Center",
+    "description": "Rough Rider Center is one of the most popular places to play pickleball in Watford City, ND. There are 8 indoor acrylic courts. The lines are permanent, and portable nets are available. Players have access to lights. Reservations are available.",
+    "address": "2209 Wolves Den Pkwy",
+    "city": "Watford City",
+    "latitude": 47.800233,
+    "longitude": -103.242352,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 8,
+    "surface_type": "Acrylic",
+    "phone": "(701) 842-3665",
+    "website": "http://www.roughridercenter.com/",
+    "photo_url": "https://cdn.filestackcontent.com/Ka0wDkHTy23KHHBX3zNw",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

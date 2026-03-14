@@ -1,0 +1,22 @@
+[
+  {
+    "county_slug": "ashe",
+    "state": "NC",
+    "verified": false,
+    "name": "Ashe County Parks And Recreation",
+    "description": "Come play pickleball at Ashe County Parks And Recreation in Jefferson, NC! There are 2 indoor courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "626 Ashe Central School Rd",
+    "city": "Jefferson",
+    "zip_code": "28640",
+    "latitude": 36.429132,
+    "longitude": -81.435196,
+    "indoor": true,
+    "num_courts": 2,
+    "fees": "Free",
+    "phone": "3369826185",
+    "photo_url": "https://cdn.filestackcontent.com/vNmXaqSoRE6JVIClfajh",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

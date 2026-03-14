@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "cheatham",
+    "state": "TN",
+    "verified": false,
+    "name": "LL Burns PARK",
+    "description": "LL Burns PARK is a place to play pickleball in Kingston Springs, TN. There is 1 outdoor asphalt court. This is a dedicated court with a permanent net and lines. The court is free. Amenities include restrooms.",
+    "address": "501 Park Street",
+    "city": "Kingston Springs",
+    "latitude": 36.102581,
+    "longitude": -87.108285,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/o0QWcUurQl2j1cfRr60g",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "cheatham",
+    "state": "TN",
+    "verified": false,
+    "name": "Pegram Park",
+    "description": "Pegram Park is a place to play pickleball in Pegram, TN. There are 2 outdoor asphalt courts. The lines are overlaid on a tennis court, so the net is a little taller than a normal pickleball net. The courts are free. The facility includes amenities like lights and restrooms.",
+    "address": "308 U.S. 70",
+    "city": "Pegram",
+    "latitude": 36.096098,
+    "longitude": -87.043032,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "website": "https://www.pegram.net/pegram-park/",
+    "photo_url": "https://cdn.filestackcontent.com/iUsMjapNTRKV7JTLVkwj",
+    "has_restrooms": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

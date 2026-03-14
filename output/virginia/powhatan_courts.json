@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "powhatan",
+    "state": "VA",
+    "verified": false,
+    "name": "Powhatan United Methodist Church",
+    "description": "Powhatan United Methodist Church is one of the most popular places to play pickleball in Powhatan, VA. There are 3 indoor courts. The lines are permanent, and portable nets are available. Players have access to restrooms and water. The courts are private.",
+    "address": "2253 Rosson Rd",
+    "city": "Powhatan",
+    "zip_code": "23139",
+    "latitude": 37.547147,
+    "longitude": -77.924395,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Private",
+    "website": "https://powhatanumc.us/",
+    "photo_url": "https://cdn.filestackcontent.com/b6n0jEUxTDuT2nA3DYWa",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

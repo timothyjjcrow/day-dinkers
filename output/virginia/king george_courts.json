@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "king george",
+    "state": "VA",
+    "verified": false,
+    "name": "King George Family YMCA",
+    "description": "King George Family YMCA is one of the most popular places to play pickleball in King George, VA. There is 1 indoor court. The lines are permanent, and portable nets are available. The court can be reserved. A membership is required to play.",
+    "address": "10545 Kings Hwy",
+    "city": "King George",
+    "zip_code": "22485",
+    "latitude": 38.255578,
+    "longitude": -77.162687,
+    "indoor": true,
+    "num_courts": 1,
+    "fees": "Members only",
+    "website": "http://www.family-ymca.org",
+    "photo_url": "https://cdn.filestackcontent.com/XPtGtoOQlyLOkKwptHFz",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "king george",
+    "state": "VA",
+    "verified": false,
+    "name": "King George Tennis Center",
+    "description": "King George Tennis Center is one of the most popular places to play pickleball in King George, VA. There are 6 outdoor acrylic courts. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "8246 Dahlgren Road",
+    "city": "King George",
+    "latitude": 38.27755,
+    "longitude": -77.20115,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "phone": "+15407759181",
+    "website": "https://www.kinggeorgecountyva.gov/facilities/facility/details/King-George-Tennis-Center-20",
+    "photo_url": "https://cdn.filestackcontent.com/CZlQRKD8QNGRvGgfVS3x",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

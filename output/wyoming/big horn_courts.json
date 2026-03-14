@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "big horn",
+    "state": "WY",
+    "verified": false,
+    "name": "Basin WY Community Center Gymnasium",
+    "description": "Basin WY Community Center Gymnasium is a place to play pickleball in Basin, WY. There are 3 indoor wood courts. The lines are permanent, and portable nets are available. Players have access to restrooms and water. The courts are free.",
+    "address": "911 B Street",
+    "city": "Basin",
+    "latitude": 44.379666,
+    "longitude": -108.046747,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+13075681488",
+    "website": "https://basincomplex.com/basin-rec-district-4/",
+    "email": "basinrecreation8@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/KX12M9CASnCXuh26xeMw",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced",
+    "court_type": "dedicated"
+  }
+]

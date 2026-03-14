@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "box butte",
+    "state": "NE",
+    "verified": false,
+    "name": "Alliance Rec Center",
+    "description": "Alliance Rec Center is one of the most popular places to play pickleball in Alliance, NE. There are 3 indoor courts. The lines are permanent, and portable nets are available. The facility includes amenities like restrooms. A membership is required to play.",
+    "address": "1202 E 10th St",
+    "city": "Alliance",
+    "zip_code": "69301",
+    "latitude": 42.105305,
+    "longitude": -102.855224,
+    "indoor": true,
+    "num_courts": 3,
+    "fees": "Members only",
+    "phone": "3087605574",
+    "website": "http://alliancereccenter.com/",
+    "photo_url": "https://cdn.filestackcontent.com/GbARChQSQyJZ91UAZveQ",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

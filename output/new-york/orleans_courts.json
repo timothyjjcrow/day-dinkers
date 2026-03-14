@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "orleans",
+    "state": "NY",
+    "verified": false,
+    "name": "Medina High School",
+    "description": "Medina High School is one of the most popular places to play pickleball in Medina, NY. There are 10 outdoor wood courts. The lines are permanent, but you'll need to bring your own net. The courts are free. Players have access to wheelchair accessibility and lights.",
+    "address": "2 Mustang Dr",
+    "city": "Medina",
+    "zip_code": "14103",
+    "latitude": 43.20955,
+    "longitude": -78.395961,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 10,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "5857982700",
+    "website": "https://www.medinacsd.org/",
+    "photo_url": "https://cdn.filestackcontent.com/2I8yg549TZiHtpC5sYsf",
+    "wheelchair_accessible": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

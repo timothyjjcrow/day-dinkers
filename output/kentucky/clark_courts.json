@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "clark",
+    "state": "KY",
+    "verified": false,
+    "name": "Clark County Parks & Recreation",
+    "description": "Clark County Parks & Recreation is a place to play pickleball in Winchester, KY. There are 6 wood and asphalt courts. 2 are indoors and 4 are outdoors. The lines are permanent, and portable nets are available. A one-time fee is required to play. You can\u2019t reserve the courts. Players have access to restrooms.",
+    "address": "15 Wheeler Ave",
+    "city": "Winchester",
+    "zip_code": "40391",
+    "latitude": 37.991034,
+    "longitude": -84.18602,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Wood, Asphalt",
+    "fees": "Fee required \u2014 $5.50/day ($4.50 for seniors, youth, or veterans)",
+    "phone": "(859) 744-9554",
+    "website": "http://www.winchesterparksandrec.org/",
+    "email": "wccpr.info@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/ElwfjOvyRCSKMzmh7L0c",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

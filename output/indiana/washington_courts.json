@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "washington",
+    "state": "IN",
+    "verified": false,
+    "name": "Washington County Family YMCA",
+    "description": "WC YMCA Members can reserve courts in advance.",
+    "address": "1709 N Shelby St",
+    "city": "Salem",
+    "latitude": 38.62359,
+    "longitude": -86.10708,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Members only",
+    "phone": "+18128839622",
+    "website": "https://wcfymca.org",
+    "email": "Devin@wcfymca.org",
+    "photo_url": "https://cdn.filestackcontent.com/QJurPu7ZTViRuax0hdc3",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

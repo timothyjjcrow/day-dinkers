@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "cocke",
+    "state": "TN",
+    "verified": false,
+    "name": "Newport City Park",
+    "description": "Newport City Park is one of the most popular places to play pickleball in Newport, TN. There are 2 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free. The facility includes amenities like lights.",
+    "address": "City View Dr",
+    "city": "Newport",
+    "zip_code": "37821",
+    "latitude": 35.95123,
+    "longitude": -83.18351,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "http://www.nngov.com/",
+    "photo_url": "https://cdn.filestackcontent.com/uNTix6fSWeg7HOAau4C3",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "ouray",
+    "state": "CO",
+    "verified": false,
+    "name": "Chipeta Lodge",
+    "description": "Come play pickleball at Chipeta Lodge in Ridgway, CO! There are 7 outdoor concrete courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. The courts cannot be reserved.",
+    "address": "304 S Lena St",
+    "city": "Ridgway",
+    "zip_code": "81432",
+    "latitude": 38.148923,
+    "longitude": -107.755548,
+    "indoor": false,
+    "num_courts": 7,
+    "surface_type": "Concrete",
+    "fees": "Fee required \u2014 $2 drop in",
+    "phone": "9703181409",
+    "website": "https://chipetalodge.com/",
+    "email": "d_forrester@yahoo.com",
+    "photo_url": "https://cdn.filestackcontent.com/7uTixjJSRy2QohwhsZvc",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

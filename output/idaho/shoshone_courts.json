@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "shoshone",
+    "state": "ID",
+    "verified": false,
+    "name": "Kellogg Middle School",
+    "description": "Come play pickleball at Kellogg Middle School in Kellogg, ID! There are 4 outdoor hard courts. The lines are permanent, and portable nets are available. Players have access to restrooms. The courts are free.",
+    "address": "275 Morning Star Dr",
+    "city": "Kellogg",
+    "latitude": 47.541513,
+    "longitude": -116.131431,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "website": "https://kms.kelloggschools.org/",
+    "photo_url": "https://cdn.filestackcontent.com/yolYJFUwTA6qzAjeKhlF",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

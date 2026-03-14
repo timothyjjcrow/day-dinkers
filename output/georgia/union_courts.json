@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "union",
+    "state": "GA",
+    "verified": false,
+    "name": "Union County Pickleball Complex",
+    "description": "Come play pickleball at Union County Pickleball Complex in Blairsville, GA! There are 8 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. Amenities include restrooms, water, and trainers or lessons. The courts are free.",
+    "address": "67 Chase Drive",
+    "city": "Blairsville",
+    "latitude": 34.876707,
+    "longitude": -83.948005,
+    "indoor": false,
+    "num_courts": 8,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+17064396074",
+    "website": "http://www.unioncountyga.gov/parks-recreation/",
+    "photo_url": "https://cdn.filestackcontent.com/QFvnsQjiTOSgOWwXP43W",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

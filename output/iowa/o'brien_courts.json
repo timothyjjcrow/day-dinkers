@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "o'brien",
+    "state": "IA",
+    "verified": false,
+    "name": "Sheldon Senior High School",
+    "description": "Sheldon Senior High School is one of the most popular places to play pickleball in Sheldon, IA. There are 2 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "1700 E 4th St",
+    "city": "Sheldon",
+    "zip_code": "51201",
+    "latitude": 43.183544,
+    "longitude": -95.835205,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7123242501",
+    "website": "http://www.sheldonschools.com/",
+    "photo_url": "https://cdn.filestackcontent.com/TkEz02HgSDSlToyY4nUv",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

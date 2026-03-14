@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "dakota",
+    "state": "NE",
+    "verified": false,
+    "name": "Norm Waitt Sr YMCA",
+    "description": "Norm Waitt Sr YMCA is a place to play pickleball in South Sioux City, NE. There are 6 hard courts. 2 are indoors and 4 are outdoors. The lines are permanent, and portable nets are available. The courts can be reserved. A membership is required to play. Amenities include lights.",
+    "address": "601 Riverview Dr",
+    "city": "South Sioux City",
+    "zip_code": "68776",
+    "latitude": 42.483821,
+    "longitude": -96.40482,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "website": "http://nwsymca.org/",
+    "photo_url": "https://cdn.filestackcontent.com/Ux4lOoecR0yAvfq1Jsm3",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "liberty",
+    "state": "TX",
+    "verified": false,
+    "name": "Liberty High School",
+    "description": "Come play pickleball at Liberty High School in Liberty, TX! There are 4 outdoor acrylic courts. Chalk lines have been drawn, but you'll need to bring your own net. Amenities include lights. The courts are free.",
+    "address": "2615 Jefferson Dr",
+    "city": "Liberty",
+    "latitude": 30.074739,
+    "longitude": -94.787582,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Acrylic",
+    "fees": "Free",
+    "website": "https://m.facebook.com/groups/1061546721620919/",
+    "photo_url": "https://cdn.filestackcontent.com/wOEXzSKIQUS9DAPLQon2",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "shared"
+  }
+]

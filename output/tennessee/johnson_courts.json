@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "johnson",
+    "state": "TN",
+    "verified": false,
+    "name": "Mountain City Community Center",
+    "description": "Come play pickleball at Mountain City Community Center in Mountain City, TN! There are 6 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "128 College St",
+    "city": "Mountain City",
+    "zip_code": "37683",
+    "latitude": 36.475959,
+    "longitude": -81.805831,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "7076139768",
+    "email": "terncottage@yahoo.com",
+    "photo_url": "https://cdn.filestackcontent.com/FkOB0HTyRGWUeMxsN0Jw",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

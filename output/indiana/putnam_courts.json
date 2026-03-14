@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "putnam",
+    "state": "IN",
+    "verified": false,
+    "name": "Robe Anne Park",
+    "description": "Come play pickleball at Robe Anne Park in Greencastle, IN! There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free. The facility includes amenities like restrooms, water, and lights.",
+    "address": "624 Anderson St",
+    "city": "Greencastle",
+    "zip_code": "46135",
+    "latitude": 39.640193,
+    "longitude": -86.852968,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "3173740066",
+    "website": "https://gprd.recdesk.com/Community/Facility/Detail?facilityId=1",
+    "photo_url": "https://cdn.filestackcontent.com/IjPhIBKAQEKeRaLqrMSe",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

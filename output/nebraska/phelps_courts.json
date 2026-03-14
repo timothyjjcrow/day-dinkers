@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "phelps",
+    "state": "NE",
+    "verified": false,
+    "name": "YMCA of the Prairie",
+    "description": "Come play pickleball at YMCA of the Prairie in Holdrege, NE! There are 5 wood and hard courts. 3 are indoors and 2 are outdoors. The lines are permanent, and portable nets are available. The courts can be reserved. Amenities include restrooms, water, and lights. A membership is required to play.",
+    "address": "1415 Broadway St",
+    "city": "Holdrege",
+    "latitude": 40.449815,
+    "longitude": -99.387863,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 5,
+    "surface_type": "Wood, Hard",
+    "fees": "Members only",
+    "phone": "+13089954050",
+    "website": "https://www.ymcaoftheprairie.org/",
+    "photo_url": "https://cdn.filestackcontent.com/jfbXs5UCT9aYVta4CkZN",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

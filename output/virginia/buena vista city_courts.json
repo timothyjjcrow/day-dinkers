@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "buena vista city",
+    "state": "VA",
+    "verified": false,
+    "name": "Southern Virginia University",
+    "description": "Come play pickleball at Southern Virginia University in Buena Vista, VA! There are 6 outdoor wood courts. You\u2019ll have to create your own lines and bring your own net. The facility includes amenities like restrooms and lights. The courts are private.",
+    "address": "University Hl",
+    "city": "Buena Vista",
+    "zip_code": "24416",
+    "latitude": 37.74149,
+    "longitude": -79.351427,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Wood",
+    "fees": "Private",
+    "website": "http://www.svu.edu/",
+    "photo_url": "https://cdn.filestackcontent.com/SC3ChMSDQDOvTchQTYaJ",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

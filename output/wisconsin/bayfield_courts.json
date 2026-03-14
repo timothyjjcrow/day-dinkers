@@ -1,0 +1,41 @@
+[
+  {
+    "county_slug": "bayfield",
+    "state": "WI",
+    "verified": false,
+    "name": "Town Of Barnes Park",
+    "description": "Come play pickleball at Town Of Barnes Park in Solon Springs, WI! There are 3 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "3360 County Rd N",
+    "city": "Solon Springs",
+    "zip_code": "54873",
+    "latitude": 46.345311,
+    "longitude": -91.501911,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7157952359",
+    "photo_url": "https://cdn.filestackcontent.com/noSn6h8nSM6YNXvs5rQg",
+    "nets_provided": false,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "bayfield",
+    "state": "WI",
+    "verified": false,
+    "name": "Washburn",
+    "description": "Come play pickleball at Washburn in Washburn, WI! There are 4 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "521 E 3rd St",
+    "city": "Washburn",
+    "latitude": 46.678796,
+    "longitude": -90.884788,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/TOAaXBhaR1OVbGvBra6o",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

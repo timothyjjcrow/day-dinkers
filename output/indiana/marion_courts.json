@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "marion",
+    "state": "IN",
+    "verified": false,
+    "name": "Sarah T Bolton park",
+    "description": "Come play pickleball at Sarah T Bolton park in Beech Grove, IN! There are 2 outdoor asphalt courts. The lines are permanent, but you'll need to bring your own net. Reservations are not available. Amenities include restrooms. The courts are free.",
+    "address": "1300 Churchman Avenue",
+    "city": "Beech Grove",
+    "latitude": 39.718603,
+    "longitude": -86.099462,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+13177884977",
+    "website": "https://www.hornetparkcommunitycenter.com/sarah-t-bolton-park",
+    "photo_url": "https://cdn.filestackcontent.com/qwbPs5J1S5ajedyj908i",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

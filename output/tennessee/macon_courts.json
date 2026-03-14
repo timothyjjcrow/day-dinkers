@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "macon",
+    "state": "TN",
+    "verified": false,
+    "name": "Lafayette City Park",
+    "description": "Lafayette City Park is a place to play pickleball in Lafayette, TN. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. Players have access to lights and restrooms. The courts are free.",
+    "address": "508 Days Road",
+    "city": "Lafayette",
+    "latitude": 36.51538,
+    "longitude": -86.015346,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "open_play_schedule": "City Park hours 8am - 10pm",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/Iw53iB9iSburt3ieRrdx",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

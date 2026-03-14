@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "jones",
+    "state": "IA",
+    "verified": false,
+    "name": "Monticello Pickleball Courts",
+    "description": "Monticello Pickleball Courts is a place to play pickleball in Monticello, IA. There are 4 courts. 2 are indoors and 2 are outdoors. These are dedicated courts with permanent lines and nets. You can reserve the courts. A one-time fee is required to play.",
+    "address": "766 N Maple St",
+    "city": "Monticello",
+    "zip_code": "52310",
+    "latitude": 42.247232,
+    "longitude": -91.189644,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Fee required",
+    "phone": "3194656640",
+    "website": "http://www.ci.monticello.ia.us/parks-and-recreation/",
+    "photo_url": "https://cdn.filestackcontent.com/KcD7anSTVySlkml4luWV",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Friday, 8am to 5pm"
+  }
+]

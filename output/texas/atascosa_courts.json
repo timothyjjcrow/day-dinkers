@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "atascosa",
+    "state": "TX",
+    "verified": false,
+    "name": "Pleasanton River Park",
+    "description": "Come play pickleball at Pleasanton River Park in Pleasanton, TX! There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free. Players have access to restrooms, water, and lights.",
+    "address": "900 River Park Road",
+    "city": "Pleasanton",
+    "latitude": 28.968728,
+    "longitude": -98.482714,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+18305693867",
+    "website": "https://www.pleasantonexpress.com/articles/check-out-the-river-park-additions/",
+    "photo_url": "https://cdn.filestackcontent.com/dLzds2FQye48UOk6Gb4H",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]

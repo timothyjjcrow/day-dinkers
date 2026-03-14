@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "winneshiek",
+    "state": "IA",
+    "verified": false,
+    "name": "Decorah: City Tennis Courts",
+    "description": "Come play pickleball at Decorah: City Tennis Courts in Decorah, IA! There are 2 outdoor courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "223 Claiborne Dr",
+    "city": "Decorah",
+    "zip_code": "52101",
+    "latitude": 43.305832,
+    "longitude": -91.787765,
+    "indoor": false,
+    "num_courts": 2,
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/TdURfSdvTNumyNNiizPX",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "winneshiek",
+    "state": "IA",
+    "verified": false,
+    "name": "St Al gym",
+    "description": "Managed by Kristi Creek",
+    "address": "302 Maryville St",
+    "city": "Calmar",
+    "latitude": 43.180657,
+    "longitude": -91.86479,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://maps.app.goo.gl/yirJRHUexk2G76Lt5",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "shared"
+  }
+]

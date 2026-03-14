@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "graham",
+    "state": "KS",
+    "verified": false,
+    "name": "Hill City Tennis Courts",
+    "description": "Hill City Tennis Courts is a place to play pickleball in Hill City, KS. There are 3 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. You can\u2019t reserve the courts. The facility includes amenities like lights.",
+    "address": "507 N 8th Ave",
+    "city": "Hill City",
+    "latitude": 39.369356,
+    "longitude": -99.851494,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

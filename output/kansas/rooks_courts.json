@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "rooks",
+    "state": "KS",
+    "verified": false,
+    "name": "Downtown",
+    "description": "Come play pickleball at Downtown in Plainville, KS! There are 2 outdoor courts. The court lines are permanent. Amenities include lights.",
+    "address": "1st St SW",
+    "city": "Plainville",
+    "zip_code": "67663",
+    "latitude": 39.233398,
+    "longitude": -99.301058,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "rooks",
+    "state": "KS",
+    "verified": false,
+    "name": "Webster State Park",
+    "description": "Come play pickleball at Webster State Park in Stockton, KS! There is 1 outdoor court. The lines are permanent, but you'll need to bring your own net. The court is free.",
+    "address": "1140 10th Rd",
+    "city": "Stockton",
+    "zip_code": "67669",
+    "latitude": 39.417092,
+    "longitude": -99.435471,
+    "indoor": false,
+    "num_courts": 1,
+    "fees": "Free",
+    "phone": "7854256775",
+    "website": "http://ksoutdoors.com/State-Parks/Locations/Webster",
+    "photo_url": "https://cdn.filestackcontent.com/WfZtzlMTRRKj0K9H8lij",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Thursday 8 am to 4 pm",
+    "has_parking": true,
+    "wheelchair_accessible": true
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "jay",
+    "state": "IN",
+    "verified": false,
+    "name": "Jay Community Center",
+    "description": "Jay Community Center is a place to play pickleball in Portland, IN. There are 7 indoor wood courts. The lines are permanent, and portable nets are available. Amenities include restrooms. A one-time fee is required to play.",
+    "address": "115 E Water St",
+    "city": "Portland",
+    "zip_code": "47371",
+    "latitude": 40.432157,
+    "longitude": -84.977121,
+    "indoor": true,
+    "num_courts": 7,
+    "surface_type": "Wood",
+    "fees": "Fee required",
+    "phone": "2607266477",
+    "website": "http://www.jaycc.org/",
+    "photo_url": "https://cdn.filestackcontent.com/LKp4Ko3mRXeKB3B3aNHM",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

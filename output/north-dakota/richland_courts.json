@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "richland",
+    "state": "ND",
+    "verified": false,
+    "name": "NDSCS basketball court",
+    "description": "NDSCS basketball court is a place to play pickleball in Wahpeton, ND. There are 3 indoor wood courts. The lines are permanent, and portable nets are available. The facility includes amenities like locker rooms, restrooms, water, lights, and wheelchair accessibility. The courts cannot be reserved.",
+    "address": "800 6th St N",
+    "city": "Wahpeton",
+    "latitude": 46.275277,
+    "longitude": -96.60738,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "phone": "701-671-2445",
+    "website": "https://www.ndscswildcats.com/facilities/-fitnessmembership",
+    "photo_url": "https://cdn.filestackcontent.com/3XrZysjWShqdc7uuy7LR",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "hours": "12pm-6pm"
+  }
+]

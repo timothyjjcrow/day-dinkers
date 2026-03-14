@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "todd",
+    "state": "KY",
+    "verified": false,
+    "name": "Elkton Park",
+    "description": "Come play pickleball at Elkton Park in Elkton, KY! There are 3 outdoor concrete courts. The lines are permanent, and portable nets are available. The courts are free. Amenities include lights and restrooms.",
+    "address": "Elkton Park Rd",
+    "city": "Elkton",
+    "latitude": 36.803963,
+    "longitude": -87.155338,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/KwHIYLfQ0Cu8vhf92rQt",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

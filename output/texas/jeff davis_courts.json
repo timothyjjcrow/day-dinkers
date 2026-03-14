@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "jeff davis",
+    "state": "TX",
+    "verified": false,
+    "name": "The Rendezvous",
+    "description": "The Rendezvous is one of the most popular places to play pickleball in Fort Davis, TX. There is 1 outdoor concrete court. This is a dedicated court with a permanent net and lines. A membership is required to play. Players have access to food, restrooms, and water.",
+    "address": "105 2nd St",
+    "city": "Fort Davis",
+    "latitude": 30.594446,
+    "longitude": -103.891143,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Members only",
+    "phone": "tel:+14324260010",
+    "photo_url": "https://cdn.filestackcontent.com/ph7v9TeyQTSxNza6DQ5y",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated"
+  }
+]

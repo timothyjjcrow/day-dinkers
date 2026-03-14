@@ -1,0 +1,21 @@
+[
+  {
+    "county_slug": "calhoun",
+    "state": "IA",
+    "verified": false,
+    "name": "Lake City Pickleball Courts",
+    "description": "Lake City Pickleball Courts is one of the most popular places to play pickleball in Lake City, IA. There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "300 N 37th St",
+    "city": "Lake City",
+    "latitude": 42.270048,
+    "longitude": -94.745897,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "https://www.lakecitypickleballproject.com/",
+    "photo_url": "https://cdn.filestackcontent.com/rJ49KGjeQfun6p5Gc3qC",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

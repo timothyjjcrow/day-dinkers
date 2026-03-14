@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "brown",
+    "state": "MN",
+    "verified": false,
+    "name": "New Ulm Vogel Fieldhouse",
+    "description": "Come play pickleball at New Ulm Vogel Fieldhouse in New Ulm, MN! There are 12 concrete courts. 6 are indoors and 6 are outdoors. The lines are permanent, and portable nets are available. The courts are free.",
+    "address": "122 South Garden Street",
+    "city": "New Ulm",
+    "latitude": 44.306383,
+    "longitude": -94.469401,
+    "indoor": false,
+    "num_courts": 12,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+15073598347",
+    "website": "https://www.newulmmn.gov/157/Park-Recreation",
+    "photo_url": "https://cdn.filestackcontent.com/akfsm5S0SjmOgNhPAzL5",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

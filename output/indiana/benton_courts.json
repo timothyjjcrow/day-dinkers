@@ -1,0 +1,18 @@
+[
+  {
+    "county_slug": "benton",
+    "state": "IN",
+    "verified": false,
+    "name": "Weise",
+    "description": "Come play pickleball at Weise in Otterbein, IN! There is 1 outdoor court. You\u2019ll have to create your own lines and bring your own net. The court is private. Reservations are not available.",
+    "address": "Otterbein",
+    "city": "Otterbein",
+    "latitude": 40.490591,
+    "longitude": -87.096403,
+    "indoor": false,
+    "num_courts": 1,
+    "fees": "Private \u2014 No access",
+    "nets_provided": false,
+    "court_type": "shared"
+  }
+]

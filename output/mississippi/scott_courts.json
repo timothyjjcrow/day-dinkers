@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "scott",
+    "state": "MS",
+    "verified": false,
+    "name": "Gaddis Park",
+    "description": "Gaddis Park is one of the most popular places to play pickleball in Forest, MS. There are 6 outdoor concrete courts. Tape lines have been laid, and portable nets are available. The courts are free. Reservations are not available. The facility includes amenities like restrooms, wheelchair accessibility, and lights.",
+    "address": "835 Park Road",
+    "city": "Forest",
+    "latitude": 32.359102,
+    "longitude": -89.486214,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+16014692921",
+    "website": "https://cityofforest.com/ova_sev/city-of-forest-parks/",
+    "photo_url": "https://cdn.filestackcontent.com/OYuv5WfSveDM1MGJN7Rh",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "shared",
+    "hours": "Mon \u2013 Fri: 8:00 am \u2013 5:00 pm Phone: (601) 469-2921 Email: adamotaylor@att.net Service Request City Services Community Healthy Hometown Contact Useful LInks Our History CCR Report City of Forest Zoning Ordinance City News & Updates Copyright 2025 City of Forest, Mississippi. All Rights Reserved. | Admin | Privacy Policy Web design and hosting by U.S.NEXT"
+  }
+]

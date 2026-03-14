@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "hardeman",
+    "state": "TN",
+    "verified": false,
+    "name": "City of Bolivar",
+    "description": "Come play pickleball at City of Bolivar in Bolivar, TN! There are 3 indoor concrete courts. The lines are permanent, and portable nets are available. Players have access to restrooms, water, wheelchair accessibility, and lights. The courts are free.",
+    "address": "1600 West Market Street",
+    "city": "Bolivar",
+    "latitude": 35.278643,
+    "longitude": -89.023014,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+17616587529",
+    "website": "https://www.cityofbolivar.com/parks-recreation",
+    "photo_url": "https://cdn.filestackcontent.com/nYMyWreT9mXiKx0FrXVD",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

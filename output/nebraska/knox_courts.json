@@ -1,0 +1,39 @@
+[
+  {
+    "county_slug": "knox",
+    "state": "NE",
+    "verified": false,
+    "name": "Crofton Auditorium",
+    "description": "Crofton Auditorium is a place to play pickleball in Crofton, NE. There is 1 outdoor court. You\u2019ll need to create your own lines and bring your own net.",
+    "address": "1309 W 2nd St",
+    "city": "Crofton",
+    "zip_code": "68730",
+    "latitude": 42.729636,
+    "longitude": -97.495556,
+    "indoor": false,
+    "num_courts": 1,
+    "phone": "4023752674",
+    "email": "mawilso4@hotmail.com",
+    "skill_levels": "beginner",
+    "court_type": "shared"
+  },
+  {
+    "county_slug": "knox",
+    "state": "NE",
+    "verified": false,
+    "name": "Northside Park, Crofton",
+    "description": "Northside Park, Crofton is one of the most popular places to play pickleball in Crofton, NE. There is 1 outdoor court. You\u2019ll have to create your own lines and bring your own net. The court is free.",
+    "address": "W 2nd St",
+    "city": "Crofton",
+    "zip_code": "68730",
+    "latitude": 42.734012,
+    "longitude": -97.496147,
+    "indoor": false,
+    "num_courts": 1,
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/5IhTO9IdQ0CBvIwT9AbJ",
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  }
+]

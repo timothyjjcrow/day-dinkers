@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "clay",
+    "state": "NC",
+    "verified": false,
+    "name": "Clay County NC",
+    "description": "Clay County NC is a place to play pickleball in Hayesville, NC. There are 8 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include restrooms and wheelchair accessibility. Reservations are not available.",
+    "address": "333 Ball Park Dr",
+    "city": "Hayesville",
+    "latitude": 35.0462,
+    "longitude": -83.817953,
+    "indoor": false,
+    "num_courts": 8,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+13525844829",
+    "photo_url": "https://cdn.filestackcontent.com/c1pgOn2wThiDv26cxdB7",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

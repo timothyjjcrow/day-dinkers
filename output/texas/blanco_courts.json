@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "blanco",
+    "state": "TX",
+    "verified": false,
+    "name": "Terraqueous RV Resort",
+    "description": "The courts are located in Terraqueous RV Resort, register to play at the office where you also have access to the snack shack and lounge & receive a park guest pass, restrooms are located at the sports court.  The pickleball courts are fenced on volly sides.\n The sports complex has a children's playground, the pickleball courts, 2 bocce ball lanes, horseshoes and sensory hill, sandbox for the young and young at heart.",
+    "address": "895 Ranch to Market 32",
+    "city": "Blanco",
+    "latitude": 30.06722,
+    "longitude": -98.397679,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "open_play_schedule": "These are the office hours in order to registered to play,  the courts are lighted from dusk to 10pm.",
+    "fees": "Fee required \u2014 $5 per day or $40 per month for a play pass",
+    "phone": "+18308334232",
+    "website": "http://www.terraqueous.net",
+    "email": "camp@terraqueous.net",
+    "photo_url": "https://cdn.filestackcontent.com/RkuuZYuuTqyPhI0Zf96H",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

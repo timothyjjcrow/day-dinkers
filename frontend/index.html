@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Third Shot - California Pickleball</title>
+    <title>Third Shot - Pickleball Courts</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -27,7 +27,7 @@
             </select>
             <div class="county-picker" id="county-picker">
                 <button type="button" class="county-picker-trigger" id="county-picker-trigger" onclick="App.toggleCountyPicker()">
-                    <span id="county-picker-label">Humboldt County</span>
+                    <span id="county-picker-label">California</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
                 <div class="county-picker-dropdown" id="county-picker-dropdown" style="display:none">
@@ -35,6 +35,9 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
                         <span>Use My Location</span>
                     </button>
+                    <select id="state-select" onchange="App.onStateChange(this.value)" aria-label="Select state" class="state-select">
+                        <option value="CA">California</option>
+                    </select>
                     <input type="text" id="county-picker-search" placeholder="Search counties..." oninput="App.filterCountyList(this.value)" autocomplete="off">
                     <div id="county-picker-list" class="county-picker-list"></div>
                 </div>

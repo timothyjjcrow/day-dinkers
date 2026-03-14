@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "wythe",
+    "state": "VA",
+    "verified": false,
+    "name": "Wytheville Golf Club",
+    "description": "Wytheville Golf Club is a place to play pickleball in Wytheville, VA. There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. A membership is required to play. The facility includes amenities like lights.",
+    "address": "1325 West Lee Highway",
+    "city": "Wytheville",
+    "latitude": 36.943974,
+    "longitude": -81.107556,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "phone": "+12762282143",
+    "website": "https://wythegolf.com/",
+    "photo_url": "https://cdn.filestackcontent.com/4f5sgUkiTeYIR4TtNUHU",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "grand",
+    "state": "UT",
+    "verified": false,
+    "name": "City Street Gym",
+    "description": "Come play pickleball at City Street Gym in Moab, UT! There are 2 indoor courts. The lines are permanent, but you'll need to bring your own net. A membership is required to play. Amenities include lights.",
+    "address": "125 E Center St",
+    "city": "Moab",
+    "zip_code": "84532",
+    "latitude": 38.573585,
+    "longitude": -109.54828,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 2,
+    "fees": "Members only",
+    "phone": "+14352592255",
+    "website": "https://www.moabrecreation.org",
+    "photo_url": "https://cdn.filestackcontent.com/X0yo9UoLQm6QoT9tEdxo",
+    "nets_provided": false,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "grand",
+    "state": "UT",
+    "verified": false,
+    "name": "Grand County High School",
+    "description": "Play is only allowed when school is out and the tennis team is not practicing. No chalk lines allowed during spring and fall tennis season.",
+    "address": "608 S 400 E",
+    "city": "Moab",
+    "zip_code": "84532",
+    "latitude": 38.562942,
+    "longitude": -109.54288,
+    "indoor": false,
+    "fees": "Free",
+    "phone": "4352100205",
+    "photo_url": "https://cdn.filestackcontent.com/3XPgDzfQbmlZ6DmVo8kQ",
+    "nets_provided": false,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "shared"
+  }
+]

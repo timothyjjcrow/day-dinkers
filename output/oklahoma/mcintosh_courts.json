@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "mcintosh",
+    "state": "OK",
+    "verified": false,
+    "name": "Jim Lucas Checotah Public Library Pickleball Courts",
+    "description": "Jim Lucas Checotah Public Library has paddles and balls available to borrow for free with an Eastern Oklahoma Library System library card. There is no charge to use the court.",
+    "address": "606 W Gentry Ave",
+    "city": "Checotah",
+    "latitude": 35.470753,
+    "longitude": -95.526743,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "phone": "+19184736715",
+    "website": "https://eols.org/pickleball/",
+    "email": "checotahpl@eols.org",
+    "photo_url": "https://cdn.filestackcontent.com/Tve0AgOfT8CPLC3JV2WU",
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

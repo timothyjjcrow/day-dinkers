@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "montour",
+    "state": "PA",
+    "verified": false,
+    "name": "DACC",
+    "description": "DACC is a place to play pickleball in Danville, PA. There are 3 indoor wood courts. The lines are permanent, and portable nets are available. A one-time fee is required to play. The facility includes amenities like food, locker rooms, restrooms, water, lights, and wheelchair accessibility.",
+    "address": "1041 Liberty St",
+    "city": "Danville",
+    "zip_code": "17821",
+    "latitude": 40.957104,
+    "longitude": -76.604029,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Wood",
+    "fees": "Fee required \u2014 $5 to play or if you have a membership it\u2019s included",
+    "phone": "5702753001",
+    "website": "https://www.danvilleacc.com/",
+    "photo_url": "https://cdn.filestackcontent.com/k4D7gvq2TNyKjDNUQFl7",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

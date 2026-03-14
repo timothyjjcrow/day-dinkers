@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "jackson",
+    "state": "TX",
+    "verified": false,
+    "name": "Port Lavaca / Matagorda Bay KOA Holiday",
+    "description": "Come play pickleball at Port Lavaca / Matagorda Bay KOA Holiday in Port Lavaca, TX! There are 2 outdoor concrete courts. These are dedicated courts with permanent lines and nets. A one-time fee is required to play. Amenities include food, restrooms, and water.",
+    "address": "1348 Co Rd 302",
+    "city": "Port Lavaca",
+    "latitude": 28.70528,
+    "longitude": -96.430154,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Concrete",
+    "fees": "Fee required \u2014 Free for Registered Guests. $10 per person for Day Pass. $50 for 4 Sunday Funday Day Passes which includes: 2 Free Hunt Bros Pizzas and access to all campground amenities.",
+    "phone": "+13618935120",
+    "website": "https://koa.com/campgrounds/port-lavaca/",
+    "email": "portlavaca@koa.com",
+    "photo_url": "https://cdn.filestackcontent.com/rMT9MgSSTWme4n7lpAhB",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner",
+    "court_type": "dedicated",
+    "hours": "12 PM-2 PM"
+  }
+]

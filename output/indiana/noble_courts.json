@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "noble",
+    "state": "IN",
+    "verified": false,
+    "name": "Martin Kenney Memorial Park",
+    "description": "Come play pickleball at Martin Kenney Memorial Park in Ligonier, IN! There are 2 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "520 W Union St",
+    "city": "Ligonier",
+    "latitude": 41.45966,
+    "longitude": -85.597064,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "+12608947344",
+    "website": "https://www.ligonier-in.org/government_departments_parks.html",
+    "photo_url": "https://cdn.filestackcontent.com/FhNP30PiQsKxDnOIJx50",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

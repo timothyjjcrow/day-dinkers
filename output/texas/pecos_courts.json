@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "pecos",
+    "state": "TX",
+    "verified": false,
+    "name": "Fort Stockton Middle School",
+    "description": "Can only use during non school hours.",
+    "address": "2400 West 5th Street",
+    "city": "Fort Stockton",
+    "latitude": 30.890314,
+    "longitude": -102.906229,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 5,
+    "surface_type": "Hard",
+    "open_play_schedule": "First come, first serve.",
+    "fees": "Free",
+    "phone": "+14323364131",
+    "website": "https://www.fsisd.net/Domain/11",
+    "photo_url": "https://cdn.filestackcontent.com/tnvYIWAQoiIN1hLEMvwA",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

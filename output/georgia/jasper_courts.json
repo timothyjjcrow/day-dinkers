@@ -1,0 +1,28 @@
+[
+  {
+    "county_slug": "jasper",
+    "state": "GA",
+    "verified": false,
+    "name": "Turtle Cove",
+    "description": "Come play pickleball at Turtle Cove in Monticello, GA! There are 6 outdoor hard courts. These are dedicated courts with permanent lines and nets. A membership is required to play. The facility includes amenities like food, lights, and restrooms. You can\u2019t reserve the courts.",
+    "address": "222 Clubhouse Drive",
+    "city": "Monticello",
+    "latitude": 33.37071,
+    "longitude": -83.842392,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 6,
+    "surface_type": "Hard",
+    "fees": "Members only",
+    "phone": "7703351636",
+    "website": "https://turtlecovepoa.com/",
+    "email": "office@turtlecovepoa.com",
+    "photo_url": "https://cdn.filestackcontent.com/Rzj1UXb7QpKWEQDZgMe2",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated",
+    "hours": "Tuesday - 3pm - 10:30pm",
+    "has_pro_shop": true
+  }
+]

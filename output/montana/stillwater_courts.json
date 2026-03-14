@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "stillwater",
+    "state": "MT",
+    "verified": false,
+    "name": "Stillwater Youth Center",
+    "description": "We've adapted an indoor racquetball court for pickleball, complete with tape lines, a portable net, and loaner paddles and balls ready for you to use. While it's not a regulation-sized court, that's part of the fun! This smaller space will definitely test your accuracy and speed, making for some exciting and challenging games while sharpening your skills. All ages are welcome to come give it a try!",
+    "address": "1036 East Pike Avenue",
+    "city": "Columbus",
+    "latitude": 45.635608,
+    "longitude": -109.245847,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 1,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "+14063225440",
+    "website": "https://www.stillwateryouthcenter.com/index2.shtml",
+    "email": "stillwateryouthcenteroffice@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/Jz1YX61WTvWkUJAiLJrp",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "shared"
+  }
+]

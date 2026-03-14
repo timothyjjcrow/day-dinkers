@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "skamania",
+    "state": "WA",
+    "verified": false,
+    "name": "Exhibit Hall",
+    "description": "Come play pickleball at Exhibit Hall in Stevenson, WA! There are 3 indoor hard courts. You\u2019ll have to create your own lines and bring your own net. Amenities include restrooms, water, and lights. The courts are private.",
+    "address": "710 SW Rock Creek Dr",
+    "city": "Stevenson",
+    "latitude": 45.691334,
+    "longitude": -121.891819,
+    "indoor": true,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Hard",
+    "fees": "Private",
+    "website": "https://www.skamaniacounty.org/departments-offices/events-and-recreation/community-recreation-programs/pickleball",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": false,
+    "court_type": "shared"
+  },
+  {
+    "county_slug": "skamania",
+    "state": "WA",
+    "verified": false,
+    "name": "Stevenson High School",
+    "description": "Stevenson High School is a place to play pickleball in Stevenson, WA. There are 2 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "390 NW Gropper Rd",
+    "city": "Stevenson",
+    "zip_code": "98648",
+    "latitude": 45.701329,
+    "longitude": -121.889303,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/u5mDJOEQTUmjtVWD7kPS",
+    "nets_provided": false,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

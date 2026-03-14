@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "titus",
+    "state": "TX",
+    "verified": false,
+    "name": "Heritage Park",
+    "description": "Heritage Park is a place to play pickleball in Mount Pleasant, TX. There are 2 outdoor concrete and hard courts. The lines are permanent, and portable nets are available. The courts are free. Amenities include restrooms, water, and lights.",
+    "address": "1642 Amy St",
+    "city": "Mount Pleasant",
+    "zip_code": "75455",
+    "latitude": 33.171899,
+    "longitude": -94.983845,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 2,
+    "surface_type": "Concrete, Hard",
+    "fees": "Free",
+    "website": "http://www.mpcity.net/",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Monday \u00e2\u0080\u0093 Friday 8:00 a.m. \u00e2\u0080\u0093 5:00 p.m. (excluding public holidays) VISIT MAIN STREET Learn more about our Historic Main Street and Downtown Merchants . UPCOMING CALENDAR 17 Mar CITY COUNCIL MEETING Tuesday , City Hall 02 Apr MAIN STREET ADVISORY COMM. Thursday , Civic Center No event found! VIEW COMMUNITY CALENDAR @ COPYRIGHT - CITY OF MOUNT PLEASANT, TX Facebook Instagram Youtube Scroll to top"
+  }
+]

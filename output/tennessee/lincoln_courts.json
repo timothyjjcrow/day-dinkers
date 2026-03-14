@@ -1,0 +1,24 @@
+[
+  {
+    "county_slug": "lincoln",
+    "state": "TN",
+    "verified": false,
+    "name": "Fayetteville Recreation Center",
+    "description": "Come play pickleball at Fayetteville Recreation Center in Fayetteville, TN! There are 4 outdoor hard courts. The lines are permanent, and portable nets are available. The courts cannot be reserved. Players have access to lights. The courts are free.",
+    "address": "1203 Winchester Hwy",
+    "city": "Fayetteville",
+    "latitude": 35.161111,
+    "longitude": -86.552842,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+19314336059",
+    "website": "https://fayettevilletn.com/",
+    "photo_url": "https://cdn.filestackcontent.com/qP5xhDGaSD2cYP1apYyI",
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

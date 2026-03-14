@@ -1,0 +1,43 @@
+[
+  {
+    "county_slug": "lemhi",
+    "state": "ID",
+    "verified": false,
+    "name": "North Fork Fire Department",
+    "description": "North Fork Fire Department is one of the most popular places to play pickleball in North Fork, ID. There is 1 outdoor concrete court. The lines are permanent, but you'll need to bring your own net. Players have access to restrooms and wheelchair accessibility. The court is free.",
+    "address": "2066 Highway 93 N",
+    "city": "North Fork",
+    "zip_code": "83466",
+    "latitude": 45.410778,
+    "longitude": -113.997115,
+    "indoor": false,
+    "num_courts": 1,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "website": "http://www.northforkfire.org/",
+    "has_restrooms": true,
+    "wheelchair_accessible": true,
+    "nets_provided": false,
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "lemhi",
+    "state": "ID",
+    "verified": false,
+    "name": "Salmon City Park Tennis Courts",
+    "description": "Salmon City Park Tennis Courts is a place to play pickleball in Salmon, ID. There are 4 outdoor courts. The lines are permanent, but you'll need to bring your own net. The courts are free.",
+    "address": "11 City Park Lp",
+    "city": "Salmon",
+    "zip_code": "83467",
+    "latitude": 45.163436,
+    "longitude": -113.868202,
+    "indoor": false,
+    "num_courts": 4,
+    "fees": "Free",
+    "phone": "2087567137",
+    "photo_url": "https://cdn.filestackcontent.com/E6Gf74OIQryvd132NdwA",
+    "nets_provided": false,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "county_slug": "sanpete",
+    "state": "UT",
+    "verified": false,
+    "name": "Moroni City Courts",
+    "description": "Come play pickleball at Moroni City Courts in Moroni, UT! There are 3 outdoor concrete courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "80 South 300 West Street",
+    "city": "Moroni",
+    "latitude": 39.524094,
+    "longitude": -111.589384,
+    "indoor": false,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]

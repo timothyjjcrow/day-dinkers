@@ -1,0 +1,25 @@
+[
+  {
+    "county_slug": "chickasaw",
+    "state": "IA",
+    "verified": false,
+    "name": "Husky Wellness Center",
+    "description": "Come play pickleball at Husky Wellness Center in Nashua, IA! There are 3 indoor concrete courts. Tape lines have been laid, and portable nets are available. The facility includes amenities like restrooms and water. A one-time fee is required to play.",
+    "address": "700 Andrews St",
+    "city": "Nashua",
+    "latitude": 42.949077,
+    "longitude": -92.541695,
+    "indoor": true,
+    "num_courts": 3,
+    "surface_type": "Concrete",
+    "fees": "Fee required \u2014 Non members $5 access/day",
+    "phone": "6414354611",
+    "website": "https://www.facebook.com/HuskyWellnessCenter/",
+    "photo_url": "https://cdn.filestackcontent.com/qRkcr6ezSruFpFfsmwqV",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "shared"
+  }
+]

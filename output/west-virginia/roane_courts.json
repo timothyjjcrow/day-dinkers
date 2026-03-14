@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "roane",
+    "state": "WV",
+    "verified": false,
+    "name": "Washington Park Pickleball Court",
+    "description": "One permanent pickleball court is on site.  Two additional courts are painted on a single tennis court. Bring a net or portable nets are available during scheduled open play.",
+    "address": "Maple St",
+    "city": "Spencer",
+    "latitude": 38.793645,
+    "longitude": -81.353695,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 3,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "3049271640",
+    "website": "https://www.cityofspencer.com/parks-recreation",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

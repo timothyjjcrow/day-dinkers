@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "watonwan",
+    "state": "MN",
+    "verified": false,
+    "name": "Next Level STJ",
+    "description": "Next Level STJ is one of the most popular places to play pickleball in Saint James, MN. There are 2 indoor hard courts. The lines are permanent, and portable nets are available. Reservations are available. Amenities include water, restrooms, and wheelchair accessibility. The courts are private.",
+    "address": "806 Weston Ave",
+    "city": "Saint James",
+    "latitude": 43.985735,
+    "longitude": -94.627671,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "open_play_schedule": "Call or text 507-380-5294 to reserve court. Building is accessible 24/7",
+    "fees": "Private \u2014 Court fee is $25/Hour. Call or text to reserve court and gain access to building.",
+    "phone": "+15073805294",
+    "email": "nextlevelstj@gmail.com",
+    "photo_url": "https://cdn.filestackcontent.com/bwh4IWeBR82RHYClFeT5",
+    "has_restrooms": true,
+    "has_water": true,
+    "wheelchair_accessible": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  }
+]

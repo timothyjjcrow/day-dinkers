@@ -1,0 +1,42 @@
+[
+  {
+    "county_slug": "bottineau",
+    "state": "ND",
+    "verified": false,
+    "name": "Kevin",
+    "description": "Nice park with a big turtle statue riding a snowmobile. Nice courts, nice bathrooms.",
+    "address": "10th St E",
+    "city": "Bottineau",
+    "latitude": 48.822024,
+    "longitude": -100.437814,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Concrete",
+    "fees": "Free",
+    "photo_url": "https://cdn.filestackcontent.com/PzGwORWeRN2STwH2ff6e",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "court_type": "dedicated"
+  },
+  {
+    "county_slug": "bottineau",
+    "state": "ND",
+    "verified": false,
+    "name": "Lakeview Pickelball Court",
+    "description": "Come play pickleball at Lakeview Pickelball Court in Bottineau, ND! There are 3 outdoor courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "8 E Shore Pk Rd",
+    "city": "Bottineau",
+    "zip_code": "58318",
+    "latitude": 48.980997,
+    "longitude": -100.348438,
+    "indoor": false,
+    "num_courts": 3,
+    "fees": "Free",
+    "phone": "7012631682",
+    "photo_url": "https://cdn.filestackcontent.com/fPXsbH16RUG4YW23P3Vr",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

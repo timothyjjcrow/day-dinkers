@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "galax city",
+    "state": "VA",
+    "verified": false,
+    "name": "Felts Park",
+    "description": "Come play pickleball at Felts Park in Galax, VA! There are 4 outdoor hard courts. These are dedicated courts with permanent lines and nets. The courts are free.",
+    "address": "601 South Main Street",
+    "city": "Galax",
+    "latitude": 36.656161,
+    "longitude": -80.920428,
+    "indoor": false,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+12762363218",
+    "website": "https://www.galaxparks-rec.com/parks-facilities/felts-park/",
+    "photo_url": "https://cdn.filestackcontent.com/kn8T2AeARv2XrGhv4lPi",
+    "nets_provided": true,
+    "skill_levels": "advanced,intermediate",
+    "court_type": "dedicated"
+  }
+]

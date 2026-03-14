@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "adams",
+    "state": "WI",
+    "verified": false,
+    "name": "Rome Town Hall",
+    "description": "Winter only",
+    "address": "1156 Alpine Dr",
+    "city": "Nekoosa",
+    "zip_code": "54457",
+    "latitude": 44.2219,
+    "longitude": -89.80939,
+    "indoor": true,
+    "num_courts": 2,
+    "surface_type": "Acrylic",
+    "fees": "Fee required",
+    "phone": "7152583796",
+    "photo_url": "https://cdn.filestackcontent.com/gk8ZWY5pRkuEsFJ7Ha3G",
+    "nets_provided": true,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated"
+  }
+]

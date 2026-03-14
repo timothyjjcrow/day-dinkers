@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "park",
+    "state": "CO",
+    "verified": false,
+    "name": "Lake George Community Park",
+    "description": "Come play pickleball at Lake George Community Park in Lake George, CO! There are 2 outdoor hard courts. The lines are permanent, but you'll need to bring your own net. Amenities include restrooms. The courts are free.",
+    "address": "37371 Highway 24",
+    "city": "Lake George",
+    "zip_code": "80827",
+    "latitude": 38.983623,
+    "longitude": -105.358679,
+    "indoor": false,
+    "num_courts": 2,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "7197483949",
+    "website": "https://parkco.us/Facilities/Facility/Details/Lake-George-Community-Center-5?mobile=ON",
+    "photo_url": "https://cdn.filestackcontent.com/MxXCgyRmWV6SfQHeosPA",
+    "has_restrooms": true,
+    "nets_provided": false,
+    "skill_levels": "intermediate",
+    "court_type": "dedicated",
+    "has_parking": true
+  }
+]

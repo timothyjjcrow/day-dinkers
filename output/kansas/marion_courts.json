@@ -1,0 +1,26 @@
+[
+  {
+    "county_slug": "marion",
+    "state": "KS",
+    "verified": false,
+    "name": "Hillsboro/Tabor College",
+    "description": "Converted tennis courts with permanent lines. Two courts are currently lighted.",
+    "address": "East D Street",
+    "city": "Hillsboro",
+    "latitude": 38.347583,
+    "longitude": -97.199023,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Hard",
+    "fees": "Free",
+    "phone": "+16209473490",
+    "website": "https://www.cityofhillsboro.net/recreation",
+    "email": "recreation@cityofhillsboro.net",
+    "photo_url": "https://cdn.filestackcontent.com/6NbCcKlmQ1SQtG33Xgqj",
+    "has_restrooms": true,
+    "skill_levels": "beginner,intermediate",
+    "court_type": "dedicated",
+    "hours": "Fri 8am - 5pm"
+  }
+]

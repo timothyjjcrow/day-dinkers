@@ -1,0 +1,27 @@
+[
+  {
+    "county_slug": "upson",
+    "state": "GA",
+    "verified": false,
+    "name": "Greatest Generation Memorial Park",
+    "description": "Come play pickleball at Greatest Generation Memorial Park in Thomaston, GA! There are 4 outdoor asphalt courts. These are dedicated courts with permanent lines and nets. The courts are free. Amenities include restrooms, water, and lights.",
+    "address": "213 Park Dr",
+    "city": "Thomaston",
+    "zip_code": "30286",
+    "latitude": 32.903815,
+    "longitude": -84.330581,
+    "indoor": false,
+    "lighted": true,
+    "num_courts": 4,
+    "surface_type": "Asphalt",
+    "fees": "Free",
+    "phone": "7066474242",
+    "website": "https://www.cityofthomaston.com/",
+    "photo_url": "https://cdn.filestackcontent.com/UNqk5zmcQYeXYYecfZiR",
+    "has_restrooms": true,
+    "has_water": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner,intermediate",
+    "court_type": "dedicated"
+  }
+]

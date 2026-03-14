@@ -1,0 +1,23 @@
+[
+  {
+    "county_slug": "gooding",
+    "state": "ID",
+    "verified": false,
+    "name": "Gooding Rec. Center",
+    "description": "Gooding Rec. Center is a place to play pickleball in Gooding, ID. There are 6 wood courts. 5 are indoors and 1 is outdoors. The lines are permanent, and portable nets are available. The courts are free. Players have access to restrooms.",
+    "address": "315 14th Ave E",
+    "city": "Gooding",
+    "latitude": 42.930881,
+    "longitude": -114.710215,
+    "indoor": false,
+    "num_courts": 6,
+    "surface_type": "Wood",
+    "fees": "Free",
+    "phone": "2085390710",
+    "photo_url": "https://cdn.filestackcontent.com/XFOvCtVLRji2ZhpacIX2",
+    "has_restrooms": true,
+    "nets_provided": true,
+    "skill_levels": "advanced,beginner",
+    "court_type": "dedicated"
+  }
+]
