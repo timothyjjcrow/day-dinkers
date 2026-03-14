@@ -232,7 +232,10 @@ def _run_lightweight_migrations():
 
 
 def _repair_court_county_assignments():
-    """Keep court county slugs aligned with coordinate bounds."""
+    """Keep CA court county slugs aligned with coordinate bounds.
+
+    Only processes California courts — other states don't have bounds data.
+    """
     from backend.models import Court
     from backend.services.california_county_bounds import (
         is_point_within_county_bounds,
@@ -241,8 +244,10 @@ def _repair_court_county_assignments():
 
     updated = 0
     removed = 0
-    courts = Court.query.all()
-    for court in courts:
+    ca_courts = Court.query.filter(
+        db.or_(Court.state == 'CA', Court.state.is_(None), Court.state == '')
+    ).all()
+    for court in ca_courts:
         lat = getattr(court, 'latitude', None)
         lng = getattr(court, 'longitude', None)
         if lat is None or lng is None:
