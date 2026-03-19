@@ -11,9 +11,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from backend.app import db
 from backend.models import (
     User, Friendship, Notification, PlaySession, PlaySessionPlayer, CheckIn,
-    RateLimitBucket,
+    RateLimitBucket, Message, Match, MatchPlayer, Tournament,
+    Court, CourtUpdateSubmission,
 )
-from backend.auth_utils import generate_token, login_required, csrf_token_for_bearer
+from backend.auth_utils import (
+    generate_token, login_required, admin_required, csrf_token_for_bearer,
+)
 from backend.time_utils import utcnow_naive
 
 auth_bp = Blueprint('auth', __name__)
@@ -750,3 +753,137 @@ def mark_notifications_read():
     ).update({'read': True})
     db.session.commit()
     return jsonify({'message': 'Notifications marked as read'})
+
+
+@auth_bp.route('/admin/analytics', methods=['GET'])
+@admin_required
+def admin_analytics():
+    now = utcnow_naive()
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+
+    total_users = User.query.count()
+    new_users_7d = User.query.filter(User.created_at >= week_ago).count()
+    new_users_30d = User.query.filter(User.created_at >= month_ago).count()
+
+    total_courts = Court.query.count()
+    total_checkins = CheckIn.query.count()
+    checkins_7d = CheckIn.query.filter(CheckIn.checked_in_at >= week_ago).count()
+    total_messages = Message.query.count()
+    messages_7d = Message.query.filter(Message.created_at >= week_ago).count()
+    total_sessions = PlaySession.query.count()
+    active_sessions = PlaySession.query.filter_by(status='active').count()
+    total_matches = Match.query.count()
+    completed_matches = Match.query.filter_by(status='completed').count()
+    matches_7d = Match.query.filter(Match.created_at >= week_ago).count()
+    total_tournaments = Tournament.query.count()
+    total_friendships = Friendship.query.filter_by(status='accepted').count()
+    pending_submissions = CourtUpdateSubmission.query.filter_by(status='pending').count()
+
+    active_checkin_users = db.session.query(
+        db.func.count(db.distinct(CheckIn.user_id))
+    ).filter(CheckIn.checked_in_at >= week_ago).scalar() or 0
+    active_message_users = db.session.query(
+        db.func.count(db.distinct(Message.sender_id))
+    ).filter(Message.created_at >= week_ago).scalar() or 0
+    active_match_users = db.session.query(
+        db.func.count(db.distinct(MatchPlayer.user_id))
+    ).join(Match, Match.id == MatchPlayer.match_id).filter(
+        Match.created_at >= week_ago
+    ).scalar() or 0
+
+    skill_rows = db.session.query(
+        User.skill_level, db.func.count(User.id)
+    ).filter(User.skill_level.isnot(None)).group_by(User.skill_level).all()
+    skill_distribution = {str(level): count for level, count in skill_rows}
+    no_skill = User.query.filter(User.skill_level.is_(None)).count()
+    skill_distribution['Not set'] = no_skill
+
+    elo_buckets = [
+        ('Bronze (<1200)', 0, 1200),
+        ('Silver (1200-1299)', 1200, 1300),
+        ('Gold (1300-1399)', 1300, 1400),
+        ('Platinum (1400-1499)', 1400, 1500),
+        ('Diamond (1500+)', 1500, 99999),
+    ]
+    elo_distribution = {}
+    for label, low, high in elo_buckets:
+        count = User.query.filter(User.elo_rating >= low, User.elo_rating < high).count()
+        elo_distribution[label] = count
+
+    registration_weeks = []
+    for i in range(11, -1, -1):
+        start = now - timedelta(weeks=i + 1)
+        end = now - timedelta(weeks=i)
+        count = User.query.filter(User.created_at >= start, User.created_at < end).count()
+        registration_weeks.append({
+            'week_start': start.strftime('%b %d'),
+            'count': count,
+        })
+
+    top_players_by_games = db.session.query(User).filter(
+        User.games_played > 0
+    ).order_by(User.games_played.desc()).limit(10).all()
+
+    top_elo = db.session.query(User).filter(
+        User.games_played > 0
+    ).order_by(User.elo_rating.desc()).limit(10).all()
+
+    recent_users = db.session.query(User).order_by(
+        User.created_at.desc()
+    ).limit(10).all()
+
+    return jsonify({
+        'overview': {
+            'total_users': total_users,
+            'new_users_7d': new_users_7d,
+            'new_users_30d': new_users_30d,
+            'total_courts': total_courts,
+            'total_friendships': total_friendships,
+            'pending_submissions': pending_submissions,
+        },
+        'activity': {
+            'total_checkins': total_checkins,
+            'checkins_7d': checkins_7d,
+            'total_messages': total_messages,
+            'messages_7d': messages_7d,
+            'total_sessions': total_sessions,
+            'active_sessions': active_sessions,
+            'total_matches': total_matches,
+            'completed_matches': completed_matches,
+            'matches_7d': matches_7d,
+            'total_tournaments': total_tournaments,
+        },
+        'active_users_7d': {
+            'checkins': active_checkin_users,
+            'messages': active_message_users,
+            'matches': active_match_users,
+        },
+        'skill_distribution': skill_distribution,
+        'elo_distribution': elo_distribution,
+        'registration_trend': registration_weeks,
+        'top_players_by_games': [
+            {
+                'id': u.id, 'username': u.username, 'name': u.name,
+                'games_played': u.games_played, 'wins': u.wins,
+                'losses': u.losses, 'elo_rating': round(u.elo_rating or 1200),
+            }
+            for u in top_players_by_games
+        ],
+        'top_players_by_elo': [
+            {
+                'id': u.id, 'username': u.username, 'name': u.name,
+                'elo_rating': round(u.elo_rating or 1200),
+                'games_played': u.games_played, 'wins': u.wins,
+            }
+            for u in top_elo
+        ],
+        'recent_signups': [
+            {
+                'id': u.id, 'username': u.username, 'name': u.name,
+                'created_at': u.created_at.isoformat() if u.created_at else None,
+                'games_played': u.games_played,
+            }
+            for u in recent_users
+        ],
+    })

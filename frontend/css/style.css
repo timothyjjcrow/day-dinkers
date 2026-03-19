@@ -6184,6 +6184,166 @@ input.flatpickr-input[readonly] {
   margin-bottom: 12px;
 }
 
+/* ── Admin Analytics Dashboard ─────────────────── */
+.analytics-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.analytics-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0 10px;
+  color: var(--text);
+}
+.analytics-section-title:first-of-type {
+  margin-top: 4px;
+}
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.analytics-stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 12px;
+  text-align: center;
+  border-left: 4px solid var(--border);
+}
+.analytics-stat-card.analytics-stat-users { border-left-color: #6366f1; }
+.analytics-stat-card.analytics-stat-new { border-left-color: #22c55e; }
+.analytics-stat-card.analytics-stat-social { border-left-color: #f59e0b; }
+.analytics-stat-card.analytics-stat-courts { border-left-color: #06b6d4; }
+.analytics-stat-card.analytics-stat-checkins { border-left-color: #10b981; }
+.analytics-stat-card.analytics-stat-messages { border-left-color: #8b5cf6; }
+.analytics-stat-card.analytics-stat-sessions { border-left-color: #3b82f6; }
+.analytics-stat-card.analytics-stat-matches { border-left-color: #ef4444; }
+.analytics-stat-card.analytics-stat-tournaments { border-left-color: #f97316; }
+.analytics-stat-card.analytics-stat-pending { border-left-color: #eab308; }
+.analytics-stat-number {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.analytics-stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.analytics-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 8px;
+}
+.analytics-column {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.analytics-column .analytics-section-title {
+  margin-top: 0;
+}
+.analytics-bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 120px;
+  padding-top: 8px;
+}
+.analytics-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+}
+.analytics-bar-fill {
+  width: 100%;
+  max-width: 32px;
+  background: #6366f1;
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+  transition: height 0.3s ease;
+}
+.analytics-bar-val {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.analytics-bar-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  max-height: 50px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.analytics-dist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.analytics-dist-label {
+  font-size: 12px;
+  min-width: 90px;
+  color: var(--text);
+}
+.analytics-dist-bar-wrap {
+  flex: 1;
+  height: 16px;
+  background: var(--bg);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.analytics-dist-bar {
+  height: 100%;
+  background: #6366f1;
+  border-radius: 8px;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+.analytics-dist-value {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 70px;
+  text-align: right;
+}
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.analytics-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--border);
+}
+.analytics-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.analytics-table tbody tr:hover {
+  background: var(--bg);
+}
+@media (max-width: 600px) {
+  .analytics-grid { grid-template-columns: repeat(2, 1fr); }
+  .analytics-columns { grid-template-columns: 1fr; }
+  .analytics-bar-label { display: none; }
+}
+
 /* ── Map Markers ───────────────────────────────── */
 .court-marker-icon {
   background: none !important;

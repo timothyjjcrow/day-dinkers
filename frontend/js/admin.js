@@ -2,7 +2,7 @@
  * Admin review console for court update submissions and court reports.
  */
 const AdminPage = {
-    activeTab: 'updates',
+    activeTab: 'analytics',
     submissions: [],
     filteredSubmissions: [],
     selectedSubmissionId: null,
@@ -48,9 +48,14 @@ const AdminPage = {
                 <p class="muted">Review and publish community-submitted court updates and court issue reports.</p>
 
                 <div class="admin-tabs">
+                    <button id="admin-tab-analytics" class="btn-secondary btn-sm" onclick="AdminPage.setTab('analytics')">Analytics</button>
                     <button id="admin-tab-updates" class="btn-secondary btn-sm" onclick="AdminPage.setTab('updates')">Court Updates</button>
                     <button id="admin-tab-reports" class="btn-secondary btn-sm" onclick="AdminPage.setTab('reports')">Court Reports</button>
                     <button id="admin-tab-timeline" class="btn-secondary btn-sm" onclick="AdminPage.setTab('timeline')">Activity Timeline</button>
+                </div>
+
+                <div id="admin-analytics-section" style="display:none">
+                    <div id="admin-analytics-content"><p class="loading">Loading analytics...</p></div>
                 </div>
 
                 <div id="admin-updates-section">
@@ -162,27 +167,36 @@ const AdminPage = {
     },
 
     setTab(tab) {
-        AdminPage.activeTab = ['updates', 'reports', 'timeline'].includes(tab) ? tab : 'updates';
-        const updatesSection = document.getElementById('admin-updates-section');
-        const reportsSection = document.getElementById('admin-reports-section');
-        const timelineSection = document.getElementById('admin-timeline-section');
-        const updatesTab = document.getElementById('admin-tab-updates');
-        const reportsTab = document.getElementById('admin-tab-reports');
-        const timelineTab = document.getElementById('admin-tab-timeline');
-        if (updatesSection) updatesSection.style.display = AdminPage.activeTab === 'updates' ? 'block' : 'none';
-        if (reportsSection) reportsSection.style.display = AdminPage.activeTab === 'reports' ? 'block' : 'none';
-        if (timelineSection) timelineSection.style.display = AdminPage.activeTab === 'timeline' ? 'block' : 'none';
-        if (updatesTab) updatesTab.classList.toggle('active', AdminPage.activeTab === 'updates');
-        if (reportsTab) reportsTab.classList.toggle('active', AdminPage.activeTab === 'reports');
-        if (timelineTab) timelineTab.classList.toggle('active', AdminPage.activeTab === 'timeline');
+        AdminPage.activeTab = ['analytics', 'updates', 'reports', 'timeline'].includes(tab) ? tab : 'analytics';
+        const sections = {
+            analytics: document.getElementById('admin-analytics-section'),
+            updates: document.getElementById('admin-updates-section'),
+            reports: document.getElementById('admin-reports-section'),
+            timeline: document.getElementById('admin-timeline-section'),
+        };
+        const tabs = {
+            analytics: document.getElementById('admin-tab-analytics'),
+            updates: document.getElementById('admin-tab-updates'),
+            reports: document.getElementById('admin-tab-reports'),
+            timeline: document.getElementById('admin-tab-timeline'),
+        };
+        for (const [key, el] of Object.entries(sections)) {
+            if (el) el.style.display = AdminPage.activeTab === key ? 'block' : 'none';
+        }
+        for (const [key, el] of Object.entries(tabs)) {
+            if (el) el.classList.toggle('active', AdminPage.activeTab === key);
+        }
+        if (tab === 'analytics') AdminPage.loadAnalytics();
     },
 
     async refresh() {
+        AdminPage.analyticsData = null;
         await Promise.all([AdminPage.refreshUpdates(), AdminPage.refreshReports()]);
         AdminPage._buildTimelineItems();
         AdminPage._pruneTimelineSelection();
         AdminPage.applyTimelineFilters();
         AdminPage._renderBulkResult();
+        if (AdminPage.activeTab === 'analytics') AdminPage.loadAnalytics();
     },
 
     async refreshUpdates() {
@@ -1289,6 +1303,186 @@ const AdminPage = {
             AdminPage._renderBulkResult();
             App.toast(err.message || 'Bulk action failed', 'error');
         }
+    },
+
+    // ── Analytics ─────────────────────────────────────────────────
+
+    analyticsData: null,
+
+    async loadAnalytics() {
+        const container = document.getElementById('admin-analytics-content');
+        if (!container) return;
+        if (AdminPage.analyticsData) {
+            AdminPage._renderAnalytics(AdminPage.analyticsData);
+            return;
+        }
+        container.innerHTML = '<p class="loading">Loading analytics...</p>';
+        try {
+            const data = await API.get('/api/auth/admin/analytics');
+            AdminPage.analyticsData = data;
+            AdminPage._renderAnalytics(data);
+        } catch (err) {
+            container.innerHTML = `<p class="error">${AdminPage._escapeHtml(err.message || 'Failed to load analytics')}</p>`;
+        }
+    },
+
+    async refreshAnalytics() {
+        AdminPage.analyticsData = null;
+        await AdminPage.loadAnalytics();
+    },
+
+    _renderAnalytics(data) {
+        const container = document.getElementById('admin-analytics-content');
+        if (!container) return;
+        const o = data.overview || {};
+        const a = data.activity || {};
+        const au = data.active_users_7d || {};
+
+        container.innerHTML = `
+            <div class="analytics-toolbar">
+                <button class="btn-secondary btn-sm" onclick="AdminPage.refreshAnalytics()">Refresh Data</button>
+            </div>
+
+            <h3 class="analytics-section-title">Users Overview</h3>
+            <div class="analytics-grid">
+                ${AdminPage._statCard(o.total_users, 'Total Users', 'users')}
+                ${AdminPage._statCard(o.new_users_7d, 'New (7 days)', 'new')}
+                ${AdminPage._statCard(o.new_users_30d, 'New (30 days)', 'new')}
+                ${AdminPage._statCard(o.total_friendships, 'Friendships', 'social')}
+            </div>
+
+            <h3 class="analytics-section-title">Platform Activity</h3>
+            <div class="analytics-grid">
+                ${AdminPage._statCard(o.total_courts, 'Courts', 'courts')}
+                ${AdminPage._statCard(a.total_checkins, 'Total Check-ins', 'checkins')}
+                ${AdminPage._statCard(a.checkins_7d, 'Check-ins (7d)', 'checkins')}
+                ${AdminPage._statCard(a.total_messages, 'Messages Sent', 'messages')}
+                ${AdminPage._statCard(a.messages_7d, 'Messages (7d)', 'messages')}
+                ${AdminPage._statCard(a.active_sessions, 'Active Sessions', 'sessions')}
+                ${AdminPage._statCard(a.total_sessions, 'Total Sessions', 'sessions')}
+                ${AdminPage._statCard(o.pending_submissions, 'Pending Reviews', 'pending')}
+            </div>
+
+            <h3 class="analytics-section-title">Competitive Play</h3>
+            <div class="analytics-grid">
+                ${AdminPage._statCard(a.total_matches, 'Total Matches', 'matches')}
+                ${AdminPage._statCard(a.completed_matches, 'Completed', 'matches')}
+                ${AdminPage._statCard(a.matches_7d, 'Matches (7d)', 'matches')}
+                ${AdminPage._statCard(a.total_tournaments, 'Tournaments', 'tournaments')}
+            </div>
+
+            <h3 class="analytics-section-title">Active Users (past 7 days)</h3>
+            <div class="analytics-grid">
+                ${AdminPage._statCard(au.checkins, 'Checked In', 'checkins')}
+                ${AdminPage._statCard(au.messages, 'Sent Messages', 'messages')}
+                ${AdminPage._statCard(au.matches, 'Played Matches', 'matches')}
+            </div>
+
+            <div class="analytics-columns">
+                <div class="analytics-column">
+                    <h3 class="analytics-section-title">Registration Trend (12 weeks)</h3>
+                    <div class="analytics-chart">
+                        ${AdminPage._barChart(data.registration_trend || [])}
+                    </div>
+                </div>
+
+                <div class="analytics-column">
+                    <h3 class="analytics-section-title">Skill Distribution</h3>
+                    <div class="analytics-distribution">
+                        ${AdminPage._distributionBars(data.skill_distribution || {})}
+                    </div>
+                </div>
+
+                <div class="analytics-column">
+                    <h3 class="analytics-section-title">ELO Distribution</h3>
+                    <div class="analytics-distribution">
+                        ${AdminPage._distributionBars(data.elo_distribution || {})}
+                    </div>
+                </div>
+            </div>
+
+            <div class="analytics-columns">
+                <div class="analytics-column">
+                    <h3 class="analytics-section-title">Top Players by Games</h3>
+                    ${AdminPage._playerTable(data.top_players_by_games || [], ['games_played', 'wins', 'losses', 'elo_rating'])}
+                </div>
+                <div class="analytics-column">
+                    <h3 class="analytics-section-title">Top Players by ELO</h3>
+                    ${AdminPage._playerTable(data.top_players_by_elo || [], ['elo_rating', 'games_played', 'wins'])}
+                </div>
+                <div class="analytics-column">
+                    <h3 class="analytics-section-title">Recent Signups</h3>
+                    ${AdminPage._playerTable(data.recent_signups || [], ['created_at', 'games_played'])}
+                </div>
+            </div>
+        `;
+    },
+
+    _statCard(value, label, type) {
+        return `
+            <div class="analytics-stat-card analytics-stat-${type || 'default'}">
+                <div class="analytics-stat-number">${value ?? 0}</div>
+                <div class="analytics-stat-label">${AdminPage._escapeHtml(label)}</div>
+            </div>
+        `;
+    },
+
+    _barChart(weeks) {
+        if (!weeks.length) return '<p class="muted">No data yet.</p>';
+        const max = Math.max(1, ...weeks.map(w => w.count));
+        return `<div class="analytics-bar-chart">
+            ${weeks.map(w => {
+                const pct = Math.round((w.count / max) * 100);
+                return `<div class="analytics-bar-col">
+                    <div class="analytics-bar-fill" style="height:${pct}%" title="${w.count} users"></div>
+                    <span class="analytics-bar-val">${w.count}</span>
+                    <span class="analytics-bar-label">${AdminPage._escapeHtml(w.week_start)}</span>
+                </div>`;
+            }).join('')}
+        </div>`;
+    },
+
+    _distributionBars(distribution) {
+        const entries = Object.entries(distribution);
+        if (!entries.length) return '<p class="muted">No data.</p>';
+        const total = entries.reduce((sum, [, v]) => sum + v, 0) || 1;
+        return entries.map(([label, count]) => {
+            const pct = Math.round((count / total) * 100);
+            return `<div class="analytics-dist-row">
+                <span class="analytics-dist-label">${AdminPage._escapeHtml(label)}</span>
+                <div class="analytics-dist-bar-wrap">
+                    <div class="analytics-dist-bar" style="width:${pct}%"></div>
+                </div>
+                <span class="analytics-dist-value">${count} (${pct}%)</span>
+            </div>`;
+        }).join('');
+    },
+
+    _playerTable(players, columns) {
+        if (!players.length) return '<p class="muted">No data yet.</p>';
+        const colLabels = {
+            games_played: 'Games', wins: 'Wins', losses: 'Losses',
+            elo_rating: 'ELO', created_at: 'Joined',
+        };
+        return `<table class="analytics-table">
+            <thead><tr>
+                <th>#</th><th>Player</th>
+                ${columns.map(c => `<th>${colLabels[c] || c}</th>`).join('')}
+            </tr></thead>
+            <tbody>
+                ${players.map((p, i) => `<tr>
+                    <td>${i + 1}</td>
+                    <td><strong>${AdminPage._escapeHtml(p.name || p.username)}</strong><br><span class="muted">@${AdminPage._escapeHtml(p.username)}</span></td>
+                    ${columns.map(c => {
+                        let val = p[c];
+                        if (c === 'created_at' && val) {
+                            val = new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                        }
+                        return `<td>${val ?? '-'}</td>`;
+                    }).join('')}
+                </tr>`).join('')}
+            </tbody>
+        </table>`;
     },
 
     _escapeHtml(value) {

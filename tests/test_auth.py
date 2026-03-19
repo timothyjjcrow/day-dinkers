@@ -806,3 +806,45 @@ def test_authenticated_mutation_requires_csrf_token_with_origin(client):
         'X-CSRF-Token': csrf_token,
     })
     assert ok.status_code == 200
+
+
+def test_admin_analytics_requires_admin(client):
+    reg = client.post('/api/auth/register', json={
+        'username': 'normaluser', 'email': 'normal@test.com',
+        'password': 'password123',
+    })
+    token = json.loads(reg.data)['token']
+
+    res = client.get('/api/auth/admin/analytics', headers={
+        'Authorization': f'Bearer {token}',
+    })
+    assert res.status_code == 403
+
+
+def test_admin_analytics_returns_data(client):
+    client.application.config['ADMIN_EMAILS'] = 'admin@analytics.com'
+    reg = client.post('/api/auth/register', json={
+        'username': 'analyticsadmin', 'email': 'admin@analytics.com',
+        'password': 'password123',
+    })
+    token = json.loads(reg.data)['token']
+
+    res = client.get('/api/auth/admin/analytics', headers={
+        'Authorization': f'Bearer {token}',
+    })
+    assert res.status_code == 200
+    data = json.loads(res.data)
+
+    assert 'overview' in data
+    assert 'activity' in data
+    assert 'active_users_7d' in data
+    assert 'skill_distribution' in data
+    assert 'elo_distribution' in data
+    assert 'registration_trend' in data
+    assert 'top_players_by_games' in data
+    assert 'top_players_by_elo' in data
+    assert 'recent_signups' in data
+
+    assert data['overview']['total_users'] >= 1
+    assert len(data['registration_trend']) == 12
+    assert len(data['recent_signups']) >= 1

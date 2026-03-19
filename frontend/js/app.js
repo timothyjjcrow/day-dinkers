@@ -367,6 +367,10 @@ const App = {
         if (screen === 'main' && App.currentMainTab === 'map') {
             setTimeout(() => { if (MapView.map) MapView.map.invalidateSize(); }, 100);
         }
+
+        if (screen === 'admin' && typeof AdminPage !== 'undefined') {
+            AdminPage.load();
+        }
     },
 
     setMainTab(tab) {
