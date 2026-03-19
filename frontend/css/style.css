@@ -7976,4 +7976,114 @@ input.flatpickr-input[readonly] {
 .court-sticky-nav-btn {
   padding: 6px 10px;
   font-size: 11px;
+  position: relative;
+}
+
+/* ── Ranked nav badge ──────────────────────────── */
+.nav-action-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  padding: 0 4px;
+  pointer-events: none;
+  animation: badge-pop 0.3s ease;
+}
+@keyframes badge-pop {
+  0% { transform: scale(0); }
+  60% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+/* ── Floating ranked action banner ─────────────── */
+#ranked-floating-actions {
+  position: sticky;
+  top: 44px;
+  z-index: 7;
+}
+.ranked-float-banner {
+  background: linear-gradient(135deg, #fef3c7 0%, #fff7ed 100%);
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius);
+  margin: 0 4px 8px;
+  padding: 10px 12px;
+  animation: float-slide-in 0.3s ease;
+}
+@keyframes float-slide-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ranked-float-banner-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ranked-float-banner-hdr strong {
+  flex: 1;
+  font-size: 13px;
+  color: #92400e;
+}
+.ranked-float-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 5px;
+}
+.ranked-float-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(245, 158, 11, 0.2);
+}
+.ranked-float-item:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.ranked-float-item-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #78350f;
+  flex: 1;
+  min-width: 0;
+}
+.ranked-float-item-info span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ranked-float-item-info svg {
+  flex-shrink: 0;
+  color: #d97706;
+}
+.ranked-float-item-btns {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.ranked-float-flash {
+  animation: float-flash 0.6s ease;
+}
+@keyframes float-flash {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.3); }
 }

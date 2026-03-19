@@ -1580,10 +1580,11 @@ const MapView = {
             <div class="court-sticky-nav">
                 <button type="button" class="court-sticky-nav-btn active" data-target="court-live-inline" aria-current="true" onclick="MapView.scrollToCourtSection('court-live-inline', this)">Play</button>
                 <button type="button" class="court-sticky-nav-btn" data-target="court-schedule-inline" onclick="MapView.scrollToCourtSection('court-schedule-inline', this)">Schedule</button>
-                <button type="button" class="court-sticky-nav-btn" data-target="court-ranked-inline" onclick="MapView.scrollToCourtSection('court-ranked-inline', this)">Ranked</button>
+                <button type="button" class="court-sticky-nav-btn" data-target="court-ranked-inline" onclick="MapView.scrollToCourtSection('court-ranked-inline', this)">Ranked<span id="ranked-nav-badge" class="nav-action-badge" style="display:none"></span></button>
                 <button type="button" class="court-sticky-nav-btn" data-target="court-info-inline" onclick="MapView.scrollToCourtSection('court-info-inline', this)">Details</button>
                 <button type="button" class="court-sticky-nav-btn" data-target="court-chat-inline" onclick="MapView.scrollToCourtSection('court-chat-inline', this)">Chat</button>
             </div>
+            <div id="ranked-floating-actions"></div>
         `;
 
         const sections = [

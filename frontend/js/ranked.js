@@ -141,11 +141,125 @@ const Ranked = {
     },
 
     _maybePromoteActionCenter(courtId) {
+        const banner = document.getElementById('ranked-floating-actions');
+        if (banner && banner.innerHTML.trim()) {
+            banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            banner.classList.add('ranked-float-flash');
+            setTimeout(() => banner.classList.remove('ranked-float-flash'), 2500);
+            return;
+        }
         const center = document.getElementById('ranked-action-center');
         if (!center) return;
         center.scrollIntoView({ behavior: 'smooth', block: 'start' });
         center.classList.add('action-center-highlight');
         setTimeout(() => center.classList.remove('action-center-highlight'), 2200);
+    },
+
+    _updateFloatingBanner(summary, courtId) {
+        const banner = document.getElementById('ranked-floating-actions');
+        if (!banner) return;
+        const currentUser = Ranked._currentUser();
+        const userId = Number(currentUser.id) || 0;
+        if (!userId) { banner.innerHTML = ''; return; }
+
+        const items = [];
+        const matches = summary.matches || [];
+        const pendingLobbies = summary.pending_lobbies || [];
+        const readyLobbies = summary.ready_lobbies || [];
+
+        matches.filter(m => m.status === 'in_progress').forEach(m => {
+            if ((m.players || []).some(p => Number(p.user_id) === userId)) {
+                const t1 = Ranked._teamNames(m.team1);
+                const t2 = Ranked._teamNames(m.team2);
+                items.push({
+                    priority: 1,
+                    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+                    label: `Enter score: ${t1} vs ${t2}`,
+                    action: `Ranked.showScoreModal(${m.id})`,
+                    btnLabel: 'Enter Score',
+                    btnClass: 'btn-primary',
+                });
+            }
+        });
+
+        matches.filter(m => m.status === 'pending_confirmation').forEach(m => {
+            const me = (m.players || []).find(p => Number(p.user_id) === userId);
+            if (me && !me.confirmed) {
+                items.push({
+                    priority: 2,
+                    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+                    label: `Confirm score: ${m.team1_score}-${m.team2_score}`,
+                    action: `Ranked.confirmMatch(${m.id}, event)`,
+                    action2: `Ranked.rejectMatch(${m.id}, event)`,
+                    btnLabel: 'Confirm',
+                    btn2Label: 'Reject',
+                    btnClass: 'btn-primary',
+                    btn2Class: 'btn-outline',
+                });
+            }
+        });
+
+        pendingLobbies.forEach(l => {
+            const me = (l.players || []).find(p => Number(p.user_id) === userId);
+            if (me && me.acceptance_status === 'pending') {
+                const inviter = Ranked._e(l.created_by?.name || l.created_by?.username || 'A player');
+                items.push({
+                    priority: 3,
+                    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
+                    label: `${inviter} challenged you`,
+                    action: `Ranked.respondToLobby(${l.id}, 'accept', event)`,
+                    action2: `Ranked.respondToLobby(${l.id}, 'decline', event)`,
+                    btnLabel: 'Accept',
+                    btn2Label: 'Decline',
+                    btnClass: 'btn-primary',
+                    btn2Class: 'btn-outline',
+                });
+            }
+        });
+
+        readyLobbies.forEach(l => {
+            const me = (l.players || []).find(p => Number(p.user_id) === userId);
+            if (me && me.acceptance_status === 'accepted') {
+                items.push({
+                    priority: 4,
+                    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+                    label: `${Ranked._e(l.match_type || 'Ranked')} game ready`,
+                    action: `Ranked.startLobbyMatch(${l.id}, event)`,
+                    btnLabel: 'Start Game',
+                    btnClass: 'btn-primary',
+                });
+            }
+        });
+
+        if (!items.length) { banner.innerHTML = ''; return; }
+        items.sort((a, b) => a.priority - b.priority);
+
+        banner.innerHTML = `<div class="ranked-float-banner">
+            <div class="ranked-float-banner-hdr">
+                <span class="ranked-float-badge">${items.length}</span>
+                <strong>Action needed</strong>
+                <button class="btn-text btn-sm" onclick="MapView.scrollToCourtSection('court-ranked-inline')">View all</button>
+            </div>
+            ${items.map(it => `<div class="ranked-float-item">
+                <div class="ranked-float-item-info">${it.icon}<span>${it.label}</span></div>
+                <div class="ranked-float-item-btns">
+                    <button class="${it.btnClass} btn-sm" onclick="${it.action}">${it.btnLabel}</button>
+                    ${it.action2 ? `<button class="${it.btn2Class} btn-sm" onclick="${it.action2}">${it.btn2Label}</button>` : ''}
+                </div>
+            </div>`).join('')}
+        </div>`;
+    },
+
+    _updateNavBadge(actionState) {
+        const badge = document.getElementById('ranked-nav-badge');
+        if (!badge) return;
+        const count = (actionState.ids || []).length;
+        if (count > 0) {
+            badge.textContent = count;
+            badge.style.display = '';
+        } else {
+            badge.style.display = 'none';
+        }
     },
 
     _getRecentGamesFilter(courtId) {
@@ -398,6 +512,8 @@ const Ranked = {
                 ? Ranked._renderCompactCourtRanked
                 : Ranked._renderCourtRanked;
             container.innerHTML = renderer(res, courtId);
+            Ranked._updateFloatingBanner(res, courtId);
+            Ranked._updateNavBadge(nextActionState);
             if (
                 Ranked.currentTournamentId
                 && Number(Ranked.currentTournamentCourtId || courtId) === Number(courtId)
@@ -440,6 +556,9 @@ const Ranked = {
                     </div>
                 </div>
             `;
+            const banner = document.getElementById('ranked-floating-actions');
+            if (banner) banner.innerHTML = '';
+            Ranked._updateNavBadge({ ids: [] });
         }
     },
 
