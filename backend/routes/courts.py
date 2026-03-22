@@ -6,9 +6,12 @@ from sqlalchemy import func, and_, or_
 from backend.app import db
 from backend.models import (
     User, Court, CourtReport, CheckIn, ActivityLog, Notification, PlaySession,
-    CourtCommunityInfo, CourtImage, CourtEvent, CourtUpdateSubmission
+    CourtCommunityInfo, CourtImage, CourtEvent, CourtUpdateSubmission,
+    Match, MatchPlayer, RankedQueue, Message, Friendship,
 )
 from backend.auth_utils import login_required, admin_required
+from backend.routes.ranked.helpers import _categorize_court_lobbies, _expire_stale_items
+from backend.routes.sessions import _build_schedule_banner_payload, _get_optional_user_id
 from backend.time_utils import utcnow_naive
 from backend.services.california_counties import CALIFORNIA_COUNTIES
 from backend.services.california_county_bounds import (
@@ -91,6 +94,237 @@ def _county_name_from_slug(slug):
     if official_name:
         return official_name
     return ' '.join(part.capitalize() for part in cleaned.split('-') if part) or 'Unknown'
+
+
+def _friend_ids_for_user(user_id):
+    if not user_id:
+        return set()
+    friendships = Friendship.query.filter(
+        ((Friendship.user_id == user_id) | (Friendship.friend_id == user_id))
+        & (Friendship.status == 'accepted')
+    ).all()
+    return {
+        friendship.friend_id if friendship.user_id == user_id else friendship.user_id
+        for friendship in friendships
+    }
+
+
+def _serialize_checked_in_user(checkin, current_user_id=0, friend_ids=None, am_checked_in_here=False):
+    friend_ids = friend_ids or set()
+    user_data = checkin.user.to_public_dict()
+    user_data['court_id'] = checkin.court_id
+    user_data['looking_for_game'] = bool(checkin.looking_for_game)
+    user_data['checked_in_at'] = checkin.checked_in_at.isoformat() if checkin.checked_in_at else None
+    user_data['is_self'] = bool(current_user_id and checkin.user_id == current_user_id)
+    user_data['is_friend'] = bool(checkin.user_id in friend_ids)
+    user_data['can_challenge'] = bool(
+        current_user_id
+        and am_checked_in_here
+        and checkin.user_id != current_user_id
+    )
+    return user_data
+
+
+def _sort_challengeable_players(players):
+    return sorted(
+        players,
+        key=lambda player: (
+            -int(bool(player.get('is_friend'))),
+            -int(bool(player.get('looking_for_game'))),
+            player.get('checked_in_at') or '',
+            str(player.get('name') or player.get('username') or '').lower(),
+        ),
+    )
+
+
+def _queue_ready_cohort(queue_entries, current_user_id=0):
+    singles = [entry for entry in queue_entries if entry.get('match_type') == 'singles']
+    doubles = [entry for entry in queue_entries if entry.get('match_type') == 'doubles']
+    candidates = []
+    if len(singles) >= 2:
+        group = singles[:2]
+        candidates.append({
+            'ready_at': group[-1].get('joined_at') or '',
+            'match_type': 'singles',
+            'entries': group,
+            'team1_user_ids': [group[0].get('user_id')],
+            'team2_user_ids': [group[1].get('user_id')],
+        })
+    if len(doubles) >= 4:
+        group = doubles[:4]
+        candidates.append({
+            'ready_at': group[-1].get('joined_at') or '',
+            'match_type': 'doubles',
+            'entries': group,
+            'team1_user_ids': [group[0].get('user_id'), group[1].get('user_id')],
+            'team2_user_ids': [group[2].get('user_id'), group[3].get('user_id')],
+        })
+    if not candidates:
+        return None
+    cohort = sorted(candidates, key=lambda item: (item['ready_at'], item['match_type']))[0]
+    cohort['current_user_in_cohort'] = bool(
+        current_user_id and any(entry.get('user_id') == current_user_id for entry in cohort['entries'])
+    )
+    return cohort
+
+
+def _build_action_center(
+    *,
+    court_id,
+    current_user_id,
+    am_checked_in_here,
+    challengeable_players,
+    queue_entries,
+    active_matches,
+    ready_lobbies,
+    pending_lobbies,
+):
+    current_user_id = int(current_user_id or 0)
+
+    pending_confirm = []
+    live_matches = []
+    for match in active_matches:
+        players = match.get('players') or []
+        me = next((player for player in players if int(player.get('user_id') or 0) == current_user_id), None)
+        if not me:
+            continue
+        if match.get('status') == 'pending_confirmation' and not me.get('confirmed'):
+            pending_confirm.append(match)
+        elif match.get('status') == 'in_progress':
+            live_matches.append(match)
+
+    if pending_confirm:
+        match = pending_confirm[0]
+        return {
+            'type': 'confirm_score',
+            'primary_action': {'kind': 'confirm_score', 'match_id': match['id'], 'label': 'Confirm Score'},
+            'secondary_action': {'kind': 'reject_score', 'match_id': match['id'], 'label': 'Reject'},
+            'match': match,
+        }
+
+    if live_matches:
+        match = live_matches[0]
+        return {
+            'type': 'enter_score',
+            'primary_action': {'kind': 'enter_score', 'match_id': match['id'], 'label': 'Enter Score'},
+            'secondary_action': {'kind': 'cancel_match', 'match_id': match['id'], 'label': 'Cancel'},
+            'match': match,
+        }
+
+    pending_invites = []
+    for lobby in pending_lobbies:
+        me = next(
+            (player for player in (lobby.get('players') or []) if int(player.get('user_id') or 0) == current_user_id),
+            None,
+        )
+        if me and me.get('acceptance_status') == 'pending':
+            pending_invites.append(lobby)
+    if pending_invites:
+        lobby = pending_invites[0]
+        return {
+            'type': 'respond_invite',
+            'primary_action': {'kind': 'accept_invite', 'lobby_id': lobby['id'], 'label': 'Accept'},
+            'secondary_action': {'kind': 'decline_invite', 'lobby_id': lobby['id'], 'label': 'Decline'},
+            'lobby': lobby,
+        }
+
+    startable_lobbies = []
+    for lobby in ready_lobbies:
+        me = next(
+            (player for player in (lobby.get('players') or []) if int(player.get('user_id') or 0) == current_user_id),
+            None,
+        )
+        if me and me.get('acceptance_status') == 'accepted':
+            startable_lobbies.append(lobby)
+    if startable_lobbies:
+        lobby = startable_lobbies[0]
+        return {
+            'type': 'start_ready_game',
+            'primary_action': {'kind': 'start_lobby', 'lobby_id': lobby['id'], 'label': 'Start Ready Game'},
+            'secondary_action': None,
+            'lobby': lobby,
+        }
+
+    queue_cohort = _queue_ready_cohort(queue_entries, current_user_id=current_user_id)
+    if queue_cohort and queue_cohort.get('current_user_in_cohort'):
+        return {
+            'type': 'start_next_queue_game',
+            'primary_action': {
+                'kind': 'start_queue_game',
+                'court_id': queue_entries[0]['court_id'] if queue_entries else None,
+                'label': 'Start Next Game',
+            },
+            'secondary_action': None,
+            'queue_ready_cohort': queue_cohort,
+        }
+
+    if not am_checked_in_here:
+        return {
+            'type': 'check_in',
+            'primary_action': {
+                'kind': 'check_in',
+                'court_id': court_id,
+                'label': 'Check In',
+            },
+            'secondary_action': None,
+        }
+
+    if challengeable_players:
+        primary_player = challengeable_players[0]
+        in_queue = any(int(entry.get('user_id') or 0) == current_user_id for entry in queue_entries)
+        return {
+            'type': 'quick_challenge',
+            'primary_action': {
+                'kind': 'challenge_player',
+                'court_id': primary_player.get('court_id'),
+                'target_user_id': primary_player['id'],
+                'label': f"Challenge {primary_player.get('name') or primary_player.get('username') or 'Player'}",
+            },
+            'secondary_action': {
+                'kind': 'leave_queue' if in_queue else 'join_queue',
+                'court_id': court_id,
+                'label': 'Leave Queue' if in_queue else 'Join Queue',
+            },
+            'challengeable_players': challengeable_players[:6],
+        }
+
+    in_queue = next(
+        (entry for entry in queue_entries if int(entry.get('user_id') or 0) == current_user_id),
+        None,
+    )
+    if in_queue:
+        return {
+            'type': 'queue_status',
+            'primary_action': {
+                'kind': 'leave_queue',
+                'court_id': in_queue.get('court_id'),
+                'label': 'Leave Queue',
+            },
+            'secondary_action': None,
+            'queue_entry': in_queue,
+        }
+
+    if am_checked_in_here:
+        return {
+            'type': 'join_queue',
+            'primary_action': {
+                'kind': 'join_queue',
+                'court_id': court_id,
+                'label': 'Join Queue',
+                'default_match_type': 'doubles',
+            },
+            'secondary_action': {
+                'kind': 'schedule_ranked',
+                'court_id': court_id,
+                'label': 'Schedule Ranked',
+            },
+        }
+
+    return {
+        'type': 'schedule_ranked',
+        'primary_action': {'kind': 'schedule_ranked', 'court_id': court_id, 'label': 'Schedule Ranked'},
+        'secondary_action': None,
+    }
 
 
 def _enforce_county_bounds(court_data, existing_court=None, explicit_county=False):
@@ -522,24 +756,243 @@ def resolve_county():
     })
 
 
+def _build_court_hub_payload(court, current_user_id=0):
+    friend_ids = _friend_ids_for_user(current_user_id)
+    active_checkins = CheckIn.query.filter_by(
+        court_id=court.id,
+        checked_out_at=None,
+    ).order_by(CheckIn.checked_in_at.asc()).all()
+    am_checked_in_here = any(checkin.user_id == current_user_id for checkin in active_checkins)
+
+    checked_in_users = [
+        _serialize_checked_in_user(
+            checkin,
+            current_user_id=current_user_id,
+            friend_ids=friend_ids,
+            am_checked_in_here=am_checked_in_here,
+        )
+        for checkin in active_checkins
+    ]
+    self_players = [player for player in checked_in_users if player.get('is_self')]
+    other_players = [player for player in checked_in_users if not player.get('is_self')]
+    sorted_other_players = _sort_challengeable_players(other_players)
+    checked_in_users = [*self_players, *sorted_other_players]
+    challengeable_players = [player for player in sorted_other_players if player.get('can_challenge')]
+
+    active_sessions = _active_play_sessions_query(court_id=court.id).order_by(
+        PlaySession.start_time.asc(),
+        PlaySession.created_at.asc(),
+    ).all()
+    active_sessions_data = [session.to_dict() for session in active_sessions]
+    future_scheduled_sessions = [
+        session for session in active_sessions_data
+        if session.get('session_type') == 'scheduled' and session.get('start_time')
+    ]
+    next_scheduled_session = future_scheduled_sessions[0] if future_scheduled_sessions else None
+
+    active_user_ids_query = db.session.query(CheckIn.user_id).filter(
+        CheckIn.court_id == court.id,
+        CheckIn.checked_out_at.is_(None),
+    )
+    queue_entries = RankedQueue.query.filter(
+        RankedQueue.court_id == court.id,
+        RankedQueue.user_id.in_(active_user_ids_query),
+    ).order_by(RankedQueue.joined_at.asc()).all()
+    queue_data = []
+    queue_position_by_type = {'singles': 0, 'doubles': 0}
+    for entry in queue_entries:
+        item = entry.to_dict()
+        match_type = str(item.get('match_type') or 'doubles')
+        queue_position_by_type[match_type] = queue_position_by_type.get(match_type, 0) + 1
+        item['position'] = len(queue_data) + 1
+        item['match_type_position'] = queue_position_by_type[match_type]
+        item['is_self'] = bool(current_user_id and entry.user_id == current_user_id)
+        item['is_friend'] = bool(entry.user_id in friend_ids)
+        queue_data.append(item)
+
+    _expire_stale_items(court_id=court.id)
+    ready_lobbies, scheduled_lobbies, pending_lobbies = _categorize_court_lobbies(court.id)
+
+    active_matches = Match.query.filter(
+        Match.court_id == court.id,
+        Match.status.in_(['in_progress', 'pending_confirmation']),
+    ).order_by(Match.created_at.desc()).all()
+    active_match_data = [match.to_dict() for match in active_matches]
+
+    completed_matches = Match.query.filter(
+        Match.court_id == court.id,
+        Match.status == 'completed',
+    ).order_by(
+        Match.completed_at.desc(),
+        Match.created_at.desc(),
+    ).limit(6).all()
+    recent_match_data = [match.to_dict() for match in completed_matches]
+
+    leaderboard_user_ids = db.session.query(MatchPlayer.user_id).join(Match).filter(
+        Match.court_id == court.id,
+        Match.status == 'completed',
+    ).distinct().subquery()
+    leaderboard_players = User.query.filter(
+        User.id.in_(db.session.query(leaderboard_user_ids)),
+        User.games_played > 0,
+    ).order_by(User.elo_rating.desc()).limit(5).all()
+    leaderboard = []
+    for index, player in enumerate(leaderboard_players, start=1):
+        games_played = int(player.games_played or 0)
+        leaderboard.append({
+            'rank': index,
+            'user_id': player.id,
+            'name': player.name or player.username,
+            'username': player.username,
+            'elo_rating': round(player.elo_rating or 1200),
+            'wins': int(player.wins or 0),
+            'losses': int(player.losses or 0),
+            'games_played': games_played,
+            'win_rate': round((player.wins / games_played) * 100) if games_played else 0,
+        })
+
+    community_info = CourtCommunityInfo.query.filter_by(court_id=court.id).first()
+    approved_images = CourtImage.query.filter_by(
+        court_id=court.id,
+        approved=True,
+    ).order_by(CourtImage.created_at.desc()).limit(8).all()
+    now_utc = utcnow_naive()
+    upcoming_events = CourtEvent.query.filter(
+        CourtEvent.court_id == court.id,
+        CourtEvent.approved.is_(True),
+        (
+            ((CourtEvent.end_time.is_(None)) & (CourtEvent.start_time >= now_utc))
+            | ((CourtEvent.end_time.isnot(None)) & (CourtEvent.end_time >= now_utc))
+        ),
+    ).order_by(CourtEvent.start_time.asc()).limit(6).all()
+    pending_updates_count = CourtUpdateSubmission.query.filter_by(
+        court_id=court.id,
+        status='pending',
+    ).count()
+
+    chat_messages = []
+    if current_user_id:
+        messages = Message.query.filter_by(
+            court_id=court.id,
+            msg_type='court',
+        ).order_by(Message.created_at.desc()).limit(5).all()
+        chat_messages = [message.to_dict() for message in reversed(messages)]
+
+    amenities = []
+    if court.has_restrooms:
+        amenities.append('Restrooms')
+    if court.has_parking:
+        amenities.append('Parking')
+    if court.has_water:
+        amenities.append('Water')
+    if court.lighted:
+        amenities.append('Lighted')
+    if court.nets_provided:
+        amenities.append('Nets Provided')
+    if court.paddle_rental:
+        amenities.append('Paddle Rental')
+    if court.has_pro_shop:
+        amenities.append('Pro Shop')
+    if court.has_ball_machine:
+        amenities.append('Ball Machine')
+    if court.wheelchair_accessible:
+        amenities.append('Accessible')
+
+    action_center = _build_action_center(
+        court_id=court.id,
+        current_user_id=current_user_id,
+        am_checked_in_here=am_checked_in_here,
+        challengeable_players=challengeable_players,
+        queue_entries=queue_data,
+        active_matches=active_match_data,
+        ready_lobbies=ready_lobbies,
+        pending_lobbies=pending_lobbies,
+    )
+
+    return {
+        'court_id': court.id,
+        'header': {
+            'court': court.to_dict(),
+            'address_line': ', '.join(filter(None, [court.address, court.city, court.state, court.zip_code])).strip(', '),
+            'active_players': len(active_checkins),
+            'friend_count': len([player for player in checked_in_users if player.get('is_friend')]),
+            'checked_in_here': bool(am_checked_in_here),
+            'pending_updates_count': pending_updates_count,
+        },
+        'schedule_banner': _build_schedule_banner_payload(
+            current_user_id=current_user_id,
+            court_id=court.id,
+            user_only=False,
+            days=7,
+        ),
+        'action_center': action_center,
+        'live_snapshot': {
+            'checked_in_count': len(active_checkins),
+            'looking_to_play_count': len([player for player in checked_in_users if player.get('looking_for_game')]),
+            'friend_presence': [player for player in checked_in_users if player.get('is_friend')],
+            'checked_in_players': checked_in_users,
+            'next_scheduled_session': next_scheduled_session,
+            'active_sessions': active_sessions_data,
+            'queue_count': len(queue_data),
+            'active_match_count': len(active_match_data),
+        },
+        'ranked': {
+            'queue': queue_data,
+            'ready_lobbies': ready_lobbies,
+            'scheduled_lobbies': scheduled_lobbies,
+            'pending_lobbies': pending_lobbies,
+            'active_matches': active_match_data,
+            'challengeable_players': challengeable_players,
+            'queue_ready_cohort': _queue_ready_cohort(queue_data, current_user_id=current_user_id),
+        },
+        'competitive_history': {
+            'leaderboard': leaderboard,
+            'recent_matches': recent_match_data,
+        },
+        'details': {
+            'court': court.to_dict(),
+            'description': court.description,
+            'amenities': amenities,
+            'community_info': community_info.to_dict() if community_info else {},
+            'images': [image.to_dict() for image in approved_images],
+            'upcoming_events': [event.to_dict() for event in upcoming_events],
+            'pending_updates_count': pending_updates_count,
+        },
+        'chat_preview': {
+            'can_chat': bool(current_user_id),
+            'messages': chat_messages,
+        },
+    }
+
+
 @courts_bp.route('/<int:court_id>', methods=['GET'])
 def get_court(court_id):
     _cleanup_past_scheduled_sessions()
+    _cleanup_stale_checkins()
     court = db.session.get(Court, court_id)
     if not court:
         return jsonify({'error': 'Court not found'}), 404
 
+    current_user_id = _get_optional_user_id()
+    friend_ids = _friend_ids_for_user(current_user_id)
     court_dict = court.to_dict()
     active_checkins = CheckIn.query.filter_by(
         court_id=court.id, checked_out_at=None
-    ).all()
+    ).order_by(CheckIn.checked_in_at.asc()).all()
+    am_checked_in_here = any(ci.user_id == current_user_id for ci in active_checkins)
     court_dict['active_players'] = len(active_checkins)
-    court_dict['checked_in_users'] = []
-    for ci in active_checkins:
-        user_data = ci.user.to_public_dict()
-        user_data['looking_for_game'] = ci.looking_for_game
-        user_data['checked_in_at'] = ci.checked_in_at.isoformat()
-        court_dict['checked_in_users'].append(user_data)
+    checked_in_users = [
+        _serialize_checked_in_user(
+            ci,
+            current_user_id=current_user_id,
+            friend_ids=friend_ids,
+            am_checked_in_here=am_checked_in_here,
+        )
+        for ci in active_checkins
+    ]
+    self_players = [player for player in checked_in_users if player.get('is_self')]
+    other_players = [player for player in checked_in_users if not player.get('is_self')]
+    court_dict['checked_in_users'] = [*self_players, *_sort_challengeable_players(other_players)]
 
     # Active play sessions at this court (replaces upcoming_games)
     active_sessions = _active_play_sessions_query(court_id=court_id) \
@@ -586,8 +1039,23 @@ def get_court(court_id):
         court_id=court_id,
         status='pending',
     ).count()
+    court_dict['viewer'] = {
+        'current_user_id': current_user_id,
+        'checked_in_here': bool(am_checked_in_here),
+    }
 
     return jsonify({'court': court_dict})
+
+
+@courts_bp.route('/<int:court_id>/hub', methods=['GET'])
+def get_court_hub(court_id):
+    _cleanup_past_scheduled_sessions()
+    _cleanup_stale_checkins()
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'Court not found'}), 404
+    current_user_id = _get_optional_user_id()
+    return jsonify(_build_court_hub_payload(court, current_user_id=current_user_id))
 
 
 @courts_bp.route('', methods=['POST'])

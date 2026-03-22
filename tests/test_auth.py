@@ -623,6 +623,101 @@ def test_notifications(client):
     assert res.status_code == 200
 
 
+def test_notifications_include_targets_and_single_read_keeps_other_notifications_unread(client):
+    viewer_reg = client.post('/api/auth/register', json={
+        'username': 'notifviewer',
+        'email': 'notifviewer@test.com',
+        'password': 'password123',
+        'name': 'Notif Viewer',
+    })
+    viewer_payload = json.loads(viewer_reg.data)
+    viewer_token = viewer_payload['token']
+    viewer_id = viewer_payload['user']['id']
+
+    friend_reg = client.post('/api/auth/register', json={
+        'username': 'notiffriend',
+        'email': 'notiffriend@test.com',
+        'password': 'password123',
+        'name': 'Notif Friend',
+    })
+    friend_payload = json.loads(friend_reg.data)
+    friend_token = friend_payload['token']
+
+    send_request = client.post('/api/auth/friends/request', json={
+        'friend_id': viewer_id,
+    }, headers={'Authorization': f'Bearer {friend_token}'})
+    assert send_request.status_code == 201
+
+    pending = client.get('/api/auth/friends/pending', headers={'Authorization': f'Bearer {viewer_token}'})
+    pending_payload = json.loads(pending.data)
+    friendship_id = pending_payload['requests'][0]['id']
+
+    accept = client.post('/api/auth/friends/respond', json={
+        'friendship_id': friendship_id,
+        'action': 'accept',
+    }, headers={'Authorization': f'Bearer {viewer_token}'})
+    assert accept.status_code == 200
+
+    court_res = client.post('/api/courts', json={
+        'name': 'Notification Court',
+        'latitude': 40.78,
+        'longitude': -124.14,
+        'city': 'Eureka',
+    }, headers={'Authorization': f'Bearer {friend_token}'})
+    assert court_res.status_code == 201
+    court = json.loads(court_res.data)['court']
+
+    checkin = client.post('/api/presence/checkin', json={
+        'court_id': court['id'],
+    }, headers={'Authorization': f'Bearer {friend_token}'})
+    assert checkin.status_code == 201
+
+    notifications = client.get('/api/auth/notifications',
+        headers={'Authorization': f'Bearer {viewer_token}'},
+    )
+    assert notifications.status_code == 200
+    notifications_payload = json.loads(notifications.data)['notifications']
+
+    checkin_notification = next(
+        notification for notification in notifications_payload
+        if notification['notif_type'] == 'checkin'
+    )
+    friend_request_notification = next(
+        notification for notification in notifications_payload
+        if notification['notif_type'] == 'friend_request'
+    )
+
+    assert checkin_notification['target_path'] == f'/courts/{court["id"]}'
+    assert checkin_notification['target_label'] == 'Open court'
+    assert friend_request_notification['read'] is False
+
+    mark_one = client.post(
+        f'/api/auth/notifications/{checkin_notification["id"]}/read',
+        json={},
+        headers={'Authorization': f'Bearer {viewer_token}'},
+    )
+    assert mark_one.status_code == 200
+    mark_one_payload = json.loads(mark_one.data)['notification']
+    assert mark_one_payload['read'] is True
+    assert mark_one_payload['target_path'] == f'/courts/{court["id"]}'
+
+    refreshed = client.get('/api/auth/notifications',
+        headers={'Authorization': f'Bearer {viewer_token}'},
+    )
+    refreshed_payload = json.loads(refreshed.data)['notifications']
+    refreshed_friend_request = next(
+        notification for notification in refreshed_payload
+        if notification['id'] == friend_request_notification['id']
+    )
+    refreshed_checkin = next(
+        notification for notification in refreshed_payload
+        if notification['id'] == checkin_notification['id']
+    )
+
+    assert refreshed_checkin['read'] is True
+    assert refreshed_friend_request['read'] is False
+
+
 def test_google_config_endpoint(client):
     client.application.config['GOOGLE_CLIENT_ID'] = ''
     disabled = client.get('/api/auth/google/config')

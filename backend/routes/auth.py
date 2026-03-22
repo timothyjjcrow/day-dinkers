@@ -12,7 +12,7 @@ from backend.app import db
 from backend.models import (
     User, Friendship, Notification, PlaySession, PlaySessionPlayer, CheckIn,
     RateLimitBucket, Message, Match, MatchPlayer, Tournament,
-    Court, CourtUpdateSubmission,
+    Court, CourtUpdateSubmission, RankedLobby,
 )
 from backend.auth_utils import (
     generate_token, login_required, admin_required, csrf_token_for_bearer,
@@ -242,6 +242,104 @@ def _password_reset_ttl_minutes():
 
 def _hash_reset_token(raw_token):
     return hashlib.sha256(str(raw_token or '').encode('utf-8')).hexdigest()
+
+
+def _notification_target(notification):
+    notif_type = str(notification.notif_type or '').strip().lower()
+    reference_id = notification.reference_id
+
+    profile_types = {
+        'friend_request',
+        'friend_accepted',
+        'password_reset_requested',
+        'password_reset_completed',
+    }
+    lobby_types = {
+        'ranked_challenge_invite',
+        'ranked_challenge_ready',
+        'ranked_challenge_declined',
+    }
+    match_types = {
+        'match_confirm',
+        'match_result',
+        'match_rejected',
+        'match_cancelled',
+        'tournament_match_ready',
+    }
+    tournament_types = {
+        'tournament_invite',
+        'tournament_invite_response',
+        'tournament_started',
+        'tournament_cancelled',
+        'tournament_result',
+        'tournament_withdrawal',
+    }
+    session_types = {
+        'session_invite',
+        'session_join',
+        'session_spot_opened',
+        'session_cancelled',
+    }
+
+    if notif_type == 'checkin' and reference_id:
+        return {
+            'target_path': f'/courts/{reference_id}',
+            'target_label': 'Open court',
+        }
+
+    if notif_type in profile_types:
+        return {
+            'target_path': '/profile',
+            'target_label': 'Open profile',
+        }
+
+    if notif_type in lobby_types and reference_id:
+        lobby = db.session.get(RankedLobby, reference_id)
+        if lobby:
+            return {
+                'target_path': f'/courts/{lobby.court_id}',
+                'target_label': 'Open ranked lobby',
+            }
+
+    if notif_type in match_types and reference_id:
+        match = db.session.get(Match, reference_id)
+        if match:
+            return {
+                'target_path': f'/courts/{match.court_id}',
+                'target_label': 'Open match',
+            }
+
+    if notif_type in tournament_types and reference_id:
+        tournament = db.session.get(Tournament, reference_id)
+        if tournament:
+            return {
+                'target_path': f'/courts/{tournament.court_id}',
+                'target_label': 'Open tournament',
+            }
+
+    if notif_type in session_types and reference_id:
+        session = db.session.get(PlaySession, reference_id)
+        if session:
+            if session.session_type == 'scheduled':
+                return {
+                    'target_path': f'/courts/{session.court_id}?session={session.id}',
+                    'target_label': 'Open scheduled game',
+                }
+            return {
+                'target_path': f'/courts/{session.court_id}',
+                'target_label': 'Open court',
+            }
+
+    return {
+        'target_path': '/map',
+        'target_label': 'Open map',
+    }
+
+
+def _serialize_notification(notification):
+    data = notification.to_dict()
+    data.update(_notification_target(notification))
+    return data
 
 
 def _clear_login_lock_state(user):
@@ -742,7 +840,7 @@ def get_notifications():
     notifs = Notification.query.filter_by(
         user_id=request.current_user.id
     ).order_by(Notification.created_at.desc()).limit(50).all()
-    return jsonify({'notifications': [n.to_dict() for n in notifs]})
+    return jsonify({'notifications': [_serialize_notification(n) for n in notifs]})
 
 
 @auth_bp.route('/notifications/read', methods=['POST'])
@@ -753,6 +851,21 @@ def mark_notifications_read():
     ).update({'read': True})
     db.session.commit()
     return jsonify({'message': 'Notifications marked as read'})
+
+
+@auth_bp.route('/notifications/<int:notification_id>/read', methods=['POST'])
+@login_required
+def mark_notification_read(notification_id):
+    notification = Notification.query.filter_by(
+        id=notification_id,
+        user_id=request.current_user.id,
+    ).first()
+    if not notification:
+        return jsonify({'error': 'Notification not found'}), 404
+
+    notification.read = True
+    db.session.commit()
+    return jsonify({'notification': _serialize_notification(notification)})
 
 
 @auth_bp.route('/admin/analytics', methods=['GET'])

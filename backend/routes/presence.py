@@ -68,6 +68,19 @@ def _touch_presence_ping(checkin):
     checkin.last_presence_ping_at = utcnow_naive()
 
 
+def _serialize_presence(checkin):
+    court = checkin.court
+    return {
+        'checked_in': True,
+        'court_id': checkin.court_id,
+        'court_name': court.name if court else None,
+        'court_photo_url': getattr(court, 'photo_url', None) if court else None,
+        'looking_for_game': checkin.looking_for_game,
+        'checked_in_at': checkin.checked_in_at.isoformat() if checkin.checked_in_at else None,
+        'last_presence_ping_at': checkin.last_presence_ping_at.isoformat() if checkin.last_presence_ping_at else None,
+    }
+
+
 @presence_bp.route('/checkin', methods=['POST'])
 @login_required
 def check_in():
@@ -159,12 +172,7 @@ def presence_ping():
 
     _touch_presence_ping(active)
     db.session.commit()
-    return jsonify({
-        'checked_in': True,
-        'court_id': active.court_id,
-        'checked_in_at': active.checked_in_at.isoformat() if active.checked_in_at else None,
-        'last_presence_ping_at': active.last_presence_ping_at.isoformat() if active.last_presence_ping_at else None,
-    })
+    return jsonify(_serialize_presence(active))
 
 
 @presence_bp.route('/lfg', methods=['POST'])
@@ -203,13 +211,7 @@ def get_my_status():
     ).first()
     if not active:
         return jsonify({'checked_in': False})
-    return jsonify({
-        'checked_in': True,
-        'court_id': active.court_id,
-        'looking_for_game': active.looking_for_game,
-        'checked_in_at': active.checked_in_at.isoformat(),
-        'last_presence_ping_at': active.last_presence_ping_at.isoformat() if active.last_presence_ping_at else None,
-    })
+    return jsonify(_serialize_presence(active))
 
 
 @presence_bp.route('/active', methods=['GET'])

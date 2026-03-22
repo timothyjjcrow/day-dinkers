@@ -1,0 +1,18 @@
+{
+  "name": "Third Shot",
+  "short_name": "Third Shot",
+  "description": "Mobile-first pickleball court discovery, check-ins, ranked challenges, schedules, and chat.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#efe6d5",
+  "theme_color": "#133529",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

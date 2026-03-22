@@ -165,11 +165,15 @@ def confirm_match(match_id):
         return jsonify({'error': 'You are not a player in this match'}), 403
 
     mp.confirmed = True
-    db.session.flush()
+    db.session.commit()
+    db.session.refresh(match)
 
-    all_confirmed = all(p.confirmed for p in match.players)
     did_complete = False
-    if all_confirmed:
+    remaining_unconfirmed = MatchPlayer.query.filter_by(
+        match_id=match_id,
+        confirmed=False,
+    ).count()
+    if remaining_unconfirmed == 0:
         completed_at = utcnow_naive()
         completion_claimed = Match.query.filter(
             Match.id == match_id,
@@ -207,7 +211,8 @@ def confirm_match(match_id):
                     reference_id=match.id,
                 ))
 
-    db.session.commit()
+            db.session.commit()
+
     db.session.refresh(match)
     all_confirmed = all(p.confirmed for p in match.players)
     _emit_ranked_update(court_id=match.court_id, reason='match_confirmation_updated')

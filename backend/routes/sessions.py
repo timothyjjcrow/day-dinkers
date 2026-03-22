@@ -7,9 +7,11 @@ from backend.app import db
 from backend.models import (
     PlaySession, PlaySessionPlayer, Court, Notification, Friendship, CheckIn,
     RecurringSessionSeries, RecurringSessionSeriesItem,
+    RankedLobby, RankedLobbyPlayer, Tournament, TournamentParticipant,
 )
 from backend.auth_utils import login_required
 from backend.time_utils import utcnow_naive
+from backend.services.court_payloads import normalize_county_slug
 
 sessions_bp = Blueprint('sessions', __name__)
 
@@ -174,6 +176,301 @@ def _serialize_session(session):
     return data
 
 
+def _schedule_item_day_key(iso_string):
+    if not iso_string:
+        return None
+    try:
+        return datetime.fromisoformat(iso_string.replace('Z', '+00:00')).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _session_viewer_status(session, current_user_id):
+    user_id = int(current_user_id or 0)
+    if not user_id:
+        return 'none'
+    if session.creator_id == user_id:
+        return 'creator'
+    participant = next(
+        (player for player in (session.players or []) if player.user_id == user_id),
+        None,
+    )
+    if not participant:
+        return 'none'
+    if participant.status in {'joined', 'invited', 'waitlisted'}:
+        return participant.status
+    return 'participant'
+
+
+def _session_spot_summary(session):
+    joined_players = [
+        participant for participant in (session.players or [])
+        if participant.status == 'joined'
+    ]
+    spots_taken = 1 + len(joined_players)
+    max_players = None
+    spots_remaining = None
+    if session.max_players is not None:
+        try:
+            max_players = int(session.max_players)
+        except (TypeError, ValueError):
+            max_players = None
+    if max_players is not None:
+        spots_remaining = max(0, max_players - spots_taken)
+    return spots_taken, max_players, spots_remaining
+
+
+def _session_creator_name(session):
+    if not session.creator:
+        return None
+    return session.creator.name or session.creator.username
+
+
+def _notify_session_participants(session, notif_type, content):
+    recipient_ids = {
+        participant.user_id
+        for participant in (session.players or [])
+        if participant.user_id and participant.user_id != session.creator_id
+    }
+    for user_id in recipient_ids:
+        db.session.add(Notification(
+            user_id=user_id,
+            notif_type=notif_type,
+            content=content,
+            reference_id=session.id,
+        ))
+
+
+def _build_schedule_banner_days(items):
+    grouped = {}
+    for item in items:
+        day_key = _schedule_item_day_key(item.get('start_time'))
+        if not day_key:
+            continue
+        if day_key not in grouped:
+            date_obj = datetime.fromisoformat(day_key)
+            grouped[day_key] = {
+                'day_key': day_key,
+                'label': date_obj.strftime('%a'),
+                'date_label': date_obj.strftime('%b %d'),
+                'count': 0,
+            }
+        grouped[day_key]['count'] += 1
+    return [grouped[key] for key in sorted(grouped.keys())]
+
+
+def _session_banner_items(current_user_id=None, court_id=None, county_slug='', user_only=False, days=7):
+    now = utcnow_naive()
+    horizon = now + timedelta(days=max(1, int(days or 7)))
+    query = _active_sessions_query().filter(
+        PlaySession.session_type == 'scheduled',
+        PlaySession.start_time.isnot(None),
+        PlaySession.start_time >= now,
+        PlaySession.start_time <= horizon,
+    )
+    if court_id:
+        query = query.filter(PlaySession.court_id == court_id)
+    elif county_slug:
+        query = query.join(Court, Court.id == PlaySession.court_id).filter(
+            Court.county_slug == county_slug,
+        )
+
+    sessions = query.order_by(PlaySession.start_time.asc()).limit(80).all()
+    items = []
+    current_user_id = int(current_user_id or 0)
+    for session in sessions:
+        viewer_status = _session_viewer_status(session, current_user_id)
+        spots_taken, max_players, spots_remaining = _session_spot_summary(session)
+        is_mine = bool(current_user_id and viewer_status != 'none')
+        if user_only and not is_mine:
+            continue
+        if session.visibility == 'friends' and not current_user_id:
+            continue
+        if session.visibility == 'friends' and not _can_view_session(session, current_user_id):
+            continue
+
+        items.append({
+            'id': f'session-{session.id}',
+            'reference_id': session.id,
+            'item_type': 'session',
+            'title': session.notes.strip() or 'Open Play',
+            'subtitle': session.court.name if session.court else 'Court',
+            'court_id': session.court_id,
+            'court_name': session.court.name if session.court else 'Court',
+            'county_slug': session.court.county_slug if session.court else '',
+            'state': session.court.state if session.court else '',
+            'start_time': session.start_time.isoformat() if session.start_time else None,
+            'end_time': session.end_time.isoformat() if session.end_time else None,
+            'visibility': session.visibility,
+            'game_type': session.game_type,
+            'status': session.status,
+            'is_mine': bool(is_mine),
+            'is_friend_only': session.visibility == 'friends',
+            'participant_count': spots_taken,
+            'viewer_status': viewer_status,
+            'creator_name': _session_creator_name(session),
+            'max_players': max_players,
+            'spots_taken': spots_taken,
+            'spots_remaining': spots_remaining,
+        })
+    return items
+
+
+def _ranked_lobby_banner_items(current_user_id=None, court_id=None, county_slug='', user_only=False, days=7):
+    user_id = int(current_user_id or 0)
+    if not user_id:
+        return []
+    now = utcnow_naive()
+    horizon = now + timedelta(days=max(1, int(days or 7)))
+    participant_lobby_ids = db.session.query(RankedLobbyPlayer.lobby_id).filter(
+        RankedLobbyPlayer.user_id == user_id,
+    )
+    query = RankedLobby.query.filter(
+        RankedLobby.id.in_(participant_lobby_ids),
+        RankedLobby.status.in_(['pending_acceptance', 'ready']),
+        RankedLobby.scheduled_for.isnot(None),
+        RankedLobby.scheduled_for >= now,
+        RankedLobby.scheduled_for <= horizon,
+    )
+    if court_id:
+        query = query.filter(RankedLobby.court_id == court_id)
+    elif county_slug:
+        query = query.join(Court, Court.id == RankedLobby.court_id).filter(
+            Court.county_slug == county_slug,
+        )
+
+    lobbies = query.order_by(RankedLobby.scheduled_for.asc()).limit(40).all()
+    items = []
+    for lobby in lobbies:
+        me = next(
+            (player for player in (lobby.players or []) if player.user_id == user_id),
+            None,
+        )
+        if user_only and not me:
+            continue
+        items.append({
+            'id': f'ranked-lobby-{lobby.id}',
+            'reference_id': lobby.id,
+            'item_type': 'ranked_lobby',
+            'title': 'Ranked Challenge',
+            'subtitle': lobby.court.name if lobby.court else 'Court',
+            'court_id': lobby.court_id,
+            'court_name': lobby.court.name if lobby.court else 'Court',
+            'county_slug': lobby.court.county_slug if lobby.court else '',
+            'state': lobby.court.state if lobby.court else '',
+            'start_time': lobby.scheduled_for.isoformat() if lobby.scheduled_for else None,
+            'end_time': None,
+            'visibility': 'private',
+            'game_type': lobby.match_type,
+            'status': lobby.status,
+            'is_mine': True,
+            'participant_count': len(lobby.players or []),
+            'acceptance_status': me.acceptance_status if me else None,
+            'source': lobby.source,
+        })
+    return items
+
+
+def _tournament_banner_items(current_user_id=None, court_id=None, county_slug='', user_only=False, days=7):
+    now = utcnow_naive()
+    horizon = now + timedelta(days=max(1, int(days or 7)))
+    query = Tournament.query.filter(
+        Tournament.status == 'upcoming',
+        Tournament.start_time.isnot(None),
+        Tournament.start_time >= now,
+        Tournament.start_time <= horizon,
+    )
+    if court_id:
+        query = query.filter(Tournament.court_id == court_id)
+    elif county_slug:
+        query = query.join(Court, Court.id == Tournament.court_id).filter(
+            Court.county_slug == county_slug,
+        )
+
+    user_id = int(current_user_id or 0)
+    if user_only:
+        if not user_id:
+            return []
+        participant_tournament_ids = db.session.query(TournamentParticipant.tournament_id).filter(
+            TournamentParticipant.user_id == user_id,
+        )
+        query = query.filter(
+            db.or_(
+                Tournament.host_user_id == user_id,
+                Tournament.id.in_(participant_tournament_ids),
+            )
+        )
+
+    tournaments = query.order_by(Tournament.start_time.asc()).limit(40).all()
+    items = []
+    for tournament in tournaments:
+        is_mine = bool(
+            user_id and (
+                tournament.host_user_id == user_id
+                or any(participant.user_id == user_id for participant in (tournament.participants or []))
+            )
+        )
+        items.append({
+            'id': f'tournament-{tournament.id}',
+            'reference_id': tournament.id,
+            'item_type': 'tournament',
+            'title': tournament.name,
+            'subtitle': tournament.court.name if tournament.court else 'Court',
+            'court_id': tournament.court_id,
+            'court_name': tournament.court.name if tournament.court else 'Court',
+            'county_slug': tournament.court.county_slug if tournament.court else '',
+            'state': tournament.court.state if tournament.court else '',
+            'start_time': tournament.start_time.isoformat() if tournament.start_time else None,
+            'end_time': None,
+            'visibility': tournament.access_mode,
+            'game_type': tournament.match_type,
+            'status': tournament.status,
+            'is_mine': is_mine,
+            'participant_count': sum(
+                1 for participant in (tournament.participants or [])
+                if participant.participant_status in {'registered', 'checked_in'}
+            ),
+        })
+    return items
+
+
+def _build_schedule_banner_payload(current_user_id=None, court_id=None, county_slug='', user_only=False, days=7):
+    normalized_county = normalize_county_slug(county_slug, fallback='') if county_slug else ''
+    items = [
+        *_session_banner_items(
+            current_user_id=current_user_id,
+            court_id=court_id,
+            county_slug=normalized_county,
+            user_only=user_only,
+            days=days,
+        ),
+        *_ranked_lobby_banner_items(
+            current_user_id=current_user_id,
+            court_id=court_id,
+            county_slug=normalized_county,
+            user_only=user_only,
+            days=days,
+        ),
+        *_tournament_banner_items(
+            current_user_id=current_user_id,
+            court_id=court_id,
+            county_slug=normalized_county,
+            user_only=user_only,
+            days=days,
+        ),
+    ]
+    items.sort(key=lambda item: (item.get('start_time') or '', item.get('item_type') or ''))
+    return {
+        'items': items,
+        'days': _build_schedule_banner_days(items),
+        'context': {
+            'court_id': court_id,
+            'county_slug': normalized_county or None,
+            'user_only': bool(user_only),
+        },
+    }
+
+
 @sessions_bp.route('', methods=['GET'])
 def get_sessions():
     """List active sessions, filtered by visibility for the requester."""
@@ -221,6 +518,28 @@ def get_sessions():
             results.append(_serialize_session(s))
 
     return jsonify({'sessions': results})
+
+
+@sessions_bp.route('/banner', methods=['GET'])
+def get_schedule_banner():
+    """Normalized next-7-days banner payload for the React shell."""
+    _expire_stale_sessions()
+    current_user_id = _get_optional_user_id()
+    court_id = request.args.get('court_id', type=int)
+    county_slug = normalize_county_slug(
+        request.args.get('county_slug'),
+        fallback='',
+    ) if request.args.get('county_slug') else ''
+    days = request.args.get('days', 7, type=int)
+    user_only = str(request.args.get('user_only') or '').strip().lower() in {'1', 'true', 'yes'}
+    payload = _build_schedule_banner_payload(
+        current_user_id=current_user_id,
+        court_id=court_id,
+        county_slug=county_slug,
+        user_only=user_only,
+        days=days,
+    )
+    return jsonify(payload)
 
 
 @sessions_bp.route('/my', methods=['GET'])
@@ -683,6 +1002,11 @@ def cancel_session(session_id):
     if session.creator_id != request.current_user.id:
         return jsonify({'error': 'Only the creator can cancel this session'}), 403
     session.status = 'cancelled'
+    _notify_session_participants(
+        session,
+        'session_cancelled',
+        f'{request.current_user.username} cancelled a play session at {session.court.name}',
+    )
     db.session.commit()
     return jsonify({'message': 'Session cancelled'})
 
@@ -714,6 +1038,11 @@ def cancel_series(series_id):
         if session.start_time and session.start_time < now_local and not include_started:
             continue
         session.status = 'cancelled'
+        _notify_session_participants(
+            session,
+            'session_cancelled',
+            f'{request.current_user.username} cancelled a play session at {session.court.name}',
+        )
         cancelled_ids.append(session.id)
 
     db.session.commit()

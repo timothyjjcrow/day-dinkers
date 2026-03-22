@@ -41,6 +41,21 @@ def _create_session(client, token, court_id, **overrides):
     return json.loads(res.data)['session']
 
 
+def _make_friends(client, requester_token, recipient_token, recipient_id):
+    send = client.post('/api/auth/friends/request', json={
+        'friend_id': recipient_id,
+    }, headers={'Authorization': f'Bearer {requester_token}'})
+    assert send.status_code == 201
+
+    pending = client.get('/api/auth/friends/pending', headers={'Authorization': f'Bearer {recipient_token}'})
+    pending_id = json.loads(pending.data)['requests'][0]['id']
+    accept = client.post('/api/auth/friends/respond', json={
+        'friendship_id': pending_id,
+        'action': 'accept',
+    }, headers={'Authorization': f'Bearer {recipient_token}'})
+    assert accept.status_code == 200
+
+
 def test_now_session_requires_checkin_at_court(client):
     token, _ = _register(client, 'now_checkin', 'now_checkin@test.com')
     court = _create_court(client, token, 'Now Checkin Court')
@@ -227,8 +242,9 @@ def test_session_waitlist_and_auto_promotion(client):
     # Promoted player receives an actionable notification.
     notif_res = client.get('/api/auth/notifications', headers={'Authorization': f'Bearer {p3_token}'})
     notifs = json.loads(notif_res.data)['notifications']
-    notif_types = [n['notif_type'] for n in notifs]
-    assert 'session_spot_opened' in notif_types
+    spot_notification = next(notification for notification in notifs if notification['notif_type'] == 'session_spot_opened')
+    assert spot_notification['target_path'] == f'/courts/{court["id"]}'
+    assert spot_notification['target_label'] == 'Open court'
 
 
 def test_join_session_twice_returns_existing_membership(client):
@@ -262,6 +278,82 @@ def test_join_session_twice_returns_existing_membership(client):
     guest_rows = [p for p in players if p['user']['username'] == 'sess_dupe_guest']
     assert len(guest_rows) == 1
     assert guest_rows[0]['status'] == 'joined'
+
+
+def test_scheduled_session_notifications_deep_link_to_the_game(client):
+    host_token, host_id = _register(client, 'sched_notif_host', 'sched_notif_host@test.com')
+    guest_token, guest_id = _register(client, 'sched_notif_guest', 'sched_notif_guest@test.com')
+    court = _create_court(client, host_token, 'Scheduled Notif Court')
+    _make_friends(client, host_token, guest_token, guest_id)
+
+    start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+    end = start + timedelta(hours=2)
+    created = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': start.isoformat(),
+        'end_time': end.isoformat(),
+        'max_players': 4,
+        'invite_friends': [guest_id],
+        'notes': 'Invite-only run',
+    }, headers={'Authorization': f'Bearer {host_token}'})
+    assert created.status_code == 201
+    session_id = json.loads(created.data)['session']['id']
+
+    guest_notifs = client.get('/api/auth/notifications', headers={'Authorization': f'Bearer {guest_token}'})
+    invite_notification = next(
+        notification for notification in json.loads(guest_notifs.data)['notifications']
+        if notification['notif_type'] == 'session_invite'
+    )
+    assert invite_notification['target_path'] == f'/courts/{court["id"]}?session={session_id}'
+    assert invite_notification['target_label'] == 'Open scheduled game'
+
+    joined = client.post(f'/api/sessions/{session_id}/join', json={}, headers={'Authorization': f'Bearer {guest_token}'})
+    assert joined.status_code == 200
+
+    host_notifs = client.get('/api/auth/notifications', headers={'Authorization': f'Bearer {host_token}'})
+    join_notification = next(
+        notification for notification in json.loads(host_notifs.data)['notifications']
+        if notification['notif_type'] == 'session_join'
+    )
+    assert join_notification['target_path'] == f'/courts/{court["id"]}?session={session_id}'
+    assert join_notification['target_label'] == 'Open scheduled game'
+
+
+def test_cancelling_scheduled_session_notifies_players(client):
+    host_token, host_id = _register(client, 'cancel_notif_host', 'cancel_notif_host@test.com')
+    guest_token, guest_id = _register(client, 'cancel_notif_guest', 'cancel_notif_guest@test.com')
+    court = _create_court(client, host_token, 'Cancel Notif Court')
+    _make_friends(client, host_token, guest_token, guest_id)
+
+    start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+    end = start + timedelta(hours=2)
+    created = client.post('/api/sessions', json={
+        'court_id': court['id'],
+        'session_type': 'scheduled',
+        'start_time': start.isoformat(),
+        'end_time': end.isoformat(),
+        'max_players': 4,
+        'visibility': 'friends',
+        'invite_friends': [guest_id],
+        'notes': 'Series warmup',
+    }, headers={'Authorization': f'Bearer {host_token}'})
+    assert created.status_code == 201
+    session_id = json.loads(created.data)['session']['id']
+
+    joined = client.post(f'/api/sessions/{session_id}/join', json={}, headers={'Authorization': f'Bearer {guest_token}'})
+    assert joined.status_code == 200
+
+    cancelled = client.delete(f'/api/sessions/{session_id}', headers={'Authorization': f'Bearer {host_token}'})
+    assert cancelled.status_code == 200
+
+    guest_notifs = client.get('/api/auth/notifications', headers={'Authorization': f'Bearer {guest_token}'})
+    cancel_notification = next(
+        notification for notification in json.loads(guest_notifs.data)['notifications']
+        if notification['notif_type'] == 'session_cancelled'
+    )
+    assert cancel_notification['target_path'] == f'/courts/{court["id"]}?session={session_id}'
+    assert cancel_notification['target_label'] == 'Open scheduled game'
 
 
 def test_create_recurring_series(client):

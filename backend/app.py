@@ -10,7 +10,26 @@ from backend.config import config
 db = SQLAlchemy()
 socketio = SocketIO()
 
-FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend')
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+LEGACY_FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend')
+REACT_FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend-react', 'dist')
+
+
+def _frontend_dir():
+    react_index = os.path.join(REACT_FRONTEND_DIR, 'index.html')
+    if os.path.exists(react_index):
+        return REACT_FRONTEND_DIR
+    return LEGACY_FRONTEND_DIR
+
+
+def _frontend_asset_exists(frontend_dir, filename):
+    if not filename:
+        return False
+    root = os.path.abspath(frontend_dir)
+    candidate = os.path.abspath(os.path.join(frontend_dir, filename))
+    if not candidate.startswith(root + os.sep):
+        return False
+    return os.path.isfile(candidate)
 
 
 def _parse_allowed_origins(raw_origins):
@@ -321,6 +340,7 @@ def create_app(config_name='development'):
         return None
 
     from backend.routes.auth import auth_bp
+    from backend.routes.app_shell import app_bp
     from backend.routes.courts import courts_bp
     from backend.routes.games import games_bp
     from backend.routes.sessions import sessions_bp
@@ -328,6 +348,7 @@ def create_app(config_name='development'):
     from backend.routes.presence import presence_bp
     from backend.routes.ranked import ranked_bp
 
+    app.register_blueprint(app_bp, url_prefix='/api/app')
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(courts_bp, url_prefix='/api/courts')
     app.register_blueprint(games_bp, url_prefix='/api/games')
@@ -336,13 +357,13 @@ def create_app(config_name='development'):
     app.register_blueprint(presence_bp, url_prefix='/api/presence')
     app.register_blueprint(ranked_bp, url_prefix='/api/ranked')
 
-    @app.route('/')
-    def index():
-        return send_from_directory(FRONTEND_DIR, 'index.html')
-
+    @app.route('/', defaults={'filename': ''})
     @app.route('/<path:filename>')
     def frontend_files(filename):
-        return send_from_directory(FRONTEND_DIR, filename)
+        frontend_dir = _frontend_dir()
+        if filename and _frontend_asset_exists(frontend_dir, filename):
+            return send_from_directory(frontend_dir, filename)
+        return send_from_directory(frontend_dir, 'index.html')
 
     with app.app_context():
         from backend import models  # noqa: F401

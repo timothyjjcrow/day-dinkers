@@ -966,6 +966,39 @@ def test_court_summary_endpoint(client):
     assert len(data['matches']) >= 1
 
 
+def test_confirm_match_completes_when_all_players_are_already_confirmed(client, app):
+    t1, id1 = _register(client, 'confirm_rescue_u1', 'confirm_rescue_u1@test.com')
+    t2, id2 = _register(client, 'confirm_rescue_u2', 'confirm_rescue_u2@test.com')
+    court = _create_court(client, t1, 'Confirm Rescue Court')
+
+    assert _checkin(client, t1, court['id']).status_code == 201
+    assert _checkin(client, t2, court['id']).status_code == 201
+
+    created = _create_match(client, t1, court['id'], [id1], [id2], match_type='singles')
+    assert created.status_code == 201
+    match_id = json.loads(created.data)['match']['id']
+
+    scored = client.post(
+        f'/api/ranked/match/{match_id}/score',
+        json={'team1_score': 11, 'team2_score': 7},
+        headers=_auth(t1),
+    )
+    assert scored.status_code == 200
+
+    with app.app_context():
+        match = db.session.get(Match, match_id)
+        for player in match.players:
+            player.confirmed = True
+        match.status = 'pending_confirmation'
+        db.session.commit()
+
+    confirmed = client.post(f'/api/ranked/match/{match_id}/confirm', json={}, headers=_auth(t2))
+    assert confirmed.status_code == 200
+    confirmed_data = json.loads(confirmed.data)
+    assert confirmed_data['match']['status'] == 'completed'
+    assert confirmed_data['all_confirmed'] is True
+
+
 def test_reconfirm_completed_match_does_not_change_elo(client, app):
     t1, id1 = _register(client, 'reconfirm_u1', 'reconfirm_u1@test.com')
     t2, id2 = _register(client, 'reconfirm_u2', 'reconfirm_u2@test.com')
