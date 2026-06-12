@@ -657,7 +657,7 @@
       ${gamesHtml}
       ${(court.recent_results || []).length ? `
         <div class="section-label">Recent results here</div>
-        ${court.recent_results.map(resultCardHtml).join('')}` : ''}
+        ${court.recent_results.map(resultRowHtml).join('')}` : ''}
     `);
 
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
@@ -938,32 +938,69 @@
     }));
   }
 
-  function resultCardHtml(game) {
+  function resultRowHtml(game) {
     const court = game.court || {};
-    const team1 = game.players.filter((p) => p.team === 1);
-    const team2 = game.players.filter((p) => p.team === 2);
-    const team1Won = game.score_team1 > game.score_team2;
-    const names = (team) => team.map((p) =>
-      `<span data-view-user="${p.user_id}" style="cursor:pointer">${esc(p.display_name)}${p.rating_delta != null ? ` <span class="${p.rating_delta >= 0 ? 'delta-up' : 'delta-down'}" style="font-size:12px">${p.rating_delta >= 0 ? '+' : ''}${p.rating_delta}</span>` : ''}</span>`
-    ).join(' & ') || '—';
-    const sideHtml = (team, score, won) => `
-      <div class="result-side ${won ? 'won' : ''}">
-        <div class="result-names">${won ? '🏆 ' : ''}${names(team)}</div>
-        <div class="result-score">${score}</div>
-      </div>`;
-    const tags = [];
-    if (game.game_type === 'ranked') tags.push('<span class="tag ranked" style="margin:0">🏆 Ranked</span>');
-    if (game.involves_me) tags.push('<span class="tag" style="margin:0">You played</span>');
-    else if (game.involves_friend) tags.push('<span class="tag" style="margin:0">🤝 Friend</span>');
+    const t1 = game.players.filter((p) => p.team === 1);
+    const t2 = game.players.filter((p) => p.team === 2);
+    const t1Won = game.score_team1 > game.score_team2;
+    const firstName = (p) => esc(p.display_name.split(' ')[0]);
+    const names = (team) => team.map(firstName).join(' & ') || '—';
+    const mine = game.you_won === true || game.you_won === false;
+    const delta = game.your_rating_delta;
+
+    const meta = [
+      esc(court.name || ''),
+      fmtDateTime(game.completed_at),
+      game.game_type === 'ranked' ? '🏆 Ranked' : 'Casual',
+    ];
+    if (!mine && game.involves_friend) meta.push('🤝 Friend');
+
+    let badge;
+    let line;
+    if (mine) {
+      const me = game.players.find((p) => p.user_id === (state.me || {}).id);
+      const myTeam = me ? me.team : 1;
+      const opponents = myTeam === 1 ? t2 : t1;
+      const myScore = myTeam === 1 ? game.score_team1 : game.score_team2;
+      const oppScore = myTeam === 1 ? game.score_team2 : game.score_team1;
+      badge = `<div class="rr-badge ${game.you_won ? 'won' : 'lost'}">${game.you_won ? 'W' : 'L'}</div>`;
+      line = `
+        <span class="rr-score">${myScore}–${oppScore}</span>
+        <span class="rr-vs">vs ${names(opponents)}</span>
+        ${delta != null ? `<span class="rr-delta ${delta >= 0 ? 'delta-up' : 'delta-down'}">${delta >= 0 ? '+' : ''}${delta}</span>` : ''}`;
+    } else {
+      const winners = t1Won ? t1 : t2;
+      const losers = t1Won ? t2 : t1;
+      const winScore = t1Won ? game.score_team1 : game.score_team2;
+      const loseScore = t1Won ? game.score_team2 : game.score_team1;
+      badge = '<div class="rr-badge neutral">🏆</div>';
+      line = `
+        <span class="rr-winner">${names(winners)}</span>
+        <span class="rr-score">${winScore}–${loseScore}</span>
+        <span class="rr-vs">${names(losers)}</span>`;
+    }
+
     return `
-      <div class="card">
-        <div class="row-sub" style="margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          ${tags.join('')}
-          <span>${esc(court.name || '')} · ${fmtDateTime(game.completed_at)}</span>
+      <div class="result-row" data-open-game="${game.id}">
+        ${badge}
+        <div class="rr-main">
+          <div class="rr-line">${line}</div>
+          <div class="rr-meta">${meta.join(' · ')}</div>
         </div>
-        ${sideHtml(team1, game.score_team1, team1Won)}
-        ${sideHtml(team2, game.score_team2, !team1Won)}
+        <span class="chev">›</span>
       </div>`;
+  }
+
+  function resultDayLabel(isoStr) {
+    if (!isoStr) return 'Earlier';
+    const d = new Date(isoStr);
+    const now = new Date();
+    const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((startOf(now) - startOf(d)) / 86400000);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    if (diff < 7) return d.toLocaleDateString([], { weekday: 'long' });
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
   async function renderPlay() {
@@ -996,10 +1033,22 @@
           : (state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] });
         url += `?lat=${c.lat}&lng=${c.lng}`;
         const data = await api(url);
-        el.innerHTML = data.items.length
-          ? data.items.map(resultCardHtml).join('')
-          : '<div class="empty-state"><span class="big">📋</span>No finished games around here yet.<br>Play one and it\'ll show up!</div>';
-        bindUserButtons(el);
+        if (!data.items.length) {
+          el.innerHTML = '<div class="empty-state"><span class="big">📋</span>No finished games around here yet.<br>Play one and it\'ll show up!</div>';
+          return;
+        }
+        let resultsHtml = '';
+        let lastLabel = null;
+        data.items.forEach((g) => {
+          const label = resultDayLabel(g.completed_at);
+          if (label !== lastLabel) {
+            resultsHtml += `<div class="section-label">${label}</div>`;
+            lastLabel = label;
+          }
+          resultsHtml += resultRowHtml(g);
+        });
+        el.innerHTML = resultsHtml;
+        bindGameButtons(el, renderPlay);
         return;
       }
 
@@ -1046,7 +1095,7 @@
         const history = await api('/games/history');
         if (history.items.length) {
           html += '<div class="section-label">Past games</div>';
-          html += history.items.map((g) => gameCardHtml(g)).join('');
+          html += history.items.map(resultRowHtml).join('');
         }
       } else {
         html = data.items.map((g) => gameCardHtml(g)).join('');
@@ -1922,21 +1971,11 @@
     try {
       const history = await api('/games/history');
       if (history.items.length) {
-        el.querySelector('#pf-history').innerHTML =
+        const historyEl = el.querySelector('#pf-history');
+        historyEl.innerHTML =
           '<div class="section-label">Match history</div>' +
-          history.items.map((g) => {
-            const myPlayer = g.players.find((p) => p.user_id === me.id);
-            const delta = myPlayer && myPlayer.rating_delta != null
-              ? ` <span class="${myPlayer.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${myPlayer.rating_delta >= 0 ? '+' : ''}${myPlayer.rating_delta}</span>`
-              : '';
-            return `
-              <div class="card row">
-                <div class="row-main">
-                  <div class="row-title">${esc(g.court ? g.court.name : 'Game')}${delta}</div>
-                  <div class="row-sub">${fmtDateTime(g.completed_at)} · ${g.score_team1}–${g.score_team2} · ${g.game_type === 'ranked' ? '🏆 Ranked' : 'Casual'}</div>
-                </div>
-              </div>`;
-          }).join('');
+          history.items.map(resultRowHtml).join('');
+        bindGameButtons(historyEl, renderProfile);
       }
     } catch { /* ignore */ }
   }
