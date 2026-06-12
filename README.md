@@ -1,4 +1,4 @@
-# Picklepals
+# Third Shot
 
 A simple social app for pickleball players: find courts on a map, check in, add
 friends, chat, schedule casual or ranked games, and climb the rankings.

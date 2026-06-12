@@ -13,7 +13,7 @@
     gamesToConfirm: 0,
     lastNotifId: null,
     tab: 'courts',
-    playSeg: 'nearby',
+    playSeg: 'games',
     chatSeg: 'chats',
     map: null,
     markers: null,
@@ -173,7 +173,7 @@
         if (!coveredByBanner) toast(`🔔 ${latest.title}`);
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
           try {
-            new Notification('Picklepals', { body: latest.title, icon: '/icon.svg', tag: `pp-${latest.id}` });
+            new Notification('Third Shot', { body: latest.title, icon: '/icon-512.png', tag: `pp-${latest.id}` });
           } catch { /* not supported */ }
         }
         if (state.tab === 'play') renderPlay();
@@ -347,9 +347,11 @@
 
     $('#locate-btn').addEventListener('click', locateMe);
     $('#bell-btn').addEventListener('click', openActivity);
+    const ICON_LIST = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;vertical-align:-2px"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>';
+    const ICON_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;vertical-align:-2px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
     const syncListToggle = () => {
       const open = !$('#court-list').classList.contains('hidden');
-      $('#list-toggle').innerHTML = open ? '✕ Close' : '☰ List';
+      $('#list-toggle').innerHTML = open ? `${ICON_X} Close` : `${ICON_LIST} List`;
     };
     $('#list-toggle').addEventListener('click', () => {
       $('#court-list').classList.toggle('hidden');
@@ -621,8 +623,8 @@
     let isFavorite = court.is_favorite;
     try { history.replaceState(null, '', `#court/${court.id}`); } catch { /* ignore */ }
     const heroImg = court.photo_url
-      ? `<img class="cd-hero-img" src="${esc(court.photo_url)}" alt="" onerror="this.outerHTML='<div class=\\'cd-hero-img placeholder\\'>🥒</div>'">`
-      : '<div class="cd-hero-img placeholder">🥒</div>';
+      ? `<img class="cd-hero-img" src="${esc(court.photo_url)}" alt="" onerror="this.outerHTML='<div class=\\'cd-hero-img placeholder\\'>🏓</div>'">`
+      : '<div class="cd-hero-img placeholder">🏓</div>';
     const chipsHtml = tags.map((t) => t.startsWith('<span') ? t : `<span class="tag">${t}</span>`).join('');
     const linkParts = [];
     if (court.website) linkParts.push(`<a href="${esc(court.website)}" target="_blank" rel="noopener">🌐 Website</a>`);
@@ -633,7 +635,7 @@
         ${heroImg}
         <div class="cd-hero-shade"></div>
         <div class="cd-hero-actions">
-          <button class="glass-btn" id="cd-share" title="Share">📤</button>
+          <button class="glass-btn" id="cd-share" title="Share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg></button>
           <button class="glass-btn" id="cd-favorite" title="Save">${isFavorite ? '★' : '☆'}</button>
           <button class="glass-btn modal-close">✕</button>
         </div>
@@ -646,10 +648,10 @@
         ${checkedIn ? 'Check out' : "📍 I'm here — check in"}
       </button>
       <div class="action-grid">
-        <button class="action-tile" id="cd-play-now"><span>▶️</span>Play now</button>
-        <button class="action-tile" id="cd-schedule"><span>📅</span>Schedule</button>
-        <button class="action-tile" id="cd-chat"><span>💬</span>Chat</button>
-        <a class="action-tile" href="${mapsUrl}" target="_blank" rel="noopener"><span>🧭</span>Directions</a>
+        <button class="action-tile" id="cd-play-now"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg></span>Play now</button>
+        <button class="action-tile" id="cd-schedule"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span>Schedule</button>
+        <button class="action-tile" id="cd-chat"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>Chat</button>
+        <a class="action-tile" href="${mapsUrl}" target="_blank" rel="noopener"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg></span>Directions</a>
       </div>
       <div style="margin-top:14px">${chipsHtml}</div>
       ${court.open_play_schedule ? `
@@ -692,7 +694,7 @@
       const text = `${court.name} — pickleball at ${court.city || 'this court'}`;
       try {
         if (navigator.share) {
-          await navigator.share({ title: 'Picklepals', text, url });
+          await navigator.share({ title: 'Third Shot', text, url });
         } else {
           await navigator.clipboard.writeText(url);
           toast('Link copied 📋');
@@ -1011,104 +1013,118 @@
     const seg = state.playSeg;
     const el = $('#play-content');
     el.innerHTML = '<div class="empty-state">Loading…</div>';
+    const loc = state.userLoc
+      ? { lat: state.userLoc[0], lng: state.userLoc[1] }
+      : (state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] });
     try {
-      if (seg === 'rankings') {
-        const data = await api('/leaderboard');
-        el.innerHTML = data.items.length
-          ? data.items.map((u, i) => `
-              <div class="card row">
-                <div class="rank-num">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</div>
-                ${avatarHtml(u)}
+      if (seg === 'scores') {
+        const [board, results] = await Promise.all([
+          api('/leaderboard'),
+          api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`),
+        ]);
+        let html = '';
+
+        if (board.items.length) {
+          const top3 = board.items.slice(0, 3);
+          // Podium order: 2nd, 1st, 3rd
+          const order = [top3[1], top3[0], top3[2]].filter(Boolean);
+          const place = (u) => board.items.indexOf(u) + 1;
+          html += '<div class="podium">' + order.map((u) => `
+            <div class="podium-col place-${place(u)}" data-view-user="${u.id}">
+              <div class="podium-medal">${['🥇', '🥈', '🥉'][place(u) - 1]}</div>
+              ${avatarHtml(u)}
+              <div class="podium-name">${esc(u.display_name.split(' ')[0])}${u.current_streak >= 2 ? ' 🔥' : ''}</div>
+              <div class="podium-rating">${u.rating}</div>
+              <div class="podium-base"></div>
+            </div>`).join('') + '</div>';
+
+          const rest = board.items.slice(3, 10);
+          if (rest.length) {
+            html += rest.map((u, i) => `
+              <div class="card row ${state.me && u.id === state.me.id ? 'you-row' : ''}" data-view-user="${u.id}" style="cursor:pointer;padding:10px 14px">
+                <div class="rank-num">${i + 4}</div>
+                ${avatarHtml(u, 'sm')}
                 <div class="row-main">
-                  <div class="row-title">${esc(u.display_name)}${u.current_streak >= 2 ? ` <span title="Win streak">🔥${u.current_streak}</span>` : ''}</div>
-                  <div class="row-sub">${u.ranked_wins}W – ${u.ranked_losses}L · ${skillLabel(u.skill_level)}</div>
+                  <div class="row-title" style="font-size:14px">${esc(u.display_name)}${u.current_streak >= 2 ? ` <span title="Win streak">🔥${u.current_streak}</span>` : ''}</div>
+                  <div class="row-sub">${u.ranked_wins}W – ${u.ranked_losses}L</div>
                 </div>
-                <div class="stat-value">${u.rating}</div>
-              </div>`).join('')
-          : '<div class="empty-state"><span class="big">🏆</span>No ranked games yet.<br>Schedule a ranked game and record the score to get on the board!</div>';
+                <div class="stat-value" style="font-size:16px">${u.rating}</div>
+              </div>`).join('');
+          }
+          const me = state.me;
+          if (me && !board.items.some((u) => u.id === me.id)) {
+            html += `<div class="card row" style="padding:10px 14px">
+              <div class="rank-num">—</div>
+              ${avatarHtml(me, 'sm')}
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">You</div>
+                <div class="row-sub">Win a ranked game to enter the leaderboard</div>
+              </div>
+              <div class="stat-value" style="font-size:16px">${me.rating}</div>
+            </div>`;
+          }
+        } else {
+          html += '<div class="empty-state"><span class="big">🏆</span>No ranked games yet.<br>Win one and claim the podium!</div>';
+        }
+
+        if (results.items.length) {
+          html += '<div class="section-label" style="margin-top:18px">Recent games</div>';
+          let lastLabel = null;
+          results.items.forEach((g) => {
+            const label = resultDayLabel(g.completed_at);
+            if (label !== lastLabel) {
+              if (lastLabel !== null) html += `<div class="section-label" style="font-size:11px">${label}</div>`;
+              lastLabel = label;
+            }
+            html += resultRowHtml(g);
+          });
+        }
+
+        el.innerHTML = html;
+        bindGameButtons(el, renderPlay);
         bindUserButtons(el);
         return;
       }
 
-      if (seg === 'results') {
-        let url = '/games/results';
-        const c = state.userLoc
-          ? { lat: state.userLoc[0], lng: state.userLoc[1] }
-          : (state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] });
-        url += `?lat=${c.lat}&lng=${c.lng}`;
-        const data = await api(url);
-        if (!data.items.length) {
-          el.innerHTML = '<div class="empty-state"><span class="big">📋</span>No finished games around here yet.<br>Play one and it\'ll show up!</div>';
-          return;
-        }
-        let resultsHtml = '';
-        let lastLabel = null;
-        data.items.forEach((g) => {
-          const label = resultDayLabel(g.completed_at);
-          if (label !== lastLabel) {
-            resultsHtml += `<div class="section-label">${label}</div>`;
-            lastLabel = label;
-          }
-          resultsHtml += resultRowHtml(g);
-        });
-        el.innerHTML = resultsHtml;
-        bindGameButtons(el, renderPlay);
-        return;
-      }
+      // --- Games: everything actionable + yours + nearby, one scroll ---
+      const [mine, nearby] = await Promise.all([
+        api('/games?mine=1'),
+        api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60`),
+      ]);
+      const nowMs = Date.now();
+      const toScore = mine.items.filter((g) =>
+        g.status === 'upcoming' && new Date(g.scheduled_at).getTime() <= nowMs && g.players.length >= 2);
+      const toConfirm = mine.items.filter((g) => g.awaiting_your_confirmation);
+      const waiting = mine.items.filter((g) =>
+        g.status === 'awaiting_confirmation' && !g.awaiting_your_confirmation);
+      const upcoming = mine.items.filter((g) =>
+        !toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g));
+      const mineIds = new Set(mine.items.map((g) => g.id));
+      const nearbyOpen = nearby.items.filter((g) => !mineIds.has(g.id));
 
-      let url = '/games';
-      if (seg === 'mine') url += '?mine=1';
-      else if (state.userLoc) url += `?lat=${state.userLoc[0]}&lng=${state.userLoc[1]}&radius=60`;
-      else {
-        const c = state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
-        url += `?lat=${c.lat}&lng=${c.lng}&radius=60`;
+      let html = '';
+      if (toScore.length) {
+        html += '<div class="section-label" style="margin-top:6px">🎾 Played — enter the score</div>';
+        html += toScore.map((g) => gameCardHtml(g)).join('');
       }
-      const data = await api(url);
-      let html;
-
-      if (seg === 'mine') {
-        // Top: games you've played that need a score, then confirmations,
-        // then waiting-on-opponent, then upcoming, then history.
-        const nowMs = Date.now();
-        const toScore = data.items.filter((g) =>
-          g.status === 'upcoming' && g.is_joined
-          && new Date(g.scheduled_at).getTime() <= nowMs && g.players.length >= 2);
-        const toConfirm = data.items.filter((g) => g.awaiting_your_confirmation);
-        const waiting = data.items.filter((g) =>
-          g.status === 'awaiting_confirmation' && !g.awaiting_your_confirmation);
-        const upcoming = data.items.filter((g) =>
-          !toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g));
-
-        html = '';
-        if (toScore.length) {
-          html += '<div class="section-label" style="margin-top:6px">🎾 Played — enter the score</div>';
-          html += toScore.map((g) => gameCardHtml(g)).join('');
-        }
-        if (toConfirm.length) {
-          html += '<div class="section-label">⚡ Confirm the score</div>';
-          html += toConfirm.map((g) => gameCardHtml(g)).join('');
-        }
-        if (waiting.length) {
-          html += '<div class="section-label">⏳ Waiting on opponents</div>';
-          html += waiting.map((g) => gameCardHtml(g)).join('');
-        }
-        if (upcoming.length) {
-          html += '<div class="section-label">📅 Upcoming</div>';
-          html += upcoming.map((g) => gameCardHtml(g)).join('');
-        }
-        const history = await api('/games/history');
-        if (history.items.length) {
-          html += '<div class="section-label">Past games</div>';
-          html += history.items.map(resultRowHtml).join('');
-        }
-      } else {
-        html = data.items.map((g) => gameCardHtml(g)).join('');
+      if (toConfirm.length) {
+        html += '<div class="section-label">⚡ Confirm the score</div>';
+        html += toConfirm.map((g) => gameCardHtml(g)).join('');
       }
-      el.innerHTML = html || `<div class="empty-state"><span class="big">🎾</span>${
-        seg === 'mine'
-          ? 'You haven\'t joined any games yet.<br>Find one nearby or tap ＋ to schedule your own!'
-          : 'No upcoming games in your area yet.<br>Tap ＋ to schedule the first one!'
-      }</div>`;
+      if (waiting.length) {
+        html += '<div class="section-label">⏳ Waiting on opponents</div>';
+        html += waiting.map((g) => gameCardHtml(g)).join('');
+      }
+      if (upcoming.length) {
+        html += '<div class="section-label">Your upcoming games</div>';
+        html += upcoming.map((g) => gameCardHtml(g)).join('');
+      }
+      html += '<div class="section-label">Nearby games</div>';
+      html += nearbyOpen.length
+        ? nearbyOpen.map((g) => gameCardHtml(g)).join('')
+        : '<div class="empty-state" style="padding:18px">No open games around you right now.<br>Tap + to start one!</div>';
+
+      el.innerHTML = html;
       bindGameButtons(el, renderPlay);
     } catch (e) {
       el.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
@@ -1423,7 +1439,7 @@
         });
         closeModal(modal);
         toast(nowMode ? "Game on! It's live in My games 🎾" : 'Game scheduled! 🎾');
-        if (state.tab === 'play') { state.playSeg = nowMode ? 'mine' : state.playSeg; renderPlay(); }
+        if (state.tab === 'play') { state.playSeg = 'games'; renderPlay(); }
         document.querySelectorAll('#play-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === state.playSeg));
         refreshMe();
       } catch (err) { toast(err.message); btn.disabled = false; }

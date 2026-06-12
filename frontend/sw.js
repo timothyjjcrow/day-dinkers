@@ -1,7 +1,7 @@
 /* Picklepals service worker: offline fallback for the app shell.
    Network-first everywhere so deploys are never stale. */
-const CACHE = 'picklepals-v2';
-const SHELL = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'thirdshot-v3';
+const SHELL = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon-512.png', '/logo.jpg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
