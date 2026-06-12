@@ -474,6 +474,41 @@ def challenge_user(user_id):
     return jsonify(game.to_dict(g.current_user.id)), 201
 
 
+@games_bp.post('/games/<int:game_id>/decline')
+@login_required
+def decline_challenge(game_id):
+    """Decline an open challenge-style game you were invited to: cancels it."""
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.status != 'upcoming':
+        return jsonify({'error': 'game_not_open'}), 400
+    if any(p.user_id == g.current_user.id for p in game.players):
+        return jsonify({'error': 'already_joined'}), 400
+    if len(game.players) > 1:
+        return jsonify({'error': 'game_already_started'}), 400
+
+    from backend.models import Notification
+    was_challenged = Notification.query.filter_by(
+        user_id=g.current_user.id,
+        kind='challenge',
+        related_game_id=game.id,
+    ).first()
+    if not was_challenged:
+        return jsonify({'error': 'forbidden'}), 403
+
+    game.status = 'cancelled'
+    notify(
+        game.creator_id,
+        'challenge_declined',
+        f'{g.current_user.display_name} declined your challenge',
+        related_user_id=g.current_user.id,
+        related_game_id=game.id,
+    )
+    db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id))
+
+
 @games_bp.get('/games/results')
 def recent_results():
     """Feed of recently finished games: yours, your friends', and nearby ones."""

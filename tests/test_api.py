@@ -529,6 +529,51 @@ def test_active_game_banner_states(client):
     assert me_a['active_game'] is None
 
 
+def test_challenge_banner_and_decline(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    game = client.post(f"/api/users/{b['user']['id']}/challenge", json={'court_id': court_id}, headers=auth_headers(a['token'])).get_json()
+
+    # Challenged player sees the challenge in their banner
+    me_b = client.get('/api/me', headers=auth_headers(b['token'])).get_json()
+    assert me_b['active_game']['id'] == game['id']
+    assert me_b['active_game']['banner_state'] == 'challenge'
+
+    # Challenger sees it as their live game (they're in it, scheduled now)
+    me_a = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me_a['active_game']['banner_state'] == 'live'
+
+    # Only the challenged player may decline
+    c = register(client, 'c@example.com', 'Cam')
+    res = client.post(f"/api/games/{game['id']}/decline", headers=auth_headers(c['token']))
+    assert res.status_code == 403
+
+    res = client.post(f"/api/games/{game['id']}/decline", headers=auth_headers(b['token']))
+    assert res.status_code == 200
+    assert res.get_json()['status'] == 'cancelled'
+
+    assert res.get_json()['status'] == 'cancelled'
+
+    # Challenger got notified, target's banner cleared
+    notes = client.get('/api/notifications', headers=auth_headers(a['token'])).get_json()
+    assert any(n['kind'] == 'challenge_declined' for n in notes['items'])
+    me_b = client.get('/api/me', headers=auth_headers(b['token'])).get_json()
+    assert me_b['active_game'] is None
+
+    # Accepting a challenge turns it into a live game for both
+    game3 = client.post(f"/api/users/{b['user']['id']}/challenge", json={'court_id': court_id}, headers=auth_headers(a['token'])).get_json()
+    client.post(f"/api/games/{game3['id']}/join", headers=auth_headers(b['token']))
+    me_b = client.get('/api/me', headers=auth_headers(b['token'])).get_json()
+    assert me_b['active_game']['id'] == game3['id']
+    assert me_b['active_game']['banner_state'] == 'live'
+
+    # Declining after someone joined is rejected
+    res = client.post(f"/api/games/{game3['id']}/decline", headers=auth_headers(c['token']))
+    assert res.status_code == 400
+
+
 def test_start_game_now(client):
     from backend.models import utcnow
     a = register(client, 'a@example.com')

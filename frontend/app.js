@@ -61,6 +61,11 @@
     scheduled_in_past: 'Pick a time in the future.',
     already_friends: 'You are already friends.',
     request_already_sent: 'Request already sent.',
+    nothing_to_confirm: 'This score was already handled.',
+    nothing_to_dispute: 'This score was already handled.',
+    game_not_open: 'This game is no longer open.',
+    game_already_started: 'Too late — the game already has players.',
+    already_joined: "You're already in this game.",
   };
   const humanError = (code) => ERROR_TEXT[code] || code.replace(/_/g, ' ');
 
@@ -163,7 +168,9 @@
     const latest = data.latest_notification;
     if (latest) {
       if (state.lastNotifId !== null && latest.id > state.lastNotifId && !latest.read) {
-        toast(`🔔 ${latest.title}`);
+        const coveredByBanner = latest.related_game_id && state.activeGame
+          && state.activeGame.id === latest.related_game_id;
+        if (!coveredByBanner) toast(`🔔 ${latest.title}`);
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
           try {
             new Notification('Picklepals', { body: latest.title, icon: '/icon.svg', tag: `pp-${latest.id}` });
@@ -191,6 +198,11 @@
     }
     const court = game.court || {};
     const stateCfg = {
+      challenge: {
+        icon: '⚔️',
+        title: `${esc((game.players[0] || {}).display_name || 'Someone')} challenged you!`,
+        sub: `Ranked at ${esc(court.name || 'the court')} · tap to accept or decline`,
+      },
       live: {
         icon: '<span class="agb-dot"></span>',
         title: `LIVE at ${esc(court.name || 'the court')}`,
@@ -1284,6 +1296,25 @@
     renderLabels();
     highlightWinner();
 
+    // If someone else reports a score (or the game changes) while this is open,
+    // swap to the game screen instead of letting a stale submission overwrite it.
+    const originalStatus = game.status;
+    const scorePoll = setInterval(async () => {
+      if (!document.body.contains(modal)) { clearInterval(scorePoll); return; }
+      try {
+        const fresh = await api(`/games/${game.id}`);
+        const someoneElseReported = fresh.score_submitted_by && fresh.score_submitted_by !== state.me.id
+          && fresh.status === 'awaiting_confirmation' && originalStatus !== 'awaiting_confirmation';
+        if (fresh.status !== originalStatus || someoneElseReported) {
+          clearInterval(scorePoll);
+          closeModal(modal);
+          toast(`⚡ ${fresh.score_submitted_by_name || 'Your opponent'} already reported a score`);
+          refreshMe();
+          openGameScreen(game.id);
+        }
+      } catch { /* offline */ }
+    }, 5000);
+
     modal.querySelectorAll('[data-step]').forEach((btn) => btn.addEventListener('click', () => {
       const input = modal.querySelector(`#${btn.dataset.target}`);
       input.value = Math.max(0, Math.min(99, Number(input.value || 0) + Number(btn.dataset.step)));
@@ -1832,14 +1863,18 @@
     });
   }
 
-  async function openGameScreen(gameId) {
-    let game;
-    try { game = await api(`/games/${gameId}`); } catch (e) { toast(e.message); return; }
+  function gameFingerprint(game) {
+    return JSON.stringify([
+      game.status, game.score_team1, game.score_team2, game.score_submitted_by,
+      game.players.map((p) => [p.user_id, p.team]).sort((x, y) => x[0] - y[0]),
+    ]);
+  }
+
+  function gameScreenHtml(game) {
     const court = game.court || {};
     const isChallenge = game.notes.startsWith('⚔️');
     const live = game.status === 'upcoming' && new Date(game.scheduled_at).getTime() <= Date.now();
 
-    // Status headline
     let emoji = '🎾';
     let headline = fmtDateTime(game.scheduled_at);
     let subline = `${game.players.length}/${game.max_players} players`;
@@ -1848,21 +1883,21 @@
       headline = `Final: ${game.score_team1}–${game.score_team2}`;
       subline = fmtDateTime(game.completed_at);
     } else if (game.status === 'cancelled') {
-      emoji = '🚫'; headline = 'Cancelled';
+      emoji = '🚫'; headline = 'Cancelled'; subline = 'This game was called off.';
     } else if (game.status === 'awaiting_confirmation') {
       emoji = game.awaiting_your_confirmation ? '⚡' : '⏳';
       headline = `Reported: ${game.score_team1}–${game.score_team2}`;
       subline = game.awaiting_your_confirmation
         ? `${esc(game.score_submitted_by_name || 'Opponent')} reported — confirm or dispute`
         : 'Waiting for opponents to confirm';
+    } else if (isChallenge && !game.is_joined && game.spots_left > 0) {
+      emoji = '⚔️'; headline = "You've been challenged!";
+      subline = `Ranked singles vs ${esc((game.players[0] || {}).display_name || 'a player')}`;
     } else if (live) {
       emoji = '🟢'; headline = 'Game on!';
       subline = game.players.length >= 2 ? 'Enter the score when you finish' : 'Waiting for players to join';
-    } else if (isChallenge && !game.is_joined && game.spots_left > 0) {
-      emoji = '⚔️'; headline = 'You\'ve been challenged!';
     }
 
-    // Players (grouped by team when assigned)
     const team1 = game.players.filter((p) => p.team === 1);
     const team2 = game.players.filter((p) => p.team === 2);
     const playerRow = (p) => `
@@ -1880,11 +1915,13 @@
         </div>`
       : game.players.map(playerRow).join('');
 
-    // Primary actions by state
     let actions = '';
     if (game.status === 'upcoming') {
       if (!game.is_joined && game.spots_left > 0) {
         actions = `<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${isChallenge ? '⚔️ Accept challenge' : '🎾 Join this game'}</button>`;
+        if (isChallenge && game.players.length === 1) {
+          actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
+        }
       } else if (game.is_joined) {
         if (game.players.length >= 2) {
           actions = `<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">📝 Enter the score</button>`;
@@ -1902,7 +1939,7 @@
       actions = `<button class="btn btn-secondary btn-block" id="gs-rematch">↺ Rematch at ${esc(court.name || 'this court')}</button>`;
     }
 
-    const modal = openModal(`
+    return `
       <div class="modal-head">
         <div style="flex:1">
           <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}</h3>
@@ -1921,61 +1958,101 @@
       ${game.notes ? `<div class="row-sub" style="margin:0 0 12px 4px">“${esc(game.notes)}”</div>` : ''}
       <div class="section-label">Players (${game.players.length}/${game.max_players})</div>
       ${playersHtml}
-      <div style="margin-top:16px">${actions}</div>
-    `);
+      <div style="margin-top:16px">${actions}</div>`;
+  }
 
-    const reopen = () => { closeModal(modal); openGameScreen(gameId); };
-    modal.querySelector('#gs-court').addEventListener('click', () => { closeModal(modal); openCourtDetail(court.id); });
-    modal.querySelector('#gs-join')?.addEventListener('click', async () => {
-      try {
-        await api(`/games/${gameId}/join`, { method: 'POST' });
-        toast(isChallenge ? 'Challenge accepted! ⚔️' : 'You\'re in! 🎾');
-        refreshMe(); reopen();
-      } catch (e) { toast(e.message); }
-    });
-    modal.querySelector('#gs-score')?.addEventListener('click', async () => {
-      const fresh = await api(`/games/${gameId}`);
-      closeModal(modal);
-      openScoreModal(fresh, () => refreshMe());
-    });
-    modal.querySelector('#gs-confirm')?.addEventListener('click', async () => {
-      try {
-        const updated = await api(`/games/${gameId}/confirm`, { method: 'POST' });
+  async function openGameScreen(gameId) {
+    let game;
+    try { game = await api(`/games/${gameId}`); } catch (e) { toast(e.message); return; }
+
+    const modal = openModal('');
+    const box = modal.querySelector('.modal');
+    let fingerprint = '';
+
+    const render = (fresh) => {
+      game = fresh;
+      fingerprint = gameFingerprint(game);
+      box.innerHTML = gameScreenHtml(game);
+      bind();
+    };
+
+    const reopenFresh = async () => {
+      try { render(await api(`/games/${gameId}`)); } catch (e) { toast(e.message); }
+    };
+
+    function bind() {
+      const court = game.court || {};
+      const isChallenge = game.notes.startsWith('⚔️');
+      box.querySelectorAll('.modal-close').forEach((b) => { b.onclick = () => closeModal(modal); });
+      box.querySelector('#gs-court')?.addEventListener('click', () => { closeModal(modal); openCourtDetail(court.id); });
+      box.querySelector('#gs-join')?.addEventListener('click', async () => {
+        try {
+          await api(`/games/${gameId}/join`, { method: 'POST' });
+          toast(isChallenge ? 'Challenge accepted! ⚔️' : "You're in! 🎾");
+          refreshMe(); reopenFresh();
+        } catch (e) { toast(e.message); reopenFresh(); }
+      });
+      box.querySelector('#gs-decline')?.addEventListener('click', async () => {
+        try {
+          await api(`/games/${gameId}/decline`, { method: 'POST' });
+          toast('Challenge declined');
+          closeModal(modal); refreshMe();
+        } catch (e) { toast(e.message); reopenFresh(); }
+      });
+      box.querySelector('#gs-score')?.addEventListener('click', async () => {
+        const fresh = await api(`/games/${gameId}`);
         closeModal(modal);
-        showCelebration(updated);
-        refreshMe();
-        if (state.tab === 'play') renderPlay();
-      } catch (e) { toast(e.message); }
-    });
-    modal.querySelector('#gs-dispute')?.addEventListener('click', async () => {
+        openScoreModal(fresh, () => refreshMe());
+      });
+      box.querySelector('#gs-confirm')?.addEventListener('click', async () => {
+        try {
+          const updated = await api(`/games/${gameId}/confirm`, { method: 'POST' });
+          closeModal(modal);
+          showCelebration(updated);
+          refreshMe();
+          if (state.tab === 'play') renderPlay();
+        } catch (e) { toast(e.message); reopenFresh(); }
+      });
+      box.querySelector('#gs-dispute')?.addEventListener('click', async () => {
+        try {
+          await api(`/games/${gameId}/dispute`, { method: 'POST' });
+          toast('Score cleared — enter the right one together');
+          refreshMe(); reopenFresh();
+        } catch (e) { toast(e.message); reopenFresh(); }
+      });
+      box.querySelector('#gs-leave')?.addEventListener('click', async () => {
+        try {
+          await api(`/games/${gameId}/leave`, { method: 'POST' });
+          toast('Left the game');
+          closeModal(modal); refreshMe();
+          if (state.tab === 'play') renderPlay();
+        } catch (e) { toast(e.message); reopenFresh(); }
+      });
+      box.querySelector('#gs-cancel')?.addEventListener('click', async () => {
+        if (!confirm('Cancel this game for everyone?')) return;
+        try {
+          await api(`/games/${gameId}/cancel`, { method: 'POST' });
+          toast('Game cancelled');
+          closeModal(modal); refreshMe();
+          if (state.tab === 'play') renderPlay();
+        } catch (e) { toast(e.message); reopenFresh(); }
+      });
+      bindUserButtons(box);
+    }
+
+    render(game);
+
+    // Live sync: while this screen is open, pick up joins, scores, confirmations…
+    const pollTimer = setInterval(async () => {
+      if (!document.body.contains(box)) { clearInterval(pollTimer); return; }
       try {
-        await api(`/games/${gameId}/dispute`, { method: 'POST' });
-        toast('Score cleared — enter the right one together');
-        refreshMe(); reopen();
-      } catch (e) { toast(e.message); }
-    });
-    modal.querySelector('#gs-leave')?.addEventListener('click', async () => {
-      try {
-        await api(`/games/${gameId}/leave`, { method: 'POST' });
-        toast('Left the game');
-        closeModal(modal); refreshMe();
-        if (state.tab === 'play') renderPlay();
-      } catch (e) { toast(e.message); }
-    });
-    modal.querySelector('#gs-cancel')?.addEventListener('click', async () => {
-      if (!confirm('Cancel this game for everyone?')) return;
-      try {
-        await api(`/games/${gameId}/cancel`, { method: 'POST' });
-        toast('Game cancelled');
-        closeModal(modal); refreshMe();
-        if (state.tab === 'play') renderPlay();
-      } catch (e) { toast(e.message); }
-    });
-    modal.querySelector('#gs-rematch')?.addEventListener('click', () => {
-      closeModal(modal);
-      openNewGameModal(court, game.game_type, true);
-    });
-    bindUserButtons(modal);
+        const fresh = await api(`/games/${gameId}`);
+        if (gameFingerprint(fresh) !== fingerprint) {
+          render(fresh);
+          refreshMe();
+        }
+      } catch { /* offline */ }
+    }, 5000);
   }
 
   async function openActivity() {
@@ -1990,7 +2067,7 @@
       ${data.items.length
         ? data.items.map((n) => `
             <div class="card row" data-notif-game="${n.related_game_id || ''}" style="${n.read ? 'opacity:.65' : ''}${n.related_game_id ? ';cursor:pointer' : ''}">
-              <span style="font-size:20px">${{ friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️' }[n.kind] || '🔔'}</span>
+              <span style="font-size:20px">${{ friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅' }[n.kind] || '🔔'}</span>
               <div class="row-main">
                 <div class="row-title" style="font-size:14px">${esc(n.title)}</div>
                 <div class="row-sub">${fmtDateTime(n.created_at)}</div>

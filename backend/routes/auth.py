@@ -114,9 +114,15 @@ def _games_to_confirm_count(user_id):
 
 
 def _active_game_payload(user):
-    """The single most relevant game for the banner: live game you're in,
-    then a score waiting on you, then your score waiting on opponents,
-    then your next upcoming game."""
+    """The single most relevant game for the banner.
+
+    Priority: live game you're in > incoming challenge > score waiting on you
+    > your score waiting on opponents > your next upcoming game."""
+    from datetime import timedelta
+
+    now = utcnow()
+    candidates = []
+
     games = (
         Game.query.join(GamePlayer)
         .filter(
@@ -127,24 +133,45 @@ def _active_game_payload(user):
         .limit(25)
         .all()
     )
-    now = utcnow()
-    best, best_rank = None, 99
     for game in games:
         data = game.to_dict(user.id)
         if game.status == 'upcoming' and game.scheduled_at <= now:
             rank, banner_state = 0, 'live'
         elif data['awaiting_your_confirmation']:
-            rank, banner_state = 1, 'confirm'
+            rank, banner_state = 2, 'confirm'
         elif game.status == 'awaiting_confirmation':
-            rank, banner_state = 2, 'waiting'
+            rank, banner_state = 3, 'waiting'
         else:
-            rank, banner_state = 3, 'upcoming'
-        if rank < best_rank:
-            data['banner_state'] = banner_state
-            best, best_rank = data, rank
-        if best_rank == 0:
-            break
-    return best
+            rank, banner_state = 4, 'upcoming'
+        data['banner_state'] = banner_state
+        candidates.append((rank, data))
+
+    # Incoming challenges you haven't responded to (last 24h)
+    challenge_notes = (
+        Notification.query.filter_by(user_id=user.id, kind='challenge')
+        .filter(Notification.created_at >= now - timedelta(hours=24))
+        .order_by(Notification.id.desc())
+        .limit(5)
+        .all()
+    )
+    seen_challenge_games = set()
+    for note in challenge_notes:
+        if not note.related_game_id or note.related_game_id in seen_challenge_games:
+            continue
+        seen_challenge_games.add(note.related_game_id)
+        game = db.session.get(Game, note.related_game_id)
+        if not game or game.status != 'upcoming':
+            continue
+        data = game.to_dict(user.id)
+        if data['is_joined'] or data['spots_left'] <= 0:
+            continue
+        data['banner_state'] = 'challenge'
+        candidates.append((1, data))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: (c[0], c[1]['scheduled_at'] or ''))
+    return candidates[0][1]
 
 
 def _me_payload(user):
