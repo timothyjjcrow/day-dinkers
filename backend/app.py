@@ -1,6 +1,7 @@
 """Flask application bootstrap."""
 import os
 import threading
+import time
 
 from flask import Flask, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
@@ -50,6 +51,31 @@ def _maybe_auto_seed(app):
     threading.Thread(target=_seed_courts_background, args=(app,), daemon=True).start()
 
 
+def _migrate_legacy_schema(app):
+    """If the database holds the pre-rebuild schema (user table without the new
+    columns), rename every old table aside so create_all can build fresh ones.
+    Old data is preserved under *_legacy_<timestamp> rather than dropped."""
+    from sqlalchemy import inspect as sa_inspect, text
+    try:
+        inspector = sa_inspect(db.engine)
+        tables = inspector.get_table_names()
+        if 'user' not in tables:
+            return
+        columns = {c['name'] for c in inspector.get_columns('user')}
+        if {'password_hash', 'display_name', 'rating'} <= columns:
+            return
+        suffix = time.strftime('legacy_%Y%m%d%H%M%S')
+        app.logger.warning(
+            'Incompatible legacy schema detected — renaming %d tables to *_%s',
+            len(tables), suffix,
+        )
+        with db.engine.begin() as conn:
+            for table in tables:
+                conn.execute(text(f'ALTER TABLE "{table}" RENAME TO "{table}_{suffix}"'))
+    except Exception:
+        app.logger.exception('Legacy schema migration failed')
+
+
 def create_app(config_name=None):
     app = Flask(__name__, static_folder=None)
     app.config.from_object(get_config(config_name))
@@ -57,6 +83,7 @@ def create_app(config_name=None):
     _register_blueprints(app)
 
     with app.app_context():
+        _migrate_legacy_schema(app)
         if app.config.get('RESET_DB_ON_BOOT'):
             # One-time escape hatch for migrating off an old schema:
             # set RESET_DB_ON_BOOT=true, deploy, then REMOVE the env var.
