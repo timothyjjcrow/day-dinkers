@@ -84,8 +84,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .nav-btn {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 2px; font-size: 11px; font-weight: 600; color: var(--ink-soft); position: relative;
+  transition: color .15s;
 }
 .nav-btn.active { color: var(--green-700); }
+.nav-btn.active::before {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 36px; height: 3px; border-radius: 0 0 3px 3px; background: var(--green-700);
+}
+.nav-btn:active .nav-icon { transform: scale(.85); }
+.nav-icon { transition: transform .12s; }
 .nav-icon { font-size: 21px; }
 .badge {
   position: absolute; top: 6px; right: calc(50% - 22px);
@@ -151,8 +158,19 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
   background: var(--green-700); color: #fff; border: 2.5px solid #fff;
   border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 11px; box-shadow: 0 2px 6px rgba(0,0,0,.35);
+  position: relative;
 }
-.court-marker.busy { background: var(--amber-500); }
+.court-marker.busy { background: var(--amber-500); animation: pulse 2.2s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 2px 6px rgba(0,0,0,.35), 0 0 0 0 rgba(245,158,11,.55); }
+  50% { box-shadow: 0 2px 6px rgba(0,0,0,.35), 0 0 0 9px rgba(245,158,11,0); }
+}
+.marker-game-badge {
+  position: absolute; top: -6px; right: -7px;
+  background: #5b21b6; color: #fff; font-size: 9px; font-weight: 800;
+  min-width: 15px; height: 15px; border-radius: 8px; border: 1.5px solid #fff;
+  display: flex; align-items: center; justify-content: center; padding: 0 3px;
+}
 
 .sheet {
   position: absolute; bottom: 0; left: 0; right: 0; z-index: 600;
@@ -166,7 +184,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .card {
   background: var(--card); border-radius: var(--radius); padding: 14px;
   box-shadow: var(--shadow); margin-bottom: 12px;
+  transition: transform .08s ease;
 }
+.card:active { transform: scale(.992); }
+.checkin-sheet { text-align: center; padding: 18px 4px 6px; }
+.map-topbar input { backdrop-filter: blur(8px); background: rgba(255,255,255,.94); }
 .row { display: flex; align-items: center; gap: 12px; }
 .row-main { flex: 1; min-width: 0; }
 .row-title { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

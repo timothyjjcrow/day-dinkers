@@ -283,6 +283,50 @@ def test_chat_flow(client):
     assert [m['body'] for m in fresh['items']] == ['You in?']
 
 
+def test_court_chat(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    res = client.post(f'/api/courts/{court_id}/chat', json={'body': 'Anyone up for games at 6?'}, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    assert res.get_json()['sender_name'] == 'Ana'
+
+    room = client.get(f'/api/courts/{court_id}/chat', headers=auth_headers(b['token'])).get_json()
+    assert [m['body'] for m in room['items']] == ['Anyone up for games at 6?']
+
+    # Court messages must not leak into DM conversations or unread counts
+    convos = client.get('/api/chat', headers=auth_headers(b['token'])).get_json()
+    assert convos['items'] == []
+    me_b = client.get('/api/me', headers=auth_headers(b['token'])).get_json()
+    assert me_b['unread_messages'] == 0
+
+    since = room['items'][-1]['id']
+    client.post(f'/api/courts/{court_id}/chat', json={'body': 'Yes!'}, headers=auth_headers(b['token']))
+    fresh = client.get(f'/api/courts/{court_id}/chat?since_id={since}', headers=auth_headers(a['token'])).get_json()
+    assert [m['body'] for m in fresh['items']] == ['Yes!']
+
+
+def test_challenge(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    res = client.post(f"/api/users/{b['user']['id']}/challenge", json={'court_id': court_id}, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    game = res.get_json()
+    assert game['game_type'] == 'ranked'
+    assert game['max_players'] == 2
+    assert 'challenged' in game['notes']
+
+    notes = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()
+    challenge = [n for n in notes['items'] if n['kind'] == 'challenge'][0]
+    assert challenge['related_game_id'] == game['id']
+
+    res = client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    assert res.get_json()['spots_left'] == 0
+
+
 # ---------- Games ----------
 
 def make_game(client, token, court_id, game_type='casual', hours_ahead=24):

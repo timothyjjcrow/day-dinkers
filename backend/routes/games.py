@@ -434,6 +434,43 @@ def dispute_score(game_id):
     return jsonify(game.to_dict(g.current_user.id))
 
 
+@games_bp.post('/users/<int:user_id>/challenge')
+@login_required
+def challenge_user(user_id):
+    """Challenge another player to a ranked match at a court, right now."""
+    target = db.session.get(User, user_id)
+    if not target:
+        return jsonify({'error': 'user_not_found'}), 404
+    if target.id == g.current_user.id:
+        return jsonify({'error': 'cannot_challenge_self'}), 400
+
+    payload = request.get_json(silent=True) or {}
+    court = db.session.get(Court, int(payload.get('court_id') or 0))
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+
+    game = Game(
+        court_id=court.id,
+        creator_id=g.current_user.id,
+        scheduled_at=utcnow(),
+        game_type='ranked',
+        max_players=2,
+        notes=f'⚔️ {g.current_user.display_name} challenged {target.display_name}!',
+    )
+    db.session.add(game)
+    db.session.flush()
+    db.session.add(GamePlayer(game_id=game.id, user_id=g.current_user.id))
+    notify(
+        target.id,
+        'challenge',
+        f'⚔️ {g.current_user.display_name} challenged you at {court.name}!',
+        related_user_id=g.current_user.id,
+        related_game_id=game.id,
+    )
+    db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id)), 201
+
+
 @games_bp.get('/games/results')
 def recent_results():
     """Feed of recently finished games: yours, your friends', and nearby ones."""

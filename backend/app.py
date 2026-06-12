@@ -128,6 +128,29 @@ def _clear_conflicting_legacy_indexes(app):
         app.logger.exception('Legacy index cleanup failed')
 
 
+def _upgrade_schema(app):
+    """Tiny additive migrations for existing databases (create_all only builds
+    brand-new tables, it never alters existing ones)."""
+    from sqlalchemy import inspect as sa_inspect, text
+    try:
+        inspector = sa_inspect(db.engine)
+        if 'message' not in inspector.get_table_names():
+            return
+        columns = {c['name'] for c in inspector.get_columns('message')}
+        statements = []
+        if 'court_id' not in columns:
+            statements.append('ALTER TABLE message ADD COLUMN court_id INTEGER')
+            if db.engine.dialect.name == 'postgresql':
+                statements.append('ALTER TABLE message ALTER COLUMN recipient_id DROP NOT NULL')
+        if statements:
+            app.logger.warning('Upgrading message table for court chat')
+            with db.engine.begin() as conn:
+                for statement in statements:
+                    conn.execute(text(statement))
+    except Exception:
+        app.logger.exception('Schema upgrade failed')
+
+
 def create_app(config_name=None):
     app = Flask(__name__, static_folder=None)
     app.config.from_object(get_config(config_name))
@@ -138,6 +161,7 @@ def create_app(config_name=None):
         _ensure_pg_schema(app)
         _migrate_legacy_schema(app)
         _clear_conflicting_legacy_indexes(app)
+        _upgrade_schema(app)
         if app.config.get('RESET_DB_ON_BOOT'):
             # One-time escape hatch for migrating off an old schema:
             # set RESET_DB_ON_BOOT=true, deploy, then REMOVE the env var.

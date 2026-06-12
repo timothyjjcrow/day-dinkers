@@ -86,6 +86,8 @@ def presence_payload(user_id):
         'checked_in': True,
         'court_id': checkin.court_id,
         'court_name': court.name if court else 'Court',
+        'court_latitude': court.latitude if court else None,
+        'court_longitude': court.longitude if court else None,
         'looking_for_game': bool(checkin.looking_for_game),
         'checked_in_at': checkin.checked_in_at.isoformat() + 'Z' if checkin.checked_in_at else None,
     }

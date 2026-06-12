@@ -1,13 +1,47 @@
-"""Direct messaging between players."""
+"""Direct messaging between players, plus per-court chat rooms."""
 from flask import Blueprint, g, jsonify, request
 from sqlalchemy import or_
 
 from backend.app import db
-from backend.models import Message, User, utcnow
+from backend.models import Court, Message, User, utcnow
 
 chat_bp = Blueprint('chat', __name__)
 
 from backend.routes.auth import login_required  # noqa: E402
+
+
+@chat_bp.get('/courts/<int:court_id>/chat')
+@login_required
+def court_chat(court_id):
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+    since_id = request.args.get('since_id', type=int)
+    query = Message.query.filter(Message.court_id == court_id)
+    if since_id:
+        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
+    else:
+        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+    return jsonify({
+        'court': {'id': court.id, 'name': court.name},
+        'items': [m.to_dict() for m in messages],
+    })
+
+
+@chat_bp.post('/courts/<int:court_id>/chat')
+@login_required
+def send_court_message(court_id):
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+    payload = request.get_json(silent=True) or {}
+    body = str(payload.get('body') or '').strip()
+    if not body:
+        return jsonify({'error': 'message_body_required'}), 400
+    message = Message(sender_id=g.current_user.id, court_id=court.id, body=body[:2000])
+    db.session.add(message)
+    db.session.commit()
+    return jsonify(message.to_dict()), 201
 
 
 @chat_bp.get('/chat')
@@ -16,7 +50,10 @@ def conversations():
     """Conversation list: latest message per partner with unread counts."""
     me = g.current_user.id
     messages = (
-        Message.query.filter(or_(Message.sender_id == me, Message.recipient_id == me))
+        Message.query.filter(
+            Message.court_id.is_(None),
+            or_(Message.sender_id == me, Message.recipient_id == me),
+        )
         .order_by(Message.id.desc())
         .limit(500)
         .all()
@@ -55,10 +92,11 @@ def thread(user_id):
 
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(
+        Message.court_id.is_(None),
         or_(
             (Message.sender_id == me) & (Message.recipient_id == user_id),
             (Message.sender_id == user_id) & (Message.recipient_id == me),
-        )
+        ),
     )
     if since_id:
         query = query.filter(Message.id > since_id)

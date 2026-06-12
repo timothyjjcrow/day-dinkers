@@ -174,9 +174,11 @@ class Friendship(TimestampMixin, db.Model):
 
 
 class Message(TimestampMixin, db.Model):
+    """Either a direct message (recipient_id set) or a court-room message (court_id set)."""
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), index=True)
     body = db.Column(db.Text, nullable=False, default='')
     read_at = db.Column(db.DateTime)
 
@@ -187,7 +189,10 @@ class Message(TimestampMixin, db.Model):
         return {
             'id': self.id,
             'sender_id': self.sender_id,
+            'sender_name': self.sender.display_name if self.sender else None,
+            'sender_color': self.sender.avatar_color if self.sender else '#2f9e44',
             'recipient_id': self.recipient_id,
+            'court_id': self.court_id,
             'body': self.body,
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),

@@ -18,6 +18,9 @@
     map: null,
     markers: null,
     mapFilter: 'all',
+    userDot: null,
+    geoWatchId: null,
+    lastAutoCheckAt: 0,
     userLoc: null,
     courtsInView: [],
     activeThreadUserId: null,
@@ -155,10 +158,16 @@
     state.gamesToConfirm = data.games_to_confirm || 0;
 
     // Live updates: pop a toast when something new lands while the app is open.
+    state.unreadNotifications = data.unread_notifications || 0;
     const latest = data.latest_notification;
     if (latest) {
       if (state.lastNotifId !== null && latest.id > state.lastNotifId && !latest.read) {
         toast(`🔔 ${latest.title}`);
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+          try {
+            new Notification('Picklepals', { body: latest.title, icon: '/icon.svg', tag: `pp-${latest.id}` });
+          } catch { /* not supported */ }
+        }
         if (state.tab === 'play') renderPlay();
       }
       state.lastNotifId = latest.id;
@@ -179,6 +188,11 @@
     const playBadge = $('#play-badge');
     playBadge.textContent = String(state.gamesToConfirm);
     playBadge.classList.toggle('hidden', state.gamesToConfirm === 0);
+
+    const bellBadge = $('#bell-badge');
+    const unread = state.unreadNotifications || 0;
+    bellBadge.textContent = unread > 99 ? '99+' : String(unread);
+    bellBadge.classList.toggle('hidden', unread === 0);
   }
 
   async function refreshMe() {
@@ -246,6 +260,7 @@
     });
 
     $('#locate-btn').addEventListener('click', locateMe);
+    $('#bell-btn').addEventListener('click', openActivity);
     $('#list-toggle').addEventListener('click', () => {
       $('#court-list').classList.toggle('hidden');
     });
@@ -266,7 +281,9 @@
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         state.userLoc = [pos.coords.latitude, pos.coords.longitude];
-        state.map.setView(state.userLoc, 12);
+        state.map.setView(state.userLoc, 13);
+        updateUserDot();
+        startLocationWatch();
       },
       () => { if (!silent) toast('Could not get your location'); },
       { timeout: 8000 },
@@ -311,9 +328,11 @@
       if (court.latitude == null) return;
       const busy = court.players_here > 0;
       const size = busy ? 34 : 26;
+      const gameBadge = court.upcoming_games > 0
+        ? `<span class="marker-game-badge">${court.upcoming_games}</span>` : '';
       const icon = L.divIcon({
         className: '',
-        html: `<div class="court-marker ${busy ? 'busy' : ''}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}</div>`,
+        html: `<div class="court-marker ${busy ? 'busy' : ''}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}${gameBadge}</div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });
@@ -321,6 +340,82 @@
         .addTo(state.markers)
         .on('click', () => openCourtDetail(court.id));
     });
+  }
+
+  // ---------- Live location & auto check-in ----------
+  function updateUserDot() {
+    if (!state.map || !state.userLoc) return;
+    if (!state.userDot) {
+      state.userDot = L.circleMarker(state.userLoc, {
+        radius: 8, color: '#fff', weight: 3, fillColor: '#1971c2', fillOpacity: 1,
+      }).addTo(state.map);
+    } else {
+      state.userDot.setLatLng(state.userLoc);
+    }
+  }
+
+  function startLocationWatch() {
+    if (!navigator.geolocation || state.geoWatchId != null) return;
+    state.geoWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        state.userLoc = [pos.coords.latitude, pos.coords.longitude];
+        updateUserDot();
+        maybeAutoCheckIn();
+      },
+      () => { /* permission denied or unavailable */ },
+      { enableHighAccuracy: true, maximumAge: 30000, timeout: 20000 },
+    );
+  }
+
+  const AUTO_CHECKIN_MILES = 0.09;   // ~150 m: you're at the court
+  const AUTO_CHECKOUT_MILES = 0.45;  // you've clearly left
+
+  function milesBetween(a, b) {
+    const R = 3958.8;
+    const dLat = (b[0] - a[0]) * Math.PI / 180;
+    const dLng = (b[1] - a[1]) * Math.PI / 180;
+    const s = Math.sin(dLat / 2) ** 2
+      + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+
+  async function maybeAutoCheckIn() {
+    if (!state.me || !state.userLoc) return;
+    if (localStorage.getItem('pp_auto_checkin') === 'off') return;
+    const now = Date.now();
+    if (now - (state.lastAutoCheckAt || 0) < 45000) return;
+    state.lastAutoCheckAt = now;
+
+    const presence = state.presence;
+    if (presence && presence.checked_in) {
+      // Auto check-out once you've clearly left the court
+      if (presence.court_latitude != null) {
+        const dist = milesBetween(state.userLoc, [presence.court_latitude, presence.court_longitude]);
+        if (dist > AUTO_CHECKOUT_MILES) {
+          try {
+            await api('/checkout', { method: 'POST' });
+            toast(`👋 Auto checked out of ${presence.court_name}`);
+            await refreshMe();
+            fetchCourtsInView();
+          } catch { /* ignore */ }
+        }
+      }
+      return;
+    }
+
+    try {
+      const data = await api(`/courts?lat=${state.userLoc[0]}&lng=${state.userLoc[1]}&radius=1&limit=3`);
+      const nearest = data.items[0];
+      if (nearest && nearest.distance_miles != null && nearest.distance_miles <= AUTO_CHECKIN_MILES) {
+        await api(`/courts/${nearest.id}/checkin`, {
+          method: 'POST',
+          body: JSON.stringify({ looking_for_game: false }),
+        });
+        toast(`📍 Auto checked in at ${nearest.name}`);
+        await refreshMe();
+        fetchCourtsInView();
+      }
+    } catch { /* offline */ }
   }
 
   function courtRowHtml(c) {
@@ -404,6 +499,7 @@
           if (p.looking_for_game) badges.push('<span class="tag live" style="margin:0 0 0 6px">Wants to play</span>');
           const record = (p.ranked_wins + p.ranked_losses) > 0 ? ` · ${p.ranked_wins}W–${p.ranked_losses}L` : '';
           const actions = p.is_me ? '' : `
+            <button class="btn btn-sm" data-challenge="${p.id}" title="Challenge to a ranked match" style="background:#ede9fe;color:#5b21b6">⚔️</button>
             <button class="btn btn-secondary btn-sm" data-msg-user="${p.id}" title="Message">💬</button>
             ${!p.is_friend ? `<button class="btn btn-primary btn-sm" data-add-friend-inline="${p.id}" title="Add friend">＋</button>` : ''}`;
           return `
@@ -450,8 +546,9 @@
         <button class="btn" id="cd-schedule-ranked" style="background:#ede9fe;color:#5b21b6">🏆 Ranked game</button>
       </div>
       <div class="action-row" style="margin-top:0">
+        <button class="btn btn-secondary" id="cd-chat">💬 Court chat</button>
         <a class="btn btn-secondary" style="text-align:center;text-decoration:none" href="${mapsUrl}" target="_blank" rel="noopener">🧭 Directions</a>
-        ${court.website ? `<a class="btn btn-secondary" style="text-align:center;text-decoration:none" href="${esc(court.website)}" target="_blank" rel="noopener">🌐 Website</a>` : ''}
+        ${court.website ? `<a class="btn btn-secondary" style="text-align:center;text-decoration:none" href="${esc(court.website)}" target="_blank" rel="noopener">🌐</a>` : ''}
       </div>
       ${court.open_play_schedule ? `<div class="section-label">Open play</div><div class="card" style="font-size:13.5px;color:var(--ink-soft)">${esc(court.open_play_schedule)}</div>` : ''}
       <div class="section-label">Playing now (${court.players_here.length})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
@@ -464,22 +561,18 @@
     `);
 
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
-      try {
-        if (checkedIn) {
+      if (checkedIn) {
+        try {
           await api('/checkout', { method: 'POST' });
-          toast('Checked out');
-        } else {
-          const lfg = confirm('Looking for a game? OK = yes, Cancel = just playing');
-          await api(`/courts/${court.id}/checkin`, {
-            method: 'POST',
-            body: JSON.stringify({ looking_for_game: lfg }),
-          });
-          toast(`Checked in at ${court.name}`);
-        }
-        closeModal(modal);
-        await refreshMe();
-        fetchCourtsInView();
-      } catch (e) { toast(e.message); }
+          toast('Checked out 👋');
+          closeModal(modal);
+          await refreshMe();
+          fetchCourtsInView();
+        } catch (e) { toast(e.message); }
+        return;
+      }
+      closeModal(modal);
+      openCheckInSheet(court);
     });
 
     modal.addEventListener('click', (e) => {
@@ -518,6 +611,22 @@
       } catch (err) { toast(err.message); }
     });
 
+    modal.querySelector('#cd-chat').addEventListener('click', () => {
+      openCourtChat(court);
+    });
+
+    modal.querySelectorAll('[data-challenge]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('Challenge to a ranked match here, right now?')) return;
+      try {
+        await api(`/users/${b.dataset.challenge}/challenge`, {
+          method: 'POST',
+          body: JSON.stringify({ court_id: court.id }),
+        });
+        toast('⚔️ Challenge sent! Game appears in My games.');
+        refreshMe();
+      } catch (e) { toast(e.message); }
+    }));
+
     modal.querySelectorAll('[data-msg-user]').forEach((b) => b.addEventListener('click', () => {
       closeModal(modal);
       openThread(Number(b.dataset.msgUser));
@@ -532,6 +641,37 @@
 
     bindGameButtons(modal, () => { closeModal(modal); openCourtDetail(courtId); });
     bindUserButtons(modal);
+  }
+
+  function openCheckInSheet(court) {
+    const modal = openModal(`
+      <div class="checkin-sheet">
+        <div class="celebrate-emoji" style="font-size:46px">📍</div>
+        <h3 style="margin:6px 0 2px">Check in at ${esc(court.name)}</h3>
+        <p class="row-sub" style="margin-bottom:18px">Friends will see you're here.</p>
+        <button class="btn btn-primary btn-block" id="ci-lfg" style="margin-bottom:10px;padding:16px">
+          🎾 I'm looking for players
+        </button>
+        <button class="btn btn-secondary btn-block" id="ci-play" style="padding:16px">
+          👍 Just playing with my group
+        </button>
+        <button class="btn-link modal-close btn-block" style="margin-top:8px">Cancel</button>
+      </div>
+    `);
+    const doCheckIn = async (looking) => {
+      try {
+        await api(`/courts/${court.id}/checkin`, {
+          method: 'POST',
+          body: JSON.stringify({ looking_for_game: looking }),
+        });
+        closeModal(modal);
+        toast(looking ? `You're in — players can find you 🎾` : `Checked in at ${court.name}`);
+        await refreshMe();
+        fetchCourtsInView();
+      } catch (e) { toast(e.message); }
+    };
+    modal.querySelector('#ci-lfg').addEventListener('click', () => doCheckIn(true));
+    modal.querySelector('#ci-play').addEventListener('click', () => doCheckIn(false));
   }
 
   // ---------- Games ----------
@@ -1182,7 +1322,8 @@
           ${esc(m.body)}
           <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
         </div>`).join('');
-      if (append) msgsEl.insertAdjacentHTML('beforeend', html);
+      if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
+      else if (append) msgsEl.innerHTML = html;
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Say hi! 👋</div>';
       if (items.length) lastId = items[items.length - 1].id;
       msgsEl.scrollTop = msgsEl.scrollHeight;
@@ -1207,6 +1348,72 @@
       input.value = '';
       try {
         const msg = await api(`/chat/${userId}`, { method: 'POST', body: JSON.stringify({ body }) });
+        renderMsgs([msg], true);
+      } catch (err) { toast(err.message); }
+    });
+  }
+
+  async function openCourtChat(court) {
+    let data;
+    try { data = await api(`/courts/${court.id}/chat`); } catch (e) { toast(e.message); return; }
+
+    const modal = openModal(`
+      <div class="thread" style="height:84dvh;margin:-10px -18px -28px">
+        <div class="thread-head">
+          <button class="modal-close" style="font-size:18px">‹</button>
+          <span style="font-size:22px">🏟</span>
+          <div class="row-main">
+            <div class="row-title">${esc(court.name)}</div>
+            <div class="row-sub">Court chat — everyone at this court can read it</div>
+          </div>
+        </div>
+        <div class="thread-msgs" id="cc-msgs"></div>
+        <form class="thread-input" id="cc-form">
+          <input type="text" id="cc-text" placeholder="Message the court…" autocomplete="off" maxlength="500" />
+          <button type="submit">➤</button>
+        </form>
+      </div>
+    `);
+
+    const msgsEl = modal.querySelector('#cc-msgs');
+    let lastId = 0;
+    const renderMsgs = (items, append) => {
+      const html = items.map((m) => {
+        const mine = m.sender_id === state.me.id;
+        return `
+        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+          ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%">
+            ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${esc(m.body)}
+            <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
+          </div>
+        </div>`;
+      }).join('');
+      if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
+      else if (append) msgsEl.innerHTML = html;
+      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — say hi to the court! 👋</div>';
+      if (items.length) lastId = items[items.length - 1].id;
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    };
+    renderMsgs(data.items, false);
+
+    const pollTimer = setInterval(async () => {
+      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      try {
+        const fresh = await api(`/courts/${court.id}/chat?since_id=${lastId}`);
+        if (fresh.items.length) renderMsgs(fresh.items, true);
+      } catch { /* offline */ }
+    }, 5000);
+
+    modal.querySelector('#cc-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = modal.querySelector('#cc-text');
+      const body = input.value.trim();
+      if (!body) return;
+      input.value = '';
+      try {
+        const msg = await api(`/courts/${court.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
         renderMsgs([msg], true);
       } catch (err) { toast(err.message); }
     });
@@ -1308,11 +1515,38 @@
           </div>
           <button class="btn btn-secondary btn-sm" id="pf-checkout">Check out</button>
         </div>` : ''}
+      <div class="card row" style="margin-bottom:10px">
+        <span style="font-size:20px">📍</span>
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">Auto check-in</div>
+          <div class="row-sub">Checks you in when you arrive at a court (while the app is open)</div>
+        </div>
+        <button class="btn btn-sm ${localStorage.getItem('pp_auto_checkin') === 'off' ? 'btn-secondary' : 'btn-primary'}" id="pf-auto">
+          ${localStorage.getItem('pp_auto_checkin') === 'off' ? 'Off' : 'On'}
+        </button>
+      </div>
+      ${!window.matchMedia('(display-mode: standalone)').matches ? `
+        <div class="card row" style="margin-bottom:10px">
+          <span style="font-size:20px">📱</span>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px">Get the app feel</div>
+            <div class="row-sub">In your browser menu tap <b>Add to Home Screen</b> — Picklepals installs like an app.</div>
+          </div>
+        </div>` : ''}
       <button class="btn btn-secondary btn-block" id="pf-edit" style="margin-bottom:10px">✏️ Edit profile</button>
       <button class="btn btn-secondary btn-block" id="pf-activity" style="margin-bottom:10px">🔔 Activity</button>
       <button class="btn btn-danger btn-block" id="pf-logout">Log out</button>
       <div id="pf-history"></div>
     `;
+
+    el.querySelector('#pf-auto').addEventListener('click', (e) => {
+      const off = localStorage.getItem('pp_auto_checkin') === 'off';
+      localStorage.setItem('pp_auto_checkin', off ? 'on' : 'off');
+      e.target.textContent = off ? 'On' : 'Off';
+      e.target.classList.toggle('btn-primary', off);
+      e.target.classList.toggle('btn-secondary', !off);
+      toast(off ? 'Auto check-in on 📍' : 'Auto check-in off');
+    });
 
     el.querySelector('#pf-logout').addEventListener('click', logout);
     el.querySelector('#pf-edit').addEventListener('click', openEditProfile);
@@ -1421,42 +1655,76 @@
     });
   }
 
+  async function openGameModal(gameId) {
+    let game;
+    try { game = await api(`/games/${gameId}`); } catch (e) { toast(e.message); return; }
+    const modal = openModal(`
+      ${modalHead(game.game_type === 'ranked' ? '🏆 Ranked game' : '🎾 Game')}
+      ${gameCardHtml(game)}
+    `);
+    bindGameButtons(modal, () => { closeModal(modal); openGameModal(gameId); });
+  }
+
   async function openActivity() {
     let data;
     try { data = await api('/notifications'); } catch (e) { toast(e.message); return; }
+    const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
+      ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
+      : '';
     const modal = openModal(`
       ${modalHead('Activity')}
+      ${enableBtn}
       ${data.items.length
         ? data.items.map((n) => `
-            <div class="card row" style="${n.read ? 'opacity:.65' : ''}">
-              <span style="font-size:20px">${{ friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️' }[n.kind] || '🔔'}</span>
+            <div class="card row" data-notif-game="${n.related_game_id || ''}" style="${n.read ? 'opacity:.65' : ''}${n.related_game_id ? ';cursor:pointer' : ''}">
+              <span style="font-size:20px">${{ friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️' }[n.kind] || '🔔'}</span>
               <div class="row-main">
                 <div class="row-title" style="font-size:14px">${esc(n.title)}</div>
                 <div class="row-sub">${fmtDateTime(n.created_at)}</div>
               </div>
+              ${n.related_game_id ? '<span class="chev">›</span>' : ''}
             </div>`).join('')
         : '<div class="empty-state"><span class="big">🔔</span>Nothing yet — go play some pickleball!</div>'}
     `);
+    modal.querySelector('#act-enable')?.addEventListener('click', async (e) => {
+      const result = await Notification.requestPermission();
+      e.target.remove();
+      toast(result === 'granted' ? 'Notifications on 🔔' : 'Notifications stay off');
+    });
+    modal.querySelectorAll('[data-notif-game]').forEach((row) => {
+      const gameId = row.dataset.notifGame;
+      if (!gameId) return;
+      row.addEventListener('click', () => {
+        closeModal(modal);
+        openGameModal(Number(gameId));
+      });
+    });
     if (data.unread) {
       api('/notifications/read', { method: 'POST' }).then(refreshMe).catch(() => {});
     }
-    void modal;
   }
 
   // ---------- Presence banner ----------
   function renderPresenceBanner() {
     const el = $('#presence-banner');
     if (state.presence && state.presence.checked_in) {
-      el.innerHTML = `📍 You're at <b>&nbsp;${esc(state.presence.court_name)}</b>
+      el.innerHTML = `📍 You're at <b>&nbsp;${esc(state.presence.court_name)}&nbsp;</b><span style="opacity:.7">›</span>
         <button id="banner-checkout">Check out</button>`;
       el.classList.remove('hidden');
-      $('#banner-checkout').addEventListener('click', async () => {
+      el.style.cursor = 'pointer';
+      el.onclick = (e) => {
+        if (e.target.id !== 'banner-checkout') openCourtDetail(state.presence.court_id);
+      };
+      $('#banner-checkout').addEventListener('click', async (e) => {
+        e.stopPropagation();
         await api('/checkout', { method: 'POST' });
+        toast('Checked out 👋');
         await refreshMe();
         fetchCourtsInView();
       });
     } else {
       el.classList.add('hidden');
+      el.onclick = null;
     }
   }
 
@@ -1466,6 +1734,7 @@
     $('#main-screen').classList.remove('hidden');
     if (!state.map) setupMap();
     else setTimeout(() => state.map.invalidateSize(), 60);
+    startLocationWatch();
     clearInterval(state.mePollTimer);
     let tick = 0;
     state.mePollTimer = setInterval(() => {
