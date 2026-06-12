@@ -146,10 +146,33 @@ def create_game():
     db.session.flush()
     db.session.add(GamePlayer(game_id=game.id, user_id=g.current_user.id))
 
+    label = 'ranked game' if game_type == 'ranked' else 'game'
+
+    # Personal invites to specific players
+    invited_ids = set()
+    for raw_id in (payload.get('invite_user_ids') or [])[:20]:
+        try:
+            invitee_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if invitee_id == g.current_user.id or invitee_id in invited_ids:
+            continue
+        if not db.session.get(User, invitee_id):
+            continue
+        invited_ids.add(invitee_id)
+        notify(
+            invitee_id,
+            'game_invite_direct',
+            f'{g.current_user.display_name} invited you to a {label} at {court.name}',
+            related_user_id=g.current_user.id,
+            related_game_id=game.id,
+        )
+
     if payload.get('notify_friends', True):
         from backend.routes.social import friend_ids
-        label = 'ranked game' if game_type == 'ranked' else 'game'
         for friend_id in friend_ids(g.current_user.id):
+            if friend_id in invited_ids:
+                continue
             notify(
                 friend_id,
                 'game_invite',

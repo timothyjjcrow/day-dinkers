@@ -140,33 +140,42 @@ def _active_game_payload(user):
         elif data['awaiting_your_confirmation']:
             rank, banner_state = 2, 'confirm'
         elif game.status == 'awaiting_confirmation':
-            rank, banner_state = 3, 'waiting'
+            rank, banner_state = 4, 'waiting'
         else:
-            rank, banner_state = 4, 'upcoming'
+            rank, banner_state = 5, 'upcoming'
         data['banner_state'] = banner_state
         candidates.append((rank, data))
 
-    # Incoming challenges you haven't responded to (last 24h)
-    challenge_notes = (
-        Notification.query.filter_by(user_id=user.id, kind='challenge')
-        .filter(Notification.created_at >= now - timedelta(hours=24))
+    # Incoming challenges (24h) and personal game invites (48h) you haven't joined
+    invite_notes = (
+        Notification.query.filter(
+            Notification.user_id == user.id,
+            Notification.kind.in_(['challenge', 'game_invite_direct']),
+            Notification.created_at >= now - timedelta(hours=48),
+        )
         .order_by(Notification.id.desc())
-        .limit(5)
+        .limit(10)
         .all()
     )
-    seen_challenge_games = set()
-    for note in challenge_notes:
-        if not note.related_game_id or note.related_game_id in seen_challenge_games:
+    seen_invite_games = set()
+    for note in invite_notes:
+        if not note.related_game_id or note.related_game_id in seen_invite_games:
             continue
-        seen_challenge_games.add(note.related_game_id)
+        if note.kind == 'challenge' and note.created_at < now - timedelta(hours=24):
+            continue
+        seen_invite_games.add(note.related_game_id)
         game = db.session.get(Game, note.related_game_id)
         if not game or game.status != 'upcoming':
             continue
         data = game.to_dict(user.id)
         if data['is_joined'] or data['spots_left'] <= 0:
             continue
-        data['banner_state'] = 'challenge'
-        candidates.append((1, data))
+        if note.kind == 'challenge':
+            data['banner_state'] = 'challenge'
+            candidates.append((1, data))
+        else:
+            data['banner_state'] = 'invited'
+            candidates.append((3, data))
 
     if not candidates:
         return None

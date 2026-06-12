@@ -188,10 +188,15 @@
     renderActiveGameBanner();
   }
 
+  function dismissedInvites() {
+    try { return JSON.parse(localStorage.getItem('pp_dismissed_invites') || '[]'); }
+    catch { return []; }
+  }
+
   function renderActiveGameBanner() {
     const el = $('#active-game-banner');
     const game = state.activeGame;
-    if (!game) {
+    if (!game || (game.banner_state === 'invited' && dismissedInvites().includes(game.id))) {
       el.classList.add('hidden');
       $('#app').classList.remove('has-banner');
       return;
@@ -202,6 +207,11 @@
         icon: '⚔️',
         title: `${esc((game.players[0] || {}).display_name || 'Someone')} challenged you!`,
         sub: `Ranked at ${esc(court.name || 'the court')} · tap to accept or decline`,
+      },
+      invited: {
+        icon: '📨',
+        title: `${esc((game.players.find((p) => p.user_id === game.creator_id) || {}).display_name || 'A friend')} invited you to play`,
+        sub: `${fmtDateTime(game.scheduled_at)} · ${esc(court.name || '')} · tap to join`,
       },
       live: {
         icon: '<span class="agb-dot"></span>',
@@ -233,7 +243,18 @@
         <div class="agb-title">${stateCfg.title}</div>
         <div class="agb-sub">${stateCfg.sub}</div>
       </div>
-      <span class="agb-chev">›</span>`;
+      ${game.banner_state === 'invited' ? '<span class="agb-dismiss" id="agb-dismiss">✕</span>' : '<span class="agb-chev">›</span>'}`;
+    const dismissBtn = el.querySelector('#agb-dismiss');
+    if (dismissBtn) {
+      dismissBtn.onclick = (e) => {
+        e.stopPropagation();
+        const ids = dismissedInvites();
+        if (!ids.includes(game.id)) ids.push(game.id);
+        localStorage.setItem('pp_dismissed_invites', JSON.stringify(ids.slice(-30)));
+        renderActiveGameBanner();
+        toast('Invite dismissed — it stays in your Activity');
+      };
+    }
     el.onclick = () => {
       if (game.banner_state === 'live' && game.players.length >= 2) {
         api(`/games/${game.id}`).then((fresh) => openScoreModal(fresh, () => refreshMe())).catch((e) => toast(e.message));
@@ -1052,20 +1073,94 @@
     $('#new-game-fab').addEventListener('click', () => openNewGameModal());
   }
 
-  function openNewGameModal(court, defaultType = 'casual', startNow = false) {
-    const now = new Date();
-    now.setHours(now.getHours() + 2, 0, 0, 0);
-    const pad = (n) => String(n).padStart(2, '0');
-    const defaultDt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:00`;
+  async function openNewGameModal(court, defaultType = 'casual', startNow = false) {
+    // Gather friends (for invites) and court suggestions in parallel
+    let friends = [];
+    let suggestions = [];
+    try {
+      const reqs = [api('/friends').catch(() => ({ friends: [] }))];
+      if (!court) {
+        const c = state.userLoc
+          ? { lat: state.userLoc[0], lng: state.userLoc[1] }
+          : (state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] });
+        reqs.push(api('/courts/favorites').catch(() => ({ items: [] })));
+        reqs.push(api(`/courts?lat=${c.lat}&lng=${c.lng}&radius=30&limit=6`).catch(() => ({ items: [] })));
+      }
+      const res = await Promise.all(reqs);
+      friends = res[0].friends || [];
+      if (!court) {
+        const seen = new Set();
+        if (state.presence && state.presence.checked_in) {
+          suggestions.push({ id: state.presence.court_id, name: state.presence.court_name, city: '', tag: "📍 You're here" });
+          seen.add(state.presence.court_id);
+        }
+        (res[1].items || []).forEach((c) => {
+          if (!seen.has(c.id) && suggestions.length < 5) { suggestions.push({ ...c, tag: '⭐ Saved' }); seen.add(c.id); }
+        });
+        (res[2].items || []).forEach((c) => {
+          if (!seen.has(c.id) && suggestions.length < 5) {
+            suggestions.push({ ...c, tag: c.distance_miles != null ? `${c.distance_miles} mi` : 'Nearby' });
+            seen.add(c.id);
+          }
+        });
+      }
+    } catch { /* suggestions are optional */ }
+
+    // Day & time presets
+    const days = [];
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(); d.setDate(d.getDate() + i); d.setHours(0, 0, 0, 0);
+      days.push(d);
+    }
+    const dayLabel = (d, i) => i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString([], { weekday: 'short' });
+    const timePresets = [8, 10, 12, 14, 16, 18, 20];
+    const timeLabel = (h) => h === 12 ? '12 PM' : h < 12 ? `${h} AM` : `${h - 12} PM`;
+
+    // Defaults: first preset at least ~1h away today, else tomorrow morning
+    let selDayIdx = 0;
+    let selHour = timePresets.find((h) => {
+      const d = new Date(days[0]); d.setHours(h);
+      return d.getTime() > Date.now() + 50 * 60000;
+    });
+    if (selHour == null) { selDayIdx = 1; selHour = 10; }
+
+    const dayChips = days.map((d, i) =>
+      `<button type="button" data-day="${i}" class="${i === selDayIdx ? 'active' : ''}">${dayLabel(d, i)}</button>`).join('');
+    const timeChips = timePresets.map((h) =>
+      `<button type="button" data-hour="${h}" class="${h === selHour ? 'active' : ''}">${timeLabel(h)}</button>`).join('');
+
+    const friendChips = friends.map((f) => `
+      <button type="button" class="invite-chip" data-fid="${f.id}">
+        ${avatarHtml(f, 'sm')} ${esc(f.display_name.split(' ')[0])}
+      </button>`).join('');
+
+    const suggestionRows = suggestions.map((c) => `
+      <button type="button" class="court-suggestion" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}">
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+          <div class="row-sub">${esc(c.city || '')}</div>
+        </div>
+        <span class="tag" style="margin:0">${esc(c.tag)}</span>
+      </button>`).join('');
 
     const modal = openModal(`
       ${modalHead(startNow ? 'Start a game' : 'Schedule a game')}
+
       <div class="form-field">
         <label>Court</label>
-        <input type="text" id="ng-court-search" placeholder="Search for a court…" value="${court ? esc(court.name) : ''}" ${court ? 'disabled' : ''} />
+        <div id="ng-court-selected" class="${court ? '' : 'hidden'} court-selected">
+          <div class="row-main">
+            <div class="row-title" style="font-size:14.5px" id="ng-court-name">${court ? esc(court.name) : ''}</div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="ng-court-change">Change</button>
+        </div>
+        <div id="ng-court-picker" class="${court ? 'hidden' : ''}">
+          <input type="search" id="ng-court-search" placeholder="Search courts…" />
+          <div id="ng-court-results" style="margin-top:8px">${suggestionRows}</div>
+        </div>
         <input type="hidden" id="ng-court-id" value="${court ? court.id : ''}" />
-        <div id="ng-court-results"></div>
       </div>
+
       <div class="form-field">
         <label>When</label>
         <div class="segmented" id="ng-mode">
@@ -1074,151 +1169,210 @@
         </div>
       </div>
       <div id="ng-later-fields" class="${startNow ? 'hidden' : ''}">
-        <div class="form-grid">
-          <div class="form-field">
-            <label>Date & time</label>
-            <input type="datetime-local" id="ng-when" value="${defaultDt}" />
+        <div class="quick-times" id="ng-days" style="margin-bottom:8px">${dayChips}</div>
+        <div class="quick-times" id="ng-hours" style="margin-bottom:8px">${timeChips}
+          <button type="button" data-hour="custom">Custom…</button>
+        </div>
+        <input type="datetime-local" id="ng-when" class="hidden" style="margin-bottom:12px" />
+      </div>
+
+      <div class="form-grid">
+        <div class="form-field">
+          <label>Type</label>
+          <div class="type-cards" id="ng-type">
+            <button type="button" data-val="casual" class="${defaultType === 'casual' ? 'active' : ''}">
+              <span style="font-size:20px">🎾</span><b>Casual</b><small>Just for fun</small>
+            </button>
+            <button type="button" data-val="ranked" class="${defaultType === 'ranked' ? 'active' : ''}">
+              <span style="font-size:20px">🏆</span><b>Ranked</b><small>Counts for rating</small>
+            </button>
           </div>
-          <div class="form-field">
-            <label>Players needed</label>
-            <select id="ng-max">
-              <option value="2">2 (singles)</option>
-              <option value="4" selected>4 (doubles)</option>
-              <option value="6">6</option>
-              <option value="8">8</option>
-            </select>
+        </div>
+        <div class="form-field">
+          <label>Players needed</label>
+          <select id="ng-max">
+            <option value="2">2 (singles)</option>
+            <option value="4" selected>4 (doubles)</option>
+            <option value="6">6</option>
+            <option value="8">8</option>
+          </select>
+        </div>
+      </div>
+
+      ${friends.length ? `
+        <div class="form-field">
+          <label>Invite players</label>
+          <div class="invite-chips" id="ng-invites">
+            <button type="button" class="invite-chip active" id="ng-all-friends">🔔 All friends</button>
+            ${friendChips}
           </div>
-        </div>
-        <div class="quick-times" id="ng-quick" style="margin:-6px 0 14px">
-          <button type="button" data-q="tonight">Tonight 6 PM</button>
-          <button type="button" data-q="tomorrow">Tomorrow 9 AM</button>
-          <button type="button" data-q="weekend">Saturday 9 AM</button>
-        </div>
-      </div>
-      <div id="ng-now-fields" class="form-field ${startNow ? '' : 'hidden'}">
-        <label>Players needed</label>
-        <select id="ng-max-now">
-          <option value="2">2 (singles)</option>
-          <option value="4" selected>4 (doubles)</option>
-          <option value="6">6</option>
-          <option value="8">8</option>
-        </select>
-        <p class="row-sub" style="margin-top:6px">The game starts immediately — players at the court and friends can jump in.</p>
-      </div>
+          <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">Everyone you pick gets a personal invite.</p>
+        </div>` : `
+        <label class="row" style="margin-bottom:14px;cursor:pointer">
+          <input type="checkbox" id="ng-notify" checked style="width:auto" />
+          <span style="font-size:14px">Let my friends know 🔔</span>
+        </label>`}
+
       <div class="form-field">
-        <label>Type</label>
-        <div class="segmented" id="ng-type">
-          <button ${defaultType === 'casual' ? 'class="active"' : ''} data-val="casual">Casual</button>
-          <button ${defaultType === 'ranked' ? 'class="active"' : ''} data-val="ranked">🏆 Ranked</button>
-        </div>
-        <p class="row-sub" id="ng-type-hint" style="margin-top:6px${defaultType === 'ranked' ? '' : ';display:none'}">Ranked games count toward player ratings.</p>
+        <input type="text" id="ng-notes" maxlength="200" placeholder="Note (optional) — e.g. All levels welcome!" />
       </div>
-      <div class="form-field">
-        <label>Note (optional)</label>
-        <input type="text" id="ng-notes" maxlength="200" placeholder="e.g. All levels welcome!" />
-      </div>
-      <label class="row" style="margin-bottom:14px;cursor:pointer">
-        <input type="checkbox" id="ng-notify" checked style="width:auto" />
-        <span style="font-size:14px">Let my friends know 🔔</span>
-      </label>
-      <button class="btn btn-primary btn-block" id="ng-submit" data-later-label="Schedule ${defaultType === 'ranked' ? 'ranked ' : ''}game">
-        ${startNow ? 'Start game now' : `Schedule ${defaultType === 'ranked' ? 'ranked ' : ''}game`}
+
+      <button class="btn btn-primary btn-block" id="ng-submit" style="padding:15px">
+        ${startNow ? 'Start game now' : 'Schedule game'}
       </button>
     `);
 
+    // --- Court picking ---
+    const setCourt = (id, name) => {
+      modal.querySelector('#ng-court-id').value = id || '';
+      modal.querySelector('#ng-court-name').textContent = name || '';
+      modal.querySelector('#ng-court-selected').classList.toggle('hidden', !id);
+      modal.querySelector('#ng-court-picker').classList.toggle('hidden', !!id);
+    };
+    modal.querySelector('#ng-court-change').addEventListener('click', () => setCourt(null, null));
+    const bindCourtPicks = () => {
+      modal.querySelectorAll('[data-pick-court]').forEach((row) => row.addEventListener('click', () => {
+        setCourt(row.dataset.pickCourt, row.dataset.pickName);
+      }));
+    };
+    bindCourtPicks();
+    let searchTimer;
+    modal.querySelector('#ng-court-search').addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      const q = e.target.value.trim();
+      searchTimer = setTimeout(async () => {
+        const resultsEl = modal.querySelector('#ng-court-results');
+        if (q.length < 2) { resultsEl.innerHTML = suggestionRows; bindCourtPicks(); return; }
+        let url = `/courts?q=${encodeURIComponent(q)}&limit=6`;
+        if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
+        try {
+          const data = await api(url);
+          resultsEl.innerHTML = data.items.map((c) => `
+            <button type="button" class="court-suggestion" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}">
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+                <div class="row-sub">${esc(c.city || '')}</div>
+              </div>
+              ${c.distance_miles != null ? `<span class="tag" style="margin:0">${c.distance_miles} mi</span>` : ''}
+            </button>`).join('') || '<div class="empty-state" style="padding:10px">No courts found.</div>';
+          bindCourtPicks();
+        } catch { /* ignore */ }
+      }, 300);
+    });
+
+    // --- When ---
     let nowMode = startNow;
+    let customMode = false;
     modal.querySelector('#ng-mode').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       nowMode = btn.dataset.mode === 'now';
       modal.querySelectorAll('#ng-mode button').forEach((b) => b.classList.toggle('active', b === btn));
       modal.querySelector('#ng-later-fields').classList.toggle('hidden', nowMode);
-      modal.querySelector('#ng-now-fields').classList.toggle('hidden', !nowMode);
-      const submit = modal.querySelector('#ng-submit');
-      submit.textContent = nowMode ? 'Start game now' : submit.dataset.laterLabel;
+      modal.querySelector('#ng-submit').textContent = nowMode ? 'Start game now' : 'Schedule game';
     });
-
-    modal.querySelector('#ng-quick').addEventListener('click', (e) => {
+    modal.querySelector('#ng-days').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
-      const d = new Date();
-      if (btn.dataset.q === 'tonight') {
-        if (d.getHours() >= 18) d.setDate(d.getDate() + 1);
-        d.setHours(18, 0, 0, 0);
-      } else if (btn.dataset.q === 'tomorrow') {
-        d.setDate(d.getDate() + 1);
-        d.setHours(9, 0, 0, 0);
+      selDayIdx = Number(btn.dataset.day);
+      modal.querySelectorAll('#ng-days button').forEach((b) => b.classList.toggle('active', b === btn));
+    });
+    modal.querySelector('#ng-hours').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      modal.querySelectorAll('#ng-hours button').forEach((b) => b.classList.toggle('active', b === btn));
+      if (btn.dataset.hour === 'custom') {
+        customMode = true;
+        const whenEl = modal.querySelector('#ng-when');
+        whenEl.classList.remove('hidden');
+        if (!whenEl.value) {
+          const d = new Date(days[selDayIdx]); d.setHours(selHour || 18);
+          const pad2 = (n) => String(n).padStart(2, '0');
+          whenEl.value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:00`;
+        }
       } else {
-        const daysToSat = ((6 - d.getDay()) + 7) % 7 || 7;
-        d.setDate(d.getDate() + daysToSat);
-        d.setHours(9, 0, 0, 0);
+        customMode = false;
+        selHour = Number(btn.dataset.hour);
+        modal.querySelector('#ng-when').classList.add('hidden');
       }
-      const pad2 = (n) => String(n).padStart(2, '0');
-      modal.querySelector('#ng-when').value =
-        `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
     });
 
+    // --- Type ---
     let gameType = defaultType;
     modal.querySelector('#ng-type').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       gameType = btn.dataset.val;
       modal.querySelectorAll('#ng-type button').forEach((b) => b.classList.toggle('active', b === btn));
-      modal.querySelector('#ng-type-hint').style.display = gameType === 'ranked' ? '' : 'none';
     });
 
-    if (!court) {
-      let timer;
-      const searchInput = modal.querySelector('#ng-court-search');
-      searchInput.addEventListener('input', () => {
-        clearTimeout(timer);
-        timer = setTimeout(async () => {
-          const q = searchInput.value.trim();
-          if (q.length < 2) return;
-          let url = `/courts?q=${encodeURIComponent(q)}&limit=6`;
-          if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
-          const data = await api(url);
-          modal.querySelector('#ng-court-results').innerHTML = data.items.map((c) => `
-            <div class="card row" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}" style="cursor:pointer;margin:6px 0;padding:10px">
-              <div class="row-main">
-                <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
-                <div class="row-sub">${esc(c.city)}${c.distance_miles != null ? ` · ${c.distance_miles} mi` : ''}</div>
-              </div>
-            </div>`).join('');
-          modal.querySelectorAll('[data-pick-court]').forEach((row) => row.addEventListener('click', () => {
-            modal.querySelector('#ng-court-id').value = row.dataset.pickCourt;
-            searchInput.value = row.dataset.pickName;
-            modal.querySelector('#ng-court-results').innerHTML = '';
-          }));
-        }, 300);
+    // --- Invites ---
+    const inviteIds = new Set();
+    let allFriends = true;
+    const allBtn = modal.querySelector('#ng-all-friends');
+    if (allBtn) {
+      modal.querySelector('#ng-invites').addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        if (btn === allBtn) {
+          allFriends = !allFriends;
+          allBtn.classList.toggle('active', allFriends);
+        } else if (btn.dataset.fid) {
+          const fid = Number(btn.dataset.fid);
+          if (inviteIds.has(fid)) inviteIds.delete(fid);
+          else inviteIds.add(fid);
+          btn.classList.toggle('active', inviteIds.has(fid));
+          // Picking specific people usually means you don't want to blast everyone
+          if (inviteIds.size === 1 && allFriends) {
+            allFriends = false;
+            allBtn.classList.remove('active');
+          }
+        }
+        const hint = modal.querySelector('#ng-invite-hint');
+        hint.textContent = inviteIds.size
+          ? `${inviteIds.size} personal invite${inviteIds.size === 1 ? '' : 's'}${allFriends ? ' + all friends notified' : ''}`
+          : (allFriends ? 'All friends get notified.' : 'No one will be notified.');
       });
     }
 
+    // --- Submit ---
     modal.querySelector('#ng-submit').addEventListener('click', async (e) => {
       const courtId = modal.querySelector('#ng-court-id').value;
-      const when = modal.querySelector('#ng-when').value;
       if (!courtId) { toast('Pick a court first'); return; }
-      if (!nowMode && !when) { toast('Pick a date and time'); return; }
+      let scheduledAt;
+      if (nowMode) {
+        scheduledAt = new Date();
+      } else if (customMode) {
+        const v = modal.querySelector('#ng-when').value;
+        if (!v) { toast('Pick a date and time'); return; }
+        scheduledAt = new Date(v);
+      } else {
+        if (selHour == null) { toast('Pick a time'); return; }
+        scheduledAt = new Date(days[selDayIdx]);
+        scheduledAt.setHours(selHour, 0, 0, 0);
+        if (scheduledAt.getTime() < Date.now() - 10 * 60000) { toast('That time already passed today'); return; }
+      }
       const btn = e.currentTarget;
       if (btn.disabled) return;
       btn.disabled = true;
-      const maxSel = nowMode ? modal.querySelector('#ng-max-now') : modal.querySelector('#ng-max');
       try {
         await api('/games', {
           method: 'POST',
           body: JSON.stringify({
             court_id: Number(courtId),
-            scheduled_at: nowMode ? new Date().toISOString() : new Date(when).toISOString(),
+            scheduled_at: scheduledAt.toISOString(),
             game_type: gameType,
-            max_players: Number(maxSel.value),
+            max_players: Number(modal.querySelector('#ng-max').value),
             notes: modal.querySelector('#ng-notes').value.trim(),
-            notify_friends: modal.querySelector('#ng-notify').checked,
+            notify_friends: allBtn ? allFriends : modal.querySelector('#ng-notify').checked,
+            invite_user_ids: [...inviteIds],
           }),
         });
         closeModal(modal);
-        toast(nowMode ? 'Game on! It\'s live in My games 🎾' : 'Game scheduled! 🎾');
+        toast(nowMode ? "Game on! It's live in My games 🎾" : 'Game scheduled! 🎾');
         if (state.tab === 'play') { state.playSeg = nowMode ? 'mine' : state.playSeg; renderPlay(); }
         document.querySelectorAll('#play-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === state.playSeg));
+        refreshMe();
       } catch (err) { toast(err.message); btn.disabled = false; }
     });
   }
@@ -2067,7 +2221,7 @@
       ${data.items.length
         ? data.items.map((n) => `
             <div class="card row" data-notif-game="${n.related_game_id || ''}" style="${n.read ? 'opacity:.65' : ''}${n.related_game_id ? ';cursor:pointer' : ''}">
-              <span style="font-size:20px">${{ friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅' }[n.kind] || '🔔'}</span>
+              <span style="font-size:20px">${{ friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅' }[n.kind] || '🔔'}</span>
               <div class="row-main">
                 <div class="row-title" style="font-size:14px">${esc(n.title)}</div>
                 <div class="row-sub">${fmtDateTime(n.created_at)}</div>

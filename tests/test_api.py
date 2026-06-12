@@ -574,6 +574,61 @@ def test_challenge_banner_and_decline(client):
     assert res.status_code == 400
 
 
+def test_direct_game_invites(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    # a and c are friends; b is not
+    res = client.post('/api/friends/request', json={'user_id': c['user']['id']}, headers=auth_headers(a['token']))
+    fid = res.get_json()['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(c['token']))
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    when = (utcnow() + timedelta(hours=5)).isoformat() + 'Z'
+    res = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': when,
+        'game_type': 'casual',
+        'invite_user_ids': [b['user']['id']],
+        'notify_friends': False,
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    game = res.get_json()
+
+    # b got a personal invite; c (friend, no blast) got nothing
+    notes_b = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()
+    invite = [n for n in notes_b['items'] if n['kind'] == 'game_invite_direct']
+    assert len(invite) == 1
+    assert invite[0]['related_game_id'] == game['id']
+    notes_c = client.get('/api/notifications', headers=auth_headers(c['token'])).get_json()
+    assert all(n['kind'] not in ('game_invite', 'game_invite_direct') for n in notes_c['items'])
+
+    # Invite shows in b's banner as 'invited'
+    me_b = client.get('/api/me', headers=auth_headers(b['token'])).get_json()
+    assert me_b['active_game']['id'] == game['id']
+    assert me_b['active_game']['banner_state'] == 'invited'
+
+    # Joining clears the invite state (game becomes their upcoming game)
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    me_b = client.get('/api/me', headers=auth_headers(b['token'])).get_json()
+    assert me_b['active_game']['banner_state'] == 'upcoming'
+
+    # Blast + personal invites don't double-notify the invited friend
+    res = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': when,
+        'invite_user_ids': [c['user']['id']],
+        'notify_friends': True,
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    notes_c = client.get('/api/notifications', headers=auth_headers(c['token'])).get_json()
+    kinds = [n['kind'] for n in notes_c['items']]
+    assert kinds.count('game_invite_direct') == 1
+    assert kinds.count('game_invite') == 0
+
+
 def test_start_game_now(client):
     from backend.models import utcnow
     a = register(client, 'a@example.com')
