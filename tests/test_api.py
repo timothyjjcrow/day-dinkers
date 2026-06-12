@@ -495,6 +495,40 @@ def test_scorekeeper_submit_any_player_confirms(client):
     assert res.get_json()['status'] == 'completed'
 
 
+def test_active_game_banner_states(client):
+    from backend.models import utcnow
+    players, game, court_id = setup_ranked_doubles(client)
+    a, c = players['a'], players['c']
+
+    # Scheduled in the future -> 'upcoming'
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_game']['id'] == game['id']
+    assert me['active_game']['banner_state'] == 'upcoming'
+
+    # A live game outranks it
+    live = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'game_type': 'casual',
+    }, headers=auth_headers(a['token'])).get_json()
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_game']['id'] == live['id']
+    assert me['active_game']['banner_state'] == 'live'
+
+    # Submitted score: submitter side sees 'waiting', opponent sees 'confirm'
+    client.post(f"/api/games/{live['id']}/cancel", headers=auth_headers(a['token']))
+    submit_doubles_score(client, a['token'], game['id'], players)
+    me_a = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me_a['active_game']['banner_state'] == 'waiting'
+    me_c = client.get('/api/me', headers=auth_headers(c['token'])).get_json()
+    assert me_c['active_game']['banner_state'] == 'confirm'
+
+    # Confirmed -> no active game left
+    client.post(f"/api/games/{game['id']}/confirm", headers=auth_headers(c['token']))
+    me_a = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me_a['active_game'] is None
+
+
 def test_start_game_now(client):
     from backend.models import utcnow
     a = register(client, 'a@example.com')

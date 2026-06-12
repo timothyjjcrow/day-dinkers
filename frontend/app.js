@@ -159,6 +159,7 @@
 
     // Live updates: pop a toast when something new lands while the app is open.
     state.unreadNotifications = data.unread_notifications || 0;
+    state.activeGame = data.active_game || null;
     const latest = data.latest_notification;
     if (latest) {
       if (state.lastNotifId !== null && latest.id > state.lastNotifId && !latest.read) {
@@ -177,6 +178,58 @@
 
     renderBadges();
     renderPresenceBanner();
+    renderActiveGameBanner();
+  }
+
+  function renderActiveGameBanner() {
+    const el = $('#active-game-banner');
+    const game = state.activeGame;
+    if (!game) {
+      el.classList.add('hidden');
+      $('#app').classList.remove('has-banner');
+      return;
+    }
+    const court = game.court || {};
+    const stateCfg = {
+      live: {
+        icon: '<span class="agb-dot"></span>',
+        title: `LIVE at ${esc(court.name || 'the court')}`,
+        sub: game.players.length >= 2 ? 'Tap to enter the score' : `${game.players.length}/${game.max_players} players — waiting for more`,
+      },
+      confirm: {
+        icon: '⚡',
+        title: `Confirm the score: ${game.score_team1}–${game.score_team2}`,
+        sub: `${esc(game.score_submitted_by_name || 'Opponent')} reported · ${esc(court.name || '')}`,
+      },
+      waiting: {
+        icon: '⏳',
+        title: `${game.score_team1}–${game.score_team2} sent for confirmation`,
+        sub: `Waiting on opponents · ${esc(court.name || '')}`,
+      },
+      upcoming: {
+        icon: '📅',
+        title: `Next game: ${fmtDateTime(game.scheduled_at)}`,
+        sub: `${esc(court.name || '')} · ${game.players.length}/${game.max_players} players`,
+      },
+    }[game.banner_state] || null;
+    if (!stateCfg) { el.classList.add('hidden'); return; }
+
+    el.className = `active-game-banner state-${game.banner_state}`;
+    el.innerHTML = `
+      ${stateCfg.icon.startsWith('<') ? stateCfg.icon : `<span style="font-size:17px">${stateCfg.icon}</span>`}
+      <div class="agb-main">
+        <div class="agb-title">${stateCfg.title}</div>
+        <div class="agb-sub">${stateCfg.sub}</div>
+      </div>
+      <span class="agb-chev">›</span>`;
+    el.onclick = () => {
+      if (game.banner_state === 'live' && game.players.length >= 2) {
+        api(`/games/${game.id}`).then((fresh) => openScoreModal(fresh, () => refreshMe())).catch((e) => toast(e.message));
+      } else {
+        openGameScreen(game.id);
+      }
+    };
+    $('#app').classList.add('has-banner');
   }
 
   function renderBadges() {
@@ -670,13 +723,14 @@
       if (btn.disabled) return;
       btn.disabled = true;
       try {
-        await api(`/users/${player.id}/challenge`, {
+        const game = await api(`/users/${player.id}/challenge`, {
           method: 'POST',
           body: JSON.stringify({ court_id: court.id }),
         });
         closeModal(modal);
         toast(`⚔️ Challenge sent to ${player.display_name}!`);
         refreshMe();
+        openGameScreen(game.id);
       } catch (err) { toast(err.message); btn.disabled = false; }
     });
   }
@@ -730,13 +784,9 @@
       const startMs = new Date(game.scheduled_at).getTime();
       const inProgress = startMs <= Date.now();
       if (game.is_joined) {
-        action = `<button class="btn btn-secondary btn-sm" data-game-leave="${game.id}">Leave</button>`;
-        if (game.players.length >= 2) {
-          action += ` <button class="btn btn-primary btn-sm" data-game-score="${game.id}">Enter score</button>`;
-        }
         if (inProgress) {
           cardStyle = 'border:2px solid var(--green-600)';
-          banner = '<div class="status-banner live-banner">🟢 Game time! Enter the score when you\'re done.</div>';
+          banner = `<div class="status-banner live-banner">🟢 ${game.players.length >= 2 ? 'Game time! Tap to enter the score.' : 'Live — waiting for players to join.'}</div>`;
         } else {
           const mins = Math.round((startMs - Date.now()) / 60000);
           banner = `<div class="status-banner">⏱ Starts in ${fmtDuration(mins)}</div>`;
@@ -767,18 +817,16 @@
       } else {
         action = `<span class="tag" style="margin:0">${game.score_team1}–${game.score_team2}</span>`;
       }
-      if (game.is_joined) {
-        action += ` <button class="btn btn-secondary btn-sm" data-game-rematch="${game.id}" data-rematch-type="${game.game_type}">↺ Rematch</button>`;
-      }
     }
 
     return `
-      <div class="card" style="${cardStyle}">
+      <div class="card" style="${cardStyle};cursor:pointer" data-open-game="${game.id}">
         <div class="row" style="margin-bottom:8px">
           <div class="row-main">
             <div class="row-title">${esc(fmtDateTime(game.scheduled_at))}${typeTag}</div>
             <div class="row-sub">${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</div>
           </div>
+          <span class="chev">›</span>
         </div>
         ${banner}
         ${game.notes ? `<div class="row-sub" style="margin-bottom:8px">“${esc(game.notes)}”</div>` : ''}
@@ -791,42 +839,34 @@
   }
 
   function bindGameButtons(rootEl, refresh) {
-    rootEl.querySelectorAll('[data-game-join]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api(`/games/${b.dataset.gameJoin}/join`, { method: 'POST' }); toast('You joined the game! 🎾'); refresh(); }
-      catch (e) { toast(e.message); }
+    // Tap anywhere on a card to open the game screen; inline buttons stop propagation.
+    rootEl.querySelectorAll('[data-open-game]').forEach((card) => card.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      openGameScreen(Number(card.dataset.openGame));
     }));
-    rootEl.querySelectorAll('[data-game-leave]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api(`/games/${b.dataset.gameLeave}/leave`, { method: 'POST' }); toast('Left the game'); refresh(); }
-      catch (e) { toast(e.message); }
+    rootEl.querySelectorAll('[data-game-join]').forEach((b) => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { await api(`/games/${b.dataset.gameJoin}/join`, { method: 'POST' }); toast('You joined the game! \u{1F3BE}'); refreshMe(); refresh(); }
+      catch (err) { toast(err.message); }
     }));
-    rootEl.querySelectorAll('[data-game-score]').forEach((b) => b.addEventListener('click', async () => {
-      try {
-        const game = await api(`/games/${b.dataset.gameScore}`);
-        openScoreModal(game, refresh);
-      } catch (e) { toast(e.message); }
-    }));
-    rootEl.querySelectorAll('[data-game-confirm]').forEach((b) => b.addEventListener('click', async () => {
+    rootEl.querySelectorAll('[data-game-confirm]').forEach((b) => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
       try {
         const game = await api(`/games/${b.dataset.gameConfirm}/confirm`, { method: 'POST' });
         showCelebration(game);
         refreshMe();
         refresh();
-      } catch (e) { toast(e.message); }
+      } catch (err) { toast(err.message); }
     }));
-    rootEl.querySelectorAll('[data-game-rematch]').forEach((b) => b.addEventListener('click', async () => {
-      try {
-        const game = await api(`/games/${b.dataset.gameRematch}`);
-        if (game.court) openNewGameModal(game.court, b.dataset.rematchType || 'casual');
-      } catch (e) { toast(e.message); }
-    }));
-    rootEl.querySelectorAll('[data-game-dispute]').forEach((b) => b.addEventListener('click', async () => {
+    rootEl.querySelectorAll('[data-game-dispute]').forEach((b) => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
       if (!confirm('Dispute this score? It will be cleared so it can be re-entered.')) return;
       try {
         await api(`/games/${b.dataset.gameDispute}/dispute`, { method: 'POST' });
-        toast('Score disputed — enter the correct one together');
+        toast('Score disputed \u2014 enter the correct one together');
         refreshMe();
         refresh();
-      } catch (e) { toast(e.message); }
+      } catch (err) { toast(err.message); }
     }));
   }
 
@@ -1792,14 +1832,150 @@
     });
   }
 
-  async function openGameModal(gameId) {
+  async function openGameScreen(gameId) {
     let game;
     try { game = await api(`/games/${gameId}`); } catch (e) { toast(e.message); return; }
+    const court = game.court || {};
+    const isChallenge = game.notes.startsWith('⚔️');
+    const live = game.status === 'upcoming' && new Date(game.scheduled_at).getTime() <= Date.now();
+
+    // Status headline
+    let emoji = '🎾';
+    let headline = fmtDateTime(game.scheduled_at);
+    let subline = `${game.players.length}/${game.max_players} players`;
+    if (game.status === 'completed') {
+      emoji = game.you_won === true ? '🏆' : game.you_won === false ? '🤝' : '✅';
+      headline = `Final: ${game.score_team1}–${game.score_team2}`;
+      subline = fmtDateTime(game.completed_at);
+    } else if (game.status === 'cancelled') {
+      emoji = '🚫'; headline = 'Cancelled';
+    } else if (game.status === 'awaiting_confirmation') {
+      emoji = game.awaiting_your_confirmation ? '⚡' : '⏳';
+      headline = `Reported: ${game.score_team1}–${game.score_team2}`;
+      subline = game.awaiting_your_confirmation
+        ? `${esc(game.score_submitted_by_name || 'Opponent')} reported — confirm or dispute`
+        : 'Waiting for opponents to confirm';
+    } else if (live) {
+      emoji = '🟢'; headline = 'Game on!';
+      subline = game.players.length >= 2 ? 'Enter the score when you finish' : 'Waiting for players to join';
+    } else if (isChallenge && !game.is_joined && game.spots_left > 0) {
+      emoji = '⚔️'; headline = 'You\'ve been challenged!';
+    }
+
+    // Players (grouped by team when assigned)
+    const team1 = game.players.filter((p) => p.team === 1);
+    const team2 = game.players.filter((p) => p.team === 2);
+    const playerRow = (p) => `
+      <div class="row" style="margin-bottom:8px" data-view-user="${p.user_id}">
+        ${avatarHtml(p, 'sm')}
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">${esc(p.display_name)}${p.user_id === game.creator_id ? ' <span class="tag" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">Host</span>' : ''}</div>
+          <div class="row-sub">${skillLabel(p.skill_level)} · ${p.rating}${p.rating_delta != null ? ` · <span class="${p.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${p.rating_delta >= 0 ? '+' : ''}${p.rating_delta}</span>` : ''}</div>
+        </div>
+      </div>`;
+    const playersHtml = (team1.length && team2.length)
+      ? `<div class="form-grid">
+          <div><div class="section-label" style="margin-top:0">Team 1</div>${team1.map(playerRow).join('')}</div>
+          <div><div class="section-label" style="margin-top:0">Team 2</div>${team2.map(playerRow).join('')}</div>
+        </div>`
+      : game.players.map(playerRow).join('');
+
+    // Primary actions by state
+    let actions = '';
+    if (game.status === 'upcoming') {
+      if (!game.is_joined && game.spots_left > 0) {
+        actions = `<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${isChallenge ? '⚔️ Accept challenge' : '🎾 Join this game'}</button>`;
+      } else if (game.is_joined) {
+        if (game.players.length >= 2) {
+          actions = `<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">📝 Enter the score</button>`;
+        }
+        actions += `<div class="action-row" style="margin-top:10px">
+          <button class="btn btn-secondary" id="gs-leave">Leave game</button>
+          ${game.is_creator ? '<button class="btn btn-danger" id="gs-cancel">Cancel game</button>' : ''}
+        </div>`;
+      }
+    } else if (game.status === 'awaiting_confirmation' && game.awaiting_your_confirmation) {
+      actions = `
+        <button class="btn btn-primary btn-block" id="gs-confirm" style="padding:16px">✓ Confirm ${game.score_team1}–${game.score_team2}</button>
+        <button class="btn btn-danger btn-block" id="gs-dispute" style="margin-top:10px">✕ That score is wrong</button>`;
+    } else if (game.status === 'completed' && game.is_joined) {
+      actions = `<button class="btn btn-secondary btn-block" id="gs-rematch">↺ Rematch at ${esc(court.name || 'this court')}</button>`;
+    }
+
     const modal = openModal(`
-      ${modalHead(game.game_type === 'ranked' ? '🏆 Ranked game' : '🎾 Game')}
-      ${gameCardHtml(game)}
+      <div class="modal-head">
+        <div style="flex:1">
+          <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}</h3>
+          <div class="row-sub">${subline}</div>
+        </div>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="card row" id="gs-court" style="cursor:pointer">
+        <span style="font-size:20px">📍</span>
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">${esc(court.name || 'Court')}</div>
+          <div class="row-sub">${esc(court.city || '')}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>
+      ${game.notes ? `<div class="row-sub" style="margin:0 0 12px 4px">“${esc(game.notes)}”</div>` : ''}
+      <div class="section-label">Players (${game.players.length}/${game.max_players})</div>
+      ${playersHtml}
+      <div style="margin-top:16px">${actions}</div>
     `);
-    bindGameButtons(modal, () => { closeModal(modal); openGameModal(gameId); });
+
+    const reopen = () => { closeModal(modal); openGameScreen(gameId); };
+    modal.querySelector('#gs-court').addEventListener('click', () => { closeModal(modal); openCourtDetail(court.id); });
+    modal.querySelector('#gs-join')?.addEventListener('click', async () => {
+      try {
+        await api(`/games/${gameId}/join`, { method: 'POST' });
+        toast(isChallenge ? 'Challenge accepted! ⚔️' : 'You\'re in! 🎾');
+        refreshMe(); reopen();
+      } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#gs-score')?.addEventListener('click', async () => {
+      const fresh = await api(`/games/${gameId}`);
+      closeModal(modal);
+      openScoreModal(fresh, () => refreshMe());
+    });
+    modal.querySelector('#gs-confirm')?.addEventListener('click', async () => {
+      try {
+        const updated = await api(`/games/${gameId}/confirm`, { method: 'POST' });
+        closeModal(modal);
+        showCelebration(updated);
+        refreshMe();
+        if (state.tab === 'play') renderPlay();
+      } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#gs-dispute')?.addEventListener('click', async () => {
+      try {
+        await api(`/games/${gameId}/dispute`, { method: 'POST' });
+        toast('Score cleared — enter the right one together');
+        refreshMe(); reopen();
+      } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#gs-leave')?.addEventListener('click', async () => {
+      try {
+        await api(`/games/${gameId}/leave`, { method: 'POST' });
+        toast('Left the game');
+        closeModal(modal); refreshMe();
+        if (state.tab === 'play') renderPlay();
+      } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#gs-cancel')?.addEventListener('click', async () => {
+      if (!confirm('Cancel this game for everyone?')) return;
+      try {
+        await api(`/games/${gameId}/cancel`, { method: 'POST' });
+        toast('Game cancelled');
+        closeModal(modal); refreshMe();
+        if (state.tab === 'play') renderPlay();
+      } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#gs-rematch')?.addEventListener('click', () => {
+      closeModal(modal);
+      openNewGameModal(court, game.game_type, true);
+    });
+    bindUserButtons(modal);
   }
 
   async function openActivity() {
@@ -1833,7 +2009,7 @@
       if (!gameId) return;
       row.addEventListener('click', () => {
         closeModal(modal);
-        openGameModal(Number(gameId));
+        openGameScreen(Number(gameId));
       });
     });
     if (data.unread) {

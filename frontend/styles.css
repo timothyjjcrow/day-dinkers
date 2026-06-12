@@ -75,6 +75,35 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .tab-header h2 { font-size: 24px; margin-bottom: 10px; }
 .tab-scroll { flex: 1; overflow-y: auto; padding: 4px 16px 90px; }
 
+.active-game-banner {
+  position: absolute; bottom: var(--nav-h); left: 10px; right: 10px; z-index: 999;
+  border-radius: 14px 14px 0 0; padding: 11px 14px;
+  display: flex; align-items: center; gap: 9px; text-align: left;
+  font-size: 13.5px; font-weight: 700; color: #fff;
+  background: var(--green-900); box-shadow: 0 -4px 18px rgba(0,0,0,.18);
+  animation: bannerIn .25s ease;
+}
+@keyframes bannerIn { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+.active-game-banner .agb-main { flex: 1; min-width: 0; }
+.active-game-banner .agb-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.active-game-banner .agb-sub { font-size: 11.5px; font-weight: 600; opacity: .8; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.active-game-banner .agb-chev { font-size: 18px; opacity: .8; }
+.active-game-banner.state-live { background: linear-gradient(90deg, var(--green-700), var(--green-600)); }
+.active-game-banner.state-live .agb-dot {
+  width: 9px; height: 9px; border-radius: 50%; background: #bbf7d0; flex-shrink: 0;
+  animation: blink 1.4s ease-in-out infinite;
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.active-game-banner.state-confirm { background: linear-gradient(90deg, #b45309, var(--amber-500)); }
+.active-game-banner.state-waiting { background: var(--ink); }
+
+/* Lift floating controls when the banner is showing */
+.has-banner .fab { bottom: 132px; }
+.has-banner .pill-btn { bottom: 72px; }
+.has-banner .toast { bottom: 138px; }
+.has-banner .tab-scroll { padding-bottom: 140px; }
+.has-banner .sheet { padding-bottom: 70px; }
+
 #bottom-nav {
   position: absolute; bottom: 0; left: 0; right: 0; height: var(--nav-h);
   background: #fff; border-top: 1px solid var(--line);

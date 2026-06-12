@@ -17,6 +17,7 @@ from backend.models import (
     Notification,
     SKILL_LEVELS,
     User,
+    utcnow,
 )
 
 auth_bp = Blueprint('auth', __name__)
@@ -112,6 +113,40 @@ def _games_to_confirm_count(user_id):
     return count
 
 
+def _active_game_payload(user):
+    """The single most relevant game for the banner: live game you're in,
+    then a score waiting on you, then your score waiting on opponents,
+    then your next upcoming game."""
+    games = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status.in_(['upcoming', 'awaiting_confirmation']),
+        )
+        .order_by(Game.scheduled_at.asc())
+        .limit(25)
+        .all()
+    )
+    now = utcnow()
+    best, best_rank = None, 99
+    for game in games:
+        data = game.to_dict(user.id)
+        if game.status == 'upcoming' and game.scheduled_at <= now:
+            rank, banner_state = 0, 'live'
+        elif data['awaiting_your_confirmation']:
+            rank, banner_state = 1, 'confirm'
+        elif game.status == 'awaiting_confirmation':
+            rank, banner_state = 2, 'waiting'
+        else:
+            rank, banner_state = 3, 'upcoming'
+        if rank < best_rank:
+            data['banner_state'] = banner_state
+            best, best_rank = data, rank
+        if best_rank == 0:
+            break
+    return best
+
+
 def _me_payload(user):
     unread_messages = Message.query.filter_by(recipient_id=user.id, read_at=None).count()
     pending_requests = Friendship.query.filter_by(
@@ -133,6 +168,7 @@ def _me_payload(user):
         'unread_notifications': unread_notifications,
         'games_to_confirm': _games_to_confirm_count(user.id),
         'latest_notification': latest.to_dict() if latest else None,
+        'active_game': _active_game_payload(user),
     }
 
 
