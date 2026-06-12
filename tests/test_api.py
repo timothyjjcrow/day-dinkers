@@ -114,6 +114,13 @@ def test_courts_bbox_and_search(client):
     assert [c['name'] for c in res.get_json()['items']] == ['Adorni Center']
 
 
+def test_courts_amenity_filters(client):
+    lighted = client.get('/api/courts?lighted=1').get_json()['items']
+    assert [c['name'] for c in lighted] == ['Larson Park']
+    indoor = client.get('/api/courts?indoor=1').get_json()['items']
+    assert [c['name'] for c in indoor] == ['Adorni Center']
+
+
 def test_courts_nearby_distance(client):
     res = client.get('/api/courts?lat=33.66&lng=-117.91&radius=30')
     items = res.get_json()['items']

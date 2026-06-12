@@ -76,6 +76,11 @@ def list_courts():
             Court.name.ilike(like) | Court.city.ilike(like) | Court.address.ilike(like)
         )
 
+    if str(request.args.get('lighted') or '') in {'1', 'true'}:
+        query = query.filter(Court.lighted.is_(True))
+    if str(request.args.get('indoor') or '') in {'1', 'true'}:
+        query = query.filter(Court.indoor.is_(True))
+
     bbox = str(request.args.get('bbox') or '').strip()
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)

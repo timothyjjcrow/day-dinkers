@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#15803d"/>
+      <stop offset="1" stop-color="#14532d"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <!-- paddle -->
+  <g transform="rotate(-35 256 256)">
+    <ellipse cx="256" cy="215" rx="110" ry="125" fill="#f0fdf4"/>
+    <rect x="232" y="320" width="48" height="95" rx="22" fill="#f0fdf4"/>
+  </g>
+  <!-- ball -->
+  <circle cx="362" cy="352" r="58" fill="#facc15"/>
+  <circle cx="345" cy="338" r="7" fill="#ca8a04"/>
+  <circle cx="378" cy="345" r="7" fill="#ca8a04"/>
+  <circle cx="360" cy="372" r="7" fill="#ca8a04"/>
+</svg>

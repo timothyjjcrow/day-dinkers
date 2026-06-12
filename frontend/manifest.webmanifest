@@ -1,0 +1,12 @@
+{
+  "name": "Picklepals — Find courts, friends & games",
+  "short_name": "Picklepals",
+  "description": "Find pickleball courts, meet players, schedule casual and ranked games.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#14532d",
+  "theme_color": "#14532d",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

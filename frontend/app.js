@@ -17,6 +17,7 @@
     chatSeg: 'chats',
     map: null,
     markers: null,
+    mapFilter: 'all',
     userLoc: null,
     courtsInView: [],
     activeThreadUserId: null,
@@ -212,7 +213,31 @@
       attribution: '&copy; OpenStreetMap &copy; CARTO',
       maxZoom: 19,
     }).addTo(state.map);
-    state.markers = L.layerGroup().addTo(state.map);
+    state.markers = (typeof L.markerClusterGroup === 'function')
+      ? L.markerClusterGroup({
+          maxClusterRadius: 46,
+          showCoverageOnHover: false,
+          spiderfyOnMaxZoom: true,
+          iconCreateFunction: (cluster) => {
+            const n = cluster.getChildCount();
+            const size = n >= 50 ? 44 : n >= 10 ? 38 : 32;
+            return L.divIcon({
+              className: '',
+              html: `<div class="cluster-icon" style="width:${size}px;height:${size}px">${n}</div>`,
+              iconSize: [size, size],
+            });
+          },
+        })
+      : L.layerGroup();
+    state.markers.addTo(state.map);
+
+    $('#map-filters').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      state.mapFilter = btn.dataset.filter;
+      document.querySelectorAll('#map-filters button').forEach((b) => b.classList.toggle('active', b === btn));
+      fetchCourtsInView();
+    });
 
     state.map.on('moveend', () => {
       const c = state.map.getCenter();
@@ -254,11 +279,15 @@
     const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(4)).join(',');
     let url = `/courts?bbox=${bbox}&limit=250`;
     if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
+    if (state.mapFilter === 'lighted') url += '&lighted=1';
+    if (state.mapFilter === 'indoor') url += '&indoor=1';
     try {
       const data = await api(url);
-      state.courtsInView = data.items;
-      drawMarkers(data.items);
-      renderCourtList(data.items);
+      let items = data.items;
+      if (state.mapFilter === 'active') items = items.filter((c) => c.players_here > 0);
+      state.courtsInView = items;
+      drawMarkers(items);
+      renderCourtList(items);
     } catch { /* network hiccup */ }
   }
 
@@ -395,13 +424,18 @@
 
     const checkedIn = court.is_checked_in;
     let isFavorite = court.is_favorite;
+    try { history.replaceState(null, '', `#court/${court.id}`); } catch { /* ignore */ }
+    const photoHtml = court.photo_url
+      ? `<img class="court-photo" src="${esc(court.photo_url)}" alt="" onerror="this.outerHTML='<div class=\\'court-photo placeholder\\'>🥒</div>'">`
+      : '<div class="court-photo placeholder">🥒</div>';
     const modal = openModal(`
-      ${court.photo_url ? `<img class="court-photo" src="${esc(court.photo_url)}" alt="" onerror="this.remove()">` : ''}
-      <div class="modal-head" style="padding-top:${court.photo_url ? 0 : 8}px">
+      ${photoHtml}
+      <div class="modal-head" style="padding-top:0">
         <div style="flex:1">
           <div class="detail-title">${esc(court.name)}</div>
           <div class="detail-sub">${esc([court.address, court.city].filter(Boolean).join(', '))}</div>
         </div>
+        <button class="icon-btn" id="cd-share" title="Share court" style="box-shadow:none;font-size:17px">📤</button>
         <button class="modal-close">✕</button>
       </div>
       <div>${tags.map((t) => t.startsWith('<span') ? t : `<span class="tag">${t}</span>`).join('')}</div>
@@ -446,6 +480,24 @@
         await refreshMe();
         fetchCourtsInView();
       } catch (e) { toast(e.message); }
+    });
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+      }
+    });
+    modal.querySelector('#cd-share').addEventListener('click', async () => {
+      const url = `${location.origin}/#court/${court.id}`;
+      const text = `${court.name} — pickleball at ${court.city || 'this court'}`;
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: 'Picklepals', text, url });
+        } else {
+          await navigator.clipboard.writeText(url);
+          toast('Link copied 📋');
+        }
+      } catch { /* user cancelled share */ }
     });
 
     modal.querySelector('#cd-schedule').addEventListener('click', () => {
@@ -536,6 +588,9 @@
       } else {
         action = `<span class="tag" style="margin:0">${game.score_team1}–${game.score_team2}</span>`;
       }
+      if (game.is_joined) {
+        action += ` <button class="btn btn-secondary btn-sm" data-game-rematch="${game.id}" data-rematch-type="${game.game_type}">↺ Rematch</button>`;
+      }
     }
 
     return `
@@ -577,6 +632,12 @@
         showCelebration(game);
         refreshMe();
         refresh();
+      } catch (e) { toast(e.message); }
+    }));
+    rootEl.querySelectorAll('[data-game-rematch]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        const game = await api(`/games/${b.dataset.gameRematch}`);
+        if (game.court) openNewGameModal(game.court, b.dataset.rematchType || 'casual');
       } catch (e) { toast(e.message); }
     }));
     rootEl.querySelectorAll('[data-game-dispute]').forEach((b) => b.addEventListener('click', async () => {
@@ -772,6 +833,11 @@
           </select>
         </div>
       </div>
+      <div class="quick-times" id="ng-quick" style="margin:-6px 0 14px">
+        <button type="button" data-q="tonight">Tonight 6 PM</button>
+        <button type="button" data-q="tomorrow">Tomorrow 9 AM</button>
+        <button type="button" data-q="weekend">Saturday 9 AM</button>
+      </div>
       <div class="form-field">
         <label>Type</label>
         <div class="segmented" id="ng-type">
@@ -790,6 +856,26 @@
       </label>
       <button class="btn btn-primary btn-block" id="ng-submit">Schedule ${defaultType === 'ranked' ? 'ranked ' : ''}game</button>
     `);
+
+    modal.querySelector('#ng-quick').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const d = new Date();
+      if (btn.dataset.q === 'tonight') {
+        if (d.getHours() >= 18) d.setDate(d.getDate() + 1);
+        d.setHours(18, 0, 0, 0);
+      } else if (btn.dataset.q === 'tomorrow') {
+        d.setDate(d.getDate() + 1);
+        d.setHours(9, 0, 0, 0);
+      } else {
+        const daysToSat = ((6 - d.getDay()) + 7) % 7 || 7;
+        d.setDate(d.getDate() + daysToSat);
+        d.setHours(9, 0, 0, 0);
+      }
+      const pad2 = (n) => String(n).padStart(2, '0');
+      modal.querySelector('#ng-when').value =
+        `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    });
 
     let gameType = defaultType;
     modal.querySelector('#ng-type').addEventListener('click', (e) => {
@@ -856,6 +942,7 @@
 
   function openScoreModal(game, refresh) {
     const players = game.players;
+    const singles = players.length === 2;
     const half = Math.ceil(players.length / 2);
     const checkboxes = (team) => players.map((p, i) => `
       <label class="row" style="margin-bottom:6px;cursor:pointer">
@@ -863,15 +950,23 @@
         ${avatarHtml(p, 'sm')} <span>${esc(p.display_name)}</span>
       </label>`).join('');
 
+    // Singles: no team picking — it's just player vs player.
+    const teamsHtml = singles
+      ? `<input type="checkbox" class="hidden" name="team1" value="${players[0].user_id}" checked />
+         <input type="checkbox" class="hidden" name="team2" value="${players[1].user_id}" checked />`
+      : `<div class="form-grid">
+          <div class="form-field"><label>Team 1</label>${checkboxes(1)}</div>
+          <div class="form-field"><label>Team 2</label>${checkboxes(2)}</div>
+        </div>`;
+    const scoreLabel1 = singles ? esc(players[0].display_name) : 'Team 1 score';
+    const scoreLabel2 = singles ? esc(players[1].display_name) : 'Team 2 score';
+
     const modal = openModal(`
       ${modalHead(`Record score${game.game_type === 'ranked' ? ' (ranked)' : ''}`)}
+      ${teamsHtml}
       <div class="form-grid">
-        <div class="form-field"><label>Team 1</label>${checkboxes(1)}</div>
-        <div class="form-field"><label>Team 2</label>${checkboxes(2)}</div>
-      </div>
-      <div class="form-grid">
-        <div class="form-field"><label>Team 1 score</label><input type="number" id="sc-1" min="0" max="99" value="11" /></div>
-        <div class="form-field"><label>Team 2 score</label><input type="number" id="sc-2" min="0" max="99" value="9" /></div>
+        <div class="form-field"><label>${scoreLabel1}</label><input type="number" id="sc-1" min="0" max="99" value="11" /></div>
+        <div class="form-field"><label>${scoreLabel2}</label><input type="number" id="sc-2" min="0" max="99" value="9" /></div>
       </div>
       ${game.game_type === 'ranked' ? '<p class="row-sub" style="margin-bottom:12px">🏆 Ranked: an opponent confirms the score, then ratings update.</p>' : ''}
       <button class="btn btn-primary btn-block" id="sc-submit">Save result</button>
@@ -976,6 +1071,7 @@
                 ? `📍 At ${esc(f.checked_in_court.name)}${f.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-700)">wants to play!</b>' : ''}`
                 : `${skillLabel(f.skill_level)} · ${f.rating}`}</div>
             </div>
+            <button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game">🎾</button>
             <button class="btn btn-secondary btn-sm" data-msg="${f.id}">💬</button>
           </div>`).join('')
       : '<div class="empty-state" style="padding:18px">No friends yet — search above to find players.</div>';
@@ -1003,6 +1099,13 @@
       } catch (e) { toast(e.message); }
     }));
     el.querySelectorAll('[data-msg]').forEach((b) => b.addEventListener('click', () => openThread(Number(b.dataset.msg))));
+    el.querySelectorAll('[data-invite]').forEach((b) => b.addEventListener('click', () => {
+      const court = b.dataset.inviteCourt
+        ? { id: Number(b.dataset.inviteCourt), name: b.dataset.inviteCourtName }
+        : null;
+      openNewGameModal(court, 'casual');
+      toast('Schedule it — your friends get notified 🔔');
+    }));
     bindUserButtons(el);
 
     let timer;
@@ -1374,7 +1477,15 @@
     }, 12000);
   }
 
+  function openDeepLink() {
+    const match = location.hash.match(/^#court\/(\d+)$/);
+    if (match) openCourtDetail(Number(match[1]));
+  }
+
   async function boot() {
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
     setupAuth();
     setupTabs();
     setupPlay();
@@ -1383,6 +1494,7 @@
       try {
         applyMe(await api('/me'));
         showMain();
+        openDeepLink();
         return;
       } catch { /* fall through to auth */ }
     }

@@ -105,8 +105,38 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
   flex: 0 0 46px; height: 46px; background: #fff; border-radius: 12px;
   box-shadow: var(--shadow); font-size: 19px;
 }
-.presence-banner {
+.map-filters {
   position: absolute; top: 66px; left: 12px; right: 12px; z-index: 500;
+  display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.map-filters::-webkit-scrollbar { display: none; }
+.map-filters button {
+  flex: 0 0 auto; background: #fff; border-radius: 999px; padding: 7px 13px;
+  font-size: 12.5px; font-weight: 700; color: var(--ink-soft); box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.map-filters button.active { background: var(--ink); color: #fff; }
+
+.cluster-icon {
+  background: var(--green-900); color: #fff; border: 3px solid rgba(255,255,255,.85);
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+
+.court-photo.placeholder {
+  display: flex; align-items: center; justify-content: center; font-size: 52px;
+  background: linear-gradient(140deg, var(--green-100), var(--green-600));
+}
+
+.quick-times { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.quick-times button {
+  background: var(--green-50); border: 1px solid var(--green-100); color: var(--green-900);
+  border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 700;
+}
+
+.presence-banner {
+  position: absolute; top: 112px; left: 12px; right: 12px; z-index: 500;
   background: var(--green-900); color: #fff; border-radius: 12px;
   padding: 10px 14px; font-size: 13px; font-weight: 600;
   display: flex; align-items: center; gap: 8px; box-shadow: var(--shadow);
