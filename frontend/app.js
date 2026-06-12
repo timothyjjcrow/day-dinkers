@@ -620,37 +620,44 @@
     const checkedIn = court.is_checked_in;
     let isFavorite = court.is_favorite;
     try { history.replaceState(null, '', `#court/${court.id}`); } catch { /* ignore */ }
-    const photoHtml = court.photo_url
-      ? `<img class="court-photo" src="${esc(court.photo_url)}" alt="" onerror="this.outerHTML='<div class=\\'court-photo placeholder\\'>🥒</div>'">`
-      : '<div class="court-photo placeholder">🥒</div>';
+    const heroImg = court.photo_url
+      ? `<img class="cd-hero-img" src="${esc(court.photo_url)}" alt="" onerror="this.outerHTML='<div class=\\'cd-hero-img placeholder\\'>🥒</div>'">`
+      : '<div class="cd-hero-img placeholder">🥒</div>';
+    const chipsHtml = tags.map((t) => t.startsWith('<span') ? t : `<span class="tag">${t}</span>`).join('');
+    const linkParts = [];
+    if (court.website) linkParts.push(`<a href="${esc(court.website)}" target="_blank" rel="noopener">🌐 Website</a>`);
+    if (court.phone) linkParts.push(`<a href="tel:${esc(court.phone)}">📞 ${esc(court.phone)}</a>`);
+
     const modal = openModal(`
-      ${photoHtml}
-      <div class="modal-head" style="padding-top:0">
-        <div style="flex:1">
-          <div class="detail-title">${esc(court.name)}</div>
-          <div class="detail-sub">${esc([court.address, court.city].filter(Boolean).join(', '))}</div>
+      <div class="cd-hero">
+        ${heroImg}
+        <div class="cd-hero-shade"></div>
+        <div class="cd-hero-actions">
+          <button class="glass-btn" id="cd-share" title="Share">📤</button>
+          <button class="glass-btn" id="cd-favorite" title="Save">${isFavorite ? '★' : '☆'}</button>
+          <button class="glass-btn modal-close">✕</button>
         </div>
-        <button class="icon-btn" id="cd-share" title="Share court" style="box-shadow:none;font-size:17px">📤</button>
-        <button class="modal-close">✕</button>
+        <div class="cd-hero-title">
+          <h2>${esc(court.name)}</h2>
+          <div>${esc([court.address, court.city].filter(Boolean).join(', '))}</div>
+        </div>
       </div>
-      <div>${tags.map((t) => t.startsWith('<span') ? t : `<span class="tag">${t}</span>`).join('')}</div>
-      <div class="action-row">
-        <button class="btn ${checkedIn ? 'btn-danger' : 'btn-primary'}" id="cd-checkin">
-          ${checkedIn ? 'Check out' : "I'm here — check in"}
-        </button>
-        <button class="btn btn-secondary" id="cd-favorite" style="flex:0 0 56px;font-size:19px">${isFavorite ? '★' : '☆'}</button>
+      <button class="btn ${checkedIn ? 'btn-danger' : 'btn-primary'} btn-block" id="cd-checkin" style="padding:15px;margin-bottom:10px">
+        ${checkedIn ? 'Check out' : "📍 I'm here — check in"}
+      </button>
+      <div class="action-grid">
+        <button class="action-tile" id="cd-play-now"><span>▶️</span>Play now</button>
+        <button class="action-tile" id="cd-schedule"><span>📅</span>Schedule</button>
+        <button class="action-tile" id="cd-chat"><span>💬</span>Chat</button>
+        <a class="action-tile" href="${mapsUrl}" target="_blank" rel="noopener"><span>🧭</span>Directions</a>
       </div>
-      <div class="action-row" style="margin-top:0">
-        <button class="btn btn-primary" id="cd-play-now" style="background:var(--green-600)">▶️ Play now</button>
-        <button class="btn btn-secondary" id="cd-schedule">📅 Schedule</button>
-        <button class="btn" id="cd-schedule-ranked" style="background:#ede9fe;color:#5b21b6;flex:0 0 56px">🏆</button>
-      </div>
-      <div class="action-row" style="margin-top:0">
-        <button class="btn btn-secondary" id="cd-chat">💬 Court chat</button>
-        <a class="btn btn-secondary" style="text-align:center;text-decoration:none" href="${mapsUrl}" target="_blank" rel="noopener">🧭 Directions</a>
-        ${court.website ? `<a class="btn btn-secondary" style="text-align:center;text-decoration:none;flex:0 0 56px" href="${esc(court.website)}" target="_blank" rel="noopener">🌐</a>` : ''}
-      </div>
-      ${court.open_play_schedule ? `<div class="section-label">Open play</div><div class="card" style="font-size:13.5px;color:var(--ink-soft)">${esc(court.open_play_schedule)}</div>` : ''}
+      <div style="margin-top:14px">${chipsHtml}</div>
+      ${court.open_play_schedule ? `
+        <details class="cd-hours">
+          <summary>🕑 Open play hours</summary>
+          <p>${esc(court.open_play_schedule)}</p>
+        </details>` : ''}
+      ${linkParts.length ? `<div class="cd-links">${linkParts.join('')}</div>` : ''}
       <div class="section-label">Playing now (${court.players_here.length})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
       ${playersHtml}
       <div class="section-label">Upcoming games</div>
@@ -701,16 +708,13 @@
       closeModal(modal);
       openNewGameModal(court, 'casual');
     });
-    modal.querySelector('#cd-schedule-ranked').addEventListener('click', () => {
-      closeModal(modal);
-      openNewGameModal(court, 'ranked', court.players_here.length > 1);
-    });
 
     modal.querySelector('#cd-favorite').addEventListener('click', async (e) => {
+      const favBtn = e.currentTarget;
       try {
         const data = await api(`/courts/${court.id}/favorite`, { method: 'POST' });
         isFavorite = data.favorited;
-        e.currentTarget.textContent = isFavorite ? '★' : '☆';
+        favBtn.textContent = isFavorite ? '★' : '☆';
         toast(isFavorite ? 'Court saved ⭐' : 'Removed from saved courts');
       } catch (err) { toast(err.message); }
     });
