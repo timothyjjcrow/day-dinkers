@@ -21,6 +21,11 @@ def _get_int(name, default):
         return default
 
 
+# The app keeps all of its tables in a dedicated Postgres schema so it can
+# never collide with tables left behind by older deployments in `public`.
+PG_SCHEMA = 'picklepals'
+
+
 def _database_url():
     """Normalize DATABASE_URL for SQLAlchemy 2 + psycopg3 (Render gives postgres://)."""
     url = os.getenv('DATABASE_URL', 'sqlite:///app.db')
@@ -31,10 +36,17 @@ def _database_url():
     return url
 
 
+def _engine_options():
+    if _database_url().startswith('postgresql'):
+        return {'connect_args': {'options': f'-csearch_path={PG_SCHEMA}'}}
+    return {}
+
+
 class BaseConfig:
     APP_ENV = os.getenv('APP_ENV', 'development')
     SECRET_KEY = os.getenv('SECRET_KEY', 'change-me')
     SQLALCHEMY_DATABASE_URI = _database_url()
+    SQLALCHEMY_ENGINE_OPTIONS = _engine_options()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
     JWT_TTL_SECONDS = _get_int('JWT_TTL_SECONDS', 60 * 60 * 24 * 30)

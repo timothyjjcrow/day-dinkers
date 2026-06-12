@@ -51,6 +51,21 @@ def _maybe_auto_seed(app):
     threading.Thread(target=_seed_courts_background, args=(app,), daemon=True).start()
 
 
+def _ensure_pg_schema(app):
+    """On Postgres the app lives in its own schema (search_path is set via
+    connect_args), fully isolated from legacy tables in `public`."""
+    if db.engine.dialect.name != 'postgresql':
+        return
+    from sqlalchemy import text
+
+    from backend.config import PG_SCHEMA
+    try:
+        with db.engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{PG_SCHEMA}"'))
+    except Exception:
+        app.logger.exception('Could not ensure schema %s exists', PG_SCHEMA)
+
+
 def _migrate_legacy_schema(app):
     """If the database holds the pre-rebuild schema (user table without the new
     columns), rename every old table aside so create_all can build fresh ones.
@@ -120,6 +135,7 @@ def create_app(config_name=None):
     _register_blueprints(app)
 
     with app.app_context():
+        _ensure_pg_schema(app)
         _migrate_legacy_schema(app)
         _clear_conflicting_legacy_indexes(app)
         if app.config.get('RESET_DB_ON_BOOT'):
