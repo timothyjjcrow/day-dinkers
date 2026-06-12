@@ -76,6 +76,43 @@ def _migrate_legacy_schema(app):
         app.logger.exception('Legacy schema migration failed')
 
 
+def _clear_conflicting_legacy_indexes(app):
+    """Renaming a table does not rename its indexes (Postgres and SQLite), so
+    indexes belonging to *_legacy_* tables can still shadow names that
+    create_all needs. Move those aside too."""
+    from sqlalchemy import inspect as sa_inspect, text
+    try:
+        inspector = sa_inspect(db.engine)
+        existing_tables = inspector.get_table_names()
+        model_tables = set(db.metadata.tables.keys())
+        wanted = {
+            idx.name
+            for table in db.metadata.tables.values()
+            for idx in table.indexes
+        }
+        conflicts = []
+        for table in existing_tables:
+            if table in model_tables:
+                continue
+            for idx in inspector.get_indexes(table):
+                name = idx.get('name')
+                if name in wanted:
+                    conflicts.append(name)
+        if not conflicts:
+            return
+        suffix = time.strftime('legacy_%Y%m%d%H%M%S')
+        app.logger.warning('Moving %d legacy indexes out of the way', len(conflicts))
+        dialect = db.engine.dialect.name
+        with db.engine.begin() as conn:
+            for name in conflicts:
+                if dialect == 'postgresql':
+                    conn.execute(text(f'ALTER INDEX "{name}" RENAME TO "{name}_{suffix}"'))
+                else:
+                    conn.execute(text(f'DROP INDEX IF EXISTS "{name}"'))
+    except Exception:
+        app.logger.exception('Legacy index cleanup failed')
+
+
 def create_app(config_name=None):
     app = Flask(__name__, static_folder=None)
     app.config.from_object(get_config(config_name))
@@ -84,6 +121,7 @@ def create_app(config_name=None):
 
     with app.app_context():
         _migrate_legacy_schema(app)
+        _clear_conflicting_legacy_indexes(app)
         if app.config.get('RESET_DB_ON_BOOT'):
             # One-time escape hatch for migrating off an old schema:
             # set RESET_DB_ON_BOOT=true, deploy, then REMOVE the env var.
