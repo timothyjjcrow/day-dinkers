@@ -211,7 +211,8 @@ class Game(TimestampMixin, db.Model):
     game_type = db.Column(db.String(20), nullable=False, default='casual')
     max_players = db.Column(db.Integer, nullable=False, default=4)
     notes = db.Column(db.String(500), nullable=False, default='')
-    status = db.Column(db.String(20), nullable=False, default='upcoming', index=True)
+    # 32 chars: must fit 'awaiting_confirmation' (Postgres enforces this, SQLite doesn't)
+    status = db.Column(db.String(32), nullable=False, default='upcoming', index=True)
     score_team1 = db.Column(db.Integer)
     score_team2 = db.Column(db.Integer)
     score_submitted_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
@@ -232,11 +233,13 @@ class Game(TimestampMixin, db.Model):
         submitter = next(
             (p for p in players if p.user_id == self.score_submitted_by_id), None,
         )
-        # Only a player on the opposing team of whoever reported the score may confirm it.
+        # A player on the opposing team of whoever reported the score confirms it.
+        # If the reporter wasn't on a team (scorekeeper), any other assigned player can.
         awaiting_mine = bool(
             self.status == 'awaiting_confirmation'
-            and me and submitter and me.team and submitter.team
-            and me.team != submitter.team
+            and me and submitter and me.team
+            and me.user_id != submitter.user_id
+            and (not submitter.team or me.team != submitter.team)
         )
         you_won = None
         if (

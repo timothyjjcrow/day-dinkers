@@ -150,7 +150,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 .presence-banner button { margin-left: auto; color: #bbf7d0; font-weight: 700; font-size: 13px; }
 .pill-btn {
-  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 500;
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 700;
   background: var(--ink); color: #fff; border-radius: 999px; padding: 10px 20px;
   font-weight: 600; font-size: 14px; box-shadow: var(--shadow);
 }
@@ -313,6 +313,39 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 .result-side.won { background: var(--green-50); color: var(--ink); font-weight: 700; }
 .result-side .result-score { font-size: 17px; font-weight: 800; }
+
+/* Score entry */
+.team-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  border-radius: 999px; padding: 6px 14px 6px 6px; font-size: 13.5px; font-weight: 700;
+  border: 2px solid transparent; transition: all .12s;
+}
+.team-chip.team-1 { background: var(--green-100); color: var(--green-900); border-color: var(--green-600); }
+.team-chip.team-2 { background: #ede9fe; color: #5b21b6; border-color: #8b5cf6; }
+.team-chip:disabled { opacity: 1; }
+.score-grid { display: flex; align-items: stretch; gap: 8px; }
+.score-panel {
+  flex: 1; background: var(--bg); border: 2px solid var(--line); border-radius: 16px;
+  padding: 12px 8px; text-align: center; transition: all .15s;
+}
+.score-panel.winning { border-color: var(--green-600); background: var(--green-50); }
+.score-panel.winning .score-team-label::after { content: ' 🏆'; }
+.score-team-label {
+  font-size: 13px; font-weight: 700; margin-bottom: 8px; color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.score-vs { align-self: center; font-weight: 800; color: var(--ink-soft); font-size: 13px; }
+.score-stepper { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.score-stepper input {
+  width: 64px; text-align: center; font-size: 30px; font-weight: 800; padding: 4px 2px;
+  border: none; background: transparent; color: var(--ink); -moz-appearance: textfield;
+}
+.score-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.score-stepper button {
+  width: 38px; height: 38px; border-radius: 50%; background: #fff; border: 1.5px solid var(--line);
+  font-size: 19px; font-weight: 700; color: var(--ink); flex-shrink: 0;
+}
+.score-stepper button:active { background: var(--green-100); }
 
 .celebrate { text-align: center; padding: 26px 8px 8px; }
 .celebrate-emoji { font-size: 64px; animation: pop .45s cubic-bezier(.2, 1.6, .4, 1); }

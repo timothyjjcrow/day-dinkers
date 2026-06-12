@@ -261,9 +261,21 @@
 
     $('#locate-btn').addEventListener('click', locateMe);
     $('#bell-btn').addEventListener('click', openActivity);
+    const syncListToggle = () => {
+      const open = !$('#court-list').classList.contains('hidden');
+      $('#list-toggle').innerHTML = open ? '✕ Close' : '☰ List';
+    };
     $('#list-toggle').addEventListener('click', () => {
       $('#court-list').classList.toggle('hidden');
+      syncListToggle();
     });
+    $('#court-list').addEventListener('click', (e) => {
+      if (e.target.classList.contains('sheet-handle')) {
+        $('#court-list').classList.add('hidden');
+        syncListToggle();
+      }
+    });
+    state.syncListToggle = syncListToggle;
 
     let searchTimer;
     $('#court-search').addEventListener('input', (e) => {
@@ -315,6 +327,7 @@
       drawMarkers(data.items);
       renderCourtList(data.items);
       $('#court-list').classList.remove('hidden');
+      if (state.syncListToggle) state.syncListToggle();
       if (data.items.length) {
         const pts = data.items.filter((c) => c.latitude != null);
         if (pts.length) state.map.fitBounds(pts.map((c) => [c.latitude, c.longitude]), { maxZoom: 13, padding: [40, 40] });
@@ -542,13 +555,14 @@
         <button class="btn btn-secondary" id="cd-favorite" style="flex:0 0 56px;font-size:19px">${isFavorite ? '★' : '☆'}</button>
       </div>
       <div class="action-row" style="margin-top:0">
-        <button class="btn btn-secondary" id="cd-schedule">📅 Schedule game</button>
-        <button class="btn" id="cd-schedule-ranked" style="background:#ede9fe;color:#5b21b6">🏆 Ranked game</button>
+        <button class="btn btn-primary" id="cd-play-now" style="background:var(--green-600)">▶️ Play now</button>
+        <button class="btn btn-secondary" id="cd-schedule">📅 Schedule</button>
+        <button class="btn" id="cd-schedule-ranked" style="background:#ede9fe;color:#5b21b6;flex:0 0 56px">🏆</button>
       </div>
       <div class="action-row" style="margin-top:0">
         <button class="btn btn-secondary" id="cd-chat">💬 Court chat</button>
         <a class="btn btn-secondary" style="text-align:center;text-decoration:none" href="${mapsUrl}" target="_blank" rel="noopener">🧭 Directions</a>
-        ${court.website ? `<a class="btn btn-secondary" style="text-align:center;text-decoration:none" href="${esc(court.website)}" target="_blank" rel="noopener">🌐</a>` : ''}
+        ${court.website ? `<a class="btn btn-secondary" style="text-align:center;text-decoration:none;flex:0 0 56px" href="${esc(court.website)}" target="_blank" rel="noopener">🌐</a>` : ''}
       </div>
       ${court.open_play_schedule ? `<div class="section-label">Open play</div><div class="card" style="font-size:13.5px;color:var(--ink-soft)">${esc(court.open_play_schedule)}</div>` : ''}
       <div class="section-label">Playing now (${court.players_here.length})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
@@ -593,13 +607,17 @@
       } catch { /* user cancelled share */ }
     });
 
+    modal.querySelector('#cd-play-now').addEventListener('click', () => {
+      closeModal(modal);
+      openNewGameModal(court, 'casual', true);
+    });
     modal.querySelector('#cd-schedule').addEventListener('click', () => {
       closeModal(modal);
       openNewGameModal(court, 'casual');
     });
     modal.querySelector('#cd-schedule-ranked').addEventListener('click', () => {
       closeModal(modal);
-      openNewGameModal(court, 'ranked');
+      openNewGameModal(court, 'ranked', court.players_here.length > 1);
     });
 
     modal.querySelector('#cd-favorite').addEventListener('click', async (e) => {
@@ -615,16 +633,9 @@
       openCourtChat(court);
     });
 
-    modal.querySelectorAll('[data-challenge]').forEach((b) => b.addEventListener('click', async () => {
-      if (!confirm('Challenge to a ranked match here, right now?')) return;
-      try {
-        await api(`/users/${b.dataset.challenge}/challenge`, {
-          method: 'POST',
-          body: JSON.stringify({ court_id: court.id }),
-        });
-        toast('⚔️ Challenge sent! Game appears in My games.');
-        refreshMe();
-      } catch (e) { toast(e.message); }
+    modal.querySelectorAll('[data-challenge]').forEach((b) => b.addEventListener('click', () => {
+      const player = court.players_here.find((p) => p.id === Number(b.dataset.challenge));
+      if (player) openChallengeSheet(player, court);
     }));
 
     modal.querySelectorAll('[data-msg-user]').forEach((b) => b.addEventListener('click', () => {
@@ -641,6 +652,33 @@
 
     bindGameButtons(modal, () => { closeModal(modal); openCourtDetail(courtId); });
     bindUserButtons(modal);
+  }
+
+  function openChallengeSheet(player, court) {
+    const modal = openModal(`
+      <div class="checkin-sheet">
+        <div class="celebrate-emoji" style="font-size:46px">⚔️</div>
+        <h3 style="margin:6px 0 2px">Challenge ${esc(player.display_name)}</h3>
+        <p class="row-sub" style="margin-bottom:6px">${skillLabel(player.skill_level)} · ${player.rating} rated</p>
+        <p class="row-sub" style="margin-bottom:18px">Ranked singles at ${esc(court.name)}, starting now. Winner takes the rating points. 🏆</p>
+        <button class="btn btn-primary btn-block" id="ch-send" style="padding:16px;margin-bottom:8px">⚔️ Send challenge</button>
+        <button class="btn-link modal-close btn-block">Maybe later</button>
+      </div>
+    `);
+    modal.querySelector('#ch-send').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await api(`/users/${player.id}/challenge`, {
+          method: 'POST',
+          body: JSON.stringify({ court_id: court.id }),
+        });
+        closeModal(modal);
+        toast(`⚔️ Challenge sent to ${player.display_name}!`);
+        refreshMe();
+      } catch (err) { toast(err.message); btn.disabled = false; }
+    });
   }
 
   function openCheckInSheet(court) {
@@ -697,6 +735,7 @@
           action += ` <button class="btn btn-primary btn-sm" data-game-score="${game.id}">Enter score</button>`;
         }
         if (inProgress) {
+          cardStyle = 'border:2px solid var(--green-600)';
           banner = '<div class="status-banner live-banner">🟢 Game time! Enter the score when you\'re done.</div>';
         } else {
           const mins = Math.round((startMs - Date.now()) / 60000);
@@ -902,17 +941,34 @@
       let html;
 
       if (seg === 'mine') {
-        // Action first: scores to confirm, then live/upcoming, then history.
-        const needsAction = data.items.filter((g) => g.awaiting_your_confirmation);
-        const rest = data.items.filter((g) => !g.awaiting_your_confirmation);
+        // Top: games you've played that need a score, then confirmations,
+        // then waiting-on-opponent, then upcoming, then history.
+        const nowMs = Date.now();
+        const toScore = data.items.filter((g) =>
+          g.status === 'upcoming' && g.is_joined
+          && new Date(g.scheduled_at).getTime() <= nowMs && g.players.length >= 2);
+        const toConfirm = data.items.filter((g) => g.awaiting_your_confirmation);
+        const waiting = data.items.filter((g) =>
+          g.status === 'awaiting_confirmation' && !g.awaiting_your_confirmation);
+        const upcoming = data.items.filter((g) =>
+          !toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g));
+
         html = '';
-        if (needsAction.length) {
-          html += '<div class="section-label" style="margin-top:6px">⚡ Needs your confirmation</div>';
-          html += needsAction.map((g) => gameCardHtml(g)).join('');
+        if (toScore.length) {
+          html += '<div class="section-label" style="margin-top:6px">🎾 Played — enter the score</div>';
+          html += toScore.map((g) => gameCardHtml(g)).join('');
         }
-        if (rest.length) {
-          if (needsAction.length) html += '<div class="section-label">Upcoming</div>';
-          html += rest.map((g) => gameCardHtml(g)).join('');
+        if (toConfirm.length) {
+          html += '<div class="section-label">⚡ Confirm the score</div>';
+          html += toConfirm.map((g) => gameCardHtml(g)).join('');
+        }
+        if (waiting.length) {
+          html += '<div class="section-label">⏳ Waiting on opponents</div>';
+          html += waiting.map((g) => gameCardHtml(g)).join('');
+        }
+        if (upcoming.length) {
+          html += '<div class="section-label">📅 Upcoming</div>';
+          html += upcoming.map((g) => gameCardHtml(g)).join('');
         }
         const history = await api('/games/history');
         if (history.items.length) {
@@ -944,39 +1000,58 @@
     $('#new-game-fab').addEventListener('click', () => openNewGameModal());
   }
 
-  function openNewGameModal(court, defaultType = 'casual') {
+  function openNewGameModal(court, defaultType = 'casual', startNow = false) {
     const now = new Date();
     now.setHours(now.getHours() + 2, 0, 0, 0);
     const pad = (n) => String(n).padStart(2, '0');
     const defaultDt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:00`;
 
     const modal = openModal(`
-      ${modalHead('Schedule a game')}
+      ${modalHead(startNow ? 'Start a game' : 'Schedule a game')}
       <div class="form-field">
         <label>Court</label>
         <input type="text" id="ng-court-search" placeholder="Search for a court…" value="${court ? esc(court.name) : ''}" ${court ? 'disabled' : ''} />
         <input type="hidden" id="ng-court-id" value="${court ? court.id : ''}" />
         <div id="ng-court-results"></div>
       </div>
-      <div class="form-grid">
-        <div class="form-field">
-          <label>When</label>
-          <input type="datetime-local" id="ng-when" value="${defaultDt}" />
-        </div>
-        <div class="form-field">
-          <label>Players needed</label>
-          <select id="ng-max">
-            <option value="2">2 (singles)</option>
-            <option value="4" selected>4 (doubles)</option>
-            <option value="6">6</option>
-            <option value="8">8</option>
-          </select>
+      <div class="form-field">
+        <label>When</label>
+        <div class="segmented" id="ng-mode">
+          <button type="button" data-mode="now" ${startNow ? 'class="active"' : ''}>▶️ Right now</button>
+          <button type="button" data-mode="later" ${startNow ? '' : 'class="active"'}>📅 Schedule</button>
         </div>
       </div>
-      <div class="quick-times" id="ng-quick" style="margin:-6px 0 14px">
-        <button type="button" data-q="tonight">Tonight 6 PM</button>
-        <button type="button" data-q="tomorrow">Tomorrow 9 AM</button>
-        <button type="button" data-q="weekend">Saturday 9 AM</button>
+      <div id="ng-later-fields" class="${startNow ? 'hidden' : ''}">
+        <div class="form-grid">
+          <div class="form-field">
+            <label>Date & time</label>
+            <input type="datetime-local" id="ng-when" value="${defaultDt}" />
+          </div>
+          <div class="form-field">
+            <label>Players needed</label>
+            <select id="ng-max">
+              <option value="2">2 (singles)</option>
+              <option value="4" selected>4 (doubles)</option>
+              <option value="6">6</option>
+              <option value="8">8</option>
+            </select>
+          </div>
+        </div>
+        <div class="quick-times" id="ng-quick" style="margin:-6px 0 14px">
+          <button type="button" data-q="tonight">Tonight 6 PM</button>
+          <button type="button" data-q="tomorrow">Tomorrow 9 AM</button>
+          <button type="button" data-q="weekend">Saturday 9 AM</button>
+        </div>
+      </div>
+      <div id="ng-now-fields" class="form-field ${startNow ? '' : 'hidden'}">
+        <label>Players needed</label>
+        <select id="ng-max-now">
+          <option value="2">2 (singles)</option>
+          <option value="4" selected>4 (doubles)</option>
+          <option value="6">6</option>
+          <option value="8">8</option>
+        </select>
+        <p class="row-sub" style="margin-top:6px">The game starts immediately — players at the court and friends can jump in.</p>
       </div>
       <div class="form-field">
         <label>Type</label>
@@ -994,8 +1069,22 @@
         <input type="checkbox" id="ng-notify" checked style="width:auto" />
         <span style="font-size:14px">Let my friends know 🔔</span>
       </label>
-      <button class="btn btn-primary btn-block" id="ng-submit">Schedule ${defaultType === 'ranked' ? 'ranked ' : ''}game</button>
+      <button class="btn btn-primary btn-block" id="ng-submit" data-later-label="Schedule ${defaultType === 'ranked' ? 'ranked ' : ''}game">
+        ${startNow ? 'Start game now' : `Schedule ${defaultType === 'ranked' ? 'ranked ' : ''}game`}
+      </button>
     `);
+
+    let nowMode = startNow;
+    modal.querySelector('#ng-mode').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      nowMode = btn.dataset.mode === 'now';
+      modal.querySelectorAll('#ng-mode button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelector('#ng-later-fields').classList.toggle('hidden', nowMode);
+      modal.querySelector('#ng-now-fields').classList.toggle('hidden', !nowMode);
+      const submit = modal.querySelector('#ng-submit');
+      submit.textContent = nowMode ? 'Start game now' : submit.dataset.laterLabel;
+    });
 
     modal.querySelector('#ng-quick').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
@@ -1057,25 +1146,27 @@
       const courtId = modal.querySelector('#ng-court-id').value;
       const when = modal.querySelector('#ng-when').value;
       if (!courtId) { toast('Pick a court first'); return; }
-      if (!when) { toast('Pick a date and time'); return; }
+      if (!nowMode && !when) { toast('Pick a date and time'); return; }
       const btn = e.currentTarget;
       if (btn.disabled) return;
       btn.disabled = true;
+      const maxSel = nowMode ? modal.querySelector('#ng-max-now') : modal.querySelector('#ng-max');
       try {
         await api('/games', {
           method: 'POST',
           body: JSON.stringify({
             court_id: Number(courtId),
-            scheduled_at: new Date(when).toISOString(),
+            scheduled_at: nowMode ? new Date().toISOString() : new Date(when).toISOString(),
             game_type: gameType,
-            max_players: Number(modal.querySelector('#ng-max').value),
+            max_players: Number(maxSel.value),
             notes: modal.querySelector('#ng-notes').value.trim(),
             notify_friends: modal.querySelector('#ng-notify').checked,
           }),
         });
         closeModal(modal);
-        toast('Game scheduled! 🎾');
-        if (state.tab === 'play') renderPlay();
+        toast(nowMode ? 'Game on! It\'s live in My games 🎾' : 'Game scheduled! 🎾');
+        if (state.tab === 'play') { state.playSeg = nowMode ? 'mine' : state.playSeg; renderPlay(); }
+        document.querySelectorAll('#play-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === state.playSeg));
       } catch (err) { toast(err.message); btn.disabled = false; }
     });
   }
@@ -1083,51 +1174,97 @@
   function openScoreModal(game, refresh) {
     const players = game.players;
     const singles = players.length === 2;
+    // Default split: first half team 1, second half team 2 (tap a chip to flip it)
+    const teams = {};
     const half = Math.ceil(players.length / 2);
-    const checkboxes = (team) => players.map((p, i) => `
-      <label class="row" style="margin-bottom:6px;cursor:pointer">
-        <input type="checkbox" style="width:auto" name="team${team}" value="${p.user_id}" ${team === 1 && i < half ? 'checked' : ''}${team === 2 && i >= half ? 'checked' : ''} />
-        ${avatarHtml(p, 'sm')} <span>${esc(p.display_name)}</span>
-      </label>`).join('');
+    players.forEach((p, i) => { teams[p.user_id] = i < half ? 1 : 2; });
 
-    // Singles: no team picking — it's just player vs player.
-    const teamsHtml = singles
-      ? `<input type="checkbox" class="hidden" name="team1" value="${players[0].user_id}" checked />
-         <input type="checkbox" class="hidden" name="team2" value="${players[1].user_id}" checked />`
-      : `<div class="form-grid">
-          <div class="form-field"><label>Team 1</label>${checkboxes(1)}</div>
-          <div class="form-field"><label>Team 2</label>${checkboxes(2)}</div>
-        </div>`;
-    const scoreLabel1 = singles ? esc(players[0].display_name) : 'Team 1 score';
-    const scoreLabel2 = singles ? esc(players[1].display_name) : 'Team 2 score';
-
+    const court = game.court || {};
     const modal = openModal(`
-      ${modalHead(`Record score${game.game_type === 'ranked' ? ' (ranked)' : ''}`)}
-      ${teamsHtml}
-      <div class="form-grid">
-        <div class="form-field"><label>${scoreLabel1}</label><input type="number" id="sc-1" min="0" max="99" value="11" /></div>
-        <div class="form-field"><label>${scoreLabel2}</label><input type="number" id="sc-2" min="0" max="99" value="9" /></div>
+      <div class="modal-head">
+        <div style="flex:1">
+          <h3>${game.game_type === 'ranked' ? '🏆 Record ranked score' : '🎾 Record score'}</h3>
+          <div class="row-sub">${esc(court.name || '')}</div>
+        </div>
+        <button class="modal-close">✕</button>
       </div>
-      ${game.game_type === 'ranked' ? '<p class="row-sub" style="margin-bottom:12px">🏆 Ranked: an opponent confirms the score, then ratings update.</p>' : ''}
-      <button class="btn btn-primary btn-block" id="sc-submit">Save result</button>
+      ${singles ? '' : '<p class="row-sub" style="margin-bottom:8px">Tap a player to switch their team.</p>'}
+      <div id="sc-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px"></div>
+      <div class="score-grid">
+        <div class="score-panel" id="sc-panel-1">
+          <div class="score-team-label" id="sc-label-1"></div>
+          <div class="score-stepper">
+            <button type="button" data-step="-1" data-target="sc-1">−</button>
+            <input type="number" id="sc-1" min="0" max="99" value="11" inputmode="numeric" />
+            <button type="button" data-step="1" data-target="sc-1">＋</button>
+          </div>
+        </div>
+        <div class="score-vs">vs</div>
+        <div class="score-panel" id="sc-panel-2">
+          <div class="score-team-label" id="sc-label-2"></div>
+          <div class="score-stepper">
+            <button type="button" data-step="-1" data-target="sc-2">−</button>
+            <input type="number" id="sc-2" min="0" max="99" value="9" inputmode="numeric" />
+            <button type="button" data-step="1" data-target="sc-2">＋</button>
+          </div>
+        </div>
+      </div>
+      ${game.game_type === 'ranked' ? '<p class="row-sub" style="margin:10px 0 12px;text-align:center">An opponent confirms the score, then ratings update.</p>' : '<div style="height:12px"></div>'}
+      <button class="btn btn-primary btn-block" id="sc-submit" style="padding:15px">
+        ${game.game_type === 'ranked' ? 'Send for confirmation' : 'Save result'}
+      </button>
     `);
 
+    const renderChips = () => {
+      modal.querySelector('#sc-chips').innerHTML = players.map((p) => `
+        <button type="button" class="team-chip team-${teams[p.user_id]}" data-chip="${p.user_id}" ${singles ? 'disabled' : ''}>
+          ${avatarHtml(p, 'sm')} ${esc(p.display_name)}
+        </button>`).join('');
+      if (!singles) {
+        modal.querySelectorAll('[data-chip]').forEach((chip) => chip.addEventListener('click', () => {
+          const uid = Number(chip.dataset.chip);
+          teams[uid] = teams[uid] === 1 ? 2 : 1;
+          renderChips();
+          renderLabels();
+        }));
+      }
+    };
+    const teamNames = (t) => players.filter((p) => teams[p.user_id] === t).map((p) => esc(p.display_name.split(' ')[0])).join(' & ') || '—';
+    const renderLabels = () => {
+      modal.querySelector('#sc-label-1').innerHTML = singles ? esc(players[0].display_name) : teamNames(1);
+      modal.querySelector('#sc-label-2').innerHTML = singles ? esc(players[1].display_name) : teamNames(2);
+    };
+    const highlightWinner = () => {
+      const s1 = Number(modal.querySelector('#sc-1').value);
+      const s2 = Number(modal.querySelector('#sc-2').value);
+      modal.querySelector('#sc-panel-1').classList.toggle('winning', s1 > s2);
+      modal.querySelector('#sc-panel-2').classList.toggle('winning', s2 > s1);
+    };
+    renderChips();
+    renderLabels();
+    highlightWinner();
+
+    modal.querySelectorAll('[data-step]').forEach((btn) => btn.addEventListener('click', () => {
+      const input = modal.querySelector(`#${btn.dataset.target}`);
+      input.value = Math.max(0, Math.min(99, Number(input.value || 0) + Number(btn.dataset.step)));
+      highlightWinner();
+    }));
+    modal.querySelectorAll('#sc-1, #sc-2').forEach((inp) => inp.addEventListener('input', highlightWinner));
+
     modal.querySelector('#sc-submit').addEventListener('click', async (e) => {
-      const team1 = [...modal.querySelectorAll('input[name="team1"]:checked')].map((i) => Number(i.value));
-      const team2 = [...modal.querySelectorAll('input[name="team2"]:checked')].map((i) => Number(i.value));
-      if (!team1.length || !team2.length) { toast('Each team needs at least one player'); return; }
-      if (team1.some((id) => team2.includes(id))) { toast('A player can\'t be on both teams'); return; }
+      const team1 = players.filter((p) => teams[p.user_id] === 1).map((p) => p.user_id);
+      const team2 = players.filter((p) => teams[p.user_id] === 2).map((p) => p.user_id);
+      if (!team1.length || !team2.length) { toast('Each side needs at least one player'); return; }
+      const s1 = Number(modal.querySelector('#sc-1').value);
+      const s2 = Number(modal.querySelector('#sc-2').value);
+      if (s1 === s2) { toast('Pickleball has no ties — adjust the score'); return; }
       const btn = e.currentTarget;
       if (btn.disabled) return;
       btn.disabled = true;
       try {
         const updated = await api(`/games/${game.id}/complete`, {
           method: 'POST',
-          body: JSON.stringify({
-            team1, team2,
-            score_team1: Number(modal.querySelector('#sc-1').value),
-            score_team2: Number(modal.querySelector('#sc-2').value),
-          }),
+          body: JSON.stringify({ team1, team2, score_team1: s1, score_team2: s2 }),
         });
         closeModal(modal);
         if (updated.status === 'awaiting_confirmation') {

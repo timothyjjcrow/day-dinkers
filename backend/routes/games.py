@@ -394,7 +394,10 @@ def confirm_score(game_id):
     )
     if not me:
         return jsonify({'error': 'forbidden'}), 403
-    if not submitter or not me.team or me.team == submitter.team:
+    if (
+        not submitter or not me.team or me.user_id == submitter.user_id
+        or (submitter.team and me.team == submitter.team)
+    ):
         return jsonify({'error': 'opponent_confirmation_required'}), 403
 
     _finalize_game(game, actor_id=g.current_user.id)

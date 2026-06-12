@@ -466,6 +466,51 @@ def test_ranked_score_needs_confirmation(client, app):
     assert me_player['rating_delta'] == 16
 
 
+def test_status_column_fits_all_statuses():
+    # Postgres enforces VARCHAR lengths (SQLite doesn't) — regression for the
+    # 500 caused by 'awaiting_confirmation' (21 chars) vs VARCHAR(20).
+    from backend.models import GAME_STATUSES, Game as GameModel
+    assert GameModel.status.type.length >= max(len(s) for s in GAME_STATUSES)
+
+
+def test_scorekeeper_submit_any_player_confirms(client):
+    # If the reporter isn't on either team, any assigned player may confirm.
+    players, game, _ = setup_ranked_doubles(client)
+    a, b, c = players['a'], players['b'], players['c']
+
+    res = client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [b['user']['id']],
+        'team2': [c['user']['id']],
+        'score_team1': 11,
+        'score_team2': 5,
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 200
+    assert res.get_json()['status'] == 'awaiting_confirmation'
+
+    detail_b = client.get(f"/api/games/{game['id']}", headers=auth_headers(b['token'])).get_json()
+    assert detail_b['awaiting_your_confirmation'] is True
+
+    res = client.post(f"/api/games/{game['id']}/confirm", headers=auth_headers(b['token']))
+    assert res.status_code == 200
+    assert res.get_json()['status'] == 'completed'
+
+
+def test_start_game_now(client):
+    from backend.models import utcnow
+    a = register(client, 'a@example.com')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    res = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'game_type': 'casual',
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    assert res.get_json()['status'] == 'upcoming'
+
+    mine = client.get('/api/games?mine=1', headers=auth_headers(a['token'])).get_json()
+    assert len(mine['items']) == 1
+
+
 def test_dispute_score(client, app):
     players, game, _ = setup_ranked_doubles(client)
     a, d = players['a'], players['d']

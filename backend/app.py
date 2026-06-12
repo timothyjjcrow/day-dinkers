@@ -134,16 +134,26 @@ def _upgrade_schema(app):
     from sqlalchemy import inspect as sa_inspect, text
     try:
         inspector = sa_inspect(db.engine)
-        if 'message' not in inspector.get_table_names():
-            return
-        columns = {c['name'] for c in inspector.get_columns('message')}
+        tables = inspector.get_table_names()
+        is_postgres = db.engine.dialect.name == 'postgresql'
         statements = []
-        if 'court_id' not in columns:
-            statements.append('ALTER TABLE message ADD COLUMN court_id INTEGER')
-            if db.engine.dialect.name == 'postgresql':
-                statements.append('ALTER TABLE message ALTER COLUMN recipient_id DROP NOT NULL')
+
+        if 'message' in tables:
+            columns = {c['name'] for c in inspector.get_columns('message')}
+            if 'court_id' not in columns:
+                statements.append('ALTER TABLE message ADD COLUMN court_id INTEGER')
+                if is_postgres:
+                    statements.append('ALTER TABLE message ALTER COLUMN recipient_id DROP NOT NULL')
+
+        if is_postgres and 'game' in tables:
+            status_col = next(
+                (c for c in inspector.get_columns('game') if c['name'] == 'status'), None,
+            )
+            if status_col is not None and getattr(status_col['type'], 'length', 32) < 32:
+                statements.append('ALTER TABLE game ALTER COLUMN status TYPE VARCHAR(32)')
+
         if statements:
-            app.logger.warning('Upgrading message table for court chat')
+            app.logger.warning('Applying schema upgrades: %s', statements)
             with db.engine.begin() as conn:
                 for statement in statements:
                     conn.execute(text(statement))
