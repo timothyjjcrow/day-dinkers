@@ -57,7 +57,13 @@ def create_app(config_name=None):
     _register_blueprints(app)
 
     with app.app_context():
-        if app.config.get('AUTO_CREATE_DB'):
+        if app.config.get('RESET_DB_ON_BOOT'):
+            # One-time escape hatch for migrating off an old schema:
+            # set RESET_DB_ON_BOOT=true, deploy, then REMOVE the env var.
+            app.logger.warning('RESET_DB_ON_BOOT set — dropping and recreating all tables')
+            db.drop_all()
+            db.create_all()
+        elif app.config.get('AUTO_CREATE_DB'):
             db.create_all()
         _maybe_auto_seed(app)
 

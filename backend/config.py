@@ -43,8 +43,9 @@ class BaseConfig:
     JSON_SORT_KEYS = False
     TESTING = False
     DEBUG = False
-    AUTO_CREATE_DB = _get_bool('AUTO_CREATE_DB', default=False)
+    AUTO_CREATE_DB = _get_bool('AUTO_CREATE_DB', default=True)
     AUTO_SEED_COURTS = _get_bool('AUTO_SEED_COURTS', default=False)
+    RESET_DB_ON_BOOT = _get_bool('RESET_DB_ON_BOOT', default=False)
     PRESENCE_STALE_AFTER_SECONDS = _get_int('PRESENCE_STALE_AFTER_SECONDS', 7200)
 
 
@@ -78,5 +79,7 @@ CONFIG_BY_NAME = {
 
 
 def get_config(name=None):
-    config_name = (name or os.getenv('APP_ENV') or 'development').strip().lower()
+    config_name = (
+        name or os.getenv('APP_ENV') or os.getenv('FLASK_ENV') or 'development'
+    ).strip().lower()
     return CONFIG_BY_NAME.get(config_name, DevelopmentConfig)
