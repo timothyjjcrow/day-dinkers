@@ -1,29 +1,12 @@
-# Python
 __pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.so
-
-# Virtual environments
+*.pyc
+.pytest_cache/
+instance/
+*.db
+.env
+.DS_Store
 venv/
 .venv/
-env/
-
-# Test/cache artifacts
-.pytest_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-
-# Local environment files
-.env
-.env.*
-
-# Local databases
-*.db
-
-# OS/editor files
-.DS_Store
-.vscode/
-.idea/
+output/
+tmp/
+.claude/

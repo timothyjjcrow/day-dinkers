@@ -1,94 +1,82 @@
 import os
 
-basedir = os.path.abspath(os.path.dirname(__file__))
 
-
-def _env_bool(name, default=False):
-    raw = os.environ.get(name)
-    if raw is None:
+def _get_bool(name, default=False):
+    raw_value = os.getenv(name)
+    if raw_value is None:
         return default
-    return str(raw).strip().lower() in {'1', 'true', 'yes', 'on'}
+    value = raw_value.strip().lower()
+    if value in {'1', 'true', 'yes', 'on'}:
+        return True
+    if value in {'0', 'false', 'no', 'off'}:
+        return False
+    return default
 
 
-def _env_int(name, default):
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
+def _get_int(name, default):
+    raw_value = os.getenv(name)
     try:
-        return int(raw)
+        return int(raw_value) if raw_value is not None else default
     except (TypeError, ValueError):
         return default
 
 
-def _env_float(name, default):
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return default
-
-
-def _normalize_database_url(raw_url):
-    if not raw_url:
-        return raw_url
-    if raw_url.startswith('postgres://'):
-        return raw_url.replace('postgres://', 'postgresql://', 1)
-    return raw_url
+def _database_url():
+    """Normalize DATABASE_URL for SQLAlchemy 2 + psycopg3 (Render gives postgres://)."""
+    url = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+    if url.startswith('postgres://'):
+        url = 'postgresql+psycopg://' + url[len('postgres://'):]
+    elif url.startswith('postgresql://'):
+        url = 'postgresql+psycopg://' + url[len('postgresql://'):]
+    return url
 
 
 class BaseConfig:
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-prod')
+    APP_ENV = os.getenv('APP_ENV', 'development')
+    SECRET_KEY = os.getenv('SECRET_KEY', 'change-me')
+    SQLALCHEMY_DATABASE_URI = _database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_EXPIRATION_HOURS = 24
-    AUTH_RATE_LIMIT_WINDOW_SECONDS = _env_int('AUTH_RATE_LIMIT_WINDOW_SECONDS', 60)
-    AUTH_LOGIN_RATE_LIMIT_PER_WINDOW = _env_int('AUTH_LOGIN_RATE_LIMIT_PER_WINDOW', 30)
-    AUTH_GOOGLE_RATE_LIMIT_PER_WINDOW = _env_int('AUTH_GOOGLE_RATE_LIMIT_PER_WINDOW', 30)
-    USER_SEARCH_RATE_LIMIT_PER_WINDOW = _env_int('USER_SEARCH_RATE_LIMIT_PER_WINDOW', 60)
-    AUTH_LOCKOUT_THRESHOLD = _env_int('AUTH_LOCKOUT_THRESHOLD', 5)
-    AUTH_LOCKOUT_MINUTES = _env_int('AUTH_LOCKOUT_MINUTES', 15)
-    PASSWORD_RESET_TOKEN_TTL_MINUTES = _env_int('PASSWORD_RESET_TOKEN_TTL_MINUTES', 30)
-    PASSWORD_RESET_REQUEST_RATE_LIMIT_PER_WINDOW = _env_int('PASSWORD_RESET_REQUEST_RATE_LIMIT_PER_WINDOW', 10)
-    GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
-    ADMIN_EMAILS = os.environ.get('ADMIN_EMAILS', '')
-    COURT_UPDATE_REVIEWER_EMAILS = os.environ.get('COURT_UPDATE_REVIEWER_EMAILS', '')
-    COURT_UPDATE_REVIEWER_USERNAMES = os.environ.get('COURT_UPDATE_REVIEWER_USERNAMES', '')
-    COURT_UPDATE_AUTO_APPLY = _env_bool('COURT_UPDATE_AUTO_APPLY', False)
-    COURT_UPDATE_AUTO_APPLY_THRESHOLD = _env_float('COURT_UPDATE_AUTO_APPLY_THRESHOLD', 0.92)
-    COURT_UPDATE_MAX_IMAGES = _env_int('COURT_UPDATE_MAX_IMAGES', 8)
-    COURT_UPDATE_MAX_EVENTS = _env_int('COURT_UPDATE_MAX_EVENTS', 6)
-    COURT_UPDATE_MAX_IMAGE_BYTES = _env_int('COURT_UPDATE_MAX_IMAGE_BYTES', 2 * 1024 * 1024)
-    CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', '*')
-    SOCKETIO_ASYNC_MODE = os.environ.get('SOCKETIO_ASYNC_MODE', 'threading')
-    PRESENCE_HEARTBEAT_TIMEOUT_MINUTES = _env_int('PRESENCE_HEARTBEAT_TIMEOUT_MINUTES', 20)
-    SCHEDULED_SESSION_RETENTION_DAYS = _env_int('SCHEDULED_SESSION_RETENTION_DAYS', 3)
-    CHAT_RETENTION_DAYS = _env_int('CHAT_RETENTION_DAYS', 7)
-    CHAT_FETCH_LIMIT = _env_int('CHAT_FETCH_LIMIT', 100)
+    JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
+    JWT_TTL_SECONDS = _get_int('JWT_TTL_SECONDS', 60 * 60 * 24 * 30)
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+    PORT = _get_int('PORT', 8000)
+    JSON_SORT_KEYS = False
+    TESTING = False
+    DEBUG = False
+    AUTO_CREATE_DB = _get_bool('AUTO_CREATE_DB', default=False)
+    AUTO_SEED_COURTS = _get_bool('AUTO_SEED_COURTS', default=False)
+    PRESENCE_STALE_AFTER_SECONDS = _get_int('PRESENCE_STALE_AFTER_SECONDS', 7200)
 
 
 class DevelopmentConfig(BaseConfig):
     DEBUG = True
-    SQLALCHEMY_DATABASE_URI = _normalize_database_url(
-        os.environ.get(
-            'DATABASE_URL',
-            'sqlite:///' + os.path.join(basedir, '..', 'pickleball_dev.db')
-        )
-    )
+    AUTO_CREATE_DB = _get_bool('AUTO_CREATE_DB', default=True)
 
 
-class TestingConfig(BaseConfig):
-    TESTING = True
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+class StagingConfig(BaseConfig):
+    APP_ENV = 'staging'
 
 
 class ProductionConfig(BaseConfig):
-    DEBUG = False
-    SQLALCHEMY_DATABASE_URI = _normalize_database_url(os.environ.get('DATABASE_URL'))
+    APP_ENV = 'production'
 
 
-config = {
+class TestingConfig(BaseConfig):
+    APP_ENV = 'testing'
+    TESTING = True
+    DEBUG = True
+    SQLALCHEMY_DATABASE_URI = os.getenv('TEST_DATABASE_URL', 'sqlite:///:memory:')
+    AUTO_CREATE_DB = True
+
+
+CONFIG_BY_NAME = {
     'development': DevelopmentConfig,
-    'testing': TestingConfig,
+    'staging': StagingConfig,
     'production': ProductionConfig,
+    'testing': TestingConfig,
 }
+
+
+def get_config(name=None):
+    config_name = (name or os.getenv('APP_ENV') or 'development').strip().lower()
+    return CONFIG_BY_NAME.get(config_name, DevelopmentConfig)

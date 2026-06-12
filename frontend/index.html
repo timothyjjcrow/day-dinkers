@@ -1,593 +1,101 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Third Shot - Pickleball Courts</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css" />
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <link rel="icon" type="image/png" href="assets/third-shot-logo.png">
-    <link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#14532d" />
+  <title>Picklepals — Find courts, friends & games</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🥒</text></svg>" />
 </head>
 <body>
-
-    <!-- ═══ App Header ═══ -->
-    <header id="app-header">
-        <div class="header-left">
-            <img class="header-logo" src="assets/third-shot-logo.png" alt="Third Shot" onclick="App.showScreen('main')">
-        </div>
-        <div class="header-center">
-            <select id="county-select" onchange="App.onCountyChange(this.value)" aria-label="Select county" style="display:none">
-                <option value="humboldt">Humboldt County</option>
-            </select>
-            <div class="county-picker" id="county-picker">
-                <button type="button" class="county-picker-trigger" id="county-picker-trigger" onclick="App.toggleCountyPicker()">
-                    <span id="county-picker-label">California</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-                <div class="county-picker-dropdown" id="county-picker-dropdown" style="display:none">
-                    <button type="button" class="county-picker-locate" onclick="App.useLocationCounty(); App.closeCountyPicker();">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
-                        <span>Use My Location</span>
-                    </button>
-                    <button type="button" class="picker-state-btn" id="picker-state-btn" onclick="App.showStatePicker()">
-                        <span id="picker-state-btn-label">California</span>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M9 18l6-6-6-6"/></svg>
-                    </button>
-                    <div id="picker-county-panel">
-                        <input type="text" id="county-picker-search" placeholder="Search counties..." oninput="App.filterCountyList(this.value)" autocomplete="off">
-                        <div id="county-picker-list" class="county-picker-list"></div>
-                    </div>
-                    <div id="picker-state-panel" style="display:none">
-                        <input type="text" id="state-picker-search" placeholder="Search states..." oninput="App.filterStateList(this.value)" autocomplete="off">
-                        <div id="state-picker-list" class="county-picker-list"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="header-right">
-            <button class="header-icon-btn" id="btn-inbox" onclick="Inbox.toggle()" title="Messages">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                <span class="badge" id="inbox-badge" style="display:none">0</span>
-            </button>
-            <button class="header-icon-btn" id="btn-notifications" onclick="App.toggleNotifications()" title="Notifications">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                <span class="badge" id="notif-badge" style="display:none">0</span>
-            </button>
-            <button class="header-auth-btn" id="btn-auth" onclick="Auth.showModal()">Sign In</button>
-            <button class="header-avatar-btn" id="btn-profile" onclick="App.setMainTab('profile')" style="display:none" title="Profile">
-                <span id="header-user-initial">?</span>
-            </button>
-        </div>
-    </header>
-
-    <!-- Location Consent Banner -->
-    <div id="location-consent-banner" class="location-consent-banner" style="display:none">
-        <span>Enable location for nearby courts and check-in.</span>
-        <div class="location-consent-actions">
-            <button class="btn-primary btn-sm" onclick="App.enableLocationTracking()">Enable</button>
-            <button class="btn-secondary btn-sm" onclick="App.dismissLocationPrompt()">Not now</button>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════
-         MAIN SCREEN
-         ═══════════════════════════════════════════════ -->
-    <div id="main-screen" class="screen">
-        <!-- Main Tab Bar -->
-        <div id="main-tab-bar" class="tab-bar">
-            <button class="tab active" data-tab="map" onclick="App.setMainTab('map')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                <span>Map</span>
-            </button>
-            <button class="tab" data-tab="profile" onclick="App.setMainTab('profile')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                <span>Profile</span>
-            </button>
-        </div>
-
-        <!-- Map Tab -->
-        <div id="map-tab" class="tab-content active">
-            <section id="map-schedule-banner" class="map-schedule-banner">
-                <button
-                    id="map-schedule-banner-toggle"
-                    class="map-schedule-banner-toggle"
-                    type="button"
-                    onclick="MapView.toggleScheduleBanner()"
-                    aria-expanded="false"
-                    aria-controls="map-schedule-banner-days"
-                >
-                    <span class="map-schedule-banner-title-wrap">
-                        <span class="map-schedule-banner-title">Next 7 Days</span>
-                        <span id="map-schedule-banner-meta" class="map-schedule-banner-meta">Tap to view scheduled games</span>
-                    </span>
-                    <span id="map-schedule-banner-chevron" class="map-schedule-banner-chevron">▼</span>
-                </button>
-                <div id="map-schedule-banner-days" class="map-schedule-banner-days" hidden></div>
-            </section>
-            <div id="map-container">
-                <div id="map"></div>
-                <div id="map-filters">
-                    <div class="mobile-search-inline">
-                        <input type="text" id="mobile-search-input" placeholder="Search courts, cities..." autocomplete="off">
-                        <button type="button" class="search-clear-btn" id="search-clear-btn" onclick="MapView.clearSearch()" style="display:none">&times;</button>
-                        <div id="search-suggestions" class="search-suggestions" style="display:none"></div>
-                    </div>
-                    <span id="map-court-count" class="map-court-count"></span>
-                    <button class="filter-chip active" data-filter="all" onclick="MapView.setFilter('all')">All</button>
-                    <button class="filter-chip" data-filter="outdoor" onclick="MapView.setFilter('outdoor')">Outdoor</button>
-                    <button class="filter-chip" data-filter="indoor" onclick="MapView.setFilter('indoor')">Indoor</button>
-                    <button class="filter-chip" data-filter="lighted" onclick="MapView.setFilter('lighted')">Lighted</button>
-                    <button class="filter-chip" data-filter="free" onclick="MapView.setFilter('free')">Free</button>
-                    <button class="filter-chip" data-filter="dedicated" onclick="MapView.setFilter('dedicated')">Dedicated</button>
-                    <button class="filter-chip" data-filter="restrooms" onclick="MapView.setFilter('restrooms')">Restrooms</button>
-                    <button class="filter-chip" data-filter="parking" onclick="MapView.setFilter('parking')">Parking</button>
-                    <button class="filter-chip" data-filter="accessible" onclick="MapView.setFilter('accessible')">Accessible</button>
-                    <button class="filter-chip" data-filter="active" onclick="MapView.setFilter('active')">Players Now</button>
-                    <button class="filter-chip" id="nearby-filter" type="button" onclick="MapView.toggleNearbyMode()">Near Me</button>
-                    <button class="filter-chip filter-chip-smart" onclick="MapView.openBestCourtNow()">Best Right Now</button>
-                    <span id="map-last-updated" class="map-last-updated"></span>
-                </div>
-                <button id="locate-btn" onclick="MapView.locateUser()" title="My Location" aria-label="Center map on my location">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m8-10h4M2 12h4"/></svg>
-                </button>
-                <button id="list-toggle" onclick="MapView.toggleCourtList()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
-                    <span>Courts</span>
-                </button>
-                <div id="court-list-sidebar" class="court-list-sidebar">
-                    <div class="sidebar-header">
-                        <h3>Courts</h3>
-                        <select id="court-sort-select" onchange="MapView.setSort(this.value)">
-                            <option value="name">Sort: Name</option>
-                            <option value="distance">Sort: Distance</option>
-                            <option value="courts">Sort: # Courts</option>
-                            <option value="active">Sort: Active Players</option>
-                        </select>
-                        <button class="sidebar-close-btn" onclick="MapView.toggleCourtList()">&times;</button>
-                    </div>
-                    <div id="court-list-items"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Profile Tab -->
-        <div id="profile-tab" class="tab-content">
-            <div class="tab-page">
-                <div id="profile-page-content"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════
-         COURT DETAILS SCREEN
-         ═══════════════════════════════════════════════ -->
-    <div id="court-details-screen" class="screen" style="display:none">
-        <div id="court-details-header">
-            <button class="back-btn" onclick="App.backToMain()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-            </button>
-            <div class="court-details-title">
-                <h2 id="court-details-name"></h2>
-                <p id="court-details-address" class="muted"></p>
-            </div>
-            <a id="court-directions-link" class="directions-btn" href="#" target="_blank" rel="noopener noreferrer" title="Get Directions">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
-            </a>
-        </div>
-
-        <!-- Single scrollable court page -->
-        <div id="court-page-content" class="court-scrollable-page"></div>
-
-        <!-- Bottom Sheet for Court Updates -->
-        <div id="updates-bottom-sheet" class="bottom-sheet" style="display:none">
-            <div class="bottom-sheet-overlay" onclick="App.toggleUpdatesSheet()"></div>
-            <div class="bottom-sheet-panel">
-                <div class="bottom-sheet-handle" onclick="App.toggleUpdatesSheet()"><div class="handle-bar"></div></div>
-                <div class="bottom-sheet-content" id="updates-sheet-body"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════
-         ADMIN VIEW (standalone)
-         ═══════════════════════════════════════════════ -->
-    <div id="admin-view" class="screen" style="display:none">
-        <div class="admin-header">
-            <button class="back-btn" onclick="App.showScreen('main')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-            </button>
-            <h2>Admin Console</h2>
-        </div>
-        <div id="admin-page-content"></div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════
-         MODALS (unchanged)
-         ═══════════════════════════════════════════════ -->
-
-    <!-- Match Modal -->
-    <div id="match-modal" class="modal" style="display:none"></div>
-
-    <!-- Auth Modal -->
-    <div id="auth-modal" class="modal" style="display:none">
-        <div class="modal-content auth-modal-content">
-            <button class="modal-close" onclick="Auth.hideModal()" aria-label="Close">&times;</button>
-            <div class="auth-tabs">
-                <button class="auth-tab active" onclick="Auth.switchTab('login')">Sign In</button>
-                <button class="auth-tab" onclick="Auth.switchTab('register')">Sign Up</button>
-            </div>
-            <form id="login-form" class="auth-form" onsubmit="Auth.login(event)">
-                <div class="form-group"><label>Email</label><input type="email" name="email" required placeholder="you@example.com"></div>
-                <div class="form-group"><label>Password</label><input type="password" name="password" required placeholder="••••••••"></div>
-                <button type="button" class="btn-text" onclick="Auth.showResetRequestForm()">Forgot password?</button>
-                <button type="submit" class="btn-primary btn-full">Sign In</button>
-                <div id="google-auth-wrapper" class="google-auth-wrapper" style="display:none">
-                    <div class="auth-divider"><span>or</span></div>
-                    <div id="google-signin-btn" class="google-signin-btn"></div>
-                    <p class="auth-error" id="google-auth-error"></p>
-                </div>
-                <p class="auth-error" id="login-error"></p>
-            </form>
-            <form id="reset-request-form" class="auth-form" style="display:none" onsubmit="Auth.requestPasswordReset(event)">
-                <p class="muted">Enter your account email and we will generate reset instructions.</p>
-                <div class="form-group"><label>Email</label><input type="email" name="email" required placeholder="you@example.com"></div>
-                <button type="submit" class="btn-primary btn-full">Request Password Reset</button>
-                <button type="button" class="btn-text" onclick="Auth.showResetConfirmForm()">Have a reset token?</button>
-                <button type="button" class="btn-text" onclick="Auth.switchTab('login')">Back to sign in</button>
-                <p class="auth-error" id="reset-request-error"></p>
-                <p class="muted" id="reset-request-status"></p>
-            </form>
-            <form id="reset-confirm-form" class="auth-form" style="display:none" onsubmit="Auth.confirmPasswordReset(event)">
-                <p class="muted">Enter your reset token and choose a new password.</p>
-                <div class="form-group"><label>Email (optional)</label><input type="email" name="email" placeholder="you@example.com"></div>
-                <div class="form-group"><label>Reset Token</label><input type="text" name="token" required placeholder="Paste your reset token"></div>
-                <div class="form-group"><label>New Password</label><input type="password" name="new_password" required minlength="8" placeholder="At least 8 chars, letters + numbers"></div>
-                <button type="submit" class="btn-primary btn-full">Reset Password</button>
-                <button type="button" class="btn-text" onclick="Auth.showResetRequestForm()">Need a reset token?</button>
-                <button type="button" class="btn-text" onclick="Auth.switchTab('login')">Back to sign in</button>
-                <p class="auth-error" id="reset-confirm-error"></p>
-                <p class="muted" id="reset-confirm-status"></p>
-            </form>
-            <form id="register-form" class="auth-form" style="display:none" onsubmit="Auth.register(event)">
-                <div class="form-group"><label>Username</label><input type="text" name="username" required placeholder="picklepro42"></div>
-                <div class="form-group"><label>Email</label><input type="email" name="email" required placeholder="you@example.com"></div>
-                <div class="form-group"><label>Password</label><input type="password" name="password" required minlength="8" placeholder="At least 8 chars, letters + numbers"></div>
-                <div class="form-group"><label>Display Name</label><input type="text" name="name" placeholder="Alex Smith"></div>
-                <div class="form-row">
-                    <div class="form-group"><label>Skill Level</label>
-                        <select name="skill_level"><option value="">Select...</option><option value="2.0">2.0 - Beginner</option><option value="2.5">2.5 - Beginner+</option><option value="3.0">3.0 - Intermediate</option><option value="3.5">3.5 - Intermediate+</option><option value="4.0">4.0 - Advanced</option><option value="4.5">4.5 - Advanced+</option><option value="5.0">5.0 - Pro</option></select>
-                    </div>
-                    <div class="form-group"><label>Play Style</label>
-                        <select name="play_style"><option value="">Any</option><option value="doubles">Doubles</option><option value="singles">Singles</option><option value="mixed">Mixed Doubles</option></select>
-                    </div>
-                </div>
-                <button type="submit" class="btn-primary btn-full">Create Account</button>
-                <p class="auth-error" id="register-error"></p>
-            </form>
-        </div>
-    </div>
-
-    <!-- Create Session Modal -->
-    <div id="session-modal" class="modal" style="display:none" onclick="if (event.target === this) Sessions.hideCreateModal()">
-        <div class="modal-content session-modal-content">
-            <button class="modal-close" onclick="Sessions.hideCreateModal()" aria-label="Close">&times;</button>
-            <h2>Schedule Open to Play</h2>
-            <p class="session-modal-subtitle">Pick a court, tap day/time, and post. Open exact timing only when you need it.</p>
-            <form id="create-session-form" class="session-create-form" onsubmit="Sessions.create(event)">
-                <section class="session-form-primary">
-                    <div class="form-row">
-                        <div class="form-group" style="flex:2">
-                            <label>Court</label>
-                            <select name="court_id" id="session-court-select" required></select>
-                        </div>
-                        <div class="form-group" style="flex:1">
-                            <label>Game Type</label>
-                            <select name="game_type">
-                                <option value="open">Open Play</option>
-                                <option value="doubles">Doubles</option>
-                                <option value="singles">Singles</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="session-quick-grid">
-                        <div class="form-group session-quick-group">
-                            <label>Day</label>
-                            <div class="session-quick-buttons" id="session-quick-buttons">
-                                <button type="button" class="session-quick-btn" data-preset="today">Today</button>
-                                <button type="button" class="session-quick-btn active" data-preset="tomorrow">Tomorrow</button>
-                                <button type="button" class="session-quick-btn" data-preset="weekend">Weekend</button>
-                                <button type="button" class="session-quick-btn" data-preset="next_week">Next Week</button>
-                                <button type="button" class="session-quick-btn" data-preset="custom">Pick Date</button>
-                            </div>
-                        </div>
-                        <div class="form-group session-quick-group">
-                            <label>Time</label>
-                            <div class="session-time-buttons" id="session-time-buttons">
-                                <button type="button" class="session-quick-btn" data-time-slot="next">Next Available</button>
-                                <button type="button" class="session-quick-btn" data-time-slot="09:00">9 AM</button>
-                                <button type="button" class="session-quick-btn" data-time-slot="12:00">12 PM</button>
-                                <button type="button" class="session-quick-btn" data-time-slot="17:30">5:30 PM</button>
-                                <button type="button" class="session-quick-btn active" data-time-slot="18:30">6:30 PM</button>
-                                <button type="button" class="session-quick-btn" data-time-slot="custom">Pick Time</button>
-                            </div>
-                        </div>
-                        <div class="form-group session-quick-group">
-                            <label>Length</label>
-                            <input type="hidden" name="duration_minutes" id="session-duration-select" value="90">
-                            <div class="session-duration-buttons" id="session-duration-buttons">
-                                <button type="button" class="session-quick-btn" data-duration="60">1h</button>
-                                <button type="button" class="session-quick-btn active" data-duration="90">1.5h</button>
-                                <button type="button" class="session-quick-btn" data-duration="120">2h</button>
-                                <button type="button" class="session-quick-btn" data-duration="custom">Custom</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="session-schedule-summary" id="session-schedule-summary">Choose a day and time to schedule your session.</div>
-                </section>
-
-                <details class="session-form-timing" id="session-form-timing">
-                    <summary>Exact date, end time, and repeat</summary>
-                    <div class="session-form-advanced-body">
-                        <div class="form-group"><label>Start Time</label><input type="datetime-local" name="start_time" id="session-start-time" step="900"></div>
-                        <div class="form-row">
-                            <div class="form-group"><label>End Time <span class="muted">(optional)</span></label><input type="datetime-local" name="end_time" id="session-end-time" step="900"></div>
-                            <div class="form-group">
-                                <label>Repeat</label>
-                                <select name="recurrence" id="session-recurrence-select" onchange="Sessions._toggleRecurrenceFields()">
-                                    <option value="none">Do not repeat</option>
-                                    <option value="weekly">Weekly</option>
-                                    <option value="biweekly">Every 2 weeks</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-group" id="session-recurrence-count-group" style="display:none">
-                            <label>Occurrences</label>
-                            <select name="recurrence_count" id="session-recurrence-count" onchange="Sessions._renderScheduleSummary()">
-                                <option value="2">2 sessions</option><option value="3">3 sessions</option>
-                                <option value="4" selected>4 sessions</option><option value="6">6 sessions</option><option value="8">8 sessions</option>
-                            </select>
-                        </div>
-                    </div>
-                </details>
-
-                <details class="session-form-advanced">
-                    <summary>More options</summary>
-                    <div class="session-form-advanced-body">
-                        <div class="form-row">
-                            <div class="form-group"><label>Max Players</label><input type="number" name="max_players" value="4" min="2" max="20"></div>
-                            <div class="form-group"><label>Visibility</label>
-                                <select name="visibility"><option value="all">Open to All</option><option value="friends">Friends Only</option></select>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label>Skill Level</label>
-                            <select name="skill_level"><option value="all">All Levels</option><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select>
-                        </div>
-                        <div class="form-group"><label>Notes <span class="muted">(optional)</span></label><textarea name="notes" rows="2" placeholder="Casual doubles, all welcome!"></textarea></div>
-                        <div class="form-group" id="session-invite-section" style="display:none">
-                            <label>Invite Friends</label>
-                            <div id="session-invite-friends" class="friend-picker"></div>
-                        </div>
-                    </div>
-                </details>
-
-                <button id="session-submit-btn" type="submit" class="btn-primary btn-full">Schedule Open to Play</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- Invite Friends Modal -->
-    <div id="invite-modal" class="modal" style="display:none">
-        <div class="modal-content modal-sm">
-            <button class="modal-close" onclick="App.hideInviteModal()">&times;</button>
-            <h2 id="invite-modal-title">Invite Friends</h2>
-            <div id="invite-modal-friends" class="friend-picker"></div>
-            <button id="invite-modal-send" class="btn-primary btn-full" style="margin-top:12px">Send Invites</button>
-        </div>
-    </div>
-
-    <!-- Court Update Submission Modal -->
-    <div id="court-update-modal" class="modal" style="display:none">
-        <div class="modal-content court-update-modal-content">
-            <button class="modal-close" onclick="CourtUpdates.hideModal()">&times;</button>
-            <h2 id="court-update-title">Suggest Court Update</h2>
-            <p class="muted">Share accurate court changes. Submissions are reviewed before publishing.</p>
-            <form id="court-update-form" onsubmit="CourtUpdates.submit(event)">
-                <input type="hidden" id="court-update-court-id" name="court_id">
-                <div class="court-update-section">
-                    <h3>1) Update Summary</h3>
-                    <div class="form-group"><label>What changed?</label><textarea name="summary" rows="2" required placeholder="Example: Hours changed and two courts were resurfaced."></textarea></div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Confidence</label>
-                            <select name="confidence_level"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select>
-                        </div>
-                        <div class="form-group"><label>Source</label><input type="text" name="source_notes" placeholder="Pro shop, city website..."></div>
-                    </div>
-                </div>
-                <div class="court-update-section">
-                    <h3>2) Location</h3>
-                    <div class="form-row">
-                        <div class="form-group"><label>Address</label><input type="text" name="loc_address"></div>
-                        <div class="form-group"><label>City</label><input type="text" name="loc_city"></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>State</label><input type="text" name="loc_state" maxlength="2" placeholder="CA"></div>
-                        <div class="form-group"><label>ZIP</label><input type="text" name="loc_zip"></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Latitude</label><input type="number" step="any" name="loc_latitude"></div>
-                        <div class="form-group"><label>Longitude</label><input type="number" step="any" name="loc_longitude"></div>
-                    </div>
-                    <div class="form-group"><label>Location notes</label><textarea name="location_notes" rows="2"></textarea></div>
-                </div>
-                <div class="court-update-section">
-                    <h3>3) Court Info</h3>
-                    <div class="form-row">
-                        <div class="form-group"><label>Court name</label><input type="text" name="court_name"></div>
-                        <div class="form-group"><label>Num courts</label><input type="number" min="1" max="100" name="court_num_courts"></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Surface</label><input type="text" name="court_surface_type" placeholder="Concrete, asphalt..."></div>
-                        <div class="form-group"><label>Setup</label>
-                            <select name="court_type"><option value="">No change</option><option value="dedicated">Dedicated</option><option value="converted">Converted</option><option value="shared">Shared</option></select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Indoor/outdoor</label>
-                            <select name="court_indoor"><option value="">No change</option><option value="true">Indoor</option><option value="false">Outdoor</option></select>
-                        </div>
-                        <div class="form-group"><label>Skill levels</label><input type="text" name="court_skill_levels" placeholder="all, beginner, 3.0+"></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Fees</label><input type="text" name="court_fees"></div>
-                        <div class="form-group"><label>Phone</label><input type="text" name="court_phone"></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Website</label><input type="url" name="court_website"></div>
-                        <div class="form-group"><label>Email</label><input type="email" name="court_email"></div>
-                    </div>
-                    <div class="form-group"><label>Description</label><textarea name="court_description" rows="2"></textarea></div>
-                    <div class="form-group">
-                        <label>Amenities</label>
-                        <div class="court-update-checkbox-grid">
-                            <label><input type="checkbox" name="amenity_lighted"> Lighted</label>
-                            <label><input type="checkbox" name="amenity_has_restrooms"> Restrooms</label>
-                            <label><input type="checkbox" name="amenity_has_parking"> Parking</label>
-                            <label><input type="checkbox" name="amenity_has_water"> Water</label>
-                            <label><input type="checkbox" name="amenity_has_pro_shop"> Pro shop</label>
-                            <label><input type="checkbox" name="amenity_has_ball_machine"> Ball machine</label>
-                            <label><input type="checkbox" name="amenity_wheelchair_accessible"> Accessible</label>
-                            <label><input type="checkbox" name="amenity_nets_provided"> Nets</label>
-                            <label><input type="checkbox" name="amenity_paddle_rental"> Paddle rental</label>
-                        </div>
-                    </div>
-                </div>
-                <div class="court-update-section">
-                    <h3>4) Hours</h3>
-                    <div class="form-group"><label>Court hours</label><textarea name="hours_text" rows="2" placeholder="Mon-Fri 7am-9pm..."></textarea></div>
-                    <div class="form-group"><label>Open play schedule</label><textarea name="open_play_schedule" rows="2"></textarea></div>
-                    <div class="form-group"><label>Hours notes</label><textarea name="hours_notes" rows="2"></textarea></div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Best times</label><input type="text" name="best_times"></div>
-                        <div class="form-group"><label>Closure notes</label><input type="text" name="closure_notes"></div>
-                    </div>
-                </div>
-                <div class="court-update-section">
-                    <h3>5) Images</h3>
-                    <div id="court-update-image-rows"></div>
-                    <button type="button" class="btn-secondary btn-sm" onclick="CourtUpdates.addImageRow()">+ Add Image Link</button>
-                    <div class="form-group" style="margin-top:10px">
-                        <label>Upload photos</label>
-                        <input type="file" id="court-update-image-files" accept="image/*" multiple>
-                    </div>
-                </div>
-                <div class="court-update-section">
-                    <h3>6) Events</h3>
-                    <div id="court-update-event-rows"></div>
-                    <button type="button" class="btn-secondary btn-sm" onclick="CourtUpdates.addEventRow()">+ Add Event</button>
-                </div>
-                <div class="court-update-section">
-                    <h3>7) Extra Notes</h3>
-                    <div class="form-group"><label>Parking notes</label><textarea name="parking_notes" rows="2"></textarea></div>
-                    <div class="form-group"><label>Access notes</label><textarea name="access_notes" rows="2"></textarea></div>
-                    <div class="form-group"><label>Court rules</label><textarea name="court_rules" rows="2"></textarea></div>
-                    <div class="form-group"><label>Additional info</label><textarea name="additional_info" rows="2"></textarea></div>
-                </div>
-                <button type="submit" class="btn-primary btn-full">Send Update For Review</button>
-            </form>
-            <div class="court-update-submissions">
-                <h3>My Recent Submissions</h3>
-                <div id="court-update-my-submissions"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Notifications Dropdown -->
-    <div id="notifications-dropdown" class="dropdown" style="display:none">
-        <div class="dropdown-header"><h3>Notifications</h3><button class="btn-text" onclick="App.markNotificationsRead()">Mark all read</button></div>
-        <div id="notifications-list" class="dropdown-list"></div>
-    </div>
-
-    <!-- Messages Inbox Dropdown -->
-    <div id="inbox-dropdown" class="dropdown inbox-dropdown" style="display:none">
-        <div class="dropdown-header">
-            <h3>Messages</h3>
-            <div class="inbox-tabs">
-                <button class="inbox-tab active" data-filter="all" onclick="Inbox.setFilter('all')">All</button>
-                <button class="inbox-tab" data-filter="direct" onclick="Inbox.setFilter('direct')">Direct</button>
-                <button class="inbox-tab" data-filter="sessions" onclick="Inbox.setFilter('sessions')">Sessions</button>
-            </div>
-        </div>
-        <div id="inbox-thread-list" class="dropdown-list"></div>
-    </div>
-
-    <!-- Chat Panel (DMs) -->
-    <div id="chat-panel" class="chat-panel" style="display:none">
-        <div class="chat-header">
-            <h3 id="chat-title">Chat</h3>
-            <button class="panel-close" onclick="Chat.close()">&times;</button>
-        </div>
-        <div id="chat-messages" class="chat-messages"></div>
-        <form class="chat-input" onsubmit="Chat.send(event)">
-            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
-            <button type="submit" class="btn-primary">Send</button>
+  <div id="app">
+    <!-- Auth screen -->
+    <section id="auth-screen" class="screen hidden">
+      <div class="auth-card">
+        <div class="auth-logo">🥒</div>
+        <h1>Picklepals</h1>
+        <p class="auth-tagline">Find courts. Meet players. Get on the court.</p>
+        <form id="auth-form">
+          <input type="text" id="auth-name" placeholder="Display name" autocomplete="name" class="hidden" />
+          <input type="email" id="auth-email" placeholder="Email" autocomplete="email" required />
+          <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required minlength="6" />
+          <p id="auth-error" class="form-error hidden"></p>
+          <button type="submit" class="btn btn-primary btn-block" id="auth-submit">Log in</button>
         </form>
-    </div>
+        <button class="btn-link" id="auth-toggle">New here? Create an account</button>
+      </div>
+    </section>
 
-    <!-- Schedule Day Popup (map + court) -->
-    <div id="schedule-day-popup" class="schedule-day-popup" style="display:none">
-        <div class="schedule-day-popup-overlay" onclick="MapView.closeDayPopup()"></div>
-        <div class="schedule-day-popup-panel">
-            <div class="schedule-day-popup-header">
-                <h3 id="schedule-day-popup-title">Schedule</h3>
-                <button class="modal-close" onclick="MapView.closeDayPopup()" aria-label="Close">&times;</button>
-            </div>
-            <div id="schedule-day-popup-body" class="schedule-day-popup-body"></div>
+    <!-- Main app -->
+    <main id="main-screen" class="screen hidden">
+      <!-- Courts tab -->
+      <section id="tab-courts" class="tab-panel">
+        <div id="map"></div>
+        <div class="map-topbar">
+          <input type="search" id="court-search" placeholder="Search courts or cities…" />
+          <button id="locate-btn" class="icon-btn" title="My location">📍</button>
         </div>
-    </div>
-
-    <!-- Leaderboard Popup -->
-    <div id="leaderboard-popup" class="schedule-day-popup" style="display:none">
-        <div class="schedule-day-popup-overlay" onclick="App.closeLeaderboardPopup()"></div>
-        <div class="schedule-day-popup-panel">
-            <div class="schedule-day-popup-header">
-                <h3>Leaderboard</h3>
-                <button class="modal-close" onclick="App.closeLeaderboardPopup()" aria-label="Close">&times;</button>
-            </div>
-            <div id="leaderboard-popup-body" class="schedule-day-popup-body"></div>
+        <div id="presence-banner" class="presence-banner hidden"></div>
+        <button id="list-toggle" class="pill-btn">☰ List</button>
+        <div id="court-list" class="sheet hidden">
+          <div class="sheet-handle"></div>
+          <h3 class="sheet-title">Courts in view</h3>
+          <div id="court-list-items"></div>
         </div>
-    </div>
+      </section>
 
-    <div id="toast-container"></div>
+      <!-- Play tab -->
+      <section id="tab-play" class="tab-panel hidden">
+        <header class="tab-header">
+          <h2>Play</h2>
+          <div class="segmented" id="play-segments">
+            <button data-seg="nearby" class="active">Nearby</button>
+            <button data-seg="mine">Mine</button>
+            <button data-seg="results">Results</button>
+            <button data-seg="rankings">Top</button>
+          </div>
+        </header>
+        <div id="play-content" class="tab-scroll"></div>
+        <button id="new-game-fab" class="fab">＋</button>
+      </section>
 
-    <!-- Scripts -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="js/api.js"></script>
-    <script src="js/datetime_picker.js"></script>
-    <script src="js/select_picker.js"></script>
-    <script src="js/auth.js"></script>
-    <script src="js/court_updates.js"></script>
-    <script src="js/admin.js"></script>
-    <script src="js/map.js"></script>
-    <script src="js/sessions.js"></script>
-    <script src="js/chat.js"></script>
-    <script src="js/inbox.js"></script>
-    <script src="js/profile.js"></script>
-    <script src="js/location.js"></script>
-    <script src="js/ranked.js"></script>
-    <script src="js/ranked_render.js"></script>
-    <script src="js/ranked_modals.js"></script>
-    <script src="js/ranked_challenges.js"></script>
-    <script src="js/ranked_tournaments.js"></script>
-    <script src="js/app.js"></script>
+      <!-- Chat tab -->
+      <section id="tab-chat" class="tab-panel hidden">
+        <header class="tab-header">
+          <h2>People</h2>
+          <div class="segmented" id="chat-segments">
+            <button data-seg="chats" class="active">Chats</button>
+            <button data-seg="friends">Friends</button>
+          </div>
+        </header>
+        <div id="chat-content" class="tab-scroll"></div>
+      </section>
+
+      <!-- Profile tab -->
+      <section id="tab-profile" class="tab-panel hidden">
+        <header class="tab-header"><h2>Profile</h2></header>
+        <div id="profile-content" class="tab-scroll"></div>
+      </section>
+
+      <!-- Bottom navigation -->
+      <nav id="bottom-nav">
+        <button data-tab="courts" class="nav-btn active"><span class="nav-icon">🗺️</span>Courts</button>
+        <button data-tab="play" class="nav-btn"><span class="nav-icon">🎾</span>Play<span id="play-badge" class="badge hidden"></span></button>
+        <button data-tab="chat" class="nav-btn"><span class="nav-icon">💬</span>Chat<span id="chat-badge" class="badge hidden"></span></button>
+        <button data-tab="profile" class="nav-btn"><span class="nav-icon">👤</span>Profile</button>
+      </nav>
+    </main>
+
+    <!-- Overlays -->
+    <div id="overlay-root"></div>
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
 </body>
 </html>

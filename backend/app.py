@@ -1,374 +1,93 @@
+"""Flask application bootstrap."""
 import os
-from urllib.parse import urlparse
-from flask import Flask, send_from_directory, request, jsonify
+import threading
+
+from flask import Flask, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
-from flask_socketio import SocketIO
-from flask_cors import CORS
-from sqlalchemy import inspect, text
-from backend.config import config
 
-db = SQLAlchemy()
-socketio = SocketIO()
+from backend.config import get_config
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-LEGACY_FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend')
-REACT_FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend-react', 'dist')
+db = SQLAlchemy(session_options={'expire_on_commit': False})
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FRONTEND_DIR = os.path.join(PROJECT_ROOT, 'frontend')
+BUNDLED_COURTS_FILE = os.path.join(PROJECT_ROOT, 'data', 'courts.json.gz')
 
 
-def _frontend_dir():
-    react_index = os.path.join(REACT_FRONTEND_DIR, 'index.html')
-    if os.path.exists(react_index):
-        return REACT_FRONTEND_DIR
-    return LEGACY_FRONTEND_DIR
+_seed_thread_started = False
 
 
-def _frontend_asset_exists(frontend_dir, filename):
-    if not filename:
-        return False
-    root = os.path.abspath(frontend_dir)
-    candidate = os.path.abspath(os.path.join(frontend_dir, filename))
-    if not candidate.startswith(root + os.sep):
-        return False
-    return os.path.isfile(candidate)
+def _seed_courts_background(app):
+    """Import the bundled court data on first boot (runs in a thread so deploys
+    don't time out while ~18k rows insert)."""
+    with app.app_context():
+        try:
+            from backend.models import Court
+            from backend.seed import import_courts_file
+            if Court.query.count() > 0:
+                return
+            count = import_courts_file(BUNDLED_COURTS_FILE)
+            app.logger.info('Auto-seeded %s courts from bundled data', count)
+        except Exception:
+            app.logger.exception('Court auto-seed failed')
 
 
-def _parse_allowed_origins(raw_origins):
-    if not raw_origins:
-        return '*'
-
-    if isinstance(raw_origins, (list, tuple, set)):
-        cleaned = [origin for origin in raw_origins if origin]
-        return cleaned or '*'
-
-    raw_text = str(raw_origins).strip()
-    if not raw_text or raw_text == '*':
-        return '*'
-
-    origins = [origin.strip() for origin in raw_text.split(',') if origin.strip()]
-    return origins or '*'
-
-
-def _canonical_origin(raw_origin):
-    text = str(raw_origin or '').strip()
-    if not text or text == '*':
-        return ''
-    candidate = text if '://' in text else f'https://{text}'
-    parsed = urlparse(candidate)
-    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
-        return ''
-    if not parsed.hostname:
-        return ''
-    try:
-        _ = parsed.port
-    except ValueError:
-        return ''
-    return f'{parsed.scheme}://{parsed.netloc}'
-
-
-def _derive_production_allowed_origins():
-    candidates = []
-    for key in ('CORS_ALLOWED_ORIGINS', 'PUBLIC_APP_URL', 'FRONTEND_URL', 'RENDER_EXTERNAL_URL'):
-        raw_value = os.environ.get(key, '')
-        if not raw_value:
-            continue
-        parts = [part.strip() for part in str(raw_value).split(',') if part.strip()]
-        candidates.extend(parts)
-
-    render_hostname = str(os.environ.get('RENDER_EXTERNAL_HOSTNAME') or '').strip()
-    if render_hostname:
-        candidates.append(f'https://{render_hostname}')
-
-    origins = []
-    seen = set()
-    for raw in candidates:
-        origin = _canonical_origin(raw)
-        if not origin or origin in seen:
-            continue
-        seen.add(origin)
-        origins.append(origin)
-    return origins
-
-
-def _run_lightweight_migrations():
-    """Apply small schema updates for local/dev databases without Alembic."""
-    inspector = inspect(db.engine)
-    table_names = inspector.get_table_names()
-    if 'user' not in table_names:
+def _maybe_auto_seed(app):
+    global _seed_thread_started
+    if _seed_thread_started or not app.config.get('AUTO_SEED_COURTS'):
         return
-
-    user_columns = {col['name'] for col in inspector.get_columns('user')}
-    court_columns = {col['name'] for col in inspector.get_columns('court')} if 'court' in table_names else set()
-    checkin_columns = {col['name'] for col in inspector.get_columns('check_in')} if 'check_in' in table_names else set()
-    match_columns = {col['name'] for col in inspector.get_columns('match')} if 'match' in table_names else set()
-    message_columns = {col['name'] for col in inspector.get_columns('message')} if 'message' in table_names else set()
-    with db.engine.begin() as connection:
-        if 'is_admin' not in user_columns:
-            connection.execute(text(
-                'ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0'
-            ))
-        if 'google_sub' not in user_columns:
-            connection.execute(text(
-                'ALTER TABLE "user" ADD COLUMN google_sub VARCHAR(255)'
-            ))
-            connection.execute(text(
-                'CREATE UNIQUE INDEX IF NOT EXISTS ix_user_google_sub ON "user" (google_sub)'
-            ))
-        if 'failed_login_attempts' not in user_columns:
-            connection.execute(text(
-                'ALTER TABLE "user" ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0'
-            ))
-        if 'locked_until' not in user_columns:
-            connection.execute(text(
-                'ALTER TABLE "user" ADD COLUMN locked_until TIMESTAMP'
-            ))
-        if 'password_reset_token_hash' not in user_columns:
-            connection.execute(text(
-                'ALTER TABLE "user" ADD COLUMN password_reset_token_hash VARCHAR(128)'
-            ))
-        if 'password_reset_token_expires_at' not in user_columns:
-            connection.execute(text(
-                'ALTER TABLE "user" ADD COLUMN password_reset_token_expires_at TIMESTAMP'
-            ))
-        connection.execute(text(
-            'CREATE INDEX IF NOT EXISTS ix_user_locked_until ON "user" (locked_until)'
-        ))
-        connection.execute(text(
-            'CREATE INDEX IF NOT EXISTS ix_user_password_reset_token_hash ON "user" (password_reset_token_hash)'
-        ))
-
-        if 'court' in table_names:
-            if 'county_slug' not in court_columns:
-                connection.execute(text(
-                    "ALTER TABLE court ADD COLUMN county_slug VARCHAR(80) NOT NULL DEFAULT 'humboldt'"
-                ))
-            connection.execute(text(
-                "UPDATE court SET county_slug = 'humboldt' WHERE county_slug IS NULL OR TRIM(county_slug) = ''"
-            ))
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_court_county_slug ON court (county_slug)'
-            ))
-
-        if 'check_in' in table_names and 'last_presence_ping_at' not in checkin_columns:
-            connection.execute(text(
-                'ALTER TABLE check_in ADD COLUMN last_presence_ping_at TIMESTAMP'
-            ))
-            connection.execute(text(
-                'UPDATE check_in SET last_presence_ping_at = checked_in_at WHERE last_presence_ping_at IS NULL'
-            ))
-
-        if 'message' in table_names:
-            if 'session_id' not in message_columns:
-                connection.execute(text(
-                    'ALTER TABLE message ADD COLUMN session_id INTEGER'
-                ))
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_message_court_type_created '
-                'ON message (court_id, msg_type, created_at)'
-            ))
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_message_session_type_created '
-                'ON message (session_id, msg_type, created_at)'
-            ))
-
-        # Ranked queue: ensure one active queue entry per user
-        if 'ranked_queue' in table_names:
-            connection.execute(text(
-                'DELETE FROM ranked_queue WHERE id NOT IN ('
-                '  SELECT MAX(id) FROM ranked_queue GROUP BY user_id'
-                ')'
-            ))
-            connection.execute(text(
-                'CREATE UNIQUE INDEX IF NOT EXISTS ix_ranked_queue_user '
-                'ON ranked_queue (user_id)'
-            ))
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_ranked_queue_court_joined_at '
-                'ON ranked_queue (court_id, joined_at)'
-            ))
-
-        if 'play_session_player' in table_names:
-            connection.execute(text(
-                'DELETE FROM play_session_player WHERE id NOT IN ('
-                '  SELECT MIN(id) FROM play_session_player GROUP BY session_id, user_id'
-                ')'
-            ))
-            connection.execute(text(
-                'CREATE UNIQUE INDEX IF NOT EXISTS ix_play_session_player_session_user '
-                'ON play_session_player (session_id, user_id)'
-            ))
-
-        # Performance indexes for ranked queries
-        if 'match' in table_names:
-            if 'tournament_id' not in match_columns:
-                connection.execute(text(
-                    'ALTER TABLE "match" ADD COLUMN tournament_id INTEGER'
-                ))
-            if 'bracket_round' not in match_columns:
-                connection.execute(text(
-                    'ALTER TABLE "match" ADD COLUMN bracket_round INTEGER'
-                ))
-            if 'bracket_slot' not in match_columns:
-                connection.execute(text(
-                    'ALTER TABLE "match" ADD COLUMN bracket_slot INTEGER'
-                ))
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_match_court_status '
-                'ON match (court_id, status)'
-            ))
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_match_tournament_round_slot '
-                'ON match (tournament_id, bracket_round, bracket_slot)'
-            ))
-        if 'match_player' in table_names:
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_match_player_user_confirmed '
-                'ON match_player (user_id, confirmed)'
-            ))
-        if 'ranked_lobby' in table_names:
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_ranked_lobby_court_status '
-                'ON ranked_lobby (court_id, status)'
-            ))
-        if 'tournament' in table_names:
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_tournament_court_status_start '
-                'ON tournament (court_id, status, start_time)'
-            ))
-        if 'tournament_participant' in table_names:
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_tournament_participant_tournament_status '
-                'ON tournament_participant (tournament_id, participant_status)'
-            ))
-        if 'tournament_result' in table_names:
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_tournament_result_court_points '
-                'ON tournament_result (court_id, points)'
-            ))
-            connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS ix_tournament_result_user_created '
-                'ON tournament_result (user_id, created_at)'
-            ))
-
-
-def _repair_court_county_assignments():
-    """Keep CA court county slugs aligned with coordinate bounds.
-
-    Only processes California courts — other states don't have bounds data.
-    """
+    if not os.path.exists(BUNDLED_COURTS_FILE):
+        app.logger.warning('AUTO_SEED_COURTS set but %s is missing', BUNDLED_COURTS_FILE)
+        return
     from backend.models import Court
-    from backend.services.california_county_bounds import (
-        is_point_within_county_bounds,
-        resolve_county_slug_for_point,
-    )
-
-    updated = 0
-    removed = 0
-    ca_courts = Court.query.filter(
-        db.or_(Court.state == 'CA', Court.state.is_(None), Court.state == '')
-    ).all()
-    for court in ca_courts:
-        lat = getattr(court, 'latitude', None)
-        lng = getattr(court, 'longitude', None)
-        if lat is None or lng is None:
-            continue
-
-        if is_point_within_county_bounds(lat, lng, court.county_slug):
-            continue
-
-        resolved_slug = resolve_county_slug_for_point(lat, lng, preferred_slug='')
-        if resolved_slug:
-            if resolved_slug != court.county_slug:
-                court.county_slug = resolved_slug
-                updated += 1
-        else:
-            db.session.delete(court)
-            removed += 1
-
-    if updated or removed:
-        db.session.commit()
+    try:
+        if Court.query.count() > 0:
+            return
+    except Exception:
+        app.logger.exception('Could not check court count for auto-seed')
+        return
+    _seed_thread_started = True
+    threading.Thread(target=_seed_courts_background, args=(app,), daemon=True).start()
 
 
-def create_app(config_name='development'):
-    app = Flask(__name__)
-    app.config.from_object(config[config_name])
-
-    allowed_origins = _parse_allowed_origins(app.config.get('CORS_ALLOWED_ORIGINS', '*'))
-    if str(config_name).strip().lower() == 'production':
-        secret_key = str(app.config.get('SECRET_KEY') or '').strip()
-        if not secret_key or secret_key == 'dev-secret-key-change-in-prod':
-            raise RuntimeError('SECRET_KEY must be set to a non-default value in production')
-        if allowed_origins == '*':
-            derived_origins = _derive_production_allowed_origins()
-            if not derived_origins:
-                raise RuntimeError('CORS_ALLOWED_ORIGINS must be explicitly set in production')
-            allowed_origins = derived_origins
-            app.config['CORS_ALLOWED_ORIGINS'] = ','.join(derived_origins)
-
+def create_app(config_name=None):
+    app = Flask(__name__, static_folder=None)
+    app.config.from_object(get_config(config_name))
     db.init_app(app)
-    socketio.init_app(
-        app,
-        cors_allowed_origins=allowed_origins,
-        async_mode=app.config.get('SOCKETIO_ASYNC_MODE', 'threading'),
-    )
-    CORS(app, resources={r'/api/*': {'origins': allowed_origins}})
-
-    @app.before_request
-    def _enforce_origin_for_mutating_api_requests():
-        if request.method in {'GET', 'HEAD', 'OPTIONS'}:
-            return None
-        if not request.path.startswith('/api/'):
-            return None
-
-        origin = str(request.headers.get('Origin') or '').strip()
-        if not origin:
-            return None
-
-        configured_origins = _parse_allowed_origins(
-            app.config.get('CORS_ALLOWED_ORIGINS', '*')
-        )
-        if configured_origins != '*' and origin not in configured_origins:
-            return jsonify({'error': 'Invalid request origin'}), 403
-
-        auth_header = str(request.headers.get('Authorization') or '').strip()
-        if not auth_header:
-            return None
-
-        csrf_header = request.headers.get('X-CSRF-Token')
-        from backend.auth_utils import csrf_token_matches
-        if not csrf_token_matches(auth_header, csrf_header):
-            return jsonify({'error': 'Invalid CSRF token'}), 403
-        return None
-
-    from backend.routes.auth import auth_bp
-    from backend.routes.app_shell import app_bp
-    from backend.routes.courts import courts_bp
-    from backend.routes.games import games_bp
-    from backend.routes.sessions import sessions_bp
-    from backend.routes.chat import chat_bp
-    from backend.routes.presence import presence_bp
-    from backend.routes.ranked import ranked_bp
-
-    app.register_blueprint(app_bp, url_prefix='/api/app')
-    app.register_blueprint(auth_bp, url_prefix='/api/auth')
-    app.register_blueprint(courts_bp, url_prefix='/api/courts')
-    app.register_blueprint(games_bp, url_prefix='/api/games')
-    app.register_blueprint(sessions_bp, url_prefix='/api/sessions')
-    app.register_blueprint(chat_bp, url_prefix='/api/chat')
-    app.register_blueprint(presence_bp, url_prefix='/api/presence')
-    app.register_blueprint(ranked_bp, url_prefix='/api/ranked')
-
-    @app.route('/', defaults={'filename': ''})
-    @app.route('/<path:filename>')
-    def frontend_files(filename):
-        frontend_dir = _frontend_dir()
-        if filename and _frontend_asset_exists(frontend_dir, filename):
-            return send_from_directory(frontend_dir, filename)
-        return send_from_directory(frontend_dir, 'index.html')
+    _register_blueprints(app)
 
     with app.app_context():
-        from backend import models  # noqa: F401
-        db.create_all()
-        _run_lightweight_migrations()
-        _repair_court_county_assignments()
+        if app.config.get('AUTO_CREATE_DB'):
+            db.create_all()
+        _maybe_auto_seed(app)
+
+    @app.get('/health')
+    def health():
+        return jsonify({'status': 'ok', 'env': app.config.get('APP_ENV')})
+
+    @app.get('/')
+    def index():
+        return send_from_directory(FRONTEND_DIR, 'index.html')
+
+    @app.get('/<path:filename>')
+    def frontend_assets(filename):
+        return send_from_directory(FRONTEND_DIR, filename)
 
     return app
+
+
+def _register_blueprints(app):
+    from backend.routes.auth import auth_bp
+    from backend.routes.chat import chat_bp
+    from backend.routes.courts import courts_bp
+    from backend.routes.games import games_bp
+    from backend.routes.social import social_bp
+
+    app.register_blueprint(auth_bp, url_prefix='/api')
+    app.register_blueprint(courts_bp, url_prefix='/api')
+    app.register_blueprint(games_bp, url_prefix='/api')
+    app.register_blueprint(social_bp, url_prefix='/api')
+    app.register_blueprint(chat_bp, url_prefix='/api')
+
+
+app = create_app()
