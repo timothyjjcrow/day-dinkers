@@ -706,13 +706,6 @@
       </div>
     `, { court: true });
 
-    // Collapse the hero to a slim bar once the body scrolls, keeping the
-    // name + share/save/close buttons pinned and visible the whole time.
-    const cdScroll = modal.querySelector('.cd-scroll');
-    cdScroll.addEventListener('scroll', () => {
-      modal.classList.toggle('collapsed', cdScroll.scrollTop > 36);
-    });
-
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
       if (checkedIn) {
         try {
