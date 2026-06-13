@@ -572,41 +572,56 @@
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(backdrop); });
     root.appendChild(backdrop);
     backdrop.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => closeModal(backdrop)));
+
+    // Mark the element that's actually allowed to scroll so we can block the
+    // page/map behind from scrolling when you drag anywhere else on the sheet.
+    const scroller = backdrop.querySelector('.thread-msgs, .cd-scroll') || backdrop.querySelector('.modal');
+    if (scroller) scroller.setAttribute('data-scroll', '');
+    backdrop.addEventListener('touchmove', (e) => {
+      if (!e.target.closest('[data-scroll]')) e.preventDefault();
+    }, { passive: false });
+
+    document.documentElement.classList.add('modal-open');
     return backdrop;
   }
   function closeModal(el) {
     if (el && el._cleanup) el._cleanup();
     el?.remove();
+    if (!$('#overlay-root').querySelector('.modal-backdrop')) {
+      document.documentElement.classList.remove('modal-open');
+    }
   }
 
   // Keep a chat sheet pinned to the visible viewport so the mobile keyboard
-  // never covers the input or pushes messages out of view.
+  // never covers the input — without hijacking the user's scrolling.
   function attachChatViewport(backdrop, msgsEl, inputEl) {
     const stick = () => { msgsEl.scrollTop = msgsEl.scrollHeight; };
     stick();
     const vv = window.visualViewport;
     if (!vv) return;
-    const apply = () => {
-      if (!document.body.contains(backdrop)) {
-        vv.removeEventListener('resize', apply);
-        vv.removeEventListener('scroll', apply);
-        return;
-      }
+    // Only reposition the sheet to the visible viewport — never force-scroll.
+    const place = () => {
+      if (!document.body.contains(backdrop)) { detach(); return; }
       backdrop.style.top = `${vv.offsetTop}px`;
       backdrop.style.height = `${vv.height}px`;
       backdrop.style.bottom = 'auto';
-      stick();
     };
-    apply();
-    vv.addEventListener('resize', apply);
-    vv.addEventListener('scroll', apply);
-    if (inputEl) {
-      inputEl.addEventListener('focus', () => setTimeout(() => { apply(); stick(); }, 300));
+    let lastH = vv.height;
+    const onResize = () => {
+      place();
+      // Keyboard opening (viewport shrank) → keep the latest messages in view.
+      if (vv.height < lastH - 80) stick();
+      lastH = vv.height;
+    };
+    function detach() {
+      vv.removeEventListener('resize', onResize);
+      vv.removeEventListener('scroll', place);
     }
-    backdrop._cleanup = () => {
-      vv.removeEventListener('resize', apply);
-      vv.removeEventListener('scroll', apply);
-    };
+    place();
+    vv.addEventListener('resize', onResize);
+    vv.addEventListener('scroll', place);
+    if (inputEl) inputEl.addEventListener('focus', () => setTimeout(() => { place(); stick(); }, 300));
+    backdrop._cleanup = detach;
   }
   const modalHead = (title) => `<div class="modal-head"><h3>${esc(title)}</h3><button class="modal-close">✕</button></div>`;
 
