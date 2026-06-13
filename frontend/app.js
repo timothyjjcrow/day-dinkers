@@ -562,17 +562,50 @@
   }
 
   // ---------- Modal helpers ----------
-  function openModal(html) {
+  function openModal(html, opts = {}) {
     const root = $('#overlay-root');
     const backdrop = document.createElement('div');
-    backdrop.className = 'modal-backdrop';
+    backdrop.className = 'modal-backdrop' + (opts.chat ? ' chat-modal' : '');
     backdrop.innerHTML = `<div class="modal">${html}</div>`;
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(backdrop); });
     root.appendChild(backdrop);
     backdrop.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => closeModal(backdrop)));
     return backdrop;
   }
-  function closeModal(el) { el?.remove(); }
+  function closeModal(el) {
+    if (el && el._cleanup) el._cleanup();
+    el?.remove();
+  }
+
+  // Keep a chat sheet pinned to the visible viewport so the mobile keyboard
+  // never covers the input or pushes messages out of view.
+  function attachChatViewport(backdrop, msgsEl, inputEl) {
+    const stick = () => { msgsEl.scrollTop = msgsEl.scrollHeight; };
+    stick();
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const apply = () => {
+      if (!document.body.contains(backdrop)) {
+        vv.removeEventListener('resize', apply);
+        vv.removeEventListener('scroll', apply);
+        return;
+      }
+      backdrop.style.top = `${vv.offsetTop}px`;
+      backdrop.style.height = `${vv.height}px`;
+      backdrop.style.bottom = 'auto';
+      stick();
+    };
+    apply();
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    if (inputEl) {
+      inputEl.addEventListener('focus', () => setTimeout(() => { apply(); stick(); }, 300));
+    }
+    backdrop._cleanup = () => {
+      vv.removeEventListener('resize', apply);
+      vv.removeEventListener('scroll', apply);
+    };
+  }
   const modalHead = (title) => `<div class="modal-head"><h3>${esc(title)}</h3><button class="modal-close">✕</button></div>`;
 
   // ---------- Court detail ----------
@@ -1728,7 +1761,7 @@
     try { data = await api(`/chat/${userId}`); } catch (e) { toast(e.message); return; }
 
     const modal = openModal(`
-      <div class="thread" style="height:84dvh;margin:-10px -18px -28px">
+      <div class="thread">
         <div class="thread-head">
           <button class="modal-close" style="font-size:18px">‹</button>
           ${avatarHtml(data.user, 'sm')}
@@ -1743,7 +1776,7 @@
           <button type="submit">➤</button>
         </form>
       </div>
-    `);
+    `, { chat: true });
 
     const msgsEl = modal.querySelector('#thread-msgs');
     let lastId = 0;
@@ -1760,6 +1793,7 @@
       msgsEl.scrollTop = msgsEl.scrollHeight;
     };
     renderMsgs(data.items, false);
+    attachChatViewport(modal, msgsEl, modal.querySelector('#thread-text'));
     refreshMe();
 
     clearInterval(state.threadPollTimer);
@@ -1789,7 +1823,7 @@
     try { data = await api(`/courts/${court.id}/chat`); } catch (e) { toast(e.message); return; }
 
     const modal = openModal(`
-      <div class="thread" style="height:84dvh;margin:-10px -18px -28px">
+      <div class="thread">
         <div class="thread-head">
           <button class="modal-close" style="font-size:18px">‹</button>
           <span style="font-size:22px">🏟</span>
@@ -1804,7 +1838,7 @@
           <button type="submit">➤</button>
         </form>
       </div>
-    `);
+    `, { chat: true });
 
     const msgsEl = modal.querySelector('#cc-msgs');
     let lastId = 0;
@@ -1828,6 +1862,7 @@
       msgsEl.scrollTop = msgsEl.scrollHeight;
     };
     renderMsgs(data.items, false);
+    attachChatViewport(modal, msgsEl, modal.querySelector('#cc-text'));
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
