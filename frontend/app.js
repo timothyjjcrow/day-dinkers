@@ -565,7 +565,9 @@
   function openModal(html, opts = {}) {
     const root = $('#overlay-root');
     const backdrop = document.createElement('div');
-    backdrop.className = 'modal-backdrop' + (opts.chat ? ' chat-modal' : '');
+    backdrop.className = 'modal-backdrop'
+      + (opts.chat ? ' chat-modal' : '')
+      + (opts.court ? ' court-modal' : '');
     backdrop.innerHTML = `<div class="modal">${html}</div>`;
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(backdrop); });
     root.appendChild(backdrop);
@@ -677,6 +679,7 @@
           <div>${esc([court.address, court.city].filter(Boolean).join(', '))}</div>
         </div>
       </div>
+      <div class="cd-scroll">
       <button class="btn ${checkedIn ? 'btn-danger' : 'btn-primary'} btn-block" id="cd-checkin" style="padding:15px;margin-bottom:10px">
         ${checkedIn ? 'Check out' : "📍 I'm here — check in"}
       </button>
@@ -700,7 +703,15 @@
       ${(court.recent_results || []).length ? `
         <div class="section-label">Recent results here</div>
         ${court.recent_results.map(resultRowHtml).join('')}` : ''}
-    `);
+      </div>
+    `, { court: true });
+
+    // Collapse the hero to a slim bar once the body scrolls, keeping the
+    // name + share/save/close buttons pinned and visible the whole time.
+    const cdScroll = modal.querySelector('.cd-scroll');
+    cdScroll.addEventListener('scroll', () => {
+      modal.classList.toggle('collapsed', cdScroll.scrollTop > 36);
+    });
 
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
       if (checkedIn) {
