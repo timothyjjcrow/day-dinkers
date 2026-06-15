@@ -8,7 +8,9 @@ from backend.app import db
 from backend.models import (
     Court,
     GAME_TYPES,
+    GAME_VISIBILITIES,
     Game,
+    GameInvite,
     GamePlayer,
     User,
     notify,
@@ -16,6 +18,7 @@ from backend.models import (
 )
 from backend.routes.auth import login_required, optional_current_user
 from backend.routes.courts import haversine_miles
+from backend.routes.social import friend_ids
 
 games_bp = Blueprint('games', __name__)
 
@@ -79,10 +82,15 @@ def list_games():
             Court.longitude.between(lng - lng_delta, lng + lng_delta),
         )
 
-    games = query.order_by(Game.scheduled_at.asc()).limit(100).all()
+    games = query.order_by(Game.scheduled_at.asc()).limit(150).all()
     viewer_id = current_user.id if current_user else None
+    viewer_friends = friend_ids(viewer_id) if viewer_id else set()
+
     items = []
     for game in games:
+        # In the public/nearby feed, only show games the viewer is allowed to see.
+        if not mine and not game.visible_to(viewer_id, viewer_friends):
+            continue
         item = game.to_dict(viewer_id)
         court = game.court
         if lat is not None and lng is not None and court and court.latitude is not None:
@@ -92,7 +100,7 @@ def list_games():
         items.append(item)
     if lat is not None and lng is not None and not mine:
         items.sort(key=lambda i: (i.get('distance_miles', 1e9), i['scheduled_at']))
-    return jsonify({'items': items})
+    return jsonify({'items': items[:100]})
 
 
 @games_bp.get('/games/history')
@@ -134,22 +142,8 @@ def create_game():
     if game_type == 'ranked':
         max_players = 4 if max_players > 2 else 2
 
-    game = Game(
-        court_id=court.id,
-        creator_id=g.current_user.id,
-        scheduled_at=scheduled_at,
-        game_type=game_type,
-        max_players=max_players,
-        notes=str(payload.get('notes') or '').strip()[:500],
-    )
-    db.session.add(game)
-    db.session.flush()
-    db.session.add(GamePlayer(game_id=game.id, user_id=g.current_user.id))
-
-    label = 'ranked game' if game_type == 'ranked' else 'game'
-
-    # Personal invites to specific players
-    invited_ids = set()
+    # Collect any specifically-invited players (valid, real, not self)
+    invited_ids = []
     for raw_id in (payload.get('invite_user_ids') or [])[:20]:
         try:
             invitee_id = int(raw_id)
@@ -159,20 +153,42 @@ def create_game():
             continue
         if not db.session.get(User, invitee_id):
             continue
-        invited_ids.add(invitee_id)
-        notify(
-            invitee_id,
-            'game_invite_direct',
-            f'{g.current_user.display_name} invited you to a {label} at {court.name}',
-            related_user_id=g.current_user.id,
-            related_game_id=game.id,
-        )
+        invited_ids.append(invitee_id)
 
-    if payload.get('notify_friends', True):
-        from backend.routes.social import friend_ids
+    # Visibility: open (anyone nearby) / friends (all friends) / private (invited only)
+    visibility = str(payload.get('visibility') or '').strip().lower()
+    if visibility not in GAME_VISIBILITIES:
+        visibility = 'private' if invited_ids else 'open'
+    if visibility == 'private' and not invited_ids:
+        return jsonify({'error': 'no_invitees'}), 400
+
+    game = Game(
+        court_id=court.id,
+        creator_id=g.current_user.id,
+        scheduled_at=scheduled_at,
+        game_type=game_type,
+        visibility=visibility,
+        max_players=max_players,
+        notes=str(payload.get('notes') or '').strip()[:500],
+    )
+    db.session.add(game)
+    db.session.flush()
+    db.session.add(GamePlayer(game_id=game.id, user_id=g.current_user.id))
+
+    label = 'ranked game' if game_type == 'ranked' else 'game'
+
+    if visibility == 'private':
+        for uid in invited_ids:
+            db.session.add(GameInvite(game_id=game.id, user_id=uid))
+            notify(
+                uid,
+                'game_invite_direct',
+                f'{g.current_user.display_name} invited you to a {label} at {court.name}',
+                related_user_id=g.current_user.id,
+                related_game_id=game.id,
+            )
+    elif visibility == 'friends':
         for friend_id in friend_ids(g.current_user.id):
-            if friend_id in invited_ids:
-                continue
             notify(
                 friend_id,
                 'game_invite',
@@ -180,6 +196,7 @@ def create_game():
                 related_user_id=g.current_user.id,
                 related_game_id=game.id,
             )
+    # open: publicly discoverable in the nearby feed, no targeted notifications
 
     db.session.commit()
     return jsonify(game.to_dict(g.current_user.id)), 201
@@ -206,6 +223,9 @@ def join_game(game_id):
         return jsonify(game.to_dict(g.current_user.id))
     if len(game.players) >= game.max_players:
         return jsonify({'error': 'game_full'}), 400
+    # Respect visibility: you can only join games you'd be allowed to see.
+    if not game.visible_to(g.current_user.id, friend_ids(g.current_user.id)):
+        return jsonify({'error': 'not_invited'}), 403
 
     db.session.add(GamePlayer(game=game, user_id=g.current_user.id))
     if game.creator_id != g.current_user.id:
@@ -480,12 +500,14 @@ def challenge_user(user_id):
         creator_id=g.current_user.id,
         scheduled_at=utcnow(),
         game_type='ranked',
+        visibility='private',
         max_players=2,
         notes=f'⚔️ {g.current_user.display_name} challenged {target.display_name}!',
     )
     db.session.add(game)
     db.session.flush()
     db.session.add(GamePlayer(game_id=game.id, user_id=g.current_user.id))
+    db.session.add(GameInvite(game_id=game.id, user_id=target.id))
     notify(
         target.id,
         'challenge',
@@ -541,10 +563,7 @@ def recent_results():
     current_user = optional_current_user()
     viewer_id = current_user.id if current_user else None
 
-    friends = set()
-    if current_user:
-        from backend.routes.social import friend_ids
-        friends = friend_ids(current_user.id)
+    friends = friend_ids(current_user.id) if current_user else set()
 
     games = (
         Game.query.filter(Game.status == 'completed')
@@ -561,7 +580,9 @@ def recent_results():
         court = game.court
         if lat is not None and lng is not None and court and court.latitude is not None:
             distance = haversine_miles(lat, lng, court.latitude, court.longitude)
-        if not (involves_me or involves_friend or (distance is not None and distance <= 100)):
+        nearby = distance is not None and distance <= 100
+        # Strangers only see open games nearby; private/friends stay among their people.
+        if not (involves_me or involves_friend or (nearby and game.visibility == 'open')):
             continue
         item = game.to_dict(viewer_id)
         item['involves_friend'] = involves_friend

@@ -469,6 +469,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .type-cards button small { font-size: 10.5px; color: var(--ink-soft); }
 .type-cards button.active { border-color: var(--green-600); background: var(--green-50); }
 .type-cards button[data-val="ranked"].active { border-color: #8b5cf6; background: #f5f3ff; }
+.vis-cards button { padding: 9px 3px; }
+.vis-cards button small { font-size: 9.5px; line-height: 1.1; }
+.vis-cards button[data-vis="private"].active { border-color: #8b5cf6; background: #f5f3ff; }
 .quick-times button.active { background: var(--ink); border-color: var(--ink); color: #fff; }
 .invite-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .invite-chip {

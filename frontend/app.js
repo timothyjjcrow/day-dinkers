@@ -863,6 +863,11 @@
     const typeTag = game.game_type === 'ranked'
       ? '<span class="tag ranked" style="margin:0 0 0 8px">🏆 Ranked</span>'
       : '<span class="tag" style="margin:0 0 0 8px">Casual</span>';
+    const visTag = game.visibility === 'private'
+      ? '<span class="tag" style="margin:0 0 0 6px">🔒 Invite</span>'
+      : game.visibility === 'friends'
+        ? '<span class="tag" style="margin:0 0 0 6px">🤝 Friends</span>'
+        : '';
     const host = game.players.find((p) => p.user_id === game.creator_id);
     const hostLabel = host ? ` · Host: ${esc(host.display_name)}` : '';
     const avatars = game.players.slice(0, 5).map((p) => avatarHtml(p, 'sm')).join('');
@@ -914,7 +919,7 @@
       <div class="card" style="${cardStyle};cursor:pointer" data-open-game="${game.id}">
         <div class="row" style="margin-bottom:8px">
           <div class="row-main">
-            <div class="row-title">${esc(fmtDateTime(game.scheduled_at))}${typeTag}</div>
+            <div class="row-title">${esc(fmtDateTime(game.scheduled_at))}${typeTag}${visTag}</div>
             <div class="row-sub">${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</div>
           </div>
           <span class="chev">›</span>
@@ -1320,19 +1325,20 @@
         </div>
       </div>
 
-      ${friends.length ? `
-        <div class="form-field">
-          <label>Invite players</label>
-          <div class="invite-chips" id="ng-invites">
-            <button type="button" class="invite-chip active" id="ng-all-friends">🔔 All friends</button>
-            ${friendChips}
-          </div>
-          <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">Everyone you pick gets a personal invite.</p>
-        </div>` : `
-        <label class="row" style="margin-bottom:14px;cursor:pointer">
-          <input type="checkbox" id="ng-notify" checked style="width:auto" />
-          <span style="font-size:14px">Let my friends know 🔔</span>
-        </label>`}
+      <div class="form-field">
+        <label>Who can join?</label>
+        <div class="type-cards vis-cards" id="ng-vis">
+          <button type="button" data-vis="open" class="active"><span style="font-size:19px">🌍</span><b>Anyone</b><small>Nearby players</small></button>
+          <button type="button" data-vis="friends"><span style="font-size:19px">🤝</span><b>Friends</b><small>All your friends</small></button>
+          <button type="button" data-vis="private"><span style="font-size:19px">🔒</span><b>Specific</b><small>Only who you pick</small></button>
+        </div>
+        <div id="ng-friends-wrap" class="hidden" style="margin-top:10px">
+          ${friends.length
+            ? `<div class="invite-chips" id="ng-invites">${friendChips}</div>
+               <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">Pick who to invite — only they will see this game.</p>`
+            : '<p class="row-sub">Add friends first to invite specific people.</p>'}
+        </div>
+      </div>
 
       <div class="form-field">
         <input type="text" id="ng-notes" maxlength="200" placeholder="Note (optional) — e.g. All levels welcome!" />
@@ -1427,32 +1433,28 @@
       modal.querySelectorAll('#ng-type button').forEach((b) => b.classList.toggle('active', b === btn));
     });
 
-    // --- Invites ---
+    // --- Visibility / invites ---
+    let visibility = 'open';
     const inviteIds = new Set();
-    let allFriends = true;
-    const allBtn = modal.querySelector('#ng-all-friends');
-    if (allBtn) {
-      modal.querySelector('#ng-invites').addEventListener('click', (e) => {
-        const btn = e.target.closest('button');
+    const friendsWrap = modal.querySelector('#ng-friends-wrap');
+    modal.querySelector('#ng-vis').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      visibility = btn.dataset.vis;
+      modal.querySelectorAll('#ng-vis button').forEach((b) => b.classList.toggle('active', b === btn));
+      friendsWrap.classList.toggle('hidden', visibility !== 'private');
+    });
+    const invitesEl = modal.querySelector('#ng-invites');
+    if (invitesEl) {
+      invitesEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-fid]');
         if (!btn) return;
-        if (btn === allBtn) {
-          allFriends = !allFriends;
-          allBtn.classList.toggle('active', allFriends);
-        } else if (btn.dataset.fid) {
-          const fid = Number(btn.dataset.fid);
-          if (inviteIds.has(fid)) inviteIds.delete(fid);
-          else inviteIds.add(fid);
-          btn.classList.toggle('active', inviteIds.has(fid));
-          // Picking specific people usually means you don't want to blast everyone
-          if (inviteIds.size === 1 && allFriends) {
-            allFriends = false;
-            allBtn.classList.remove('active');
-          }
-        }
-        const hint = modal.querySelector('#ng-invite-hint');
-        hint.textContent = inviteIds.size
-          ? `${inviteIds.size} personal invite${inviteIds.size === 1 ? '' : 's'}${allFriends ? ' + all friends notified' : ''}`
-          : (allFriends ? 'All friends get notified.' : 'No one will be notified.');
+        const fid = Number(btn.dataset.fid);
+        if (inviteIds.has(fid)) inviteIds.delete(fid); else inviteIds.add(fid);
+        btn.classList.toggle('active', inviteIds.has(fid));
+        modal.querySelector('#ng-invite-hint').textContent = inviteIds.size
+          ? `${inviteIds.size} invited — only they will see this game.`
+          : 'Pick who to invite — only they will see this game.';
       });
     }
 
@@ -1473,6 +1475,10 @@
         scheduledAt.setHours(selHour, 0, 0, 0);
         if (scheduledAt.getTime() < Date.now() - 10 * 60000) { toast('That time already passed today'); return; }
       }
+      if (visibility === 'private' && inviteIds.size === 0) {
+        toast('Pick at least one person to invite');
+        return;
+      }
       const btn = e.currentTarget;
       if (btn.disabled) return;
       btn.disabled = true;
@@ -1483,10 +1489,10 @@
             court_id: Number(courtId),
             scheduled_at: scheduledAt.toISOString(),
             game_type: gameType,
+            visibility,
             max_players: Number(modal.querySelector('#ng-max').value),
             notes: modal.querySelector('#ng-notes').value.trim(),
-            notify_friends: allBtn ? allFriends : modal.querySelector('#ng-notify').checked,
-            invite_user_ids: [...inviteIds],
+            invite_user_ids: visibility === 'private' ? [...inviteIds] : [],
           }),
         });
         closeModal(modal);

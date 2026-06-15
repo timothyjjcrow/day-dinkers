@@ -192,7 +192,7 @@ def test_game_create_notifies_friends(client):
     client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(b['token']))
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
 
-    make_game(client, a['token'], court_id, game_type='ranked')
+    make_game(client, a['token'], court_id, game_type='ranked', visibility='friends')
 
     notes = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()
     kinds = [n['kind'] for n in notes['items']]
@@ -202,9 +202,8 @@ def test_game_create_notifies_friends(client):
     assert 'Larson Park' in invite['title']
 
 
-def test_game_create_notify_friends_opt_out(client):
-    from datetime import timedelta
-    from backend.models import utcnow
+def test_open_game_public_no_notifications(client):
+    # Open games are publicly discoverable but send no targeted notifications.
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
     res = client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=auth_headers(a['token']))
@@ -212,16 +211,104 @@ def test_game_create_notify_friends_opt_out(client):
     client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(b['token']))
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
 
-    when = (utcnow() + timedelta(hours=24)).isoformat() + 'Z'
-    res = client.post('/api/games', json={
-        'court_id': court_id,
-        'scheduled_at': when,
-        'notify_friends': False,
-    }, headers=auth_headers(a['token']))
-    assert res.status_code == 201
+    game = make_game(client, a['token'], court_id, visibility='open')
+    assert game['visibility'] == 'open'
 
     notes = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()
-    assert all(n['kind'] != 'game_invite' for n in notes['items'])
+    assert all(n['kind'] not in ('game_invite', 'game_invite_direct') for n in notes['items'])
+
+    # A complete stranger nearby still sees an open game
+    stranger = register(client, 'z@example.com', 'Zed')
+    feed = client.get('/api/games?lat=33.66&lng=-117.91', headers=auth_headers(stranger['token'])).get_json()
+    assert any(g['id'] == game['id'] for g in feed['items'])
+
+
+def test_visibility_modes_feed_access(client):
+    """Open shows to everyone nearby; friends only to friends; private only to invitees."""
+    a = register(client, 'a@example.com', 'Ana')      # creator
+    friend = register(client, 'f@example.com', 'Fred')  # a's friend
+    invitee = register(client, 'i@example.com', 'Ivy')  # a's friend + invited
+    stranger = register(client, 's@example.com', 'Sam')  # unrelated, nearby
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    for u in (friend, invitee):
+        res = client.post('/api/friends/request', json={'user_id': u['user']['id']}, headers=auth_headers(a['token']))
+        fid = res.get_json()['friendship_id']
+        client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(u['token']))
+
+    open_g = make_game(client, a['token'], court_id, visibility='open')
+    friends_g = make_game(client, a['token'], court_id, visibility='friends')
+    private_g = make_game(client, a['token'], court_id, visibility='private',
+                          invite_user_ids=[invitee['user']['id']])
+
+    def nearby_ids(tok):
+        feed = client.get('/api/games?lat=33.66&lng=-117.91', headers=auth_headers(tok)).get_json()
+        return {g['id'] for g in feed['items']}
+
+    # Stranger: only the open game
+    s_ids = nearby_ids(stranger['token'])
+    assert open_g['id'] in s_ids
+    assert friends_g['id'] not in s_ids
+    assert private_g['id'] not in s_ids
+
+    # Friend (not invited): open + friends, NOT the private one
+    f_ids = nearby_ids(friend['token'])
+    assert open_g['id'] in f_ids
+    assert friends_g['id'] in f_ids
+    assert private_g['id'] not in f_ids
+
+    # Invitee: sees all three (friend of creator + invited)
+    i_ids = nearby_ids(invitee['token'])
+    assert {open_g['id'], friends_g['id'], private_g['id']} <= i_ids
+
+    # Invitee got a personal invite notification; friend did NOT for the private game
+    inv_notes = client.get('/api/notifications', headers=auth_headers(invitee['token'])).get_json()
+    assert any(n['kind'] == 'game_invite_direct' and n['related_game_id'] == private_g['id']
+               for n in inv_notes['items'])
+    f_notes = client.get('/api/notifications', headers=auth_headers(friend['token'])).get_json()
+    assert all(n['related_game_id'] != private_g['id'] for n in f_notes['items'])
+
+    # Private game appears in invitee's banner as 'invited'
+    me_i = client.get('/api/me', headers=auth_headers(invitee['token'])).get_json()
+    assert me_i['active_game'] and me_i['active_game']['banner_state'] == 'invited'
+
+
+def test_visibility_join_guards(client):
+    a = register(client, 'a@example.com', 'Ana')
+    invitee = register(client, 'i@example.com', 'Ivy')
+    stranger = register(client, 's@example.com', 'Sam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    private_g = make_game(client, a['token'], court_id, visibility='private',
+                          invite_user_ids=[invitee['user']['id']])
+
+    # Stranger cannot join a private game they weren't invited to
+    res = client.post(f"/api/games/{private_g['id']}/join", headers=auth_headers(stranger['token']))
+    assert res.status_code == 403
+    assert res.get_json()['error'] == 'not_invited'
+
+    # Invitee can join
+    res = client.post(f"/api/games/{private_g['id']}/join", headers=auth_headers(invitee['token']))
+    assert res.status_code == 200
+
+    # Friends-only game: non-friend stranger cannot join
+    friends_g = make_game(client, a['token'], court_id, visibility='friends')
+    res = client.post(f"/api/games/{friends_g['id']}/join", headers=auth_headers(stranger['token']))
+    assert res.status_code == 403
+
+
+def test_private_requires_invitees(client):
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    from datetime import timedelta
+    from backend.models import utcnow
+    when = (utcnow() + timedelta(hours=24)).isoformat() + 'Z'
+    res = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when,
+        'visibility': 'private', 'invite_user_ids': [],
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 400
+    assert res.get_json()['error'] == 'no_invitees'
 
 
 # ---------- Friends ----------
@@ -329,16 +416,20 @@ def test_challenge(client):
 
 # ---------- Games ----------
 
-def make_game(client, token, court_id, game_type='casual', hours_ahead=24):
+def make_game(client, token, court_id, game_type='casual', hours_ahead=24, visibility='open', invite_user_ids=None):
     from datetime import timedelta
     from backend.models import utcnow
     when = (utcnow() + timedelta(hours=hours_ahead)).isoformat() + 'Z'
-    res = client.post('/api/games', json={
+    body = {
         'court_id': court_id,
         'scheduled_at': when,
         'game_type': game_type,
         'max_players': 4,
-    }, headers=auth_headers(token))
+        'visibility': visibility,
+    }
+    if invite_user_ids is not None:
+        body['invite_user_ids'] = invite_user_ids
+    res = client.post('/api/games', json=body, headers=auth_headers(token))
     assert res.status_code == 201, res.get_json()
     return res.get_json()
 

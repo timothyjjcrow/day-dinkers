@@ -201,6 +201,11 @@ class Message(TimestampMixin, db.Model):
 
 GAME_TYPES = ['casual', 'ranked']
 GAME_STATUSES = ['upcoming', 'awaiting_confirmation', 'completed', 'cancelled']
+# Who can see / join a game:
+#   open    -> anyone nearby
+#   friends -> the creator's friends
+#   private -> only specifically invited players
+GAME_VISIBILITIES = ['open', 'friends', 'private']
 
 
 class Game(TimestampMixin, db.Model):
@@ -209,6 +214,7 @@ class Game(TimestampMixin, db.Model):
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     scheduled_at = db.Column(db.DateTime, nullable=False, index=True)
     game_type = db.Column(db.String(20), nullable=False, default='casual')
+    visibility = db.Column(db.String(16), nullable=False, default='open', index=True)
     max_players = db.Column(db.Integer, nullable=False, default=4)
     notes = db.Column(db.String(500), nullable=False, default='')
     # 32 chars: must fit 'awaiting_confirmation' (Postgres enforces this, SQLite doesn't)
@@ -226,6 +232,26 @@ class Game(TimestampMixin, db.Model):
         'GamePlayer', back_populates='game', lazy='selectin',
         cascade='all, delete-orphan',
     )
+    invites = db.relationship(
+        'GameInvite', back_populates='game', lazy='selectin',
+        cascade='all, delete-orphan',
+    )
+
+    def invited_user_ids(self):
+        return {inv.user_id for inv in self.invites}
+
+    def visible_to(self, user_id, friend_ids=None):
+        """Whether this game should appear to a given viewer in public/nearby feeds."""
+        if user_id and (self.creator_id == user_id
+                        or any(p.user_id == user_id for p in self.players)):
+            return True
+        if self.visibility == 'open':
+            return True
+        if self.visibility == 'friends':
+            return bool(user_id and friend_ids and self.creator_id in friend_ids)
+        if self.visibility == 'private':
+            return bool(user_id and user_id in self.invited_user_ids())
+        return False
 
     def to_dict(self, current_user_id=None):
         players = sorted(self.players, key=lambda p: p.id)
@@ -253,6 +279,7 @@ class Game(TimestampMixin, db.Model):
             'creator_id': self.creator_id,
             'scheduled_at': iso(self.scheduled_at),
             'game_type': self.game_type,
+            'visibility': self.visibility,
             'max_players': self.max_players,
             'notes': self.notes,
             'status': self.status,
@@ -293,6 +320,20 @@ class GamePlayer(TimestampMixin, db.Model):
         data['team'] = self.team
         data['rating_delta'] = self.rating_delta
         return data
+
+
+class GameInvite(TimestampMixin, db.Model):
+    """A personal invite to a private game — only invited users can see it."""
+    __table_args__ = (
+        db.UniqueConstraint('game_id', 'user_id', name='uq_game_invite'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+
+    game = db.relationship('Game', back_populates='invites')
+    user = db.relationship('User')
 
 
 class FavoriteCourt(TimestampMixin, db.Model):

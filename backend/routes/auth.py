@@ -12,6 +12,7 @@ from backend.models import (
     Court,
     Friendship,
     Game,
+    GameInvite,
     GamePlayer,
     Message,
     Notification,
@@ -118,8 +119,6 @@ def _active_game_payload(user):
 
     Priority: live game you're in > incoming challenge > score waiting on you
     > your score waiting on opponents > your next upcoming game."""
-    from datetime import timedelta
-
     now = utcnow()
     candidates = []
 
@@ -146,31 +145,21 @@ def _active_game_payload(user):
         data['banner_state'] = banner_state
         candidates.append((rank, data))
 
-    # Incoming challenges (24h) and personal game invites (48h) you haven't joined
-    invite_notes = (
-        Notification.query.filter(
-            Notification.user_id == user.id,
-            Notification.kind.in_(['challenge', 'game_invite_direct']),
-            Notification.created_at >= now - timedelta(hours=48),
-        )
-        .order_by(Notification.id.desc())
-        .limit(10)
+    # Private games you've been invited to (challenges + personal invites) and
+    # haven't joined yet. The invite list is the source of truth, not notifications.
+    invited_games = (
+        Game.query.join(GameInvite)
+        .filter(GameInvite.user_id == user.id, Game.status == 'upcoming')
+        .order_by(Game.scheduled_at.asc())
+        .limit(15)
         .all()
     )
-    seen_invite_games = set()
-    for note in invite_notes:
-        if not note.related_game_id or note.related_game_id in seen_invite_games:
-            continue
-        if note.kind == 'challenge' and note.created_at < now - timedelta(hours=24):
-            continue
-        seen_invite_games.add(note.related_game_id)
-        game = db.session.get(Game, note.related_game_id)
-        if not game or game.status != 'upcoming':
-            continue
+    for game in invited_games:
         data = game.to_dict(user.id)
         if data['is_joined'] or data['spots_left'] <= 0:
             continue
-        if note.kind == 'challenge':
+        is_challenge = game.notes.startswith('⚔️')
+        if is_challenge:
             data['banner_state'] = 'challenge'
             candidates.append((1, data))
         else:

@@ -145,12 +145,18 @@ def _upgrade_schema(app):
                 if is_postgres:
                     statements.append('ALTER TABLE message ALTER COLUMN recipient_id DROP NOT NULL')
 
-        if is_postgres and 'game' in tables:
-            status_col = next(
-                (c for c in inspector.get_columns('game') if c['name'] == 'status'), None,
-            )
-            if status_col is not None and getattr(status_col['type'], 'length', 32) < 32:
-                statements.append('ALTER TABLE game ALTER COLUMN status TYPE VARCHAR(32)')
+        if 'game' in tables:
+            game_cols = {c['name'] for c in inspector.get_columns('game')}
+            if is_postgres:
+                status_col = next(
+                    (c for c in inspector.get_columns('game') if c['name'] == 'status'), None,
+                )
+                if status_col is not None and getattr(status_col['type'], 'length', 32) < 32:
+                    statements.append('ALTER TABLE game ALTER COLUMN status TYPE VARCHAR(32)')
+            if 'visibility' not in game_cols:
+                statements.append(
+                    "ALTER TABLE game ADD COLUMN visibility VARCHAR(16) NOT NULL DEFAULT 'open'"
+                )
 
         if statements:
             app.logger.warning('Applying schema upgrades: %s', statements)
