@@ -128,6 +128,53 @@ def test_courts_nearby_distance(client):
     assert items[0]['distance_miles'] < 5
 
 
+def test_geocode(client, monkeypatch):
+    import backend.routes.courts as courts_mod
+    courts_mod._GEOCODE_CACHE.clear()
+    calls = {'n': 0}
+
+    def fake_fetch(query):
+        calls['n'] += 1
+        return [{
+            'lat': '30.2711', 'lon': '-97.7437',
+            'display_name': 'Austin, Travis County, Texas, United States',
+            'address': {'city': 'Austin', 'state': 'Texas'},
+        }]
+
+    monkeypatch.setattr(courts_mod, '_nominatim_fetch', fake_fetch)
+
+    res = client.get('/api/geocode?q=Austin, TX')
+    assert res.status_code == 200
+    items = res.get_json()['items']
+    assert len(items) == 1
+    assert items[0]['label'] == 'Austin, Texas'
+    assert abs(items[0]['lat'] - 30.2711) < 1e-4
+    assert abs(items[0]['lng'] - (-97.7437)) < 1e-4
+
+    # Cached: a second identical query does not hit the fetcher again
+    client.get('/api/geocode?q=Austin, TX')
+    assert calls['n'] == 1
+
+    # Short queries are ignored without calling out
+    assert client.get('/api/geocode?q=a').get_json()['items'] == []
+    assert calls['n'] == 1
+
+
+def test_geocode_handles_failure(client, monkeypatch):
+    import backend.routes.courts as courts_mod
+    courts_mod._GEOCODE_CACHE.clear()
+
+    def boom(query):
+        raise TimeoutError('nominatim down')
+
+    monkeypatch.setattr(courts_mod, '_nominatim_fetch', boom)
+    res = client.get('/api/geocode?q=Denver, CO')
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body['items'] == []
+    assert body['error'] == 'geocode_unavailable'
+
+
 def test_checkin_flow(client):
     token = register(client, 'a@example.com')['token']
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']

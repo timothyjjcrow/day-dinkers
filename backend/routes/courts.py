@@ -1,5 +1,9 @@
 """Court discovery, detail, and check-in routes."""
+import json
 import math
+import time
+import urllib.parse
+import urllib.request
 from datetime import timedelta
 
 from flask import Blueprint, current_app, g, jsonify, request
@@ -13,6 +17,75 @@ from backend.routes.social import friend_ids
 courts_bp = Blueprint('courts', __name__)
 
 MAX_COURT_RESULTS = 300
+
+# --- Geocoding (OpenStreetMap Nominatim proxy) ---
+_GEOCODE_CACHE = {}
+_GEOCODE_CACHE_TTL = 60 * 60 * 24  # 24h — place coordinates don't move
+_GEOCODE_MAX_CACHE = 500
+
+
+def _nominatim_fetch(query):
+    """Fetch geocoding results from Nominatim. Isolated so tests can mock it."""
+    params = urllib.parse.urlencode({
+        'q': query,
+        'format': 'jsonv2',
+        'addressdetails': 1,
+        'limit': 5,
+        'countrycodes': 'us',
+    })
+    url = f'https://nominatim.openstreetmap.org/search?{params}'
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'ThirdShot/1.0 (pickleball court finder; contact: support@thirdshot.app)',
+        'Accept': 'application/json',
+    })
+    with urllib.request.urlopen(req, timeout=6) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
+def _format_place(raw):
+    try:
+        lat = float(raw['lat'])
+        lng = float(raw['lon'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    addr = raw.get('address') or {}
+    city = (addr.get('city') or addr.get('town') or addr.get('village')
+            or addr.get('hamlet') or addr.get('county') or '')
+    state = addr.get('state') or ''
+    short = ', '.join(part for part in (city, state) if part)
+    label = short or (raw.get('display_name') or '').split(',')[0]
+    return {
+        'lat': lat,
+        'lng': lng,
+        'label': label,
+        'detail': raw.get('display_name', ''),
+    }
+
+
+@courts_bp.get('/geocode')
+def geocode():
+    """Search for a place by name and return coordinates to recenter the map."""
+    query = str(request.args.get('q') or '').strip()
+    if len(query) < 3:
+        return jsonify({'items': []})
+
+    key = query.lower()
+    cached = _GEOCODE_CACHE.get(key)
+    if cached and cached['expires_at'] > time.time():
+        return jsonify({'items': cached['items']})
+
+    try:
+        raw_results = _nominatim_fetch(query)
+    except Exception:
+        current_app.logger.warning('Geocode lookup failed for %r', query, exc_info=True)
+        return jsonify({'items': [], 'error': 'geocode_unavailable'})
+
+    items = [p for p in (_format_place(r) for r in (raw_results or [])) if p][:5]
+
+    if len(_GEOCODE_CACHE) > _GEOCODE_MAX_CACHE:
+        _GEOCODE_CACHE.clear()
+    _GEOCODE_CACHE[key] = {'items': items, 'expires_at': time.time() + _GEOCODE_CACHE_TTL}
+    return jsonify({'items': items})
 
 
 def cleanup_stale_presence():

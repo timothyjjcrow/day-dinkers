@@ -23,6 +23,7 @@
     geoWatchId: null,
     lastAutoCheckAt: 0,
     userLoc: null,
+    areaLoc: null,
     courtsInView: [],
     activeThreadUserId: null,
     threadPollTimer: null,
@@ -382,13 +383,35 @@
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         state.userLoc = [pos.coords.latitude, pos.coords.longitude];
+        state.areaLoc = null; // "my location" takes precedence again
         state.map.setView(state.userLoc, 13);
         updateUserDot();
         startLocationWatch();
+        fetchCourtsInView();
       },
       () => { if (!silent) toast('Could not get your location'); },
       { timeout: 8000 },
     );
+  }
+
+  // The location the rest of the app's "near me" features follow: an explicitly
+  // searched area wins, then GPS, then wherever the map is centered.
+  function areaLatLng() {
+    if (state.areaLoc) return { lat: state.areaLoc[0], lng: state.areaLoc[1] };
+    if (state.userLoc) return { lat: state.userLoc[0], lng: state.userLoc[1] };
+    const c = state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
+    return { lat: c.lat, lng: c.lng };
+  }
+
+  function jumpToPlace(lat, lng, label) {
+    state.areaLoc = [lat, lng];
+    if (state.map) state.map.setView([lat, lng], 12);
+    $('#court-list').classList.add('hidden');
+    if (state.syncListToggle) state.syncListToggle();
+    const search = $('#court-search');
+    if (search) search.value = '';
+    if (label) toast(`📍 ${label}`);
+    fetchCourtsInView();
   }
 
   async function fetchCourtsInView() {
@@ -411,14 +434,17 @@
 
   async function searchCourts(q) {
     try {
-      const data = await api(`/courts?q=${encodeURIComponent(q)}&limit=50`);
-      state.courtsInView = data.items;
-      drawMarkers(data.items);
-      renderCourtList(data.items);
+      const [courtData, placeData] = await Promise.all([
+        api(`/courts?q=${encodeURIComponent(q)}&limit=50`),
+        api(`/geocode?q=${encodeURIComponent(q)}`).catch(() => ({ items: [] })),
+      ]);
+      state.courtsInView = courtData.items;
+      drawMarkers(courtData.items);
+      renderCourtList(courtData.items, placeData.items || []);
       $('#court-list').classList.remove('hidden');
       if (state.syncListToggle) state.syncListToggle();
-      if (data.items.length) {
-        const pts = data.items.filter((c) => c.latitude != null);
+      if (courtData.items.length) {
+        const pts = courtData.items.filter((c) => c.latitude != null);
         if (pts.length) state.map.fitBounds(pts.map((c) => [c.latitude, c.longitude]), { maxZoom: 13, padding: [40, 40] });
       }
     } catch { /* ignore */ }
@@ -537,9 +563,23 @@
     `;
   }
 
-  async function renderCourtList(courts) {
+  async function renderCourtList(courts, places = []) {
     const el = $('#court-list-items');
     let html = '';
+
+    if (places.length) {
+      html += '<div class="section-label" style="margin-top:4px">📍 Jump to area</div>';
+      html += places.map((p, i) => `
+        <div class="card row" data-place="${i}" style="cursor:pointer">
+          <span style="font-size:18px">📍</span>
+          <div class="row-main">
+            <div class="row-title">${esc(p.label)}</div>
+            <div class="row-sub">${esc((p.detail || '').split(',').slice(1, 4).join(',').trim())}</div>
+          </div>
+          <span class="chev">›</span>
+        </div>`).join('');
+      html += '<div class="section-label">Courts</div>';
+    }
 
     if (state.token) {
       try {
@@ -559,6 +599,10 @@
     el.innerHTML = html;
     el.querySelectorAll('[data-court]').forEach((row) => {
       row.addEventListener('click', () => openCourtDetail(Number(row.dataset.court)));
+    });
+    el.querySelectorAll('[data-place]').forEach((row) => {
+      const p = places[Number(row.dataset.place)];
+      if (p) row.addEventListener('click', () => jumpToPlace(p.lat, p.lng, p.label));
     });
   }
 
@@ -1080,9 +1124,7 @@
     const seg = state.playSeg;
     const el = $('#play-content');
     el.innerHTML = '<div class="empty-state">Loading…</div>';
-    const loc = state.userLoc
-      ? { lat: state.userLoc[0], lng: state.userLoc[1] }
-      : (state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] });
+    const loc = areaLatLng();
     try {
       if (seg === 'scores') {
         const [board, results] = await Promise.all([
@@ -1216,9 +1258,7 @@
     try {
       const reqs = [api('/friends').catch(() => ({ friends: [] }))];
       if (!court) {
-        const c = state.userLoc
-          ? { lat: state.userLoc[0], lng: state.userLoc[1] }
-          : (state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] });
+        const c = areaLatLng();
         reqs.push(api('/courts/favorites').catch(() => ({ items: [] })));
         reqs.push(api(`/courts?lat=${c.lat}&lng=${c.lng}&radius=30&limit=6`).catch(() => ({ items: [] })));
       }
@@ -1680,9 +1720,7 @@
   }
 
   async function renderNearbyPlayers(el) {
-    const loc = state.userLoc
-      ? { lat: state.userLoc[0], lng: state.userLoc[1] }
-      : (state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] });
+    const loc = areaLatLng();
     const skill = state.nearbySkill || '';
     let data;
     try {
