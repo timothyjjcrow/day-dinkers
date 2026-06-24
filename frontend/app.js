@@ -15,6 +15,7 @@
     tab: 'courts',
     playSeg: 'games',
     chatSeg: 'chats',
+    nearbySkill: '',
     map: null,
     markers: null,
     mapFilter: 'all',
@@ -1668,12 +1669,75 @@
               </div>`).join('')
           : '<div class="empty-state"><span class="big">💬</span>No chats yet.<br>Add some friends and say hi!</div>';
         el.querySelectorAll('[data-thread]').forEach((row) => row.addEventListener('click', () => openThread(Number(row.dataset.thread))));
+      } else if (state.chatSeg === 'nearby') {
+        await renderNearbyPlayers(el);
       } else {
         await renderFriends(el);
       }
     } catch (e) {
       el.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
     }
+  }
+
+  async function renderNearbyPlayers(el) {
+    const loc = state.userLoc
+      ? { lat: state.userLoc[0], lng: state.userLoc[1] }
+      : (state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] });
+    const skill = state.nearbySkill || '';
+    let data;
+    try {
+      data = await api(`/players/nearby?lat=${loc.lat}&lng=${loc.lng}&radius=50${skill ? `&skill=${skill}` : ''}`);
+    } catch (e) { el.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; return; }
+
+    const skills = [['', 'All levels'], ['beginner', 'Beginner'], ['intermediate', 'Intermediate'], ['advanced', 'Advanced'], ['pro', 'Pro']];
+    let html = `
+      <div class="form-field" style="margin-top:4px">
+        <div class="quick-times" id="nearby-skill">
+          ${skills.map(([v, label]) => `<button type="button" data-skill="${v}" class="${v === skill ? 'active' : ''}">${label}</button>`).join('')}
+        </div>
+      </div>`;
+
+    html += data.items.length
+      ? data.items.map((p) => {
+          let action;
+          if (p.is_friend) action = '<span class="tag" style="margin:0">Friends ✓</span>';
+          else if (p.friendship_status === 'pending') action = p.outgoing
+            ? '<span class="tag" style="margin:0">Pending</span>'
+            : `<button class="btn btn-primary btn-sm" data-respond-inline="${p.friendship_id}">Accept</button>`;
+          else action = `<button class="btn btn-primary btn-sm" data-add-friend="${p.id}">＋ Add</button>`;
+          const sub = p.checked_in_court
+            ? `📍 At ${esc(p.checked_in_court.name)}${p.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-700)">wants to play!</b>' : ''}`
+            : `${skillLabel(p.skill_level)} · ${p.rating} · ${p.distance_miles} mi away`;
+          return `
+            <div class="card row">
+              <div data-view-user="${p.id}" style="cursor:pointer">${avatarHtml(p)}</div>
+              <div class="row-main" data-view-user="${p.id}" style="cursor:pointer">
+                <div class="row-title">${esc(p.display_name)}${p.current_streak >= 2 ? ' 🔥' : ''}</div>
+                <div class="row-sub">${sub}</div>
+              </div>
+              <button class="btn btn-secondary btn-sm" data-msg="${p.id}">💬</button>
+              ${action}
+            </div>`;
+        }).join('')
+      : '<div class="empty-state"><span class="big">📍</span>No players near you yet.<br>Check in at a court so others can find you!</div>';
+
+    el.innerHTML = html;
+    el.querySelector('#nearby-skill').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      state.nearbySkill = btn.dataset.skill;
+      renderChat();
+    });
+    el.querySelectorAll('[data-msg]').forEach((b) => b.addEventListener('click', () => openThread(Number(b.dataset.msg))));
+    el.querySelectorAll('[data-add-friend]').forEach((b) => b.addEventListener('click', async () => {
+      try { await api('/friends/request', { method: 'POST', body: JSON.stringify({ user_id: Number(b.dataset.addFriend) }) }); toast('Friend request sent!'); renderChat(); }
+      catch (e) { toast(e.message); }
+    }));
+    el.querySelectorAll('[data-respond-inline]').forEach((b) => b.addEventListener('click', async () => {
+      try { await api(`/friends/${b.dataset.respondInline}/respond`, { method: 'POST', body: JSON.stringify({ accept: true }) }); toast('Friend added! 🎉'); refreshMe(); renderChat(); }
+      catch (e) { toast(e.message); }
+    }));
+    bindUserButtons(el);
   }
 
   async function renderFriends(el) {

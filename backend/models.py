@@ -44,6 +44,10 @@ class User(TimestampMixin, db.Model):
     current_streak = db.Column(db.Integer, nullable=False, default=0)
     best_streak = db.Column(db.Integer, nullable=False, default=0)
     home_court_id = db.Column(db.Integer, db.ForeignKey('court.id'))
+    # Last-known location, used for "players near you" discovery (set on check-in).
+    last_lat = db.Column(db.Float, index=True)
+    last_lng = db.Column(db.Float, index=True)
+    last_location_at = db.Column(db.DateTime)
 
     home_court = db.relationship('Court', foreign_keys=[home_court_id])
     checkins = db.relationship(

@@ -251,6 +251,13 @@ def check_in(court_id):
             court_id=court.id,
             looking_for_game=looking,
         ))
+
+    # Remember where the player is for "players near you" discovery.
+    if court.latitude is not None and court.longitude is not None:
+        g.current_user.last_lat = court.latitude
+        g.current_user.last_lng = court.longitude
+        g.current_user.last_location_at = utcnow()
+
     db.session.commit()
     return jsonify({'presence': presence_payload(g.current_user.id)})
 

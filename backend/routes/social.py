@@ -1,12 +1,34 @@
-"""Friends, user search, public profiles, notifications."""
+"""Friends, user search, public profiles, notifications, nearby players."""
+import math
+
 from flask import Blueprint, g, jsonify, request
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import aliased
 
 from backend.app import db
-from backend.models import CheckIn, Friendship, Game, GamePlayer, Notification, User, notify
+from backend.models import (
+    CheckIn,
+    Court,
+    Friendship,
+    Game,
+    GamePlayer,
+    Notification,
+    SKILL_LEVELS,
+    User,
+    notify,
+)
 from backend.routes.auth import login_required
 
 social_bp = Blueprint('social', __name__)
+
+
+def _haversine_miles(lat1, lng1, lat2, lng2):
+    radius = 3958.8
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlng / 2) ** 2
+    return 2 * radius * math.asin(math.sqrt(a))
 
 
 def friend_ids(user_id):
@@ -50,6 +72,89 @@ def _friend_entry(friendship, viewer_id):
     else:
         entry['checked_in_court'] = None
     return entry
+
+
+@social_bp.get('/players/nearby')
+@login_required
+def players_nearby():
+    """Players near a location, by last check-in (or home court as fallback)."""
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    if lat is None or lng is None:
+        return jsonify({'error': 'location_required'}), 400
+    radius = min(max(request.args.get('radius', default=25.0, type=float), 1.0), 250.0)
+    text = str(request.args.get('q') or '').strip()
+    skill = str(request.args.get('skill') or '').strip().lower()
+
+    lat_delta = radius / 69.0
+    lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
+    lat_lo, lat_hi = lat - lat_delta, lat + lat_delta
+    lng_lo, lng_hi = lng - lng_delta, lng + lng_delta
+
+    home = aliased(Court)
+    query = (
+        User.query.outerjoin(home, User.home_court_id == home.id)
+        .filter(User.id != g.current_user.id)
+        .filter(or_(
+            and_(User.last_lat.between(lat_lo, lat_hi), User.last_lng.between(lng_lo, lng_hi)),
+            and_(User.last_lat.is_(None),
+                 home.latitude.between(lat_lo, lat_hi),
+                 home.longitude.between(lng_lo, lng_hi)),
+        ))
+    )
+    if text:
+        query = query.filter(User.display_name.ilike(f'%{text}%'))
+    if skill in SKILL_LEVELS:
+        query = query.filter(User.skill_level == skill)
+
+    candidates = query.limit(300).all()
+
+    my_friends = friend_ids(g.current_user.id)
+    # One pass to know who's checked in right now.
+    candidate_ids = [u.id for u in candidates]
+    active = {}
+    if candidate_ids:
+        rows = (
+            CheckIn.query.filter(
+                CheckIn.user_id.in_(candidate_ids),
+                CheckIn.checked_out_at.is_(None),
+            )
+            .order_by(CheckIn.id.desc())
+            .all()
+        )
+        for ci in rows:
+            active.setdefault(ci.user_id, ci)
+
+    items = []
+    for user in candidates:
+        ploc = (user.last_lat, user.last_lng)
+        if ploc[0] is None and user.home_court:
+            ploc = (user.home_court.latitude, user.home_court.longitude)
+        if ploc[0] is None or ploc[1] is None:
+            continue
+        distance = _haversine_miles(lat, lng, ploc[0], ploc[1])
+        if distance > radius:
+            continue
+        entry = user.to_public_dict()
+        entry['distance_miles'] = round(distance, 1)
+        friendship = _friendship_between(g.current_user.id, user.id)
+        entry['is_friend'] = user.id in my_friends
+        entry['friendship_status'] = friendship.status if friendship else None
+        entry['friendship_id'] = friendship.id if friendship else None
+        entry['outgoing'] = bool(friendship and friendship.requester_id == g.current_user.id)
+        ci = active.get(user.id)
+        entry['checked_in_court'] = (
+            {'id': ci.court.id, 'name': ci.court.name, 'looking_for_game': bool(ci.looking_for_game)}
+            if ci and ci.court else None
+        )
+        entry['last_seen_at'] = (
+            user.last_location_at.isoformat() + 'Z' if user.last_location_at else None
+        )
+        items.append(entry)
+
+    # Active players first, then closest.
+    items.sort(key=lambda i: (i['checked_in_court'] is None, i['distance_miles']))
+    return jsonify({'items': items[:60], 'count': len(items)})
 
 
 @social_bp.get('/users/search')

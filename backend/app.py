@@ -145,6 +145,19 @@ def _upgrade_schema(app):
                 if is_postgres:
                     statements.append('ALTER TABLE message ALTER COLUMN recipient_id DROP NOT NULL')
 
+        if 'user' in tables:
+            user_cols = {c['name'] for c in inspector.get_columns('user')}
+            for col, ddl in (
+                ('last_lat', 'ALTER TABLE "user" ADD COLUMN last_lat DOUBLE PRECISION'),
+                ('last_lng', 'ALTER TABLE "user" ADD COLUMN last_lng DOUBLE PRECISION'),
+                ('last_location_at', 'ALTER TABLE "user" ADD COLUMN last_location_at TIMESTAMP'),
+            ):
+                if col not in user_cols:
+                    # SQLite uses FLOAT/DATETIME; Postgres accepts these too.
+                    statements.append(ddl if is_postgres else ddl
+                                      .replace('DOUBLE PRECISION', 'FLOAT')
+                                      .replace('TIMESTAMP', 'DATETIME'))
+
         if 'game' in tables:
             game_cols = {c['name'] for c in inspector.get_columns('game')}
             if is_postgres:

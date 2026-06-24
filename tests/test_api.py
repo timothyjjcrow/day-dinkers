@@ -341,6 +341,63 @@ def test_user_search(client):
     assert [u['display_name'] for u in res.get_json()['items']] == ['Benny']
 
 
+def test_players_nearby(client):
+    # Larson Park ~ (33.66, -117.91); Adorni ~ (40.81, -124.16) — far apart.
+    a = register(client, 'a@example.com', 'Ana')
+    near = register(client, 'near@example.com', 'Nearby Nick')
+    far = register(client, 'far@example.com', 'Far Fred')
+    pro = register(client, 'pro@example.com', 'Pro Paula')
+
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+
+    # Locate players via check-in (sets last_lat/last_lng)
+    client.post(f'/api/courts/{larson}/checkin', json={'looking_for_game': True}, headers=auth_headers(near['token']))
+    client.post(f'/api/courts/{larson}/checkin', json={}, headers=auth_headers(pro['token']))
+    client.patch('/api/me', json={'skill_level': 'pro'}, headers=auth_headers(pro['token']))
+    client.post(f'/api/courts/{adorni}/checkin', json={}, headers=auth_headers(far['token']))
+
+    # Ana looks near Larson Park
+    res = client.get('/api/players/nearby?lat=33.66&lng=-117.91&radius=25', headers=auth_headers(a['token']))
+    assert res.status_code == 200
+    names = [p['display_name'] for p in res.get_json()['items']]
+    assert 'Nearby Nick' in names and 'Pro Paula' in names
+    assert 'Far Fred' not in names  # 400+ miles away
+    nick = next(p for p in res.get_json()['items'] if p['display_name'] == 'Nearby Nick')
+    assert nick['distance_miles'] < 5
+    assert nick['checked_in_court']['looking_for_game'] is True
+    assert nick['friendship_status'] is None
+
+    # Skill filter
+    res = client.get('/api/players/nearby?lat=33.66&lng=-117.91&skill=pro', headers=auth_headers(a['token']))
+    assert [p['display_name'] for p in res.get_json()['items']] == ['Pro Paula']
+
+    # Name query
+    res = client.get('/api/players/nearby?lat=33.66&lng=-117.91&q=nick', headers=auth_headers(a['token']))
+    assert [p['display_name'] for p in res.get_json()['items']] == ['Nearby Nick']
+
+    # Friendship status surfaces
+    fr = client.post('/api/friends/request', json={'user_id': near['user']['id']}, headers=auth_headers(a['token']))
+    assert fr.status_code == 201
+    res = client.get('/api/players/nearby?lat=33.66&lng=-117.91', headers=auth_headers(a['token']))
+    nick = next(p for p in res.get_json()['items'] if p['display_name'] == 'Nearby Nick')
+    assert nick['friendship_status'] == 'pending' and nick['outgoing'] is True
+
+    # Location required
+    assert client.get('/api/players/nearby', headers=auth_headers(a['token'])).status_code == 400
+
+
+def test_players_nearby_home_court_fallback(client):
+    # A player who never checked in but set a home court is still discoverable.
+    a = register(client, 'a@example.com', 'Ana')
+    homer = register(client, 'homer@example.com', 'Homer')
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.patch('/api/me', json={'home_court_id': larson}, headers=auth_headers(homer['token']))
+
+    res = client.get('/api/players/nearby?lat=33.66&lng=-117.91&radius=25', headers=auth_headers(a['token']))
+    assert 'Homer' in [p['display_name'] for p in res.get_json()['items']]
+
+
 # ---------- Chat ----------
 
 def test_chat_flow(client):
