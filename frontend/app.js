@@ -581,6 +581,15 @@
       if (!e.target.closest('[data-scroll]')) e.preventDefault();
     }, { passive: false });
 
+    // Show a divider under the sticky header once the generic modal scrolls.
+    const modalBox = backdrop.querySelector('.modal');
+    const head = modalBox && modalBox.querySelector(':scope > .modal-head');
+    if (head && !opts.chat && !opts.court) {
+      modalBox.addEventListener('scroll', () => {
+        head.classList.toggle('scrolled', modalBox.scrollTop > 4);
+      });
+    }
+
     document.documentElement.classList.add('modal-open');
     return backdrop;
   }
