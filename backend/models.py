@@ -48,6 +48,10 @@ class User(TimestampMixin, db.Model):
     last_lat = db.Column(db.Float, index=True)
     last_lng = db.Column(db.Float, index=True)
     last_location_at = db.Column(db.DateTime)
+    # Persisted home area — the app centers the map/feeds here on launch.
+    home_lat = db.Column(db.Float)
+    home_lng = db.Column(db.Float)
+    home_area = db.Column(db.String(120))
 
     home_court = db.relationship('Court', foreign_keys=[home_court_id])
     checkins = db.relationship(
@@ -80,6 +84,9 @@ class User(TimestampMixin, db.Model):
     def to_dict(self):
         data = self.to_public_dict()
         data['email'] = self.email
+        data['home_lat'] = self.home_lat
+        data['home_lng'] = self.home_lng
+        data['home_area'] = self.home_area
         return data
 
 

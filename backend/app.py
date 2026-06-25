@@ -151,6 +151,9 @@ def _upgrade_schema(app):
                 ('last_lat', 'ALTER TABLE "user" ADD COLUMN last_lat DOUBLE PRECISION'),
                 ('last_lng', 'ALTER TABLE "user" ADD COLUMN last_lng DOUBLE PRECISION'),
                 ('last_location_at', 'ALTER TABLE "user" ADD COLUMN last_location_at TIMESTAMP'),
+                ('home_lat', 'ALTER TABLE "user" ADD COLUMN home_lat DOUBLE PRECISION'),
+                ('home_lng', 'ALTER TABLE "user" ADD COLUMN home_lng DOUBLE PRECISION'),
+                ('home_area', 'ALTER TABLE "user" ADD COLUMN home_area VARCHAR(120)'),
             ):
                 if col not in user_cols:
                     # SQLite uses FLOAT/DATETIME; Postgres accepts these too.

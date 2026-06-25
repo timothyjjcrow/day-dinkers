@@ -160,6 +160,38 @@ def test_geocode(client, monkeypatch):
     assert calls['n'] == 1
 
 
+def test_set_home_area(client):
+    token = register(client, 'a@example.com')['token']
+    res = client.patch('/api/me', json={
+        'home_lat': 30.2711, 'home_lng': -97.7437, 'home_area': 'Austin, Texas',
+    }, headers=auth_headers(token))
+    assert res.status_code == 200
+    user = res.get_json()['user']
+    assert abs(user['home_lat'] - 30.2711) < 1e-4
+    assert user['home_area'] == 'Austin, Texas'
+
+    # Persisted across requests
+    me = client.get('/api/me', headers=auth_headers(token)).get_json()
+    assert me['user']['home_area'] == 'Austin, Texas'
+
+    # Bad coordinates rejected
+    bad = client.patch('/api/me', json={'home_lat': 999, 'home_lng': 0}, headers=auth_headers(token))
+    assert bad.status_code == 400
+
+
+def test_reverse_geocode(client, monkeypatch):
+    import backend.routes.courts as courts_mod
+    monkeypatch.setattr(courts_mod, '_nominatim_reverse', lambda lat, lng: {
+        'lat': str(lat), 'lon': str(lng),
+        'display_name': 'Austin, Travis County, Texas, United States',
+        'address': {'city': 'Austin', 'state': 'Texas'},
+    })
+    res = client.get('/api/geocode/reverse?lat=30.27&lng=-97.74')
+    assert res.status_code == 200
+    assert res.get_json()['label'] == 'Austin, Texas'
+    assert client.get('/api/geocode/reverse').status_code == 400
+
+
 def test_geocode_handles_failure(client, monkeypatch):
     import backend.routes.courts as courts_mod
     courts_mod._GEOCODE_CACHE.clear()

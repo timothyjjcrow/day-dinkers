@@ -88,6 +88,36 @@ def geocode():
     return jsonify({'items': items})
 
 
+def _nominatim_reverse(lat, lng):
+    """Reverse-geocode coordinates to a place. Isolated so tests can mock it."""
+    params = urllib.parse.urlencode({
+        'lat': lat, 'lon': lng, 'format': 'jsonv2', 'addressdetails': 1, 'zoom': 10,
+    })
+    url = f'https://nominatim.openstreetmap.org/reverse?{params}'
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'ThirdShot/1.0 (pickleball court finder; contact: support@thirdshot.app)',
+        'Accept': 'application/json',
+    })
+    with urllib.request.urlopen(req, timeout=6) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
+@courts_bp.get('/geocode/reverse')
+def geocode_reverse():
+    """Turn coordinates into a human area label (for naming a home area)."""
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    if lat is None or lng is None:
+        return jsonify({'error': 'lat_lng_required'}), 400
+    try:
+        raw = _nominatim_reverse(lat, lng)
+    except Exception:
+        current_app.logger.warning('Reverse geocode failed for %s,%s', lat, lng, exc_info=True)
+        return jsonify({'label': '', 'error': 'geocode_unavailable'})
+    place = _format_place(raw) if raw else None
+    return jsonify({'label': place['label'] if place else ''})
+
+
 def cleanup_stale_presence():
     """Auto check-out anyone whose presence ping is older than the staleness window."""
     cutoff = utcnow() - timedelta(

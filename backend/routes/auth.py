@@ -271,5 +271,17 @@ def update_me():
                 return jsonify({'error': 'court_not_found'}), 404
             user.home_court_id = court.id
 
+    if 'home_lat' in payload or 'home_lng' in payload:
+        try:
+            home_lat = float(payload.get('home_lat'))
+            home_lng = float(payload.get('home_lng'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_home_location'}), 400
+        if not (-90 <= home_lat <= 90 and -180 <= home_lng <= 180):
+            return jsonify({'error': 'invalid_home_location'}), 400
+        user.home_lat = home_lat
+        user.home_lng = home_lng
+        user.home_area = str(payload.get('home_area') or '').strip()[:120]
+
     db.session.commit()
     return jsonify(_me_payload(user))

@@ -309,8 +309,16 @@
   // ---------- Map / Courts ----------
   function setupMap() {
     const saved = JSON.parse(localStorage.getItem('pp_mapview') || 'null');
-    state.map = L.map('map', { zoomControl: false })
-      .setView(saved ? saved.center : DEFAULT_CENTER, saved ? saved.zoom : 11);
+    // Center on the user's saved home area when there's no last-viewed map.
+    let center = DEFAULT_CENTER;
+    let zoom = 11;
+    if (saved) {
+      center = saved.center; zoom = saved.zoom;
+    } else if (state.me && state.me.home_lat != null) {
+      center = [state.me.home_lat, state.me.home_lng]; zoom = 12;
+      state.areaLoc = [state.me.home_lat, state.me.home_lng];
+    }
+    state.map = L.map('map', { zoomControl: false }).setView(center, zoom);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap &copy; CARTO',
       maxZoom: 19,
@@ -374,7 +382,8 @@
       searchTimer = setTimeout(() => q ? searchCourts(q) : fetchCourtsInView(), 350);
     });
 
-    if (!saved) locateMe(true);
+    // Only auto-locate when we have neither a saved view nor a saved home area.
+    if (!saved && !(state.me && state.me.home_lat != null)) locateMe(true);
     fetchCourtsInView();
   }
 
@@ -2118,6 +2127,14 @@
           <button class="btn btn-secondary btn-sm" id="pf-checkout">Check out</button>
         </div>` : ''}
       <div class="card row" style="margin-bottom:10px">
+        <span style="font-size:20px">🏠</span>
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">Home area</div>
+          <div class="row-sub">${me.home_area ? esc(me.home_area) : 'Where the app opens — courts, games & players near you'}</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="pf-home">${me.home_area ? 'Change' : 'Set'}</button>
+      </div>
+      <div class="card row" style="margin-bottom:10px">
         <span style="font-size:20px">📍</span>
         <div class="row-main">
           <div class="row-title" style="font-size:14px">Auto check-in</div>
@@ -2150,6 +2167,10 @@
       toast(off ? 'Auto check-in on 📍' : 'Auto check-in off');
     });
 
+    el.querySelector('#pf-home').addEventListener('click', async () => {
+      const ok = await setHomeAreaFromLocation();
+      if (ok) renderProfile();
+    });
     el.querySelector('#pf-logout').addEventListener('click', logout);
     el.querySelector('#pf-edit').addEventListener('click', openEditProfile);
     el.querySelector('#pf-activity').addEventListener('click', openActivity);
@@ -2503,12 +2524,66 @@
   }
 
   // ---------- Boot ----------
+  // Capture the device location as the user's home area (reverse-geocoded label).
+  async function setHomeAreaFromLocation({ silent = false } = {}) {
+    if (!navigator.geolocation) {
+      if (!silent) toast('Location not available on this device');
+      return false;
+    }
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        let label = '';
+        try {
+          const geo = await api(`/geocode/reverse?lat=${lat}&lng=${lng}`);
+          label = geo.label || '';
+        } catch { /* label is optional */ }
+        try {
+          const data = await api('/me', {
+            method: 'PATCH',
+            body: JSON.stringify({ home_lat: lat, home_lng: lng, home_area: label }),
+          });
+          applyMe(data);
+          state.areaLoc = [lat, lng];
+          state.userLoc = [lat, lng];
+          if (state.map) { state.map.setView([lat, lng], 12); updateUserDot(); }
+          toast(label ? `Home area set to ${label} 📍` : 'Home area set 📍');
+          resolve(true);
+        } catch (e) { if (!silent) toast(e.message); resolve(false); }
+      }, () => {
+        if (!silent) toast('Could not get your location');
+        resolve(false);
+      }, { timeout: 10000 });
+    });
+  }
+
+  function maybeOnboardHomeArea() {
+    if (!state.me || state.me.home_lat != null) return;
+    if (localStorage.getItem('pp_onboarded_home') === '1') return;
+    localStorage.setItem('pp_onboarded_home', '1');
+    const modal = openModal(`
+      <div class="checkin-sheet">
+        <div class="celebrate-emoji" style="font-size:46px">📍</div>
+        <h3 style="margin:6px 0 2px">Set your home area</h3>
+        <p class="row-sub" style="margin-bottom:18px">So Third Shot opens to courts, games, and players near you — anywhere in the US.</p>
+        <button class="btn btn-primary btn-block" id="ob-loc" style="padding:15px;margin-bottom:8px">Use my current location</button>
+        <button class="btn-link modal-close btn-block">Maybe later</button>
+      </div>
+    `);
+    modal.querySelector('#ob-loc').addEventListener('click', async () => {
+      const ok = await setHomeAreaFromLocation();
+      if (ok) { closeModal(modal); fetchCourtsInView(); }
+    });
+  }
+
   async function showMain() {
     $('#auth-screen').classList.add('hidden');
     $('#main-screen').classList.remove('hidden');
     if (!state.map) setupMap();
     else setTimeout(() => state.map.invalidateSize(), 60);
     startLocationWatch();
+    maybeOnboardHomeArea();
     clearInterval(state.mePollTimer);
     let tick = 0;
     state.mePollTimer = setInterval(() => {
