@@ -7,6 +7,7 @@ from flask import Blueprint, g, jsonify, request
 from backend.app import db
 from backend.models import (
     Court,
+    GAME_RECURRENCES,
     GAME_TYPES,
     GAME_VISIBILITIES,
     Game,
@@ -52,10 +53,36 @@ def auto_confirm_stale_scores():
         db.session.commit()
 
 
+def roll_forward_recurring():
+    """Advance weekly open-play sessions to their next occurrence once the last
+    one is ~3h past, resetting the RSVP list to just the host (re-RSVP weekly)."""
+    cutoff = utcnow() - timedelta(hours=3)
+    due = Game.query.filter(
+        Game.recurrence == 'weekly',
+        Game.status == 'upcoming',
+        Game.scheduled_at < cutoff,
+    ).all()
+    changed = False
+    now = utcnow()
+    for game in due:
+        nxt = game.scheduled_at
+        while nxt < now:
+            nxt += timedelta(days=7)
+        game.scheduled_at = nxt
+        # Reset attendees to the host for the new week
+        for player in list(game.players):
+            if player.user_id != game.creator_id:
+                game.players.remove(player)
+        changed = True
+    if changed:
+        db.session.commit()
+
+
 @games_bp.get('/games')
 def list_games():
     """Upcoming games feed, optionally sorted by distance from lat/lng."""
     auto_confirm_stale_scores()
+    roll_forward_recurring()
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
     mine = str(request.args.get('mine') or '').strip() in {'1', 'true', 'yes'}
@@ -162,12 +189,20 @@ def create_game():
     if visibility == 'private' and not invited_ids:
         return jsonify({'error': 'no_invitees'}), 400
 
+    # Recurrence: weekly open-play sessions (casual only — they don't score).
+    recurrence = str(payload.get('recurrence') or 'none').strip().lower()
+    if recurrence not in GAME_RECURRENCES:
+        recurrence = 'none'
+    if game_type == 'ranked':
+        recurrence = 'none'
+
     game = Game(
         court_id=court.id,
         creator_id=g.current_user.id,
         scheduled_at=scheduled_at,
         game_type=game_type,
         visibility=visibility,
+        recurrence=recurrence,
         max_players=max_players,
         notes=str(payload.get('notes') or '').strip()[:500],
     )
@@ -368,6 +403,8 @@ def submit_score(game_id):
         return jsonify({'error': 'game_not_found'}), 404
     if game.status not in ('upcoming', 'awaiting_confirmation'):
         return jsonify({'error': 'game_not_open'}), 400
+    if game.recurrence != 'none':
+        return jsonify({'error': 'recurring_open_play'}), 400
     player_ids = {p.user_id for p in game.players}
     if g.current_user.id not in player_ids:
         return jsonify({'error': 'forbidden'}), 403

@@ -931,6 +931,9 @@
       : game.visibility === 'friends'
         ? '<span class="tag" style="margin:0 0 0 6px">🤝 Friends</span>'
         : '';
+    const recurTag = game.recurrence === 'weekly'
+      ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>'
+      : '';
     const host = game.players.find((p) => p.user_id === game.creator_id);
     const hostLabel = host ? ` · Host: ${esc(host.display_name)}` : '';
     const avatars = game.players.slice(0, 5).map((p) => avatarHtml(p, 'sm')).join('');
@@ -982,7 +985,7 @@
       <div class="card" style="${cardStyle};cursor:pointer" data-open-game="${game.id}">
         <div class="row" style="margin-bottom:8px">
           <div class="row-main">
-            <div class="row-title">${esc(fmtDateTime(game.scheduled_at))}${typeTag}${visTag}</div>
+            <div class="row-title">${esc(fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}</div>
             <div class="row-sub">${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</div>
           </div>
           <span class="chev">›</span>
@@ -1399,6 +1402,11 @@
         </div>
       </div>
 
+      <label class="row" id="ng-recurring-row" style="margin-bottom:14px;cursor:pointer;gap:10px">
+        <input type="checkbox" id="ng-recurring" style="width:18px;height:18px;flex:0 0 auto" />
+        <span><span style="font-weight:700">🔁 Repeats weekly</span><br><span class="row-sub">Open-play session — players re-RSVP each week</span></span>
+      </label>
+
       <div class="form-field">
         <input type="text" id="ng-notes" maxlength="200" placeholder="Note (optional) — e.g. All levels welcome!" />
       </div>
@@ -1485,11 +1493,21 @@
 
     // --- Type ---
     let gameType = defaultType;
+    const recurringRow = modal.querySelector('#ng-recurring-row');
+    const recurringBox = modal.querySelector('#ng-recurring');
+    const syncRecurring = () => {
+      // Recurring weekly sessions are open-play only (ranked games don't repeat).
+      const isRanked = gameType === 'ranked';
+      recurringRow.classList.toggle('hidden', isRanked);
+      if (isRanked) recurringBox.checked = false;
+    };
+    syncRecurring();
     modal.querySelector('#ng-type').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       gameType = btn.dataset.val;
       modal.querySelectorAll('#ng-type button').forEach((b) => b.classList.toggle('active', b === btn));
+      syncRecurring();
     });
 
     // --- Visibility / invites ---
@@ -1549,6 +1567,7 @@
             scheduled_at: scheduledAt.toISOString(),
             game_type: gameType,
             visibility,
+            recurrence: recurringBox.checked ? 'weekly' : 'none',
             max_players: Number(modal.querySelector('#ng-max').value),
             notes: modal.querySelector('#ng-notes').value.trim(),
             invite_user_ids: visibility === 'private' ? [...inviteIds] : [],
@@ -2347,7 +2366,7 @@
     return `
       <div class="modal-head">
         <div style="flex:1">
-          <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}</h3>
+          <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
         <button class="modal-close">✕</button>

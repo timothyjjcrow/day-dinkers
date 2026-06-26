@@ -217,6 +217,9 @@ GAME_STATUSES = ['upcoming', 'awaiting_confirmation', 'completed', 'cancelled']
 #   friends -> the creator's friends
 #   private -> only specifically invited players
 GAME_VISIBILITIES = ['open', 'friends', 'private']
+# How a session repeats. 'weekly' open-play sessions roll forward to the next
+# occurrence (re-RSVP each week); 'none' is a one-off game.
+GAME_RECURRENCES = ['none', 'weekly']
 
 
 class Game(TimestampMixin, db.Model):
@@ -226,6 +229,7 @@ class Game(TimestampMixin, db.Model):
     scheduled_at = db.Column(db.DateTime, nullable=False, index=True)
     game_type = db.Column(db.String(20), nullable=False, default='casual')
     visibility = db.Column(db.String(16), nullable=False, default='open', index=True)
+    recurrence = db.Column(db.String(16), nullable=False, default='none')
     max_players = db.Column(db.Integer, nullable=False, default=4)
     notes = db.Column(db.String(500), nullable=False, default='')
     # 32 chars: must fit 'awaiting_confirmation' (Postgres enforces this, SQLite doesn't)
@@ -291,6 +295,7 @@ class Game(TimestampMixin, db.Model):
             'scheduled_at': iso(self.scheduled_at),
             'game_type': self.game_type,
             'visibility': self.visibility,
+            'recurrence': self.recurrence,
             'max_players': self.max_players,
             'notes': self.notes,
             'status': self.status,

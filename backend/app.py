@@ -173,6 +173,10 @@ def _upgrade_schema(app):
                 statements.append(
                     "ALTER TABLE game ADD COLUMN visibility VARCHAR(16) NOT NULL DEFAULT 'open'"
                 )
+            if 'recurrence' not in game_cols:
+                statements.append(
+                    "ALTER TABLE game ADD COLUMN recurrence VARCHAR(16) NOT NULL DEFAULT 'none'"
+                )
 
         if statements:
             app.logger.warning('Applying schema upgrades: %s', statements)

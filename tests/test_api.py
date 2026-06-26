@@ -160,6 +160,66 @@ def test_geocode(client, monkeypatch):
     assert calls['n'] == 1
 
 
+def test_recurring_session_rolls_forward(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    g = make_game(client, a['token'], court_id, visibility='open')
+    # turn it into a weekly session via the create endpoint
+    when = (utcnow() + timedelta(days=2)).isoformat() + 'Z'
+    res = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when,
+        'game_type': 'casual', 'visibility': 'open', 'recurrence': 'weekly',
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    weekly = res.get_json()
+    assert weekly['recurrence'] == 'weekly'
+
+    # Ben RSVPs
+    client.post(f"/api/games/{weekly['id']}/join", headers=auth_headers(b['token']))
+
+    # Recurring sessions don't take scores
+    sc = client.post(f"/api/games/{weekly['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 5,
+    }, headers=auth_headers(a['token']))
+    assert sc.status_code == 400
+
+    # Force it into the past, then a feed read rolls it forward and resets RSVPs to host
+    with app.app_context():
+        row = db.session.get(GameModel, weekly['id'])
+        row.scheduled_at = utcnow() - timedelta(days=5)
+        db.session.commit()
+
+    client.get('/api/games?lat=33.66&lng=-117.91')
+    detail = client.get(f"/api/games/{weekly['id']}").get_json()
+    assert detail['status'] == 'upcoming'
+    # advanced into the future
+    from datetime import datetime
+    sched = datetime.fromisoformat(detail['scheduled_at'].replace('Z', ''))
+    assert sched > utcnow()
+    # back to host only
+    assert [p['user_id'] for p in detail['players']] == [a['user']['id']]
+    assert weekly['id'] != g['id']  # sanity: distinct from the one-off game
+
+
+def test_ranked_cannot_recur(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+    a = register(client, 'a@example.com')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    res = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(hours=24)).isoformat() + 'Z',
+        'game_type': 'ranked', 'recurrence': 'weekly',
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    assert res.get_json()['recurrence'] == 'none'
+
+
 def test_set_home_area(client):
     token = register(client, 'a@example.com')['token']
     res = client.patch('/api/me', json={
