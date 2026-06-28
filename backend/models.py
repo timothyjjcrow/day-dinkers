@@ -38,6 +38,7 @@ class User(TimestampMixin, db.Model):
     bio = db.Column(db.String(500), nullable=False, default='')
     skill_level = db.Column(db.String(20), nullable=False, default='beginner')
     avatar_color = db.Column(db.String(7), nullable=False, default='#2f9e44')
+    avatar_url = db.Column(db.String(500), nullable=False, default='')
     rating = db.Column(db.Integer, nullable=False, default=DEFAULT_RATING)
     ranked_wins = db.Column(db.Integer, nullable=False, default=0)
     ranked_losses = db.Column(db.Integer, nullable=False, default=0)
@@ -72,6 +73,7 @@ class User(TimestampMixin, db.Model):
             'bio': self.bio,
             'skill_level': self.skill_level,
             'avatar_color': self.avatar_color,
+            'avatar_url': self.avatar_url or '',
             'rating': self.rating,
             'ranked_wins': self.ranked_wins,
             'ranked_losses': self.ranked_losses,

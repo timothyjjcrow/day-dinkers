@@ -160,6 +160,26 @@ def test_geocode(client, monkeypatch):
     assert calls['n'] == 1
 
 
+def test_avatar_url(client):
+    token = register(client, 'a@example.com', 'Ana')['token']
+    res = client.patch('/api/me', json={'avatar_url': 'https://example.com/me.jpg'},
+                       headers=auth_headers(token))
+    assert res.status_code == 200
+    assert res.get_json()['user']['avatar_url'] == 'https://example.com/me.jpg'
+
+    # Public profiles expose it too
+    me_id = res.get_json()['user']['id']
+    b = register(client, 'b@example.com')
+    prof = client.get(f'/api/users/{me_id}', headers=auth_headers(b['token'])).get_json()
+    assert prof['avatar_url'] == 'https://example.com/me.jpg'
+
+    # Bad URL rejected; blank clears
+    assert client.patch('/api/me', json={'avatar_url': 'javascript:alert(1)'},
+                        headers=auth_headers(token)).status_code == 400
+    cleared = client.patch('/api/me', json={'avatar_url': ''}, headers=auth_headers(token))
+    assert cleared.get_json()['user']['avatar_url'] == ''
+
+
 def test_production_requires_secret_key(monkeypatch):
     monkeypatch.delenv('SECRET_KEY', raising=False)
     with pytest.raises(RuntimeError):

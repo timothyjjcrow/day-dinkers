@@ -1,4 +1,4 @@
-/* Picklepals — simple social pickleball app */
+/* Third Shot — simple social pickleball app */
 (() => {
   'use strict';
 
@@ -84,7 +84,15 @@
     return String(name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   }
   function avatarHtml(user, cls = '') {
-    return `<div class="avatar ${cls}" style="background:${esc(user.avatar_color || '#2f9e44')}">${esc(initials(user.display_name))}</div>`;
+    const bg = esc(user.avatar_color || '#2f9e44');
+    const label = esc(initials(user.display_name));
+    if (user.avatar_url) {
+      // Photo with graceful fallback to the colored-initials avatar on load error.
+      return `<div class="avatar ${cls}" style="background:${bg}">`
+        + `<img src="${esc(user.avatar_url)}" alt="" loading="lazy" `
+        + `onerror="this.remove()" />${label}</div>`;
+    }
+    return `<div class="avatar ${cls}" style="background:${bg}">${label}</div>`;
   }
   function fmtDateTime(isoStr) {
     if (!isoStr) return '';
@@ -2168,7 +2176,7 @@
           <span style="font-size:20px">📱</span>
           <div class="row-main">
             <div class="row-title" style="font-size:14px">Get the app feel</div>
-            <div class="row-sub">In your browser menu tap <b>Add to Home Screen</b> — Picklepals installs like an app.</div>
+            <div class="row-sub">In your browser menu tap <b>Add to Home Screen</b> — Third Shot installs like an app.</div>
           </div>
         </div>` : ''}
       <button class="btn btn-secondary btn-block" id="pf-edit" style="margin-bottom:10px">✏️ Edit profile</button>
@@ -2225,6 +2233,14 @@
         </select>
       </div>
       <div class="form-field">
+        <label>Profile photo (optional)</label>
+        <div class="row" style="gap:10px">
+          <div id="ep-avatar-preview">${avatarHtml(me)}</div>
+          <input type="url" id="ep-avatar-url" placeholder="Paste an image URL…" value="${esc(me.avatar_url || '')}" style="flex:1" />
+        </div>
+        <p class="row-sub" style="margin-top:4px">Leave blank to use your colored initials.</p>
+      </div>
+      <div class="form-field">
         <label>Avatar color</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${colors.map((c) => `<button type="button" class="avatar" data-color="${c}" style="background:${c};outline:${me.avatar_color === c ? '3px solid var(--ink)' : 'none'}">${esc(initials(me.display_name))}</button>`).join('')}
@@ -2240,9 +2256,18 @@
     `);
 
     let color = me.avatar_color;
+    const avatarUrlInput = modal.querySelector('#ep-avatar-url');
+    const refreshAvatarPreview = () => {
+      modal.querySelector('#ep-avatar-preview').innerHTML = avatarHtml({
+        display_name: me.display_name, avatar_color: color,
+        avatar_url: avatarUrlInput.value.trim(),
+      });
+    };
+    avatarUrlInput.addEventListener('input', refreshAvatarPreview);
     modal.querySelectorAll('[data-color]').forEach((b) => b.addEventListener('click', () => {
       color = b.dataset.color;
       modal.querySelectorAll('[data-color]').forEach((x) => { x.style.outline = x === b ? '3px solid var(--ink)' : 'none'; });
+      refreshAvatarPreview();
     }));
 
     let timer;
@@ -2275,6 +2300,7 @@
           bio: modal.querySelector('#ep-bio').value.trim(),
           skill_level: modal.querySelector('#ep-skill').value,
           avatar_color: color,
+          avatar_url: avatarUrlInput.value.trim(),
         };
         const courtId = modal.querySelector('#ep-court-id').value;
         if (courtId) body.home_court_id = Number(courtId);

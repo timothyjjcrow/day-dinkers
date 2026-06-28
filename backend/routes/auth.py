@@ -264,6 +264,11 @@ def update_me():
         if not re.match(r'^#[0-9a-fA-F]{6}$', color):
             return jsonify({'error': 'invalid_avatar_color'}), 400
         user.avatar_color = color
+    if 'avatar_url' in payload:
+        url = str(payload.get('avatar_url') or '').strip()
+        if url and not re.match(r'^https?://\S+$', url):
+            return jsonify({'error': 'invalid_avatar_url'}), 400
+        user.avatar_url = url[:500]
     if 'home_court_id' in payload:
         court_id = payload.get('home_court_id')
         if court_id in (None, '', 0):
