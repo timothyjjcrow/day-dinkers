@@ -4,6 +4,7 @@ from sqlalchemy import or_
 
 from backend.app import db
 from backend.models import Court, Message, User, utcnow
+from backend.security import rate_limit
 
 chat_bp = Blueprint('chat', __name__)
 
@@ -29,6 +30,7 @@ def court_chat(court_id):
 
 
 @chat_bp.post('/courts/<int:court_id>/chat')
+@rate_limit(60, 60)
 @login_required
 def send_court_message(court_id):
     court = db.session.get(Court, court_id)
@@ -120,6 +122,7 @@ def thread(user_id):
 
 
 @chat_bp.post('/chat/<int:user_id>')
+@rate_limit(60, 60)
 @login_required
 def send_message(user_id):
     partner = db.session.get(User, user_id)

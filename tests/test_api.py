@@ -160,6 +160,37 @@ def test_geocode(client, monkeypatch):
     assert calls['n'] == 1
 
 
+def test_production_requires_secret_key(monkeypatch):
+    monkeypatch.delenv('SECRET_KEY', raising=False)
+    with pytest.raises(RuntimeError):
+        create_app('production')
+
+
+def test_security_headers(client):
+    res = client.get('/health')
+    assert res.headers.get('X-Content-Type-Options') == 'nosniff'
+    assert res.headers.get('X-Frame-Options') == 'SAMEORIGIN'
+    assert 'Referrer-Policy' in res.headers
+
+
+def test_rate_limiting(app):
+    app.config['RATE_LIMIT_ENABLED'] = True
+    import backend.security as sec
+    sec._BUCKETS.clear()
+    c = app.test_client()
+    statuses = []
+    for i in range(12):
+        r = c.post('/api/auth/register', json={
+            'email': f'rl{i}@example.com', 'password': 'secret123', 'display_name': f'R{i}',
+        })
+        statuses.append(r.status_code)
+    assert 429 in statuses, statuses
+    # register limit is 10 per window; the 11th+ should be limited
+    assert statuses[:10].count(201) == 10
+    app.config['RATE_LIMIT_ENABLED'] = False
+    sec._BUCKETS.clear()
+
+
 def test_recurring_session_rolls_forward(client, app):
     from datetime import timedelta
     from backend.models import Game as GameModel, utcnow

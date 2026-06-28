@@ -13,6 +13,7 @@ from backend.app import db
 from backend.models import CheckIn, Court, FavoriteCourt, Game, GamePlayer, utcnow
 from backend.routes.auth import active_checkin_for, login_required, optional_current_user, presence_payload
 from backend.routes.social import friend_ids
+from backend.security import rate_limit
 
 courts_bp = Blueprint('courts', __name__)
 
@@ -333,6 +334,7 @@ def list_favorites():
 
 
 @courts_bp.post('/courts/<int:court_id>/checkin')
+@rate_limit(40, 60)
 @login_required
 def check_in(court_id):
     court = db.session.get(Court, court_id)

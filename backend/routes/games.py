@@ -20,6 +20,7 @@ from backend.models import (
 from backend.routes.auth import login_required, optional_current_user
 from backend.routes.courts import haversine_miles
 from backend.routes.social import friend_ids
+from backend.security import rate_limit
 
 games_bp = Blueprint('games', __name__)
 
@@ -144,6 +145,7 @@ def my_game_history():
 
 
 @games_bp.post('/games')
+@rate_limit(20, 60)
 @login_required
 def create_game():
     payload = request.get_json(silent=True) or {}
@@ -518,6 +520,7 @@ def dispute_score(game_id):
 
 
 @games_bp.post('/users/<int:user_id>/challenge')
+@rate_limit(20, 60)
 @login_required
 def challenge_user(user_id):
     """Challenge another player to a ranked match at a court, right now."""

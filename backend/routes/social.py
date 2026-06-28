@@ -18,6 +18,7 @@ from backend.models import (
     notify,
 )
 from backend.routes.auth import login_required
+from backend.security import rate_limit
 
 social_bp = Blueprint('social', __name__)
 
@@ -237,6 +238,7 @@ def list_friends():
 
 
 @social_bp.post('/friends/request')
+@rate_limit(40, 60)
 @login_required
 def send_friend_request():
     payload = request.get_json(silent=True) or {}

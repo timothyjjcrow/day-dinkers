@@ -59,6 +59,7 @@ class BaseConfig:
     AUTO_SEED_COURTS = _get_bool('AUTO_SEED_COURTS', default=False)
     RESET_DB_ON_BOOT = _get_bool('RESET_DB_ON_BOOT', default=False)
     PRESENCE_STALE_AFTER_SECONDS = _get_int('PRESENCE_STALE_AFTER_SECONDS', 7200)
+    RATE_LIMIT_ENABLED = _get_bool('RATE_LIMIT_ENABLED', default=True)
 
 
 class DevelopmentConfig(BaseConfig):
@@ -79,7 +80,16 @@ class TestingConfig(BaseConfig):
     TESTING = True
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.getenv('TEST_DATABASE_URL', 'sqlite:///:memory:')
+    # A single shared connection so an in-memory SQLite DB is consistent across
+    # app contexts/requests within a test (otherwise pooled connections each get
+    # their own empty :memory: database).
+    from sqlalchemy.pool import StaticPool
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'poolclass': StaticPool,
+        'connect_args': {'check_same_thread': False},
+    }
     AUTO_CREATE_DB = True
+    RATE_LIMIT_ENABLED = False
 
 
 CONFIG_BY_NAME = {

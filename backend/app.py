@@ -190,8 +190,24 @@ def _upgrade_schema(app):
 def create_app(config_name=None):
     app = Flask(__name__, static_folder=None)
     app.config.from_object(get_config(config_name))
+
+    # Never run production with a guessable signing key.
+    if app.config.get('APP_ENV') == 'production' and \
+            app.config.get('SECRET_KEY') in (None, '', 'change-me'):
+        raise RuntimeError(
+            'SECRET_KEY must be set to a strong value in production '
+            '(the default "change-me" is not allowed).'
+        )
+
     db.init_app(app)
     _register_blueprints(app)
+
+    @app.after_request
+    def _security_headers(resp):
+        resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        resp.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+        resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        return resp
 
     with app.app_context():
         _ensure_pg_schema(app)

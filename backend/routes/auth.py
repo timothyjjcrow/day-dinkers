@@ -7,6 +7,7 @@ import jwt
 from flask import Blueprint, current_app, g, jsonify, request
 
 from backend.app import db
+from backend.security import rate_limit
 from backend.models import (
     CheckIn,
     Court,
@@ -198,6 +199,7 @@ def _me_payload(user):
 
 
 @auth_bp.post('/auth/register')
+@rate_limit(10, 600)
 def register():
     payload = request.get_json(silent=True) or {}
     email = str(payload.get('email') or '').strip().lower()
@@ -221,6 +223,7 @@ def register():
 
 
 @auth_bp.post('/auth/login')
+@rate_limit(20, 300)
 def login():
     payload = request.get_json(silent=True) or {}
     email = str(payload.get('email') or '').strip().lower()
