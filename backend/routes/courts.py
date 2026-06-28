@@ -10,7 +10,7 @@ from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy import func
 
 from backend.app import db
-from backend.models import CheckIn, Court, FavoriteCourt, Game, GamePlayer, utcnow
+from backend.models import CheckIn, Court, CourtReview, FavoriteCourt, Game, GamePlayer, utcnow
 from backend.routes.auth import active_checkin_for, login_required, optional_current_user, presence_payload
 from backend.routes.social import friend_ids
 from backend.security import rate_limit
@@ -143,6 +143,26 @@ def haversine_miles(lat1, lng1, lat2, lng2):
     return 2 * radius_miles * math.asin(math.sqrt(a))
 
 
+def _rating_summary_for(court_ids):
+    """Batch {court_id: {avg, count}} for a list of courts."""
+    if not court_ids:
+        return {}
+    rows = (
+        db.session.query(
+            CourtReview.court_id,
+            func.avg(CourtReview.rating),
+            func.count(CourtReview.id),
+        )
+        .filter(CourtReview.court_id.in_(court_ids))
+        .group_by(CourtReview.court_id)
+        .all()
+    )
+    return {
+        cid: {'rating_avg': round(float(avg), 1), 'rating_count': int(count)}
+        for cid, avg, count in rows
+    }
+
+
 def _active_counts_for(court_ids):
     if not court_ids:
         return {}, {}
@@ -222,10 +242,15 @@ def list_courts():
         items.sort(key=lambda c: c.get('distance_miles', 0))
     items = items[:limit]
 
-    players, games = _active_counts_for([c['id'] for c in items])
+    ids = [c['id'] for c in items]
+    players, games = _active_counts_for(ids)
+    ratings = _rating_summary_for(ids)
     for item in items:
         item['players_here'] = players.get(item['id'], 0)
         item['upcoming_games'] = games.get(item['id'], 0)
+        summary = ratings.get(item['id'])
+        item['rating_avg'] = summary['rating_avg'] if summary else None
+        item['rating_count'] = summary['rating_count'] if summary else 0
 
     return jsonify({'items': items, 'count': len(items)})
 
@@ -294,7 +319,73 @@ def court_detail(court_id):
             user_id=current_user.id, court_id=court.id,
         ).first()
     )
+
+    summary = _rating_summary_for([court.id]).get(court.id)
+    payload['rating_avg'] = summary['rating_avg'] if summary else None
+    payload['rating_count'] = summary['rating_count'] if summary else 0
+    recent_reviews = (
+        CourtReview.query.filter_by(court_id=court.id)
+        .order_by(CourtReview.updated_at.desc())
+        .limit(10)
+        .all()
+    )
+    payload['reviews'] = [r.to_dict() for r in recent_reviews]
+    my_review = (
+        CourtReview.query.filter_by(court_id=court.id, user_id=current_user.id).first()
+        if current_user else None
+    )
+    payload['my_review'] = my_review.to_dict() if my_review else None
     return jsonify(payload)
+
+
+@courts_bp.get('/courts/<int:court_id>/reviews')
+def court_reviews(court_id):
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+    reviews = (
+        CourtReview.query.filter_by(court_id=court.id)
+        .order_by(CourtReview.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+    summary = _rating_summary_for([court.id]).get(court.id)
+    return jsonify({
+        'items': [r.to_dict() for r in reviews],
+        'rating_avg': summary['rating_avg'] if summary else None,
+        'rating_count': summary['rating_count'] if summary else 0,
+    })
+
+
+@courts_bp.post('/courts/<int:court_id>/reviews')
+@rate_limit(20, 60)
+@login_required
+def upsert_review(court_id):
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+    payload = request.get_json(silent=True) or {}
+    try:
+        rating = int(payload.get('rating'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'rating_required'}), 400
+    if rating < 1 or rating > 5:
+        return jsonify({'error': 'invalid_rating'}), 400
+    comment = str(payload.get('comment') or '').strip()[:500]
+
+    review = CourtReview.query.filter_by(court_id=court.id, user_id=g.current_user.id).first()
+    if not review:
+        review = CourtReview(court_id=court.id, user_id=g.current_user.id)
+        db.session.add(review)
+    review.rating = rating
+    review.comment = comment
+    db.session.commit()
+    summary = _rating_summary_for([court.id]).get(court.id)
+    return jsonify({
+        'review': review.to_dict(),
+        'rating_avg': summary['rating_avg'] if summary else None,
+        'rating_count': summary['rating_count'] if summary else 0,
+    }), 201
 
 
 @courts_bp.post('/courts/<int:court_id>/favorite')

@@ -160,6 +160,42 @@ def test_geocode(client, monkeypatch):
     assert calls['n'] == 1
 
 
+def test_court_reviews(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Ana reviews 4 stars
+    res = client.post(f'/api/courts/{court_id}/reviews', json={'rating': 4, 'comment': 'Nice nets'}, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    assert res.get_json()['rating_avg'] == 4.0
+    assert res.get_json()['rating_count'] == 1
+
+    # Ben reviews 2 stars -> avg 3.0, count 2
+    res = client.post(f'/api/courts/{court_id}/reviews', json={'rating': 2}, headers=auth_headers(b['token']))
+    assert res.get_json()['rating_avg'] == 3.0
+    assert res.get_json()['rating_count'] == 2
+
+    # One review per user: Ana edits to 5 -> avg (5+2)/2 = 3.5
+    res = client.post(f'/api/courts/{court_id}/reviews', json={'rating': 5, 'comment': 'Even better'}, headers=auth_headers(a['token']))
+    assert res.get_json()['rating_avg'] == 3.5
+    assert res.get_json()['rating_count'] == 2
+
+    # Detail exposes summary + my_review + recent reviews
+    detail = client.get(f'/api/courts/{court_id}', headers=auth_headers(a['token'])).get_json()
+    assert detail['rating_avg'] == 3.5 and detail['rating_count'] == 2
+    assert detail['my_review']['rating'] == 5
+    assert len(detail['reviews']) == 2
+
+    # Search results carry the average
+    item = [c for c in client.get('/api/courts?q=larson').get_json()['items'] if c['id'] == court_id][0]
+    assert item['rating_avg'] == 3.5 and item['rating_count'] == 2
+
+    # Validation
+    assert client.post(f'/api/courts/{court_id}/reviews', json={'rating': 9}, headers=auth_headers(a['token'])).status_code == 400
+    assert client.post(f'/api/courts/{court_id}/reviews', json={}, headers=auth_headers(a['token'])).status_code == 400
+
+
 def test_avatar_url(client):
     token = register(client, 'a@example.com', 'Ana')['token']
     res = client.patch('/api/me', json={'avatar_url': 'https://example.com/me.jpg'},

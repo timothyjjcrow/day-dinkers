@@ -600,6 +600,7 @@
           <div class="row-sub">
             ${esc(c.city)}${c.distance_miles != null ? ` · ${c.distance_miles} mi` : ''}
             · ${c.num_courts} court${c.num_courts === 1 ? '' : 's'}
+            ${c.rating_avg ? ` · ⭐ ${c.rating_avg} (${c.rating_count})` : ''}
             ${c.players_here ? ` · <b style="color:var(--green-700)">${c.players_here} playing now</b>` : ''}
             ${c.upcoming_games ? ` · ${c.upcoming_games} game${c.upcoming_games === 1 ? '' : 's'} scheduled` : ''}
           </div>
@@ -726,6 +727,70 @@
   const modalHead = (title) => `<div class="modal-head"><h3>${esc(title)}</h3><button class="modal-close">✕</button></div>`;
 
   // ---------- Court detail ----------
+  function starsHtml(rating, interactive = false) {
+    let out = '';
+    for (let i = 1; i <= 5; i++) {
+      const filled = i <= rating;
+      out += interactive
+        ? `<button type="button" class="star-btn ${filled ? 'on' : ''}" data-star="${i}">★</button>`
+        : `<span class="star ${filled ? 'on' : ''}">★</span>`;
+    }
+    return out;
+  }
+
+  function renderReviewSection(el, court) {
+    const mine = court.my_review;
+    let chosen = mine ? mine.rating : 0;
+    const reviews = court.reviews || [];
+    const formCard = state.me ? `
+      <div class="card" id="cd-review-form">
+        <div class="row-title" style="font-size:14px;margin-bottom:6px">${mine ? 'Your review' : 'Rate this court'}</div>
+        <div class="star-row" id="cd-stars">${starsHtml(chosen, true)}</div>
+        <input type="text" id="cd-review-comment" maxlength="500" placeholder="Add a comment (optional)" value="${esc(mine ? mine.comment : '')}" style="margin:8px 0" />
+        <button class="btn btn-primary btn-sm" id="cd-review-save">${mine ? 'Update review' : 'Post review'}</button>
+      </div>` : '';
+    const others = reviews.filter((r) => !state.me || r.user_id !== state.me.id);
+    const listHtml = others.length
+      ? others.map((r) => `
+        <div class="card row" style="align-items:flex-start">
+          ${avatarHtml({ display_name: r.user_name, avatar_color: r.avatar_color, avatar_url: r.avatar_url }, 'sm')}
+          <div class="row-main">
+            <div class="row-title" style="font-size:13.5px">${esc(r.user_name)} <span class="stars-inline">${starsHtml(r.rating)}</span></div>
+            ${r.comment ? `<div class="row-sub">${esc(r.comment)}</div>` : ''}
+          </div>
+        </div>`).join('')
+      : (reviews.length ? '' : '<div class="row-sub" style="padding:4px 4px 8px">No reviews yet — be the first!</div>');
+    el.innerHTML = formCard + listHtml;
+
+    if (!state.me) return;
+    const starRow = el.querySelector('#cd-stars');
+    starRow.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-star]');
+      if (!b) return;
+      chosen = Number(b.dataset.star);
+      starRow.innerHTML = starsHtml(chosen, true);
+    });
+    el.querySelector('#cd-review-save').addEventListener('click', async (e) => {
+      if (!chosen) { toast('Pick a star rating first'); return; }
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await api(`/courts/${court.id}/reviews`, {
+          method: 'POST',
+          body: JSON.stringify({ rating: chosen, comment: el.querySelector('#cd-review-comment').value.trim() }),
+        });
+        toast('Thanks for the review! ⭐');
+        const fresh = await api(`/courts/${court.id}`);
+        court.my_review = fresh.my_review;
+        court.reviews = fresh.reviews;
+        court.rating_avg = fresh.rating_avg;
+        court.rating_count = fresh.rating_count;
+        renderReviewSection(el, court);
+      } catch (err) { toast(err.message); btn.disabled = false; }
+    });
+  }
+
   async function openCourtDetail(courtId) {
     let court;
     try { court = await api(`/courts/${courtId}`); } catch (e) { toast(e.message); return; }
@@ -818,8 +883,12 @@
       ${(court.recent_results || []).length ? `
         <div class="section-label">Recent results here</div>
         ${court.recent_results.map(resultRowHtml).join('')}` : ''}
+      <div class="section-label">Reviews${court.rating_avg ? ` · ⭐ ${court.rating_avg} (${court.rating_count})` : ''}</div>
+      <div id="cd-reviews"></div>
       </div>
     `, { court: true });
+
+    renderReviewSection(modal.querySelector('#cd-reviews'), court);
 
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
       if (checkedIn) {

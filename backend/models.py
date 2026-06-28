@@ -367,6 +367,34 @@ class FavoriteCourt(TimestampMixin, db.Model):
     court = db.relationship('Court')
 
 
+class CourtReview(TimestampMixin, db.Model):
+    """One 1–5 star rating (+ optional comment) per user per court; editable."""
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'court_id', name='uq_court_review'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
+    rating = db.Column(db.Integer, nullable=False, default=5)
+    comment = db.Column(db.String(500), nullable=False, default='')
+
+    user = db.relationship('User')
+    court = db.relationship('Court')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'user_name': self.user.display_name if self.user else 'Player',
+            'avatar_color': self.user.avatar_color if self.user else '#2f9e44',
+            'avatar_url': (self.user.avatar_url or '') if self.user else '',
+            'rating': self.rating,
+            'comment': self.comment,
+            'created_at': iso(self.created_at),
+        }
+
+
 class Notification(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)

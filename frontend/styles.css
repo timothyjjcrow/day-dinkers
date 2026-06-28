@@ -389,6 +389,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .cd-links { display: flex; gap: 16px; margin-top: 12px; padding: 0 4px; }
 .cd-links a { font-size: 13.5px; font-weight: 700; color: var(--green-700); text-decoration: none; }
 
+/* Court reviews / star ratings */
+.star { color: var(--line); font-size: 15px; }
+.star.on { color: var(--amber-500); }
+.stars-inline { white-space: nowrap; }
+.star-row { display: flex; gap: 4px; }
+.star-btn { font-size: 28px; line-height: 1; color: var(--line); padding: 2px; }
+.star-btn.on { color: var(--amber-500); }
+
 .detail-title { font-size: 21px; font-weight: 800; }
 .detail-sub { color: var(--ink-soft); font-size: 14px; margin: 2px 0 12px; }
 .action-row { display: flex; gap: 10px; margin: 12px 0; }
