@@ -83,6 +83,35 @@
   function initials(name) {
     return String(name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   }
+  // Loading placeholder rows (shimmering skeleton cards).
+  function skeletonHtml(rows = 4) {
+    const card = `
+      <div class="skeleton-card">
+        <div class="sk-circle sk-shimmer"></div>
+        <div style="flex:1">
+          <div class="sk-line sk-shimmer" style="width:55%;margin-bottom:8px"></div>
+          <div class="sk-line sk-shimmer" style="width:80%"></div>
+        </div>
+      </div>`;
+    return card.repeat(rows);
+  }
+
+  // Inline error with a Retry button wired to re-run the view.
+  function renderError(el, message, retryFn) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <span class="big">⚠️</span>
+        ${esc(message || 'Something went wrong.')}
+        <br><button class="btn btn-secondary" data-retry>Try again</button>
+      </div>`;
+    const btn = el.querySelector('[data-retry]');
+    if (btn && retryFn) btn.addEventListener('click', retryFn);
+  }
+
+  function emptyHtml(emoji, title, sub) {
+    return `<div class="empty-state"><span class="big">${emoji}</span>${esc(title)}${sub ? `<br>${esc(sub)}` : ''}</div>`;
+  }
+
   function avatarHtml(user, cls = '') {
     const bg = esc(user.avatar_color || '#2f9e44');
     const label = esc(initials(user.display_name));
@@ -1143,7 +1172,7 @@
   async function renderPlay() {
     const seg = state.playSeg;
     const el = $('#play-content');
-    el.innerHTML = '<div class="empty-state">Loading…</div>';
+    el.innerHTML = skeletonHtml(5);
     const loc = areaLatLng();
     try {
       if (seg === 'scores') {
@@ -1256,7 +1285,7 @@
       el.innerHTML = html;
       bindGameButtons(el, renderPlay);
     } catch (e) {
-      el.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
+      renderError(el, e.message, renderPlay);
     }
   }
 
@@ -1729,7 +1758,7 @@
 
   async function renderChat() {
     const el = $('#chat-content');
-    el.innerHTML = '<div class="empty-state">Loading…</div>';
+    el.innerHTML = skeletonHtml(5);
     try {
       if (state.chatSeg === 'chats') {
         const data = await api('/chat');
@@ -1751,7 +1780,7 @@
         await renderFriends(el);
       }
     } catch (e) {
-      el.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
+      renderError(el, e.message, renderChat);
     }
   }
 

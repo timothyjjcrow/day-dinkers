@@ -272,6 +272,22 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 .empty-state { text-align: center; color: var(--ink-soft); padding: 40px 20px; font-size: 14px; }
 .empty-state .big { font-size: 40px; display: block; margin-bottom: 8px; }
+.empty-state .btn { margin-top: 16px; display: inline-block; }
+
+/* Loading skeletons */
+.skeleton-card {
+  background: var(--card); border-radius: var(--radius); padding: 14px;
+  box-shadow: var(--shadow); margin-bottom: 12px; display: flex; gap: 12px; align-items: center;
+}
+.sk-line { background: var(--line); border-radius: 7px; height: 12px; }
+.sk-circle { width: 42px; height: 42px; border-radius: 50%; background: var(--line); flex-shrink: 0; }
+.sk-shimmer { position: relative; overflow: hidden; }
+.sk-shimmer::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.65), transparent);
+  animation: shimmer 1.3s infinite;
+}
+@keyframes shimmer { 100% { transform: translateX(100%); } }
 
 .fab {
   position: absolute; right: 16px; bottom: 78px; z-index: 50;
