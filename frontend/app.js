@@ -177,6 +177,7 @@
         localStorage.setItem('pp_token', data.token);
         applyMe(data);
         showMain();
+        openDeepLink();
       } catch (err) {
         errEl.textContent = err.message;
         errEl.classList.remove('hidden');
@@ -2493,6 +2494,7 @@
           <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
+        <button class="icon-btn" id="gs-share" title="Share game" style="box-shadow:none;font-size:17px">📤</button>
         <button class="modal-close">✕</button>
       </div>
       <div class="card row" id="gs-court" style="cursor:pointer">
@@ -2516,6 +2518,10 @@
     const modal = openModal('');
     const box = modal.querySelector('.modal');
     let fingerprint = '';
+    try { history.replaceState(null, '', `#game/${gameId}`); } catch { /* ignore */ }
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) { try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ } }
+    });
 
     const render = (fresh) => {
       game = fresh;
@@ -2531,8 +2537,18 @@
     function bind() {
       const court = game.court || {};
       const isChallenge = game.notes.startsWith('⚔️');
-      box.querySelectorAll('.modal-close').forEach((b) => { b.onclick = () => closeModal(modal); });
-      box.querySelector('#gs-court')?.addEventListener('click', () => { closeModal(modal); openCourtDetail(court.id); });
+      const clearHash = () => { try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ } };
+      box.querySelectorAll('.modal-close').forEach((b) => { b.onclick = () => { clearHash(); closeModal(modal); }; });
+      box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
+      box.querySelector('#gs-share')?.addEventListener('click', async () => {
+        const url = `${location.origin}/#game/${gameId}`;
+        const when = fmtDateTime(game.scheduled_at);
+        const text = `Join my pickleball game${court.name ? ` at ${court.name}` : ''} — ${when}`;
+        try {
+          if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
+          else { await navigator.clipboard.writeText(url); toast('Link copied 📋'); }
+        } catch { /* user cancelled */ }
+      });
       box.querySelector('#gs-join')?.addEventListener('click', async () => {
         try {
           await api(`/games/${gameId}/join`, { method: 'POST' });
@@ -2739,8 +2755,10 @@
   }
 
   function openDeepLink() {
-    const match = location.hash.match(/^#court\/(\d+)$/);
-    if (match) openCourtDetail(Number(match[1]));
+    const courtMatch = location.hash.match(/^#court\/(\d+)$/);
+    if (courtMatch) { openCourtDetail(Number(courtMatch[1])); return; }
+    const gameMatch = location.hash.match(/^#game\/(\d+)$/);
+    if (gameMatch) openGameScreen(Number(gameMatch[1]));
   }
 
   async function boot() {
