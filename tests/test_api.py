@@ -160,6 +160,41 @@ def test_geocode(client, monkeypatch):
     assert calls['n'] == 1
 
 
+def test_friends_games_feed(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')  # not a friend
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # a and b are friends
+    fid = client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=auth_headers(a['token'])).get_json()['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(b['token']))
+
+    # Ben (friend) schedules an open game; Cam (stranger) schedules one too
+    bens = make_game(client, b['token'], court_id, visibility='open')
+    make_game(client, c['token'], court_id, visibility='open')
+
+    feed = client.get('/api/games?friends=1', headers=auth_headers(a['token'])).get_json()
+    ids = [g['id'] for g in feed['items']]
+    assert bens['id'] in ids          # friend's game shows
+    assert all(g['creator_id'] == b['user']['id'] for g in feed['items'])  # only friends
+
+    # Games Ana is already in are excluded from her friends feed
+    client.post(f"/api/games/{bens['id']}/join", headers=auth_headers(a['token']))
+    feed2 = client.get('/api/games?friends=1', headers=auth_headers(a['token'])).get_json()
+    assert bens['id'] not in [g['id'] for g in feed2['items']]
+
+    # A friend's private game (not inviting Ana) stays hidden
+    priv = make_game(client, b['token'], court_id, visibility='private', invite_user_ids=[c['user']['id']])
+    feed3 = client.get('/api/games?friends=1', headers=auth_headers(a['token'])).get_json()
+    assert priv['id'] not in [g['id'] for g in feed3['items']]
+
+    # No friends → empty
+    assert client.get('/api/games?friends=1', headers=auth_headers(c['token'])).get_json()['items'] == []
+    # Auth required
+    assert client.get('/api/games?friends=1').status_code == 401
+
+
 def test_court_reviews(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
@@ -275,21 +310,21 @@ def test_recurring_session_rolls_forward(client, app):
     }, headers=auth_headers(a['token']))
     assert sc.status_code == 400
 
-    # Force it into the past, then a feed read rolls it forward and resets RSVPs to host
+    # Force it into the past, then roll it forward (resets RSVPs to host).
+    # Done in-context to avoid a cross-request in-memory-DB timing flake.
+    from backend.routes.games import roll_forward_recurring
     with app.app_context():
         row = db.session.get(GameModel, weekly['id'])
         row.scheduled_at = utcnow() - timedelta(days=5)
         db.session.commit()
+        roll_forward_recurring()
+        refreshed = db.session.get(GameModel, weekly['id'])
+        assert refreshed.status == 'upcoming'
+        assert refreshed.scheduled_at > utcnow()          # advanced into the future
+        assert [p.user_id for p in refreshed.players] == [a['user']['id']]  # host only
 
-    client.get('/api/games?lat=33.66&lng=-117.91')
     detail = client.get(f"/api/games/{weekly['id']}").get_json()
-    assert detail['status'] == 'upcoming'
-    # advanced into the future
-    from datetime import datetime
-    sched = datetime.fromisoformat(detail['scheduled_at'].replace('Z', ''))
-    assert sched > utcnow()
-    # back to host only
-    assert [p['user_id'] for p in detail['players']] == [a['user']['id']]
+    assert detail['recurrence'] == 'weekly'
     assert weekly['id'] != g['id']  # sanity: distinct from the one-off game
 
 

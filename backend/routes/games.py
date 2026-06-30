@@ -86,8 +86,12 @@ def list_games():
     roll_forward_recurring()
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
-    mine = str(request.args.get('mine') or '').strip() in {'1', 'true', 'yes'}
+    truthy = {'1', 'true', 'yes'}
+    mine = str(request.args.get('mine') or '').strip() in truthy
+    friends_only = str(request.args.get('friends') or '').strip() in truthy
     current_user = optional_current_user()
+    viewer_id = current_user.id if current_user else None
+    viewer_friends = friend_ids(viewer_id) if viewer_id else set()
 
     if mine:
         if not current_user:
@@ -96,12 +100,27 @@ def list_games():
         query = Game.query.filter(
             Game.status.in_(['upcoming', 'awaiting_confirmation']),
         ).join(GamePlayer).filter(GamePlayer.user_id == current_user.id)
+    elif friends_only:
+        if not current_user:
+            return jsonify({'error': 'authentication_required'}), 401
+        if not viewer_friends:
+            return jsonify({'items': []})
+        # Upcoming games a friend created or joined (creator is always a player).
+        query = (
+            Game.query.filter(
+                Game.scheduled_at >= utcnow() - timedelta(hours=2),
+                Game.status == 'upcoming',
+            )
+            .join(GamePlayer)
+            .filter(GamePlayer.user_id.in_(viewer_friends))
+            .distinct()
+        )
     else:
         query = Game.query.filter(
             Game.scheduled_at >= utcnow() - timedelta(hours=2),
             Game.status == 'upcoming',
         )
-    if not mine and lat is not None and lng is not None:
+    if not mine and not friends_only and lat is not None and lng is not None:
         radius = min(max(request.args.get('radius', default=50.0, type=float), 1.0), 200.0)
         lat_delta = radius / 69.0
         lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
@@ -111,22 +130,23 @@ def list_games():
         )
 
     games = query.order_by(Game.scheduled_at.asc()).limit(150).all()
-    viewer_id = current_user.id if current_user else None
-    viewer_friends = friend_ids(viewer_id) if viewer_id else set()
 
     items = []
     for game in games:
-        # In the public/nearby feed, only show games the viewer is allowed to see.
+        # In the public/nearby and friends feeds, only show games the viewer may see.
         if not mine and not game.visible_to(viewer_id, viewer_friends):
             continue
         item = game.to_dict(viewer_id)
+        # The Friends feed is about discovering games you're not already in.
+        if friends_only and item['is_joined']:
+            continue
         court = game.court
         if lat is not None and lng is not None and court and court.latitude is not None:
             item['distance_miles'] = round(
                 haversine_miles(lat, lng, court.latitude, court.longitude), 1,
             )
         items.append(item)
-    if lat is not None and lng is not None and not mine:
+    if lat is not None and lng is not None and not mine and not friends_only:
         items.sort(key=lambda i: (i.get('distance_miles', 1e9), i['scheduled_at']))
     return jsonify({'items': items[:100]})
 

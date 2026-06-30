@@ -1314,9 +1314,10 @@
         return;
       }
 
-      // --- Games: everything actionable + yours + nearby, one scroll ---
-      const [mine, nearby] = await Promise.all([
+      // --- Games: everything actionable + yours + friends + nearby, one scroll ---
+      const [mine, friends, nearby] = await Promise.all([
         api('/games?mine=1'),
+        api('/games?friends=1').catch(() => ({ items: [] })),
         api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60`),
       ]);
       const nowMs = Date.now();
@@ -1328,7 +1329,9 @@
       const upcoming = mine.items.filter((g) =>
         !toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g));
       const mineIds = new Set(mine.items.map((g) => g.id));
-      const nearbyOpen = nearby.items.filter((g) => !mineIds.has(g.id));
+      const friendsGames = (friends.items || []).filter((g) => !mineIds.has(g.id));
+      const friendsIds = new Set(friendsGames.map((g) => g.id));
+      const nearbyOpen = nearby.items.filter((g) => !mineIds.has(g.id) && !friendsIds.has(g.id));
 
       let html = '';
       if (toScore.length) {
@@ -1346,6 +1349,10 @@
       if (upcoming.length) {
         html += '<div class="section-label">Your upcoming games</div>';
         html += upcoming.map((g) => gameCardHtml(g)).join('');
+      }
+      if (friendsGames.length) {
+        html += '<div class="section-label">🤝 Friends playing</div>';
+        html += friendsGames.map((g) => gameCardHtml(g)).join('');
       }
       html += '<div class="section-label">Nearby games</div>';
       html += nearbyOpen.length
