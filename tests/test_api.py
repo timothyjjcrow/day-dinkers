@@ -160,6 +160,28 @@ def test_geocode(client, monkeypatch):
     assert calls['n'] == 1
 
 
+def test_public_profile_extras(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')  # viewer (not a friend)
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Ana sets a home court, favorites a court, and schedules an open game
+    client.patch('/api/me', json={'home_court_id': court_id}, headers=auth_headers(a['token']))
+    client.post(f'/api/courts/{court_id}/favorite', headers=auth_headers(a['token']))
+    open_g = make_game(client, a['token'], court_id, visibility='open')
+    # …and a private game Ben can't see
+    priv = make_game(client, a['token'], court_id, visibility='private',
+                     invite_user_ids=[register(client, 'c@example.com')['user']['id']])
+
+    prof = client.get(f"/api/users/{a['user']['id']}", headers=auth_headers(b['token'])).get_json()
+    up_ids = [g['id'] for g in prof['upcoming_games']]
+    assert open_g['id'] in up_ids          # viewer sees the open game
+    assert priv['id'] not in up_ids        # private game stays hidden from non-invitee
+    court_ids = [c['id'] for c in prof['courts']]
+    assert court_id in court_ids
+    assert any(c['is_home'] for c in prof['courts'])  # home court flagged
+
+
 def test_friends_games_feed(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

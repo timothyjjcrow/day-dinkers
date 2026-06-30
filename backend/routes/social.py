@@ -9,6 +9,7 @@ from backend.app import db
 from backend.models import (
     CheckIn,
     Court,
+    FavoriteCourt,
     Friendship,
     Game,
     GamePlayer,
@@ -16,7 +17,9 @@ from backend.models import (
     SKILL_LEVELS,
     User,
     notify,
+    utcnow,
 )
+from datetime import timedelta
 from backend.routes.auth import login_required
 from backend.security import rate_limit
 
@@ -212,6 +215,43 @@ def user_profile(user_id):
         .all()
     )
     payload['recent_games'] = [game.to_dict(user.id) for game in recent]
+
+    # Upcoming games this player is in — only those the viewer is allowed to see.
+    viewer_friends = friend_ids(g.current_user.id)
+    upcoming = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status == 'upcoming',
+            Game.scheduled_at >= utcnow() - timedelta(hours=2),
+        )
+        .order_by(Game.scheduled_at.asc())
+        .limit(20)
+        .all()
+    )
+    payload['upcoming_games'] = [
+        game.to_dict(g.current_user.id)
+        for game in upcoming
+        if game.visible_to(g.current_user.id, viewer_friends)
+    ][:8]
+
+    # Home + favorite courts.
+    courts = []
+    seen = set()
+    if user.home_court:
+        courts.append({**user.home_court.to_summary_dict(), 'is_home': True})
+        seen.add(user.home_court.id)
+    favs = (
+        FavoriteCourt.query.filter_by(user_id=user.id)
+        .order_by(FavoriteCourt.id.desc())
+        .limit(10)
+        .all()
+    )
+    for fav in favs:
+        if fav.court and fav.court.id not in seen:
+            courts.append({**fav.court.to_summary_dict(), 'is_home': False})
+            seen.add(fav.court.id)
+    payload['courts'] = courts[:8]
     return jsonify(payload)
 
 

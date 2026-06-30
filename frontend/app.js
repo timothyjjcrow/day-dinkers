@@ -2184,6 +2184,17 @@
     }
 
     const games = user.recent_games || [];
+    const upcoming = user.upcoming_games || [];
+    const courts = user.courts || [];
+    const courtRow = (c) => `
+      <div class="card row" data-pcourt="${c.id}" style="cursor:pointer">
+        <span style="font-size:18px">${c.is_home ? '🏠' : '⭐'}</span>
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+          <div class="row-sub">${esc(c.city || '')}${c.is_home ? ' · Home court' : ''}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>`;
     const modal = openModal(`
       ${modalHead('')}
       <div class="profile-hero">
@@ -2198,8 +2209,16 @@
         <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Losses</div></div>
       </div>
       <div class="action-row">${friendAction}</div>
+      ${upcoming.length ? `<div class="section-label">Upcoming games</div>${upcoming.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
+      ${courts.length ? `<div class="section-label">Courts</div>${courts.map(courtRow).join('')}` : ''}
       ${games.length ? `<div class="section-label">Recent games</div>${games.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
     `);
+
+    bindGameButtons(modal, () => { closeModal(modal); openUserProfile(userId); });
+    modal.querySelectorAll('[data-pcourt]').forEach((row) => row.addEventListener('click', () => {
+      closeModal(modal);
+      openCourtDetail(Number(row.dataset.pcourt));
+    }));
 
     modal.querySelector('#up-add')?.addEventListener('click', async () => {
       try {
