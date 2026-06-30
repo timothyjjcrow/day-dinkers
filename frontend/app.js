@@ -2651,19 +2651,39 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅' };
+    // Where each notification taps to: game if it references one, else the other user for friend events.
+    const targetFor = (n) => {
+      if (n.related_game_id) return { type: 'game', id: n.related_game_id };
+      if (n.related_user_id && (n.kind === 'friend_request' || n.kind === 'friend_accept')) {
+        return { type: 'user', id: n.related_user_id };
+      }
+      return null;
+    };
+
+    let listHtml = '';
+    let lastLabel = null;
+    data.items.forEach((n) => {
+      const label = resultDayLabel(n.created_at);
+      if (label !== lastLabel) { listHtml += `<div class="section-label">${label}</div>`; lastLabel = label; }
+      const t = targetFor(n);
+      const time = new Date(n.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      listHtml += `
+        <div class="card row" ${t ? `data-notif-type="${t.type}" data-notif-id="${t.id}" style="cursor:pointer"` : ''}>
+          ${n.read ? '' : '<span class="notif-dot"></span>'}
+          <span style="font-size:20px">${icons[n.kind] || '🔔'}</span>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px;${n.read ? '' : 'font-weight:800'}">${esc(n.title)}</div>
+            <div class="row-sub">${time}</div>
+          </div>
+          ${t ? '<span class="chev">›</span>' : ''}
+        </div>`;
+    });
+
     const modal = openModal(`
       ${modalHead('Activity')}
       ${enableBtn}
-      ${data.items.length
-        ? data.items.map((n) => `
-            <div class="card row" data-notif-game="${n.related_game_id || ''}" style="${n.read ? 'opacity:.65' : ''}${n.related_game_id ? ';cursor:pointer' : ''}">
-              <span style="font-size:20px">${{ friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅' }[n.kind] || '🔔'}</span>
-              <div class="row-main">
-                <div class="row-title" style="font-size:14px">${esc(n.title)}</div>
-                <div class="row-sub">${fmtDateTime(n.created_at)}</div>
-              </div>
-              ${n.related_game_id ? '<span class="chev">›</span>' : ''}
-            </div>`).join('')
+      ${data.items.length ? listHtml
         : '<div class="empty-state"><span class="big">🔔</span>Nothing yet — go play some pickleball!</div>'}
     `);
     modal.querySelector('#act-enable')?.addEventListener('click', async (e) => {
@@ -2671,12 +2691,11 @@
       e.target.remove();
       toast(result === 'granted' ? 'Notifications on 🔔' : 'Notifications stay off');
     });
-    modal.querySelectorAll('[data-notif-game]').forEach((row) => {
-      const gameId = row.dataset.notifGame;
-      if (!gameId) return;
+    modal.querySelectorAll('[data-notif-type]').forEach((row) => {
       row.addEventListener('click', () => {
         closeModal(modal);
-        openGameScreen(Number(gameId));
+        if (row.dataset.notifType === 'game') openGameScreen(Number(row.dataset.notifId));
+        else openUserProfile(Number(row.dataset.notifId));
       });
     });
     if (data.unread) {

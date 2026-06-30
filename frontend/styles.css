@@ -225,6 +225,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 .card:active { transform: scale(.992); }
 .checkin-sheet { text-align: center; padding: 18px 4px 6px; }
+.notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red-500); flex-shrink: 0; }
 .tour-dots { display: flex; gap: 7px; justify-content: center; }
 .tour-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
 .tour-dot.on { background: var(--green-600); }
