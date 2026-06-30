@@ -2725,8 +2725,12 @@
   }
 
   function maybeOnboardHomeArea() {
-    if (!state.me || state.me.home_lat != null) return;
-    if (localStorage.getItem('pp_onboarded_home') === '1') return;
+    if (!state.me) return;
+    // Returning / already-prompted users skip straight to the tour check.
+    if (state.me.home_lat != null || localStorage.getItem('pp_onboarded_home') === '1') {
+      maybeShowTour();
+      return;
+    }
     localStorage.setItem('pp_onboarded_home', '1');
     const modal = openModal(`
       <div class="checkin-sheet">
@@ -2739,8 +2743,42 @@
     `);
     modal.querySelector('#ob-loc').addEventListener('click', async () => {
       const ok = await setHomeAreaFromLocation();
-      if (ok) { closeModal(modal); fetchCourtsInView(); }
+      if (ok) { closeModal(modal); fetchCourtsInView(); maybeShowTour(); }
     });
+    // Whichever way they leave the home-area step, follow with the quick tour.
+    modal.querySelector('.modal-close').addEventListener('click', () => maybeShowTour());
+  }
+
+  // One-time 3-step welcome tour for brand-new users.
+  function maybeShowTour() {
+    if (!state.me || localStorage.getItem('pp_tour_seen') === '1') return;
+    localStorage.setItem('pp_tour_seen', '1');
+    const steps = [
+      { emoji: '🗺️', title: 'Find courts near you', body: "Browse the map, tap a court to see who's playing, and check in when you arrive." },
+      { emoji: '🤝', title: 'Meet players', body: 'See players nearby and your friends — then add, message, or challenge them.' },
+      { emoji: '🎾', title: 'Play a game', body: 'Start a game now or schedule one — casual, ranked, or a weekly open-play session.' },
+    ];
+    let i = 0;
+    const modal = openModal('');
+    const box = modal.querySelector('.modal');
+    const render = () => {
+      const s = steps[i];
+      const last = i === steps.length - 1;
+      box.innerHTML = `
+        <div class="checkin-sheet">
+          <div class="celebrate-emoji" style="font-size:46px">${s.emoji}</div>
+          <h3 style="margin:6px 0 2px">${esc(s.title)}</h3>
+          <p class="row-sub" style="margin-bottom:14px">${esc(s.body)}</p>
+          <div class="tour-dots">${steps.map((_, k) => `<span class="tour-dot ${k === i ? 'on' : ''}"></span>`).join('')}</div>
+          <button class="btn btn-primary btn-block" id="tour-next" style="padding:14px;margin-top:14px">${last ? "Let's play 🎾" : 'Next'}</button>
+          ${last ? '' : '<button class="btn-link btn-block" id="tour-skip">Skip</button>'}
+        </div>`;
+      box.querySelector('#tour-next').onclick = () => {
+        if (last) closeModal(modal); else { i += 1; render(); }
+      };
+      box.querySelector('#tour-skip')?.addEventListener('click', () => closeModal(modal));
+    };
+    render();
   }
 
   async function showMain() {
