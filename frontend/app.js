@@ -2307,6 +2307,7 @@
       <button class="btn btn-secondary btn-block" id="pf-edit" style="margin-bottom:10px">✏️ Edit profile</button>
       <button class="btn btn-secondary btn-block" id="pf-activity" style="margin-bottom:10px">🔔 Activity</button>
       <button class="btn btn-danger btn-block" id="pf-logout">Log out</button>
+      <div id="pf-upcoming"></div>
       <div id="pf-courts"></div>
       <div id="pf-history"></div>
     `;
@@ -2332,6 +2333,20 @@
       await refreshMe();
       renderProfile();
     });
+
+    // My upcoming games (parity with public profiles), tappable into the game screen.
+    try {
+      const mine = await api('/games?mine=1');
+      const nowMs = Date.now();
+      const up = (mine.items || []).filter((game) =>
+        game.status === 'upcoming' && new Date(game.scheduled_at).getTime() > nowMs);
+      if (up.length) {
+        const upEl = el.querySelector('#pf-upcoming');
+        upEl.innerHTML = '<div class="section-label">My upcoming games</div>'
+          + up.map((game) => gameCardHtml(game)).join('');
+        bindGameButtons(upEl, renderProfile);
+      }
+    } catch { /* ignore */ }
 
     // Saved courts (home court first), tappable into court detail.
     try {
