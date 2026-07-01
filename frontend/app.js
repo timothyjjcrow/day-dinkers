@@ -2307,6 +2307,7 @@
       <button class="btn btn-secondary btn-block" id="pf-edit" style="margin-bottom:10px">✏️ Edit profile</button>
       <button class="btn btn-secondary btn-block" id="pf-activity" style="margin-bottom:10px">🔔 Activity</button>
       <button class="btn btn-danger btn-block" id="pf-logout">Log out</button>
+      <div id="pf-courts"></div>
       <div id="pf-history"></div>
     `;
 
@@ -2331,6 +2332,32 @@
       await refreshMe();
       renderProfile();
     });
+
+    // Saved courts (home court first), tappable into court detail.
+    try {
+      const favs = await api('/courts/favorites');
+      const courtsEl = el.querySelector('#pf-courts');
+      const rows = [];
+      const seen = new Set();
+      if (me.home_court_id) {
+        rows.push({ id: me.home_court_id, name: me.home_court_name || 'Home court', city: '', is_home: true });
+        seen.add(me.home_court_id);
+      }
+      (favs.items || []).forEach((c) => { if (!seen.has(c.id)) { rows.push({ ...c, is_home: false }); seen.add(c.id); } });
+      courtsEl.innerHTML = '<div class="section-label">Saved courts</div>' + (rows.length
+        ? rows.map((c) => `
+            <div class="card row" data-pfcourt="${c.id}" style="cursor:pointer">
+              <span style="font-size:18px">${c.is_home ? '🏠' : '⭐'}</span>
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+                <div class="row-sub">${esc(c.city || '')}${c.is_home ? ' · Home court' : ''}${c.rating_avg ? ` · ⭐ ${c.rating_avg}` : ''}</div>
+              </div>
+              <span class="chev">›</span>
+            </div>`).join('')
+        : '<div class="empty-state" style="padding:16px">No saved courts yet — tap ☆ on a court to save it.</div>');
+      courtsEl.querySelectorAll('[data-pfcourt]').forEach((row) =>
+        row.addEventListener('click', () => openCourtDetail(Number(row.dataset.pfcourt))));
+    } catch { /* ignore */ }
 
     try {
       const history = await api('/games/history');
