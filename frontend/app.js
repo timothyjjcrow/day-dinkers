@@ -660,10 +660,11 @@
   }
 
   function courtRowHtml(c) {
+    const cond = c.condition && COURT_CONDITION_LABELS[c.condition];
     return `
       <div class="card row" data-court="${c.id}" style="cursor:pointer">
         <div class="row-main">
-          <div class="row-title">${esc(c.name)}</div>
+          <div class="row-title">${esc(c.name)}${cond ? ` <span class="tag ${c.condition === 'good' ? 'live' : 'warn'}" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">${cond[0]} ${esc(cond[1].split(' — ')[0].split(' /')[0])}</span>` : ''}</div>
           <div class="row-sub">
             ${esc(c.city)}${c.distance_miles != null ? ` · ${c.distance_miles} mi` : ''}
             · ${c.num_courts} court${c.num_courts === 1 ? '' : 's'}

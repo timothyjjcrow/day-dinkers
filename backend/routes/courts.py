@@ -270,9 +270,11 @@ def list_courts():
     ids = [c['id'] for c in items]
     players, games = _active_counts_for(ids)
     ratings = _rating_summary_for(ids)
+    conditions = _conditions_for(ids)
     for item in items:
         item['players_here'] = players.get(item['id'], 0)
         item['upcoming_games'] = games.get(item['id'], 0)
+        item['condition'] = conditions.get(item['id'])
         summary = ratings.get(item['id'])
         item['rating_avg'] = summary['rating_avg'] if summary else None
         item['rating_count'] = summary['rating_count'] if summary else 0
@@ -558,6 +560,21 @@ def report_condition(court_id):
     ))
     db.session.commit()
     return jsonify({'ok': True, 'condition': condition}), 201
+
+
+def _conditions_for(court_ids):
+    """Batch {court_id: freshest condition} for list views."""
+    if not court_ids:
+        return {}
+    rows = (
+        CourtCondition.query.filter(
+            CourtCondition.court_id.in_(court_ids),
+            CourtCondition.created_at >= utcnow() - timedelta(hours=CONDITION_FRESH_HOURS),
+        )
+        .order_by(CourtCondition.id.asc())
+        .all()
+    )
+    return {r.court_id: r.condition for r in rows}  # later (newer) rows win
 
 
 def _latest_condition_for(court_id):

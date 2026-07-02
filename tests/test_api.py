@@ -807,12 +807,17 @@ def test_court_conditions(client, app):
     latest = client.get(f'/api/courts/{court_id}').get_json()['latest_condition']
     assert latest['condition'] == 'good' and latest['user_name'] == 'Ana'
 
-    # Stale reports (>3h) drop off.
+    # The list view carries the freshest condition too.
+    listed = client.get('/api/courts?q=larson').get_json()['items'][0]
+    assert listed['condition'] == 'good'
+
+    # Stale reports (>3h) drop off everywhere.
     with app.app_context():
         for row in CCModel.query.all():
             row.created_at = utcnow() - timedelta(hours=4)
         db.session.commit()
     assert client.get(f'/api/courts/{court_id}').get_json()['latest_condition'] is None
+    assert client.get('/api/courts?q=larson').get_json()['items'][0]['condition'] is None
 
 
 def test_court_regulars(client, app):
