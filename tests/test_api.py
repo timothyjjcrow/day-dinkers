@@ -382,6 +382,94 @@ def test_recurring_session_rolls_forward(client, app):
     assert weekly['id'] != g['id']  # sanity: distinct from the one-off game
 
 
+def test_game_reminder_fires_in_window(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, Notification, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=24)
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+
+    from backend.routes.games import send_game_reminders
+    with app.app_context():
+        def reminders():
+            return Notification.query.filter_by(kind='game_reminder').all()
+
+        # 24h out: too early, nothing fires.
+        send_game_reminders()
+        assert reminders() == []
+
+        # Move the game to 30 minutes from now: both players get exactly one.
+        row = db.session.get(GameModel, game['id'])
+        row.scheduled_at = utcnow() + timedelta(minutes=30)
+        db.session.commit()
+        send_game_reminders()
+        got = reminders()
+        assert {n.user_id for n in got} == {a['user']['id'], b['user']['id']}
+        assert all(n.related_game_id == game['id'] for n in got)
+        assert all('Larson Park' in n.title for n in got)
+
+        # Sweeping again never duplicates.
+        send_game_reminders()
+        assert len(reminders()) == 2
+
+    # The reminder reaches the player through the notifications feed.
+    feed = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()
+    assert any(n['kind'] == 'game_reminder' for n in feed['items'])
+
+
+def test_game_reminder_skips_past_and_nonupcoming(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, Notification, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=24)
+
+    from backend.routes.games import send_game_reminders
+    with app.app_context():
+        row = db.session.get(GameModel, game['id'])
+        # Already started: no reminder.
+        row.scheduled_at = utcnow() - timedelta(minutes=5)
+        db.session.commit()
+        send_game_reminders()
+        assert Notification.query.filter_by(kind='game_reminder').count() == 0
+
+        # In window but cancelled: no reminder.
+        row = db.session.get(GameModel, game['id'])
+        row.scheduled_at = utcnow() + timedelta(minutes=30)
+        row.status = 'cancelled'
+        db.session.commit()
+        send_game_reminders()
+        assert Notification.query.filter_by(kind='game_reminder').count() == 0
+
+
+def test_game_reminder_resets_on_recurring_rollover(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    res = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(days=2)).isoformat() + 'Z',
+        'game_type': 'casual', 'visibility': 'open', 'recurrence': 'weekly',
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    weekly = res.get_json()
+
+    from backend.routes.games import roll_forward_recurring
+    with app.app_context():
+        row = db.session.get(GameModel, weekly['id'])
+        # Pretend last week's occurrence was reminded, then finished.
+        row.players[0].reminded_at = utcnow() - timedelta(days=5)
+        row.scheduled_at = utcnow() - timedelta(days=5)
+        db.session.commit()
+        roll_forward_recurring()
+        refreshed = db.session.get(GameModel, weekly['id'])
+        assert refreshed.scheduled_at > utcnow()
+        assert refreshed.players[0].reminded_at is None  # eligible again next week
+
+
 def test_ranked_cannot_recur(client):
     from datetime import timedelta
     from backend.models import utcnow

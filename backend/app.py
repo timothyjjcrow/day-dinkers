@@ -179,6 +179,14 @@ def _upgrade_schema(app):
                     "ALTER TABLE game ADD COLUMN recurrence VARCHAR(16) NOT NULL DEFAULT 'none'"
                 )
 
+        if 'game_player' in tables:
+            gp_cols = {c['name'] for c in inspector.get_columns('game_player')}
+            if 'reminded_at' not in gp_cols:
+                statements.append(
+                    'ALTER TABLE game_player ADD COLUMN reminded_at '
+                    + ('TIMESTAMP' if is_postgres else 'DATETIME')
+                )
+
         if statements:
             app.logger.warning('Applying schema upgrades: %s', statements)
             with db.engine.begin() as conn:

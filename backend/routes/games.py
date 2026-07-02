@@ -26,6 +26,7 @@ games_bp = Blueprint('games', __name__)
 
 ELO_K = 32
 SCORE_AUTO_CONFIRM_HOURS = 24
+REMINDER_LEAD_MINUTES = 65
 
 
 def _parse_scheduled_at(raw):
@@ -54,6 +55,35 @@ def auto_confirm_stale_scores():
         db.session.commit()
 
 
+def send_game_reminders():
+    """Notify each player about an hour before their game starts. Lazy sweep
+    (like auto_confirm_stale_scores) — runs on feed/me reads; reminded_at on
+    game_player guarantees at most one reminder per player per occurrence."""
+    now = utcnow()
+    due = Game.query.filter(
+        Game.status == 'upcoming',
+        Game.scheduled_at > now,
+        Game.scheduled_at <= now + timedelta(minutes=REMINDER_LEAD_MINUTES),
+    ).all()
+    changed = False
+    for game in due:
+        court_name = game.court.name if game.court else 'the court'
+        for player in game.players:
+            if player.reminded_at is not None:
+                continue
+            notify(
+                player.user_id,
+                'game_reminder',
+                f'Game at {court_name} in about an hour',
+                f'{len(game.players)} signed up — don’t forget your paddle! \U0001F3BE',
+                related_game_id=game.id,
+            )
+            player.reminded_at = now
+            changed = True
+    if changed:
+        db.session.commit()
+
+
 def roll_forward_recurring():
     """Advance weekly open-play sessions to their next occurrence once the last
     one is ~3h past, resetting the RSVP list to just the host (re-RSVP weekly)."""
@@ -74,6 +104,8 @@ def roll_forward_recurring():
         for player in list(game.players):
             if player.user_id != game.creator_id:
                 game.players.remove(player)
+            else:
+                player.reminded_at = None  # remind again for the new occurrence
         changed = True
     if changed:
         db.session.commit()
@@ -84,6 +116,7 @@ def list_games():
     """Upcoming games feed, optionally sorted by distance from lat/lng."""
     auto_confirm_stale_scores()
     roll_forward_recurring()
+    send_game_reminders()
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
     truthy = {'1', 'true', 'yes'}

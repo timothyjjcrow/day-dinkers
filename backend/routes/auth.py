@@ -238,6 +238,9 @@ def login():
 @auth_bp.get('/me')
 @login_required
 def me():
+    # Lazy import: games.py imports from this module at load time.
+    from backend.routes.games import send_game_reminders
+    send_game_reminders()
     return jsonify(_me_payload(g.current_user))
 
 

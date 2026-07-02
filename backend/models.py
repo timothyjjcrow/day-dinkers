@@ -328,6 +328,7 @@ class GamePlayer(TimestampMixin, db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     team = db.Column(db.Integer)
     rating_delta = db.Column(db.Integer)
+    reminded_at = db.Column(db.DateTime)
 
     game = db.relationship('Game', back_populates='players')
     user = db.relationship('User')
