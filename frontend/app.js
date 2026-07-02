@@ -1415,6 +1415,28 @@
     }));
   }
 
+  // Share text that fits the game's state: brag about results, invite to
+  // upcoming games.
+  function gameShareText(game) {
+    const courtName = game.court ? game.court.name : '';
+    if (game.status === 'completed' && game.score_team1 != null) {
+      const score = `${game.score_team1}–${game.score_team2}`;
+      if (game.you_won === true) return `Just won ${score}${courtName ? ` at ${courtName}` : ''} 🏆 Come play on Third Shot!`;
+      if (game.you_won === false) return `Battled to ${score}${courtName ? ` at ${courtName}` : ''} — rematch soon 🎾`;
+      return `Final: ${score}${courtName ? ` at ${courtName}` : ''} on Third Shot 🎾`;
+    }
+    return `Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${fmtDateTime(game.scheduled_at)}`;
+  }
+
+  async function shareGame(game) {
+    const url = `${location.origin}/#game/${game.id}`;
+    const text = gameShareText(game);
+    try {
+      if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
+      else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Copied to share 📋'); }
+    } catch { /* user cancelled */ }
+  }
+
   function showCelebration(game) {
     const won = game.you_won;
     const delta = game.your_rating_delta;
@@ -1438,10 +1460,11 @@
             ${delta >= 0 ? '+' : ''}${delta} rating
           </div>` : ''}
         ${streak >= 2 ? `<div class="tag live" style="font-size:14px;padding:6px 14px">🔥 ${streak} win streak!</div>` : ''}
-        <button class="btn btn-primary btn-block modal-close" style="margin-top:18px">Keep playing</button>
+        ${won === true ? '<button class="btn btn-secondary btn-block" id="cel-share" style="margin-top:18px">📤 Share the win</button>' : ''}
+        <button class="btn btn-primary btn-block modal-close" style="margin-top:${won === true ? '10' : '18'}px">Keep playing</button>
       </div>
     `);
-    void modal;
+    modal.querySelector('#cel-share')?.addEventListener('click', () => shareGame(game));
   }
 
   function bindUserButtons(rootEl) {
@@ -3215,15 +3238,7 @@
           reopenFresh();
         } catch (e) { toast(e.message); reopenFresh(); }
       });
-      box.querySelector('#gs-share')?.addEventListener('click', async () => {
-        const url = `${location.origin}/#game/${gameId}`;
-        const when = fmtDateTime(game.scheduled_at);
-        const text = `Join my pickleball game${court.name ? ` at ${court.name}` : ''} — ${when}`;
-        try {
-          if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
-          else { await navigator.clipboard.writeText(url); toast('Link copied 📋'); }
-        } catch { /* user cancelled */ }
-      });
+      box.querySelector('#gs-share')?.addEventListener('click', () => shareGame(game));
       box.querySelector('#gs-join')?.addEventListener('click', async () => {
         try {
           await api(`/games/${gameId}/join`, { method: 'POST' });
