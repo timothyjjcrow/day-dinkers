@@ -3660,11 +3660,20 @@
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
-    // Remember a friend's invite link across the signup flow.
+    // Remember a friend's invite link across the signup flow, and greet the
+    // newcomer with who invited them.
     const inviteRef = location.hash.match(/^#invite\/(\d+)$/);
     if (inviteRef && !state.token) {
       localStorage.setItem('pp_invite_ref', inviteRef[1]);
       try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+      api(`/invite/${inviteRef[1]}`).then((card) => {
+        const tagline = document.querySelector('.auth-tagline');
+        if (!tagline || document.querySelector('.invite-hello')) return;
+        const el = document.createElement('div');
+        el.className = 'invite-hello';
+        el.innerHTML = `${avatarHtml(card, 'sm')} <span><b>${esc(card.display_name)}</b> invited you to play 🎾</span>`;
+        tagline.after(el);
+      }).catch(() => { /* inviter gone — sign up normally */ });
     }
     setupAuth();
     setupTabs();

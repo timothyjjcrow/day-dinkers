@@ -188,6 +188,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 .av-chip.active { background: var(--green-700); border-color: var(--green-700); color: #fff; }
 
+.invite-hello {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--green-50); border: 1px solid var(--green-100);
+  border-radius: 12px; padding: 9px 14px; margin: 12px 0 4px;
+  font-size: 13.5px; color: var(--ink);
+}
+
 .gallery-scroll {
   display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch; margin: 4px -4px 0; padding: 0 4px 6px;

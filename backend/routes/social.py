@@ -197,6 +197,21 @@ def search_users():
     return jsonify({'items': items})
 
 
+@social_bp.get('/invite/<int:user_id>')
+@rate_limit(30, 60)
+def invite_card(user_id):
+    """Minimal public card for invite links — just enough to say who's inviting.
+    Name and avatar are already visible to any signed-in user."""
+    user = db.session.get(User, user_id)
+    if not user or user.deleted_at is not None:
+        return jsonify({'error': 'user_not_found'}), 404
+    return jsonify({
+        'display_name': user.display_name,
+        'avatar_color': user.avatar_color,
+        'avatar_url': user.avatar_url or '',
+    })
+
+
 @social_bp.get('/users/<int:user_id>')
 @login_required
 def user_profile(user_id):

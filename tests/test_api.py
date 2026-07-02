@@ -1168,6 +1168,19 @@ def test_delete_account(client, app):
         assert row.bio == '' and row.avatar_url == ''
 
 
+def test_invite_card(client):
+    a = register(client, 'a@example.com', 'Ana')
+    # Public — no auth needed; returns only name + avatar.
+    card = client.get(f"/api/invite/{a['user']['id']}")
+    assert card.status_code == 200
+    assert set(card.get_json().keys()) == {'display_name', 'avatar_color', 'avatar_url'}
+    assert card.get_json()['display_name'] == 'Ana'
+    # Unknown and deleted users 404.
+    assert client.get('/api/invite/99999').status_code == 404
+    client.delete('/api/me', json={'password': 'secret123'}, headers=auth_headers(a['token']))
+    assert client.get(f"/api/invite/{a['user']['id']}").status_code == 404
+
+
 def test_block_user_flow(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
