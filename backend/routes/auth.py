@@ -387,6 +387,16 @@ def my_stats():
         if court:
             top_court = {'id': court.id, 'name': court.name, 'games': counts[top_id]}
 
+    # Last-5 form, newest first.
+    form = []
+    for game in completed:
+        if len(form) >= 5:
+            break
+        mine = next((p for p in game.players if p.user_id == user.id), None)
+        if not mine or not mine.team or game.score_team1 is None:
+            continue
+        form.append('W' if (game.score_team1 > game.score_team2) == (mine.team == 1) else 'L')
+
     # Who you win with, and who you battle most.
     partners, rivals = {}, {}
     for game in completed:
@@ -429,6 +439,7 @@ def my_stats():
         'top_court': top_court,
         'best_partner': best_partner,
         'top_rival': top_rival,
+        'form': form,
     })
 
 

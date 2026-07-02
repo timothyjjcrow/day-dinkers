@@ -1100,7 +1100,7 @@ def test_my_stats(client):
     # Fresh player: all zeros.
     stats = client.get('/api/me/stats', headers=ah).get_json()
     assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0,
-                     'top_court': None, 'best_partner': None, 'top_rival': None}
+                     'top_court': None, 'best_partner': None, 'top_rival': None, 'form': []}
 
     def play(court_id):
         g = make_game(client, a['token'], court_id, hours_ahead=1)
@@ -1141,6 +1141,7 @@ def test_my_stats(client):
     assert stats['best_partner']['display_name'] == 'Cam'
     assert stats['best_partner']['wins'] == 1
     assert stats['top_rival']['games'] == 4  # Ben again, now 4 meetings
+    assert stats['form'] == ['W', 'W', 'W', 'W']  # all four wins, newest first
 
     # Auth required.
     assert client.get('/api/me/stats').status_code == 401
@@ -1358,8 +1359,11 @@ def test_head_to_head_on_profile(client):
     play(a, b, a['token'])  # Ana wins again
     play(b, a, b['token'])  # Ben takes one back
 
-    h2h = client.get(f"/api/users/{b['user']['id']}", headers=ah).get_json()['head_to_head']
+    profile_b = client.get(f"/api/users/{b['user']['id']}", headers=ah).get_json()
+    h2h = profile_b['head_to_head']
     assert h2h['wins'] == 2 and h2h['losses'] == 1
+    # Ben's form from HIS perspective: lost, lost, then won (newest first → W L L).
+    assert profile_b['form'] == ['W', 'L', 'L']
     # Symmetric from Ben's perspective.
     h2h_b = client.get(f"/api/users/{a['user']['id']}", headers=bh).get_json()['head_to_head']
     assert h2h_b['wins'] == 1 and h2h_b['losses'] == 2

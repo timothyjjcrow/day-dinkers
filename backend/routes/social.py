@@ -239,6 +239,11 @@ def user_profile(user_id):
         .all()
     )
     payload['recent_games'] = [game.to_dict(user.id) for game in recent]
+    # Last-5 form from the profile owner's perspective, newest first.
+    payload['form'] = [
+        'W' if g['you_won'] else 'L'
+        for g in payload['recent_games'] if g['you_won'] is not None
+    ][:5]
 
     # Head-to-head: completed scored games where viewer and target were on
     # opposite teams.

@@ -943,6 +943,15 @@
     });
   }
 
+  function formStripHtml(form) {
+    if (!form || !form.length) return '';
+    return `
+      <div style="display:flex;gap:5px;justify-content:center;align-items:center;margin-top:10px">
+        <span class="row-sub" style="margin-right:2px">Last ${form.length}:</span>
+        ${form.map((r) => `<span style="width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;background:${r === 'W' ? 'var(--green-600)' : '#e03131'}">${r}</span>`).join('')}
+      </div>`;
+  }
+
   function weatherEmoji(shortForecast) {
     const t = (shortForecast || '').toLowerCase();
     if (/thunder|storm/.test(t)) return '⛈';
@@ -2776,6 +2785,7 @@
         <div class="stat-card"><div class="stat-value">${user.ranked_wins}</div><div class="stat-label">Wins</div></div>
         <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Losses</div></div>
       </div>
+      ${formStripHtml(user.form)}
       ${h2hHtml}
       ${availHtml}
       <div class="action-row">${friendAction}</div>
@@ -2989,6 +2999,7 @@
           el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
             `<div class="row-sub" style="text-align:center;margin-top:8px">${extras.join('<br>')}</div>`);
         }
+        el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', formStripHtml(stats.form));
         el.querySelector('[data-pfcourt-top]')?.addEventListener('click', (e) => openCourtDetail(Number(e.currentTarget.dataset.pfcourtTop)));
         bindUserButtons(el.querySelector('#pf-play-stats'));
       }
