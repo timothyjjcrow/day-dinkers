@@ -3373,6 +3373,7 @@
         </div>
         <span class="chev">›</span>
       </div>
+      <div id="gs-weather"></div>
       ${game.notes ? `<div class="row-sub" style="margin:0 0 12px 4px">“${esc(game.notes)}”</div>` : ''}
       <div class="section-label">Players (${game.players.length}/${game.max_players})</div>
       ${playersHtml}
@@ -3410,6 +3411,18 @@
       box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
       box.querySelector('#gs-calendar')?.addEventListener('click', () => downloadIcs(game));
+      // Playability heads-up for games starting soon (NWS summary covers ~6h).
+      const startMs = new Date(game.scheduled_at).getTime();
+      if (game.status === 'upcoming' && court.id
+          && startMs - Date.now() < 6 * 3600e3 && startMs - Date.now() > -3600e3) {
+        api(`/courts/${court.id}/weather`).then((w) => {
+          const el = box.querySelector('#gs-weather');
+          if (!el || w.error || w.temp_f == null) return;
+          el.innerHTML = `<div class="row-sub" style="text-align:center;margin:2px 0 10px">
+            ${weatherEmoji(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${w.rain_soon ? ' · 🌧 rain likely around game time' : ''}
+          </div>`;
+        }).catch(() => { /* forecast is a nicety */ });
+      }
       box.querySelectorAll('[data-mvp]').forEach((b) => b.addEventListener('click', async () => {
         try {
           render(await api(`/games/${gameId}/mvp`, { method: 'POST', body: JSON.stringify({ user_id: Number(b.dataset.mvp) }) }));
