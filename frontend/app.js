@@ -968,9 +968,28 @@
         }).join('')
       : '<div class="empty-state" style="padding:14px">No one checked in right now — be the first!</div>';
 
-    const gamesHtml = court.games.length
-      ? court.games.map((g) => gameCardHtml(g, { compact: true })).join('')
-      : '<div class="empty-state" style="padding:14px">No upcoming games here yet.<br><button class="btn btn-secondary btn-sm" id="cd-schedule-empty" style="margin-top:8px">📅 Schedule one</button></div>';
+    let gamesHtml = '';
+    if (court.games.length) {
+      // Group by day (backend sends them sorted by scheduled_at).
+      const byDay = [];
+      for (const g of court.games) {
+        const label = upcomingDayLabel(g.scheduled_at);
+        if (!byDay.length || byDay[byDay.length - 1].label !== label) {
+          byDay.push({ label, games: [] });
+        }
+        byDay[byDay.length - 1].games.push(g);
+      }
+      if (byDay.length > 1) {
+        gamesHtml += `<div class="quick-times" style="margin:0 0 10px">${byDay
+          .map((d) => `<button type="button" disabled style="cursor:default">${esc(d.label)} · ${d.games.length}</button>`)
+          .join('')}</div>`;
+      }
+      gamesHtml += byDay.map((d) => `
+        <div class="section-label" style="font-size:11px;margin-top:8px">${esc(d.label)}</div>
+        ${d.games.map((g) => gameCardHtml(g, { compact: true })).join('')}`).join('');
+    } else {
+      gamesHtml = '<div class="empty-state" style="padding:14px">No upcoming games here yet.<br><button class="btn btn-secondary btn-sm" id="cd-schedule-empty" style="margin-top:8px">📅 Schedule one</button></div>';
+    }
 
     const checkedIn = court.is_checked_in;
     let isFavorite = court.is_favorite;
@@ -1416,6 +1435,18 @@
         </div>
         <span class="chev">›</span>
       </div>`;
+  }
+
+  function upcomingDayLabel(isoStr) {
+    if (!isoStr) return 'Upcoming';
+    const d = new Date(isoStr);
+    const now = new Date();
+    const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((startOf(d) - startOf(now)) / 86400000);
+    if (diff <= 0) return 'Today';
+    if (diff === 1) return 'Tomorrow';
+    if (diff < 7) return d.toLocaleDateString([], { weekday: 'long' });
+    return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
   function resultDayLabel(isoStr) {
