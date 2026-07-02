@@ -2825,6 +2825,10 @@
         <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Losses</div></div>
       </div>
       ${formStripHtml(user.form)}
+      ${(user.badges || []).length ? `
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
+          ${user.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}
+        </div>` : ''}
       ${h2hHtml}
       ${availHtml}
       <div class="action-row">${friendAction}</div>

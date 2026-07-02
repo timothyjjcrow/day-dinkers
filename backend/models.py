@@ -224,6 +224,46 @@ class BlockedUser(TimestampMixin, db.Model):
     blocked = db.relationship('User', foreign_keys=[blocked_id])
 
 
+def player_badges(user):
+    """Achievement badges derived from live data — shared by /me/stats and
+    public profiles so both always agree."""
+    games = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status == 'completed',
+            Game.completed_at.isnot(None),
+        )
+        .limit(500)
+        .all()
+    )
+    wins = 0
+    courts = set()
+    for game in games:
+        courts.add(game.court_id)
+        mine = next((p for p in game.players if p.user_id == user.id), None)
+        if mine and mine.team and game.score_team1 is not None \
+                and (game.score_team1 > game.score_team2) == (mine.team == 1):
+            wins += 1
+    friend_count = Friendship.query.filter(
+        Friendship.status == 'accepted',
+        db.or_(Friendship.requester_id == user.id, Friendship.addressee_id == user.id),
+    ).count()
+    mvp_count = GameMvpVote.query.filter_by(votee_id=user.id).count()
+    defs = [
+        ('first_win', '🏅', 'First win', wins >= 1),
+        ('ten_games', '🔟', '10 games played', len(games) >= 10),
+        ('explorer', '🧭', 'Played 5 courts', len(courts) >= 5),
+        ('hot_streak', '🔥', '3-win streak', (user.best_streak or 0) >= 3),
+        ('mvp', '🌟', 'Voted MVP', mvp_count >= 1),
+        ('social', '🤝', '5 friends', friend_count >= 5),
+    ]
+    return [
+        {'id': bid, 'emoji': emoji, 'label': label}
+        for bid, emoji, label, earned in defs if earned
+    ]
+
+
 def is_blocked_between(user_a_id, user_b_id):
     """True when either user has blocked the other."""
     return db.session.query(BlockedUser.id).filter(

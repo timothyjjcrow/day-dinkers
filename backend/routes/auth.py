@@ -432,33 +432,8 @@ def my_stats():
             'your_wins': top['wins'],
         }
 
-    # Earned badges — all derived from data already in hand (or one cheap query).
-    from backend.models import Friendship, GameMvpVote
-    wins_total = sum(1 for r in form if r == 'W') if len(completed) <= 5 else None
-    if wins_total is None:  # count across everything, not just the form window
-        wins_total = 0
-        for game in completed:
-            mine = next((p for p in game.players if p.user_id == user.id), None)
-            if mine and mine.team and game.score_team1 is not None \
-                    and (game.score_team1 > game.score_team2) == (mine.team == 1):
-                wins_total += 1
-    friend_count = Friendship.query.filter(
-        Friendship.status == 'accepted',
-        db.or_(Friendship.requester_id == user.id, Friendship.addressee_id == user.id),
-    ).count()
-    mvp_count = GameMvpVote.query.filter_by(votee_id=user.id).count()
-    badge_defs = [
-        ('first_win', '🏅', 'First win', wins_total >= 1),
-        ('ten_games', '🔟', '10 games played', len(completed) >= 10),
-        ('explorer', '🧭', 'Played 5 courts', len(counts) >= 5),
-        ('hot_streak', '🔥', '3-win streak', (user.best_streak or 0) >= 3),
-        ('mvp', '🌟', 'Voted MVP', mvp_count >= 1),
-        ('social', '🤝', '5 friends', friend_count >= 5),
-    ]
-    badges = [
-        {'id': bid, 'emoji': emoji, 'label': label}
-        for bid, emoji, label, earned in badge_defs if earned
-    ]
+    from backend.models import player_badges
+    badges = player_badges(user)
 
     return jsonify({
         'games_total': len(completed),
