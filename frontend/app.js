@@ -818,6 +818,31 @@
     });
   }
 
+  // Downscale a picked image file to a JPEG data URL, stepping quality down
+  // until it fits the server's 500KB photo limit.
+  function imageFileToDataUrl(file, maxDim = 1280) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        const maxChars = 660000; // ~500KB decoded
+        for (const q of [0.82, 0.65, 0.5, 0.35]) {
+          const dataUrl = canvas.toDataURL('image/jpeg', q);
+          if (dataUrl.length <= maxChars) { resolve(dataUrl); return; }
+        }
+        reject(new Error('image_too_large'));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad_image')); };
+      img.src = url;
+    });
+  }
+
   async function openCourtDetail(courtId) {
     let court;
     try { court = await api(`/courts/${courtId}`); } catch (e) { toast(e.message); return; }
@@ -879,6 +904,7 @@
         <div class="cd-hero-actions">
           <button class="glass-btn" id="cd-share" title="Share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg></button>
           <button class="glass-btn" id="cd-favorite" title="Save">${isFavorite ? '★' : '☆'}</button>
+          ${court.photo_url ? '' : '<button class="glass-btn" id="cd-add-photo" title="Add a photo">📷</button>'}
           <button class="glass-btn modal-close">✕</button>
         </div>
         <div class="cd-hero-title">
@@ -940,6 +966,26 @@
         try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
       }
     });
+    modal.querySelector('#cd-add-photo')?.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.addEventListener('change', async () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        let photo;
+        try { photo = await imageFileToDataUrl(file); }
+        catch { toast('Could not read that image'); return; }
+        try {
+          await api(`/courts/${court.id}/photo`, { method: 'POST', body: JSON.stringify({ photo }) });
+          toast('Photo added 📷 Thanks for contributing!');
+          closeModal(modal);
+          openCourtDetail(court.id);
+        } catch (e) { toast(e.message); }
+      });
+      input.click();
+    });
+
     modal.querySelector('#cd-address').addEventListener('click', async () => {
       const addressText = [court.address, court.city, court.state, court.zip_code]
         .filter(Boolean).join(', ');

@@ -60,6 +60,9 @@ class BaseConfig:
     RESET_DB_ON_BOOT = _get_bool('RESET_DB_ON_BOOT', default=False)
     PRESENCE_STALE_AFTER_SECONDS = _get_int('PRESENCE_STALE_AFTER_SECONDS', 7200)
     RATE_LIMIT_ENABLED = _get_bool('RATE_LIMIT_ENABLED', default=True)
+    # Largest legitimate request is a court-photo upload (~500KB image → ~700KB
+    # base64 JSON); cap everything at 2MB so oversized bodies get 413s.
+    MAX_CONTENT_LENGTH = _get_int('MAX_CONTENT_LENGTH', 2 * 1024 * 1024)
 
 
 class DevelopmentConfig(BaseConfig):

@@ -548,6 +548,65 @@ def test_checkin_flow(client):
     assert res.get_json()['presence']['checked_in'] is False
 
 
+def test_court_photo_upload_and_serve(client):
+    import base64 as b64
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    payload = b'x' * 200
+    photo = f"data:image/jpeg;base64,{b64.b64encode(payload).decode()}"
+
+    # Auth required
+    assert client.post(f'/api/courts/{court_id}/photo', json={'photo': photo}).status_code == 401
+
+    # Garbage rejected
+    for bad in ('', 'not a data url', 'data:image/gif;base64,AAAA', 'data:image/jpeg;base64,@@@'):
+        res = client.post(f'/api/courts/{court_id}/photo', json={'photo': bad},
+                          headers=auth_headers(a['token']))
+        assert res.status_code == 400, bad
+
+    # Oversized rejected
+    huge = f"data:image/jpeg;base64,{b64.b64encode(b'x' * (501 * 1024)).decode()}"
+    res = client.post(f'/api/courts/{court_id}/photo', json={'photo': huge},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 400
+    assert res.get_json()['error'] == 'photo_too_large'
+
+    # Valid upload lands and the court now serves it
+    res = client.post(f'/api/courts/{court_id}/photo', json={'photo': photo},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    assert res.get_json()['photo_url'] == f'/api/courts/{court_id}/photo'
+
+    img = client.get(f'/api/courts/{court_id}/photo')
+    assert img.status_code == 200
+    assert img.content_type.startswith('image/jpeg')
+    assert img.data == payload
+    assert 'max-age' in img.headers.get('Cache-Control', '')
+
+    detail = client.get(f'/api/courts/{court_id}').get_json()
+    assert detail['photo_url'] == f'/api/courts/{court_id}/photo'
+
+    # Community photos may be replaced by the community
+    assert client.post(f'/api/courts/{court_id}/photo', json={'photo': photo},
+                       headers=auth_headers(a['token'])).status_code == 201
+
+
+def test_court_photo_never_overwrites_curated(client, app):
+    from backend.models import Court as CourtModel
+    import base64 as b64
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+    with app.app_context():
+        db.session.get(CourtModel, court_id).photo_url = 'https://example.com/pro-shot.jpg'
+        db.session.commit()
+    photo = f"data:image/jpeg;base64,{b64.b64encode(b'x' * 200).decode()}"
+    res = client.post(f'/api/courts/{court_id}/photo', json={'photo': photo},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 409
+    # No photo_data was stored either
+    assert client.get(f'/api/courts/{court_id}/photo').status_code == 404
+
+
 def test_court_list_sort_options(client):
     a = register(client, 'a@example.com', 'Ana')
     courts = client.get('/api/courts').get_json()['items']

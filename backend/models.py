@@ -112,6 +112,9 @@ class Court(TimestampMixin, db.Model):
     phone = db.Column(db.String(40), nullable=False, default='')
     website = db.Column(db.String(500), nullable=False, default='')
     photo_url = db.Column(db.String(500), nullable=False, default='')
+    # User-uploaded photo as a data URL, served via /courts/<id>/photo
+    # (Render's free-tier disk is ephemeral, so files can't live on disk).
+    photo_data = db.Column(db.Text)
     has_restrooms = db.Column(db.Boolean, nullable=False, default=False)
     has_water = db.Column(db.Boolean, nullable=False, default=False)
     nets_provided = db.Column(db.Boolean, nullable=False, default=False)

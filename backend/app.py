@@ -179,6 +179,11 @@ def _upgrade_schema(app):
                     "ALTER TABLE game ADD COLUMN recurrence VARCHAR(16) NOT NULL DEFAULT 'none'"
                 )
 
+        if 'court' in tables:
+            court_cols = {c['name'] for c in inspector.get_columns('court')}
+            if 'photo_data' not in court_cols:
+                statements.append('ALTER TABLE court ADD COLUMN photo_data TEXT')
+
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}
             if 'reminded_at' not in gp_cols:

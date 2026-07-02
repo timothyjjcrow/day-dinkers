@@ -1,12 +1,14 @@
 """Court discovery, detail, and check-in routes."""
+import base64
 import json
 import math
+import re
 import time
 import urllib.parse
 import urllib.request
 from datetime import timedelta
 
-from flask import Blueprint, current_app, g, jsonify, request
+from flask import Blueprint, Response, current_app, g, jsonify, request
 from sqlalchemy import func
 
 from backend.app import db
@@ -406,6 +408,54 @@ def upsert_review(court_id):
         'rating_avg': summary['rating_avg'] if summary else None,
         'rating_count': summary['rating_count'] if summary else 0,
     }), 201
+
+
+_PHOTO_DATA_RE = re.compile(r'^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$')
+MAX_PHOTO_BYTES = 500 * 1024
+
+
+@courts_bp.post('/courts/<int:court_id>/photo')
+@login_required
+@rate_limit(10, 3600)
+def upload_court_photo(court_id):
+    """Community photo for a court that has none (or replace a community one).
+    Curated/scraped photos (external photo_url) are never overwritten."""
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+    if court.photo_url and not court.photo_url.startswith('/api/courts/'):
+        return jsonify({'error': 'photo_already_set'}), 409
+
+    payload = request.get_json(silent=True) or {}
+    match = _PHOTO_DATA_RE.match(str(payload.get('photo') or ''))
+    if not match:
+        return jsonify({'error': 'invalid_photo'}), 400
+    try:
+        raw = base64.b64decode(match.group(2), validate=True)
+    except ValueError:  # binascii.Error subclasses ValueError
+        return jsonify({'error': 'invalid_photo'}), 400
+    if not (100 <= len(raw) <= MAX_PHOTO_BYTES):
+        return jsonify({'error': 'photo_too_large' if len(raw) > MAX_PHOTO_BYTES else 'invalid_photo'}), 400
+
+    court.photo_data = f'data:image/{match.group(1)};base64,{match.group(2)}'
+    court.photo_url = f'/api/courts/{court.id}/photo'
+    db.session.commit()
+    return jsonify({'photo_url': court.photo_url}), 201
+
+
+@courts_bp.get('/courts/<int:court_id>/photo')
+def court_photo(court_id):
+    court = db.session.get(Court, court_id)
+    if not court or not court.photo_data:
+        return jsonify({'error': 'photo_not_found'}), 404
+    match = _PHOTO_DATA_RE.match(court.photo_data)
+    if not match:
+        return jsonify({'error': 'photo_not_found'}), 404
+    return Response(
+        base64.b64decode(match.group(2)),
+        mimetype=f'image/{match.group(1)}',
+        headers={'Cache-Control': 'public, max-age=86400'},
+    )
 
 
 @courts_bp.post('/courts/<int:court_id>/favorite')
