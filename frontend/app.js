@@ -1298,6 +1298,15 @@
     const recurTag = game.recurrence === 'weekly'
       ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>'
       : '';
+    // Discovery aid: flag joinable games whose players average near your rating.
+    let levelTag = '';
+    if (state.me && !game.is_joined && game.status === 'upcoming'
+        && game.spots_left > 0 && game.players.length) {
+      const avg = game.players.reduce((s, p) => s + (p.rating || 1200), 0) / game.players.length;
+      if (Math.abs(avg - state.me.rating) <= 100) {
+        levelTag = '<span class="tag live" style="margin:0 0 0 6px">⚖️ Your level</span>';
+      }
+    }
     const host = game.players.find((p) => p.user_id === game.creator_id);
     const hostLabel = host ? ` · Host: ${esc(host.display_name)}` : '';
     const avatars = game.players.slice(0, 5).map((p) => avatarHtml(p, 'sm')).join('');
@@ -1354,7 +1363,7 @@
           <div class="row-main">
             <div class="row-title">${esc(game.recurrence === 'weekly' && game.status === 'upcoming'
               ? `${new Date(game.scheduled_at).toLocaleDateString([], { weekday: 'long' })}s · ${new Date(game.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-              : fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}</div>
+              : fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}${levelTag}</div>
             <div class="row-sub">${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</div>
           </div>
           <span class="chev">›</span>
