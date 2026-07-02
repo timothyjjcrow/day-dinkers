@@ -943,6 +943,44 @@
     });
   }
 
+  // Build a calendar event for a game (90 min block, court as location).
+  function gameToIcs(game) {
+    const court = game.court || {};
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = (d) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
+    const start = new Date(game.scheduled_at);
+    const end = new Date(start.getTime() + 90 * 60000);
+    const escIcs = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/[,;]/g, (m) => '\\' + m).replace(/\n/g, '\\n');
+    return [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Third Shot//EN',
+      'BEGIN:VEVENT',
+      `UID:thirdshot-game-${game.id}@thirdshot.app`,
+      `DTSTAMP:${stamp(new Date())}`,
+      `DTSTART:${stamp(start)}`,
+      `DTEND:${stamp(end)}`,
+      `SUMMARY:${escIcs(`Pickleball${game.game_type === 'ranked' ? ' (ranked)' : ''} at ${court.name || 'the court'}`)}`,
+      `LOCATION:${escIcs([court.name, court.city].filter(Boolean).join(', '))}`,
+      `DESCRIPTION:${escIcs(`${game.players.length}/${game.max_players} players · ${location.origin}/#game/${game.id}`)}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+  }
+
+  function downloadIcs(game) {
+    const blob = new Blob([gameToIcs(game)], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pickleball-game-${game.id}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast('Calendar event downloaded 📅');
+  }
+
   function formStripHtml(form) {
     if (!form || !form.length) return '';
     return `
@@ -3289,6 +3327,10 @@
         if (game.players.length >= 2) {
           actions = `<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">📝 Enter the score</button>`;
         }
+        const startsAhead = new Date(game.scheduled_at).getTime() > Date.now();
+        if (startsAhead) {
+          actions += '<button class="btn btn-secondary btn-block" id="gs-calendar" style="margin-top:10px">📅 Add to calendar</button>';
+        }
         actions += `<div class="action-row" style="margin-top:10px">
           <button class="btn btn-secondary" id="gs-leave">Leave game</button>
           ${game.is_creator ? '<button class="btn btn-danger" id="gs-cancel">Cancel game</button>' : ''}
@@ -3367,6 +3409,7 @@
       box.querySelectorAll('.modal-close').forEach((b) => { b.onclick = () => { clearHash(); closeModal(modal); }; });
       box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
+      box.querySelector('#gs-calendar')?.addEventListener('click', () => downloadIcs(game));
       box.querySelectorAll('[data-mvp]').forEach((b) => b.addEventListener('click', async () => {
         try {
           render(await api(`/games/${gameId}/mvp`, { method: 'POST', body: JSON.stringify({ user_id: Number(b.dataset.mvp) }) }));
