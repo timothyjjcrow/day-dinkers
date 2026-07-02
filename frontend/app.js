@@ -862,7 +862,7 @@
     if (inputEl) inputEl.addEventListener('focus', () => setTimeout(() => { place(); stick(); }, 300));
     backdrop._cleanup = detach;
   }
-  const modalHead = (title) => `<div class="modal-head"><h3>${esc(title)}</h3><button class="modal-close">✕</button></div>`;
+  const modalHead = (title) => `<div class="modal-head"><h3>${esc(title)}</h3><button class="modal-close" aria-label="Close">✕</button></div>`;
 
   // ---------- Court detail ----------
   function starsHtml(rating, interactive = false) {
@@ -1032,10 +1032,10 @@
         ${heroImg}
         <div class="cd-hero-shade"></div>
         <div class="cd-hero-actions">
-          <button class="glass-btn" id="cd-share" title="Share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg></button>
-          <button class="glass-btn" id="cd-favorite" title="Save">${isFavorite ? '★' : '☆'}</button>
-          ${court.photo_url ? '' : '<button class="glass-btn" id="cd-add-photo" title="Add a photo">📷</button>'}
-          <button class="glass-btn modal-close">✕</button>
+          <button class="glass-btn" id="cd-share" title="Share" aria-label="Share court"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg></button>
+          <button class="glass-btn" id="cd-favorite" title="Save" aria-label="Save court">${isFavorite ? '★' : '☆'}</button>
+          ${court.photo_url ? '' : '<button class="glass-btn" id="cd-add-photo" title="Add a photo" aria-label="Add a photo">📷</button>'}
+          <button class="glass-btn modal-close" aria-label="Close">✕</button>
         </div>
         <div class="cd-hero-title">
           <h2>${esc(court.name)}</h2>
@@ -1997,26 +1997,27 @@
           <h3>${game.game_type === 'ranked' ? '🏆 Record ranked score' : '🎾 Record score'}</h3>
           <div class="row-sub">${esc(court.name || '')}</div>
         </div>
-        <button class="modal-close">✕</button>
+        <button class="modal-close" aria-label="Close">✕</button>
       </div>
       ${singles ? '' : '<p class="row-sub" style="margin-bottom:8px">Tap a player to switch their team.</p>'}
-      <div id="sc-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px"></div>
+      <div id="sc-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px"></div>
+      <div id="sc-uneven" class="row-sub" style="color:#b45309;font-weight:700;margin-bottom:10px;display:none"></div>
       <div class="score-grid">
         <div class="score-panel" id="sc-panel-1">
           <div class="score-team-label" id="sc-label-1"></div>
           <div class="score-stepper">
-            <button type="button" data-step="-1" data-target="sc-1">−</button>
+            <button type="button" data-step="-1" data-target="sc-1" aria-label="Decrease team 1 score">−</button>
             <input type="number" id="sc-1" min="0" max="99" value="11" inputmode="numeric" />
-            <button type="button" data-step="1" data-target="sc-1">＋</button>
+            <button type="button" data-step="1" data-target="sc-1" aria-label="Increase team 1 score">＋</button>
           </div>
         </div>
         <div class="score-vs">vs</div>
         <div class="score-panel" id="sc-panel-2">
           <div class="score-team-label" id="sc-label-2"></div>
           <div class="score-stepper">
-            <button type="button" data-step="-1" data-target="sc-2">−</button>
+            <button type="button" data-step="-1" data-target="sc-2" aria-label="Decrease team 2 score">−</button>
             <input type="number" id="sc-2" min="0" max="99" value="9" inputmode="numeric" />
-            <button type="button" data-step="1" data-target="sc-2">＋</button>
+            <button type="button" data-step="1" data-target="sc-2" aria-label="Increase team 2 score">＋</button>
           </div>
         </div>
       </div>
@@ -2044,6 +2045,12 @@
     const renderLabels = () => {
       modal.querySelector('#sc-label-1').innerHTML = singles ? esc(players[0].display_name) : teamNames(1);
       modal.querySelector('#sc-label-2').innerHTML = singles ? esc(players[1].display_name) : teamNames(2);
+      const n1 = players.filter((p) => teams[p.user_id] === 1).length;
+      const n2 = players.filter((p) => teams[p.user_id] === 2).length;
+      const uneven = modal.querySelector('#sc-uneven');
+      const lopsided = !singles && n1 && n2 && Math.abs(n1 - n2) > 1;
+      uneven.style.display = lopsided ? '' : 'none';
+      if (lopsided) uneven.textContent = `⚠️ Uneven teams (${n1} v ${n2}) — tap players above to rebalance`;
     };
     const highlightWinner = () => {
       const s1 = Number(modal.querySelector('#sc-1').value);
@@ -2340,7 +2347,7 @@
         <div class="thread-msgs" id="thread-msgs"></div>
         <form class="thread-input" id="thread-form">
           <input type="text" id="thread-text" placeholder="Message…" autocomplete="off" />
-          <button type="submit">➤</button>
+          <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
     `, { chat: true });
@@ -2402,7 +2409,7 @@
         <div class="thread-msgs" id="cc-msgs"></div>
         <form class="thread-input" id="cc-form">
           <input type="text" id="cc-text" placeholder="Message the court…" autocomplete="off" maxlength="500" />
-          <button type="submit">➤</button>
+          <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
     `, { chat: true });
@@ -2469,7 +2476,7 @@
         <div class="thread-msgs" id="gc-msgs"></div>
         <form class="thread-input" id="gc-form">
           <input type="text" id="gc-text" placeholder="Message your game…" autocomplete="off" maxlength="500" />
-          <button type="submit">➤</button>
+          <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
     `, { chat: true });
@@ -3053,9 +3060,9 @@
           <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
-        ${game.is_joined ? '<button class="icon-btn" id="gs-chat" title="Game chat" style="box-shadow:none;font-size:17px">💬</button>' : ''}
-        <button class="icon-btn" id="gs-share" title="Share game" style="box-shadow:none;font-size:17px">📤</button>
-        <button class="modal-close">✕</button>
+        ${game.is_joined ? '<button class="icon-btn" id="gs-chat" title="Game chat" aria-label="Game chat" style="box-shadow:none;font-size:17px">💬</button>' : ''}
+        <button class="icon-btn" id="gs-share" title="Share game" aria-label="Share game" style="box-shadow:none;font-size:17px">📤</button>
+        <button class="modal-close" aria-label="Close">✕</button>
       </div>
       <div class="card row" id="gs-court" style="cursor:pointer">
         <span style="font-size:20px">📍</span>
