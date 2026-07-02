@@ -1119,6 +1119,51 @@ def test_friend_request_flow(client):
     assert res.get_json()['deleted'] is True
 
 
+def test_friends_digest(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+
+    # No friends yet: empty digest.
+    digest = client.get('/api/friends/digest', headers=ah).get_json()
+    assert digest == {'days': 7, 'games': 0, 'friends_played': 0, 'checkins': 0, 'top': []}
+
+    # Ana befriends Ben (but not Cam).
+    client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah)
+    fid = client.get('/api/friends', headers=bh).get_json()['incoming'][0]['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=bh)
+
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Ben plays Cam twice this week: one win, one loss.
+    def play(ben_wins):
+        game = make_game(client, b['token'], larson, hours_ahead=1)
+        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(c['token']))
+        res = client.post(f"/api/games/{game['id']}/complete", json={
+            'team1': [b['user']['id']], 'team2': [c['user']['id']],
+            'score_team1': 11 if ben_wins else 4,
+            'score_team2': 4 if ben_wins else 11,
+        }, headers=bh)
+        assert res.status_code == 200, res.get_json()
+
+    play(True)
+    play(False)
+    client.post(f'/api/courts/{larson}/checkin', json={}, headers=bh)
+
+    digest = client.get('/api/friends/digest', headers=ah).get_json()
+    assert digest['games'] == 2
+    assert digest['friends_played'] == 1  # Cam played too, but he's not Ana's friend
+    assert digest['checkins'] == 1
+    assert digest['top'] == [{
+        'id': b['user']['id'], 'display_name': 'Ben',
+        'games': 2, 'wins': 1, 'losses': 1,
+    }]
+
+    # Auth required.
+    assert client.get('/api/friends/digest').status_code == 401
+
+
 def test_my_stats(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

@@ -403,6 +403,51 @@ def list_friends():
     return jsonify({'friends': friends, 'incoming': incoming, 'outgoing': outgoing})
 
 
+@social_bp.get('/friends/digest')
+@login_required
+def friends_digest():
+    """Last-7-days recap of friend activity: games played, records, check-ins."""
+    fids = friend_ids(g.current_user.id)
+    if not fids:
+        return jsonify({'days': 7, 'games': 0, 'friends_played': 0, 'checkins': 0, 'top': []})
+    cutoff = utcnow() - timedelta(days=7)
+    rows = (
+        db.session.query(GamePlayer, Game)
+        .join(Game, GamePlayer.game_id == Game.id)
+        .filter(
+            GamePlayer.user_id.in_(fids),
+            Game.status == 'completed',
+            Game.completed_at >= cutoff,
+        )
+        .all()
+    )
+    stats_by_friend = {}
+    game_ids = set()
+    for gp, game in rows:
+        game_ids.add(game.id)
+        stats = stats_by_friend.setdefault(gp.user_id, {'games': 0, 'wins': 0, 'losses': 0})
+        stats['games'] += 1
+        if gp.team and game.score_team1 is not None and game.score_team2 is not None:
+            won = (game.score_team1 > game.score_team2) == (gp.team == 1)
+            stats['wins' if won else 'losses'] += 1
+    checkins = CheckIn.query.filter(
+        CheckIn.user_id.in_(fids),
+        CheckIn.checked_in_at >= cutoff,
+    ).count()
+    users = {u.id: u for u in User.query.filter(User.id.in_(stats_by_friend)).all()}
+    ranked = sorted(stats_by_friend.items(), key=lambda kv: (-kv[1]['games'], -kv[1]['wins']))
+    return jsonify({
+        'days': 7,
+        'games': len(game_ids),
+        'friends_played': len(stats_by_friend),
+        'checkins': checkins,
+        'top': [
+            {'id': uid, 'display_name': users[uid].display_name, **stats}
+            for uid, stats in ranked[:3] if uid in users
+        ],
+    })
+
+
 @social_bp.post('/friends/request')
 @rate_limit(40, 60)
 @login_required

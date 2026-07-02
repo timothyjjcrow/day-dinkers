@@ -2461,9 +2461,10 @@
 
   async function renderFriends(el) {
     const loc = areaLatLng();
-    const [data, results] = await Promise.all([
+    const [data, results, digest] = await Promise.all([
       api('/friends'),
       api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`).catch(() => ({ items: [] })),
+      api('/friends/digest').catch(() => null),
     ]);
     let html = `
       <div class="form-field" style="margin-top:4px">
@@ -2483,6 +2484,25 @@
           <button class="btn btn-primary btn-sm" data-respond="${f.friendship_id}" data-accept="1">Accept</button>
           <button class="btn btn-secondary btn-sm" data-respond="${f.friendship_id}" data-accept="0">✕</button>
         </div>`).join('');
+    }
+
+    // Weekly digest — what your friends got up to in the last 7 days.
+    if (digest && (digest.games || digest.checkins)) {
+      const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+      const bits = [];
+      if (digest.games) bits.push(`${plural(digest.games, 'game')} by ${plural(digest.friends_played, 'friend')}`);
+      if (digest.checkins) bits.push(plural(digest.checkins, 'court check-in'));
+      html += '<div class="section-label">📬 This week among friends</div>';
+      html += `<div class="card">
+        <div class="row-sub">${bits.join(' · ')}</div>
+        ${(digest.top || []).map((t) => `
+          <div class="row" data-view-user="${t.id}" style="cursor:pointer;padding:8px 0 0">
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(t.display_name)}</div>
+              <div class="row-sub">${plural(t.games, 'game')}${t.wins + t.losses ? ` · ${t.wins}–${t.losses}` : ''}</div>
+            </div>
+          </div>`).join('')}
+      </div>`;
     }
 
     html += `<div class="section-label">Friends (${data.friends.length})</div>`;
