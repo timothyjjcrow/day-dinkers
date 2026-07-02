@@ -2976,7 +2976,19 @@
               <div class="stat-label">Top court${stats.top_court ? ` · ${stats.top_court.games}` : ''}</div>
             </div>
           </div>`;
+        const extras = [];
+        if (stats.best_partner) {
+          extras.push(`🤝 Best partner: <b data-view-user="${stats.best_partner.user_id}" style="cursor:pointer">${esc(stats.best_partner.display_name)}</b> · ${stats.best_partner.wins} win${stats.best_partner.wins === 1 ? '' : 's'} together`);
+        }
+        if (stats.top_rival) {
+          extras.push(`🥊 Most faced: <b data-view-user="${stats.top_rival.user_id}" style="cursor:pointer">${esc(stats.top_rival.display_name)}</b> · you're ${stats.top_rival.your_wins}–${stats.top_rival.games - stats.top_rival.your_wins}`);
+        }
+        if (extras.length) {
+          el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
+            `<div class="row-sub" style="text-align:center;margin-top:8px">${extras.join('<br>')}</div>`);
+        }
         el.querySelector('[data-pfcourt-top]')?.addEventListener('click', (e) => openCourtDetail(Number(e.currentTarget.dataset.pfcourtTop)));
+        bindUserButtons(el.querySelector('#pf-play-stats'));
       }
     } catch { /* ignore */ }
 

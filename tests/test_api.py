@@ -1102,7 +1102,8 @@ def test_my_stats(client):
 
     # Fresh player: all zeros.
     stats = client.get('/api/me/stats', headers=ah).get_json()
-    assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0, 'top_court': None}
+    assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0,
+                     'top_court': None, 'best_partner': None, 'top_rival': None}
 
     def play(court_id):
         g = make_game(client, a['token'], court_id, hours_ahead=1)
@@ -1122,6 +1123,27 @@ def test_my_stats(client):
     assert stats['games_this_month'] == 3  # completed just now
     assert stats['week_streak'] == 1       # this week counts
     assert stats['top_court']['name'] == 'Larson Park' and stats['top_court']['games'] == 2
+    # All singles vs Ben: he's the top rival, and there's no partner yet.
+    assert stats['best_partner'] is None
+    assert stats['top_rival']['display_name'] == 'Ben'
+    assert stats['top_rival'] == {'user_id': b['user']['id'], 'display_name': 'Ben',
+                                  'games': 3, 'your_wins': 3}
+
+    # One doubles win with Cam makes him the best partner.
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    doubles = make_game(client, a['token'], larson, hours_ahead=1)
+    for u in (b, c, d):
+        client.post(f"/api/games/{doubles['id']}/join", headers=auth_headers(u['token']))
+    client.post(f"/api/games/{doubles['id']}/complete", json={
+        'team1': [a['user']['id'], c['user']['id']],
+        'team2': [b['user']['id'], d['user']['id']],
+        'score_team1': 11, 'score_team2': 6,
+    }, headers=ah)
+    stats = client.get('/api/me/stats', headers=ah).get_json()
+    assert stats['best_partner']['display_name'] == 'Cam'
+    assert stats['best_partner']['wins'] == 1
+    assert stats['top_rival']['games'] == 4  # Ben again, now 4 meetings
 
     # Auth required.
     assert client.get('/api/me/stats').status_code == 401

@@ -387,11 +387,48 @@ def my_stats():
         if court:
             top_court = {'id': court.id, 'name': court.name, 'games': counts[top_id]}
 
+    # Who you win with, and who you battle most.
+    partners, rivals = {}, {}
+    for game in completed:
+        mine = next((p for p in game.players if p.user_id == user.id), None)
+        if not mine or not mine.team or game.score_team1 is None:
+            continue
+        i_won = (game.score_team1 > game.score_team2) == (mine.team == 1)
+        for p in game.players:
+            if p.user_id == user.id or not p.team or not p.user or p.user.deleted_at:
+                continue
+            bucket = partners if p.team == mine.team else rivals
+            entry = bucket.setdefault(p.user_id, {'user': p.user, 'games': 0, 'wins': 0})
+            entry['games'] += 1
+            entry['wins'] += 1 if i_won else 0
+
+    best_partner = None
+    if partners:
+        top = max(partners.values(), key=lambda e: (e['wins'], e['games']))
+        if top['wins'] > 0:
+            best_partner = {
+                'user_id': top['user'].id,
+                'display_name': top['user'].display_name,
+                'wins': top['wins'],
+                'games': top['games'],
+            }
+    top_rival = None
+    if rivals:
+        top = max(rivals.values(), key=lambda e: e['games'])
+        top_rival = {
+            'user_id': top['user'].id,
+            'display_name': top['user'].display_name,
+            'games': top['games'],
+            'your_wins': top['wins'],
+        }
+
     return jsonify({
         'games_total': len(completed),
         'games_this_month': games_this_month,
         'week_streak': streak,
         'top_court': top_court,
+        'best_partner': best_partner,
+        'top_rival': top_rival,
     })
 
 
