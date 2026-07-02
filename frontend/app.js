@@ -2889,6 +2889,8 @@
       subline = fmtDateTime(game.completed_at);
     } else if (game.status === 'cancelled') {
       emoji = '🚫'; headline = 'Cancelled'; subline = 'This game was called off.';
+    } else if (game.status === 'expired') {
+      emoji = '🕸'; headline = 'Expired'; subline = 'No score was entered, so this game closed itself.';
     } else if (game.status === 'awaiting_confirmation') {
       emoji = game.awaiting_your_confirmation ? '⚡' : '⏳';
       headline = `Reported: ${game.score_team1}–${game.score_team2}`;

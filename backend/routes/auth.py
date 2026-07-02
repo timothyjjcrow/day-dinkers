@@ -141,9 +141,14 @@ def _active_game_payload(user):
         .limit(25)
         .all()
     )
+    from datetime import timedelta
     for game in games:
         data = game.to_dict(user.id)
         if game.status == 'upcoming' and game.scheduled_at <= now:
+            # A game hours past its start isn't "live" — the Play tab's
+            # enter-the-score section owns the nagging from there.
+            if game.scheduled_at < now - timedelta(hours=4):
+                continue
             rank, banner_state = 0, 'live'
         elif data['awaiting_your_confirmation']:
             rank, banner_state = 2, 'confirm'
@@ -247,7 +252,8 @@ def login():
 @login_required
 def me():
     # Lazy import: games.py imports from this module at load time.
-    from backend.routes.games import send_game_reminders
+    from backend.routes.games import expire_stale_unscored, send_game_reminders
+    expire_stale_unscored()
     send_game_reminders()
     return jsonify(_me_payload(g.current_user))
 

@@ -336,6 +336,50 @@ def test_rate_limiting(app):
     sec._BUCKETS.clear()
 
 
+def test_expire_stale_unscored(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    ancient = make_game(client, a['token'], court_id)
+    recent = make_game(client, a['token'], court_id)
+    weekly_res = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(days=1)).isoformat() + 'Z',
+        'game_type': 'casual', 'visibility': 'open', 'recurrence': 'weekly',
+    }, headers=auth_headers(a['token']))
+    weekly = weekly_res.get_json()
+    client.post(f"/api/games/{ancient['id']}/join", headers=auth_headers(b['token']))
+
+    from backend.routes.games import expire_stale_unscored, roll_forward_recurring
+    with app.app_context():
+        # Push the ancient game and the weekly session 10 days into the past.
+        db.session.get(GameModel, ancient['id']).scheduled_at = utcnow() - timedelta(days=10)
+        db.session.get(GameModel, weekly['id']).scheduled_at = utcnow() - timedelta(days=10)
+        # Recent game started yesterday — still scorable.
+        db.session.get(GameModel, recent['id']).scheduled_at = utcnow() - timedelta(days=1)
+        db.session.commit()
+        roll_forward_recurring()
+        expire_stale_unscored()
+        assert db.session.get(GameModel, ancient['id']).status == 'expired'
+        assert db.session.get(GameModel, recent['id']).status == 'upcoming'
+        # Weekly session rolled forward instead of expiring.
+        wk = db.session.get(GameModel, weekly['id'])
+        assert wk.status == 'upcoming' and wk.scheduled_at > utcnow()
+        # Expired games drop out of the feeds by status filter, and running
+        # the sweep again is a no-op. (Assertions stay in-context: HTTP
+        # round-trips after in-context time travel hit the known StaticPool
+        # cross-context flake.)
+        expire_stale_unscored()
+        assert db.session.get(GameModel, ancient['id']).status == 'expired'
+        assert GameModel.query.filter(
+            GameModel.status.in_(['upcoming', 'awaiting_confirmation']),
+            GameModel.id == ancient['id'],
+        ).first() is None
+
+
 def test_recurring_session_rolls_forward(client, app):
     from datetime import timedelta
     from backend.models import Game as GameModel, utcnow

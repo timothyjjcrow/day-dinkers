@@ -27,6 +27,7 @@ games_bp = Blueprint('games', __name__)
 ELO_K = 32
 SCORE_AUTO_CONFIRM_HOURS = 24
 REMINDER_LEAD_MINUTES = 65
+UNSCORED_EXPIRY_DAYS = 7
 
 
 def _parse_scheduled_at(raw):
@@ -51,6 +52,21 @@ def auto_confirm_stale_scores():
     ).all()
     for game in stale:
         _finalize_game(game)
+    if stale:
+        db.session.commit()
+
+
+def expire_stale_unscored():
+    """Games that started over a week ago and never got a score stop haunting
+    the feeds and the live banner. Weekly sessions roll forward instead."""
+    cutoff = utcnow() - timedelta(days=UNSCORED_EXPIRY_DAYS)
+    stale = Game.query.filter(
+        Game.status == 'upcoming',
+        Game.recurrence != 'weekly',
+        Game.scheduled_at < cutoff,
+    ).all()
+    for game in stale:
+        game.status = 'expired'
     if stale:
         db.session.commit()
 
@@ -116,6 +132,7 @@ def list_games():
     """Upcoming games feed, optionally sorted by distance from lat/lng."""
     auto_confirm_stale_scores()
     roll_forward_recurring()
+    expire_stale_unscored()
     send_game_reminders()
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
