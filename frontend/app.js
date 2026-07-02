@@ -2728,17 +2728,21 @@
     const upcoming = user.upcoming_games || [];
     const courts = user.courts || [];
     let h2hHtml = '';
-    if (userId !== state.me.id && user.head_to_head) {
-      const { wins, losses } = user.head_to_head;
+    if (userId !== state.me.id && (user.head_to_head || user.as_teammates)) {
       const firstName = (user.display_name || 'They').split(' ')[0];
-      const line = wins > losses ? `You lead ${wins}–${losses}`
-        : losses > wins ? `${esc(firstName)} leads ${losses}–${wins}`
-        : `Tied ${wins}–${wins}`;
-      h2hHtml = `
-        <div class="card" style="text-align:center;padding:10px 14px;margin:12px 0 0">
-          <div style="font-weight:800">🎯 ${line}</div>
-          <div class="row-sub">your head-to-head record</div>
-        </div>`;
+      let lines = '';
+      if (user.head_to_head) {
+        const { wins, losses } = user.head_to_head;
+        const line = wins > losses ? `You lead ${wins}–${losses}`
+          : losses > wins ? `${esc(firstName)} leads ${losses}–${wins}`
+          : `Tied ${wins}–${wins}`;
+        lines += `<div style="font-weight:800">🎯 ${line}</div><div class="row-sub">your head-to-head record</div>`;
+      }
+      if (user.as_teammates) {
+        const t = user.as_teammates;
+        lines += `<div style="font-weight:800;margin-top:${user.head_to_head ? '8px' : '0'}">🤝 ${t.wins}–${t.losses} together</div><div class="row-sub">as teammates</div>`;
+      }
+      h2hHtml = `<div class="card" style="text-align:center;padding:10px 14px;margin:12px 0 0">${lines}</div>`;
     }
     const availLines = availabilitySummary(user.availability);
     const availHtml = availLines.length ? `

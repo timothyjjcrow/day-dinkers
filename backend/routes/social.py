@@ -243,6 +243,7 @@ def user_profile(user_id):
     # Head-to-head: completed scored games where viewer and target were on
     # opposite teams.
     payload['head_to_head'] = None
+    payload['as_teammates'] = None
     if user.id != g.current_user.id:
         me_gp, them_gp = aliased(GamePlayer), aliased(GamePlayer)
         shared = (
@@ -274,6 +275,32 @@ def user_profile(user_id):
                 'losses': len(shared) - wins,
                 'last_game': shared[0].to_dict(g.current_user.id),
             }
+
+        # And the flip side: how you fare on the SAME team.
+        us_gp, partner_gp = aliased(GamePlayer), aliased(GamePlayer)
+        together = (
+            Game.query
+            .join(us_gp, and_(us_gp.game_id == Game.id,
+                              us_gp.user_id == g.current_user.id))
+            .join(partner_gp, and_(partner_gp.game_id == Game.id,
+                                   partner_gp.user_id == user.id))
+            .filter(
+                Game.status == 'completed',
+                Game.score_team1.isnot(None),
+                Game.score_team2.isnot(None),
+                us_gp.team.isnot(None),
+                us_gp.team == partner_gp.team,
+            )
+            .limit(100)
+            .all()
+        )
+        if together:
+            team_wins = 0
+            for game in together:
+                ours = next(p for p in game.players if p.user_id == g.current_user.id)
+                if (game.score_team1 > game.score_team2) == (ours.team == 1):
+                    team_wins += 1
+            payload['as_teammates'] = {'wins': team_wins, 'losses': len(together) - team_wins}
 
     # Upcoming games this player is in — only those the viewer is allowed to see.
     viewer_friends = friend_ids(g.current_user.id)

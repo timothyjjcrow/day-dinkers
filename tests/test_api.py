@@ -1352,6 +1352,24 @@ def test_head_to_head_on_profile(client):
     # Own profile never carries it.
     assert client.get(f"/api/users/{a['user']['id']}", headers=ah).get_json()['head_to_head'] is None
 
+    # Ana and Ben pair up in doubles against Cam + Dee and win → teammate record.
+    d = register(client, 'd@example.com', 'Dee')
+    doubles = make_game(client, a['token'], court_id, hours_ahead=1)
+    for u in (b, c, d):
+        client.post(f"/api/games/{doubles['id']}/join", headers=auth_headers(u['token']))
+    res = client.post(f"/api/games/{doubles['id']}/complete", json={
+        'team1': [a['user']['id'], b['user']['id']],
+        'team2': [c['user']['id'], d['user']['id']],
+        'score_team1': 11, 'score_team2': 8,
+    }, headers=ah)
+    assert res.status_code == 200
+    profile = client.get(f"/api/users/{b['user']['id']}", headers=ah).get_json()
+    assert profile['as_teammates'] == {'wins': 1, 'losses': 0}
+    # Head-to-head unchanged by the same-team game.
+    assert profile['head_to_head']['wins'] == 2 and profile['head_to_head']['losses'] == 1
+    # Cam (opponent that game) has no teammate record with Ana.
+    assert client.get(f"/api/users/{c['user']['id']}", headers=ah).get_json()['as_teammates'] is None
+
 
 def test_user_search(client):
     a = register(client, 'a@example.com', 'Ana')
