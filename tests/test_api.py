@@ -959,6 +959,48 @@ def test_court_regulars(client, app):
     assert regulars[0]['visits'] == 3
 
 
+def test_court_busy_times(client, app):
+    from datetime import timedelta
+    from backend.models import CheckIn as CheckInModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # No history → no busy-times data.
+    assert client.get(f'/api/courts/{court_id}').get_json()['busy_times'] == []
+
+    # Larson Park sits at lng -117.91 → offset round(-117.91/15) = -8h.
+    # Local Sat 09:00 = UTC Sat 17:00; local Wed 18:00 = UTC Thu 02:00.
+    with app.app_context():
+        now = utcnow()
+        sat = (now - timedelta(days=(now.weekday() - 5) % 7)).replace(
+            hour=17, minute=0, second=0, microsecond=0)
+        wed_eve = (now - timedelta(days=(now.weekday() - 2) % 7)).replace(
+            hour=2, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        mon = (now - timedelta(days=now.weekday())).replace(
+            hour=21, minute=0, second=0, microsecond=0)  # local Mon 1pm
+        rows = []
+        for weeks in (1, 2, 3):  # three Saturday mornings
+            rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
+                                     checked_in_at=sat - timedelta(days=7 * weeks)))
+        for weeks in (1, 2):     # two Wednesday evenings
+            rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
+                                     checked_in_at=wed_eve - timedelta(days=7 * weeks)))
+        # One Monday afternoon (below the 2-visit bar) and one Sat 3am local
+        # (UTC 11:00 — night hours are excluded, so Sat mornings stays at 3).
+        rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
+                                 checked_in_at=mon - timedelta(days=7)))
+        rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
+                                 checked_in_at=sat.replace(hour=11) - timedelta(days=7)))
+        db.session.add_all(rows)
+        db.session.commit()
+
+    busy = client.get(f'/api/courts/{court_id}').get_json()['busy_times']
+    assert busy[0] == {'label': 'Sat mornings', 'count': 3}
+    assert {'label': 'Wed evenings', 'count': 2} in busy
+    assert all(b['label'] != 'Mon afternoons' for b in busy)  # 1 visit ≠ a pattern
+    assert len(busy) <= 3
+
+
 def test_favorite_courts(client):
     a = register(client, 'a@example.com')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']

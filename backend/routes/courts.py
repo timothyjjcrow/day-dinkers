@@ -422,6 +422,7 @@ def court_detail(court_id):
         {**user.to_public_dict(), 'visits': int(visits)}
         for user, visits in regular_rows
     ]
+    payload['busy_times'] = _busy_times(court)
     payload['players_here'] = players_here
     payload['friends_here'] = sum(1 for p in players_here if p['is_friend'])
     viewer_id = current_user.id if current_user else None
@@ -837,6 +838,40 @@ def list_favorites():
         item['players_here'] = players.get(item['id'], 0)
         item['upcoming_games'] = games.get(item['id'], 0)
     return jsonify({'items': items})
+
+
+def _busy_times(court):
+    """Popular visit blocks from the last 90 days of check-ins: top 3 blocks
+    of (weekday, part-of-day) with 2+ visits. Local time is approximated from
+    the court's longitude (±1h near DST/zone edges — fine at this granularity)."""
+    if court.longitude is None:
+        return []
+    rows = CheckIn.query.filter(
+        CheckIn.court_id == court.id,
+        CheckIn.checked_in_at >= utcnow() - timedelta(days=90),
+    ).all()
+    tz_offset = round(court.longitude / 15)
+    days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    buckets = {}
+    for checkin in rows:
+        local = checkin.checked_in_at + timedelta(hours=tz_offset)
+        hour = local.hour
+        if 5 <= hour < 12:
+            part = 'mornings'
+        elif 12 <= hour < 17:
+            part = 'afternoons'
+        elif 17 <= hour < 23:
+            part = 'evenings'
+        else:
+            continue
+        key = (local.weekday(), part)
+        buckets[key] = buckets.get(key, 0) + 1
+    ranked = sorted(buckets.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [
+        {'label': f'{days[weekday]} {part}', 'count': count}
+        for (weekday, part), count in ranked[:3]
+        if count >= 2
+    ]
 
 
 def _notify_friends_looking(court):

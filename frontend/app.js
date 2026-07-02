@@ -1246,6 +1246,9 @@
         <button id="cd-suggest" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">✏️ Suggest an edit</button>
         <button id="cd-condition" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">📣 Report conditions</button>
       </div>
+      ${court.busy_times && court.busy_times.length
+        ? `<div class="row-sub" style="margin-top:10px">📊 Popular here: ${court.busy_times.map((b) => esc(b.label)).join(' · ')}</div>`
+        : ''}
       ${court.open_play_schedule ? `
         <details class="cd-hours">
           <summary>🕑 Open play hours</summary>
