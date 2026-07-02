@@ -706,6 +706,61 @@
     });
   }
 
+  function openSuggestEditSheet(court, onApplied) {
+    const check = (id, label, value) => `
+      <label class="row" style="gap:8px;padding:8px 0;cursor:pointer">
+        <input type="checkbox" id="${id}" ${value ? 'checked' : ''} style="width:18px;height:18px" /> ${label}
+      </label>`;
+    const modal = openModal(`
+      ${modalHead('Suggest an edit')}
+      <p class="row-sub" style="margin-bottom:12px">Spot something wrong about <b>${esc(court.name)}</b>? Fix it below — changes apply once another player confirms them.</p>
+      <div class="form-field">
+        <label>Number of courts</label>
+        <input type="number" id="se-courts" min="1" max="100" value="${court.num_courts || 1}" />
+      </div>
+      <div class="form-field">
+        ${check('se-indoor', '🏠 Indoor', court.indoor)}
+        ${check('se-lighted', '💡 Lighted', court.lighted)}
+        ${check('se-nets', '🥅 Nets provided', court.nets_provided)}
+        ${check('se-restrooms', '🚻 Restrooms', court.has_restrooms)}
+        ${check('se-water', '🚰 Water fountain', court.has_water)}
+      </div>
+      <div class="form-field">
+        <label>Surface</label>
+        <input type="text" id="se-surface" maxlength="60" placeholder="e.g. Concrete, Asphalt, Sport court" value="${esc(court.surface_type || '')}" />
+      </div>
+      <div class="form-field">
+        <label>Fees</label>
+        <input type="text" id="se-fees" maxlength="200" placeholder="e.g. Free, $5 drop-in" value="${esc(court.fees || '')}" />
+      </div>
+      <button class="btn btn-primary btn-block" id="se-submit">Submit suggestion</button>
+    `);
+    modal.querySelector('#se-submit').addEventListener('click', async () => {
+      const body = {
+        num_courts: Number(modal.querySelector('#se-courts').value) || court.num_courts,
+        indoor: modal.querySelector('#se-indoor').checked,
+        lighted: modal.querySelector('#se-lighted').checked,
+        nets_provided: modal.querySelector('#se-nets').checked,
+        has_restrooms: modal.querySelector('#se-restrooms').checked,
+        has_water: modal.querySelector('#se-water').checked,
+        surface_type: modal.querySelector('#se-surface').value.trim(),
+        fees: modal.querySelector('#se-fees').value.trim(),
+      };
+      try {
+        const res = await api(`/courts/${court.id}/suggest`, { method: 'POST', body: JSON.stringify(body) });
+        closeModal(modal);
+        if (res.applied_fields.length) {
+          toast('Court updated — thanks! ✏️');
+          if (onApplied) onApplied();
+        } else {
+          toast('Suggestion recorded — one more confirmation applies it 🙌');
+        }
+      } catch (e) {
+        toast(e.message === 'no changes' ? 'Nothing changed from the current info' : e.message);
+      }
+    });
+  }
+
   // ---------- Modal helpers ----------
   function openModal(html, opts = {}) {
     const root = $('#overlay-root');
@@ -951,7 +1006,9 @@
         <button class="action-tile" id="cd-chat"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>Chat</button>
         <a class="action-tile" href="${mapsUrl}" target="_blank" rel="noopener"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg></span>Directions</a>
       </div>
-      <div style="margin-top:14px">${chipsHtml}</div>
+      <div style="margin-top:14px">${chipsHtml}
+        <button id="cd-suggest" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">✏️ Suggest an edit</button>
+      </div>
       ${court.open_play_schedule ? `
         <details class="cd-hours">
           <summary>🕑 Open play hours</summary>
@@ -992,6 +1049,10 @@
         try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
       }
     });
+    modal.querySelector('#cd-suggest').addEventListener('click', () => {
+      openSuggestEditSheet(court, () => { closeModal(modal); openCourtDetail(court.id); });
+    });
+
     modal.querySelector('#cd-add-photo')?.addEventListener('click', () => {
       const input = document.createElement('input');
       input.type = 'file';

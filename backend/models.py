@@ -435,6 +435,19 @@ class CourtReview(TimestampMixin, db.Model):
         }
 
 
+class CourtEditSuggestion(TimestampMixin, db.Model):
+    """A player's proposed corrections to scraped court data, as a JSON object
+    of {field: value}. Applied automatically once two distinct users agree."""
+    id = db.Column(db.Integer, primary_key=True)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    payload = db.Column(db.Text, nullable=False, default='{}')
+    status = db.Column(db.String(16), nullable=False, default='pending', index=True)
+
+    court = db.relationship('Court')
+    user = db.relationship('User')
+
+
 class Notification(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)

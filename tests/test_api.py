@@ -548,6 +548,53 @@ def test_checkin_flow(client):
     assert res.get_json()['presence']['checked_in'] is False
 
 
+def test_court_edit_suggestions_consensus(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']  # 6 courts, outdoor
+
+    # Auth required; empty/no-op payloads rejected.
+    assert client.post(f'/api/courts/{court_id}/suggest', json={'num_courts': 8}).status_code == 401
+    assert client.post(f'/api/courts/{court_id}/suggest', json={},
+                       headers=auth_headers(a['token'])).status_code == 400
+    assert client.post(f'/api/courts/{court_id}/suggest', json={'num_courts': 6},
+                       headers=auth_headers(a['token'])).status_code == 400  # unchanged value
+    assert client.post(f'/api/courts/{court_id}/suggest', json={'num_courts': 500},
+                       headers=auth_headers(a['token'])).status_code == 400  # out of range
+
+    # First suggestion: recorded, not applied.
+    res = client.post(f'/api/courts/{court_id}/suggest', json={'num_courts': 8, 'indoor': True},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    assert res.get_json()['applied_fields'] == []
+    detail = client.get(f'/api/courts/{court_id}').get_json()
+    assert detail['num_courts'] == 6 and detail['indoor'] is False
+
+    # Second user agrees on num_courts only → that field applies, indoor stays.
+    res = client.post(f'/api/courts/{court_id}/suggest', json={'num_courts': 8},
+                      headers=auth_headers(b['token']))
+    assert res.status_code == 201
+    assert res.get_json()['applied_fields'] == ['num_courts']
+    detail = client.get(f'/api/courts/{court_id}').get_json()
+    assert detail['num_courts'] == 8 and detail['indoor'] is False
+
+    # Ana's indoor=True vote survives; Cam confirms it → applied.
+    res = client.post(f'/api/courts/{court_id}/suggest', json={'indoor': True},
+                      headers=auth_headers(c['token']))
+    assert res.get_json()['applied_fields'] == ['indoor']
+    assert client.get(f'/api/courts/{court_id}').get_json()['indoor'] is True
+
+    # Resubmitting replaces the same user's pending suggestion (no double vote).
+    r1 = client.post(f'/api/courts/{court_id}/suggest', json={'fees': '$5 drop-in'},
+                     headers=auth_headers(a['token']))
+    r2 = client.post(f'/api/courts/{court_id}/suggest', json={'fees': '$5 drop-in'},
+                     headers=auth_headers(a['token']))
+    assert r1.status_code == r2.status_code == 201
+    assert r2.get_json()['applied_fields'] == []  # still one distinct voter
+    assert client.get(f'/api/courts/{court_id}').get_json()['fees'] != '$5 drop-in'
+
+
 def test_court_photo_upload_and_serve(client):
     import base64 as b64
     a = register(client, 'a@example.com', 'Ana')

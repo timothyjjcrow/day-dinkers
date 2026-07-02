@@ -12,7 +12,10 @@ from flask import Blueprint, Response, current_app, g, jsonify, request
 from sqlalchemy import func
 
 from backend.app import db
-from backend.models import CheckIn, Court, CourtReview, FavoriteCourt, Game, GamePlayer, utcnow
+from backend.models import (
+    CheckIn, Court, CourtEditSuggestion, CourtReview, FavoriteCourt, Game,
+    GamePlayer, utcnow,
+)
 from backend.routes.auth import active_checkin_for, login_required, optional_current_user, presence_payload
 from backend.routes.social import friend_ids
 from backend.security import rate_limit
@@ -407,6 +410,105 @@ def upsert_review(court_id):
         'review': review.to_dict(),
         'rating_avg': summary['rating_avg'] if summary else None,
         'rating_count': summary['rating_count'] if summary else 0,
+    }), 201
+
+
+# field → normalizer, raising ValueError on bad input
+def _norm_bool(v):
+    if not isinstance(v, bool):
+        raise ValueError
+    return v
+
+
+def _norm_courts(v):
+    n = int(v)
+    if not 1 <= n <= 100:
+        raise ValueError
+    return n
+
+
+def _norm_text(limit):
+    def norm(v):
+        return str(v or '').strip()[:limit]
+    return norm
+
+
+SUGGESTABLE_FIELDS = {
+    'num_courts': _norm_courts,
+    'indoor': _norm_bool,
+    'lighted': _norm_bool,
+    'nets_provided': _norm_bool,
+    'has_restrooms': _norm_bool,
+    'has_water': _norm_bool,
+    'surface_type': _norm_text(60),
+    'fees': _norm_text(200),
+}
+SUGGESTION_CONSENSUS = 2
+
+
+@courts_bp.post('/courts/<int:court_id>/suggest')
+@rate_limit(20, 3600)
+@login_required
+def suggest_court_edit(court_id):
+    """Record proposed data fixes; apply a field once two users agree on it."""
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+
+    body = request.get_json(silent=True) or {}
+    changes = {}
+    for field, normalize in SUGGESTABLE_FIELDS.items():
+        if field not in body:
+            continue
+        try:
+            value = normalize(body[field])
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_field', 'field': field}), 400
+        current = getattr(court, field)
+        if isinstance(value, str):
+            current = current or ''
+        if value != current:
+            changes[field] = value
+    if not changes:
+        return jsonify({'error': 'no_changes'}), 400
+
+    # One live suggestion per user per court — resubmitting replaces it.
+    suggestion = CourtEditSuggestion.query.filter_by(
+        court_id=court.id, user_id=g.current_user.id, status='pending',
+    ).first()
+    if not suggestion:
+        suggestion = CourtEditSuggestion(court_id=court.id, user_id=g.current_user.id)
+        db.session.add(suggestion)
+    suggestion.payload = json.dumps(changes)
+    db.session.flush()
+
+    # Consensus pass: apply any field value that N distinct users proposed.
+    pending = CourtEditSuggestion.query.filter_by(court_id=court.id, status='pending').all()
+    votes = {}
+    for s in pending:
+        for field, value in json.loads(s.payload).items():
+            votes.setdefault((field, json.dumps(value)), set()).add(s.user_id)
+    applied = {}
+    for (field, packed), users in votes.items():
+        if len(users) >= SUGGESTION_CONSENSUS and field in SUGGESTABLE_FIELDS:
+            value = json.loads(packed)
+            setattr(court, field, value)
+            applied[field] = value
+    if applied:
+        for s in pending:
+            remaining = {
+                f: v for f, v in json.loads(s.payload).items()
+                if f not in applied or v != applied[f]
+            }
+            if remaining:
+                s.payload = json.dumps(remaining)
+            else:
+                s.status = 'applied'
+    db.session.commit()
+    return jsonify({
+        'submitted': True,
+        'applied_fields': sorted(applied),
+        'court': court.to_dict(),
     }), 201
 
 
