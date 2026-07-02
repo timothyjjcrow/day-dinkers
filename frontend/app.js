@@ -3092,9 +3092,8 @@
       toast(off ? 'Auto check-in on 📍' : 'Auto check-in off');
     });
 
-    el.querySelector('#pf-home').addEventListener('click', async () => {
-      const ok = await setHomeAreaFromLocation();
-      if (ok) renderProfile();
+    el.querySelector('#pf-home').addEventListener('click', () => {
+      openHomeAreaSheet({ onSet: renderProfile });
     });
     el.querySelector('#pf-logout').addEventListener('click', logout);
     el.querySelector('#pf-edit').addEventListener('click', openEditProfile);
@@ -3738,6 +3737,21 @@
   }
 
   // ---------- Boot ----------
+  // Persist a home area and move the app there.
+  async function saveHomeArea(lat, lng, label, { silent = false } = {}) {
+    try {
+      const data = await api('/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ home_lat: lat, home_lng: lng, home_area: label || '' }),
+      });
+      applyMe(data);
+      state.areaLoc = [lat, lng];
+      if (state.map) state.map.setView([lat, lng], 12);
+      toast(label ? `Home area set to ${label} 📍` : 'Home area set 📍');
+      return true;
+    } catch (e) { if (!silent) toast(e.message); return false; }
+  }
+
   // Capture the device location as the user's home area (reverse-geocoded label).
   async function setHomeAreaFromLocation({ silent = false } = {}) {
     if (!navigator.geolocation) {
@@ -3753,23 +3767,72 @@
           const geo = await api(`/geocode/reverse?lat=${lat}&lng=${lng}`);
           label = geo.label || '';
         } catch { /* label is optional */ }
-        try {
-          const data = await api('/me', {
-            method: 'PATCH',
-            body: JSON.stringify({ home_lat: lat, home_lng: lng, home_area: label }),
-          });
-          applyMe(data);
-          state.areaLoc = [lat, lng];
-          state.userLoc = [lat, lng];
-          if (state.map) { state.map.setView([lat, lng], 12); updateUserDot(); }
-          toast(label ? `Home area set to ${label} 📍` : 'Home area set 📍');
-          resolve(true);
-        } catch (e) { if (!silent) toast(e.message); resolve(false); }
+        state.userLoc = [lat, lng];
+        updateUserDot();
+        resolve(await saveHomeArea(lat, lng, label, { silent }));
       }, () => {
         if (!silent) toast('Could not get your location');
         resolve(false);
       }, { timeout: 10000 });
     });
+  }
+
+  // City typeahead against /geocode: tappable place rows under the input.
+  function bindCitySearch(input, resultsEl, onPick) {
+    let timer;
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 3) { resultsEl.innerHTML = ''; return; }
+      timer = setTimeout(async () => {
+        let places = [];
+        try {
+          places = ((await api(`/geocode?q=${encodeURIComponent(q)}`)).items || []).slice(0, 4);
+        } catch { /* search is best-effort */ }
+        resultsEl.innerHTML = places.map((p, i) => `
+          <div class="card row" data-city="${i}" style="cursor:pointer;padding:10px 12px;margin-top:6px">
+            <span>📍</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(p.label)}</div>
+              <div class="row-sub">${esc((p.detail || '').split(',').slice(1, 3).join(',').trim())}</div>
+            </div>
+          </div>`).join('');
+        resultsEl.querySelectorAll('[data-city]').forEach((row) => {
+          row.addEventListener('click', () => onPick(places[Number(row.dataset.city)]));
+        });
+      }, 350);
+    });
+  }
+
+  // Home-area picker: device location or a city search. Used by onboarding
+  // and the profile's Set/Change button.
+  function openHomeAreaSheet({ intro, dismissLabel = 'Cancel', onSet, onDismiss } = {}) {
+    const modal = openModal(`
+      <div class="checkin-sheet">
+        <div class="celebrate-emoji" style="font-size:46px">📍</div>
+        <h3 style="margin:6px 0 2px">Set your home area</h3>
+        <p class="row-sub" style="margin-bottom:18px">${esc(intro || 'Courts, games, and players near here greet you when the app opens.')}</p>
+        <button class="btn btn-primary btn-block" id="ha-loc" style="padding:15px;margin-bottom:8px">Use my current location</button>
+        <div class="form-field" style="margin:2px 0 0">
+          <input type="search" id="ha-city" placeholder="Or search your city…" autocomplete="off" />
+          <div id="ha-results"></div>
+        </div>
+        <button class="btn-link modal-close btn-block">${esc(dismissLabel)}</button>
+      </div>
+    `);
+    const done = (ok) => {
+      if (!ok) return;
+      closeModal(modal);
+      fetchCourtsInView();
+      if (onSet) onSet();
+    };
+    modal.querySelector('#ha-loc').addEventListener('click', async () => {
+      done(await setHomeAreaFromLocation());
+    });
+    bindCitySearch(modal.querySelector('#ha-city'), modal.querySelector('#ha-results'), async (p) => {
+      done(await saveHomeArea(p.lat, p.lng, p.label));
+    });
+    if (onDismiss) modal.querySelector('.modal-close').addEventListener('click', onDismiss);
   }
 
   function maybeOnboardHomeArea() {
@@ -3780,21 +3843,13 @@
       return;
     }
     localStorage.setItem('pp_onboarded_home', '1');
-    const modal = openModal(`
-      <div class="checkin-sheet">
-        <div class="celebrate-emoji" style="font-size:46px">📍</div>
-        <h3 style="margin:6px 0 2px">Set your home area</h3>
-        <p class="row-sub" style="margin-bottom:18px">So Third Shot opens to courts, games, and players near you — anywhere in the US.</p>
-        <button class="btn btn-primary btn-block" id="ob-loc" style="padding:15px;margin-bottom:8px">Use my current location</button>
-        <button class="btn-link modal-close btn-block">Maybe later</button>
-      </div>
-    `);
-    modal.querySelector('#ob-loc').addEventListener('click', async () => {
-      const ok = await setHomeAreaFromLocation();
-      if (ok) { closeModal(modal); fetchCourtsInView(); maybeShowTour(); }
-    });
     // Whichever way they leave the home-area step, follow with the quick tour.
-    modal.querySelector('.modal-close').addEventListener('click', () => maybeShowTour());
+    openHomeAreaSheet({
+      intro: 'So Third Shot opens to courts, games, and players near you — anywhere in the US.',
+      dismissLabel: 'Maybe later',
+      onSet: maybeShowTour,
+      onDismiss: maybeShowTour,
+    });
   }
 
   // One-time 3-step welcome tour for brand-new users.
