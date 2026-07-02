@@ -1125,21 +1125,24 @@
     modal.querySelector('#cd-address').addEventListener('click', async () => {
       const addressText = [court.address, court.city, court.state, court.zip_code]
         .filter(Boolean).join(', ');
-      try {
-        if (navigator.clipboard && window.isSecureContext) {
-          await navigator.clipboard.writeText(addressText);
-        } else {
-          // http:// dev / older webviews: clipboard API is unavailable
+      // writeText can reject even on secure contexts (unfocused document,
+      // denied permission) — always fall back to the hidden-textarea trick.
+      let copied = false;
+      if (navigator.clipboard && window.isSecureContext) {
+        copied = await navigator.clipboard.writeText(addressText).then(() => true, () => false);
+      }
+      if (!copied) {
+        try {
           const ta = document.createElement('textarea');
           ta.value = addressText;
           ta.style.cssText = 'position:fixed;opacity:0';
           document.body.appendChild(ta);
           ta.select();
-          document.execCommand('copy');
+          copied = document.execCommand('copy');
           ta.remove();
-        }
-        toast('Address copied 📋');
-      } catch { toast('Could not copy address'); }
+        } catch { /* fall through */ }
+      }
+      toast(copied ? 'Address copied 📋' : 'Could not copy address');
     });
 
     modal.querySelector('#cd-share').addEventListener('click', async () => {
