@@ -245,6 +245,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
   0%, 100% { box-shadow: 0 2px 6px rgba(0,0,0,.35), 0 0 0 0 rgba(245,158,11,.55); }
   50% { box-shadow: 0 2px 6px rgba(0,0,0,.35), 0 0 0 9px rgba(245,158,11,0); }
 }
+.court-marker.fav { border-color: #fbbf24; box-shadow: 0 2px 6px rgba(0,0,0,.35), 0 0 0 2px rgba(251,191,36,.45); }
+.marker-fav-badge {
+  position: absolute; top: -7px; left: -7px;
+  color: #f59e0b; font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,.4);
+}
+
 .marker-game-badge {
   position: absolute; top: -6px; right: -7px;
   background: #5b21b6; color: #fff; font-size: 9px; font-weight: 800;

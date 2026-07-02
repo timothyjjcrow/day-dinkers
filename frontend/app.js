@@ -20,6 +20,7 @@
     markers: null,
     mapFilter: 'all',
     listSort: 'distance',
+    favIds: null, // Set of favorited court ids, loaded lazily for map stars
     userDot: null,
     geoWatchId: null,
     lastAutoCheckAt: 0,
@@ -527,8 +528,17 @@
     fetchCourtsInView();
   }
 
+  async function loadFavIds() {
+    if (!state.token) { state.favIds = new Set(); return; }
+    try {
+      const favs = await api('/courts/favorites');
+      state.favIds = new Set((favs.items || []).map((c) => c.id));
+    } catch { state.favIds = new Set(); }
+  }
+
   async function fetchCourtsInView() {
     if (!state.map) return;
+    if (state.favIds === null) await loadFavIds();
     const b = state.map.getBounds();
     const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(4)).join(',');
     let url = `/courts?bbox=${bbox}&limit=250&sort=${state.listSort}`;
@@ -568,12 +578,14 @@
     courts.forEach((court) => {
       if (court.latitude == null) return;
       const busy = court.players_here > 0;
+      const fav = state.favIds && state.favIds.has(court.id);
       const size = busy ? 34 : 26;
       const gameBadge = court.upcoming_games > 0
         ? `<span class="marker-game-badge">${court.upcoming_games}</span>` : '';
+      const favBadge = fav ? '<span class="marker-fav-badge">★</span>' : '';
       const icon = L.divIcon({
         className: '',
-        html: `<div class="court-marker ${busy ? 'busy' : ''}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}${gameBadge}</div>`,
+        html: `<div class="court-marker ${busy ? 'busy' : ''} ${fav ? 'fav' : ''}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}${gameBadge}${favBadge}</div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });
@@ -1248,6 +1260,8 @@
         const data = await api(`/courts/${court.id}/favorite`, { method: 'POST' });
         isFavorite = data.favorited;
         favBtn.textContent = isFavorite ? '★' : '☆';
+        if (state.favIds) state.favIds[isFavorite ? 'add' : 'delete'](court.id);
+        fetchCourtsInView(); // restar the map markers
         toast(isFavorite ? 'Court saved ⭐' : 'Removed from saved courts');
       } catch (err) { toast(err.message); }
     });
