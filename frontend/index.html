@@ -12,9 +12,14 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-512.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Third Shot" />
 </head>
 <body>
   <div id="app">
+    <div id="offline-banner" class="offline-banner hidden">📡 You're offline — reconnect to sync</div>
     <!-- Auth screen -->
     <section id="auth-screen" class="screen hidden">
       <div class="auth-card">

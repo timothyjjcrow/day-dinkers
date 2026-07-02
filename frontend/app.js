@@ -3067,6 +3067,18 @@
     }, 12000);
   }
 
+  function setupConnectivity() {
+    const banner = $('#offline-banner');
+    const sync = () => banner.classList.toggle('hidden', navigator.onLine);
+    window.addEventListener('offline', sync);
+    window.addEventListener('online', () => {
+      sync();
+      toast('Back online 🎾');
+      if (state.token) refreshMe();
+    });
+    sync();
+  }
+
   function openDeepLink() {
     const courtMatch = location.hash.match(/^#court\/(\d+)$/);
     if (courtMatch) { openCourtDetail(Number(courtMatch[1])); return; }
@@ -3083,6 +3095,7 @@
     setupPlay();
     setupChat();
     setupEmptyStateCtas();
+    setupConnectivity();
     if (state.token) {
       try {
         applyMe(await api('/me'));

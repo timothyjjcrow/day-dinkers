@@ -1,7 +1,7 @@
 /* Third Shot service worker: offline fallback for the app shell.
    Network-first everywhere so deploys are never stale. */
-const CACHE = 'thirdshot-v3';
-const SHELL = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon-512.png', '/logo.jpg'];
+const CACHE = 'thirdshot-v4';
+const SHELL = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon-512.png', '/icon-maskable.png', '/logo.jpg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
