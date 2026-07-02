@@ -225,6 +225,41 @@ def user_profile(user_id):
     )
     payload['recent_games'] = [game.to_dict(user.id) for game in recent]
 
+    # Head-to-head: completed scored games where viewer and target were on
+    # opposite teams.
+    payload['head_to_head'] = None
+    if user.id != g.current_user.id:
+        me_gp, them_gp = aliased(GamePlayer), aliased(GamePlayer)
+        shared = (
+            Game.query
+            .join(me_gp, and_(me_gp.game_id == Game.id,
+                              me_gp.user_id == g.current_user.id))
+            .join(them_gp, and_(them_gp.game_id == Game.id,
+                                them_gp.user_id == user.id))
+            .filter(
+                Game.status == 'completed',
+                Game.score_team1.isnot(None),
+                Game.score_team2.isnot(None),
+                me_gp.team.isnot(None),
+                them_gp.team.isnot(None),
+                me_gp.team != them_gp.team,
+            )
+            .order_by(Game.completed_at.desc())
+            .limit(100)
+            .all()
+        )
+        if shared:
+            wins = 0
+            for game in shared:
+                mine = next(p for p in game.players if p.user_id == g.current_user.id)
+                if (game.score_team1 > game.score_team2) == (mine.team == 1):
+                    wins += 1
+            payload['head_to_head'] = {
+                'wins': wins,
+                'losses': len(shared) - wins,
+                'last_game': shared[0].to_dict(g.current_user.id),
+            }
+
     # Upcoming games this player is in — only those the viewer is allowed to see.
     viewer_friends = friend_ids(g.current_user.id)
     upcoming = (

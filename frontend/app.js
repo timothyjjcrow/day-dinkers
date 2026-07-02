@@ -2390,6 +2390,19 @@
     const games = user.recent_games || [];
     const upcoming = user.upcoming_games || [];
     const courts = user.courts || [];
+    let h2hHtml = '';
+    if (userId !== state.me.id && user.head_to_head) {
+      const { wins, losses } = user.head_to_head;
+      const firstName = (user.display_name || 'They').split(' ')[0];
+      const line = wins > losses ? `You lead ${wins}–${losses}`
+        : losses > wins ? `${esc(firstName)} leads ${losses}–${wins}`
+        : `Tied ${wins}–${wins}`;
+      h2hHtml = `
+        <div class="card" style="text-align:center;padding:10px 14px;margin:12px 0 0">
+          <div style="font-weight:800">🎯 ${line}</div>
+          <div class="row-sub">your head-to-head record</div>
+        </div>`;
+    }
     const courtRow = (c) => `
       <div class="card row" data-pcourt="${c.id}" style="cursor:pointer">
         <span style="font-size:18px">${c.is_home ? '🏠' : '⭐'}</span>
@@ -2412,6 +2425,7 @@
         <div class="stat-card"><div class="stat-value">${user.ranked_wins}</div><div class="stat-label">Wins</div></div>
         <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Losses</div></div>
       </div>
+      ${h2hHtml}
       <div class="action-row">${friendAction}</div>
       ${upcoming.length ? `<div class="section-label">Upcoming games</div>${upcoming.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
       ${courts.length ? `<div class="section-label">Courts</div>${courts.map(courtRow).join('')}` : ''}

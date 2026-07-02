@@ -1023,6 +1023,45 @@ def test_block_hides_from_players_nearby(client):
     assert client.get('/api/players/nearby?lat=33.66&lng=-117.91', headers=bh).status_code == 200
 
 
+def test_head_to_head_on_profile(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # No shared games yet → no head-to-head block.
+    assert client.get(f"/api/users/{b['user']['id']}", headers=ah).get_json()['head_to_head'] is None
+
+    def play(winner, loser, winner_token):
+        g = make_game(client, winner_token, court_id, game_type='ranked', hours_ahead=1)
+        client.post(f"/api/games/{g['id']}/join", headers=bh if winner_token == a['token'] else ah)
+        res = client.post(f"/api/games/{g['id']}/complete", json={
+            'team1': [winner['user']['id']], 'team2': [loser['user']['id']],
+            'score_team1': 11, 'score_team2': 6,
+        }, headers=auth_headers(winner_token))
+        assert res.status_code == 200, res.get_json()
+        confirmer = bh if winner_token == a['token'] else ah
+        assert client.post(f"/api/games/{g['id']}/confirm", headers=confirmer).status_code == 200
+
+    play(a, b, a['token'])  # Ana wins
+    play(a, b, a['token'])  # Ana wins again
+    play(b, a, b['token'])  # Ben takes one back
+
+    h2h = client.get(f"/api/users/{b['user']['id']}", headers=ah).get_json()['head_to_head']
+    assert h2h['wins'] == 2 and h2h['losses'] == 1
+    # Symmetric from Ben's perspective.
+    h2h_b = client.get(f"/api/users/{a['user']['id']}", headers=bh).get_json()['head_to_head']
+    assert h2h_b['wins'] == 1 and h2h_b['losses'] == 2
+    assert h2h['last_game']['status'] == 'completed'
+
+    # A third player with no shared games sees nothing.
+    assert client.get(f"/api/users/{a['user']['id']}",
+                      headers=auth_headers(c['token'])).get_json()['head_to_head'] is None
+    # Own profile never carries it.
+    assert client.get(f"/api/users/{a['user']['id']}", headers=ah).get_json()['head_to_head'] is None
+
+
 def test_user_search(client):
     a = register(client, 'a@example.com', 'Ana')
     register(client, 'b@example.com', 'Benny')
