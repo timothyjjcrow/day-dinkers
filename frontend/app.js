@@ -2938,6 +2938,31 @@
           refreshMe(); reopenFresh();
         } catch (e) { toast(e.message); reopenFresh(); }
       });
+      box.querySelector('#gs-rematch')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        if (btn.disabled) return;
+        btn.disabled = true;
+        const others = game.players.map((p) => p.user_id).filter((id) => id !== state.me.id);
+        try {
+          const rematch = await api('/games', {
+            method: 'POST',
+            body: JSON.stringify({
+              court_id: court.id,
+              scheduled_at: new Date().toISOString(),
+              game_type: game.game_type,
+              max_players: game.max_players,
+              visibility: others.length ? 'private' : 'open',
+              invite_user_ids: others,
+              notes: '↺ Rematch!',
+            }),
+          });
+          clearHash();
+          closeModal(modal);
+          toast(others.length ? 'Rematch is on — invites sent ⚔️' : 'Rematch is on ⚔️');
+          refreshMe();
+          openGameScreen(rematch.id);
+        } catch (err) { toast(err.message); btn.disabled = false; }
+      });
       box.querySelector('#gs-leave')?.addEventListener('click', async () => {
         try {
           await api(`/games/${gameId}/leave`, { method: 'POST' });
