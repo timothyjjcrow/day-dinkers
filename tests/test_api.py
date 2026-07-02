@@ -427,6 +427,7 @@ def test_recurring_session_rolls_forward(client, app):
 
     # Force it into the past, then roll it forward (resets RSVPs to host).
     # Done in-context to avoid a cross-request in-memory-DB timing flake.
+    from backend.models import Notification
     from backend.routes.games import roll_forward_recurring
     with app.app_context():
         row = db.session.get(GameModel, weekly['id'])
@@ -437,6 +438,11 @@ def test_recurring_session_rolls_forward(client, app):
         assert refreshed.status == 'upcoming'
         assert refreshed.scheduled_at > utcnow()          # advanced into the future
         assert [p.user_id for p in refreshed.players] == [a['user']['id']]  # host only
+        # Dropped attendees get a re-RSVP nudge; the host doesn't.
+        nudges = Notification.query.filter_by(kind='session_rsvp').all()
+        assert [n.user_id for n in nudges] == [b['user']['id']]
+        assert 'RSVP again' in nudges[0].title
+        assert nudges[0].related_game_id == weekly['id']
 
     detail = client.get(f"/api/games/{weekly['id']}").get_json()
     assert detail['recurrence'] == 'weekly'

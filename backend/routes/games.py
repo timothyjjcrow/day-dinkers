@@ -117,10 +117,19 @@ def roll_forward_recurring():
         while nxt < now:
             nxt += timedelta(days=7)
         game.scheduled_at = nxt
-        # Reset attendees to the host for the new week
+        # Reset attendees to the host for the new week, nudging last week's
+        # players to grab their spot again.
+        weekday = nxt.strftime('%A')
+        court_name = game.court.name if game.court else 'the court'
         for player in list(game.players):
             if player.user_id != game.creator_id:
                 game.players.remove(player)
+                notify(
+                    player.user_id,
+                    'session_rsvp',
+                    f'{weekday} open play at {court_name} is back — RSVP again?',
+                    related_game_id=game.id,
+                )
             else:
                 player.reminded_at = None  # remind again for the new occurrence
         changed = True
