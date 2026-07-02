@@ -2077,6 +2077,7 @@
           <button type="button" data-hour="custom">Custom…</button>
         </div>
         <input type="datetime-local" id="ng-when" class="hidden" style="margin-bottom:12px" />
+        <div id="ng-busy-hint" class="row-sub" style="margin-bottom:12px"></div>
       </div>
 
       <div class="form-grid">
@@ -2131,12 +2132,45 @@
       </button>
     `);
 
+    // --- Busy-time hint: nudge scheduling toward when players actually show up ---
+    let busyTimes = null; // for the currently selected court
+    const partOfHour = (h) => (h >= 5 && h < 12 ? 'mornings' : h < 17 ? 'afternoons' : h < 23 ? 'evenings' : null);
+    const updateBusyHint = () => {
+      const el = modal.querySelector('#ng-busy-hint');
+      if (!busyTimes || !busyTimes.length || nowMode) { el.innerHTML = ''; return; }
+      let when;
+      if (customMode) {
+        const raw = modal.querySelector('#ng-when').value;
+        when = raw ? new Date(raw) : null;
+      } else {
+        when = new Date(days[selDayIdx]);
+        when.setHours(selHour ?? 18);
+      }
+      const labels = busyTimes.map((b) => b.label);
+      const slot = when
+        ? `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][when.getDay()]} ${partOfHour(when.getHours())}`
+        : null;
+      el.innerHTML = slot && labels.includes(slot)
+        ? `👍 Good pick — ${esc(slot)} are popular at this court`
+        : `📊 Popular here: ${labels.map(esc).join(' · ')}`;
+    };
+    const loadBusyHint = async (courtId) => {
+      busyTimes = null;
+      updateBusyHint();
+      if (!courtId) return;
+      try {
+        busyTimes = (await api(`/courts/${courtId}`)).busy_times || null;
+        updateBusyHint();
+      } catch { /* hint is optional */ }
+    };
+
     // --- Court picking ---
     const setCourt = (id, name) => {
       modal.querySelector('#ng-court-id').value = id || '';
       modal.querySelector('#ng-court-name').textContent = name || '';
       modal.querySelector('#ng-court-selected').classList.toggle('hidden', !id);
       modal.querySelector('#ng-court-picker').classList.toggle('hidden', !!id);
+      loadBusyHint(id);
     };
     modal.querySelector('#ng-court-change').addEventListener('click', () => setCourt(null, null));
     const bindCourtPicks = () => {
@@ -2179,12 +2213,14 @@
       modal.querySelectorAll('#ng-mode button').forEach((b) => b.classList.toggle('active', b === btn));
       modal.querySelector('#ng-later-fields').classList.toggle('hidden', nowMode);
       modal.querySelector('#ng-submit').textContent = nowMode ? 'Start game now' : 'Schedule game';
+      updateBusyHint();
     });
     modal.querySelector('#ng-days').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       selDayIdx = Number(btn.dataset.day);
       modal.querySelectorAll('#ng-days button').forEach((b) => b.classList.toggle('active', b === btn));
+      updateBusyHint();
     });
     modal.querySelector('#ng-hours').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
@@ -2204,7 +2240,14 @@
         selHour = Number(btn.dataset.hour);
         modal.querySelector('#ng-when').classList.add('hidden');
       }
+      updateBusyHint();
     });
+    modal.querySelector('#ng-when').addEventListener('input', updateBusyHint);
+    // Initial hint for a preselected court (after nowMode/customMode exist).
+    if (court) {
+      if (court.busy_times) { busyTimes = court.busy_times; updateBusyHint(); }
+      else loadBusyHint(court.id);
+    }
 
     // --- Type ---
     let gameType = defaultType;
