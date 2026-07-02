@@ -2587,6 +2587,15 @@
         <div id="ep-court-results"></div>
       </div>
       <button class="btn btn-primary btn-block" id="ep-save">Save</button>
+      <details style="margin-top:22px">
+        <summary style="color:#e03131;font-size:13px;font-weight:600;cursor:pointer">Danger zone</summary>
+        <div class="form-field" style="margin-top:10px">
+          <label>Delete account</label>
+          <p class="row-sub" style="margin-bottom:8px">Permanently removes your profile, friends, messages, and check-ins. Completed match results stay for your opponents, shown as “Deleted player”. This cannot be undone.</p>
+          <input type="password" id="ep-delete-password" placeholder="Confirm your password" autocomplete="current-password" />
+          <button class="btn btn-danger btn-block" id="ep-delete" style="margin-top:8px">Delete my account</button>
+        </div>
+      </details>
     `);
 
     let color = me.avatar_color;
@@ -2625,6 +2634,18 @@
           modal.querySelector('#ep-court-results').innerHTML = '';
         }));
       }, 300);
+    });
+
+    modal.querySelector('#ep-delete').addEventListener('click', async () => {
+      const password = modal.querySelector('#ep-delete-password').value;
+      if (!password) { toast('Enter your password to confirm'); return; }
+      if (!window.confirm('Delete your account forever? This cannot be undone.')) return;
+      try {
+        await api('/me', { method: 'DELETE', body: JSON.stringify({ password }) });
+        toast('Account deleted. Goodbye 👋');
+        closeModal(modal);
+        logout();
+      } catch (e) { toast(e.message); }
     });
 
     modal.querySelector('#ep-save').addEventListener('click', async () => {

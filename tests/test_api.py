@@ -827,6 +827,61 @@ def test_friend_request_flow(client):
     assert res.get_json()['deleted'] is True
 
 
+def test_delete_account(client, app):
+    from backend.models import User as UserModel
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Ana and Ben are friends with a completed ranked game between them.
+    fid = client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah).get_json()['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=bh)
+    game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 7,
+    }, headers=ah)
+    client.post(f"/api/games/{game['id']}/confirm", headers=bh)
+
+    # Ana also hosts an upcoming game that Ben joined.
+    upcoming = make_game(client, a['token'], court_id, hours_ahead=24)
+    client.post(f"/api/games/{upcoming['id']}/join", headers=bh)
+
+    # Wrong password → 403, account untouched (and no session-expired logout).
+    assert client.delete('/api/me', json={'password': 'wrong'}, headers=ah).status_code == 403
+    assert client.get('/api/me', headers=ah).status_code == 200
+
+    # Delete for real.
+    res = client.delete('/api/me', json={'password': 'secret123'}, headers=ah)
+    assert res.status_code == 200 and res.get_json()['deleted'] is True
+
+    # Outstanding token is dead; login is impossible.
+    assert client.get('/api/me', headers=ah).status_code == 401
+    assert client.post('/api/auth/login', json={'email': 'a@example.com', 'password': 'secret123'}).status_code == 401
+
+    # Gone from search and friends; hosted upcoming game cancelled with Ben notified.
+    assert client.get('/api/users/search?q=ana', headers=bh).get_json()['items'] == []
+    assert client.get('/api/friends', headers=bh).get_json()['friends'] == []
+    detail = client.get(f"/api/games/{upcoming['id']}", headers=bh).get_json()
+    assert detail['status'] == 'cancelled'
+    notifs = client.get('/api/notifications', headers=bh).get_json()
+    assert any(n['kind'] == 'game_cancelled' for n in notifs['items'])
+
+    # Ben's completed match history survives, showing the anonymized shell.
+    history = client.get(f"/api/games/{game['id']}", headers=bh).get_json()
+    assert history['status'] == 'completed'
+    names = [p['display_name'] for p in history['players']]
+    assert 'Deleted player' in names and 'Ben' in [n[:3] for n in names]
+
+    with app.app_context():
+        row = db.session.get(UserModel, a['user']['id'])
+        assert row.deleted_at is not None
+        assert row.email == f"deleted-{a['user']['id']}@invalid"
+        assert row.bio == '' and row.avatar_url == ''
+
+
 def test_block_user_flow(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

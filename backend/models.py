@@ -53,6 +53,9 @@ class User(TimestampMixin, db.Model):
     home_lat = db.Column(db.Float)
     home_lng = db.Column(db.Float)
     home_area = db.Column(db.String(120))
+    # Set when the account is deleted; the anonymized row stays for opponents'
+    # match history, but auth and all discovery surfaces reject it.
+    deleted_at = db.Column(db.DateTime)
 
     home_court = db.relationship('Court', foreign_keys=[home_court_id])
     checkins = db.relationship(

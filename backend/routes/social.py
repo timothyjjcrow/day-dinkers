@@ -102,7 +102,7 @@ def players_nearby():
     hidden = blocked_pair_ids(g.current_user.id)
     query = (
         User.query.outerjoin(home, User.home_court_id == home.id)
-        .filter(User.id != g.current_user.id)
+        .filter(User.id != g.current_user.id, User.deleted_at.is_(None))
         .filter(or_(
             and_(User.last_lat.between(lat_lo, lat_hi), User.last_lng.between(lng_lo, lng_hi)),
             and_(User.last_lat.is_(None),
@@ -177,6 +177,7 @@ def search_users():
     hidden = blocked_pair_ids(g.current_user.id)
     query = User.query.filter(
         User.id != g.current_user.id,
+        User.deleted_at.is_(None),
         or_(User.display_name.ilike(like), User.email.ilike(like)),
     )
     if hidden:

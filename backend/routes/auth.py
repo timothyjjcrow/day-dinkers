@@ -9,8 +9,11 @@ from flask import Blueprint, current_app, g, jsonify, request
 from backend.app import db
 from backend.security import rate_limit
 from backend.models import (
+    BlockedUser,
     CheckIn,
     Court,
+    CourtReview,
+    FavoriteCourt,
     Friendship,
     Game,
     GameInvite,
@@ -19,6 +22,7 @@ from backend.models import (
     Notification,
     SKILL_LEVELS,
     User,
+    notify,
     utcnow,
 )
 
@@ -58,7 +62,11 @@ def optional_current_user():
     user_id = payload.get('user_id')
     if not user_id:
         return None
-    return db.session.get(User, user_id)
+    user = db.session.get(User, user_id)
+    # A deleted account's outstanding tokens must die immediately.
+    if user is not None and user.deleted_at is not None:
+        return None
+    return user
 
 
 def login_required(view):
@@ -242,6 +250,77 @@ def me():
     from backend.routes.games import send_game_reminders
     send_game_reminders()
     return jsonify(_me_payload(g.current_user))
+
+
+@auth_bp.delete('/me')
+@rate_limit(5, 3600)
+@login_required
+def delete_me():
+    """Delete the account: wipe personal data and social graph, keep an
+    anonymized shell so opponents' completed match history stays intact."""
+    import secrets
+
+    from sqlalchemy import or_
+
+    user = g.current_user
+    payload = request.get_json(silent=True) or {}
+    # 403, not 401: the client treats 401 as an expired session and logs out,
+    # which would swallow a simple wrong-password mistake.
+    if not user.check_password(str(payload.get('password') or '')):
+        return jsonify({'error': 'invalid_credentials'}), 403
+
+    # Cancel upcoming games they host, letting joiners know.
+    hosted = Game.query.filter_by(creator_id=user.id, status='upcoming').all()
+    for game in hosted:
+        game.status = 'cancelled'
+        for player in game.players:
+            if player.user_id != user.id:
+                notify(
+                    player.user_id,
+                    'game_cancelled',
+                    f'Game at {game.court.name if game.court else "court"} was cancelled',
+                    related_game_id=game.id,
+                )
+    # Free up their spot in other people's upcoming games.
+    GamePlayer.query.filter(
+        GamePlayer.user_id == user.id,
+        GamePlayer.game_id.in_(
+            db.session.query(Game.id).filter(Game.status == 'upcoming'),
+        ),
+    ).delete(synchronize_session='fetch')
+
+    # Social graph, messages, and activity are personal data — remove them.
+    Friendship.query.filter(or_(
+        Friendship.requester_id == user.id, Friendship.addressee_id == user.id,
+    )).delete(synchronize_session=False)
+    BlockedUser.query.filter(or_(
+        BlockedUser.blocker_id == user.id, BlockedUser.blocked_id == user.id,
+    )).delete(synchronize_session=False)
+    Message.query.filter(or_(
+        Message.sender_id == user.id, Message.recipient_id == user.id,
+    )).delete(synchronize_session=False)
+    GameInvite.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+    FavoriteCourt.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+    CourtReview.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+    CheckIn.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+    Notification.query.filter(or_(
+        Notification.user_id == user.id, Notification.related_user_id == user.id,
+    )).delete(synchronize_session=False)
+
+    # Anonymize the shell that remains in completed games.
+    user.display_name = 'Deleted player'
+    user.email = f'deleted-{user.id}@invalid'
+    user.set_password(secrets.token_hex(32))
+    user.bio = ''
+    user.avatar_url = ''
+    user.home_court_id = None
+    user.home_lat = user.home_lng = None
+    user.home_area = ''
+    user.last_lat = user.last_lng = None
+    user.last_location_at = None
+    user.deleted_at = utcnow()
+    db.session.commit()
+    return jsonify({'deleted': True})
 
 
 @auth_bp.patch('/me')

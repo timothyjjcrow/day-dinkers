@@ -697,7 +697,10 @@ def leaderboard():
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
 
-    query = User.query.filter(User.ranked_wins + User.ranked_losses > 0)
+    query = User.query.filter(
+        User.ranked_wins + User.ranked_losses > 0,
+        User.deleted_at.is_(None),
+    )
 
     if lat is not None and lng is not None:
         radius = min(max(request.args.get('radius', default=50.0, type=float), 1.0), 250.0)
