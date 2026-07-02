@@ -336,6 +336,31 @@ def court_detail(court_id):
     payload['photo_count'] = CourtPhoto.query.filter_by(court_id=court.id).count()
     payload['latest_condition'] = _latest_condition_for(court.id)
 
+    # The viewer's personal win-loss record at this court.
+    payload['my_record'] = None
+    if current_user:
+        my_games = (
+            Game.query.join(GamePlayer)
+            .filter(
+                GamePlayer.user_id == current_user.id,
+                Game.court_id == court.id,
+                Game.status == 'completed',
+                Game.score_team1.isnot(None),
+            )
+            .all()
+        )
+        wins = losses = 0
+        for played in my_games:
+            mine = next((p for p in played.players if p.user_id == current_user.id), None)
+            if not mine or not mine.team:
+                continue
+            if (played.score_team1 > played.score_team2) == (mine.team == 1):
+                wins += 1
+            else:
+                losses += 1
+        if wins or losses:
+            payload['my_record'] = {'wins': wins, 'losses': losses}
+
     # Court regulars: most frequent visitors over the last 60 days (2+ visits).
     from backend.models import User as UserModel
     regular_rows = (

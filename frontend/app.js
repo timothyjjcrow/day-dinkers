@@ -1015,6 +1015,10 @@
     if (court.has_restrooms) tags.push('🚻 Restrooms');
     if (court.has_water) tags.push('🚰 Water');
     if (court.fees) tags.push(`<span class="tag warn" style="margin:0">💵 ${esc(court.fees)}</span>`);
+    if (court.my_record) {
+      const r = court.my_record;
+      tags.push(`<span class="tag ${r.wins >= r.losses ? 'live' : ''}" style="margin:0">🎯 You're ${r.wins}–${r.losses} here</span>`);
+    }
 
     const mapsUrl = `https://maps.apple.com/?daddr=${encodeURIComponent(`${court.address} ${court.city}`)}&ll=${court.latitude},${court.longitude}`;
 

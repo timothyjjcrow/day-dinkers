@@ -784,6 +784,40 @@ def test_court_detail_player_info(client):
     assert detail['friends_here'] == 1
 
 
+def test_my_record_at_court(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+
+    # No games yet → no record; anonymous viewers never get one.
+    assert client.get(f'/api/courts/{larson}',
+                      headers=auth_headers(a['token'])).get_json()['my_record'] is None
+
+    def play(court_id, ana_wins):
+        g = make_game(client, a['token'], court_id, hours_ahead=1)
+        client.post(f"/api/games/{g['id']}/join", headers=auth_headers(b['token']))
+        s1, s2 = (11, 4) if ana_wins else (4, 11)
+        res = client.post(f"/api/games/{g['id']}/complete", json={
+            'team1': [a['user']['id']], 'team2': [b['user']['id']],
+            'score_team1': s1, 'score_team2': s2,
+        }, headers=auth_headers(a['token']))
+        assert res.status_code == 200
+
+    play(larson, True)
+    play(larson, True)
+    play(larson, False)
+    play(adorni, True)  # other court — stays out of Larson's record
+
+    detail = client.get(f'/api/courts/{larson}', headers=auth_headers(a['token'])).get_json()
+    assert detail['my_record'] == {'wins': 2, 'losses': 1}
+    # Ben sees his own mirror-image record.
+    detail_b = client.get(f'/api/courts/{larson}', headers=auth_headers(b['token'])).get_json()
+    assert detail_b['my_record'] == {'wins': 1, 'losses': 2}
+    # Anonymous gets nothing.
+    assert client.get(f'/api/courts/{larson}').get_json()['my_record'] is None
+
+
 def test_court_conditions(client, app):
     from datetime import timedelta
     from backend.models import CourtCondition as CCModel, utcnow
