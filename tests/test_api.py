@@ -1258,6 +1258,42 @@ def test_chat_flow(client):
     assert [m['body'] for m in fresh['items']] == ['You in?']
 
 
+def test_game_chat(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id)
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+
+    # Players only: outsiders and anonymous get rejected; bad game 404s.
+    assert client.get(f"/api/games/{game['id']}/chat").status_code == 401
+    assert client.get(f"/api/games/{game['id']}/chat", headers=auth_headers(c['token'])).status_code == 403
+    assert client.post(f"/api/games/{game['id']}/chat", json={'body': 'hi'},
+                       headers=auth_headers(c['token'])).status_code == 403
+    assert client.get('/api/games/99999/chat', headers=auth_headers(a['token'])).status_code == 404
+
+    # Players can talk; both see the thread.
+    res = client.post(f"/api/games/{game['id']}/chat", json={'body': 'Running 5 late!'},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 201 and res.get_json()['game_id'] == game['id']
+    client.post(f"/api/games/{game['id']}/chat", json={'body': 'No worries, warming up'},
+                headers=auth_headers(b['token']))
+    thread = client.get(f"/api/games/{game['id']}/chat", headers=auth_headers(b['token'])).get_json()
+    assert [m['body'] for m in thread['items']] == ['Running 5 late!', 'No worries, warming up']
+    assert thread['game']['court_name'] == 'Larson Park'
+
+    # since_id returns only newer messages.
+    first_id = thread['items'][0]['id']
+    newer = client.get(f"/api/games/{game['id']}/chat?since_id={first_id}",
+                       headers=auth_headers(a['token'])).get_json()
+    assert [m['body'] for m in newer['items']] == ['No worries, warming up']
+
+    # Game messages never leak into the DM conversation list.
+    convos = client.get('/api/chat', headers=auth_headers(a['token'])).get_json()
+    assert convos['items'] == []
+
+
 def test_court_chat(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

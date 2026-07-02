@@ -2441,6 +2441,73 @@
     });
   }
 
+  async function openGameChat(game) {
+    let data;
+    try { data = await api(`/games/${game.id}/chat`); } catch (e) { toast(e.message); return; }
+
+    const modal = openModal(`
+      <div class="thread">
+        <div class="thread-head">
+          <button class="modal-close" style="font-size:18px">‹</button>
+          <span style="font-size:22px">🎾</span>
+          <div class="row-main">
+            <div class="row-title">Game chat</div>
+            <div class="row-sub">${esc(data.game.court_name)} — only players in this game can read it</div>
+          </div>
+        </div>
+        <div class="thread-msgs" id="gc-msgs"></div>
+        <form class="thread-input" id="gc-form">
+          <input type="text" id="gc-text" placeholder="Message your game…" autocomplete="off" maxlength="500" />
+          <button type="submit">➤</button>
+        </form>
+      </div>
+    `, { chat: true });
+
+    const msgsEl = modal.querySelector('#gc-msgs');
+    let lastId = 0;
+    const renderMsgs = (items, append) => {
+      const html = items.map((m) => {
+        const mine = m.sender_id === state.me.id;
+        return `
+        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+          ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%">
+            ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${esc(m.body)}
+            <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
+          </div>
+        </div>`;
+      }).join('');
+      if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
+      else if (append) msgsEl.innerHTML = html;
+      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Coordinate with your game — “running late”, “bringing balls” 🎾</div>';
+      if (items.length) lastId = items[items.length - 1].id;
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    };
+    renderMsgs(data.items, false);
+    attachChatViewport(modal, msgsEl, modal.querySelector('#gc-text'));
+
+    const pollTimer = setInterval(async () => {
+      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      try {
+        const fresh = await api(`/games/${game.id}/chat?since_id=${lastId}`);
+        if (fresh.items.length) renderMsgs(fresh.items, true);
+      } catch { /* offline */ }
+    }, 5000);
+
+    modal.querySelector('#gc-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = modal.querySelector('#gc-text');
+      const body = input.value.trim();
+      if (!body) return;
+      input.value = '';
+      try {
+        const msg = await api(`/games/${game.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
+        renderMsgs([msg], true);
+      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+    });
+  }
+
   // ---------- User profile ----------
   async function openUserProfile(userId) {
     let user;
@@ -2970,6 +3037,7 @@
           <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
+        ${game.is_joined ? '<button class="icon-btn" id="gs-chat" title="Game chat" style="box-shadow:none;font-size:17px">💬</button>' : ''}
         <button class="icon-btn" id="gs-share" title="Share game" style="box-shadow:none;font-size:17px">📤</button>
         <button class="modal-close">✕</button>
       </div>
@@ -3016,6 +3084,7 @@
       const clearHash = () => { try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ } };
       box.querySelectorAll('.modal-close').forEach((b) => { b.onclick = () => { clearHash(); closeModal(modal); }; });
       box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
+      box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
       box.querySelector('#gs-share')?.addEventListener('click', async () => {
         const url = `${location.origin}/#game/${gameId}`;
         const when = fmtDateTime(game.scheduled_at);

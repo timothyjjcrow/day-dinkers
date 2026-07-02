@@ -144,6 +144,8 @@ def _upgrade_schema(app):
                 statements.append('ALTER TABLE message ADD COLUMN court_id INTEGER')
                 if is_postgres:
                     statements.append('ALTER TABLE message ALTER COLUMN recipient_id DROP NOT NULL')
+            if 'game_id' not in columns:
+                statements.append('ALTER TABLE message ADD COLUMN game_id INTEGER')
 
         if 'user' in tables:
             user_cols = {c['name'] for c in inspector.get_columns('user')}

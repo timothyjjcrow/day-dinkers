@@ -243,11 +243,13 @@ def blocked_pair_ids(user_id):
 
 
 class Message(TimestampMixin, db.Model):
-    """Either a direct message (recipient_id set) or a court-room message (court_id set)."""
+    """A direct message (recipient_id), court-room message (court_id), or
+    game-thread message (game_id)."""
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), index=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id'), index=True)
     body = db.Column(db.Text, nullable=False, default='')
     read_at = db.Column(db.DateTime)
 
@@ -262,6 +264,7 @@ class Message(TimestampMixin, db.Model):
             'sender_color': self.sender.avatar_color if self.sender else '#2f9e44',
             'recipient_id': self.recipient_id,
             'court_id': self.court_id,
+            'game_id': self.game_id,
             'body': self.body,
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),

@@ -3,7 +3,7 @@ from flask import Blueprint, g, jsonify, request
 from sqlalchemy import or_
 
 from backend.app import db
-from backend.models import Court, Message, User, blocked_pair_ids, is_blocked_between, utcnow
+from backend.models import Court, Game, GamePlayer, Message, User, blocked_pair_ids, is_blocked_between, utcnow
 from backend.security import rate_limit
 
 chat_bp = Blueprint('chat', __name__)
@@ -46,6 +46,53 @@ def send_court_message(court_id):
     return jsonify(message.to_dict()), 201
 
 
+def _game_member_or_403(game_id):
+    game = db.session.get(Game, game_id)
+    if not game:
+        return None, (jsonify({'error': 'game_not_found'}), 404)
+    is_member = GamePlayer.query.filter_by(
+        game_id=game.id, user_id=g.current_user.id,
+    ).first() is not None
+    if not is_member:
+        return None, (jsonify({'error': 'players_only'}), 403)
+    return game, None
+
+
+@chat_bp.get('/games/<int:game_id>/chat')
+@login_required
+def game_chat(game_id):
+    game, err = _game_member_or_403(game_id)
+    if err:
+        return err
+    since_id = request.args.get('since_id', type=int)
+    query = Message.query.filter(Message.game_id == game_id)
+    if since_id:
+        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
+    else:
+        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+    return jsonify({
+        'game': {'id': game.id, 'court_name': game.court.name if game.court else 'Court'},
+        'items': [m.to_dict() for m in messages],
+    })
+
+
+@chat_bp.post('/games/<int:game_id>/chat')
+@rate_limit(60, 60)
+@login_required
+def send_game_message(game_id):
+    game, err = _game_member_or_403(game_id)
+    if err:
+        return err
+    payload = request.get_json(silent=True) or {}
+    body = str(payload.get('body') or '').strip()
+    if not body:
+        return jsonify({'error': 'message_body_required'}), 400
+    message = Message(sender_id=g.current_user.id, game_id=game.id, body=body[:2000])
+    db.session.add(message)
+    db.session.commit()
+    return jsonify(message.to_dict()), 201
+
+
 @chat_bp.get('/chat')
 @login_required
 def conversations():
@@ -54,6 +101,7 @@ def conversations():
     messages = (
         Message.query.filter(
             Message.court_id.is_(None),
+            Message.game_id.is_(None),
             or_(Message.sender_id == me, Message.recipient_id == me),
         )
         .order_by(Message.id.desc())
