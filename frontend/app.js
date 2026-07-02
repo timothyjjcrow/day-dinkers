@@ -956,6 +956,15 @@
     }));
   }
 
+  // After a real session (15+ min), ask how the courts were — feeds the
+  // live-conditions banner other players rely on. Skipped for quick in/outs.
+  function maybeAskConditions(presence) {
+    if (!presence || !presence.checked_in || !presence.checked_in_at) return;
+    const mins = (Date.now() - new Date(presence.checked_in_at)) / 60000;
+    if (mins < 15) return;
+    openConditionSheet({ id: presence.court_id, name: presence.court_name });
+  }
+
   // Downscale a picked image file to a JPEG data URL, stepping quality down
   // until it fits the server's 500KB photo limit.
   function imageFileToDataUrl(file, maxDim = 1280) {
@@ -1132,12 +1141,14 @@
 
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
       if (checkedIn) {
+        const prev = state.presence;
         try {
           await api('/checkout', { method: 'POST' });
           toast('Checked out 👋');
           closeModal(modal);
           await refreshMe();
           fetchCourtsInView();
+          maybeAskConditions(prev);
         } catch (e) { toast(e.message); }
         return;
       }
@@ -2878,9 +2889,11 @@
     el.querySelector('#pf-edit').addEventListener('click', openEditProfile);
     el.querySelector('#pf-activity').addEventListener('click', openActivity);
     el.querySelector('#pf-checkout')?.addEventListener('click', async () => {
+      const prev = state.presence;
       await api('/checkout', { method: 'POST' });
       await refreshMe();
       renderProfile();
+      maybeAskConditions(prev);
     });
 
     // My upcoming games (parity with public profiles), tappable into the game screen.
@@ -3446,10 +3459,12 @@
       };
       $('#banner-checkout').addEventListener('click', async (e) => {
         e.stopPropagation();
+        const prev = state.presence;
         await api('/checkout', { method: 'POST' });
         toast('Checked out 👋');
         await refreshMe();
         fetchCourtsInView();
+        maybeAskConditions(prev);
       });
     } else {
       el.classList.add('hidden');
