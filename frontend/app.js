@@ -943,6 +943,15 @@
     });
   }
 
+  function weatherEmoji(code) {
+    if (code === 0) return '☀️';
+    if (code <= 3) return '⛅';
+    if (code <= 48) return '🌫';
+    if (code <= 67 || (code >= 80 && code <= 82)) return '🌧';
+    if (code <= 77 || code === 85 || code === 86) return '❄️';
+    return '⛈';
+  }
+
   const COURT_CONDITION_LABELS = {
     good: ['🟢', 'All good — come play!'],
     busy: ['🚶', 'Busy — expect a wait'],
@@ -1109,6 +1118,7 @@
         <button class="action-tile" id="cd-chat"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>Chat</button>
         <a class="action-tile" href="${mapsUrl}" target="_blank" rel="noopener"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg></span>Directions</a>
       </div>
+      <div id="cd-weather"></div>
       ${court.latest_condition ? (() => {
         const c = COURT_CONDITION_LABELS[court.latest_condition.condition] || ['📣', court.latest_condition.condition];
         const mins = Math.max(1, Math.round((Date.now() - new Date(court.latest_condition.reported_at)) / 60000));
@@ -1154,6 +1164,15 @@
     `, { court: true });
 
     renderReviewSection(modal.querySelector('#cd-reviews'), court);
+
+    // Playability at a glance — loads after the sheet so it never blocks.
+    api(`/courts/${court.id}/weather`).then((w) => {
+      const el = modal.querySelector('#cd-weather');
+      if (!el || w.error || w.temp_f == null) return;
+      el.innerHTML = `<div class="row-sub" style="text-align:center;margin-top:10px">
+        ${weatherEmoji(w.weather_code)} ${w.temp_f}°F at the court · ${w.rain_soon ? '🌧 rain likely in the next few hours' : 'dry for the next few hours'}
+      </div>`;
+    }).catch(() => { /* forecast is a nicety */ });
 
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
       if (checkedIn) {

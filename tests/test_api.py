@@ -824,6 +824,35 @@ def test_my_record_at_court(client):
     assert client.get(f'/api/courts/{larson}').get_json()['my_record'] is None
 
 
+def test_court_weather(client, monkeypatch):
+    from backend.routes import courts as courts_module
+    courts_module._WEATHER_CACHE.clear()
+    calls = {'n': 0}
+
+    def fake_fetch(lat, lng):
+        calls['n'] += 1
+        return {
+            'current': {'temperature_2m': 81.6, 'weather_code': 2},
+            'hourly': {'precipitation_probability': [5, 10, 55, 20, 0, 0]},
+        }
+
+    monkeypatch.setattr(courts_module, '_openmeteo_fetch', fake_fetch)
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    data = client.get(f'/api/courts/{court_id}/weather').get_json()
+    assert data == {'temp_f': 82, 'weather_code': 2, 'rain_soon': True}
+    # Second hit serves from cache — no new upstream call.
+    client.get(f'/api/courts/{court_id}/weather')
+    assert calls['n'] == 1
+
+    # Upstream failure degrades gracefully.
+    courts_module._WEATHER_CACHE.clear()
+    monkeypatch.setattr(courts_module, '_openmeteo_fetch',
+                        lambda lat, lng: (_ for _ in ()).throw(OSError('down')))
+    assert client.get(f'/api/courts/{court_id}/weather').get_json()['error'] == 'weather_unavailable'
+    assert client.get('/api/courts/999999/weather').status_code == 404
+
+
 def test_court_conditions(client, app):
     from datetime import timedelta
     from backend.models import CourtCondition as CCModel, utcnow

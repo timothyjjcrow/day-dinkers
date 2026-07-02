@@ -569,6 +569,55 @@ MAX_PHOTO_BYTES = 500 * 1024
 MAX_COURT_PHOTOS = 12
 CONDITION_FRESH_HOURS = 3
 
+# --- Court weather (Open-Meteo, keyless) ---
+_WEATHER_CACHE = {}
+_WEATHER_CACHE_TTL = 60 * 30  # forecasts don't move fast
+_WEATHER_MAX_CACHE = 500
+
+
+def _openmeteo_fetch(lat, lng):
+    """Fetch current weather + short-range rain odds. Isolated for test mocks."""
+    params = urllib.parse.urlencode({
+        'latitude': round(lat, 3),
+        'longitude': round(lng, 3),
+        'current': 'temperature_2m,weather_code',
+        'hourly': 'precipitation_probability',
+        'forecast_hours': 6,
+        'temperature_unit': 'fahrenheit',
+    })
+    req = urllib.request.Request(
+        f'https://api.open-meteo.com/v1/forecast?{params}',
+        headers={'Accept': 'application/json'},
+    )
+    with urllib.request.urlopen(req, timeout=6) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
+@courts_bp.get('/courts/<int:court_id>/weather')
+def court_weather(court_id):
+    court = db.session.get(Court, court_id)
+    if not court or court.latitude is None:
+        return jsonify({'error': 'court_not_found'}), 404
+    key = (round(court.latitude, 2), round(court.longitude, 2))
+    cached = _WEATHER_CACHE.get(key)
+    if cached and cached['expires_at'] > time.time():
+        return jsonify(cached['data'])
+    try:
+        raw = _openmeteo_fetch(court.latitude, court.longitude)
+        probs = (raw.get('hourly') or {}).get('precipitation_probability') or []
+        data = {
+            'temp_f': round(float(raw['current']['temperature_2m'])),
+            'weather_code': int(raw['current']['weather_code']),
+            'rain_soon': max(probs[:6], default=0) >= 40,
+        }
+    except Exception:
+        current_app.logger.warning('Weather lookup failed for court %s', court_id, exc_info=True)
+        return jsonify({'error': 'weather_unavailable'})
+    if len(_WEATHER_CACHE) > _WEATHER_MAX_CACHE:
+        _WEATHER_CACHE.clear()
+    _WEATHER_CACHE[key] = {'data': data, 'expires_at': time.time() + _WEATHER_CACHE_TTL}
+    return jsonify(data)
+
 
 @courts_bp.post('/courts/<int:court_id>/condition')
 @rate_limit(30, 3600)
