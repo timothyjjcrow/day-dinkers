@@ -282,6 +282,46 @@ def list_courts():
     return jsonify({'items': items, 'count': len(items)})
 
 
+@courts_bp.post('/courts')
+@rate_limit(5, 3600)
+@login_required
+def submit_court():
+    """Community-submitted court — pinned wherever the player says it is."""
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name') or '').strip()[:255]
+    if len(name) < 3:
+        return jsonify({'error': 'name_required'}), 400
+    try:
+        lat = float(payload.get('latitude'))
+        lng = float(payload.get('longitude'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'location_required'}), 400
+    if not (18.0 <= lat <= 72.0 and -180.0 <= lng <= -66.0):
+        return jsonify({'error': 'location_out_of_range'}), 400
+    try:
+        num_courts = max(1, min(100, int(payload.get('num_courts') or 2)))
+    except (TypeError, ValueError):
+        num_courts = 2
+    court = Court(
+        name=name,
+        latitude=lat,
+        longitude=lng,
+        num_courts=num_courts,
+        indoor=bool(payload.get('indoor')),
+        lighted=bool(payload.get('lighted')),
+        city=str(payload.get('city') or '').strip()[:120],
+        state=str(payload.get('state') or '').strip().upper()[:2],
+        county_slug='community',
+        verified=False,
+    )
+    db.session.add(court)
+    db.session.flush()
+    # Submitters care about their court — save it for them.
+    db.session.add(FavoriteCourt(user_id=g.current_user.id, court_id=court.id))
+    db.session.commit()
+    return jsonify(court.to_dict()), 201
+
+
 @courts_bp.get('/courts/<int:court_id>')
 def court_detail(court_id):
     cleanup_stale_presence()

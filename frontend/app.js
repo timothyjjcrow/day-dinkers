@@ -740,8 +740,10 @@
     html += courts.length
       ? courts.slice(0, 60).map(courtRowHtml).join('')
       : '<div class="empty-state">No courts here — try zooming out or searching.</div>';
+    html += `<button class="btn btn-secondary btn-block" id="list-add-court" style="margin-top:10px">➕ Missing a court? Add it</button>`;
 
     el.innerHTML = html;
+    el.querySelector('#list-add-court').addEventListener('click', openAddCourtSheet);
     el.querySelectorAll('[data-court]').forEach((row) => {
       row.addEventListener('click', () => openCourtDetail(Number(row.dataset.court)));
     });
@@ -1009,6 +1011,52 @@
     nets_down: ['🚧', 'Nets down / missing'],
     closed: ['⛔', 'Closed right now'],
   };
+
+  function openAddCourtSheet() {
+    const center = state.map ? state.map.getCenter() : { lat: null, lng: null };
+    const modal = openModal(`
+      ${modalHead('➕ Add a missing court')}
+      <p class="row-sub" style="margin-bottom:12px">Center the map on the court first — we'll pin it right where the map is looking now.</p>
+      <div class="form-field">
+        <label>Court name</label>
+        <input type="text" id="ac-name" maxlength="255" placeholder="e.g. Riverside Park Courts" />
+      </div>
+      <div class="form-field">
+        <label>Number of courts</label>
+        <input type="number" id="ac-courts" min="1" max="100" value="2" inputmode="numeric" />
+      </div>
+      <div class="form-field">
+        <label class="row" style="gap:8px;padding:6px 0;cursor:pointer"><input type="checkbox" id="ac-indoor" style="width:18px;height:18px" /> 🏠 Indoor</label>
+        <label class="row" style="gap:8px;padding:6px 0;cursor:pointer"><input type="checkbox" id="ac-lighted" style="width:18px;height:18px" /> 💡 Lighted</label>
+      </div>
+      <button class="btn btn-primary btn-block" id="ac-submit" style="padding:15px">Add court</button>
+    `);
+    modal.querySelector('#ac-submit').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      const name = modal.querySelector('#ac-name').value.trim();
+      if (name.length < 3) { toast('Give the court a name'); return; }
+      btn.disabled = true;
+      try {
+        const court = await api('/courts', {
+          method: 'POST',
+          body: JSON.stringify({
+            name,
+            latitude: center.lat,
+            longitude: center.lng,
+            num_courts: Number(modal.querySelector('#ac-courts').value) || 2,
+            indoor: modal.querySelector('#ac-indoor').checked,
+            lighted: modal.querySelector('#ac-lighted').checked,
+          }),
+        });
+        closeModal(modal);
+        toast('Court added — thanks for growing the map! 🎾');
+        if (state.favIds) state.favIds.add(court.id);
+        fetchCourtsInView();
+        openCourtDetail(court.id);
+      } catch (err) { toast(err.message); btn.disabled = false; }
+    });
+  }
 
   function openConditionSheet(court, onDone) {
     const modal = openModal(`

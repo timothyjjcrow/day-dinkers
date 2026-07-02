@@ -615,6 +615,35 @@ def test_checkin_flow(client):
     assert res.get_json()['presence']['checked_in'] is False
 
 
+def test_submit_court(client):
+    a = register(client, 'a@example.com', 'Ana')
+    ah = auth_headers(a['token'])
+    body = {'name': 'Riverside Park Courts', 'latitude': 30.30, 'longitude': -97.75,
+            'num_courts': 4, 'lighted': True}
+
+    # Auth + validation guards.
+    assert client.post('/api/courts', json=body).status_code == 401
+    assert client.post('/api/courts', json={**body, 'name': 'ab'},
+                       headers=ah).status_code == 400
+    assert client.post('/api/courts', json={**body, 'latitude': None},
+                       headers=ah).status_code == 400
+    assert client.post('/api/courts', json={**body, 'longitude': 12.0},
+                       headers=ah).status_code == 400  # not in the US
+
+    res = client.post('/api/courts', json=body, headers=ah)
+    assert res.status_code == 201
+    court = res.get_json()
+    assert court['name'] == 'Riverside Park Courts'
+    assert court['num_courts'] == 4 and court['lighted'] is True
+
+    # Discoverable through the normal search paths…
+    found = client.get('/api/courts?q=riverside').get_json()['items']
+    assert any(c['id'] == court['id'] for c in found)
+    # …and auto-saved for the submitter.
+    favs = client.get('/api/courts/favorites', headers=ah).get_json()['items']
+    assert any(c['id'] == court['id'] for c in favs)
+
+
 def test_court_edit_suggestions_consensus(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
