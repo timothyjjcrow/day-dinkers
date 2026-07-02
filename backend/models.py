@@ -189,6 +189,39 @@ class Friendship(TimestampMixin, db.Model):
         return self.addressee if self.requester_id == user_id else self.requester
 
 
+class BlockedUser(TimestampMixin, db.Model):
+    """blocker no longer sees blocked (and vice versa) in social surfaces,
+    and DMs between the pair are refused in both directions."""
+    __table_args__ = (
+        db.UniqueConstraint('blocker_id', 'blocked_id', name='uq_blocked_pair'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    blocker_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    blocked_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+
+    blocker = db.relationship('User', foreign_keys=[blocker_id])
+    blocked = db.relationship('User', foreign_keys=[blocked_id])
+
+
+def is_blocked_between(user_a_id, user_b_id):
+    """True when either user has blocked the other."""
+    return db.session.query(BlockedUser.id).filter(
+        db.or_(
+            db.and_(BlockedUser.blocker_id == user_a_id, BlockedUser.blocked_id == user_b_id),
+            db.and_(BlockedUser.blocker_id == user_b_id, BlockedUser.blocked_id == user_a_id),
+        )
+    ).first() is not None
+
+
+def blocked_pair_ids(user_id):
+    """All user ids hidden from user_id: people they blocked or who blocked them."""
+    rows = BlockedUser.query.filter(
+        db.or_(BlockedUser.blocker_id == user_id, BlockedUser.blocked_id == user_id)
+    ).all()
+    return {r.blocked_id if r.blocker_id == user_id else r.blocker_id for r in rows}
+
+
 class Message(TimestampMixin, db.Model):
     """Either a direct message (recipient_id set) or a court-room message (court_id set)."""
     id = db.Column(db.Integer, primary_key=True)

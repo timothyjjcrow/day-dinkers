@@ -69,6 +69,7 @@
     game_not_open: 'This game is no longer open.',
     game_already_started: 'Too late — the game already has players.',
     already_joined: "You're already in this game.",
+    user_blocked: "You can't interact with this player.",
   };
   const humanError = (code) => ERROR_TEXT[code] || code.replace(/_/g, ' ');
 
@@ -2310,7 +2311,9 @@
 
     let friendAction = '';
     if (userId !== state.me.id) {
-      if (user.friendship_status === 'accepted') {
+      if (user.is_blocked) {
+        friendAction = '<span class="tag warn" style="margin:0">🚫 Blocked</span>';
+      } else if (user.friendship_status === 'accepted') {
         friendAction = `<button class="btn btn-secondary" id="up-msg">💬 Message</button>
           <button class="btn btn-danger" id="up-remove">Remove friend</button>`;
       } else if (user.friendship_status === 'pending') {
@@ -2352,6 +2355,12 @@
       ${upcoming.length ? `<div class="section-label">Upcoming games</div>${upcoming.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
       ${courts.length ? `<div class="section-label">Courts</div>${courts.map(courtRow).join('')}` : ''}
       ${games.length ? `<div class="section-label">Recent games</div>${games.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
+      ${userId !== state.me.id ? `
+        <div style="text-align:center;margin-top:18px">
+          <button id="up-block" style="background:transparent;color:${user.is_blocked ? 'var(--ink-soft)' : '#e03131'};font-size:13px;font-weight:600">
+            ${user.is_blocked ? 'Unblock user' : '🚫 Block user'}
+          </button>
+        </div>` : ''}
     `);
 
     bindGameButtons(modal, () => { closeModal(modal); openUserProfile(userId); });
@@ -2359,6 +2368,24 @@
       closeModal(modal);
       openCourtDetail(Number(row.dataset.pcourt));
     }));
+
+    modal.querySelector('#up-block')?.addEventListener('click', async () => {
+      if (user.is_blocked) {
+        try {
+          await api(`/users/${userId}/unblock`, { method: 'POST' });
+          toast('User unblocked');
+          closeModal(modal);
+          openUserProfile(userId);
+        } catch (e) { toast(e.message); }
+        return;
+      }
+      if (!window.confirm(`Block ${user.display_name}? You won't see each other in search or nearby players, and you can't message each other.`)) return;
+      try {
+        await api(`/users/${userId}/block`, { method: 'POST' });
+        toast('User blocked 🚫');
+        closeModal(modal);
+      } catch (e) { toast(e.message); }
+    });
 
     modal.querySelector('#up-add')?.addEventListener('click', async () => {
       try {

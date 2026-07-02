@@ -3,7 +3,7 @@ from flask import Blueprint, g, jsonify, request
 from sqlalchemy import or_
 
 from backend.app import db
-from backend.models import Court, Message, User, utcnow
+from backend.models import Court, Message, User, blocked_pair_ids, is_blocked_between, utcnow
 from backend.security import rate_limit
 
 chat_bp = Blueprint('chat', __name__)
@@ -60,10 +60,13 @@ def conversations():
         .limit(500)
         .all()
     )
+    hidden = blocked_pair_ids(me)
     by_partner = {}
     unread = {}
     for message in messages:
         partner_id = message.recipient_id if message.sender_id == me else message.sender_id
+        if partner_id in hidden:
+            continue
         if partner_id not in by_partner:
             by_partner[partner_id] = message
         if message.recipient_id == me and message.read_at is None:
@@ -130,6 +133,8 @@ def send_message(user_id):
         return jsonify({'error': 'user_not_found'}), 404
     if partner.id == g.current_user.id:
         return jsonify({'error': 'cannot_message_self'}), 400
+    if is_blocked_between(g.current_user.id, partner.id):
+        return jsonify({'error': 'user_blocked'}), 403
 
     payload = request.get_json(silent=True) or {}
     body = str(payload.get('body') or '').strip()

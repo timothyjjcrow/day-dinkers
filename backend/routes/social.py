@@ -7,6 +7,7 @@ from sqlalchemy.orm import aliased
 
 from backend.app import db
 from backend.models import (
+    BlockedUser,
     CheckIn,
     Court,
     FavoriteCourt,
@@ -16,6 +17,8 @@ from backend.models import (
     Notification,
     SKILL_LEVELS,
     User,
+    blocked_pair_ids,
+    is_blocked_between,
     notify,
     utcnow,
 )
@@ -96,6 +99,7 @@ def players_nearby():
     lng_lo, lng_hi = lng - lng_delta, lng + lng_delta
 
     home = aliased(Court)
+    hidden = blocked_pair_ids(g.current_user.id)
     query = (
         User.query.outerjoin(home, User.home_court_id == home.id)
         .filter(User.id != g.current_user.id)
@@ -106,6 +110,8 @@ def players_nearby():
                  home.longitude.between(lng_lo, lng_hi)),
         ))
     )
+    if hidden:
+        query = query.filter(User.id.notin_(hidden))
     if text:
         query = query.filter(User.display_name.ilike(f'%{text}%'))
     if skill in SKILL_LEVELS:
@@ -168,15 +174,14 @@ def search_users():
     if len(text) < 2:
         return jsonify({'items': []})
     like = f'%{text}%'
-    users = (
-        User.query.filter(
-            User.id != g.current_user.id,
-            or_(User.display_name.ilike(like), User.email.ilike(like)),
-        )
-        .order_by(User.display_name.asc())
-        .limit(20)
-        .all()
+    hidden = blocked_pair_ids(g.current_user.id)
+    query = User.query.filter(
+        User.id != g.current_user.id,
+        or_(User.display_name.ilike(like), User.email.ilike(like)),
     )
+    if hidden:
+        query = query.filter(User.id.notin_(hidden))
+    users = query.order_by(User.display_name.asc()).limit(20).all()
     items = []
     for user in users:
         entry = user.to_public_dict()
@@ -198,6 +203,9 @@ def user_profile(user_id):
     if not user:
         return jsonify({'error': 'user_not_found'}), 404
     payload = user.to_public_dict()
+    payload['is_blocked'] = bool(BlockedUser.query.filter_by(
+        blocker_id=g.current_user.id, blocked_id=user.id,
+    ).first())
 
     friendship = _friendship_between(g.current_user.id, user.id)
     if friendship:
@@ -255,6 +263,38 @@ def user_profile(user_id):
     return jsonify(payload)
 
 
+@social_bp.post('/users/<int:user_id>/block')
+@rate_limit(30, 3600)
+@login_required
+def block_user(user_id):
+    target = db.session.get(User, user_id)
+    if not target:
+        return jsonify({'error': 'user_not_found'}), 404
+    if target.id == g.current_user.id:
+        return jsonify({'error': 'cannot_block_self'}), 400
+    existing = BlockedUser.query.filter_by(
+        blocker_id=g.current_user.id, blocked_id=target.id,
+    ).first()
+    if not existing:
+        db.session.add(BlockedUser(blocker_id=g.current_user.id, blocked_id=target.id))
+        # Blocking ends any friendship (or pending request) between the pair.
+        friendship = _friendship_between(g.current_user.id, target.id)
+        if friendship:
+            db.session.delete(friendship)
+        db.session.commit()
+    return jsonify({'blocked': True})
+
+
+@social_bp.post('/users/<int:user_id>/unblock')
+@login_required
+def unblock_user(user_id):
+    BlockedUser.query.filter_by(
+        blocker_id=g.current_user.id, blocked_id=user_id,
+    ).delete()
+    db.session.commit()
+    return jsonify({'blocked': False})
+
+
 @social_bp.get('/friends')
 @login_required
 def list_friends():
@@ -287,6 +327,8 @@ def send_friend_request():
         return jsonify({'error': 'user_not_found'}), 404
     if target.id == g.current_user.id:
         return jsonify({'error': 'cannot_friend_self'}), 400
+    if is_blocked_between(g.current_user.id, target.id):
+        return jsonify({'error': 'user_blocked'}), 403
 
     existing = _friendship_between(g.current_user.id, target.id)
     if existing:

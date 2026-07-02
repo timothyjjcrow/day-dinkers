@@ -827,6 +827,70 @@ def test_friend_request_flow(client):
     assert res.get_json()['deleted'] is True
 
 
+def test_block_user_flow(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+
+    # Friends first, with a DM each way and both visible in search.
+    fid = client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah).get_json()['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=bh)
+    assert client.post(f"/api/chat/{b['user']['id']}", json={'body': 'hi'}, headers=ah).status_code == 201
+    assert any(u['id'] == b['user']['id'] for u in client.get('/api/users/search?q=ben', headers=ah).get_json()['items'])
+
+    # Ana blocks Ben.
+    res = client.post(f"/api/users/{b['user']['id']}/block", headers=ah)
+    assert res.status_code == 200 and res.get_json()['blocked'] is True
+    # Idempotent
+    assert client.post(f"/api/users/{b['user']['id']}/block", headers=ah).status_code == 200
+
+    # Friendship is gone, both directions.
+    assert client.get('/api/friends', headers=ah).get_json()['friends'] == []
+    assert client.get('/api/friends', headers=bh).get_json()['friends'] == []
+
+    # Hidden from search both ways.
+    assert client.get('/api/users/search?q=ben', headers=ah).get_json()['items'] == []
+    assert client.get('/api/users/search?q=ana', headers=bh).get_json()['items'] == []
+
+    # DMs refused both ways; conversation list hides the thread.
+    assert client.post(f"/api/chat/{b['user']['id']}", json={'body': 'x'}, headers=ah).status_code == 403
+    assert client.post(f"/api/chat/{a['user']['id']}", json={'body': 'x'}, headers=bh).status_code == 403
+    assert client.get('/api/chat', headers=ah).get_json()['items'] == []
+
+    # Friend requests refused both ways.
+    assert client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah).status_code == 403
+    assert client.post('/api/friends/request', json={'user_id': a['user']['id']}, headers=bh).status_code == 403
+
+    # Profile shows the block to the blocker only.
+    assert client.get(f"/api/users/{b['user']['id']}", headers=ah).get_json()['is_blocked'] is True
+    assert client.get(f"/api/users/{a['user']['id']}", headers=bh).get_json()['is_blocked'] is False
+
+    # Self-block rejected.
+    assert client.post(f"/api/users/{a['user']['id']}/block", headers=ah).status_code == 400
+
+    # Unblock restores messaging and search.
+    assert client.post(f"/api/users/{b['user']['id']}/unblock", headers=ah).get_json()['blocked'] is False
+    assert client.post(f"/api/chat/{b['user']['id']}", json={'body': 'sorry!'}, headers=ah).status_code == 201
+    assert any(u['id'] == b['user']['id'] for u in client.get('/api/users/search?q=ben', headers=ah).get_json()['items'])
+
+
+def test_block_hides_from_players_nearby(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=bh)
+
+    near = client.get('/api/players/nearby?lat=33.66&lng=-117.91', headers=ah).get_json()
+    assert any(p['id'] == b['user']['id'] for p in near['items'])
+
+    client.post(f"/api/users/{b['user']['id']}/block", headers=ah)
+    near = client.get('/api/players/nearby?lat=33.66&lng=-117.91', headers=ah).get_json()
+    assert not any(p['id'] == b['user']['id'] for p in near['items'])
+    # And Ben doesn't see Ana either (she'd need a location; just check no crash + empty)
+    assert client.get('/api/players/nearby?lat=33.66&lng=-117.91', headers=bh).status_code == 200
+
+
 def test_user_search(client):
     a = register(client, 'a@example.com', 'Ana')
     register(client, 'b@example.com', 'Benny')
