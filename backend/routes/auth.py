@@ -396,6 +396,7 @@ def my_stats():
 
 
 @auth_bp.patch('/me')
+@rate_limit(30, 600)
 @login_required
 def update_me():
     user = g.current_user

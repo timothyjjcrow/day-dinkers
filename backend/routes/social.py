@@ -322,6 +322,7 @@ def block_user(user_id):
 
 
 @social_bp.post('/users/<int:user_id>/unblock')
+@rate_limit(30, 3600)
 @login_required
 def unblock_user(user_id):
     BlockedUser.query.filter_by(
@@ -399,6 +400,7 @@ def send_friend_request():
 
 
 @social_bp.post('/friends/<int:friendship_id>/respond')
+@rate_limit(40, 60)
 @login_required
 def respond_friend_request(friendship_id):
     friendship = db.session.get(Friendship, friendship_id)
@@ -424,6 +426,7 @@ def respond_friend_request(friendship_id):
 
 
 @social_bp.delete('/friends/<int:friendship_id>')
+@rate_limit(40, 60)
 @login_required
 def remove_friend(friendship_id):
     friendship = db.session.get(Friendship, friendship_id)
@@ -452,6 +455,7 @@ def list_notifications():
 
 
 @social_bp.post('/notifications/read')
+@rate_limit(60, 60)
 @login_required
 def mark_notifications_read():
     Notification.query.filter_by(user_id=g.current_user.id, read=False).update({'read': True})

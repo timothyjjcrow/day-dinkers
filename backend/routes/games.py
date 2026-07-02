@@ -320,6 +320,7 @@ def game_detail(game_id):
 
 
 @games_bp.post('/games/<int:game_id>/join')
+@rate_limit(30, 60)
 @login_required
 def join_game(game_id):
     game = db.session.get(Game, game_id)
@@ -384,6 +385,7 @@ def join_waitlist(game_id):
 
 
 @games_bp.post('/games/<int:game_id>/waitlist/leave')
+@rate_limit(30, 60)
 @login_required
 def leave_waitlist(game_id):
     game = db.session.get(Game, game_id)
@@ -397,6 +399,7 @@ def leave_waitlist(game_id):
 
 
 @games_bp.post('/games/<int:game_id>/leave')
+@rate_limit(30, 60)
 @login_required
 def leave_game(game_id):
     game = db.session.get(Game, game_id)
@@ -422,6 +425,7 @@ def leave_game(game_id):
 
 
 @games_bp.post('/games/<int:game_id>/cancel')
+@rate_limit(30, 60)
 @login_required
 def cancel_game(game_id):
     game = db.session.get(Game, game_id)
@@ -525,6 +529,7 @@ def _finalize_game(game, actor_id=None):
 
 
 @games_bp.post('/games/<int:game_id>/complete')
+@rate_limit(20, 60)
 @login_required
 def submit_score(game_id):
     """Report a score. Casual games finish immediately; ranked scores need an
@@ -591,6 +596,7 @@ def submit_score(game_id):
 
 
 @games_bp.post('/games/<int:game_id>/confirm')
+@rate_limit(20, 60)
 @login_required
 def confirm_score(game_id):
     game = db.session.get(Game, game_id)
@@ -617,6 +623,7 @@ def confirm_score(game_id):
 
 
 @games_bp.post('/games/<int:game_id>/dispute')
+@rate_limit(20, 60)
 @login_required
 def dispute_score(game_id):
     game = db.session.get(Game, game_id)
@@ -689,6 +696,7 @@ def challenge_user(user_id):
 
 
 @games_bp.post('/games/<int:game_id>/decline')
+@rate_limit(30, 60)
 @login_required
 def decline_challenge(game_id):
     """Decline an open challenge-style game you were invited to: cancels it."""

@@ -631,6 +631,7 @@ def court_photo_item(court_id, photo_id):
 
 
 @courts_bp.post('/courts/<int:court_id>/favorite')
+@rate_limit(60, 600)
 @login_required
 def toggle_favorite(court_id):
     court = db.session.get(Court, court_id)
@@ -701,6 +702,7 @@ def check_in(court_id):
 
 
 @courts_bp.post('/checkout')
+@rate_limit(60, 60)
 @login_required
 def check_out():
     checkin = active_checkin_for(g.current_user.id)
@@ -711,6 +713,7 @@ def check_out():
 
 
 @courts_bp.post('/presence/ping')
+@rate_limit(60, 60)
 @login_required
 def presence_ping():
     checkin = active_checkin_for(g.current_user.id)

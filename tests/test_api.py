@@ -311,6 +311,23 @@ def test_production_requires_secret_key(monkeypatch):
         create_app('production')
 
 
+def test_every_mutating_route_is_rate_limited():
+    """Guard: any POST/PATCH/DELETE/PUT route must carry @rate_limit."""
+    import pathlib
+    import re
+    routes_dir = pathlib.Path(__file__).resolve().parent.parent / 'backend' / 'routes'
+    offenders = []
+    pattern = re.compile(
+        r"@(\w+_bp)\.(post|patch|delete|put)\('([^']+)'\)\n((?:@[\w.()\s,]+\n)*)def (\w+)"
+    )
+    for path in sorted(routes_dir.glob('*.py')):
+        for m in pattern.finditer(path.read_text()):
+            _, method, route, decorators, name = m.groups()
+            if 'rate_limit' not in decorators:
+                offenders.append(f'{path.name}:{name} ({method.upper()} {route})')
+    assert offenders == [], f'Mutating routes missing @rate_limit: {offenders}'
+
+
 def test_security_headers(client):
     res = client.get('/health')
     assert res.headers.get('X-Content-Type-Options') == 'nosniff'
