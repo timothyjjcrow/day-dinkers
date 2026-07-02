@@ -2339,7 +2339,11 @@
   }
 
   async function renderFriends(el) {
-    const data = await api('/friends');
+    const loc = areaLatLng();
+    const [data, results] = await Promise.all([
+      api('/friends'),
+      api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`).catch(() => ({ items: [] })),
+    ]);
     let html = `
       <div class="form-field" style="margin-top:4px">
         <input type="search" id="friend-search" placeholder="Find players by name or email…" />
@@ -2385,7 +2389,15 @@
         </div>`).join('');
     }
 
+    // What your friends have been playing — results you weren't part of.
+    const friendResults = (results.items || []).filter((g) => g.involves_friend && !g.involves_me).slice(0, 5);
+    if (friendResults.length) {
+      html += '<div class="section-label">🏆 Friend results</div>';
+      html += friendResults.map(resultRowHtml).join('');
+    }
+
     el.innerHTML = html;
+    bindGameButtons(el, () => renderChat());
 
     el.querySelectorAll('[data-respond]').forEach((b) => b.addEventListener('click', async () => {
       try {
