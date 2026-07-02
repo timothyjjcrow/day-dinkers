@@ -332,6 +332,27 @@ def court_detail(court_id):
 
     payload = court.to_dict()
     payload['photo_count'] = CourtPhoto.query.filter_by(court_id=court.id).count()
+
+    # Court regulars: most frequent visitors over the last 60 days (2+ visits).
+    from backend.models import User as UserModel
+    regular_rows = (
+        db.session.query(UserModel, func.count(CheckIn.id).label('visits'))
+        .join(CheckIn, CheckIn.user_id == UserModel.id)
+        .filter(
+            CheckIn.court_id == court.id,
+            CheckIn.checked_in_at >= utcnow() - timedelta(days=60),
+            UserModel.deleted_at.is_(None),
+        )
+        .group_by(UserModel.id)
+        .having(func.count(CheckIn.id) >= 2)
+        .order_by(func.count(CheckIn.id).desc())
+        .limit(5)
+        .all()
+    )
+    payload['regulars'] = [
+        {**user.to_public_dict(), 'visits': int(visits)}
+        for user, visits in regular_rows
+    ]
     payload['players_here'] = players_here
     payload['friends_here'] = sum(1 for p in players_here if p['is_friend'])
     viewer_id = current_user.id if current_user else None

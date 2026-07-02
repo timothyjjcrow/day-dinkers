@@ -767,6 +767,41 @@ def test_court_detail_player_info(client):
     assert detail['friends_here'] == 1
 
 
+def test_court_regulars(client, app):
+    from datetime import timedelta
+    from backend.models import CheckIn as CheckInModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # No history → no regulars section data.
+    assert client.get(f'/api/courts/{court_id}').get_json()['regulars'] == []
+
+    with app.app_context():
+        now = utcnow()
+        rows = []
+        # Ana: 3 recent visits; Ben: 1 visit (below the 2-visit bar);
+        # Cam: 4 visits but all older than 60 days.
+        for days in (1, 3, 5):
+            rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
+                                     checked_in_at=now - timedelta(days=days),
+                                     checked_out_at=now - timedelta(days=days)))
+        rows.append(CheckInModel(user_id=b['user']['id'], court_id=court_id,
+                                 checked_in_at=now - timedelta(days=2),
+                                 checked_out_at=now - timedelta(days=2)))
+        for days in (70, 75, 80, 85):
+            rows.append(CheckInModel(user_id=c['user']['id'], court_id=court_id,
+                                     checked_in_at=now - timedelta(days=days),
+                                     checked_out_at=now - timedelta(days=days)))
+        db.session.add_all(rows)
+        db.session.commit()
+
+    regulars = client.get(f'/api/courts/{court_id}').get_json()['regulars']
+    assert [r['display_name'] for r in regulars] == ['Ana']
+    assert regulars[0]['visits'] == 3
+
+
 def test_favorite_courts(client):
     a = register(client, 'a@example.com')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
