@@ -484,6 +484,9 @@
     $('#court-search').addEventListener('input', (e) => {
       clearTimeout(searchTimer);
       const q = e.target.value.trim();
+      // While a search is active, map moves must not clobber its results
+      // (fitBounds below fires moveend → fetchCourtsInView).
+      state.searchQ = q;
       searchTimer = setTimeout(() => q ? searchCourts(q) : fetchCourtsInView(), 350);
     });
 
@@ -498,6 +501,9 @@
       (pos) => {
         state.userLoc = [pos.coords.latitude, pos.coords.longitude];
         state.areaLoc = null; // "my location" takes precedence again
+        state.searchQ = '';
+        const search = $('#court-search');
+        if (search) search.value = '';
         state.map.setView(state.userLoc, 13);
         updateUserDot();
         startLocationWatch();
@@ -524,6 +530,7 @@
     if (state.syncListToggle) state.syncListToggle();
     const search = $('#court-search');
     if (search) search.value = '';
+    state.searchQ = '';
     if (label) toast(`📍 ${label}`);
     fetchCourtsInView();
   }
@@ -538,6 +545,7 @@
 
   async function fetchCourtsInView() {
     if (!state.map) return;
+    if (state.searchQ) return; // search results own the list and markers right now
     if (state.favIds === null) await loadFavIds();
     const b = state.map.getBounds();
     const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(4)).join(',');
@@ -2916,8 +2924,8 @@
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-value">${user.rating}</div><div class="stat-label">Rating</div></div>
-        <div class="stat-card"><div class="stat-value">${user.ranked_wins}</div><div class="stat-label">Wins</div></div>
-        <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Losses</div></div>
+        <div class="stat-card"><div class="stat-value">${user.ranked_wins}</div><div class="stat-label">Ranked wins</div></div>
+        <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Ranked losses</div></div>
       </div>
       ${formStripHtml(user.form)}
       ${(user.badges || []).length ? `
@@ -3008,7 +3016,7 @@
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-value">${me.rating}</div><div class="stat-label">Rating</div></div>
-        <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">Record · ${winPct}%</div></div>
+        <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">Ranked record · ${winPct}%</div></div>
         <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? '🔥' : ''}${me.current_streak}</div><div class="stat-label">Streak · best ${me.best_streak}</div></div>
       </div>
       <div id="pf-play-stats"></div>

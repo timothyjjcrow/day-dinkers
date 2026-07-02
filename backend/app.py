@@ -210,11 +210,12 @@ def create_app(config_name=None):
     app.config.from_object(get_config(config_name))
 
     # Never run production with a guessable signing key.
+    from backend.config import DEV_FALLBACK_SECRET
     if app.config.get('APP_ENV') == 'production' and \
-            app.config.get('SECRET_KEY') in (None, '', 'change-me'):
+            app.config.get('SECRET_KEY') in (None, '', 'change-me', DEV_FALLBACK_SECRET):
         raise RuntimeError(
             'SECRET_KEY must be set to a strong value in production '
-            '(the default "change-me" is not allowed).'
+            '(the dev fallback is not allowed).'
         )
 
     db.init_app(app)

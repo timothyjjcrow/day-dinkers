@@ -25,6 +25,10 @@ def _get_int(name, default):
 # never collide with tables left behind by older deployments in `public`.
 PG_SCHEMA = 'picklepals'
 
+# Dev/test fallback only — production refuses to boot with it (see create_app).
+# HS256 wants ≥32 bytes, so keep it long enough not to trip key-length warnings.
+DEV_FALLBACK_SECRET = 'change-me-dev-only-not-a-real-secret-key'
+
 
 def _database_url():
     """Normalize DATABASE_URL for SQLAlchemy 2 + psycopg3 (Render gives postgres://)."""
@@ -44,7 +48,7 @@ def _engine_options():
 
 class BaseConfig:
     APP_ENV = os.getenv('APP_ENV', 'development')
-    SECRET_KEY = os.getenv('SECRET_KEY', 'change-me')
+    SECRET_KEY = os.getenv('SECRET_KEY', DEV_FALLBACK_SECRET)
     SQLALCHEMY_DATABASE_URI = _database_url()
     SQLALCHEMY_ENGINE_OPTIONS = _engine_options()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
