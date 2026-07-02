@@ -166,6 +166,9 @@
 
     $('#auth-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const submitBtn = $('#auth-submit');
+      if (submitBtn.disabled) return; // double-tap = duplicate register attempt
+      submitBtn.disabled = true;
       const errEl = $('#auth-error');
       errEl.classList.add('hidden');
       try {
@@ -183,6 +186,8 @@
       } catch (err) {
         errEl.textContent = err.message;
         errEl.classList.remove('hidden');
+      } finally {
+        submitBtn.disabled = false;
       }
     });
   }
@@ -2294,7 +2299,7 @@
       try {
         const msg = await api(`/chat/${userId}`, { method: 'POST', body: JSON.stringify({ body }) });
         renderMsgs([msg], true);
-      } catch (err) { toast(err.message); }
+      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
     });
   }
 
@@ -2361,7 +2366,7 @@
       try {
         const msg = await api(`/courts/${court.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
         renderMsgs([msg], true);
-      } catch (err) { toast(err.message); }
+      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
     });
   }
 
@@ -2734,16 +2739,19 @@
       } catch (e) { toast(e.message); }
     });
 
-    modal.querySelector('#ep-delete').addEventListener('click', async () => {
+    modal.querySelector('#ep-delete').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
       const password = modal.querySelector('#ep-delete-password').value;
       if (!password) { toast('Enter your password to confirm'); return; }
       if (!window.confirm('Delete your account forever? This cannot be undone.')) return;
+      btn.disabled = true;
       try {
         await api('/me', { method: 'DELETE', body: JSON.stringify({ password }) });
         toast('Account deleted. Goodbye 👋');
         closeModal(modal);
         logout();
-      } catch (e) { toast(e.message); }
+      } catch (err) { toast(err.message); btn.disabled = false; }
     });
 
     modal.querySelector('#ep-save').addEventListener('click', async () => {
