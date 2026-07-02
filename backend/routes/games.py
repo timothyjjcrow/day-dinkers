@@ -697,7 +697,8 @@ def challenge_user(user_id):
     notify(
         target.id,
         'challenge',
-        f'⚔️ {g.current_user.display_name} challenged you at {court.name}!',
+        # No emoji here — the activity feed prepends one per notification kind.
+        f'{g.current_user.display_name} challenged you at {court.name}!',
         related_user_id=g.current_user.id,
         related_game_id=game.id,
     )
