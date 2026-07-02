@@ -1297,8 +1297,11 @@
         }
       } else if (game.spots_left > 0) {
         action = `<button class="btn btn-primary btn-sm" data-game-join="${game.id}">Join</button>`;
+      } else if (game.waitlist_position) {
+        action = `<span class="tag" style="margin:0">⏳ #${game.waitlist_position} in line</span>`;
       } else {
-        action = '<span class="tag warn" style="margin:0">Full</span>';
+        action = `<span class="tag warn" style="margin:0">Full</span>
+          <button class="btn btn-secondary btn-sm" data-game-waitlist="${game.id}">⏳ Waitlist</button>`;
       }
     } else if (game.status === 'awaiting_confirmation') {
       const scoreText = `${game.score_team1}–${game.score_team2}`;
@@ -1353,6 +1356,11 @@
     rootEl.querySelectorAll('[data-game-join]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
       try { await api(`/games/${b.dataset.gameJoin}/join`, { method: 'POST' }); toast('You joined the game! \u{1F3BE}'); refreshMe(); refresh(); }
+      catch (err) { toast(err.message); }
+    }));
+    rootEl.querySelectorAll('[data-game-waitlist]').forEach((b) => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { await api(`/games/${b.dataset.gameWaitlist}/waitlist`, { method: 'POST' }); toast("You're on the waitlist — we'll ping you if a spot opens ⏳"); refresh(); }
       catch (err) { toast(err.message); }
     }));
     rootEl.querySelectorAll('[data-game-confirm]').forEach((b) => b.addEventListener('click', async (e) => {
@@ -3014,6 +3022,11 @@
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
         }
+      } else if (!game.is_joined) {
+        actions = game.waitlist_position
+          ? `<div class="empty-state" style="padding:12px">⏳ You're #${game.waitlist_position} on the waitlist — we'll notify you when a spot opens.</div>
+             <button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button>`
+          : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">⏳ Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
       } else if (game.is_joined) {
         if (game.players.length >= 2) {
           actions = `<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">📝 Enter the score</button>`;
@@ -3085,6 +3098,20 @@
       box.querySelectorAll('.modal-close').forEach((b) => { b.onclick = () => { clearHash(); closeModal(modal); }; });
       box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
+      box.querySelector('#gs-waitlist')?.addEventListener('click', async () => {
+        try {
+          await api(`/games/${gameId}/waitlist`, { method: 'POST' });
+          toast("You're on the waitlist ⏳");
+          reopenFresh();
+        } catch (e) { toast(e.message); reopenFresh(); }
+      });
+      box.querySelector('#gs-waitlist-leave')?.addEventListener('click', async () => {
+        try {
+          await api(`/games/${gameId}/waitlist/leave`, { method: 'POST' });
+          toast('Left the waitlist');
+          reopenFresh();
+        } catch (e) { toast(e.message); reopenFresh(); }
+      });
       box.querySelector('#gs-share')?.addEventListener('click', async () => {
         const url = `${location.origin}/#game/${gameId}`;
         const when = fmtDateTime(game.scheduled_at);

@@ -312,6 +312,10 @@ class Game(TimestampMixin, db.Model):
         'GameInvite', back_populates='game', lazy='selectin',
         cascade='all, delete-orphan',
     )
+    waitlist = db.relationship(
+        'GameWaitlist', back_populates='game', lazy='selectin',
+        order_by='GameWaitlist.id', cascade='all, delete-orphan',
+    )
 
     def invited_user_ids(self):
         return {inv.user_id for inv in self.invites}
@@ -374,6 +378,11 @@ class Game(TimestampMixin, db.Model):
             'spots_left': max(0, self.max_players - len(players)),
             'is_joined': me is not None,
             'is_creator': self.creator_id == current_user_id,
+            'waitlist_count': len(self.waitlist),
+            'waitlist_position': next(
+                (i + 1 for i, w in enumerate(self.waitlist) if w.user_id == current_user_id),
+                None,
+            ),
         }
 
 
@@ -398,6 +407,20 @@ class GamePlayer(TimestampMixin, db.Model):
         data['team'] = self.team
         data['rating_delta'] = self.rating_delta
         return data
+
+
+class GameWaitlist(TimestampMixin, db.Model):
+    """FIFO queue for a full game — earliest entry is promoted when a spot opens."""
+    __table_args__ = (
+        db.UniqueConstraint('game_id', 'user_id', name='uq_game_waitlist'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+
+    game = db.relationship('Game', back_populates='waitlist')
+    user = db.relationship('User')
 
 
 class GameInvite(TimestampMixin, db.Model):

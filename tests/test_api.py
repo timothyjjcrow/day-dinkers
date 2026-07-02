@@ -1390,6 +1390,56 @@ def test_game_near_future_utc(client):
     assert game['status'] == 'upcoming'
 
 
+def test_game_waitlist(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # 2-player game fills up instantly.
+    from backend.models import utcnow
+    from datetime import timedelta
+    game = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(hours=5)).isoformat() + 'Z',
+        'game_type': 'casual', 'max_players': 2,
+    }, headers=auth_headers(a['token'])).get_json()
+    assert client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token'])).status_code == 200
+
+    # Not-full guard, then Cam and Dee queue up in order.
+    assert client.post(f"/api/games/{game['id']}/join",
+                       headers=auth_headers(c['token'])).get_json()['error'] == 'game_full'
+    res = client.post(f"/api/games/{game['id']}/waitlist", headers=auth_headers(c['token']))
+    assert res.status_code == 200 and res.get_json()['waitlist_position'] == 1
+    res = client.post(f"/api/games/{game['id']}/waitlist", headers=auth_headers(d['token']))
+    assert res.get_json()['waitlist_position'] == 2
+    assert res.get_json()['waitlist_count'] == 2
+    # Players can't waitlist; joining twice is idempotent.
+    assert client.post(f"/api/games/{game['id']}/waitlist",
+                       headers=auth_headers(a['token'])).status_code == 400
+    assert client.post(f"/api/games/{game['id']}/waitlist",
+                       headers=auth_headers(c['token'])).get_json()['waitlist_position'] == 1
+
+    # Ben leaves → Cam is auto-promoted and notified; Dee moves up.
+    client.post(f"/api/games/{game['id']}/leave", headers=auth_headers(b['token']))
+    detail = client.get(f"/api/games/{game['id']}", headers=auth_headers(c['token'])).get_json()
+    assert detail['is_joined'] is True and detail['waitlist_position'] is None
+    assert detail['waitlist_count'] == 1
+    notes = client.get('/api/notifications', headers=auth_headers(c['token'])).get_json()
+    assert any('spot opened' in n['title'].lower() for n in notes['items'])
+    assert client.get(f"/api/games/{game['id']}",
+                      headers=auth_headers(d['token'])).get_json()['waitlist_position'] == 1
+
+    # Dee bails from the queue; cancelling notifies remaining waitlisters.
+    client.post(f"/api/games/{game['id']}/waitlist", headers=auth_headers(b['token']))
+    assert client.post(f"/api/games/{game['id']}/waitlist/leave",
+                       headers=auth_headers(d['token'])).get_json()['waitlist_position'] is None
+    client.post(f"/api/games/{game['id']}/cancel", headers=auth_headers(a['token']))
+    notes_b = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()
+    assert any(n['kind'] == 'game_cancelled' for n in notes_b['items'])
+
+
 def test_game_full(client):
     a = register(client, 'a@example.com')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']

@@ -13,6 +13,7 @@ from backend.models import (
     Game,
     GameInvite,
     GamePlayer,
+    GameWaitlist,
     User,
     notify,
     utcnow,
@@ -347,6 +348,54 @@ def join_game(game_id):
     return jsonify(game.to_dict(g.current_user.id))
 
 
+def _promote_from_waitlist(game):
+    """Fill open spots from the waitlist queue, in order."""
+    while game.waitlist and len(game.players) < game.max_players:
+        entry = game.waitlist[0]
+        game.waitlist.remove(entry)
+        db.session.add(GamePlayer(game=game, user_id=entry.user_id))
+        notify(
+            entry.user_id,
+            'game_join',
+            f'A spot opened — you\'re in at {game.court.name if game.court else "the court"}! 🎾',
+            related_game_id=game.id,
+        )
+
+
+@games_bp.post('/games/<int:game_id>/waitlist')
+@rate_limit(30, 600)
+@login_required
+def join_waitlist(game_id):
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.status != 'upcoming':
+        return jsonify({'error': 'game_not_open'}), 400
+    if any(p.user_id == g.current_user.id for p in game.players):
+        return jsonify({'error': 'already_joined'}), 400
+    if len(game.players) < game.max_players:
+        return jsonify({'error': 'game_not_full'}), 400
+    if not game.visible_to(g.current_user.id, friend_ids(g.current_user.id)):
+        return jsonify({'error': 'not_invited'}), 403
+    if not any(w.user_id == g.current_user.id for w in game.waitlist):
+        db.session.add(GameWaitlist(game=game, user_id=g.current_user.id))
+        db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id))
+
+
+@games_bp.post('/games/<int:game_id>/waitlist/leave')
+@login_required
+def leave_waitlist(game_id):
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    entry = next((w for w in game.waitlist if w.user_id == g.current_user.id), None)
+    if entry:
+        game.waitlist.remove(entry)
+        db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id))
+
+
 @games_bp.post('/games/<int:game_id>/leave')
 @login_required
 def leave_game(game_id):
@@ -366,6 +415,8 @@ def leave_game(game_id):
             game.creator_id = remaining[0].user_id
         else:
             game.status = 'cancelled'
+    if game.status == 'upcoming':
+        _promote_from_waitlist(game)
     db.session.commit()
     return jsonify(game.to_dict(g.current_user.id))
 
@@ -389,6 +440,14 @@ def cancel_game(game_id):
                 f'Game at {game.court.name if game.court else "court"} was cancelled',
                 related_game_id=game.id,
             )
+    for entry in list(game.waitlist):
+        notify(
+            entry.user_id,
+            'game_cancelled',
+            f'Game at {game.court.name if game.court else "court"} was cancelled',
+            related_game_id=game.id,
+        )
+        game.waitlist.remove(entry)
     db.session.commit()
     return jsonify(game.to_dict(g.current_user.id))
 
