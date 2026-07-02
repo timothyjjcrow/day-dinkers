@@ -1472,6 +1472,19 @@
   }
 
   // ---------- Games ----------
+  // Why a joinable game suits this player: their level, their usual slot.
+  function gameMatchReasons(game) {
+    if (!state.me || game.is_joined || game.status !== 'upcoming' || game.spots_left <= 0) return [];
+    const reasons = [];
+    if (game.players.length) {
+      const avg = game.players.reduce((s, p) => s + (p.rating || 1200), 0) / game.players.length;
+      if (Math.abs(avg - state.me.rating) <= 100) reasons.push('skill');
+    }
+    const slot = slotForNow(new Date(game.scheduled_at));
+    if (slot && (state.me.availability || []).includes(slot)) reasons.push('time');
+    return reasons;
+  }
+
   function gameCardHtml(game, { compact = false } = {}) {
     const court = game.court || {};
     const typeTag = game.game_type === 'ranked'
@@ -1485,14 +1498,14 @@
     const recurTag = game.recurrence === 'weekly'
       ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>'
       : '';
-    // Discovery aid: flag joinable games whose players average near your rating.
+    // Discovery aids: flag joinable games near your rating or at your usual slot.
+    const reasons = gameMatchReasons(game);
     let levelTag = '';
-    if (state.me && !game.is_joined && game.status === 'upcoming'
-        && game.spots_left > 0 && game.players.length) {
-      const avg = game.players.reduce((s, p) => s + (p.rating || 1200), 0) / game.players.length;
-      if (Math.abs(avg - state.me.rating) <= 100) {
-        levelTag = '<span class="tag live" style="margin:0 0 0 6px">⚖️ Your level</span>';
-      }
+    if (reasons.includes('skill')) {
+      levelTag += '<span class="tag live" style="margin:0 0 0 6px">⚖️ Your level</span>';
+    }
+    if (reasons.includes('time')) {
+      levelTag += '<span class="tag live" style="margin:0 0 0 6px">⏰ Your usual time</span>';
     }
     const host = game.players.find((p) => p.user_id === game.creator_id);
     const hostLabel = host ? ` · Host: ${esc(host.display_name)}` : '';
@@ -1879,10 +1892,24 @@
         html += '<div class="section-label">🤝 Friends playing</div>';
         html += friendsOneOff.map((g) => gameCardHtml(g)).join('');
       }
-      html += '<div class="section-label">Nearby games</div>';
-      html += nearbyOneOff.length
-        ? nearbyOneOff.map((g) => gameCardHtml(g)).join('')
-        : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button></div>';
+      // Best skill/time fits get pulled out of the nearby list into their own rail.
+      const picked = nearbyOneOff
+        .filter((g) => gameMatchReasons(g).length)
+        .sort((a, b) => gameMatchReasons(b).length - gameMatchReasons(a).length
+          || (a.distance_miles ?? 1e9) - (b.distance_miles ?? 1e9))
+        .slice(0, 3);
+      const pickedIds = new Set(picked.map((g) => g.id));
+      const restNearby = nearbyOneOff.filter((g) => !pickedIds.has(g.id));
+      if (picked.length) {
+        html += '<div class="section-label">⭐ Picked for you</div>';
+        html += picked.map((g) => gameCardHtml(g)).join('');
+      }
+      if (restNearby.length || !picked.length) {
+        html += '<div class="section-label">Nearby games</div>';
+        html += restNearby.length
+          ? restNearby.map((g) => gameCardHtml(g)).join('')
+          : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button></div>';
+      }
       if (weeklySessions.length) {
         html += '<div class="section-label">🔁 Weekly open play</div>';
         html += weeklySessions.map((g) => gameCardHtml(g)).join('');
