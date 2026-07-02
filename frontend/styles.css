@@ -188,6 +188,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 .av-chip.active { background: var(--green-700); border-color: var(--green-700); color: #fff; }
 
+.usual-nudge {
+  position: absolute; left: 12px; right: 12px; bottom: 76px; z-index: 900;
+  background: #fff; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  padding: 12px 14px; display: flex; align-items: center; gap: 10px;
+  animation: nudge-in .25s ease;
+}
+@keyframes nudge-in { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+.nudge-x { color: var(--ink-soft); font-size: 14px; padding: 4px 6px; }
+
 .offline-banner {
   position: fixed; top: 0; left: 0; right: 0; z-index: 3000;
   background: #b45309; color: #fff; text-align: center;

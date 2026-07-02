@@ -3269,6 +3269,7 @@
     else setTimeout(() => state.map.invalidateSize(), 60);
     startLocationWatch();
     maybeOnboardHomeArea();
+    setTimeout(maybeShowUsualTimeNudge, 1200); // after the map/feeds settle
     clearInterval(state.mePollTimer);
     let tick = 0;
     state.mePollTimer = setInterval(() => {
@@ -3278,6 +3279,44 @@
         api('/presence/ping', { method: 'POST' }).catch(() => {});
       }
     }, 12000);
+  }
+
+  function slotForNow(d = new Date()) {
+    const day = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][d.getDay()];
+    const h = d.getHours();
+    const part = h >= 5 && h < 12 ? 'am' : h < 17 ? 'pm' : h < 23 ? 'eve' : null;
+    return part ? `${day}-${part}` : null;
+  }
+
+  // "It's your usual time to play" — shown once per session when the current
+  // local time matches one of the player's availability slots.
+  async function maybeShowUsualTimeNudge() {
+    if (sessionStorage.getItem('pp_usual_nudge')) return;
+    const slots = (state.me && state.me.availability) || [];
+    const slot = slotForNow();
+    if (!slot || !slots.includes(slot)) return;
+    if (state.activeGame) return; // the live banner already owns that space
+    sessionStorage.setItem('pp_usual_nudge', '1');
+    let openGames = 0;
+    try {
+      const loc = areaLatLng();
+      const data = await api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60`);
+      openGames = data.items.filter((g) => !g.is_joined && g.spots_left > 0).length;
+    } catch { return; }
+    const el = document.createElement('div');
+    el.className = 'usual-nudge';
+    el.innerHTML = `
+      <span style="font-size:20px">🎾</span>
+      <div class="row-main">
+        <b>Your usual time to play!</b>
+        <div class="row-sub">${openGames ? `${openGames} open game${openGames === 1 ? '' : 's'} near you` : 'No games nearby yet — start one?'}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" data-goto="${openGames ? 'play' : 'new-game'}">${openGames ? 'See games' : 'Start one'}</button>
+      <button class="nudge-x" aria-label="Dismiss">✕</button>`;
+    $('#app').appendChild(el);
+    const dismiss = () => el.remove();
+    el.querySelector('.nudge-x').addEventListener('click', dismiss);
+    el.querySelector('[data-goto]').addEventListener('click', dismiss);
   }
 
   function setupConnectivity() {
