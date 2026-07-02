@@ -19,6 +19,7 @@
     map: null,
     markers: null,
     mapFilter: 'all',
+    listSort: 'distance',
     userDot: null,
     geoWatchId: null,
     lastAutoCheckAt: 0,
@@ -413,6 +414,14 @@
     });
     state.syncListToggle = syncListToggle;
 
+    document.querySelectorAll('#list-sort button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.listSort = btn.dataset.sort;
+        document.querySelectorAll('#list-sort button').forEach((b) => b.classList.toggle('active', b === btn));
+        fetchCourtsInView();
+      });
+    });
+
     let searchTimer;
     $('#court-search').addEventListener('input', (e) => {
       clearTimeout(searchTimer);
@@ -465,7 +474,7 @@
     if (!state.map) return;
     const b = state.map.getBounds();
     const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(4)).join(',');
-    let url = `/courts?bbox=${bbox}&limit=250`;
+    let url = `/courts?bbox=${bbox}&limit=250&sort=${state.listSort}`;
     if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
     if (state.mapFilter === 'lighted') url += '&lighted=1';
     if (state.mapFilter === 'indoor') url += '&indoor=1';
@@ -611,8 +620,25 @@
     `;
   }
 
+  // Client-side mirror of the server's sort param — keeps search results and
+  // already-fetched lists consistent with the selected chip.
+  function sortCourts(courts) {
+    const sorted = [...courts];
+    if (state.listSort === 'rating') {
+      sorted.sort((a, b) => (b.rating_avg ?? -1) - (a.rating_avg ?? -1)
+        || (b.rating_count || 0) - (a.rating_count || 0)
+        || (b.num_courts || 0) - (a.num_courts || 0));
+    } else if (state.listSort === 'courts') {
+      sorted.sort((a, b) => (b.num_courts || 0) - (a.num_courts || 0));
+    } else if (courts.some((c) => c.distance_miles != null)) {
+      sorted.sort((a, b) => (a.distance_miles ?? 1e9) - (b.distance_miles ?? 1e9));
+    }
+    return sorted;
+  }
+
   async function renderCourtList(courts, places = []) {
     const el = $('#court-list-items');
+    courts = sortCourts(courts);
     let html = '';
 
     if (places.length) {

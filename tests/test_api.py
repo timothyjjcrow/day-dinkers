@@ -548,6 +548,37 @@ def test_checkin_flow(client):
     assert res.get_json()['presence']['checked_in'] is False
 
 
+def test_court_list_sort_options(client):
+    a = register(client, 'a@example.com', 'Ana')
+    courts = client.get('/api/courts').get_json()['items']
+    larson = next(c for c in courts if c['name'] == 'Larson Park')      # 6 courts
+    adorni = next(c for c in courts if c['name'] == 'Adorni Center')    # 4 courts
+
+    # Default (and sort=courts): most courts first.
+    names = [c['name'] for c in client.get('/api/courts?sort=courts').get_json()['items']]
+    assert names.index('Larson Park') < names.index('Adorni Center')
+
+    # Only Adorni has a review → it outranks the unrated Larson on sort=rating.
+    client.post(f"/api/courts/{adorni['id']}/reviews", json={'rating': 5},
+                headers=auth_headers(a['token']))
+    names = [c['name'] for c in client.get('/api/courts?sort=rating').get_json()['items']]
+    assert names.index('Adorni Center') < names.index('Larson Park')
+
+    # sort=distance from Eureka: Adorni (Eureka) before Larson (Costa Mesa).
+    # bbox spans both cities (a bare lat/lng radius caps at 100mi and would
+    # drop Costa Mesa entirely).
+    res = client.get(
+        '/api/courts?sort=distance&bbox=-125,32,-117,42&lat=40.8&lng=-124.1'
+    ).get_json()['items']
+    names = [c['name'] for c in res]
+    assert names.index('Adorni Center') < names.index('Larson Park')
+    assert res[0]['distance_miles'] < res[-1]['distance_miles']
+
+    # Unknown sort value falls back to the default ordering, no error.
+    assert client.get('/api/courts?sort=bogus').status_code == 200
+    assert larson['id']  # fixture sanity
+
+
 def test_court_detail_player_info(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

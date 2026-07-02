@@ -228,7 +228,27 @@ def list_courts():
         )
 
     limit = min(request.args.get('limit', default=MAX_COURT_RESULTS, type=int), MAX_COURT_RESULTS)
-    courts = query.order_by(Court.num_courts.desc(), Court.id.asc()).limit(limit * 3).all()
+    sort = str(request.args.get('sort') or 'distance').strip().lower()
+    if sort == 'rating':
+        # Order by review average in SQL so the ranking survives the limit cut.
+        rating_sq = (
+            db.session.query(
+                CourtReview.court_id.label('court_id'),
+                func.avg(CourtReview.rating).label('rating_avg'),
+                func.count(CourtReview.id).label('rating_count'),
+            )
+            .group_by(CourtReview.court_id)
+            .subquery()
+        )
+        query = query.outerjoin(rating_sq, Court.id == rating_sq.c.court_id).order_by(
+            rating_sq.c.rating_avg.desc().nullslast(),
+            rating_sq.c.rating_count.desc().nullslast(),
+            Court.num_courts.desc(),
+            Court.id.asc(),
+        )
+    else:
+        query = query.order_by(Court.num_courts.desc(), Court.id.asc())
+    courts = query.limit(limit * 3).all()
 
     items = []
     for court in courts:
@@ -238,7 +258,7 @@ def list_courts():
                 haversine_miles(lat, lng, court.latitude, court.longitude), 1,
             )
         items.append(item)
-    if lat is not None and lng is not None:
+    if sort == 'distance' and lat is not None and lng is not None:
         items.sort(key=lambda c: c.get('distance_miles', 0))
     items = items[:limit]
 
