@@ -1327,7 +1327,9 @@
       <div class="card" style="${cardStyle};cursor:pointer" data-open-game="${game.id}">
         <div class="row" style="margin-bottom:8px">
           <div class="row-main">
-            <div class="row-title">${esc(fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}</div>
+            <div class="row-title">${esc(game.recurrence === 'weekly' && game.status === 'upcoming'
+              ? `${new Date(game.scheduled_at).toLocaleDateString([], { weekday: 'long' })}s · ${new Date(game.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+              : fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}</div>
             <div class="row-sub">${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</div>
           </div>
           <span class="chev">›</span>
@@ -1613,14 +1615,24 @@
         html += '<div class="section-label">Your upcoming games</div>';
         html += upcoming.map((g) => gameCardHtml(g)).join('');
       }
-      if (friendsGames.length) {
+      // Weekly open-play sessions get their own discovery section, whether a
+      // friend hosts them or they're just nearby. Your own stay under "upcoming".
+      const isWeekly = (g) => g.recurrence === 'weekly';
+      const weeklySessions = [...friendsGames.filter(isWeekly), ...nearbyOpen.filter(isWeekly)];
+      const friendsOneOff = friendsGames.filter((g) => !isWeekly(g));
+      const nearbyOneOff = nearbyOpen.filter((g) => !isWeekly(g));
+      if (friendsOneOff.length) {
         html += '<div class="section-label">🤝 Friends playing</div>';
-        html += friendsGames.map((g) => gameCardHtml(g)).join('');
+        html += friendsOneOff.map((g) => gameCardHtml(g)).join('');
       }
       html += '<div class="section-label">Nearby games</div>';
-      html += nearbyOpen.length
-        ? nearbyOpen.map((g) => gameCardHtml(g)).join('')
+      html += nearbyOneOff.length
+        ? nearbyOneOff.map((g) => gameCardHtml(g)).join('')
         : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button></div>';
+      if (weeklySessions.length) {
+        html += '<div class="section-label">🔁 Weekly open play</div>';
+        html += weeklySessions.map((g) => gameCardHtml(g)).join('');
+      }
 
       el.innerHTML = html;
       bindGameButtons(el, renderPlay);
