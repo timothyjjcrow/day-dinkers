@@ -569,32 +569,36 @@ MAX_PHOTO_BYTES = 500 * 1024
 MAX_COURT_PHOTOS = 12
 CONDITION_FRESH_HOURS = 3
 
-# --- Court weather (Open-Meteo, keyless) ---
+# --- Court weather (US National Weather Service — free, keyless, and unlike
+# Open-Meteo it serves datacenter IPs, which killed the first attempt on prod) ---
 _WEATHER_CACHE = {}
 _WEATHER_CACHE_TTL = 60 * 30  # forecasts don't move fast
 _WEATHER_MAX_CACHE = 500
+_NWS_HEADERS = {
+    'User-Agent': 'ThirdShot/1.0 (pickleball court finder; contact: support@thirdshot.app)',
+    'Accept': 'application/geo+json',
+}
 
 
-def _openmeteo_fetch(lat, lng):
-    """Fetch current weather + short-range rain odds. Isolated for test mocks."""
-    params = urllib.parse.urlencode({
-        'latitude': round(lat, 3),
-        'longitude': round(lng, 3),
-        'current': 'temperature_2m,weather_code',
-        'hourly': 'precipitation_probability',
-        'forecast_hours': 6,
-        'temperature_unit': 'fahrenheit',
-    })
+def _nws_fetch(lat, lng):
+    """Hourly forecast summary via api.weather.gov. Isolated for test mocks."""
     req = urllib.request.Request(
-        f'https://api.open-meteo.com/v1/forecast?{params}',
-        headers={
-            # Default Python-urllib UA gets rejected from datacenter IPs.
-            'User-Agent': 'ThirdShot/1.0 (pickleball court finder; contact: support@thirdshot.app)',
-            'Accept': 'application/json',
-        },
+        f'https://api.weather.gov/points/{lat:.3f},{lng:.3f}', headers=_NWS_HEADERS,
     )
-    with urllib.request.urlopen(req, timeout=6) as resp:
-        return json.loads(resp.read().decode('utf-8'))
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        hourly_url = json.loads(resp.read())['properties']['forecastHourly']
+    req = urllib.request.Request(hourly_url, headers=_NWS_HEADERS)
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        periods = json.loads(resp.read())['properties']['periods'][:6]
+    now = periods[0]
+    rain_odds = max(
+        (p.get('probabilityOfPrecipitation') or {}).get('value') or 0 for p in periods
+    )
+    return {
+        'temp_f': round(float(now['temperature'])),
+        'short': str(now.get('shortForecast') or '')[:60],
+        'rain_soon': rain_odds >= 40,
+    }
 
 
 @courts_bp.get('/courts/<int:court_id>/weather')
@@ -607,13 +611,7 @@ def court_weather(court_id):
     if cached and cached['expires_at'] > time.time():
         return jsonify(cached['data'])
     try:
-        raw = _openmeteo_fetch(court.latitude, court.longitude)
-        probs = (raw.get('hourly') or {}).get('precipitation_probability') or []
-        data = {
-            'temp_f': round(float(raw['current']['temperature_2m'])),
-            'weather_code': int(raw['current']['weather_code']),
-            'rain_soon': max(probs[:6], default=0) >= 40,
-        }
+        data = _nws_fetch(court.latitude, court.longitude)
     except Exception:
         current_app.logger.warning('Weather lookup failed for court %s', court_id, exc_info=True)
         return jsonify({'error': 'weather_unavailable'})

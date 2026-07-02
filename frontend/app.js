@@ -943,13 +943,15 @@
     });
   }
 
-  function weatherEmoji(code) {
-    if (code === 0) return '☀️';
-    if (code <= 3) return '⛅';
-    if (code <= 48) return '🌫';
-    if (code <= 67 || (code >= 80 && code <= 82)) return '🌧';
-    if (code <= 77 || code === 85 || code === 86) return '❄️';
-    return '⛈';
+  function weatherEmoji(shortForecast) {
+    const t = (shortForecast || '').toLowerCase();
+    if (/thunder|storm/.test(t)) return '⛈';
+    if (/snow|sleet|ice|flurr/.test(t)) return '❄️';
+    if (/rain|shower|drizzle/.test(t)) return '🌧';
+    if (/fog|haze|smoke/.test(t)) return '🌫';
+    if (/cloud|overcast/.test(t)) return '⛅';
+    if (/clear|sunny/.test(t)) return '☀️';
+    return '🌤';
   }
 
   const COURT_CONDITION_LABELS = {
@@ -1170,7 +1172,7 @@
       const el = modal.querySelector('#cd-weather');
       if (!el || w.error || w.temp_f == null) return;
       el.innerHTML = `<div class="row-sub" style="text-align:center;margin-top:10px">
-        ${weatherEmoji(w.weather_code)} ${w.temp_f}°F at the court · ${w.rain_soon ? '🌧 rain likely in the next few hours' : 'dry for the next few hours'}
+        ${weatherEmoji(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''} · ${w.rain_soon ? '🌧 rain likely soon' : 'dry for the next few hours'}
       </div>`;
     }).catch(() => { /* forecast is a nicety */ });
 
