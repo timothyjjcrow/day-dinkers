@@ -690,6 +690,15 @@ def test_court_edit_suggestions_consensus(client):
     assert r2.get_json()['applied_fields'] == []  # still one distinct voter
     assert client.get(f'/api/courts/{court_id}').get_json()['fees'] != '$5 drop-in'
 
+    # Hours are suggestable too, with the same two-voter consensus.
+    assert client.get(f'/api/courts/{court_id}').get_json()['hours'] == ''
+    client.post(f'/api/courts/{court_id}/suggest', json={'hours': 'Daily 6am–10pm'},
+                headers=auth_headers(b['token']))
+    res = client.post(f'/api/courts/{court_id}/suggest', json={'hours': 'Daily 6am–10pm'},
+                      headers=auth_headers(c['token']))
+    assert res.get_json()['applied_fields'] == ['hours']
+    assert client.get(f'/api/courts/{court_id}').get_json()['hours'] == 'Daily 6am–10pm'
+
 
 def test_court_photo_upload_and_serve(client):
     import base64 as b64

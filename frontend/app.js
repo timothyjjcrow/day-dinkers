@@ -788,6 +788,10 @@
         <label>Fees</label>
         <input type="text" id="se-fees" maxlength="200" placeholder="e.g. Free, $5 drop-in" value="${esc(court.fees || '')}" />
       </div>
+      <div class="form-field">
+        <label>Hours</label>
+        <input type="text" id="se-hours" maxlength="120" placeholder="e.g. Daily 6am–10pm, Dawn to dusk" value="${esc(court.hours || '')}" />
+      </div>
       <button class="btn btn-primary btn-block" id="se-submit">Submit suggestion</button>
     `);
     modal.querySelector('#se-submit').addEventListener('click', async () => {
@@ -800,6 +804,7 @@
         has_water: modal.querySelector('#se-water').checked,
         surface_type: modal.querySelector('#se-surface').value.trim(),
         fees: modal.querySelector('#se-fees').value.trim(),
+        hours: modal.querySelector('#se-hours').value.trim(),
       };
       try {
         const res = await api(`/courts/${court.id}/suggest`, { method: 'POST', body: JSON.stringify(body) });
@@ -1129,6 +1134,7 @@
     if (court.nets_provided) tags.push('🥅 Nets provided');
     if (court.has_restrooms) tags.push('🚻 Restrooms');
     if (court.has_water) tags.push('🚰 Water');
+    if (court.hours) tags.push(`🕐 ${esc(court.hours)}`);
     if (court.fees) tags.push(`<span class="tag warn" style="margin:0">💵 ${esc(court.fees)}</span>`);
     if (court.my_record) {
       const r = court.my_record;

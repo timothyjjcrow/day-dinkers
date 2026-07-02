@@ -187,6 +187,10 @@ def _upgrade_schema(app):
             court_cols = {c['name'] for c in inspector.get_columns('court')}
             if 'photo_data' not in court_cols:
                 statements.append('ALTER TABLE court ADD COLUMN photo_data TEXT')
+            if 'hours' not in court_cols:
+                statements.append(
+                    "ALTER TABLE court ADD COLUMN hours VARCHAR(255) NOT NULL DEFAULT ''"
+                )
 
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}

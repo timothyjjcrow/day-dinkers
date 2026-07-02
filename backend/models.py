@@ -129,6 +129,8 @@ class Court(TimestampMixin, db.Model):
     court_type = db.Column(db.String(40), nullable=False, default='')
     open_play_schedule = db.Column(db.Text, nullable=False, default='')
     fees = db.Column(db.String(255), nullable=False, default='')
+    # Free-text opening hours, community-maintained via edit suggestions.
+    hours = db.Column(db.String(255), nullable=False, default='')
     phone = db.Column(db.String(40), nullable=False, default='')
     website = db.Column(db.String(500), nullable=False, default='')
     photo_url = db.Column(db.String(500), nullable=False, default='')
@@ -167,6 +169,7 @@ class Court(TimestampMixin, db.Model):
             'court_type': self.court_type,
             'open_play_schedule': self.open_play_schedule,
             'fees': self.fees,
+            'hours': self.hours,
             'phone': self.phone,
             'website': self.website,
             'has_restrooms': bool(self.has_restrooms),

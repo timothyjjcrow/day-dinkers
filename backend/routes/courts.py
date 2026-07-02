@@ -533,6 +533,7 @@ SUGGESTABLE_FIELDS = {
     'has_water': _norm_bool,
     'surface_type': _norm_text(60),
     'fees': _norm_text(200),
+    'hours': _norm_text(120),
 }
 SUGGESTION_CONSENSUS = 2
 
