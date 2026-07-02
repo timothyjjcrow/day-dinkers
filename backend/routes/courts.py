@@ -587,7 +587,11 @@ def _openmeteo_fetch(lat, lng):
     })
     req = urllib.request.Request(
         f'https://api.open-meteo.com/v1/forecast?{params}',
-        headers={'Accept': 'application/json'},
+        headers={
+            # Default Python-urllib UA gets rejected from datacenter IPs.
+            'User-Agent': 'ThirdShot/1.0 (pickleball court finder; contact: support@thirdshot.app)',
+            'Accept': 'application/json',
+        },
     )
     with urllib.request.urlopen(req, timeout=6) as resp:
         return json.loads(resp.read().decode('utf-8'))
