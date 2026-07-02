@@ -2875,10 +2875,31 @@
       const history = await api('/games/history');
       if (history.items.length) {
         const historyEl = el.querySelector('#pf-history');
-        historyEl.innerHTML =
-          '<div class="section-label">Match history</div>' +
-          history.items.map(resultRowHtml).join('');
-        bindGameButtons(historyEl, renderProfile);
+        const filters = [
+          ['all', 'All', () => true],
+          ['wins', '🏆 Wins', (g) => g.you_won === true],
+          ['losses', 'Losses', (g) => g.you_won === false],
+          ['ranked', 'Ranked', (g) => g.game_type === 'ranked'],
+          ['casual', 'Casual', (g) => g.game_type === 'casual'],
+        ];
+        let active = 'all';
+        const render = () => {
+          const test = filters.find(([k]) => k === active)[2];
+          const rows = history.items.filter(test);
+          historyEl.innerHTML = `
+            <div class="section-label">Match history</div>
+            <div class="quick-times" style="margin:0 0 10px">
+              ${filters.map(([k, label]) => `<button type="button" data-hf="${k}" class="${k === active ? 'active' : ''}">${label}</button>`).join('')}
+            </div>
+            ${rows.length ? rows.map(resultRowHtml).join('')
+              : '<div class="empty-state" style="padding:14px">No games match this filter yet.</div>'}`;
+          historyEl.querySelectorAll('[data-hf]').forEach((b) => b.addEventListener('click', () => {
+            active = b.dataset.hf;
+            render();
+          }));
+          bindGameButtons(historyEl, renderProfile);
+        };
+        render();
       }
     } catch { /* ignore */ }
   }
