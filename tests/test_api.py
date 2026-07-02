@@ -1578,6 +1578,53 @@ def test_game_near_future_utc(client):
     assert game['status'] == 'upcoming'
 
 
+def test_game_mvp_votes(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=1)
+    for u in (b, c):
+        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(u['token']))
+
+    # Voting before the game finishes is rejected.
+    assert client.post(f"/api/games/{game['id']}/mvp", json={'user_id': b['user']['id']},
+                       headers=auth_headers(a['token'])).status_code == 400
+
+    res = client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id'], c['user']['id']],
+        'score_team1': 11, 'score_team2': 7,
+    }, headers=auth_headers(a['token']))
+    assert res.status_code == 200
+
+    # Guards: outsiders 403, self-votes and non-players 400.
+    outsider = register(client, 'd@example.com', 'Dee')
+    assert client.post(f"/api/games/{game['id']}/mvp", json={'user_id': a['user']['id']},
+                       headers=auth_headers(outsider['token'])).status_code == 403
+    assert client.post(f"/api/games/{game['id']}/mvp", json={'user_id': a['user']['id']},
+                       headers=auth_headers(a['token'])).status_code == 400
+    assert client.post(f"/api/games/{game['id']}/mvp", json={'user_id': outsider['user']['id']},
+                       headers=auth_headers(a['token'])).status_code == 400
+
+    # Ben and Cam both vote Ana → she's MVP with 2 votes; Ana's vote for Ben recorded.
+    client.post(f"/api/games/{game['id']}/mvp", json={'user_id': a['user']['id']},
+                headers=auth_headers(b['token']))
+    res = client.post(f"/api/games/{game['id']}/mvp", json={'user_id': a['user']['id']},
+                      headers=auth_headers(c['token']))
+    data = res.get_json()
+    assert data['mvp'] == {'user_id': a['user']['id'], 'display_name': 'Ana', 'votes': 2}
+    res = client.post(f"/api/games/{game['id']}/mvp", json={'user_id': b['user']['id']},
+                      headers=auth_headers(a['token']))
+    assert res.get_json()['my_mvp_vote'] == b['user']['id']
+    assert res.get_json()['mvp']['display_name'] == 'Ana'
+
+    # Re-voting replaces, not stacks: Cam switches to Ben → 1-1-1 tie resolves stably.
+    res = client.post(f"/api/games/{game['id']}/mvp", json={'user_id': b['user']['id']},
+                      headers=auth_headers(c['token']))
+    assert res.get_json()['mvp']['votes'] == 2  # Ben now has Ana's + Cam's votes
+    assert res.get_json()['mvp']['display_name'] == 'Ben'
+
+
 def test_game_waitlist(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

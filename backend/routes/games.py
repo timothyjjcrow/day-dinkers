@@ -12,6 +12,7 @@ from backend.models import (
     GAME_VISIBILITIES,
     Game,
     GameInvite,
+    GameMvpVote,
     GamePlayer,
     GameWaitlist,
     User,
@@ -779,6 +780,35 @@ def recent_results():
         if len(items) >= 30:
             break
     return jsonify({'items': items})
+
+
+@games_bp.post('/games/<int:game_id>/mvp')
+@rate_limit(30, 600)
+@login_required
+def vote_mvp(game_id):
+    """Vote a fellow player MVP of a completed game; re-voting changes it."""
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.status != 'completed':
+        return jsonify({'error': 'game_not_finished'}), 400
+    player_ids = {p.user_id for p in game.players}
+    if g.current_user.id not in player_ids:
+        return jsonify({'error': 'players_only'}), 403
+    votee_id = int((request.get_json(silent=True) or {}).get('user_id') or 0)
+    if votee_id not in player_ids:
+        return jsonify({'error': 'votee_not_in_game'}), 400
+    if votee_id == g.current_user.id:
+        return jsonify({'error': 'no_self_votes'}), 400
+    vote = next((v for v in game.mvp_votes if v.voter_id == g.current_user.id), None)
+    if vote:
+        vote.votee_id = votee_id
+    else:
+        db.session.add(GameMvpVote(
+            game=game, voter_id=g.current_user.id, votee_id=votee_id,
+        ))
+    db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id))
 
 
 @games_bp.get('/leaderboard')

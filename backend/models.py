@@ -316,6 +316,10 @@ class Game(TimestampMixin, db.Model):
         'GameWaitlist', back_populates='game', lazy='selectin',
         order_by='GameWaitlist.id', cascade='all, delete-orphan',
     )
+    mvp_votes = db.relationship(
+        'GameMvpVote', back_populates='game', lazy='selectin',
+        cascade='all, delete-orphan',
+    )
 
     def invited_user_ids(self):
         return {inv.user_id for inv in self.invites}
@@ -383,6 +387,25 @@ class Game(TimestampMixin, db.Model):
                 (i + 1 for i, w in enumerate(self.waitlist) if w.user_id == current_user_id),
                 None,
             ),
+            'my_mvp_vote': next(
+                (v.votee_id for v in self.mvp_votes if v.voter_id == current_user_id),
+                None,
+            ),
+            'mvp': self._mvp_summary(),
+        }
+
+    def _mvp_summary(self):
+        if not self.mvp_votes:
+            return None
+        counts = {}
+        for vote in self.mvp_votes:
+            counts[vote.votee_id] = counts.get(vote.votee_id, 0) + 1
+        top_id = max(sorted(counts), key=lambda uid: counts[uid])
+        top = next((p.user for p in self.players if p.user_id == top_id), None)
+        return {
+            'user_id': top_id,
+            'display_name': top.display_name if top else 'Player',
+            'votes': counts[top_id],
         }
 
 
@@ -407,6 +430,22 @@ class GamePlayer(TimestampMixin, db.Model):
         data['team'] = self.team
         data['rating_delta'] = self.rating_delta
         return data
+
+
+class GameMvpVote(TimestampMixin, db.Model):
+    """One MVP vote per player per completed game."""
+    __table_args__ = (
+        db.UniqueConstraint('game_id', 'voter_id', name='uq_game_mvp_voter'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False, index=True)
+    voter_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    votee_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+
+    game = db.relationship('Game', back_populates='mvp_votes')
+    voter = db.relationship('User', foreign_keys=[voter_id])
+    votee = db.relationship('User', foreign_keys=[votee_id])
 
 
 class GameWaitlist(TimestampMixin, db.Model):

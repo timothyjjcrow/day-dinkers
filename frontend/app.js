@@ -3251,7 +3251,18 @@
         <button class="btn btn-primary btn-block" id="gs-confirm" style="padding:16px">✓ Confirm ${game.score_team1}–${game.score_team2}</button>
         <button class="btn btn-danger btn-block" id="gs-dispute" style="margin-top:10px">✕ That score is wrong</button>`;
     } else if (game.status === 'completed' && game.is_joined) {
-      actions = `<button class="btn btn-secondary btn-block" id="gs-rematch">↺ Rematch at ${esc(court.name || 'this court')}</button>`;
+      const mvpBanner = game.mvp ? `
+        <div class="card" style="text-align:center;padding:10px 14px;margin-bottom:10px">
+          <b>🌟 MVP: ${esc(game.mvp.display_name)}</b>
+          <div class="row-sub">${game.mvp.votes} vote${game.mvp.votes === 1 ? '' : 's'} from the game</div>
+        </div>` : '';
+      const votables = game.players.filter((p) => p.user_id !== (state.me && state.me.id));
+      const voteChips = votables.length ? `
+        <div class="row-sub" style="margin:0 0 6px 2px">${game.my_mvp_vote ? 'Your MVP vote:' : 'Who carried the game? Vote MVP:'}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+          ${votables.map((p) => `<button class="btn btn-sm ${game.my_mvp_vote === p.user_id ? 'btn-primary' : 'btn-secondary'}" data-mvp="${p.user_id}">🌟 ${esc(p.display_name.split(' ')[0])}</button>`).join('')}
+        </div>` : '';
+      actions = `${mvpBanner}${voteChips}<button class="btn btn-secondary btn-block" id="gs-rematch">↺ Rematch at ${esc(court.name || 'this court')}</button>`;
     }
 
     return `
@@ -3308,6 +3319,12 @@
       box.querySelectorAll('.modal-close').forEach((b) => { b.onclick = () => { clearHash(); closeModal(modal); }; });
       box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
+      box.querySelectorAll('[data-mvp]').forEach((b) => b.addEventListener('click', async () => {
+        try {
+          render(await api(`/games/${gameId}/mvp`, { method: 'POST', body: JSON.stringify({ user_id: Number(b.dataset.mvp) }) }));
+          toast('MVP vote in 🌟');
+        } catch (e) { toast(e.message); }
+      }));
       box.querySelector('#gs-waitlist')?.addEventListener('click', async () => {
         try {
           await api(`/games/${gameId}/waitlist`, { method: 'POST' });
