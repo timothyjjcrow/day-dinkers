@@ -345,6 +345,31 @@
     if (tab === 'profile') renderProfile();
   }
 
+  // Empty-state CTA buttons: any element with data-goto jumps to the right
+  // spot in the app (works inside modals too — closes them first).
+  function setupEmptyStateCtas() {
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-goto]');
+      if (!btn) return;
+      document.querySelectorAll('.modal-backdrop').forEach((m) => closeModal(m));
+      const target = btn.dataset.goto;
+      if (target === 'new-game') {
+        switchTab('play');
+        openNewGameModal();
+      } else if (target === 'courts-list') {
+        switchTab('courts');
+        $('#court-list').classList.remove('hidden');
+        if (state.syncListToggle) state.syncListToggle();
+      } else if (target === 'chat-friends') {
+        state.chatSeg = 'friends';
+        document.querySelectorAll('#chat-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === 'friends'));
+        switchTab('chat');
+      } else {
+        switchTab(target);
+      }
+    });
+  }
+
   // ---------- Map / Courts ----------
   function setupMap() {
     const saved = JSON.parse(localStorage.getItem('pp_mapview') || 'null');
@@ -884,7 +909,7 @@
 
     const gamesHtml = court.games.length
       ? court.games.map((g) => gameCardHtml(g, { compact: true })).join('')
-      : '<div class="empty-state" style="padding:14px">No upcoming games here yet.</div>';
+      : '<div class="empty-state" style="padding:14px">No upcoming games here yet.<br><button class="btn btn-secondary btn-sm" id="cd-schedule-empty" style="margin-top:8px">📅 Schedule one</button></div>';
 
     const checkedIn = court.is_checked_in;
     let isFavorite = court.is_favorite;
@@ -1024,6 +1049,10 @@
       openNewGameModal(court, 'casual', true);
     });
     modal.querySelector('#cd-schedule').addEventListener('click', () => {
+      closeModal(modal);
+      openNewGameModal(court, 'casual');
+    });
+    modal.querySelector('#cd-schedule-empty')?.addEventListener('click', () => {
       closeModal(modal);
       openNewGameModal(court, 'casual');
     });
@@ -1468,7 +1497,7 @@
       html += '<div class="section-label">Nearby games</div>';
       html += nearbyOpen.length
         ? nearbyOpen.map((g) => gameCardHtml(g)).join('')
-        : '<div class="empty-state" style="padding:18px">No open games around you right now.<br>Tap + to start one!</div>';
+        : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button></div>';
 
       el.innerHTML = html;
       bindGameButtons(el, renderPlay);
@@ -1960,7 +1989,7 @@
                 </div>
                 ${c.unread ? `<span class="badge" style="position:static">${c.unread}</span>` : `<span class="row-sub">${fmtTimeShort(c.last_message.created_at)}</span>`}
               </div>`).join('')
-          : '<div class="empty-state"><span class="big">💬</span>No chats yet.<br>Add some friends and say hi!</div>';
+          : '<div class="empty-state"><span class="big">💬</span>No chats yet.<br>Add some friends and say hi!<br><button class="btn btn-primary" data-goto="chat-friends" style="margin-top:10px">🤝 Find friends</button></div>';
         el.querySelectorAll('[data-thread]').forEach((row) => row.addEventListener('click', () => openThread(Number(row.dataset.thread))));
       } else if (state.chatSeg === 'nearby') {
         await renderNearbyPlayers(el);
@@ -2010,7 +2039,7 @@
               ${action}
             </div>`;
         }).join('')
-      : '<div class="empty-state"><span class="big">📍</span>No players near you yet.<br>Check in at a court so others can find you!</div>';
+      : '<div class="empty-state"><span class="big">📍</span>No players near you yet.<br>Check in at a court so others can find you!<br><button class="btn btn-primary" data-goto="courts" style="margin-top:10px">🗺 Browse courts</button></div>';
 
     el.innerHTML = html;
     el.querySelector('#nearby-skill').addEventListener('click', (e) => {
@@ -2480,7 +2509,7 @@
               </div>
               <span class="chev">›</span>
             </div>`).join('')
-        : '<div class="empty-state" style="padding:16px">No saved courts yet — tap ☆ on a court to save it.</div>');
+        : '<div class="empty-state" style="padding:16px">No saved courts yet — tap ☆ on a court to save it.<br><button class="btn btn-secondary btn-sm" data-goto="courts-list" style="margin-top:10px">🗺 Browse courts</button></div>');
       courtsEl.querySelectorAll('[data-pfcourt]').forEach((row) =>
         row.addEventListener('click', () => openCourtDetail(Number(row.dataset.pfcourt))));
     } catch { /* ignore */ }
@@ -2837,7 +2866,7 @@
       ${modalHead('Activity')}
       ${enableBtn}
       ${data.items.length ? listHtml
-        : '<div class="empty-state"><span class="big">🔔</span>Nothing yet — go play some pickleball!</div>'}
+        : '<div class="empty-state"><span class="big">🔔</span>Nothing yet — go play some pickleball!<br><button class="btn btn-primary" data-goto="play" style="margin-top:10px">🎾 Find a game</button></div>'}
     `);
     modal.querySelector('#act-enable')?.addEventListener('click', async (e) => {
       const result = await Notification.requestPermission();
@@ -3005,6 +3034,7 @@
     setupTabs();
     setupPlay();
     setupChat();
+    setupEmptyStateCtas();
     if (state.token) {
       try {
         applyMe(await api('/me'));
