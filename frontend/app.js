@@ -549,6 +549,7 @@
       const data = await api(url);
       let items = data.items;
       if (state.mapFilter === 'active') items = items.filter((c) => c.players_here > 0);
+      if (state.mapFilter === 'games') items = items.filter((c) => c.upcoming_games > 0);
       state.courtsInView = items;
       drawMarkers(items);
       renderCourtList(items);
