@@ -14,7 +14,8 @@ from sqlalchemy import func
 from backend.app import db
 from backend.models import (
     COURT_CONDITIONS, CheckIn, Court, CourtCondition, CourtEditSuggestion,
-    CourtPhoto, CourtReview, FavoriteCourt, Game, GamePlayer, iso, utcnow,
+    CourtPhoto, CourtReview, FavoriteCourt, Game, GamePlayer, Notification,
+    iso, notify, utcnow,
 )
 from backend.routes.auth import active_checkin_for, login_required, optional_current_user, presence_payload
 from backend.routes.social import friend_ids
@@ -837,6 +838,26 @@ def list_favorites():
     return jsonify({'items': items})
 
 
+def _notify_friends_looking(court):
+    """Tell friends someone wants a game at a court — at most once per 3h per friend."""
+    cutoff = utcnow() - timedelta(hours=3)
+    for fid in friend_ids(g.current_user.id):
+        already_pinged = Notification.query.filter(
+            Notification.user_id == fid,
+            Notification.kind == 'friend_checkin',
+            Notification.related_user_id == g.current_user.id,
+            Notification.created_at >= cutoff,
+        ).first()
+        if already_pinged:
+            continue
+        notify(
+            fid,
+            'friend_checkin',
+            f'{g.current_user.display_name} is at {court.name} looking for a game',
+            related_user_id=g.current_user.id,
+        )
+
+
 @courts_bp.post('/courts/<int:court_id>/checkin')
 @rate_limit(40, 60)
 @login_required
@@ -849,6 +870,10 @@ def check_in(court_id):
     looking = bool(payload.get('looking_for_game'))
 
     existing = active_checkin_for(g.current_user.id)
+    # Only a fresh "wants a game" (not a re-ping of an existing one) pings friends.
+    started_looking = looking and not (
+        existing and existing.court_id == court.id and existing.looking_for_game
+    )
     if existing and existing.court_id == court.id:
         existing.looking_for_game = looking
         existing.last_presence_ping_at = utcnow()
@@ -860,6 +885,8 @@ def check_in(court_id):
             court_id=court.id,
             looking_for_game=looking,
         ))
+    if started_looking:
+        _notify_friends_looking(court)
 
     # Remember where the player is for "players near you" discovery.
     if court.latitude is not None and court.longitude is not None:

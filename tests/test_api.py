@@ -1119,6 +1119,47 @@ def test_friend_request_flow(client):
     assert res.get_json()['deleted'] is True
 
 
+def test_friend_checkin_notification(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Ana befriends Ben (Cam stays a stranger).
+    client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah)
+    fid = client.get('/api/friends', headers=bh).get_json()['incoming'][0]['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=bh)
+
+    def ben_notifs():
+        items = client.get('/api/notifications', headers=bh).get_json()['items']
+        return [n for n in items if n['kind'] == 'friend_checkin']
+
+    # Plain check-in (not looking for a game): silent.
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=ah)
+    assert ben_notifs() == []
+
+    # Flipping to "looking for a game" pings the friend, tagged for profile tap-through.
+    client.post(f'/api/courts/{court_id}/checkin', json={'looking_for_game': True}, headers=ah)
+    notifs = ben_notifs()
+    assert len(notifs) == 1
+    assert 'Ana' in notifs[0]['title'] and 'Larson Park' in notifs[0]['title']
+    assert notifs[0]['related_user_id'] == a['user']['id']
+
+    # Re-pinging while still looking doesn't spam.
+    client.post(f'/api/courts/{court_id}/checkin', json={'looking_for_game': True}, headers=ah)
+    assert len(ben_notifs()) == 1
+
+    # Even after checkout + fresh looking check-in, the 3h dedupe window holds.
+    client.post('/api/checkout', headers=ah)
+    client.post(f'/api/courts/{court_id}/checkin', json={'looking_for_game': True}, headers=ah)
+    assert len(ben_notifs()) == 1
+
+    # Cam looking for a game doesn't notify Ben (not friends).
+    client.post(f'/api/courts/{court_id}/checkin', json={'looking_for_game': True}, headers=ch)
+    assert len(ben_notifs()) == 1
+
+
 def test_friends_digest(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
