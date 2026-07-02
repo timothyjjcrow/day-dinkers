@@ -208,6 +208,7 @@
         applyMe(data);
         showMain();
         openDeepLink();
+        handleInviteRef();
       } catch (err) {
         errEl.textContent = err.message;
         errEl.classList.remove('hidden');
@@ -2746,6 +2747,14 @@
           ${localStorage.getItem('pp_auto_checkin') === 'off' ? 'Off' : 'On'}
         </button>
       </div>
+      <div class="card row" style="margin-bottom:10px">
+        <span style="font-size:20px">💌</span>
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">Invite friends</div>
+          <div class="row-sub">Share your link — they'll land right on your profile</div>
+        </div>
+        <button class="btn btn-primary btn-sm" id="pf-invite">Share</button>
+      </div>
       ${!window.matchMedia('(display-mode: standalone)').matches ? `
         <div class="card row" style="margin-bottom:10px">
           <span style="font-size:20px">📱</span>
@@ -2762,6 +2771,18 @@
       <div id="pf-history"></div>
     `;
 
+    el.querySelector('#pf-invite').addEventListener('click', async () => {
+      const url = `${location.origin}/#invite/${me.id}`;
+      const text = `Play pickleball with me on Third Shot! 🎾`;
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: 'Third Shot', text, url });
+        } else {
+          await navigator.clipboard.writeText(`${text} ${url}`);
+          toast('Invite link copied 📋');
+        }
+      } catch { /* user cancelled share */ }
+    });
     el.querySelector('#pf-auto').addEventListener('click', (e) => {
       const off = localStorage.getItem('pp_auto_checkin') === 'off';
       localStorage.setItem('pp_auto_checkin', off ? 'on' : 'off');
@@ -3510,12 +3531,34 @@
     const courtMatch = location.hash.match(/^#court\/(\d+)$/);
     if (courtMatch) { openCourtDetail(Number(courtMatch[1])); return; }
     const gameMatch = location.hash.match(/^#game\/(\d+)$/);
-    if (gameMatch) openGameScreen(Number(gameMatch[1]));
+    if (gameMatch) { openGameScreen(Number(gameMatch[1])); return; }
+    const inviteMatch = location.hash.match(/^#invite\/(\d+)$/);
+    if (inviteMatch) {
+      try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+      openUserProfile(Number(inviteMatch[1]));
+    }
+  }
+
+  // A friend's invite link, remembered through the signup flow.
+  async function handleInviteRef() {
+    const ref = Number(localStorage.getItem('pp_invite_ref') || 0);
+    localStorage.removeItem('pp_invite_ref');
+    if (!ref || ref === state.me.id) return;
+    try {
+      await api('/friends/request', { method: 'POST', body: JSON.stringify({ user_id: ref }) });
+      toast('Friend request sent to the player who invited you 🤝');
+    } catch { /* already friends / requested — fine */ }
   }
 
   async function boot() {
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+    // Remember a friend's invite link across the signup flow.
+    const inviteRef = location.hash.match(/^#invite\/(\d+)$/);
+    if (inviteRef && !state.token) {
+      localStorage.setItem('pp_invite_ref', inviteRef[1]);
+      try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
     }
     setupAuth();
     setupTabs();
