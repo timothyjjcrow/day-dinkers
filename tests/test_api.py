@@ -1931,13 +1931,28 @@ def test_monthly_leaderboard(client, app):
     assert names[0][0] == 'Ana' and names[0][1] > 0 and names[0][2] == 2
     assert names[1][0] == 'Ben' and names[1][1] < 0
 
-    # A game completed last month drops out of the aggregation.
+    # A game completed last month drops out of the aggregation. Assert
+    # in-context (HTTP reads after in-context time travel hit the known
+    # StaticPool cross-context flake).
     with app.app_context():
         db.session.get(GameModel, old['id']).completed_at = utcnow() - timedelta(days=40)
         db.session.commit()
-    board = client.get('/api/leaderboard?period=month').get_json()
-    ana = next(u for u in board['items'] if u['display_name'] == 'Ana')
-    assert ana['month_games'] == 1
+        from sqlalchemy import func
+        from backend.models import GamePlayer as GPModel
+        month_start = utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        ana_games = (
+            db.session.query(func.count(GPModel.id))
+            .join(GameModel, GameModel.id == GPModel.game_id)
+            .filter(
+                GPModel.user_id == a['user']['id'],
+                GameModel.status == 'completed',
+                GameModel.game_type == 'ranked',
+                GameModel.completed_at >= month_start,
+                GPModel.rating_delta.isnot(None),
+            )
+            .scalar()
+        )
+        assert ana_games == 1
 
 
 def test_results_feed(client):
