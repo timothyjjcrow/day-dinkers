@@ -1100,7 +1100,8 @@ def test_my_stats(client):
     # Fresh player: all zeros.
     stats = client.get('/api/me/stats', headers=ah).get_json()
     assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0,
-                     'top_court': None, 'best_partner': None, 'top_rival': None, 'form': []}
+                     'top_court': None, 'best_partner': None, 'top_rival': None,
+                     'form': [], 'badges': []}
 
     def play(court_id):
         g = make_game(client, a['token'], court_id, hours_ahead=1)
@@ -1142,6 +1143,8 @@ def test_my_stats(client):
     assert stats['best_partner']['wins'] == 1
     assert stats['top_rival']['games'] == 4  # Ben again, now 4 meetings
     assert stats['form'] == ['W', 'W', 'W', 'W']  # all four wins, newest first
+    # Winning earns the first badge; the rest need more history.
+    assert [b['id'] for b in stats['badges']] == ['first_win']
 
     # Auth required.
     assert client.get('/api/me/stats').status_code == 401

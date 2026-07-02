@@ -3039,6 +3039,12 @@
             `<div class="row-sub" style="text-align:center;margin-top:8px">${extras.join('<br>')}</div>`);
         }
         el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', formStripHtml(stats.form));
+        if ((stats.badges || []).length) {
+          el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', `
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
+              ${stats.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}
+            </div>`);
+        }
         el.querySelector('[data-pfcourt-top]')?.addEventListener('click', (e) => openCourtDetail(Number(e.currentTarget.dataset.pfcourtTop)));
         bindUserButtons(el.querySelector('#pf-play-stats'));
       }
