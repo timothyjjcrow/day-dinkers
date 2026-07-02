@@ -883,7 +883,10 @@
         </div>
         <div class="cd-hero-title">
           <h2>${esc(court.name)}</h2>
-          <div>${esc([court.address, court.city].filter(Boolean).join(', '))}</div>
+          <div id="cd-address" role="button" title="Copy address" style="cursor:pointer">
+            ${esc([court.address, court.city].filter(Boolean).join(', '))}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;opacity:.85"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          </div>
         </div>
       </div>
       <div class="cd-scroll">
@@ -937,6 +940,26 @@
         try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
       }
     });
+    modal.querySelector('#cd-address').addEventListener('click', async () => {
+      const addressText = [court.address, court.city, court.state, court.zip_code]
+        .filter(Boolean).join(', ');
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(addressText);
+        } else {
+          // http:// dev / older webviews: clipboard API is unavailable
+          const ta = document.createElement('textarea');
+          ta.value = addressText;
+          ta.style.cssText = 'position:fixed;opacity:0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        toast('Address copied 📋');
+      } catch { toast('Could not copy address'); }
+    });
+
     modal.querySelector('#cd-share').addEventListener('click', async () => {
       const url = `${location.origin}/#court/${court.id}`;
       const text = `${court.name} — pickleball at ${court.city || 'this court'}`;
