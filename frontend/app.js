@@ -930,6 +930,31 @@
     });
   }
 
+  const COURT_CONDITION_LABELS = {
+    good: ['🟢', 'All good — come play!'],
+    busy: ['🚶', 'Busy — expect a wait'],
+    wet: ['💦', 'Wet courts'],
+    nets_down: ['🚧', 'Nets down / missing'],
+    closed: ['⛔', 'Closed right now'],
+  };
+
+  function openConditionSheet(court, onDone) {
+    const modal = openModal(`
+      ${modalHead('📣 Report conditions')}
+      <p class="row-sub" style="margin-bottom:12px">How's ${esc(court.name)} right now? Players nearby will see your report for the next few hours.</p>
+      ${Object.entries(COURT_CONDITION_LABELS).map(([key, [emoji, label]]) => `
+        <button class="btn btn-secondary btn-block" data-cond="${key}" style="margin-bottom:8px;text-align:left">${emoji} ${label}</button>`).join('')}
+    `);
+    modal.querySelectorAll('[data-cond]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        await api(`/courts/${court.id}/condition`, { method: 'POST', body: JSON.stringify({ condition: b.dataset.cond }) });
+        closeModal(modal);
+        toast('Thanks — players nearby can see it 📣');
+        if (onDone) onDone();
+      } catch (e) { toast(e.message); }
+    }));
+  }
+
   // Downscale a picked image file to a JPEG data URL, stepping quality down
   // until it fits the server's 500KB photo limit.
   function imageFileToDataUrl(file, maxDim = 1280) {
@@ -1058,8 +1083,20 @@
         <button class="action-tile" id="cd-chat"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>Chat</button>
         <a class="action-tile" href="${mapsUrl}" target="_blank" rel="noopener"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg></span>Directions</a>
       </div>
+      ${court.latest_condition ? (() => {
+        const c = COURT_CONDITION_LABELS[court.latest_condition.condition] || ['📣', court.latest_condition.condition];
+        const mins = Math.max(1, Math.round((Date.now() - new Date(court.latest_condition.reported_at)) / 60000));
+        return `<div class="card row" style="margin-top:12px;padding:10px 14px;background:${court.latest_condition.condition === 'good' ? 'var(--green-50)' : '#fef3c7'}">
+          <span style="font-size:18px">${c[0]}</span>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px">${c[1]}</div>
+            <div class="row-sub">reported ${mins < 60 ? `${mins}m` : `${Math.round(mins / 60)}h`} ago by ${esc(court.latest_condition.user_name)}</div>
+          </div>
+        </div>`;
+      })() : ''}
       <div style="margin-top:14px">${chipsHtml}
         <button id="cd-suggest" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">✏️ Suggest an edit</button>
+        <button id="cd-condition" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">📣 Report conditions</button>
       </div>
       ${court.open_play_schedule ? `
         <details class="cd-hours">
@@ -1114,6 +1151,9 @@
     });
     modal.querySelector('#cd-suggest').addEventListener('click', () => {
       openSuggestEditSheet(court, () => { closeModal(modal); openCourtDetail(court.id); });
+    });
+    modal.querySelector('#cd-condition').addEventListener('click', () => {
+      openConditionSheet(court, () => { closeModal(modal); openCourtDetail(court.id); });
     });
 
     const uploadCourtPhoto = (onDone) => {

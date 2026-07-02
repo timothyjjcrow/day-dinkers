@@ -784,6 +784,37 @@ def test_court_detail_player_info(client):
     assert detail['friends_here'] == 1
 
 
+def test_court_conditions(client, app):
+    from datetime import timedelta
+    from backend.models import CourtCondition as CCModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Auth + validation guards.
+    assert client.post(f'/api/courts/{court_id}/condition',
+                       json={'condition': 'wet'}).status_code == 401
+    assert client.post(f'/api/courts/{court_id}/condition', json={'condition': 'lava'},
+                       headers=auth_headers(a['token'])).status_code == 400
+
+    # Nothing reported yet.
+    assert client.get(f'/api/courts/{court_id}').get_json()['latest_condition'] is None
+
+    # Fresh report surfaces with attribution; newest wins.
+    client.post(f'/api/courts/{court_id}/condition', json={'condition': 'wet'},
+                headers=auth_headers(a['token']))
+    client.post(f'/api/courts/{court_id}/condition', json={'condition': 'good'},
+                headers=auth_headers(a['token']))
+    latest = client.get(f'/api/courts/{court_id}').get_json()['latest_condition']
+    assert latest['condition'] == 'good' and latest['user_name'] == 'Ana'
+
+    # Stale reports (>3h) drop off.
+    with app.app_context():
+        for row in CCModel.query.all():
+            row.created_at = utcnow() - timedelta(hours=4)
+        db.session.commit()
+    assert client.get(f'/api/courts/{court_id}').get_json()['latest_condition'] is None
+
+
 def test_court_regulars(client, app):
     from datetime import timedelta
     from backend.models import CheckIn as CheckInModel, utcnow

@@ -13,8 +13,8 @@ from sqlalchemy import func
 
 from backend.app import db
 from backend.models import (
-    CheckIn, Court, CourtEditSuggestion, CourtPhoto, CourtReview, FavoriteCourt,
-    Game, GamePlayer, iso, utcnow,
+    COURT_CONDITIONS, CheckIn, Court, CourtCondition, CourtEditSuggestion,
+    CourtPhoto, CourtReview, FavoriteCourt, Game, GamePlayer, iso, utcnow,
 )
 from backend.routes.auth import active_checkin_for, login_required, optional_current_user, presence_payload
 from backend.routes.social import friend_ids
@@ -332,6 +332,7 @@ def court_detail(court_id):
 
     payload = court.to_dict()
     payload['photo_count'] = CourtPhoto.query.filter_by(court_id=court.id).count()
+    payload['latest_condition'] = _latest_condition_for(court.id)
 
     # Court regulars: most frequent visitors over the last 60 days (2+ visits).
     from backend.models import User as UserModel
@@ -539,6 +540,42 @@ MAX_PHOTO_BYTES = 500 * 1024
 
 
 MAX_COURT_PHOTOS = 12
+CONDITION_FRESH_HOURS = 3
+
+
+@courts_bp.post('/courts/<int:court_id>/condition')
+@rate_limit(30, 3600)
+@login_required
+def report_condition(court_id):
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+    condition = str((request.get_json(silent=True) or {}).get('condition') or '').strip()
+    if condition not in COURT_CONDITIONS:
+        return jsonify({'error': 'invalid_condition'}), 400
+    db.session.add(CourtCondition(
+        court_id=court.id, user_id=g.current_user.id, condition=condition,
+    ))
+    db.session.commit()
+    return jsonify({'ok': True, 'condition': condition}), 201
+
+
+def _latest_condition_for(court_id):
+    row = (
+        CourtCondition.query.filter(
+            CourtCondition.court_id == court_id,
+            CourtCondition.created_at >= utcnow() - timedelta(hours=CONDITION_FRESH_HOURS),
+        )
+        .order_by(CourtCondition.id.desc())
+        .first()
+    )
+    if not row:
+        return None
+    return {
+        'condition': row.condition,
+        'reported_at': iso(row.created_at),
+        'user_name': row.user.display_name if row.user else 'Player',
+    }
 
 
 def _photo_response(data_url):

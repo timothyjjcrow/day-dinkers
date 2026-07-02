@@ -450,6 +450,21 @@ class FavoriteCourt(TimestampMixin, db.Model):
     court = db.relationship('Court')
 
 
+COURT_CONDITIONS = ['good', 'busy', 'wet', 'nets_down', 'closed']
+
+
+class CourtCondition(TimestampMixin, db.Model):
+    """A player's on-the-ground report of court state; fresh ones surface on
+    the court detail for a few hours."""
+    id = db.Column(db.Integer, primary_key=True)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    condition = db.Column(db.String(20), nullable=False)
+
+    court = db.relationship('Court')
+    user = db.relationship('User')
+
+
 class CourtPhoto(TimestampMixin, db.Model):
     """A community photo of a court, stored as a data URL (Render free-tier
     disk is ephemeral). Newest one doubles as the hero when no curated photo."""
