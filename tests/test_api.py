@@ -874,6 +874,36 @@ def test_friend_request_flow(client):
     assert res.get_json()['deleted'] is True
 
 
+def test_change_password(client):
+    a = register(client, 'a@example.com', 'Ana')
+    ah = auth_headers(a['token'])
+
+    # Auth required; wrong current password → 403 (not 401, which the client
+    # treats as an expired session); short new password rejected.
+    assert client.post('/api/auth/change-password', json={
+        'current_password': 'secret123', 'new_password': 'newsecret',
+    }).status_code == 401
+    assert client.post('/api/auth/change-password', json={
+        'current_password': 'wrong', 'new_password': 'newsecret',
+    }, headers=ah).status_code == 403
+    assert client.post('/api/auth/change-password', json={
+        'current_password': 'secret123', 'new_password': '123',
+    }, headers=ah).status_code == 400
+
+    # Change succeeds; old password dies, new one works, session token survives.
+    res = client.post('/api/auth/change-password', json={
+        'current_password': 'secret123', 'new_password': 'newsecret',
+    }, headers=ah)
+    assert res.status_code == 200
+    assert client.post('/api/auth/login', json={
+        'email': 'a@example.com', 'password': 'secret123',
+    }).status_code == 401
+    assert client.post('/api/auth/login', json={
+        'email': 'a@example.com', 'password': 'newsecret',
+    }).status_code == 200
+    assert client.get('/api/me', headers=ah).status_code == 200
+
+
 def test_delete_account(client, app):
     from backend.models import User as UserModel
     a = register(client, 'a@example.com', 'Ana')

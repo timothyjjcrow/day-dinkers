@@ -2649,6 +2649,14 @@
       </div>
       <button class="btn btn-primary btn-block" id="ep-save">Save</button>
       <details style="margin-top:22px">
+        <summary style="font-size:13px;font-weight:600;cursor:pointer">Change password</summary>
+        <div class="form-field" style="margin-top:10px">
+          <input type="password" id="ep-pw-current" placeholder="Current password" autocomplete="current-password" />
+          <input type="password" id="ep-pw-new" placeholder="New password (6+ characters)" autocomplete="new-password" style="margin-top:8px" />
+          <button class="btn btn-secondary btn-block" id="ep-pw-save" style="margin-top:8px">Update password</button>
+        </div>
+      </details>
+      <details style="margin-top:22px">
         <summary style="color:#e03131;font-size:13px;font-weight:600;cursor:pointer">Danger zone</summary>
         <div class="form-field" style="margin-top:10px">
           <label>Delete account</label>
@@ -2695,6 +2703,21 @@
           modal.querySelector('#ep-court-results').innerHTML = '';
         }));
       }, 300);
+    });
+
+    modal.querySelector('#ep-pw-save').addEventListener('click', async () => {
+      const current = modal.querySelector('#ep-pw-current').value;
+      const next = modal.querySelector('#ep-pw-new').value;
+      if (!current || !next) { toast('Fill in both password fields'); return; }
+      try {
+        await api('/auth/change-password', {
+          method: 'POST',
+          body: JSON.stringify({ current_password: current, new_password: next }),
+        });
+        modal.querySelector('#ep-pw-current').value = '';
+        modal.querySelector('#ep-pw-new').value = '';
+        toast('Password updated 🔒');
+      } catch (e) { toast(e.message); }
     });
 
     modal.querySelector('#ep-delete').addEventListener('click', async () => {

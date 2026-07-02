@@ -252,6 +252,23 @@ def me():
     return jsonify(_me_payload(g.current_user))
 
 
+@auth_bp.post('/auth/change-password')
+@rate_limit(10, 3600)
+@login_required
+def change_password():
+    user = g.current_user
+    payload = request.get_json(silent=True) or {}
+    # 403, not 401: the client treats 401 as an expired session and logs out.
+    if not user.check_password(str(payload.get('current_password') or '')):
+        return jsonify({'error': 'invalid_credentials'}), 403
+    new_password = str(payload.get('new_password') or '')
+    if len(new_password) < 6:
+        return jsonify({'error': 'password_too_short'}), 400
+    user.set_password(new_password)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
 @auth_bp.delete('/me')
 @rate_limit(5, 3600)
 @login_required
