@@ -188,6 +188,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 .av-chip.active { background: var(--green-700); border-color: var(--green-700); color: #fff; }
 
+.gallery-scroll {
+  display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch; margin: 4px -4px 0; padding: 0 4px 6px;
+}
+.gallery-item { flex: 0 0 92%; scroll-snap-align: center; margin: 0; }
+.gallery-item img {
+  width: 100%; aspect-ratio: 16/10; object-fit: cover; border-radius: 14px;
+  background: var(--green-50); display: block;
+}
+.gallery-item figcaption { margin-top: 5px; text-align: center; }
+
 .usual-nudge {
   position: absolute; left: 12px; right: 12px; bottom: 76px; z-index: 900;
   background: #fff; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18);

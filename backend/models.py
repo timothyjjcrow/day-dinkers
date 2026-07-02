@@ -450,6 +450,18 @@ class FavoriteCourt(TimestampMixin, db.Model):
     court = db.relationship('Court')
 
 
+class CourtPhoto(TimestampMixin, db.Model):
+    """A community photo of a court, stored as a data URL (Render free-tier
+    disk is ephemeral). Newest one doubles as the hero when no curated photo."""
+    id = db.Column(db.Integer, primary_key=True)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    photo_data = db.Column(db.Text, nullable=False)
+
+    court = db.relationship('Court')
+    user = db.relationship('User')
+
+
 class CourtReview(TimestampMixin, db.Model):
     """One 1–5 star rating (+ optional comment) per user per court; editable."""
     __table_args__ = (

@@ -666,7 +666,9 @@ def test_court_photo_upload_and_serve(client):
     res = client.post(f'/api/courts/{court_id}/photo', json={'photo': photo},
                       headers=auth_headers(a['token']))
     assert res.status_code == 201
-    assert res.get_json()['photo_url'] == f'/api/courts/{court_id}/photo'
+    body = res.get_json()
+    assert body['photo_url'] == f'/api/courts/{court_id}/photo'
+    assert body['photo_count'] == 1
 
     img = client.get(f'/api/courts/{court_id}/photo')
     assert img.status_code == 200
@@ -676,10 +678,23 @@ def test_court_photo_upload_and_serve(client):
 
     detail = client.get(f'/api/courts/{court_id}').get_json()
     assert detail['photo_url'] == f'/api/courts/{court_id}/photo'
+    assert detail['photo_count'] == 1
 
-    # Community photos may be replaced by the community
-    assert client.post(f'/api/courts/{court_id}/photo', json={'photo': photo},
-                       headers=auth_headers(a['token'])).status_code == 201
+    # A second photo appends to the gallery; newest becomes the hero.
+    payload2 = b'y' * 220
+    photo2 = f"data:image/png;base64,{b64.b64encode(payload2).decode()}"
+    res = client.post(f'/api/courts/{court_id}/photo', json={'photo': photo2},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 201 and res.get_json()['photo_count'] == 2
+    assert client.get(f'/api/courts/{court_id}/photo').data == payload2
+
+    gallery = client.get(f'/api/courts/{court_id}/photos').get_json()['items']
+    assert len(gallery) == 2
+    assert gallery[0]['user_name'] == 'Ana'
+    item = client.get(gallery[1]['url'].replace('/api', '/api', 1))
+    assert client.get(f"/api/courts/{court_id}/photos/{gallery[1]['id']}").data == payload
+    # Wrong-court lookups 404.
+    assert client.get(f"/api/courts/999999/photos/{gallery[0]['id']}").status_code == 404
 
 
 def test_court_photo_never_overwrites_curated(client, app):
@@ -690,12 +705,15 @@ def test_court_photo_never_overwrites_curated(client, app):
     with app.app_context():
         db.session.get(CourtModel, court_id).photo_url = 'https://example.com/pro-shot.jpg'
         db.session.commit()
+    # Community photos join the gallery, but the curated hero URL stays.
     photo = f"data:image/jpeg;base64,{b64.b64encode(b'x' * 200).decode()}"
     res = client.post(f'/api/courts/{court_id}/photo', json={'photo': photo},
                       headers=auth_headers(a['token']))
-    assert res.status_code == 409
-    # No photo_data was stored either
-    assert client.get(f'/api/courts/{court_id}/photo').status_code == 404
+    assert res.status_code == 201
+    assert res.get_json()['photo_url'] == 'https://example.com/pro-shot.jpg'
+    detail = client.get(f'/api/courts/{court_id}').get_json()
+    assert detail['photo_url'] == 'https://example.com/pro-shot.jpg'
+    assert detail['photo_count'] == 1
 
 
 def test_court_list_sort_options(client):

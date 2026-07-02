@@ -13,8 +13,8 @@ from sqlalchemy import func
 
 from backend.app import db
 from backend.models import (
-    CheckIn, Court, CourtEditSuggestion, CourtReview, FavoriteCourt, Game,
-    GamePlayer, utcnow,
+    CheckIn, Court, CourtEditSuggestion, CourtPhoto, CourtReview, FavoriteCourt,
+    Game, GamePlayer, iso, utcnow,
 )
 from backend.routes.auth import active_checkin_for, login_required, optional_current_user, presence_payload
 from backend.routes.social import friend_ids
@@ -331,6 +331,7 @@ def court_detail(court_id):
     )
 
     payload = court.to_dict()
+    payload['photo_count'] = CourtPhoto.query.filter_by(court_id=court.id).count()
     payload['players_here'] = players_here
     payload['friends_here'] = sum(1 for p in players_here if p['is_friend'])
     viewer_id = current_user.id if current_user else None
@@ -516,17 +517,31 @@ _PHOTO_DATA_RE = re.compile(r'^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]
 MAX_PHOTO_BYTES = 500 * 1024
 
 
+MAX_COURT_PHOTOS = 12
+
+
+def _photo_response(data_url):
+    match = _PHOTO_DATA_RE.match(data_url or '')
+    if not match:
+        return jsonify({'error': 'photo_not_found'}), 404
+    return Response(
+        base64.b64decode(match.group(2)),
+        mimetype=f'image/{match.group(1)}',
+        headers={'Cache-Control': 'public, max-age=86400'},
+    )
+
+
 @courts_bp.post('/courts/<int:court_id>/photo')
 @login_required
 @rate_limit(10, 3600)
 def upload_court_photo(court_id):
-    """Community photo for a court that has none (or replace a community one).
-    Curated/scraped photos (external photo_url) are never overwritten."""
+    """Add a community photo to the court's gallery. The newest one becomes
+    the hero unless a curated/external photo exists."""
     court = db.session.get(Court, court_id)
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
-    if court.photo_url and not court.photo_url.startswith('/api/courts/'):
-        return jsonify({'error': 'photo_already_set'}), 409
+    if CourtPhoto.query.filter_by(court_id=court.id).count() >= MAX_COURT_PHOTOS:
+        return jsonify({'error': 'gallery_full'}), 409
 
     payload = request.get_json(silent=True) or {}
     match = _PHOTO_DATA_RE.match(str(payload.get('photo') or ''))
@@ -539,25 +554,59 @@ def upload_court_photo(court_id):
     if not (100 <= len(raw) <= MAX_PHOTO_BYTES):
         return jsonify({'error': 'photo_too_large' if len(raw) > MAX_PHOTO_BYTES else 'invalid_photo'}), 400
 
-    court.photo_data = f'data:image/{match.group(1)};base64,{match.group(2)}'
-    court.photo_url = f'/api/courts/{court.id}/photo'
+    photo = CourtPhoto(
+        court_id=court.id,
+        user_id=g.current_user.id,
+        photo_data=f'data:image/{match.group(1)};base64,{match.group(2)}',
+    )
+    db.session.add(photo)
+    db.session.flush()
+    if not court.photo_url or court.photo_url.startswith('/api/courts/'):
+        court.photo_url = f'/api/courts/{court.id}/photo'
     db.session.commit()
-    return jsonify({'photo_url': court.photo_url}), 201
+    return jsonify({
+        'photo_url': court.photo_url,
+        'photo_id': photo.id,
+        'photo_count': CourtPhoto.query.filter_by(court_id=court.id).count(),
+    }), 201
 
 
 @courts_bp.get('/courts/<int:court_id>/photo')
 def court_photo(court_id):
+    """The court's hero image: newest gallery photo, else the legacy single."""
     court = db.session.get(Court, court_id)
-    if not court or not court.photo_data:
+    if not court:
         return jsonify({'error': 'photo_not_found'}), 404
-    match = _PHOTO_DATA_RE.match(court.photo_data)
-    if not match:
-        return jsonify({'error': 'photo_not_found'}), 404
-    return Response(
-        base64.b64decode(match.group(2)),
-        mimetype=f'image/{match.group(1)}',
-        headers={'Cache-Control': 'public, max-age=86400'},
+    newest = (
+        CourtPhoto.query.filter_by(court_id=court.id)
+        .order_by(CourtPhoto.id.desc())
+        .first()
     )
+    return _photo_response(newest.photo_data if newest else court.photo_data)
+
+
+@courts_bp.get('/courts/<int:court_id>/photos')
+def court_photos(court_id):
+    rows = (
+        CourtPhoto.query.filter_by(court_id=court_id)
+        .order_by(CourtPhoto.id.desc())
+        .limit(MAX_COURT_PHOTOS)
+        .all()
+    )
+    return jsonify({'items': [{
+        'id': p.id,
+        'url': f'/api/courts/{court_id}/photos/{p.id}',
+        'user_name': p.user.display_name if p.user else 'Player',
+        'created_at': iso(p.created_at),
+    } for p in rows]})
+
+
+@courts_bp.get('/courts/<int:court_id>/photos/<int:photo_id>')
+def court_photo_item(court_id, photo_id):
+    photo = db.session.get(CourtPhoto, photo_id)
+    if not photo or photo.court_id != court_id:
+        return jsonify({'error': 'photo_not_found'}), 404
+    return _photo_response(photo.photo_data)
 
 
 @courts_bp.post('/courts/<int:court_id>/favorite')

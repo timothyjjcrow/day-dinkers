@@ -1034,7 +1034,9 @@
         <div class="cd-hero-actions">
           <button class="glass-btn" id="cd-share" title="Share" aria-label="Share court"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg></button>
           <button class="glass-btn" id="cd-favorite" title="Save" aria-label="Save court">${isFavorite ? '★' : '☆'}</button>
-          ${court.photo_url ? '' : '<button class="glass-btn" id="cd-add-photo" title="Add a photo" aria-label="Add a photo">📷</button>'}
+          ${court.photo_count > 0
+            ? `<button class="glass-btn" id="cd-gallery" title="Photos" aria-label="View court photos" style="font-size:13px">📷 ${court.photo_count}</button>`
+            : '<button class="glass-btn" id="cd-add-photo" title="Add a photo" aria-label="Add a photo">📷</button>'}
           <button class="glass-btn modal-close" aria-label="Close">✕</button>
         </div>
         <div class="cd-hero-title">
@@ -1102,7 +1104,7 @@
       openSuggestEditSheet(court, () => { closeModal(modal); openCourtDetail(court.id); });
     });
 
-    modal.querySelector('#cd-add-photo')?.addEventListener('click', () => {
+    const uploadCourtPhoto = (onDone) => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
@@ -1115,11 +1117,16 @@
         try {
           await api(`/courts/${court.id}/photo`, { method: 'POST', body: JSON.stringify({ photo }) });
           toast('Photo added 📷 Thanks for contributing!');
-          closeModal(modal);
-          openCourtDetail(court.id);
+          onDone();
         } catch (e) { toast(e.message); }
       });
       input.click();
+    };
+    modal.querySelector('#cd-add-photo')?.addEventListener('click', () => {
+      uploadCourtPhoto(() => { closeModal(modal); openCourtDetail(court.id); });
+    });
+    modal.querySelector('#cd-gallery')?.addEventListener('click', () => {
+      openCourtGallery(court, uploadCourtPhoto);
     });
 
     modal.querySelector('#cd-address').addEventListener('click', async () => {
@@ -2456,6 +2463,25 @@
         const msg = await api(`/courts/${court.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
         renderMsgs([msg], true);
       } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+    });
+  }
+
+  async function openCourtGallery(court, uploadFn) {
+    let data;
+    try { data = await api(`/courts/${court.id}/photos`); } catch (e) { toast(e.message); return; }
+    const modal = openModal(`
+      ${modalHead(`📷 ${esc(court.name)}`)}
+      <div class="gallery-scroll">
+        ${data.items.map((p) => `
+          <figure class="gallery-item">
+            <img src="${esc(p.url)}" alt="Photo of ${esc(court.name)}" loading="lazy" />
+            <figcaption class="row-sub">by ${esc(p.user_name)} · ${resultDayLabel(p.created_at)}</figcaption>
+          </figure>`).join('')}
+      </div>
+      <button class="btn btn-secondary btn-block" id="gal-add" style="margin-top:12px">📷 Add your photo</button>
+    `);
+    modal.querySelector('#gal-add').addEventListener('click', () => {
+      if (uploadFn) uploadFn(() => { closeModal(modal); openCourtGallery(court, uploadFn); });
     });
   }
 
