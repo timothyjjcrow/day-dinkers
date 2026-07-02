@@ -918,6 +918,40 @@ def test_friend_request_flow(client):
     assert res.get_json()['deleted'] is True
 
 
+def test_my_stats(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah = auth_headers(a['token'])
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+
+    # Fresh player: all zeros.
+    stats = client.get('/api/me/stats', headers=ah).get_json()
+    assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0, 'top_court': None}
+
+    def play(court_id):
+        g = make_game(client, a['token'], court_id, hours_ahead=1)
+        client.post(f"/api/games/{g['id']}/join", headers=auth_headers(b['token']))
+        res = client.post(f"/api/games/{g['id']}/complete", json={
+            'team1': [a['user']['id']], 'team2': [b['user']['id']],
+            'score_team1': 11, 'score_team2': 4,
+        }, headers=ah)
+        assert res.status_code == 200, res.get_json()
+
+    play(larson)
+    play(larson)
+    play(adorni)
+
+    stats = client.get('/api/me/stats', headers=ah).get_json()
+    assert stats['games_total'] == 3
+    assert stats['games_this_month'] == 3  # completed just now
+    assert stats['week_streak'] == 1       # this week counts
+    assert stats['top_court']['name'] == 'Larson Park' and stats['top_court']['games'] == 2
+
+    # Auth required.
+    assert client.get('/api/me/stats').status_code == 401
+
+
 def test_availability_roundtrip(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

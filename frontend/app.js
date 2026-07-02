@@ -2596,6 +2596,7 @@
         <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">Record · ${winPct}%</div></div>
         <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? '🔥' : ''}${me.current_streak}</div><div class="stat-label">Streak · best ${me.best_streak}</div></div>
       </div>
+      <div id="pf-play-stats"></div>
       ${state.presence && state.presence.checked_in ? `
         <div class="card row">
           <span style="font-size:22px">📍</span>
@@ -2672,6 +2673,23 @@
         upEl.innerHTML = '<div class="section-label">My upcoming games</div>'
           + up.map((game) => gameCardHtml(game)).join('');
         bindGameButtons(upEl, renderProfile);
+      }
+    } catch { /* ignore */ }
+
+    // Personal play stats — quietly skipped for brand-new players.
+    try {
+      const stats = await api('/me/stats');
+      if (stats.games_total > 0) {
+        el.querySelector('#pf-play-stats').innerHTML = `
+          <div class="stat-grid" style="margin-top:10px">
+            <div class="stat-card"><div class="stat-value">${stats.games_this_month}</div><div class="stat-label">Games this month</div></div>
+            <div class="stat-card"><div class="stat-value">${stats.week_streak >= 2 ? '🔥' : ''}${stats.week_streak}</div><div class="stat-label">Week streak</div></div>
+            <div class="stat-card"${stats.top_court ? ` data-pfcourt-top="${stats.top_court.id}" style="cursor:pointer"` : ''}>
+              <div class="stat-value" style="font-size:13px;line-height:1.25;padding-top:4px">${stats.top_court ? esc(stats.top_court.name) : '—'}</div>
+              <div class="stat-label">Top court${stats.top_court ? ` · ${stats.top_court.games}` : ''}</div>
+            </div>
+          </div>`;
+        el.querySelector('[data-pfcourt-top]')?.addEventListener('click', (e) => openCourtDetail(Number(e.currentTarget.dataset.pfcourtTop)));
       }
     } catch { /* ignore */ }
 

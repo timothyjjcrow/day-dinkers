@@ -346,6 +346,55 @@ def delete_me():
     return jsonify({'deleted': True})
 
 
+@auth_bp.get('/me/stats')
+@login_required
+def my_stats():
+    """Personal play stats: totals, this month, weekly streak, top court."""
+    from datetime import timedelta
+
+    user = g.current_user
+    now = utcnow()
+    completed = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status == 'completed',
+            Game.completed_at.isnot(None),
+        )
+        .order_by(Game.completed_at.desc())
+        .limit(500)
+        .all()
+    )
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    games_this_month = sum(1 for game in completed if game.completed_at >= month_start)
+
+    # Weekly play streak: consecutive ISO weeks with ≥1 completed game. The
+    # current week only extends the streak — a quiet week so far doesn't end it.
+    weeks = {game.completed_at.isocalendar()[:2] for game in completed}
+    streak = 0
+    cursor = now if now.isocalendar()[:2] in weeks else now - timedelta(days=7)
+    while cursor.isocalendar()[:2] in weeks:
+        streak += 1
+        cursor -= timedelta(days=7)
+
+    top_court = None
+    counts = {}
+    for game in completed:
+        counts[game.court_id] = counts.get(game.court_id, 0) + 1
+    if counts:
+        top_id = max(counts, key=counts.get)
+        court = db.session.get(Court, top_id)
+        if court:
+            top_court = {'id': court.id, 'name': court.name, 'games': counts[top_id]}
+
+    return jsonify({
+        'games_total': len(completed),
+        'games_this_month': games_this_month,
+        'week_streak': streak,
+        'top_court': top_court,
+    })
+
+
 @auth_bp.patch('/me')
 @login_required
 def update_me():
