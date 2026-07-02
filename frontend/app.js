@@ -1537,7 +1537,11 @@
         const scope = state.boardScope || 'near';
         const boardUrl = scope === 'near'
           ? `/leaderboard?lat=${loc.lat}&lng=${loc.lng}&radius=50`
-          : '/leaderboard';
+          : scope === 'month' ? '/leaderboard?period=month' : '/leaderboard';
+        const isMonth = scope === 'month';
+        const boardVal = (u) => (isMonth
+          ? `<span class="${u.month_delta >= 0 ? 'delta-up' : 'delta-down'}">${u.month_delta >= 0 ? '+' : ''}${u.month_delta}</span>`
+          : u.rating);
         const [board, results] = await Promise.all([
           api(boardUrl),
           api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`),
@@ -1546,6 +1550,7 @@
           <div class="segmented" id="board-scope" style="margin:2px 0 12px">
             <button data-scope="near" class="${scope === 'near' ? 'active' : ''}">📍 Near me</button>
             <button data-scope="all" class="${scope === 'all' ? 'active' : ''}">🌎 Everyone</button>
+            <button data-scope="month" class="${isMonth ? 'active' : ''}">📈 This month</button>
           </div>`;
 
         if (board.items.length) {
@@ -1558,7 +1563,7 @@
               <div class="podium-medal">${['🥇', '🥈', '🥉'][place(u) - 1]}</div>
               ${avatarHtml(u)}
               <div class="podium-name">${esc(u.display_name.split(' ')[0])}${u.current_streak >= 2 ? ' 🔥' : ''}</div>
-              <div class="podium-rating">${u.rating}</div>
+              <div class="podium-rating">${boardVal(u)}</div>
               <div class="podium-base"></div>
             </div>`).join('') + '</div>';
 
@@ -1570,9 +1575,9 @@
                 ${avatarHtml(u, 'sm')}
                 <div class="row-main">
                   <div class="row-title" style="font-size:14px">${esc(u.display_name)}${u.current_streak >= 2 ? ` <span title="Win streak">🔥${u.current_streak}</span>` : ''}</div>
-                  <div class="row-sub">${u.ranked_wins}W – ${u.ranked_losses}L</div>
+                  <div class="row-sub">${isMonth ? `${u.month_games} ranked game${u.month_games === 1 ? '' : 's'} this month` : `${u.ranked_wins}W – ${u.ranked_losses}L`}</div>
                 </div>
-                <div class="stat-value" style="font-size:16px">${u.rating}</div>
+                <div class="stat-value" style="font-size:16px">${boardVal(u)}</div>
               </div>`).join('');
           }
           const me = state.me;

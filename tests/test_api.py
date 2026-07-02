@@ -1866,6 +1866,44 @@ def test_auto_confirm_stale_score(client, app):
         assert User.query.filter_by(email='a@example.com').first().rating == 1216
 
 
+def test_monthly_leaderboard(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Empty until a ranked game completes this month.
+    assert client.get('/api/leaderboard?period=month').get_json()['items'] == []
+
+    def ranked_win(winner_tok, loser, confirm_headers):
+        g = make_game(client, winner_tok, court_id, game_type='ranked', hours_ahead=1)
+        client.post(f"/api/games/{g['id']}/join", headers=confirm_headers)
+        me = client.get('/api/me', headers=auth_headers(winner_tok)).get_json()['user']
+        client.post(f"/api/games/{g['id']}/complete", json={
+            'team1': [me['id']], 'team2': [loser['user']['id']],
+            'score_team1': 11, 'score_team2': 3,
+        }, headers=auth_headers(winner_tok))
+        client.post(f"/api/games/{g['id']}/confirm", headers=confirm_headers)
+        return g
+
+    ranked_win(a['token'], b, auth_headers(b['token']))
+    old = ranked_win(a['token'], b, auth_headers(b['token']))
+
+    board = client.get('/api/leaderboard?period=month').get_json()
+    names = [(u['display_name'], u['month_delta'], u['month_games']) for u in board['items']]
+    assert names[0][0] == 'Ana' and names[0][1] > 0 and names[0][2] == 2
+    assert names[1][0] == 'Ben' and names[1][1] < 0
+
+    # A game completed last month drops out of the aggregation.
+    with app.app_context():
+        db.session.get(GameModel, old['id']).completed_at = utcnow() - timedelta(days=40)
+        db.session.commit()
+    board = client.get('/api/leaderboard?period=month').get_json()
+    ana = next(u for u in board['items'] if u['display_name'] == 'Ana')
+    assert ana['month_games'] == 1
+
+
 def test_results_feed(client):
     players, game, _ = setup_ranked_doubles(client)
     a, c = players['a'], players['c']

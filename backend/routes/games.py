@@ -778,6 +778,37 @@ def leaderboard():
 
     Area scoping uses each player's last-known location, falling back to
     their home court — same source as players-nearby discovery."""
+    if str(request.args.get('period') or '').strip().lower() == 'month':
+        from sqlalchemy import func
+        month_start = utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        rows = (
+            db.session.query(
+                User,
+                func.coalesce(func.sum(GamePlayer.rating_delta), 0).label('delta'),
+                func.count(GamePlayer.id).label('games'),
+            )
+            .join(GamePlayer, GamePlayer.user_id == User.id)
+            .join(Game, Game.id == GamePlayer.game_id)
+            .filter(
+                Game.status == 'completed',
+                Game.game_type == 'ranked',
+                Game.completed_at >= month_start,
+                GamePlayer.rating_delta.isnot(None),
+                User.deleted_at.is_(None),
+            )
+            .group_by(User.id)
+            .order_by(func.sum(GamePlayer.rating_delta).desc())
+            .limit(50)
+            .all()
+        )
+        items = []
+        for user, delta, games in rows:
+            entry = user.to_public_dict()
+            entry['month_delta'] = int(delta)
+            entry['month_games'] = int(games)
+            items.append(entry)
+        return jsonify({'items': items, 'period': 'month'})
+
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
 
