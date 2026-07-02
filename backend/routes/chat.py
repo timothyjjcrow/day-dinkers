@@ -3,7 +3,10 @@ from flask import Blueprint, g, jsonify, request
 from sqlalchemy import or_
 
 from backend.app import db
-from backend.models import Court, Game, GamePlayer, Message, User, blocked_pair_ids, is_blocked_between, utcnow
+from backend.models import (
+    Court, Game, GamePlayer, Message, Notification, User, blocked_pair_ids,
+    is_blocked_between, notify, utcnow,
+)
 from backend.security import rate_limit
 
 chat_bp = Blueprint('chat', __name__)
@@ -89,6 +92,28 @@ def send_game_message(game_id):
         return jsonify({'error': 'message_body_required'}), 400
     message = Message(sender_id=g.current_user.id, game_id=game.id, body=body[:2000])
     db.session.add(message)
+
+    # Tell the other players — at most one unread ping per game per player, so
+    # an active back-and-forth doesn't flood the activity feed.
+    court_name = game.court.name if game.court else 'your game'
+    for player in game.players:
+        if player.user_id == g.current_user.id:
+            continue
+        already_pinged = Notification.query.filter_by(
+            user_id=player.user_id,
+            kind='game_message',
+            related_game_id=game.id,
+            read=False,
+        ).first()
+        if not already_pinged:
+            notify(
+                player.user_id,
+                'game_message',
+                f'{g.current_user.display_name} in game chat at {court_name}',
+                body[:140],
+                related_user_id=g.current_user.id,
+                related_game_id=game.id,
+            )
     db.session.commit()
     return jsonify(message.to_dict()), 201
 

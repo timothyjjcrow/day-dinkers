@@ -1294,6 +1294,35 @@ def test_game_chat(client):
     assert convos['items'] == []
 
 
+def test_game_chat_notifications(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id)
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+
+    def pings(headers):
+        notes = client.get('/api/notifications', headers=headers).get_json()
+        return [n for n in notes['items'] if n['kind'] == 'game_message']
+
+    # Ana talks → Ben gets exactly one ping, Ana none; a second message while
+    # Ben hasn't read it doesn't stack another.
+    client.post(f"/api/games/{game['id']}/chat", json={'body': 'On my way!'}, headers=ah)
+    client.post(f"/api/games/{game['id']}/chat", json={'body': 'Bringing water too'}, headers=ah)
+    ben_pings = pings(bh)
+    assert len(ben_pings) == 1
+    assert 'game chat at Larson Park' in ben_pings[0]['title']
+    assert ben_pings[0]['body'] == 'On my way!'
+    assert ben_pings[0]['related_game_id'] == game['id']
+    assert pings(ah) == []
+
+    # Once Ben reads his notifications, the next message pings again.
+    client.post('/api/notifications/read', headers=bh)
+    client.post(f"/api/games/{game['id']}/chat", json={'body': 'Court 3!'}, headers=ah)
+    assert len(pings(bh)) == 2
+
+
 def test_court_chat(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
