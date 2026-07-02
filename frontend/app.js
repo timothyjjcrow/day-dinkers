@@ -1454,6 +1454,33 @@
     });
   }
 
+  // Courts without posted hours get one gentle ask per court per device —
+  // the check-in moment is when players actually know if the gates are open.
+  function maybeAskHours(court) {
+    if (court.hours) return;
+    const askedKey = `pp_hours_asked_${court.id}`;
+    if (localStorage.getItem(askedKey)) return;
+    localStorage.setItem(askedKey, '1');
+    const modal = openModal(`
+      ${modalHead('🕐 Know the hours here?')}
+      <p class="row-sub" style="margin-bottom:12px">${esc(court.name)} has no posted hours yet — help players plan their visit.</p>
+      <div class="form-field">
+        <input type="text" id="hp-hours" maxlength="120" placeholder="e.g. Daily 6am–10pm, Dawn to dusk" />
+      </div>
+      <button class="btn btn-primary btn-block" id="hp-save">Submit</button>
+      <button class="btn-link modal-close btn-block">Skip</button>
+    `);
+    modal.querySelector('#hp-save').addEventListener('click', async () => {
+      const hours = modal.querySelector('#hp-hours').value.trim();
+      if (!hours) { closeModal(modal); return; }
+      try {
+        const res = await api(`/courts/${court.id}/suggest`, { method: 'POST', body: JSON.stringify({ hours }) });
+        closeModal(modal);
+        toast(res.applied_fields.length ? 'Hours added — thanks! 🕐' : 'Thanks! It applies once another player confirms 🙌');
+      } catch (e) { toast(e.message); }
+    });
+  }
+
   function openCheckInSheet(court) {
     const modal = openModal(`
       <div class="checkin-sheet">
@@ -1479,6 +1506,7 @@
         toast(looking ? `You're in — players can find you 🎾` : `Checked in at ${court.name}`);
         await refreshMe();
         fetchCourtsInView();
+        maybeAskHours(court);
       } catch (e) { toast(e.message); }
     };
     modal.querySelector('#ci-lfg').addEventListener('click', () => doCheckIn(true));
