@@ -358,6 +358,15 @@ def update_me():
         if level not in SKILL_LEVELS:
             return jsonify({'error': 'invalid_skill_level'}), 400
         user.skill_level = level
+    if 'availability' in payload:
+        import json as _json
+
+        from backend.models import AVAILABILITY_SLOTS
+        slots = payload.get('availability')
+        if not isinstance(slots, list):
+            return jsonify({'error': 'invalid_availability'}), 400
+        cleaned = [s for s in dict.fromkeys(slots) if s in AVAILABILITY_SLOTS]
+        user.availability = _json.dumps(cleaned)
     if 'avatar_color' in payload:
         color = str(payload.get('avatar_color') or '').strip()
         if not re.match(r'^#[0-9a-fA-F]{6}$', color):

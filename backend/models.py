@@ -1,6 +1,7 @@
 """Database models for the pickleball player network."""
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -28,6 +29,12 @@ class TimestampMixin:
 
 SKILL_LEVELS = ['beginner', 'intermediate', 'advanced', 'pro']
 DEFAULT_RATING = 1200
+# "Usually plays" slots: <day>-<part>, e.g. mon-eve.
+AVAILABILITY_SLOTS = [
+    f'{day}-{part}'
+    for day in ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
+    for part in ('am', 'pm', 'eve')
+]
 
 
 class User(TimestampMixin, db.Model):
@@ -53,6 +60,8 @@ class User(TimestampMixin, db.Model):
     home_lat = db.Column(db.Float)
     home_lng = db.Column(db.Float)
     home_area = db.Column(db.String(120))
+    # "Usually plays" slots as a JSON array of AVAILABILITY_SLOTS tokens.
+    availability = db.Column(db.Text, nullable=False, default='[]')
     # Set when the account is deleted; the anonymized row stays for opponents'
     # match history, but auth and all discovery surfaces reject it.
     deleted_at = db.Column(db.DateTime)
@@ -69,6 +78,13 @@ class User(TimestampMixin, db.Model):
     def check_password(self, raw_password):
         return check_password_hash(self.password_hash, raw_password)
 
+    def availability_list(self):
+        try:
+            parsed = json.loads(self.availability or '[]')
+        except ValueError:
+            return []
+        return [s for s in parsed if s in AVAILABILITY_SLOTS] if isinstance(parsed, list) else []
+
     def to_public_dict(self):
         return {
             'id': self.id,
@@ -84,6 +100,7 @@ class User(TimestampMixin, db.Model):
             'best_streak': self.best_streak,
             'home_court_id': self.home_court_id,
             'home_court_name': self.home_court.name if self.home_court else None,
+            'availability': self.availability_list(),
         }
 
     def to_dict(self):

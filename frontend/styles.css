@@ -179,6 +179,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
   border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 700;
 }
 
+.av-row { display: flex; gap: 5px; align-items: center; margin-bottom: 6px; }
+.av-emoji { width: 24px; font-size: 14px; }
+.av-chip {
+  flex: 1; min-width: 0; height: 32px; border-radius: 9px;
+  background: var(--green-50); border: 1px solid var(--green-100);
+  color: var(--ink-soft); font-size: 12px; font-weight: 700;
+}
+.av-chip.active { background: var(--green-700); border-color: var(--green-700); color: #fff; }
+
 .offline-banner {
   position: fixed; top: 0; left: 0; right: 0; z-index: 3000;
   background: #b45309; color: #fff; text-align: center;

@@ -143,6 +143,31 @@
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
   const skillLabel = (s) => ({ beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced', pro: 'Pro' }[s] || s);
+
+  // "Usually plays" availability slots (mirror of backend AVAILABILITY_SLOTS).
+  const AVAIL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const AVAIL_PARTS = [['am', '🌅', 'Mornings'], ['pm', '☀️', 'Afternoons'], ['eve', '🌆', 'Evenings']];
+  function availabilitySummary(slots) {
+    if (!slots || !slots.length) return [];
+    const short = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+    const lines = [];
+    for (const [part, emoji, label] of AVAIL_PARTS) {
+      const days = AVAIL_DAYS.filter((d) => slots.includes(`${d}-${part}`));
+      if (!days.length) continue;
+      const key = days.join(',');
+      const dayText = days.length === 7 ? 'every day'
+        : key === 'mon,tue,wed,thu,fri' ? 'weekdays'
+        : key === 'sat,sun' ? 'weekends'
+        : days.map((d) => short[d]).join(' · ');
+      lines.push(`${emoji} ${label} — ${dayText}`);
+    }
+    return lines;
+  }
+  function availabilityOverlap(a, b) {
+    if (!a || !b) return 0;
+    const set = new Set(a);
+    return b.reduce((n, s) => n + (set.has(s) ? 1 : 0), 0);
+  }
   function fmtDuration(minutes) {
     if (!minutes || minutes < 1) return 'just now';
     if (minutes < 60) return `${minutes}m`;
@@ -2123,9 +2148,12 @@
             ? '<span class="tag" style="margin:0">Pending</span>'
             : `<button class="btn btn-primary btn-sm" data-respond-inline="${p.friendship_id}">Accept</button>`;
           else action = `<button class="btn btn-primary btn-sm" data-add-friend="${p.id}">＋ Add</button>`;
-          const sub = p.checked_in_court
+          let sub = p.checked_in_court
             ? `📍 At ${esc(p.checked_in_court.name)}${p.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-700)">wants to play!</b>' : ''}`
             : `${skillLabel(p.skill_level)} · ${p.rating} · ${p.distance_miles} mi away`;
+          if (availabilityOverlap(state.me.availability, p.availability)) {
+            sub += ' · <b style="color:var(--green-700)">⏰ plays your times</b>';
+          }
           return `
             <div class="card row">
               <div data-view-user="${p.id}" style="cursor:pointer">${avatarHtml(p)}</div>
@@ -2439,6 +2467,14 @@
           <div class="row-sub">your head-to-head record</div>
         </div>`;
     }
+    const availLines = availabilitySummary(user.availability);
+    const availHtml = availLines.length ? `
+      <div class="card" style="padding:10px 14px;margin:12px 0 0">
+        <div class="row-sub" style="font-weight:800;color:var(--ink)">⏰ Usually plays${
+          userId !== state.me.id && availabilityOverlap(state.me.availability, user.availability)
+            ? ' <span class="tag" style="margin:0 0 0 6px">🤝 your times too</span>' : ''}</div>
+        ${availLines.map((l) => `<div class="row-sub">${l}</div>`).join('')}
+      </div>` : '';
     const courtRow = (c) => `
       <div class="card row" data-pcourt="${c.id}" style="cursor:pointer">
         <span style="font-size:18px">${c.is_home ? '🏠' : '⭐'}</span>
@@ -2462,6 +2498,7 @@
         <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Losses</div></div>
       </div>
       ${h2hHtml}
+      ${availHtml}
       <div class="action-row">${friendAction}</div>
       ${upcoming.length ? `<div class="section-label">Upcoming games</div>${upcoming.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
       ${courts.length ? `<div class="section-label">Courts</div>${courts.map(courtRow).join('')}` : ''}
@@ -2692,6 +2729,16 @@
         </div>
       </div>
       <div class="form-field">
+        <label>Usually plays</label>
+        <p class="row-sub" style="margin-bottom:6px">Tap when you typically play — helps players find partners on their schedule.</p>
+        ${AVAIL_PARTS.map(([part, emoji]) => `
+          <div class="av-row">
+            <span class="av-emoji" title="${part}">${emoji}</span>
+            ${AVAIL_DAYS.map((d) => `
+              <button type="button" class="av-chip ${(me.availability || []).includes(`${d}-${part}`) ? 'active' : ''}" data-av="${d}-${part}">${d[0].toUpperCase()}</button>`).join('')}
+          </div>`).join('')}
+      </div>
+      <div class="form-field">
         <label>Home court</label>
         <input type="text" id="ep-court-search" placeholder="${me.home_court_name ? esc(me.home_court_name) : 'Search courts…'}" />
         <input type="hidden" id="ep-court-id" value="${me.home_court_id || ''}" />
@@ -2716,6 +2763,9 @@
         </div>
       </details>
     `);
+
+    modal.querySelectorAll('[data-av]').forEach((chip) =>
+      chip.addEventListener('click', () => chip.classList.toggle('active')));
 
     let color = me.avatar_color;
     const avatarUrlInput = modal.querySelector('#ep-avatar-url');
@@ -2793,6 +2843,7 @@
           skill_level: modal.querySelector('#ep-skill').value,
           avatar_color: color,
           avatar_url: avatarUrlInput.value.trim(),
+          availability: [...modal.querySelectorAll('[data-av].active')].map((c) => c.dataset.av),
         };
         const courtId = modal.querySelector('#ep-court-id').value;
         if (courtId) body.home_court_id = Number(courtId);

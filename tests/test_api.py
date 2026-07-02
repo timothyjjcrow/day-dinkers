@@ -874,6 +874,31 @@ def test_friend_request_flow(client):
     assert res.get_json()['deleted'] is True
 
 
+def test_availability_roundtrip(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah = auth_headers(a['token'])
+
+    # Defaults to empty.
+    assert client.get('/api/me', headers=ah).get_json()['user']['availability'] == []
+
+    # Bad shape rejected; unknown tokens and duplicates filtered.
+    assert client.patch('/api/me', json={'availability': 'mon-eve'}, headers=ah).status_code == 400
+    res = client.patch('/api/me', json={
+        'availability': ['mon-eve', 'nope-xx', 'mon-eve', 'sat-am', 42],
+    }, headers=ah)
+    assert res.status_code == 200
+    assert res.get_json()['user']['availability'] == ['mon-eve', 'sat-am']
+
+    # Visible on the public profile.
+    profile = client.get(f"/api/users/{a['user']['id']}", headers=auth_headers(b['token'])).get_json()
+    assert profile['availability'] == ['mon-eve', 'sat-am']
+
+    # Clearing works.
+    res = client.patch('/api/me', json={'availability': []}, headers=ah)
+    assert res.get_json()['user']['availability'] == []
+
+
 def test_change_password(client):
     a = register(client, 'a@example.com', 'Ana')
     ah = auth_headers(a['token'])
