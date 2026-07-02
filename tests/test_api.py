@@ -160,6 +160,38 @@ def test_geocode(client, monkeypatch):
     assert calls['n'] == 1
 
 
+def test_leaderboard_area_scope(client, app):
+    a = register(client, 'a@example.com', 'Ana')     # SoCal (last location)
+    b = register(client, 'b@example.com', 'Ben')     # Humboldt (last location)
+    c = register(client, 'c@example.com', 'Cam')     # no last loc; home court = Larson
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    with app.app_context():
+        for uid, lat, lng, wins in ((a['user']['id'], 33.66, -117.91, 3),
+                                    (b['user']['id'], 40.81, -124.16, 2)):
+            u = db.session.get(User, uid)
+            u.last_lat, u.last_lng, u.ranked_wins = lat, lng, wins
+        cu = db.session.get(User, c['user']['id'])
+        cu.home_court_id = larson
+        cu.ranked_wins = 1
+        db.session.commit()
+
+    # Global: all three ranked players
+    all_ids = [u['id'] for u in client.get('/api/leaderboard').get_json()['items']]
+    assert set(all_ids) >= {a['user']['id'], b['user']['id'], c['user']['id']}
+
+    # Near SoCal: Ana (last loc) + Cam (home-court fallback), not Ben
+    near = client.get('/api/leaderboard?lat=33.66&lng=-117.91&radius=50').get_json()['items']
+    near_ids = [u['id'] for u in near]
+    assert a['user']['id'] in near_ids
+    assert c['user']['id'] in near_ids
+    assert b['user']['id'] not in near_ids
+
+    # Near Humboldt: only Ben
+    hum = [u['id'] for u in client.get('/api/leaderboard?lat=40.81&lng=-124.16&radius=50').get_json()['items']]
+    assert hum == [b['user']['id']]
+
+
 def test_public_profile_extras(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')  # viewer (not a friend)

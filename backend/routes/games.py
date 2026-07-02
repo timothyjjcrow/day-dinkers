@@ -657,10 +657,51 @@ def recent_results():
 
 @games_bp.get('/leaderboard')
 def leaderboard():
-    users = (
-        User.query.filter(User.ranked_wins + User.ranked_losses > 0)
-        .order_by(User.rating.desc())
-        .limit(50)
-        .all()
-    )
+    """Ranked players, globally or scoped to an area (lat/lng/radius miles).
+
+    Area scoping uses each player's last-known location, falling back to
+    their home court — same source as players-nearby discovery."""
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+
+    query = User.query.filter(User.ranked_wins + User.ranked_losses > 0)
+
+    if lat is not None and lng is not None:
+        radius = min(max(request.args.get('radius', default=50.0, type=float), 1.0), 250.0)
+        lat_delta = radius / 69.0
+        lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
+        lat_lo, lat_hi = lat - lat_delta, lat + lat_delta
+        lng_lo, lng_hi = lng - lng_delta, lng + lng_delta
+
+        from sqlalchemy import and_, or_
+        from sqlalchemy.orm import aliased
+        home = aliased(Court)
+        candidates = (
+            query.outerjoin(home, User.home_court_id == home.id)
+            .filter(or_(
+                and_(User.last_lat.between(lat_lo, lat_hi),
+                     User.last_lng.between(lng_lo, lng_hi)),
+                and_(User.last_lat.is_(None),
+                     home.latitude.between(lat_lo, lat_hi),
+                     home.longitude.between(lng_lo, lng_hi)),
+            ))
+            .order_by(User.rating.desc())
+            .limit(200)
+            .all()
+        )
+        # Exact-distance pass over the bounding-box candidates.
+        users = []
+        for user in candidates:
+            ulat, ulng = user.last_lat, user.last_lng
+            if ulat is None and user.home_court:
+                ulat, ulng = user.home_court.latitude, user.home_court.longitude
+            if ulat is None or ulng is None:
+                continue
+            if haversine_miles(lat, lng, ulat, ulng) <= radius:
+                users.append(user)
+            if len(users) >= 50:
+                break
+    else:
+        users = query.order_by(User.rating.desc()).limit(50).all()
+
     return jsonify({'items': [u.to_public_dict() for u in users]})

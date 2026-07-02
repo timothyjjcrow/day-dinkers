@@ -1246,11 +1246,19 @@
     const loc = areaLatLng();
     try {
       if (seg === 'scores') {
+        const scope = state.boardScope || 'near';
+        const boardUrl = scope === 'near'
+          ? `/leaderboard?lat=${loc.lat}&lng=${loc.lng}&radius=50`
+          : '/leaderboard';
         const [board, results] = await Promise.all([
-          api('/leaderboard'),
+          api(boardUrl),
           api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`),
         ]);
-        let html = '';
+        let html = `
+          <div class="segmented" id="board-scope" style="margin:2px 0 12px">
+            <button data-scope="near" class="${scope === 'near' ? 'active' : ''}">📍 Near me</button>
+            <button data-scope="all" class="${scope === 'all' ? 'active' : ''}">🌎 Everyone</button>
+          </div>`;
 
         if (board.items.length) {
           const top3 = board.items.slice(0, 3);
@@ -1292,7 +1300,9 @@
             </div>`;
           }
         } else {
-          html += '<div class="empty-state"><span class="big">🏆</span>No ranked games yet.<br>Win one and claim the podium!</div>';
+          html += scope === 'near'
+            ? '<div class="empty-state"><span class="big">🏆</span>No ranked players in your area yet.<br>Win a ranked game and claim the local crown!</div>'
+            : '<div class="empty-state"><span class="big">🏆</span>No ranked games yet.<br>Win one and claim the podium!</div>';
         }
 
         if (results.items.length) {
@@ -1309,6 +1319,12 @@
         }
 
         el.innerHTML = html;
+        el.querySelector('#board-scope').addEventListener('click', (e) => {
+          const btn = e.target.closest('button');
+          if (!btn) return;
+          state.boardScope = btn.dataset.scope;
+          renderPlay();
+        });
         bindGameButtons(el, renderPlay);
         bindUserButtons(el);
         return;
