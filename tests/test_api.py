@@ -457,6 +457,8 @@ def test_game_reminder_fires_in_window(client, app):
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=24)
     client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    # Ana has vouched she's coming; Ben hasn't.
+    client.post(f"/api/games/{game['id']}/attend", headers=auth_headers(a['token']))
 
     from backend.routes.games import send_game_reminders
     with app.app_context():
@@ -476,6 +478,10 @@ def test_game_reminder_fires_in_window(client, app):
         assert {n.user_id for n in got} == {a['user']['id'], b['user']['id']}
         assert all(n.related_game_id == game['id'] for n in got)
         assert all('Larson Park' in n.title for n in got)
+        # Confirmed players get the paddle line; unconfirmed get the nudge.
+        by_user = {n.user_id: n.body for n in got}
+        assert 'paddle' in by_user[a['user']['id']]
+        assert 'confirm' in by_user[b['user']['id']]
 
         # Sweeping again never duplicates.
         send_game_reminders()

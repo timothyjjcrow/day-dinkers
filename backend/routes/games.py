@@ -91,11 +91,17 @@ def send_game_reminders():
         for player in game.players:
             if player.reminded_at is not None:
                 continue
+            body = (
+                f'{len(game.players)} signed up — don’t forget your paddle! \U0001F3BE'
+                if player.attending_at is not None
+                # Unconfirmed players get nudged to vouch, not just reminded.
+                else f'{len(game.players)} signed up — tap to confirm you’re coming \U0001F44B'
+            )
             notify(
                 player.user_id,
                 'game_reminder',
                 f'Game at {court_name} in about an hour',
-                f'{len(game.players)} signed up — don’t forget your paddle! \U0001F3BE',
+                body,
                 related_game_id=game.id,
             )
             player.reminded_at = now

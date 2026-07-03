@@ -1654,7 +1654,7 @@
         ${game.notes ? `<div class="row-sub" style="margin-bottom:8px">“${esc(game.notes)}”</div>` : ''}
         <div class="row">
           <div class="avatar-stack">${avatars}</div>
-          <span class="row-sub">${game.players.length}/${game.max_players} players${game.spots_left && game.status === 'upcoming' ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}</span>
+          <span class="row-sub">${game.players.length}/${game.max_players} players${game.spots_left && game.status === 'upcoming' ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}${(() => { const n = game.status === 'upcoming' ? game.players.filter((p) => p.attending).length : 0; return n ? ` · 👋 ${n} coming` : ''; })()}</span>
           <div style="margin-left:auto;display:flex;gap:6px;align-items:center">${action}</div>
         </div>
       </div>`;
