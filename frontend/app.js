@@ -716,7 +716,7 @@
             ${esc(c.city)}${c.distance_miles != null ? ` · ${c.distance_miles} mi` : ''}
             · ${c.num_courts} court${c.num_courts === 1 ? '' : 's'}
             ${c.rating_avg ? ` · ⭐ ${c.rating_avg} (${c.rating_count})` : ''}
-            ${c.players_here ? ` · <b style="color:var(--green-700)">${c.players_here} playing now</b>` : ''}
+            ${c.players_here ? ` · <b style="color:var(--green-accent)">${c.players_here} playing now</b>` : ''}
             ${c.upcoming_games ? ` · ${c.upcoming_games} game${c.upcoming_games === 1 ? '' : 's'} scheduled` : ''}
           </div>
         </div>
@@ -2600,10 +2600,10 @@
             : `<button class="btn btn-primary btn-sm" data-respond-inline="${p.friendship_id}">Accept</button>`;
           else action = `<button class="btn btn-primary btn-sm" data-add-friend="${p.id}">＋ Add</button>`;
           let sub = p.checked_in_court
-            ? `📍 At ${esc(p.checked_in_court.name)}${p.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-700)">wants to play!</b>' : ''}`
+            ? `📍 At ${esc(p.checked_in_court.name)}${p.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-accent)">wants to play!</b>' : ''}`
             : `${skillLabel(p.skill_level)} · ${p.rating} · ${p.distance_miles} mi away`;
           if (availabilityOverlap(state.me.availability, p.availability)) {
-            sub += ' · <b style="color:var(--green-700)">⏰ plays your times</b>';
+            sub += ' · <b style="color:var(--green-accent)">⏰ plays your times</b>';
           }
           return `
             <div class="card row">
@@ -2691,7 +2691,7 @@
             <div class="row-main" data-view-user="${f.id}" style="cursor:pointer">
               <div class="row-title">${esc(f.display_name)}</div>
               <div class="row-sub">${f.checked_in_court
-                ? `📍 At ${esc(f.checked_in_court.name)}${f.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-700)">wants to play!</b>' : ''}`
+                ? `📍 At ${esc(f.checked_in_court.name)}${f.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-accent)">wants to play!</b>' : ''}`
                 : `${skillLabel(f.skill_level)} · ${f.rating}`}</div>
             </div>
             <button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game">🎾</button>
