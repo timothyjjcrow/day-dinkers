@@ -68,6 +68,8 @@ class User(TimestampMixin, db.Model):
     muted_notifications = db.Column(db.Text, nullable=False, default='[]')
     # JSON array of badge ids the user has already been congratulated for.
     notified_badges = db.Column(db.Text, nullable=False, default='[]')
+    # Unguessable token for the personal calendar (.ics) feed; set on demand.
+    calendar_token = db.Column(db.String(64), index=True)
 
     def muted_kinds(self):
         try:

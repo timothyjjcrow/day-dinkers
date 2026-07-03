@@ -1235,6 +1235,39 @@ def test_clear_notifications(client):
     assert client.delete('/api/notifications').status_code == 401
 
 
+def test_calendar_feed(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah = auth_headers(a['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=24)
+
+    # Token is stable across calls; feed requires no auth (token IS the auth).
+    tok = client.get('/api/calendar/token', headers=ah).get_json()['token']
+    assert len(tok) > 20
+    assert client.get('/api/calendar/token', headers=ah).get_json()['token'] == tok
+
+    ics = client.get(f'/api/calendar/{tok}.ics')
+    assert ics.status_code == 200 and ics.mimetype == 'text/calendar'
+    body = ics.get_data(as_text=True)
+    assert 'BEGIN:VCALENDAR' in body and 'END:VCALENDAR' in body
+    assert f'thirdshot-game-{game["id"]}@thirdshot.app' in body
+    assert 'Larson Park' in body
+
+    # A bogus token → 404, not a leak.
+    assert client.get('/api/calendar/not-a-real-token.ics').status_code == 404
+
+    # Rotating the token invalidates the old URL.
+    new_tok = client.post('/api/calendar/token/reset', headers=ah).get_json()['token']
+    assert new_tok != tok
+    assert client.get(f'/api/calendar/{tok}.ics').status_code == 404
+    assert client.get(f'/api/calendar/{new_tok}.ics').status_code == 200
+
+    # Ben's feed shows only his games (he's in none) — no cross-user leak.
+    ben_tok = client.get('/api/calendar/token', headers=auth_headers(b['token'])).get_json()['token']
+    assert f'thirdshot-game-{game["id"]}' not in client.get(f'/api/calendar/{ben_tok}.ics').get_data(as_text=True)
+
+
 def test_log_past_game(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

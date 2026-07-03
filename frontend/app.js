@@ -3558,6 +3558,14 @@
         </button>
       </div>
       <div class="card row" style="margin-bottom:10px">
+        <span style="font-size:20px">📅</span>
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">Games calendar</div>
+          <div class="row-sub">Subscribe so your games sync to any calendar app</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="pf-calendar">Subscribe</button>
+      </div>
+      <div class="card row" style="margin-bottom:10px">
         <span style="font-size:20px">🌗</span>
         <div class="row-main">
           <div class="row-title" style="font-size:14px">Appearance</div>
@@ -3618,6 +3626,20 @@
       toast(off ? 'Auto check-in on 📍' : 'Auto check-in off');
     });
 
+    el.querySelector('#pf-calendar').addEventListener('click', async () => {
+      try {
+        const { token } = await api('/calendar/token');
+        // webcal:// prompts a subscribe (auto-updating), unlike a one-off .ics.
+        const feed = `${location.host}/api/calendar/${token}.ics`;
+        const webcal = `webcal://${feed}`;
+        if (navigator.share) {
+          await navigator.share({ title: 'My Third Shot games', url: `${location.protocol}//${feed}` });
+        } else {
+          await navigator.clipboard.writeText(webcal);
+          toast('Calendar link copied — add it in your calendar app 📅');
+        }
+      } catch (e) { toast(e.message); }
+    });
     el.querySelector('#pf-home').addEventListener('click', () => {
       openHomeAreaSheet({ onSet: renderProfile });
     });

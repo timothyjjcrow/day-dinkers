@@ -1,8 +1,9 @@
 """Game scheduling, joining, and ranked match results."""
 import math
+import secrets
 from datetime import UTC, datetime, timedelta
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request
 
 from backend.app import db
 from backend.models import (
@@ -27,6 +28,77 @@ from backend.routes.social import friend_ids
 from backend.security import rate_limit
 
 games_bp = Blueprint('games', __name__)
+
+
+def _ics_escape(s):
+    return str(s or '').replace('\\', '\\\\').replace(',', '\\,').replace(';', '\\;').replace('\n', '\\n')
+
+
+def _ics_stamp(dt):
+    return dt.strftime('%Y%m%dT%H%M%SZ')
+
+
+@games_bp.get('/calendar/token')
+@login_required
+def calendar_token():
+    """The user's personal calendar-feed URL path (token generated on first ask)."""
+    if not g.current_user.calendar_token:
+        g.current_user.calendar_token = secrets.token_urlsafe(24)
+        db.session.commit()
+    return jsonify({'token': g.current_user.calendar_token})
+
+
+@games_bp.post('/calendar/token/reset')
+@rate_limit(10, 3600)
+@login_required
+def reset_calendar_token():
+    """Rotate the feed token — old subscription URLs stop working."""
+    g.current_user.calendar_token = secrets.token_urlsafe(24)
+    db.session.commit()
+    return jsonify({'token': g.current_user.calendar_token})
+
+
+@games_bp.get('/calendar/<token>.ics')
+def calendar_feed(token):
+    """Public ICS feed of a user's upcoming games — the token IS the auth
+    (calendar apps can't send headers). Only upcoming games this user is in."""
+    user = User.query.filter_by(calendar_token=token).first() if token else None
+    if not user or user.deleted_at:
+        return Response('not found', status=404)
+    games = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status.in_(['upcoming', 'awaiting_confirmation']),
+            Game.scheduled_at >= utcnow() - timedelta(hours=3),
+        )
+        .order_by(Game.scheduled_at.asc())
+        .limit(200)
+        .all()
+    )
+    lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Third Shot//EN',
+             'X-WR-CALNAME:Third Shot games', 'CALSCALE:GREGORIAN']
+    now_stamp = _ics_stamp(utcnow())
+    for game in games:
+        start = game.scheduled_at
+        end = start + timedelta(minutes=90)
+        court = game.court
+        ranked = ' (ranked)' if game.game_type == 'ranked' else ''
+        lines += [
+            'BEGIN:VEVENT',
+            f'UID:thirdshot-game-{game.id}@thirdshot.app',
+            f'DTSTAMP:{now_stamp}',
+            f'DTSTART:{_ics_stamp(start)}',
+            f'DTEND:{_ics_stamp(end)}',
+            f'SUMMARY:{_ics_escape("Pickleball" + ranked + " at " + (court.name if court else "the court"))}',
+            f'LOCATION:{_ics_escape(", ".join(filter(None, [court.name, court.city])) if court else "")}',
+            f'DESCRIPTION:{_ics_escape(f"{len(game.players)}/{game.max_players} players")}',
+            'END:VEVENT',
+        ]
+    lines.append('END:VCALENDAR')
+    return Response('\r\n'.join(lines), mimetype='text/calendar',
+                    headers={'Content-Disposition': 'inline; filename="thirdshot.ics"'})
+
 
 ELO_K = 32
 SCORE_AUTO_CONFIRM_HOURS = 24
