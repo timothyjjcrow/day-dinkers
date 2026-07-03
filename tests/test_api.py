@@ -1189,6 +1189,15 @@ def test_log_past_game(client):
     assert game['status'] == 'completed' and game['game_type'] == 'casual'
     assert game['you_won'] is True
 
+    # The opponent is notified they were logged in (transparency).
+    ben_notes = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
+    logged = [n for n in ben_notes if n['kind'] == 'game_logged']
+    assert len(logged) == 1
+    assert '11–6' in logged[0]['title'] and logged[0]['related_game_id'] == game['id']
+    # The logger doesn't notify themselves.
+    assert not [n for n in client.get('/api/notifications', headers=ah).get_json()['items']
+                if n['kind'] == 'game_logged']
+
     # It counts toward stats and the court record immediately (no rating change).
     stats = client.get('/api/me/stats', headers=ah).get_json()
     assert stats['games_total'] == 1

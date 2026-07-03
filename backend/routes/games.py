@@ -306,6 +306,20 @@ def log_past_game():
         db.session.add(GamePlayer(game_id=game.id, user_id=uid, team=1))
     for uid in team2:
         db.session.add(GamePlayer(game_id=game.id, user_id=uid, team=2))
+
+    # Transparency: tell the other players they were logged into this result,
+    # so a silent/incorrect log doesn't go unnoticed.
+    score_text = f'{score1}–{score2}'
+    for uid in set(team1) | set(team2):
+        if uid == g.current_user.id:
+            continue
+        notify(
+            uid,
+            'game_logged',
+            f'{g.current_user.display_name} logged a game with you — {score_text} at {court.name}',
+            related_user_id=g.current_user.id,
+            related_game_id=game.id,
+        )
     db.session.commit()
     return jsonify(game.to_dict(g.current_user.id)), 201
 
