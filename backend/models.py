@@ -520,6 +520,9 @@ class GamePlayer(TimestampMixin, db.Model):
     team = db.Column(db.Integer)
     rating_delta = db.Column(db.Integer)
     reminded_at = db.Column(db.DateTime)
+    # "I'm coming 👋" — set when the player confirms attendance for this
+    # occurrence; cleared when a weekly session rolls forward.
+    attending_at = db.Column(db.DateTime)
 
     game = db.relationship('Game', back_populates='players')
     user = db.relationship('User')
@@ -529,6 +532,7 @@ class GamePlayer(TimestampMixin, db.Model):
         data['user_id'] = self.user_id
         data['team'] = self.team
         data['rating_delta'] = self.rating_delta
+        data['attending'] = self.attending_at is not None
         return data
 
 

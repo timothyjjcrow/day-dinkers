@@ -134,7 +134,8 @@ def roll_forward_recurring():
                     related_game_id=game.id,
                 )
             else:
-                player.reminded_at = None  # remind again for the new occurrence
+                player.reminded_at = None   # remind again for the new occurrence
+                player.attending_at = None  # and re-confirm attendance
         changed = True
     if changed:
         db.session.commit()
@@ -390,6 +391,25 @@ def game_detail(game_id):
     if item['is_joined']:
         item['chat_unread'] = _chat_unread_for(current_user.id, [game.id]).get(game.id, 0)
     return jsonify(item)
+
+
+@games_bp.post('/games/<int:game_id>/attend')
+@rate_limit(30, 60)
+@login_required
+def confirm_attendance(game_id):
+    """'I'm coming 👋' — a player vouches they'll show up for this occurrence."""
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.status != 'upcoming':
+        return jsonify({'error': 'game_not_open'}), 400
+    mine = next((p for p in game.players if p.user_id == g.current_user.id), None)
+    if not mine:
+        return jsonify({'error': 'players_only'}), 403
+    if mine.attending_at is None:
+        mine.attending_at = utcnow()
+        db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id))
 
 
 @games_bp.post('/games/<int:game_id>/join')

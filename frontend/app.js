@@ -3548,7 +3548,7 @@
       <div class="row" style="margin-bottom:8px" data-view-user="${p.user_id}">
         ${avatarHtml(p, 'sm')}
         <div class="row-main">
-          <div class="row-title" style="font-size:14px">${esc(p.display_name)}${p.user_id === game.creator_id ? ' <span class="tag" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">Host</span>' : ''}</div>
+          <div class="row-title" style="font-size:14px">${esc(p.display_name)}${p.user_id === game.creator_id ? ' <span class="tag" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">Host</span>' : ''}${p.attending && game.status === 'upcoming' ? ' <span class="tag live" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">👋 Coming</span>' : ''}</div>
           <div class="row-sub">${skillLabel(p.skill_level)} · ${p.rating}${p.rating_delta != null ? ` · <span class="${p.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${p.rating_delta >= 0 ? '+' : ''}${p.rating_delta}</span>` : ''}</div>
         </div>
       </div>`;
@@ -3577,6 +3577,11 @@
         }
         const startsAhead = new Date(game.scheduled_at).getTime() > Date.now();
         if (startsAhead) {
+          const mine = game.players.find((p) => p.user_id === (state.me && state.me.id));
+          if (mine && !mine.attending) {
+            // Vouching you'll show up is the main ask before a game starts.
+            actions += `<button class="btn ${actions ? 'btn-secondary' : 'btn-primary'} btn-block" id="gs-attend" style="margin-top:${actions ? '10px' : '0'};padding:15px">👋 I'm coming — count me in</button>`;
+          }
           actions += '<button class="btn btn-secondary btn-block" id="gs-calendar" style="margin-top:10px">📅 Add to calendar</button>';
         }
         actions += `<div class="action-row" style="margin-top:10px">
@@ -3663,6 +3668,12 @@
       box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
       box.querySelector('#gs-calendar')?.addEventListener('click', () => downloadIcs(game));
+      box.querySelector('#gs-attend')?.addEventListener('click', async () => {
+        try {
+          render(await api(`/games/${game.id}/attend`, { method: 'POST' }));
+          toast("You're counted in 👋");
+        } catch (e) { toast(e.message); }
+      });
       // Playability heads-up for games starting soon (NWS summary covers ~6h).
       const startMs = new Date(game.scheduled_at).getTime();
       if (game.status === 'upcoming' && court.id

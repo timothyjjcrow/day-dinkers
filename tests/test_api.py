@@ -1010,6 +1010,52 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_attendance_confirmation(client, app):
+    from datetime import timedelta
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=3)
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+
+    # Nobody has vouched yet.
+    detail = client.get(f"/api/games/{game['id']}", headers=ah).get_json()
+    assert all(p['attending'] is False for p in detail['players'])
+
+    # Ben confirms; only his flag flips. Repeat confirms are idempotent.
+    res = client.post(f"/api/games/{game['id']}/attend", headers=bh)
+    assert res.status_code == 200
+    client.post(f"/api/games/{game['id']}/attend", headers=bh)
+    players = {p['user_id']: p['attending'] for p in
+               client.get(f"/api/games/{game['id']}", headers=ah).get_json()['players']}
+    assert players == {a['user']['id']: False, b['user']['id']: True}
+
+    # Outsiders can't vouch.
+    z = register(client, 'z@example.com', 'Zed')
+    assert client.post(f"/api/games/{game['id']}/attend",
+                       headers=auth_headers(z['token'])).status_code == 403
+
+    # A weekly session rolling forward clears the host's confirmation too.
+    from backend.models import Game as GameModel, utcnow
+    when = (utcnow() + timedelta(days=1)).isoformat() + 'Z'
+    weekly = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when,
+        'game_type': 'casual', 'visibility': 'open', 'recurrence': 'weekly',
+    }, headers=ah).get_json()
+    client.post(f"/api/games/{weekly['id']}/attend", headers=ah)
+    with app.app_context():
+        row = db.session.get(GameModel, weekly['id'])
+        row.scheduled_at = utcnow() - timedelta(hours=4)
+        db.session.commit()
+    rolled = client.get(f"/api/games/{weekly['id']}", headers=ah).get_json()
+    # (any /games read triggers the lazy rollover sweep)
+    client.get('/api/games?mine=1', headers=ah)
+    rolled = client.get(f"/api/games/{weekly['id']}", headers=ah).get_json()
+    host = next(p for p in rolled['players'] if p['user_id'] == a['user']['id'])
+    assert host['attending'] is False
+
+
 def test_game_chat_unread_badge(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
