@@ -649,19 +649,23 @@ def court_weather(court_id):
     court = db.session.get(Court, court_id)
     if not court or court.latitude is None:
         return jsonify({'error': 'court_not_found'}), 404
+    # Fresh condition reports ride along so game screens get both in one call.
+    # They're per-court and short-lived, so they stay OUT of the weather cache
+    # (which is shared across courts at the same rounded lat/lng).
+    condition = _latest_condition_for(court.id)
     key = (round(court.latitude, 2), round(court.longitude, 2))
     cached = _WEATHER_CACHE.get(key)
     if cached and cached['expires_at'] > time.time():
-        return jsonify(cached['data'])
+        return jsonify({**cached['data'], 'latest_condition': condition})
     try:
         data = _nws_fetch(court.latitude, court.longitude)
     except Exception:
         current_app.logger.warning('Weather lookup failed for court %s', court_id, exc_info=True)
-        return jsonify({'error': 'weather_unavailable'})
+        return jsonify({'error': 'weather_unavailable', 'latest_condition': condition})
     if len(_WEATHER_CACHE) > _WEATHER_MAX_CACHE:
         _WEATHER_CACHE.clear()
     _WEATHER_CACHE[key] = {'data': data, 'expires_at': time.time() + _WEATHER_CACHE_TTL}
-    return jsonify(data)
+    return jsonify({**data, 'latest_condition': condition})
 
 
 @courts_bp.post('/courts/<int:court_id>/condition')

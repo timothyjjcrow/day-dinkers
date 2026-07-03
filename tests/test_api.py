@@ -875,10 +875,19 @@ def test_court_weather(client, monkeypatch):
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
 
     data = client.get(f'/api/courts/{court_id}/weather').get_json()
-    assert data == {'temp_f': 82, 'short': 'Partly Cloudy', 'rain_soon': True}
+    assert data == {'temp_f': 82, 'short': 'Partly Cloudy', 'rain_soon': True,
+                    'latest_condition': None}
     # Second hit serves from cache — no new upstream call.
     client.get(f'/api/courts/{court_id}/weather')
     assert calls['n'] == 1
+
+    # A fresh condition report rides along, even on the cached path.
+    a = register(client, 'weather-reporter@example.com', 'Wendy')
+    client.post(f'/api/courts/{court_id}/condition', json={'condition': 'wet'},
+                headers=auth_headers(a['token']))
+    data = client.get(f'/api/courts/{court_id}/weather').get_json()
+    assert data['temp_f'] == 82 and calls['n'] == 1  # still cached weather
+    assert data['latest_condition']['condition'] == 'wet'
 
     # Upstream failure degrades gracefully.
     courts_module._WEATHER_CACHE.clear()

@@ -3635,9 +3635,20 @@
           && startMs - Date.now() < 6 * 3600e3 && startMs - Date.now() > -3600e3) {
         api(`/courts/${court.id}/weather`).then((w) => {
           const el = box.querySelector('#gs-weather');
-          if (!el || w.error || w.temp_f == null) return;
+          if (!el) return;
+          const bits = [];
+          if (!w.error && w.temp_f != null) {
+            bits.push(`${weatherEmoji(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${w.rain_soon ? ' · 🌧 rain likely around game time' : ''}`);
+          }
+          const cond = w.latest_condition;
+          if (cond && COURT_CONDITION_LABELS[cond.condition]) {
+            const [emoji, label] = COURT_CONDITION_LABELS[cond.condition];
+            const mins = Math.max(1, Math.round((Date.now() - new Date(cond.reported_at)) / 60000));
+            bits.push(`${emoji} ${esc(label)} — reported ${mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`} ago`);
+          }
+          if (!bits.length) return;
           el.innerHTML = `<div class="row-sub" style="text-align:center;margin:2px 0 10px">
-            ${weatherEmoji(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${w.rain_soon ? ' · 🌧 rain likely around game time' : ''}
+            ${bits.join('<br>')}
           </div>`;
         }).catch(() => { /* forecast is a nicety */ });
       }
