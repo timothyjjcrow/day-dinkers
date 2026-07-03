@@ -1345,6 +1345,35 @@ def test_invite_to_existing_game(client):
                        headers=ah).status_code == 400
 
 
+def test_badge_earned_notification(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def badge_notes():
+        items = client.get('/api/notifications', headers=ah).get_json()['items']
+        return [n for n in items if n['kind'] == 'badge_earned']
+
+    # Fresh player, no badges → loading stats notifies nothing.
+    client.get('/api/me/stats', headers=ah)
+    assert badge_notes() == []
+
+    # Win a game → 'first_win' badge earned; next stats load congratulates once.
+    game = make_game(client, a['token'], court_id, hours_ahead=1)
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 3,
+    }, headers=ah)
+    client.get('/api/me/stats', headers=ah)
+    notes = badge_notes()
+    assert len(notes) == 1 and 'First win' in notes[0]['title']
+    # Re-loading stats doesn't re-notify the same badge.
+    client.get('/api/me/stats', headers=ah)
+    assert len(badge_notes()) == 1
+
+
 def test_notification_mute_preferences(client, app):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

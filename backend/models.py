@@ -66,6 +66,8 @@ class User(TimestampMixin, db.Model):
     last_recap_week = db.Column(db.String(10), nullable=False, default='')
     # JSON array of notification kinds this user has muted (only MUTEABLE ones).
     muted_notifications = db.Column(db.Text, nullable=False, default='[]')
+    # JSON array of badge ids the user has already been congratulated for.
+    notified_badges = db.Column(db.Text, nullable=False, default='[]')
 
     def muted_kinds(self):
         try:

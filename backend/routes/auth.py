@@ -489,6 +489,19 @@ def my_stats():
     rating_history = rating_history_for(user)
     badges = player_badges(user)
 
+    # Congratulate the player once for each newly-earned badge.
+    import json as _json
+    try:
+        already = set(_json.loads(user.notified_badges or '[]'))
+    except (ValueError, TypeError):
+        already = set()
+    fresh = [b for b in badges if b['id'] not in already]
+    if fresh:
+        for b in fresh:
+            notify(user.id, 'badge_earned', f'Badge unlocked: {b["emoji"]} {b["label"]}')
+        user.notified_badges = _json.dumps([b['id'] for b in badges])
+        db.session.commit()
+
     return jsonify({
         'games_total': len(completed),
         'games_this_month': games_this_month,
