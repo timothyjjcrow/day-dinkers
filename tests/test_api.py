@@ -1179,6 +1179,18 @@ def test_log_past_game(client):
     ah = auth_headers(a['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
 
+    def befriend(x, y):
+        client.post('/api/friends/request', json={'user_id': y['user']['id']}, headers=auth_headers(x['token']))
+        fid = client.get('/api/friends', headers=auth_headers(y['token'])).get_json()['incoming'][0]['friendship_id']
+        client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(y['token']))
+
+    # You can only log games with friends — a stranger is rejected.
+    assert client.post('/api/games/log', json={
+        'court_id': court_id, 'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 6,
+    }, headers=ah).status_code == 403
+
+    befriend(a, b)
     # Log a singles win for Ana.
     res = client.post('/api/games/log', json={
         'court_id': court_id, 'team1': [a['user']['id']], 'team2': [b['user']['id']],
@@ -1208,6 +1220,8 @@ def test_log_past_game(client):
     # Doubles: self + partner vs two opponents, all credited and notified.
     c = register(client, 'c@example.com', 'Cam')
     d = register(client, 'd@example.com', 'Dee')
+    befriend(a, c)
+    befriend(a, d)
     res = client.post('/api/games/log', json={
         'court_id': court_id,
         'team1': [a['user']['id'], b['user']['id']],
@@ -1236,6 +1250,14 @@ def test_log_past_game(client):
         'score_team1': 11, 'score_team2': 5,
     }, headers=ah).status_code == 404
     assert client.post('/api/games/log', json={'court_id': court_id}).status_code == 401
+
+    # Abuse guard: can't log a game against someone who blocked you, even a
+    # former friend. Ben blocks Ana → logging with Ben is refused.
+    client.post(f"/api/users/{a['user']['id']}/block", headers=auth_headers(b['token']))
+    assert client.post('/api/games/log', json={
+        'court_id': court_id, 'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 3,
+    }, headers=ah).status_code == 403
 
 
 def test_host_removes_player(client):

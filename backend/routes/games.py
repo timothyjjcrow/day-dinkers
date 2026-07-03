@@ -281,6 +281,12 @@ def log_past_game():
         return jsonify({'error': 'must_include_self'}), 400
     if len(team1) != len(team2):
         return jsonify({'error': 'uneven_teams'}), 400
+    # You can only log games with your friends (and never with someone who
+    # blocked you) — otherwise anyone could pin fake results on strangers.
+    my_friends = friend_ids(g.current_user.id)
+    for uid in (set(team1) | set(team2)) - {g.current_user.id}:
+        if uid not in my_friends or is_blocked_between(g.current_user.id, uid):
+            return jsonify({'error': 'players_must_be_friends'}), 403
 
     when = _parse_scheduled_at(payload.get('played_at')) or utcnow()
     if when > utcnow() + timedelta(minutes=5):
