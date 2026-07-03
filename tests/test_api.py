@@ -1068,6 +1068,37 @@ def test_open_game_public_no_notifications(client):
     assert any(g['id'] == game['id'] for g in feed['items'])
 
 
+def test_open_game_notifies_court_fans(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Ben and Cam saved Larson Park; Cam has blocked Ana; Dee saved nothing.
+    for u in (b, c):
+        client.post(f'/api/courts/{court_id}/favorite', headers=auth_headers(u['token']))
+    client.post(f"/api/users/{a['user']['id']}/block", headers=auth_headers(c['token']))
+
+    game = make_game(client, a['token'], court_id, visibility='open')
+
+    def court_game_notes(user):
+        items = client.get('/api/notifications', headers=auth_headers(user['token'])).get_json()['items']
+        return [n for n in items if n['kind'] == 'court_game']
+
+    ben = court_game_notes(b)
+    assert len(ben) == 1
+    assert 'Larson Park' in ben[0]['title'] and 'saved' in ben[0]['title']
+    assert ben[0]['related_game_id'] == game['id']
+    assert court_game_notes(c) == []  # blocked pair stays silent
+    assert court_game_notes(d) == []  # never saved the court
+    assert court_game_notes(a) == []  # creators don't ping themselves
+
+    # Friends-only games don't ping court fans (that's the friends feed's job).
+    make_game(client, a['token'], court_id, visibility='friends')
+    assert len(court_game_notes(b)) == 1
+
+
 def test_visibility_modes_feed_access(client):
     """Open shows to everyone nearby; friends only to friends; private only to invitees."""
     a = register(client, 'a@example.com', 'Ana')      # creator

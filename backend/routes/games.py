@@ -7,6 +7,7 @@ from flask import Blueprint, g, jsonify, request
 from backend.app import db
 from backend.models import (
     Court,
+    FavoriteCourt,
     GAME_RECURRENCES,
     GAME_TYPES,
     GAME_VISIBILITIES,
@@ -16,6 +17,7 @@ from backend.models import (
     GamePlayer,
     GameWaitlist,
     User,
+    is_blocked_between,
     notify,
     utcnow,
 )
@@ -314,7 +316,22 @@ def create_game():
                 related_user_id=g.current_user.id,
                 related_game_id=game.id,
             )
-    # open: publicly discoverable in the nearby feed, no targeted notifications
+    else:
+        # Open games ping players who saved this court — they opted into
+        # hearing about it. Friends see it in their feed already.
+        fans = FavoriteCourt.query.filter_by(court_id=court.id).limit(200).all()
+        for fan in fans:
+            if fan.user_id == g.current_user.id or fan.user_id in invited_ids:
+                continue
+            if is_blocked_between(g.current_user.id, fan.user_id):
+                continue
+            notify(
+                fan.user_id,
+                'court_game',
+                f'New {label} at {court.name} — a court you saved',
+                related_user_id=g.current_user.id,
+                related_game_id=game.id,
+            )
 
     db.session.commit()
     return jsonify(game.to_dict(g.current_user.id)), 201
