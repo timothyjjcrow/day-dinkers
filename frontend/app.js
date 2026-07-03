@@ -2420,7 +2420,7 @@
         </div>
         <button class="modal-close" aria-label="Close">✕</button>
       </div>
-      ${singles ? '' : '<p class="row-sub" style="margin-bottom:8px">Tap a player to switch their team.</p>'}
+      ${singles ? '' : `<p class="row-sub" style="margin-bottom:8px">Tap a player to switch their team.${players.length >= 4 ? ' <button type="button" id="sc-balance" class="tag" style="cursor:pointer;border:1px dashed var(--line);background:transparent">⚖️ Balance by rating</button>' : ''}</p>`}
       <div id="sc-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px"></div>
       <div id="sc-uneven" class="row-sub" style="color:var(--amber-700);font-weight:700;margin-bottom:10px;display:none"></div>
       <div class="score-grid">
@@ -2482,6 +2482,33 @@
     renderChips();
     renderLabels();
     highlightWinner();
+
+    // Fairest split: the half-size subset whose total rating is closest to
+    // the other half's (n ≤ 12 → at most C(12,6)=924 combos, instant).
+    modal.querySelector('#sc-balance')?.addEventListener('click', () => {
+      const ids = players.map((p) => p.user_id);
+      const rating = Object.fromEntries(players.map((p) => [p.user_id, p.rating || 1200]));
+      const size = Math.floor(ids.length / 2);
+      const total = ids.reduce((sum, id) => sum + rating[id], 0);
+      let best = null;
+      let bestDiff = Infinity;
+      const choose = (start, picked, sum) => {
+        if (picked.length === size) {
+          const diff = Math.abs(total - 2 * sum);
+          if (diff < bestDiff) { bestDiff = diff; best = [...picked]; }
+          return;
+        }
+        for (let i = start; i <= ids.length - (size - picked.length); i++) {
+          choose(i + 1, [...picked, ids[i]], sum + rating[ids[i]]);
+        }
+      };
+      choose(0, [], 0);
+      const teamOne = new Set(best);
+      ids.forEach((id) => { teams[id] = teamOne.has(id) ? 1 : 2; });
+      renderChips();
+      renderLabels();
+      toast(`⚖️ Balanced — teams ${bestDiff} rating point${bestDiff === 1 ? '' : 's'} apart`);
+    });
 
     // If someone else reports a score (or the game changes) while this is open,
     // swap to the game screen instead of letting a stale submission overwrite it.
