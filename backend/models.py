@@ -358,6 +358,19 @@ class CourtChatRead(TimestampMixin, db.Model):
     last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
 
 
+class GameChatRead(TimestampMixin, db.Model):
+    """How far a player has read a game's chat thread. Members with no row
+    haven't read anything — every message counts as unread."""
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'game_id', name='uq_game_chat_read'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False, index=True)
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
+
+
 GAME_TYPES = ['casual', 'ranked']
 GAME_STATUSES = ['upcoming', 'awaiting_confirmation', 'completed', 'cancelled']
 # Who can see / join a game:

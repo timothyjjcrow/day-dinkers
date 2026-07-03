@@ -4,8 +4,8 @@ from sqlalchemy import or_
 
 from backend.app import db
 from backend.models import (
-    Court, CourtChatRead, Game, GamePlayer, Message, Notification, User,
-    blocked_pair_ids, is_blocked_between, notify, utcnow,
+    Court, CourtChatRead, Game, GameChatRead, GamePlayer, Message,
+    Notification, User, blocked_pair_ids, is_blocked_between, notify, utcnow,
 )
 from backend.security import rate_limit
 
@@ -91,6 +91,24 @@ def game_chat(game_id):
         messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
     else:
         messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+
+    # Reading the thread marks it read — powers unread badges on game cards.
+    latest_id = db.session.query(db.func.max(Message.id)).filter(
+        Message.game_id == game_id,
+    ).scalar() or 0
+    marker = GameChatRead.query.filter_by(
+        user_id=g.current_user.id, game_id=game.id,
+    ).first()
+    if not marker:
+        db.session.add(GameChatRead(
+            user_id=g.current_user.id, game_id=game.id,
+            last_read_message_id=latest_id,
+        ))
+        db.session.commit()
+    elif latest_id > marker.last_read_message_id:
+        marker.last_read_message_id = latest_id
+        db.session.commit()
+
     return jsonify({
         'game': {'id': game.id, 'court_name': game.court.name if game.court else 'Court'},
         'items': [m.to_dict() for m in messages],

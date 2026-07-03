@@ -211,7 +211,12 @@ def list_games():
         items.append(item)
     if lat is not None and lng is not None and not mine and not friends_only:
         items.sort(key=lambda i: (i.get('distance_miles', 1e9), i['scheduled_at']))
-    return jsonify({'items': items[:100]})
+    items = items[:100]
+    if mine:
+        unread = _chat_unread_for(current_user.id, [i['id'] for i in items])
+        for item in items:
+            item['chat_unread'] = unread.get(item['id'], 0)
+    return jsonify({'items': items})
 
 
 @games_bp.get('/games/history')
@@ -337,13 +342,41 @@ def create_game():
     return jsonify(game.to_dict(g.current_user.id)), 201
 
 
+def _chat_unread_for(user_id, game_ids):
+    """{game_id: unread count} across a player's games. No read marker means
+    nothing's been read — every message in that thread counts."""
+    if not game_ids:
+        return {}
+    from backend.models import GameChatRead, Message
+    markers = {
+        m.game_id: m.last_read_message_id
+        for m in GameChatRead.query.filter(
+            GameChatRead.user_id == user_id,
+            GameChatRead.game_id.in_(game_ids),
+        )
+    }
+    counts = {}
+    rows = (
+        db.session.query(Message.game_id, Message.id)
+        .filter(Message.game_id.in_(game_ids))
+        .all()
+    )
+    for gid, mid in rows:
+        if mid > markers.get(gid, 0):
+            counts[gid] = counts.get(gid, 0) + 1
+    return counts
+
+
 @games_bp.get('/games/<int:game_id>')
 def game_detail(game_id):
     game = db.session.get(Game, game_id)
     if not game:
         return jsonify({'error': 'game_not_found'}), 404
     current_user = optional_current_user()
-    return jsonify(game.to_dict(current_user.id if current_user else None))
+    item = game.to_dict(current_user.id if current_user else None)
+    if item['is_joined']:
+        item['chat_unread'] = _chat_unread_for(current_user.id, [game.id]).get(game.id, 0)
+    return jsonify(item)
 
 
 @games_bp.post('/games/<int:game_id>/join')

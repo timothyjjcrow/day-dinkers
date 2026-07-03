@@ -1010,6 +1010,37 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_game_chat_unread_badge(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=2)
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+
+    def unread(headers):
+        mine = client.get('/api/games?mine=1', headers=headers).get_json()['items']
+        entry = next(i for i in mine if i['id'] == game['id'])
+        return entry['chat_unread']
+
+    # Ana posts twice: Ben has never opened the thread, so both are unread.
+    client.post(f"/api/games/{game['id']}/chat", json={'body': 'bring balls'}, headers=ah)
+    client.post(f"/api/games/{game['id']}/chat", json={'body': 'and water'}, headers=ah)
+    assert unread(bh) == 2
+    # The detail view carries the same count for players…
+    detail = client.get(f"/api/games/{game['id']}", headers=bh).get_json()
+    assert detail['chat_unread'] == 2
+    # …and spectators don't get the field at all.
+    z = register(client, 'z@example.com', 'Zed')
+    assert 'chat_unread' not in client.get(f"/api/games/{game['id']}", headers=auth_headers(z['token'])).get_json()
+
+    # Reading the thread clears it; the next message counts from there.
+    client.get(f"/api/games/{game['id']}/chat", headers=bh)
+    assert unread(bh) == 0
+    client.post(f"/api/games/{game['id']}/chat", json={'body': 'running late!'}, headers=bh)
+    assert unread(ah) == 3  # Ana never opened the thread either — all three
+
+
 def test_court_chat_unread_badge(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

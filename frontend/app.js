@@ -1577,6 +1577,9 @@
     const recurTag = game.recurrence === 'weekly'
       ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>'
       : '';
+    const chatTag = game.is_joined && game.chat_unread
+      ? `<span class="tag live" style="margin:0 0 0 6px">💬 ${game.chat_unread > 9 ? '9+' : game.chat_unread} new</span>`
+      : '';
     // Discovery aids: flag joinable games near your rating or at your usual slot.
     const reasons = gameMatchReasons(game);
     let levelTag = '';
@@ -1642,7 +1645,7 @@
           <div class="row-main">
             <div class="row-title">${esc(game.recurrence === 'weekly' && game.status === 'upcoming'
               ? `${new Date(game.scheduled_at).toLocaleDateString([], { weekday: 'long' })}s · ${new Date(game.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-              : fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}${levelTag}</div>
+              : fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}${levelTag}${chatTag}</div>
             <div class="row-sub">${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</div>
           </div>
           <span class="chev">›</span>
@@ -3606,7 +3609,7 @@
           <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
-        ${game.is_joined ? '<button class="icon-btn" id="gs-chat" title="Game chat" aria-label="Game chat" style="box-shadow:none;font-size:17px">💬</button>' : ''}
+        ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="Game chat" aria-label="Game chat" style="box-shadow:none;font-size:17px;position:relative">💬${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
         <button class="icon-btn" id="gs-share" title="Share game" aria-label="Share game" style="box-shadow:none;font-size:17px">📤</button>
         <button class="modal-close" aria-label="Close">✕</button>
       </div>
