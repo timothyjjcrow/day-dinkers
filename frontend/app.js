@@ -2701,10 +2701,11 @@
 
   async function renderFriends(el) {
     const loc = areaLatLng();
-    const [data, results, digest] = await Promise.all([
+    const [data, results, digest, suggestions] = await Promise.all([
       api('/friends'),
       api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`).catch(() => ({ items: [] })),
       api('/friends/digest').catch(() => null),
+      api('/friends/suggestions').catch(() => ({ items: [] })),
     ]);
     let html = `
       <div class="form-field" style="margin-top:4px">
@@ -2761,6 +2762,20 @@
           </div>`).join('')
       : '<div class="empty-state" style="padding:18px">No friends yet — search above to find players.</div>';
 
+    // People you've actually played with but haven't friended.
+    if (suggestions && suggestions.items && suggestions.items.length) {
+      html += '<div class="section-label">🎾 Players you\'ve played with</div>';
+      html += suggestions.items.map((s) => `
+        <div class="card row">
+          ${avatarHtml(s)}
+          <div class="row-main" data-view-user="${s.id}" style="cursor:pointer">
+            <div class="row-title">${esc(s.display_name)}</div>
+            <div class="row-sub">${s.games_together} game${s.games_together === 1 ? '' : 's'} together · ${skillLabel(s.skill_level)}</div>
+          </div>
+          <button class="btn btn-primary btn-sm" data-add-friend="${s.id}">＋ Add</button>
+        </div>`).join('');
+    }
+
     if (data.outgoing.length) {
       html += '<div class="section-label">Sent requests</div>';
       html += data.outgoing.map((f) => `
@@ -2799,6 +2814,18 @@
       openNewGameModal(court, 'casual');
       toast('Schedule it — your friends get notified 🔔');
     }));
+    // Suggestion "＋ Add" buttons (search results wire their own separately).
+    el.querySelectorAll('.card > [data-add-friend], .card [data-add-friend]:not(#friend-search-results [data-add-friend])').forEach((b) => {
+      if (b.closest('#friend-search-results')) return;
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          await api('/friends/request', { method: 'POST', body: JSON.stringify({ user_id: Number(b.dataset.addFriend) }) });
+          toast('Friend request sent! 🤝');
+          renderChat();
+        } catch (e) { toast(e.message); b.disabled = false; }
+      });
+    });
     bindUserButtons(el);
 
     let timer;

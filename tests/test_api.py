@@ -1029,6 +1029,47 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_friend_suggestions(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    ah = auth_headers(a['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Fresh player: no games, no suggestions.
+    assert client.get('/api/friends/suggestions', headers=ah).get_json()['items'] == []
+
+    def play_with(*users):
+        game = make_game(client, a['token'], court_id, hours_ahead=1)
+        for u in users:
+            client.post(f"/api/games/{game['id']}/join", headers=auth_headers(u['token']))
+        client.post(f"/api/games/{game['id']}/complete", json={
+            'team1': [a['user']['id']], 'team2': [users[0]['user']['id']],
+            'score_team1': 11, 'score_team2': 5,
+        }, headers=ah)
+
+    # Ana plays Ben twice, Cam once.
+    play_with(b)
+    play_with(b)
+    play_with(c)
+    sugg = client.get('/api/friends/suggestions', headers=ah).get_json()['items']
+    assert [(s['display_name'], s['games_together']) for s in sugg] == [('Ben', 2), ('Cam', 1)]
+
+    # Befriending Ben drops him from suggestions.
+    client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah)
+    fid = client.get('/api/friends', headers=auth_headers(b['token'])).get_json()['incoming'][0]['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(b['token']))
+    sugg = client.get('/api/friends/suggestions', headers=ah).get_json()['items']
+    assert [s['display_name'] for s in sugg] == ['Cam']
+
+    # Blocking Cam removes him too → no suggestions left.
+    client.post(f"/api/users/{c['user']['id']}/block", headers=ah)
+    assert client.get('/api/friends/suggestions', headers=ah).get_json()['items'] == []
+    # A pending request also suppresses (Dee never played, so still absent).
+    assert client.get('/api/friends/suggestions').status_code == 401
+
+
 def test_clear_notifications(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

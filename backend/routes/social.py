@@ -494,6 +494,47 @@ def friends_digest():
     })
 
 
+@social_bp.get('/friends/suggestions')
+@login_required
+def friend_suggestions():
+    """Players you've completed games with but haven't friended — ranked by
+    games shared. The organic 'add the people you actually play with' nudge."""
+    my_games = {
+        gp.game_id for gp in
+        GamePlayer.query.filter_by(user_id=g.current_user.id).all()
+    }
+    if not my_games:
+        return jsonify({'items': []})
+
+    exclude = friend_ids(g.current_user.id) | blocked_pair_ids(g.current_user.id)
+    exclude.add(g.current_user.id)
+    # Pending requests (either direction) shouldn't be re-suggested.
+    for f in Friendship.query.filter(
+        or_(Friendship.requester_id == g.current_user.id,
+            Friendship.addressee_id == g.current_user.id),
+    ).all():
+        exclude.add(f.requester_id)
+        exclude.add(f.addressee_id)
+
+    counts = {}
+    for gp in GamePlayer.query.filter(GamePlayer.game_id.in_(my_games)).all():
+        if gp.user_id in exclude:
+            continue
+        counts[gp.user_id] = counts.get(gp.user_id, 0) + 1
+    if not counts:
+        return jsonify({'items': []})
+
+    ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:6]
+    users = {u.id: u for u in User.query.filter(
+        User.id.in_([uid for uid, _ in ranked]),
+        User.deleted_at.is_(None),
+    ).all()}
+    return jsonify({'items': [
+        {**users[uid].to_public_dict(), 'games_together': n}
+        for uid, n in ranked if uid in users
+    ]})
+
+
 @social_bp.post('/friends/request')
 @rate_limit(40, 60)
 @login_required
