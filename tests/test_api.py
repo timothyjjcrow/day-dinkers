@@ -1549,8 +1549,14 @@ def test_weekly_recap_notification(client, app):
     from backend.models import User as UserModel
     from backend.routes.auth import _maybe_weekly_recap
     with app.app_context():
+        # Place the game squarely mid-week (Thursday noon) of the previous ISO
+        # week — the recap targets (now-7d)'s ISO week, and a game left exactly
+        # 7 days ago can straddle the week boundary near UTC midnight.
+        target = utcnow() - timedelta(days=7)
+        week_monday = (target - timedelta(days=target.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0)
         row = db.session.get(GameModel, game['id'])
-        row.completed_at = utcnow() - timedelta(days=7)
+        row.completed_at = week_monday + timedelta(days=3, hours=12)
         db.session.commit()
         _maybe_weekly_recap(db.session.get(UserModel, a['user']['id']))
 

@@ -389,7 +389,7 @@
     ['courts', 'play', 'chat', 'profile'].forEach((t) => {
       $(`#tab-${t}`).classList.toggle('hidden', t !== tab);
     });
-    if (tab === 'courts' && state.map) setTimeout(() => state.map.invalidateSize(), 60);
+    if (tab === 'courts' && state.map) { setTimeout(() => state.map.invalidateSize(), 60); refreshLookingBanner(); }
     if (tab === 'play') renderPlay();
     if (tab === 'chat') renderChat();
     if (tab === 'profile') renderProfile();
