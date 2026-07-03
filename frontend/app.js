@@ -3463,6 +3463,10 @@
         <div id="ep-court-results"></div>
       </div>
       <button class="btn btn-primary btn-block" id="ep-save">Save</button>
+      <details style="margin-top:22px" id="ep-blocked-wrap">
+        <summary style="font-size:13px;font-weight:600;cursor:pointer">🚫 Blocked players</summary>
+        <div id="ep-blocked" style="margin-top:10px"><div class="row-sub">Loading…</div></div>
+      </details>
       <details style="margin-top:22px">
         <summary style="font-size:13px;font-weight:600;cursor:pointer">Change password</summary>
         <div class="form-field" style="margin-top:10px">
@@ -3521,6 +3525,32 @@
           modal.querySelector('#ep-court-results').innerHTML = '';
         }));
       }, 300);
+    });
+
+    // Blocked players — the one place they still show, so unblocking is possible.
+    const loadBlocked = async () => {
+      const box = modal.querySelector('#ep-blocked');
+      try {
+        const data = await api('/users/blocked');
+        box.innerHTML = data.items.length
+          ? data.items.map((u) => `
+              <div class="row" style="margin-bottom:8px">
+                ${avatarHtml(u, 'sm')}
+                <div class="row-main"><div class="row-title" style="font-size:14px">${esc(u.display_name)}</div></div>
+                <button class="btn btn-secondary btn-sm" data-unblock="${u.id}">Unblock</button>
+              </div>`).join('')
+          : '<div class="row-sub">No one — your courts are drama-free 🌿</div>';
+        box.querySelectorAll('[data-unblock]').forEach((b) => b.addEventListener('click', async () => {
+          try {
+            await api(`/users/${b.dataset.unblock}/unblock`, { method: 'POST' });
+            toast('Unblocked');
+            loadBlocked();
+          } catch (e) { toast(e.message); }
+        }));
+      } catch { box.innerHTML = '<div class="row-sub">Could not load right now.</div>'; }
+    };
+    modal.querySelector('#ep-blocked-wrap').addEventListener('toggle', (e) => {
+      if (e.target.open) loadBlocked();
     });
 
     modal.querySelector('#ep-pw-save').addEventListener('click', async () => {

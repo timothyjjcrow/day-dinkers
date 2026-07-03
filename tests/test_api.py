@@ -1016,6 +1016,30 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_blocked_players_list(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah = auth_headers(a['token'])
+
+    assert client.get('/api/users/blocked', headers=ah).get_json()['items'] == []
+    client.post(f"/api/users/{b['user']['id']}/block", headers=ah)
+
+    # Search hides Ben, but the blocked list is the escape hatch.
+    assert client.get('/api/users/search?q=ben', headers=ah).get_json()['items'] == []
+    blocked = client.get('/api/users/blocked', headers=ah).get_json()['items']
+    assert [u['display_name'] for u in blocked] == ['Ben']
+
+    client.post(f"/api/users/{b['user']['id']}/unblock", headers=ah)
+    assert client.get('/api/users/blocked', headers=ah).get_json()['items'] == []
+    assert [u['display_name'] for u in
+            client.get('/api/users/search?q=ben', headers=ah).get_json()['items']] == ['Ben']
+
+    # Auth required; and being blocked BY someone doesn't put them on your list.
+    assert client.get('/api/users/blocked').status_code == 401
+    client.post(f"/api/users/{a['user']['id']}/block", headers=auth_headers(b['token']))
+    assert client.get('/api/users/blocked', headers=ah).get_json()['items'] == []
+
+
 def test_weekly_recap_notification(client, app):
     from datetime import timedelta
     from backend.models import Game as GameModel, utcnow

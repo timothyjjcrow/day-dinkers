@@ -350,6 +350,24 @@ def user_profile(user_id):
     return jsonify(payload)
 
 
+@social_bp.get('/users/blocked')
+@login_required
+def list_blocked():
+    """Players you've blocked — the only surface they still appear on,
+    so you can find them again to unblock."""
+    rows = (
+        BlockedUser.query.filter_by(blocker_id=g.current_user.id)
+        .order_by(BlockedUser.id.desc())
+        .limit(100)
+        .all()
+    )
+    return jsonify({'items': [
+        row.blocked.to_public_dict()
+        for row in rows
+        if row.blocked and row.blocked.deleted_at is None
+    ]})
+
+
 @social_bp.post('/users/<int:user_id>/block')
 @rate_limit(30, 3600)
 @login_required
