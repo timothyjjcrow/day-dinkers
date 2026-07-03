@@ -326,6 +326,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
   display: flex; align-items: center; gap: 8px; box-shadow: var(--shadow);
 }
 .presence-banner button { margin-left: auto; color: var(--green-200); font-weight: 700; font-size: 13px; }
+.looking-banner {
+  position: absolute; top: 112px; left: 12px; right: 12px; z-index: 499;
+  background: var(--green-700); color: #fff; border: none; border-radius: 12px;
+  padding: 10px 14px; font-size: 13px; font-weight: 700; text-align: left;
+  display: flex; align-items: center; gap: 8px; box-shadow: var(--shadow); cursor: pointer;
+}
+.looking-banner.below { top: 160px; }
+.looking-banner .chev { margin-left: auto; }
 .pill-btn {
   position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 700;
   background: var(--solid); color: var(--on-solid); border-radius: 999px; padding: 10px 20px;

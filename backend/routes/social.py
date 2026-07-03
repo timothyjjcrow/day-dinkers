@@ -169,6 +169,51 @@ def players_nearby():
     return jsonify({'items': items[:60], 'count': len(items)})
 
 
+@social_bp.get('/players/looking')
+@login_required
+def players_looking():
+    """Lightweight count (+ a few names) of players checked in and *looking
+    for a game* near a location — powers the 'go play now' home prompt."""
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    if lat is None or lng is None:
+        return jsonify({'count': 0, 'players': []})
+    radius = min(max(request.args.get('radius', default=25.0, type=float), 1.0), 100.0)
+    hidden = blocked_pair_ids(g.current_user.id)
+
+    rows = (
+        db.session.query(CheckIn, User, Court)
+        .join(User, CheckIn.user_id == User.id)
+        .join(Court, CheckIn.court_id == Court.id)
+        .filter(
+            CheckIn.checked_out_at.is_(None),
+            CheckIn.looking_for_game.is_(True),
+            CheckIn.user_id != g.current_user.id,
+            User.deleted_at.is_(None),
+            Court.latitude.isnot(None),
+        )
+        .order_by(CheckIn.id.desc())
+        .limit(200)
+        .all()
+    )
+    seen = set()
+    players = []
+    for ci, user, court in rows:
+        if user.id in seen or user.id in hidden:
+            continue
+        if _haversine_miles(lat, lng, court.latitude, court.longitude) > radius:
+            continue
+        seen.add(user.id)
+        players.append({
+            'id': user.id,
+            'display_name': user.display_name,
+            'avatar_color': user.avatar_color,
+            'avatar_url': user.avatar_url,
+            'court_name': court.name,
+        })
+    return jsonify({'count': len(players), 'players': players[:5]})
+
+
 @social_bp.get('/users/search')
 @login_required
 def search_users():

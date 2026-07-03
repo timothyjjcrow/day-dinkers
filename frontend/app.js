@@ -476,6 +476,11 @@
 
     $('#locate-btn').addEventListener('click', locateMe);
     $('#bell-btn').addEventListener('click', openActivity);
+    $('#looking-banner').addEventListener('click', () => {
+      state.chatSeg = 'nearby';
+      document.querySelectorAll('#chat-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === 'nearby'));
+      switchTab('chat');
+    });
     const ICON_LIST = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;vertical-align:-2px"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>';
     const ICON_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;vertical-align:-2px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
     const syncListToggle = () => {
@@ -623,6 +628,23 @@
       drawMarkers(items);
       renderCourtList(items);
     } catch { /* network hiccup */ }
+    refreshLookingBanner();
+  }
+
+  // "N players near you want to play" — a nudge toward a spontaneous game.
+  async function refreshLookingBanner() {
+    const el = $('#looking-banner');
+    if (!el || !state.token) return;
+    const c = areaLatLng();
+    try {
+      const data = await api(`/players/looking?lat=${c.lat}&lng=${c.lng}&radius=25`);
+      if (!data.count) { el.classList.add('hidden'); return; }
+      const names = data.players.map((p) => esc(p.display_name.split(' ')[0]));
+      const who = data.count === 1 ? `${names[0]} wants` : `${data.count} players near you want`;
+      el.innerHTML = `🎾 ${who} to play now <span class="chev">›</span>`;
+      el.classList.remove('hidden');
+      el.classList.toggle('below', !$('#presence-banner').classList.contains('hidden'));
+    } catch { el.classList.add('hidden'); }
   }
 
   async function searchCourts(q) {

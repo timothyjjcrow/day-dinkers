@@ -1087,6 +1087,37 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_players_looking_nearby(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]  # lat 33.66, lng -117.91
+
+    # Nobody looking yet.
+    r = client.get(f'/api/players/looking?lat={larson["latitude"]}&lng={larson["longitude"]}', headers=ah)
+    assert r.get_json() == {'count': 0, 'players': []}
+
+    # Ben checks in looking; Cam checks in but NOT looking.
+    client.post(f'/api/courts/{larson["id"]}/checkin', json={'looking_for_game': True}, headers=bh)
+    client.post(f'/api/courts/{larson["id"]}/checkin', json={'looking_for_game': False}, headers=ch)
+    data = client.get(f'/api/players/looking?lat={larson["latitude"]}&lng={larson["longitude"]}', headers=ah).get_json()
+    assert data['count'] == 1 and [p['display_name'] for p in data['players']] == ['Ben']
+
+    # The viewer never counts themselves, even when looking.
+    client.post(f'/api/courts/{larson["id"]}/checkin', json={'looking_for_game': True}, headers=ah)
+    assert client.get(f'/api/players/looking?lat={larson["latitude"]}&lng={larson["longitude"]}',
+                      headers=ah).get_json()['count'] == 1
+
+    # Far away → out of radius.
+    assert client.get('/api/players/looking?lat=40.81&lng=-124.16&radius=25', headers=ah).get_json()['count'] == 0
+
+    # Blocked players are hidden (Ana blocks Ben).
+    client.post(f"/api/users/{b['user']['id']}/block", headers=ah)
+    assert client.get(f'/api/players/looking?lat={larson["latitude"]}&lng={larson["longitude"]}',
+                      headers=ah).get_json()['count'] == 0
+
+
 def test_on_my_way_ping(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
