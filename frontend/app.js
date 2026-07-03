@@ -169,6 +169,21 @@
     const set = new Set(a);
     return b.reduce((n, s) => n + (set.has(s) ? 1 : 0), 0);
   }
+  // Short natural summary of the slots two players share: "Sat AM · Wed PM".
+  function sharedAvailabilityText(a, b) {
+    if (!a || !b) return '';
+    const set = new Set(a);
+    const shared = b.filter((s) => set.has(s));
+    if (!shared.length) return '';
+    const shortDay = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+    const shortPart = { am: 'AM', pm: 'PM', eve: 'eve' };
+    const order = (s) => AVAIL_DAYS.indexOf(s.split('-')[0]) * 3 + ['am', 'pm', 'eve'].indexOf(s.split('-')[1]);
+    return shared
+      .sort((x, y) => order(x) - order(y))
+      .slice(0, 4)
+      .map((s) => { const [d, p] = s.split('-'); return `${shortDay[d]} ${shortPart[p]}`; })
+      .join(' · ');
+  }
   function fmtDuration(minutes) {
     if (!minutes || minutes < 1) return 'just now';
     if (minutes < 60) return `${minutes}m`;
@@ -3164,6 +3179,8 @@
           userId !== state.me.id && availabilityOverlap(state.me.availability, user.availability)
             ? ' <span class="tag" style="margin:0 0 0 6px">🤝 your times too</span>' : ''}</div>
         ${availLines.map((l) => `<div class="row-sub">${l}</div>`).join('')}
+        ${userId !== state.me.id && sharedAvailabilityText(state.me.availability, user.availability)
+          ? `<div class="row-sub" style="margin-top:6px;color:var(--green-accent);font-weight:700">🤝 You both play: ${esc(sharedAvailabilityText(state.me.availability, user.availability))}</div>` : ''}
       </div>` : '';
     const courtRow = (c) => `
       <div class="card row" data-pcourt="${c.id}" style="cursor:pointer">
