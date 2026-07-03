@@ -248,6 +248,56 @@ def login():
     return jsonify({'token': _issue_token(user), **_me_payload(user)})
 
 
+def _maybe_weekly_recap(user):
+    """First app-open each ISO week recaps the previous week's play as a
+    notification. The marker advances even on quiet weeks, so this stays
+    one cheap string compare on every later /me."""
+    from datetime import timedelta
+
+    now = utcnow()
+    year, week, _ = (now - timedelta(days=7)).isocalendar()
+    prev_week = f'{year}-W{week:02d}'
+    if user.last_recap_week == prev_week:
+        return
+    user.last_recap_week = prev_week
+
+    games = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status == 'completed',
+            Game.completed_at.isnot(None),
+        )
+        .order_by(Game.completed_at.desc())
+        .limit(60)
+        .all()
+    )
+    played = [g_ for g_ in games if g_.completed_at.isocalendar()[:2] == (year, week)]
+    if not played:
+        db.session.commit()  # persist the marker; nothing to say
+        return
+
+    wins = losses = 0
+    delta = 0
+    for game in played:
+        mine = next((p for p in game.players if p.user_id == user.id), None)
+        if not mine:
+            continue
+        if mine.rating_delta is not None:
+            delta += mine.rating_delta
+        if mine.team and game.score_team1 is not None:
+            if (game.score_team1 > game.score_team2) == (mine.team == 1):
+                wins += 1
+            else:
+                losses += 1
+    title = f'Your week on the courts: {len(played)} game{"s" if len(played) != 1 else ""}'
+    if wins or losses:
+        title += f', {wins}–{losses}'
+    body = f'{"+" if delta >= 0 else ""}{delta} rating' if delta else 'See your stats on the profile tab'
+    notify(user.id, 'weekly_recap', title, body)
+    db.session.commit()
+
+
 @auth_bp.get('/me')
 @login_required
 def me():
@@ -255,6 +305,7 @@ def me():
     from backend.routes.games import expire_stale_unscored, send_game_reminders
     expire_stale_unscored()
     send_game_reminders()
+    _maybe_weekly_recap(g.current_user)
     return jsonify(_me_payload(g.current_user))
 
 

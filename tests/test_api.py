@@ -1016,6 +1016,51 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_weekly_recap_notification(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, ch = auth_headers(a['token']), auth_headers(c['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def recaps(headers):
+        items = client.get('/api/notifications', headers=headers).get_json()['items']
+        return [n for n in items if n['kind'] == 'weekly_recap']
+
+    # A ranked win, then shift it into last ISO week.
+    game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 6,
+    }, headers=ah)
+    client.post(f"/api/games/{game['id']}/confirm", headers=auth_headers(b['token']))
+    # Time-travel and trigger in the same context (HTTP after in-context
+    # mutations flakes under the shared in-memory session — see gotchas).
+    from backend.models import User as UserModel
+    from backend.routes.auth import _maybe_weekly_recap
+    with app.app_context():
+        row = db.session.get(GameModel, game['id'])
+        row.completed_at = utcnow() - timedelta(days=7)
+        db.session.commit()
+        _maybe_weekly_recap(db.session.get(UserModel, a['user']['id']))
+
+    got = recaps(ah)
+    assert len(got) == 1
+    assert got[0]['title'] == 'Your week on the courts: 1 game, 1–0'
+    assert got[0]['body'].startswith('+') and 'rating' in got[0]['body']
+    # The marker prevents a repeat on the next app open.
+    client.get('/api/me', headers=ah)
+    assert len(recaps(ah)) == 1
+
+    # A quiet week stays quiet — marker still advances (no recap on repeat).
+    client.get('/api/me', headers=ch)
+    client.get('/api/me', headers=ch)
+    assert recaps(ch) == []
+
+
 def test_attendance_confirmation(client, app):
     from datetime import timedelta
     a = register(client, 'a@example.com', 'Ana')

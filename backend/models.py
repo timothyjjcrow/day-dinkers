@@ -62,6 +62,8 @@ class User(TimestampMixin, db.Model):
     home_area = db.Column(db.String(120))
     # "Usually plays" slots as a JSON array of AVAILABILITY_SLOTS tokens.
     availability = db.Column(db.Text, nullable=False, default='[]')
+    # Last ISO week ('YYYY-Www') a weekly recap was generated for.
+    last_recap_week = db.Column(db.String(10), nullable=False, default='')
     # Set when the account is deleted; the anonymized row stays for opponents'
     # match history, but auth and all discovery surfaces reject it.
     deleted_at = db.Column(db.DateTime)
