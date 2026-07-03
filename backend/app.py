@@ -193,6 +193,11 @@ def _upgrade_schema(app):
                 statements.append(
                     "ALTER TABLE court ADD COLUMN hours VARCHAR(255) NOT NULL DEFAULT ''"
                 )
+            if 'closed' not in court_cols:
+                statements.append(
+                    'ALTER TABLE court ADD COLUMN closed BOOLEAN NOT NULL DEFAULT '
+                    + ('FALSE' if is_postgres else '0')
+                )
 
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}

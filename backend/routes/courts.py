@@ -197,7 +197,11 @@ def _active_counts_for(court_ids):
 def list_courts():
     """Court search: by map bounds (west,south,east,north) or lat/lng radius, plus text query."""
     cleanup_stale_presence()
-    query = Court.query.filter(Court.latitude.isnot(None), Court.longitude.isnot(None))
+    query = Court.query.filter(
+        Court.latitude.isnot(None),
+        Court.longitude.isnot(None),
+        Court.closed.is_(False),
+    )
 
     text = str(request.args.get('q') or '').strip()
     if text:
@@ -555,6 +559,7 @@ SUGGESTABLE_FIELDS = {
     'surface_type': _norm_text(60),
     'fees': _norm_text(200),
     'hours': _norm_text(120),
+    'closed': _norm_bool,
 }
 SUGGESTION_CONSENSUS = 2
 

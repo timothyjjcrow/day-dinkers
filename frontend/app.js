@@ -853,6 +853,10 @@
         <label>Hours</label>
         <input type="text" id="se-hours" maxlength="120" placeholder="e.g. Daily 6am–10pm, Dawn to dusk" value="${esc(court.hours || '')}" />
       </div>
+      <div class="form-field" style="border-top:1px solid var(--line);padding-top:12px">
+        ${check('se-closed', '🚫 This court is permanently closed / gone', court.closed)}
+        <p class="row-sub" style="margin-top:4px">Once another player confirms, it's hidden from the map.</p>
+      </div>
       <button class="btn btn-primary btn-block" id="se-submit">Submit suggestion</button>
     `);
     modal.querySelector('#se-submit').addEventListener('click', async () => {
@@ -866,6 +870,7 @@
         surface_type: modal.querySelector('#se-surface').value.trim(),
         fees: modal.querySelector('#se-fees').value.trim(),
         hours: modal.querySelector('#se-hours').value.trim(),
+        closed: modal.querySelector('#se-closed').checked,
       };
       try {
         const res = await api(`/courts/${court.id}/suggest`, { method: 'POST', body: JSON.stringify(body) });
@@ -1316,6 +1321,7 @@
         </div>
       </div>
       <div class="cd-scroll">
+      ${court.closed ? '<div class="card" style="background:var(--red-50);color:var(--red-700);text-align:center;padding:10px 14px;margin-bottom:10px;font-weight:700">🚫 This court is reported permanently closed</div>' : ''}
       <button class="btn ${checkedIn ? 'btn-danger' : 'btn-primary'} btn-block" id="cd-checkin" style="padding:15px;margin-bottom:10px">
         ${checkedIn ? 'Check out' : "📍 I'm here — check in"}
       </button>

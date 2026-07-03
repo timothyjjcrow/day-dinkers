@@ -987,6 +987,28 @@ def test_court_regulars(client, app):
     assert regulars[0]['visits'] == 3
 
 
+def test_report_court_closed(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Visible and not closed to start.
+    assert client.get(f'/api/courts/{court_id}').get_json()['closed'] is False
+    assert any(c['id'] == court_id for c in client.get('/api/courts?q=larson').get_json()['items'])
+
+    # One report isn't enough (needs consensus).
+    client.post(f'/api/courts/{court_id}/suggest', json={'closed': True}, headers=auth_headers(a['token']))
+    assert client.get(f'/api/courts/{court_id}').get_json()['closed'] is False
+
+    # A second player agreeing flips it closed → gone from listings/search.
+    res = client.post(f'/api/courts/{court_id}/suggest', json={'closed': True}, headers=auth_headers(b['token']))
+    assert res.get_json()['applied_fields'] == ['closed']
+    assert client.get(f'/api/courts/{court_id}').get_json()['closed'] is True
+    assert client.get('/api/courts?q=larson').get_json()['items'] == []
+    # Direct detail (deep link) still resolves so history/links don't 404.
+    assert client.get(f'/api/courts/{court_id}').get_json()['name'] == 'Larson Park'
+
+
 def test_court_leaders(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

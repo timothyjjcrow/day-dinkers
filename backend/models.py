@@ -153,6 +153,9 @@ class Court(TimestampMixin, db.Model):
     has_water = db.Column(db.Boolean, nullable=False, default=False)
     nets_provided = db.Column(db.Boolean, nullable=False, default=False)
     verified = db.Column(db.Boolean, nullable=False, default=False)
+    # Community-flagged permanently closed (via 2-user suggest consensus).
+    # Hidden from map/list/search but kept for historical game/check-in refs.
+    closed = db.Column(db.Boolean, nullable=False, default=False)
 
     checkins = db.relationship('CheckIn', back_populates='court', lazy='dynamic')
     games = db.relationship('Game', back_populates='court', lazy='dynamic')
@@ -187,6 +190,7 @@ class Court(TimestampMixin, db.Model):
             'has_restrooms': bool(self.has_restrooms),
             'has_water': bool(self.has_water),
             'nets_provided': bool(self.nets_provided),
+            'closed': bool(self.closed),
         })
         return data
 
