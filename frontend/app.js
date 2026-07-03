@@ -3294,7 +3294,8 @@
       if (user.is_blocked) {
         friendAction = '<span class="tag warn" style="margin:0">🚫 Blocked</span>';
       } else if (user.friendship_status === 'accepted') {
-        friendAction = `<button class="btn btn-secondary" id="up-msg">💬 Message</button>
+        friendAction = `<button class="btn btn-primary" id="up-challenge">⚔️ Challenge</button>
+          <button class="btn btn-secondary" id="up-msg">💬 Message</button>
           <button class="btn btn-danger" id="up-remove">Remove friend</button>`;
       } else if (user.friendship_status === 'pending') {
         friendAction = user.outgoing
@@ -3448,6 +3449,17 @@
     modal.querySelector('#up-msg')?.addEventListener('click', () => {
       closeModal(modal);
       openThread(userId);
+    });
+    modal.querySelector('#up-challenge')?.addEventListener('click', () => {
+      // Ranked singles, right now. Default to a court that makes sense:
+      // where you're checked in, else your home court, else theirs.
+      let court = null;
+      if (state.presence && state.presence.checked_in) court = { id: state.presence.court_id, name: state.presence.court_name };
+      else if (state.me.home_court_id) court = { id: state.me.home_court_id, name: state.me.home_court_name };
+      else if (user.home_court_id) court = { id: user.home_court_id, name: user.home_court_name };
+      if (!court) { toast('Set a home court first (Profile → Edit) to challenge'); return; }
+      closeModal(modal);
+      openChallengeSheet(user, court);
     });
     modal.querySelector('#up-schedule-shared')?.addEventListener('click', () => {
       // Open the scheduler pre-set to the shared slot whose next occurrence
