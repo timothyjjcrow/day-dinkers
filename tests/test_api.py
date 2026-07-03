@@ -987,6 +987,42 @@ def test_court_regulars(client, app):
     assert regulars[0]['visits'] == 3
 
 
+def test_court_leaders(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # No games → no champions.
+    assert client.get(f'/api/courts/{court_id}').get_json()['court_leaders'] == []
+
+    def play(ana_wins):
+        game = make_game(client, a['token'], court_id, hours_ahead=1)
+        client.post(f"/api/games/{game['id']}/join", headers=bh)
+        client.post(f"/api/games/{game['id']}/complete", json={
+            'team1': [a['user']['id']], 'team2': [b['user']['id']],
+            'score_team1': 11 if ana_wins else 4,
+            'score_team2': 4 if ana_wins else 11,
+        }, headers=ah)
+
+    play(True); play(True); play(False)  # Ana 2-1, Ben 1-2
+    leaders = client.get(f'/api/courts/{court_id}').get_json()['court_leaders']
+    assert [(p['display_name'], p['wins'], p['losses']) for p in leaders] == \
+        [('Ana', 2, 1), ('Ben', 1, 2)]
+
+    # A player with zero wins here is omitted.
+    c = register(client, 'c@example.com', 'Cam')
+    g2 = make_game(client, a['token'], court_id, hours_ahead=1)
+    client.post(f"/api/games/{g2['id']}/join", headers=auth_headers(c['token']))
+    client.post(f"/api/games/{g2['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [c['user']['id']],
+        'score_team1': 11, 'score_team2': 2,
+    }, headers=ah)
+    leaders = client.get(f'/api/courts/{court_id}').get_json()['court_leaders']
+    assert 'Cam' not in [p['display_name'] for p in leaders]
+    assert leaders[0] == {**leaders[0], 'display_name': 'Ana', 'wins': 3, 'losses': 1}
+
+
 def test_court_busy_times(client, app):
     from datetime import timedelta
     from backend.models import CheckIn as CheckInModel, utcnow

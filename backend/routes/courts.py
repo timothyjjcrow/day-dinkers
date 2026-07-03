@@ -430,6 +430,7 @@ def court_detail(court_id):
         for user, visits in regular_rows
     ]
     payload['busy_times'] = _busy_times(court)
+    payload['court_leaders'] = _court_leaders(court)
     # Court-chat unread count — only once they've opened that chat before,
     # so untouched chat rooms don't nag.
     payload['chat_unread'] = 0
@@ -861,6 +862,44 @@ def list_favorites():
         item['players_here'] = players.get(item['id'], 0)
         item['upcoming_games'] = games.get(item['id'], 0)
     return jsonify({'items': items})
+
+
+def _court_leaders(court):
+    """Top winners at this court — most wins across completed scored games,
+    ranked by wins then win rate. The local 'court champions' board."""
+    from backend.models import User as UserModel
+    games = (
+        Game.query.filter(
+            Game.court_id == court.id,
+            Game.status == 'completed',
+            Game.score_team1.isnot(None),
+            Game.score_team2.isnot(None),
+        )
+        .order_by(Game.completed_at.desc())
+        .limit(300)
+        .all()
+    )
+    tally = {}
+    for game in games:
+        team1_won = game.score_team1 > game.score_team2
+        for p in game.players:
+            if not p.team:
+                continue
+            rec = tally.setdefault(p.user_id, {'wins': 0, 'losses': 0})
+            rec['wins' if (p.team == 1) == team1_won else 'losses'] += 1
+    if not tally:
+        return []
+    users = {u.id: u for u in UserModel.query.filter(
+        UserModel.id.in_(tally), UserModel.deleted_at.is_(None),
+    ).all()}
+    ranked = sorted(
+        ((uid, r) for uid, r in tally.items() if uid in users and r['wins'] > 0),
+        key=lambda kv: (-kv[1]['wins'], -(kv[1]['wins'] / (kv[1]['wins'] + kv[1]['losses']))),
+    )[:5]
+    return [
+        {**users[uid].to_public_dict(), 'wins': r['wins'], 'losses': r['losses']}
+        for uid, r in ranked
+    ]
 
 
 def _busy_times(court):

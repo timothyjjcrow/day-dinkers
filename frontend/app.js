@@ -1363,6 +1363,18 @@
             </div>
             <span class="chev">›</span>
           </div>`).join('')}` : ''}
+      ${(court.court_leaders || []).length ? `
+        <div class="section-label">🏆 Court champions</div>
+        ${court.court_leaders.map((p, i) => `
+          <div class="card row" data-view-user="${p.id}" style="cursor:pointer;padding:11px">
+            <span style="font-size:18px;width:24px;text-align:center">${['🥇', '🥈', '🥉'][i] || (i + 1)}</span>
+            ${avatarHtml(p, 'sm')}
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(p.display_name)}</div>
+              <div class="row-sub">${p.wins}–${p.losses} here · ${skillLabel(p.skill_level)}</div>
+            </div>
+            <span class="chev">›</span>
+          </div>`).join('')}` : ''}
       <div class="section-label">Upcoming games</div>
       ${gamesHtml}
       ${(court.recent_results || []).length ? `
