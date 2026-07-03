@@ -1016,6 +1016,51 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_invite_to_existing_game(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Ana hosts a private game — Cam can't see it yet.
+    game = make_game(client, a['token'], court_id, visibility='private',
+                     invite_user_ids=[b['user']['id']])
+
+    def cam_sees():
+        feed = client.get('/api/games?lat=33.66&lng=-117.91', headers=ch).get_json()
+        return any(g['id'] == game['id'] for g in feed['items'])
+    assert not cam_sees()
+
+    # Ana invites Cam to the existing game → notification + access granted.
+    res = client.post(f"/api/games/{game['id']}/invite",
+                      json={'user_id': c['user']['id']}, headers=ah)
+    assert res.status_code == 200 and res.get_json()['invited'] is True
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=ch).get_json()['items']]
+    assert 'game_invite_direct' in kinds
+    assert cam_sees()
+    assert client.post(f"/api/games/{game['id']}/join", headers=ch).status_code == 200
+
+    # Guards: outsiders can't invite; can't invite someone already joined
+    # (Cam joined above); self is rejected.
+    d = register(client, 'd@example.com', 'Dee')
+    assert client.post(f"/api/games/{game['id']}/invite",
+                       json={'user_id': d['user']['id']}, headers=auth_headers(d['token'])).status_code == 403
+    assert client.post(f"/api/games/{game['id']}/invite",
+                       json={'user_id': c['user']['id']}, headers=ah).status_code == 409
+    assert client.post(f"/api/games/{game['id']}/invite",
+                       json={'user_id': a['user']['id']}, headers=ah).status_code == 400
+
+    # A full game can't take more invites.
+    full = make_game(client, a['token'], court_id, visibility='open')
+    client.post(f"/api/games/{full['id']}/join", headers=bh)
+    client.post(f"/api/games/{full['id']}/join", headers=ch)
+    client.post(f"/api/games/{full['id']}/join", headers=auth_headers(d['token']))
+    assert client.post(f"/api/games/{full['id']}/invite",
+                       json={'user_id': register(client, 'e@example.com', 'Eve')['user']['id']},
+                       headers=ah).status_code == 400
+
+
 def test_notification_mute_preferences(client, app):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

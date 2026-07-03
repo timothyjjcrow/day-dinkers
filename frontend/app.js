@@ -3782,6 +3782,9 @@
             // Vouching you'll show up is the main ask before a game starts.
             actions += `<button class="btn ${actions ? 'btn-secondary' : 'btn-primary'} btn-block" id="gs-attend" style="margin-top:${actions ? '10px' : '0'};padding:15px">👋 I'm coming — count me in</button>`;
           }
+          if (game.spots_left > 0) {
+            actions += `<button class="btn btn-secondary btn-block" id="gs-invite" style="margin-top:10px">＋ Invite a friend${game.spots_left ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}</button>`;
+          }
           actions += '<button class="btn btn-secondary btn-block" id="gs-calendar" style="margin-top:10px">📅 Add to calendar</button>';
         }
         actions += `<div class="action-row" style="margin-top:10px">
@@ -3868,6 +3871,30 @@
       box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
       box.querySelector('#gs-calendar')?.addEventListener('click', () => downloadIcs(game));
+      box.querySelector('#gs-invite')?.addEventListener('click', async () => {
+        let friends = [];
+        try { friends = (await api('/friends')).friends || []; } catch { /* offline */ }
+        const inGame = new Set(game.players.map((p) => p.user_id));
+        const invitable = friends.filter((f) => !inGame.has(f.id));
+        const sheet = openModal(`
+          ${modalHead('＋ Invite a friend')}
+          <p class="row-sub" style="margin-bottom:12px">They'll get an invite with a link to join.</p>
+          <div id="gi-list">${invitable.length
+            ? invitable.map((f) => `
+                <button class="btn btn-secondary btn-block" data-invite-friend="${f.id}" style="margin-bottom:8px;text-align:left;display:flex;align-items:center;gap:8px">
+                  ${avatarHtml(f, 'sm')} ${esc(f.display_name)}
+                </button>`).join('')
+            : `<div class="empty-state" style="padding:18px">${friends.length ? 'All your friends are already in this game 🎾' : 'Add friends first to invite them.'}</div>`}</div>
+        `);
+        sheet.querySelectorAll('[data-invite-friend]').forEach((b) => b.addEventListener('click', async () => {
+          b.disabled = true;
+          try {
+            await api(`/games/${game.id}/invite`, { method: 'POST', body: JSON.stringify({ user_id: Number(b.dataset.inviteFriend) }) });
+            closeModal(sheet);
+            toast('Invite sent 📨');
+          } catch (e) { toast(e.message); b.disabled = false; }
+        }));
+      });
       box.querySelector('#gs-attend')?.addEventListener('click', async () => {
         try {
           render(await api(`/games/${game.id}/attend`, { method: 'POST' }));

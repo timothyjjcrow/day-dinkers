@@ -448,6 +448,46 @@ def join_game(game_id):
     return jsonify(game.to_dict(g.current_user.id))
 
 
+@games_bp.post('/games/<int:game_id>/invite')
+@rate_limit(30, 60)
+@login_required
+def invite_to_game(game_id):
+    """A player pulls a specific friend into an upcoming game with open spots.
+    For private/friends games the invite also grants access."""
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.status != 'upcoming':
+        return jsonify({'error': 'game_not_open'}), 400
+    if not any(p.user_id == g.current_user.id for p in game.players):
+        return jsonify({'error': 'players_only'}), 403
+    if len(game.players) >= game.max_players:
+        return jsonify({'error': 'game_full'}), 400
+
+    target = db.session.get(User, int((request.get_json(silent=True) or {}).get('user_id') or 0))
+    if not target or target.deleted_at:
+        return jsonify({'error': 'user_not_found'}), 404
+    if target.id == g.current_user.id:
+        return jsonify({'error': 'cannot_invite_self'}), 400
+    if any(p.user_id == target.id for p in game.players):
+        return jsonify({'error': 'already_joined'}), 409
+    if is_blocked_between(g.current_user.id, target.id):
+        return jsonify({'error': 'user_blocked'}), 403
+
+    if target.id not in game.invited_user_ids():
+        db.session.add(GameInvite(game_id=game.id, user_id=target.id))
+    court_name = game.court.name if game.court else 'a court'
+    notify(
+        target.id,
+        'game_invite_direct',
+        f'{g.current_user.display_name} invited you to a game at {court_name}',
+        related_user_id=g.current_user.id,
+        related_game_id=game.id,
+    )
+    db.session.commit()
+    return jsonify({'invited': True})
+
+
 def _promote_from_waitlist(game):
     """Fill open spots from the waitlist queue, in order."""
     while game.waitlist and len(game.players) < game.max_players:
