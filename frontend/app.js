@@ -1381,6 +1381,9 @@
         </div>`;
       })() : ''}
       <div style="margin-top:14px">${chipsHtml}
+        ${state.token && state.me && state.me.home_court_id !== court.id
+          ? '<button id="cd-sethome" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">🏠 Make home court</button>'
+          : (state.me && state.me.home_court_id === court.id ? '<span class="tag" style="margin:0">🏠 Your home court</span>' : '')}
         <button id="cd-suggest" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">✏️ Suggest an edit</button>
         <button id="cd-condition" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">📣 Report conditions</button>
       </div>
@@ -1460,6 +1463,15 @@
       if (e.target === modal) {
         try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
       }
+    });
+    modal.querySelector('#cd-sethome')?.addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      try {
+        applyMe(await api('/me', { method: 'PATCH', body: JSON.stringify({ home_court_id: court.id }) }));
+        toast(`🏠 ${court.name} is now your home court`);
+        closeModal(modal);
+        openCourtDetail(court.id);
+      } catch (err) { toast(err.message); e.target.disabled = false; }
     });
     modal.querySelector('#cd-suggest').addEventListener('click', () => {
       openSuggestEditSheet(court, () => { closeModal(modal); openCourtDetail(court.id); });
