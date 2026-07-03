@@ -1205,8 +1205,24 @@ def test_log_past_game(client):
     me = client.get('/api/me', headers=ah).get_json()['user']
     assert me['ranked_wins'] == 0 and me['rating'] == 1200  # casual: unchanged
 
-    # Guards: must include self, no ties, even teams, real court.
+    # Doubles: self + partner vs two opponents, all credited and notified.
     c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    res = client.post('/api/games/log', json={
+        'court_id': court_id,
+        'team1': [a['user']['id'], b['user']['id']],
+        'team2': [c['user']['id'], d['user']['id']],
+        'score_team1': 11, 'score_team2': 9,
+    }, headers=ah)
+    assert res.status_code == 201
+    doubles = res.get_json()
+    assert len(doubles['players']) == 4 and doubles['you_won'] is True
+    for u in (b, c, d):
+        logged = [n for n in client.get('/api/notifications', headers=auth_headers(u['token'])).get_json()['items']
+                  if n['kind'] == 'game_logged' and n['related_game_id'] == doubles['id']]
+        assert len(logged) == 1
+
+    # Guards: must include self, no ties, real court.
     assert client.post('/api/games/log', json={
         'court_id': court_id, 'team1': [b['user']['id']], 'team2': [c['user']['id']],
         'score_team1': 11, 'score_team2': 4,

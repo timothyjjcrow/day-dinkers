@@ -2128,10 +2128,21 @@
 
     const modal = openModal(`
       ${modalHead('✍️ Log a past game')}
-      <p class="row-sub" style="margin-bottom:10px">Record a singles game you already played. It counts toward stats and court records (casual — no rating change).</p>
+      <p class="row-sub" style="margin-bottom:10px">Record a game you already played. It counts toward stats and court records (casual — no rating change).</p>
       <div class="form-field">
-        <label>Opponent</label>
+        <div class="segmented" id="lg-mode">
+          <button type="button" data-lg-mode="singles" class="active">Singles</button>
+          <button type="button" data-lg-mode="doubles">Doubles</button>
+        </div>
+      </div>
+      <div class="form-field" id="lg-partner-wrap" style="display:none">
+        <label>Your partner</label>
+        <select id="lg-partner">${friends.map((f) => `<option value="${f.id}">${esc(f.display_name)}</option>`).join('')}</select>
+      </div>
+      <div class="form-field">
+        <label id="lg-opp-heading">Opponent</label>
         <select id="lg-opp">${friends.map((f) => `<option value="${f.id}">${esc(f.display_name)}</option>`).join('')}</select>
+        <select id="lg-opp2" style="display:none;margin-top:8px">${friends.map((f) => `<option value="${f.id}">${esc(f.display_name)}</option>`).join('')}</select>
       </div>
       <div class="form-field">
         <label>Court</label>
@@ -2151,8 +2162,22 @@
       <button class="btn btn-primary btn-block" id="lg-submit" style="padding:15px;margin-top:12px">Save result</button>
     `);
     const oppSel = modal.querySelector('#lg-opp');
-    const syncOppLabel = () => { modal.querySelector('#lg-opp-label').textContent = oppSel.options[oppSel.selectedIndex].text.split(' ')[0]; };
+    let mode = 'singles';
+    const syncOppLabel = () => {
+      modal.querySelector('#lg-opp-label').textContent = mode === 'doubles' ? 'Opponents' : oppSel.options[oppSel.selectedIndex].text.split(' ')[0];
+    };
     oppSel.addEventListener('change', syncOppLabel);
+    modal.querySelector('#lg-mode').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      mode = btn.dataset.lgMode;
+      modal.querySelectorAll('#lg-mode button').forEach((b) => b.classList.toggle('active', b === btn));
+      const doubles = mode === 'doubles';
+      modal.querySelector('#lg-partner-wrap').style.display = doubles ? '' : 'none';
+      modal.querySelector('#lg-opp2').style.display = doubles ? '' : 'none';
+      modal.querySelector('#lg-opp-heading').textContent = doubles ? 'Opponents' : 'Opponent';
+      syncOppLabel();
+    });
     syncOppLabel();
     let chosenCourtId = courtOptions.length ? courtOptions[0].id : null;
     modal.querySelector('#lg-court').addEventListener('change', (e) => { chosenCourtId = Number(e.target.value); });
@@ -2191,12 +2216,20 @@
       const s2 = Number(modal.querySelector('#lg-s2').value);
       if (!chosenCourtId) { toast('Pick a court'); return; }
       if (s1 === s2) { toast('Scores can\'t be tied'); return; }
+      const team1 = [state.me.id];
+      const team2 = [Number(oppSel.value)];
+      if (mode === 'doubles') {
+        team1.push(Number(modal.querySelector('#lg-partner').value));
+        team2.push(Number(modal.querySelector('#lg-opp2').value));
+      }
+      const everyone = [...team1, ...team2];
+      if (new Set(everyone).size !== everyone.length) { toast('Each player can only be on one team once'); return; }
       btn.disabled = true;
       try {
         await api('/games/log', { method: 'POST', body: JSON.stringify({
           court_id: chosenCourtId,
-          team1: [state.me.id],
-          team2: [Number(oppSel.value)],
+          team1,
+          team2,
           score_team1: s1,
           score_team2: s2,
         }) });
