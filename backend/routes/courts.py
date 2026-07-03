@@ -277,6 +277,14 @@ def list_courts():
         items.append(item)
     if sort == 'distance' and lat is not None and lng is not None:
         items.sort(key=lambda c: c.get('distance_miles', 0))
+    elif sort == 'active':
+        # Rank by live activity — needs the counts computed on the full
+        # candidate pool before the limit cut, then closest as a tiebreak.
+        pool_players, pool_games = _active_counts_for([c['id'] for c in items])
+        items.sort(key=lambda c: (
+            -(pool_players.get(c['id'], 0) + pool_games.get(c['id'], 0)),
+            c.get('distance_miles', 1e9),
+        ))
     items = items[:limit]
 
     ids = [c['id'] for c in items]

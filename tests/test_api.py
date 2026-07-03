@@ -796,6 +796,28 @@ def test_court_photo_never_overwrites_curated(client, app):
     assert detail['photo_count'] == 1
 
 
+def test_court_sort_active(client, app):
+    from datetime import timedelta
+    from backend.models import CheckIn as CheckInModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    courts = client.get('/api/courts?limit=5').get_json()['items']
+    larson = next(c for c in courts if c['name'] == 'Larson Park')['id']
+    adorni = next(c for c in courts if c['name'] == 'Adorni Center')['id']
+
+    # Give Adorni live activity (a current check-in); Larson stays quiet.
+    with app.app_context():
+        db.session.add(CheckInModel(user_id=a['user']['id'], court_id=adorni,
+                                    checked_in_at=utcnow()))
+        db.session.commit()
+
+    active = client.get('/api/courts?sort=active&limit=5').get_json()['items']
+    # The busy court ranks first.
+    assert active[0]['name'] == 'Adorni Center'
+    assert active[0]['players_here'] == 1
+    # Larson (no activity) is present but ranked below.
+    assert any(c['name'] == 'Larson Park' for c in active)
+
+
 def test_court_list_sort_options(client):
     a = register(client, 'a@example.com', 'Ana')
     courts = client.get('/api/courts').get_json()['items']

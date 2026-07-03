@@ -792,6 +792,10 @@
         || (b.num_courts || 0) - (a.num_courts || 0));
     } else if (state.listSort === 'courts') {
       sorted.sort((a, b) => (b.num_courts || 0) - (a.num_courts || 0));
+    } else if (state.listSort === 'active') {
+      sorted.sort((a, b) => ((b.players_here || 0) + (b.upcoming_games || 0))
+        - ((a.players_here || 0) + (a.upcoming_games || 0))
+        || (a.distance_miles ?? 1e9) - (b.distance_miles ?? 1e9));
     } else if (courts.some((c) => c.distance_miles != null)) {
       sorted.sort((a, b) => (a.distance_miles ?? 1e9) - (b.distance_miles ?? 1e9));
     }
