@@ -1146,9 +1146,19 @@
     });
   }
 
+  // A dead shared link shouldn't re-toast its error on every reload.
+  function clearDeadDeepLink(hash) {
+    if (location.hash !== hash) return;
+    try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+  }
+
   async function openCourtDetail(courtId) {
     let court;
-    try { court = await api(`/courts/${courtId}`); } catch (e) { toast(e.message); return; }
+    try { court = await api(`/courts/${courtId}`); } catch (e) {
+      toast(e.message);
+      clearDeadDeepLink(`#court/${courtId}`);
+      return;
+    }
 
     const tags = [];
     if (court.indoor) tags.push('🏠 Indoor'); else tags.push('☀️ Outdoor');
@@ -3601,7 +3611,11 @@
 
   async function openGameScreen(gameId) {
     let game;
-    try { game = await api(`/games/${gameId}`); } catch (e) { toast(e.message); return; }
+    try { game = await api(`/games/${gameId}`); } catch (e) {
+      toast(e.message);
+      clearDeadDeepLink(`#game/${gameId}`);
+      return;
+    }
 
     const modal = openModal('');
     const box = modal.querySelector('.modal');
