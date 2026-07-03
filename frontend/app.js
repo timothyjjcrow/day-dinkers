@@ -3357,6 +3357,37 @@
               ${stats.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}
             </div>`);
         }
+        // If the earned rating outgrew the declared level, offer a one-tap
+        // upgrade (upward only — nobody wants a demotion prompt). One ask
+        // per suggested level per device.
+        const LEVEL_ORDER = ['beginner', 'intermediate', 'advanced', 'pro'];
+        const levelForRating = (r) => (r >= 1450 ? 'pro' : r >= 1300 ? 'advanced' : r >= 1150 ? 'intermediate' : 'beginner');
+        const suggested = levelForRating(me.rating);
+        if (me.ranked_wins + me.ranked_losses >= 5
+            && LEVEL_ORDER.indexOf(suggested) > LEVEL_ORDER.indexOf(me.skill_level)
+            && localStorage.getItem(`pp_skill_nudge_${suggested}`) !== '1') {
+          el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', `
+            <div class="card" id="pf-skill-nudge" style="margin-top:12px;padding:12px 14px;text-align:center">
+              <div style="font-weight:700;font-size:14px">📈 Your rating plays like ${skillLabel(suggested)}</div>
+              <div class="row-sub" style="margin:4px 0 10px">You're listed as ${skillLabel(me.skill_level)} — level up your label?</div>
+              <div style="display:flex;gap:8px;justify-content:center">
+                <button class="btn btn-primary btn-sm" id="pf-skill-up">Update to ${skillLabel(suggested)}</button>
+                <button class="btn btn-secondary btn-sm" id="pf-skill-keep">Keep as is</button>
+              </div>
+            </div>`);
+          el.querySelector('#pf-skill-up').addEventListener('click', async () => {
+            try {
+              applyMe(await api('/me', { method: 'PATCH', body: JSON.stringify({ skill_level: suggested }) }));
+              toast(`You're ${skillLabel(suggested)} now — go earn the next one 🎾`);
+              renderProfile();
+            } catch (e) { toast(e.message); }
+          });
+          el.querySelector('#pf-skill-keep').addEventListener('click', () => {
+            localStorage.setItem(`pp_skill_nudge_${suggested}`, '1');
+            el.querySelector('#pf-skill-nudge').remove();
+          });
+        }
+
         // Brag line built from real numbers, carrying the invite deep link.
         el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
           '<button class="btn btn-secondary btn-sm btn-block" id="pf-share-season" style="margin-top:12px">📤 Share my season</button>');
