@@ -1173,6 +1173,46 @@ def test_clear_notifications(client):
     assert client.delete('/api/notifications').status_code == 401
 
 
+def test_log_past_game(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah = auth_headers(a['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Log a singles win for Ana.
+    res = client.post('/api/games/log', json={
+        'court_id': court_id, 'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 6,
+    }, headers=ah)
+    assert res.status_code == 201
+    game = res.get_json()
+    assert game['status'] == 'completed' and game['game_type'] == 'casual'
+    assert game['you_won'] is True
+
+    # It counts toward stats and the court record immediately (no rating change).
+    stats = client.get('/api/me/stats', headers=ah).get_json()
+    assert stats['games_total'] == 1
+    assert client.get(f'/api/courts/{court_id}', headers=ah).get_json()['my_record'] == {'wins': 1, 'losses': 0}
+    me = client.get('/api/me', headers=ah).get_json()['user']
+    assert me['ranked_wins'] == 0 and me['rating'] == 1200  # casual: unchanged
+
+    # Guards: must include self, no ties, even teams, real court.
+    c = register(client, 'c@example.com', 'Cam')
+    assert client.post('/api/games/log', json={
+        'court_id': court_id, 'team1': [b['user']['id']], 'team2': [c['user']['id']],
+        'score_team1': 11, 'score_team2': 4,
+    }, headers=ah).status_code == 400  # Ana not in it
+    assert client.post('/api/games/log', json={
+        'court_id': court_id, 'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 7, 'score_team2': 7,
+    }, headers=ah).status_code == 400  # tie
+    assert client.post('/api/games/log', json={
+        'court_id': 999999, 'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 5,
+    }, headers=ah).status_code == 404
+    assert client.post('/api/games/log', json={'court_id': court_id}).status_code == 401
+
+
 def test_host_removes_player(client):
     a = register(client, 'a@example.com', 'Ana')   # host
     b = register(client, 'b@example.com', 'Ben')

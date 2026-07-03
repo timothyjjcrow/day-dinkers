@@ -239,6 +239,77 @@ def my_game_history():
     return jsonify({'items': [game.to_dict(g.current_user.id) for game in games]})
 
 
+@games_bp.post('/games/log')
+@rate_limit(20, 60)
+@login_required
+def log_past_game():
+    """Record a spontaneous pickup game that never went through scheduling.
+    Casual only — no rating impact — but counts for stats, court records,
+    and history. Only the logger's own participation is asserted; the other
+    players are just credited (they can dispute via support if needed)."""
+    payload = request.get_json(silent=True) or {}
+    court = db.session.get(Court, int(payload.get('court_id') or 0))
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+
+    try:
+        score1 = int(payload.get('score_team1'))
+        score2 = int(payload.get('score_team2'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'scores_required'}), 400
+    if score1 == score2 or score1 < 0 or score2 < 0 or max(score1, score2) > 99:
+        return jsonify({'error': 'invalid_scores'}), 400
+
+    def clean_team(raw):
+        ids = []
+        for v in (raw or [])[:2]:
+            try:
+                uid = int(v)
+            except (TypeError, ValueError):
+                continue
+            if uid not in ids and db.session.get(User, uid) and not db.session.get(User, uid).deleted_at:
+                ids.append(uid)
+        return ids
+
+    team1 = clean_team(payload.get('team1'))
+    team2 = clean_team(payload.get('team2'))
+    if not team1 or not team2:
+        return jsonify({'error': 'teams_required'}), 400
+    if set(team1) & set(team2):
+        return jsonify({'error': 'player_on_both_teams'}), 400
+    if g.current_user.id not in set(team1) | set(team2):
+        return jsonify({'error': 'must_include_self'}), 400
+    if len(team1) != len(team2):
+        return jsonify({'error': 'uneven_teams'}), 400
+
+    when = _parse_scheduled_at(payload.get('played_at')) or utcnow()
+    if when > utcnow() + timedelta(minutes=5):
+        return jsonify({'error': 'not_in_past'}), 400
+
+    game = Game(
+        court_id=court.id,
+        creator_id=g.current_user.id,
+        scheduled_at=when,
+        game_type='casual',
+        visibility='private',
+        max_players=len(team1) + len(team2),
+        status='completed',
+        score_team1=score1,
+        score_team2=score2,
+        score_submitted_by_id=g.current_user.id,
+        score_submitted_at=utcnow(),
+        completed_at=when,
+    )
+    db.session.add(game)
+    db.session.flush()
+    for uid in team1:
+        db.session.add(GamePlayer(game_id=game.id, user_id=uid, team=1))
+    for uid in team2:
+        db.session.add(GamePlayer(game_id=game.id, user_id=uid, team=2))
+    db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id)), 201
+
+
 @games_bp.post('/games')
 @rate_limit(20, 60)
 @login_required

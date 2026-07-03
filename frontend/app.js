@@ -2090,8 +2090,11 @@
         html += '<div class="section-label">🔁 Weekly open play</div>';
         html += weeklySessions.map((g) => gameCardHtml(g)).join('');
       }
+      // Capture spontaneous pickup games that never got scheduled here.
+      html += '<button class="btn btn-secondary btn-block" id="pl-log-game" style="margin-top:14px">✍️ Log a game you already played</button>';
 
       el.innerHTML = html;
+      el.querySelector('#pl-log-game')?.addEventListener('click', openLogGameSheet);
       bindGameButtons(el, renderPlay);
     } catch (e) {
       renderError(el, e.message, renderPlay);
@@ -2107,6 +2110,102 @@
       renderPlay();
     });
     $('#new-game-fab').addEventListener('click', () => openNewGameModal());
+  }
+
+  // Log a spontaneous singles game already played, against a friend.
+  async function openLogGameSheet() {
+    let friends = [];
+    try { friends = (await api('/friends')).friends || []; } catch { /* offline */ }
+    if (!friends.length) { toast('Add a friend first to log a game with them'); return; }
+    const loc = areaLatLng();
+    let nearby = [];
+    try { nearby = ((await api(`/courts?lat=${loc.lat}&lng=${loc.lng}&radius=40&limit=8`)).items) || []; } catch { /* ignore */ }
+    const courtOptions = [];
+    const seen = new Set();
+    if (state.presence && state.presence.checked_in) { courtOptions.push({ id: state.presence.court_id, name: state.presence.court_name }); seen.add(state.presence.court_id); }
+    if (state.me && state.me.home_court_id && !seen.has(state.me.home_court_id)) { courtOptions.push({ id: state.me.home_court_id, name: state.me.home_court_name }); seen.add(state.me.home_court_id); }
+    nearby.forEach((c) => { if (!seen.has(c.id) && courtOptions.length < 8) { courtOptions.push({ id: c.id, name: c.name }); seen.add(c.id); } });
+
+    const modal = openModal(`
+      ${modalHead('✍️ Log a past game')}
+      <p class="row-sub" style="margin-bottom:10px">Record a singles game you already played. It counts toward stats and court records (casual — no rating change).</p>
+      <div class="form-field">
+        <label>Opponent</label>
+        <select id="lg-opp">${friends.map((f) => `<option value="${f.id}">${esc(f.display_name)}</option>`).join('')}</select>
+      </div>
+      <div class="form-field">
+        <label>Court</label>
+        <select id="lg-court">${courtOptions.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+        <input type="search" id="lg-court-search" placeholder="Or search another court…" style="margin-top:8px" />
+        <div id="lg-court-results"></div>
+      </div>
+      <div class="score-grid">
+        <div class="score-panel"><div class="score-team-label">You</div>
+          <div class="score-stepper"><button type="button" data-lg-step="-1" data-lg-target="lg-s1">−</button><input type="number" id="lg-s1" min="0" max="99" value="11" inputmode="numeric" /><button type="button" data-lg-step="1" data-lg-target="lg-s1">＋</button></div>
+        </div>
+        <div class="score-vs">vs</div>
+        <div class="score-panel"><div class="score-team-label" id="lg-opp-label">Them</div>
+          <div class="score-stepper"><button type="button" data-lg-step="-1" data-lg-target="lg-s2">−</button><input type="number" id="lg-s2" min="0" max="99" value="9" inputmode="numeric" /><button type="button" data-lg-step="1" data-lg-target="lg-s2">＋</button></div>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-block" id="lg-submit" style="padding:15px;margin-top:12px">Save result</button>
+    `);
+    const oppSel = modal.querySelector('#lg-opp');
+    const syncOppLabel = () => { modal.querySelector('#lg-opp-label').textContent = oppSel.options[oppSel.selectedIndex].text.split(' ')[0]; };
+    oppSel.addEventListener('change', syncOppLabel);
+    syncOppLabel();
+    let chosenCourtId = courtOptions.length ? courtOptions[0].id : null;
+    modal.querySelector('#lg-court').addEventListener('change', (e) => { chosenCourtId = Number(e.target.value); });
+    modal.querySelectorAll('[data-lg-step]').forEach((b) => b.addEventListener('click', () => {
+      const el = modal.querySelector('#' + b.dataset.lgTarget);
+      el.value = Math.max(0, Math.min(99, (Number(el.value) || 0) + Number(b.dataset.lgStep)));
+    }));
+    let searchTimer;
+    modal.querySelector('#lg-court-search').addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      const q = e.target.value.trim();
+      if (q.length < 2) { modal.querySelector('#lg-court-results').innerHTML = ''; return; }
+      searchTimer = setTimeout(async () => {
+        try {
+          const data = await api(`/courts?q=${encodeURIComponent(q)}&limit=5`);
+          modal.querySelector('#lg-court-results').innerHTML = data.items.map((c) => `
+            <div class="card" data-lg-pick="${c.id}" data-lg-name="${esc(c.name)}" style="cursor:pointer;margin:6px 0;padding:10px">
+              <div class="row-title" style="font-size:14px">${esc(c.name)}</div><div class="row-sub">${esc(c.city || '')}</div>
+            </div>`).join('');
+          modal.querySelectorAll('[data-lg-pick]').forEach((row) => row.addEventListener('click', () => {
+            chosenCourtId = Number(row.dataset.lgPick);
+            const sel = modal.querySelector('#lg-court');
+            if (![...sel.options].some((o) => Number(o.value) === chosenCourtId)) {
+              sel.insertAdjacentHTML('beforeend', `<option value="${chosenCourtId}">${esc(row.dataset.lgName)}</option>`);
+            }
+            sel.value = String(chosenCourtId);
+            modal.querySelector('#lg-court-search').value = row.dataset.lgName;
+            modal.querySelector('#lg-court-results').innerHTML = '';
+          }));
+        } catch { /* ignore */ }
+      }, 300);
+    });
+    modal.querySelector('#lg-submit').addEventListener('click', async (e) => {
+      const btn = e.target;
+      const s1 = Number(modal.querySelector('#lg-s1').value);
+      const s2 = Number(modal.querySelector('#lg-s2').value);
+      if (!chosenCourtId) { toast('Pick a court'); return; }
+      if (s1 === s2) { toast('Scores can\'t be tied'); return; }
+      btn.disabled = true;
+      try {
+        await api('/games/log', { method: 'POST', body: JSON.stringify({
+          court_id: chosenCourtId,
+          team1: [state.me.id],
+          team2: [Number(oppSel.value)],
+          score_team1: s1,
+          score_team2: s2,
+        }) });
+        closeModal(modal);
+        toast(s1 > s2 ? 'Logged — nice win! 🎾' : 'Game logged 🎾');
+        refreshMe();
+        if (state.tab === 'play') renderPlay();
+      } catch (err) { toast(err.message); btn.disabled = false; }
+    });
   }
 
   async function openNewGameModal(court, defaultType = 'casual', startNow = false) {
