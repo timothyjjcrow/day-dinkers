@@ -178,6 +178,27 @@ def send_game_reminders():
             )
             player.reminded_at = now
             changed = True
+
+    # Day-before nudge for games ~20–28h out (plan-ahead reminder), once each.
+    day_due = Game.query.filter(
+        Game.status == 'upcoming',
+        Game.scheduled_at > now + timedelta(hours=20),
+        Game.scheduled_at <= now + timedelta(hours=28),
+    ).all()
+    for game in day_due:
+        court_name = game.court.name if game.court else 'the court'
+        for player in game.players:
+            if player.day_reminded_at is not None:
+                continue
+            notify(
+                player.user_id,
+                'game_reminder',
+                f'Game tomorrow at {court_name} — see you on the court! \U0001F3BE',
+                related_game_id=game.id,
+            )
+            player.day_reminded_at = now
+            changed = True
+
     if changed:
         db.session.commit()
 
@@ -212,8 +233,9 @@ def roll_forward_recurring():
                     related_game_id=game.id,
                 )
             else:
-                player.reminded_at = None   # remind again for the new occurrence
-                player.attending_at = None  # and re-confirm attendance
+                player.reminded_at = None      # remind again for the new occurrence
+                player.day_reminded_at = None
+                player.attending_at = None     # and re-confirm attendance
         changed = True
     if changed:
         db.session.commit()
@@ -832,8 +854,9 @@ def reschedule_game(game_id):
     game.scheduled_at = when
     court_name = game.court.name if game.court else 'the court'
     for player in game.players:
-        player.reminded_at = None    # re-remind for the new time
-        player.attending_at = None   # re-confirm attendance
+        player.reminded_at = None      # re-remind for the new time
+        player.day_reminded_at = None
+        player.attending_at = None     # re-confirm attendance
         if player.user_id != g.current_user.id:
             notify(
                 player.user_id,

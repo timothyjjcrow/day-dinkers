@@ -468,7 +468,7 @@ def test_game_reminder_fires_in_window(client, app):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
-    game = make_game(client, a['token'], court_id, hours_ahead=24)
+    game = make_game(client, a['token'], court_id, hours_ahead=48)
     client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
     # Ana has vouched she's coming; Ben hasn't.
     client.post(f"/api/games/{game['id']}/attend", headers=auth_headers(a['token']))
@@ -476,9 +476,11 @@ def test_game_reminder_fires_in_window(client, app):
     from backend.routes.games import send_game_reminders
     with app.app_context():
         def reminders():
-            return Notification.query.filter_by(kind='game_reminder').all()
+            # Only the hour-before kind (not the day-before "tomorrow" nudge).
+            return [n for n in Notification.query.filter_by(kind='game_reminder').all()
+                    if 'about an hour' in n.title.lower()]
 
-        # 24h out: too early, nothing fires.
+        # 48h out: too early for the hour-before reminder.
         send_game_reminders()
         assert reminders() == []
 
@@ -503,6 +505,47 @@ def test_game_reminder_fires_in_window(client, app):
     # The reminder reaches the player through the notifications feed.
     feed = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()
     assert any(n['kind'] == 'game_reminder' for n in feed['items'])
+
+
+def test_day_before_reminder(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, Notification, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=48)
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+
+    from backend.routes.games import send_game_reminders
+    with app.app_context():
+        def day_reminders():
+            return [n for n in Notification.query.filter_by(kind='game_reminder').all()
+                    if 'tomorrow' in n.title.lower()]
+
+        # 48h out: no day-before reminder yet.
+        send_game_reminders()
+        assert day_reminders() == []
+
+        # Move into the 20–28h window → both players get exactly one "tomorrow".
+        row = db.session.get(GameModel, game['id'])
+        row.scheduled_at = utcnow() + timedelta(hours=24)
+        db.session.commit()
+        send_game_reminders()
+        got = day_reminders()
+        assert {n.user_id for n in got} == {a['user']['id'], b['user']['id']}
+        assert all(n.related_game_id == game['id'] for n in got)
+
+        # Idempotent — sweeping again doesn't duplicate.
+        send_game_reminders()
+        assert len(day_reminders()) == 2
+
+        # The hour-before reminder is still separate (different marker).
+        row.scheduled_at = utcnow() + timedelta(minutes=30)
+        db.session.commit()
+        send_game_reminders()
+        hour_reminders = [n for n in Notification.query.filter_by(kind='game_reminder').all()
+                          if 'about an hour' in n.title.lower()]
+        assert len(hour_reminders) == 2
 
 
 def test_game_reminder_skips_past_and_nonupcoming(client, app):

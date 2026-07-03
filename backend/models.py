@@ -571,7 +571,8 @@ class GamePlayer(TimestampMixin, db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     team = db.Column(db.Integer)
     rating_delta = db.Column(db.Integer)
-    reminded_at = db.Column(db.DateTime)
+    reminded_at = db.Column(db.DateTime)          # hour-before reminder sent
+    day_reminded_at = db.Column(db.DateTime)      # day-before reminder sent
     # "I'm coming 👋" — set when the player confirms attendance for this
     # occurrence; cleared when a weekly session rolls forward.
     attending_at = db.Column(db.DateTime)

@@ -214,6 +214,11 @@ def _upgrade_schema(app):
                     'ALTER TABLE game_player ADD COLUMN attending_at '
                     + ('TIMESTAMP' if is_postgres else 'DATETIME')
                 )
+            if 'day_reminded_at' not in gp_cols:
+                statements.append(
+                    'ALTER TABLE game_player ADD COLUMN day_reminded_at '
+                    + ('TIMESTAMP' if is_postgres else 'DATETIME')
+                )
 
         if statements:
             app.logger.warning('Applying schema upgrades: %s', statements)
