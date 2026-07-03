@@ -790,6 +790,44 @@ def cancel_game(game_id):
     return jsonify(game.to_dict(g.current_user.id))
 
 
+@games_bp.post('/games/<int:game_id>/reschedule')
+@rate_limit(20, 60)
+@login_required
+def reschedule_game(game_id):
+    """Host moves an upcoming game to a new time, keeping the roster/RSVPs.
+    Re-arms reminders and clears attendance (plans changed), and tells players."""
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.creator_id != g.current_user.id:
+        return jsonify({'error': 'forbidden'}), 403
+    if game.status != 'upcoming':
+        return jsonify({'error': 'game_not_open'}), 400
+    if game.recurrence != 'none':
+        return jsonify({'error': 'recurring_open_play'}), 400
+
+    when = _parse_scheduled_at((request.get_json(silent=True) or {}).get('scheduled_at'))
+    if not when:
+        return jsonify({'error': 'invalid_scheduled_at'}), 400
+    if when < utcnow() - timedelta(minutes=15):
+        return jsonify({'error': 'scheduled_in_past'}), 400
+
+    game.scheduled_at = when
+    court_name = game.court.name if game.court else 'the court'
+    for player in game.players:
+        player.reminded_at = None    # re-remind for the new time
+        player.attending_at = None   # re-confirm attendance
+        if player.user_id != g.current_user.id:
+            notify(
+                player.user_id,
+                'game_reminder',
+                f'Game at {court_name} was rescheduled — tap for the new time',
+                related_game_id=game.id,
+            )
+    db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id))
+
+
 def _expected_score(rating_a, rating_b):
     return 1.0 / (1.0 + 10 ** ((rating_b - rating_a) / 400.0))
 

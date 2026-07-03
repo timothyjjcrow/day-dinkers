@@ -1355,6 +1355,40 @@ def test_log_past_game(client):
     }, headers=ah).status_code == 403
 
 
+def test_reschedule_game(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+    a = register(client, 'a@example.com', 'Ana')   # host
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=3)
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    client.post(f"/api/games/{game['id']}/attend", headers=bh)  # Ben confirms
+
+    new_when = (utcnow() + timedelta(days=1)).isoformat() + 'Z'
+
+    # Non-host can't reschedule.
+    assert client.post(f"/api/games/{game['id']}/reschedule",
+                       json={'scheduled_at': new_when}, headers=bh).status_code == 403
+    # Past times rejected.
+    past = (utcnow() - timedelta(hours=2)).isoformat() + 'Z'
+    assert client.post(f"/api/games/{game['id']}/reschedule",
+                       json={'scheduled_at': past}, headers=ah).status_code == 400
+
+    # Host reschedules → time moves, roster kept, Ben's attendance reset, Ben notified.
+    res = client.post(f"/api/games/{game['id']}/reschedule",
+                      json={'scheduled_at': new_when}, headers=ah)
+    assert res.status_code == 200
+    updated = res.get_json()
+    assert len(updated['players']) == 2  # roster intact
+    ben = next(p for p in updated['players'] if p['user_id'] == b['user']['id'])
+    assert ben['attending'] is False  # re-confirmation needed
+    notes = [n for n in client.get('/api/notifications', headers=bh).get_json()['items']
+             if 'rescheduled' in n['title'].lower()]
+    assert len(notes) == 1 and notes[0]['related_game_id'] == game['id']
+
+
 def test_host_removes_player(client):
     a = register(client, 'a@example.com', 'Ana')   # host
     b = register(client, 'b@example.com', 'Ben')

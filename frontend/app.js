@@ -4101,6 +4101,9 @@
             actions += `<button class="btn btn-secondary btn-block" id="gs-invite" style="margin-top:10px">＋ Invite a friend${game.spots_left ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}</button>`;
           }
           actions += '<button class="btn btn-secondary btn-block" id="gs-calendar" style="margin-top:10px">📅 Add to calendar</button>';
+          if (game.is_creator && game.recurrence !== 'weekly') {
+            actions += '<button class="btn btn-secondary btn-block" id="gs-reschedule" style="margin-top:10px">🕑 Reschedule</button>';
+          }
         }
         actions += `<div class="action-row" style="margin-top:10px">
           <button class="btn btn-secondary" id="gs-leave">Leave game</button>
@@ -4336,6 +4339,29 @@
           closeModal(modal); refreshMe();
           if (state.tab === 'play') renderPlay();
         } catch (e) { toast(e.message); reopenFresh(); }
+      });
+      box.querySelector('#gs-reschedule')?.addEventListener('click', () => {
+        const cur = new Date(game.scheduled_at);
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const val = `${cur.getFullYear()}-${pad2(cur.getMonth() + 1)}-${pad2(cur.getDate())}T${pad2(cur.getHours())}:${pad2(cur.getMinutes())}`;
+        const sheet = openModal(`
+          ${modalHead('🕑 Reschedule game')}
+          <p class="row-sub" style="margin-bottom:10px">Everyone in the game keeps their spot and gets re-notified.</p>
+          <div class="form-field"><input type="datetime-local" id="rs-when" value="${val}" /></div>
+          <button class="btn btn-primary btn-block" id="rs-save" style="padding:15px">Save new time</button>
+        `);
+        sheet.querySelector('#rs-save').addEventListener('click', async (e) => {
+          const raw = sheet.querySelector('#rs-when').value;
+          if (!raw) { toast('Pick a time'); return; }
+          const when = new Date(raw);
+          if (when.getTime() < Date.now() - 15 * 60000) { toast("That time's already passed"); return; }
+          e.target.disabled = true;
+          try {
+            render(await api(`/games/${gameId}/reschedule`, { method: 'POST', body: JSON.stringify({ scheduled_at: when.toISOString() }) }));
+            closeModal(sheet);
+            toast('Game rescheduled — players notified 🕑');
+          } catch (err) { toast(err.message); e.target.disabled = false; }
+        });
       });
       box.querySelectorAll('[data-remove-player]').forEach((b) => b.addEventListener('click', async (e) => {
         e.stopPropagation();
