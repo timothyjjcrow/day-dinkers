@@ -3106,6 +3106,16 @@
   }
 
   // ---------- User profile ----------
+  // "Marcus", "Marcus & Priya", "Marcus, Priya & 2 others" — mutual friends.
+  function mutualFriendsText(mutuals) {
+    const names = mutuals.map((m) => esc(m.display_name.split(' ')[0]));
+    let who;
+    if (names.length === 1) who = names[0];
+    else if (names.length === 2) who = `${names[0]} & ${names[1]}`;
+    else who = `${names.slice(0, 2).join(', ')} & ${names.length - 2} other${names.length - 2 === 1 ? '' : 's'}`;
+    return `You both know ${who}`;
+  }
+
   async function openUserProfile(userId) {
     let user;
     try { user = await api(`/users/${userId}`); } catch (e) { toast(e.message); return; }
@@ -3171,6 +3181,7 @@
         <div class="profile-name">${esc(user.display_name)}</div>
         <div class="profile-sub">${skillLabel(user.skill_level)}${user.home_court_name ? ` · 🏠 ${esc(user.home_court_name)}` : ''}</div>
         ${user.bio ? `<p class="profile-sub" style="margin-top:8px">${esc(user.bio)}</p>` : ''}
+        ${(user.mutual_friends || []).length ? `<p class="profile-sub" style="margin-top:8px">🤝 ${mutualFriendsText(user.mutual_friends)}</p>` : ''}
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-value">${user.rating}</div><div class="stat-label">Rating</div></div>

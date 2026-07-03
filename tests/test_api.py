@@ -1087,6 +1087,33 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_mutual_friends_on_profile(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+
+    def befriend(x, y):
+        client.post('/api/friends/request', json={'user_id': y['user']['id']}, headers=auth_headers(x['token']))
+        fid = client.get('/api/friends', headers=auth_headers(y['token'])).get_json()['incoming'][0]['friendship_id']
+        client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(y['token']))
+
+    # Ana↔Cam and Ben↔Cam: Cam is the mutual friend of Ana and Ben.
+    befriend(a, c)
+    befriend(b, c)
+
+    prof = client.get(f"/api/users/{b['user']['id']}", headers=auth_headers(a['token'])).get_json()
+    assert [m['display_name'] for m in prof['mutual_friends']] == ['Cam']
+
+    # Dee shares no one with Ana.
+    prof_d = client.get(f"/api/users/{d['user']['id']}", headers=auth_headers(a['token'])).get_json()
+    assert prof_d['mutual_friends'] == []
+
+    # Your own profile never lists mutuals.
+    own = client.get(f"/api/users/{a['user']['id']}", headers=auth_headers(a['token'])).get_json()
+    assert own['mutual_friends'] == []
+
+
 def test_friend_suggestions(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

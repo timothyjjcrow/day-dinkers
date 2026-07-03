@@ -233,6 +233,18 @@ def user_profile(user_id):
     else:
         payload['friendship_status'] = None
 
+    # Mutual friends — "people you both know", for trust and connection.
+    payload['mutual_friends'] = []
+    if user.id != g.current_user.id:
+        mutual_ids = friend_ids(g.current_user.id) & friend_ids(user.id)
+        if mutual_ids:
+            mutuals = User.query.filter(
+                User.id.in_(mutual_ids), User.deleted_at.is_(None),
+            ).order_by(User.display_name.asc()).limit(20).all()
+            payload['mutual_friends'] = [
+                {'id': u.id, 'display_name': u.display_name} for u in mutuals
+            ]
+
     recent = (
         Game.query.join(GamePlayer)
         .filter(GamePlayer.user_id == user.id, Game.status == 'completed')
