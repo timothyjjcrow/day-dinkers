@@ -2241,7 +2241,7 @@
     });
   }
 
-  async function openNewGameModal(court, defaultType = 'casual', startNow = false) {
+  async function openNewGameModal(court, defaultType = 'casual', startNow = false, preferredSlot = null) {
     // Gather friends (for invites) and court suggestions in parallel
     let friends = [];
     let suggestions = [];
@@ -2289,6 +2289,18 @@
       return d.getTime() > Date.now() + 50 * 60000;
     });
     if (selHour == null) { selDayIdx = 1; selHour = 10; }
+
+    // A shared-availability slot ("sat-am") pre-selects the next matching day
+    // in range and a representative hour for that part of day.
+    if (preferredSlot) {
+      const [slotDay, slotPart] = preferredSlot.split('-');
+      const targetDow = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }[slotDay];
+      const dayIdx = days.findIndex((d) => d.getDay() === targetDow);
+      if (dayIdx >= 0) {
+        selDayIdx = dayIdx;
+        selHour = { am: 10, pm: 14, eve: 18 }[slotPart] || selHour;
+      }
+    }
 
     const dayChips = days.map((d, i) =>
       `<button type="button" data-day="${i}" class="${i === selDayIdx ? 'active' : ''}">${dayLabel(d, i)}</button>`).join('');
@@ -3312,7 +3324,8 @@
             ? ' <span class="tag" style="margin:0 0 0 6px">🤝 your times too</span>' : ''}</div>
         ${availLines.map((l) => `<div class="row-sub">${l}</div>`).join('')}
         ${userId !== state.me.id && sharedAvailabilityText(state.me.availability, user.availability)
-          ? `<div class="row-sub" style="margin-top:6px;color:var(--green-accent);font-weight:700">🤝 You both play: ${esc(sharedAvailabilityText(state.me.availability, user.availability))}</div>` : ''}
+          ? `<div class="row-sub" style="margin-top:6px;color:var(--green-accent);font-weight:700">🤝 You both play: ${esc(sharedAvailabilityText(state.me.availability, user.availability))}</div>
+             <button class="btn btn-secondary btn-sm btn-block" id="up-schedule-shared" style="margin-top:8px">🎾 Schedule at a shared time</button>` : ''}
       </div>` : '';
     const courtRow = (c) => `
       <div class="card row" data-pcourt="${c.id}" style="cursor:pointer">
@@ -3425,6 +3438,18 @@
     modal.querySelector('#up-msg')?.addEventListener('click', () => {
       closeModal(modal);
       openThread(userId);
+    });
+    modal.querySelector('#up-schedule-shared')?.addEventListener('click', () => {
+      // Open the scheduler pre-set to the shared slot whose next occurrence
+      // is soonest on the calendar (so it lands within the day picker's range).
+      const shared = (user.availability || []).filter((s) => (state.me.availability || []).includes(s));
+      const dow = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+      const today = new Date().getDay();
+      const daysUntil = (s) => ((dow[s.split('-')[0]] - today) + 7) % 7;
+      const slot = shared.sort((x, y) => daysUntil(x) - daysUntil(y))[0];
+      closeModal(modal);
+      openNewGameModal(null, 'casual', false, slot);
+      toast(`Pick a court — invite ${esc(user.display_name.split(' ')[0])} below 🎾`);
     });
   }
 
