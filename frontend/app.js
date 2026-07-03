@@ -3384,10 +3384,15 @@
         }
         el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', formStripHtml(stats.form));
         el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', ratingSparklineHtml(stats.rating_history));
-        if ((stats.badges || []).length) {
+        if ((stats.badges || []).length || (stats.badge_progress || []).length) {
+          const earned = (stats.badges || []).map((b) =>
+            `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`);
+          // Locked badges show dimmed with progress toward the next milestone.
+          const locked = (stats.badge_progress || []).map((b) =>
+            `<span class="tag" style="margin:0;opacity:.5;filter:grayscale(1)" title="${esc(b.label)} (${b.current}/${b.target})">${b.emoji} ${esc(b.label)} ${b.current}/${b.target}</span>`);
           el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', `
             <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
-              ${stats.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}
+              ${[...earned, ...locked].join('')}
             </div>`);
         }
         // If the earned rating outgrew the declared level, offer a one-tap

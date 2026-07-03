@@ -1550,11 +1550,16 @@ def test_my_stats(client):
     larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
 
-    # Fresh player: all zeros.
+    # Fresh player: all zeros. Every badge is locked, and the three nearest
+    # (first win 0/1, MVP 0/1, 3-win streak 0/3) surface as progress.
     stats = client.get('/api/me/stats', headers=ah).get_json()
+    progress = stats.pop('badge_progress')
     assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0,
                      'top_court': None, 'best_partner': None, 'top_rival': None,
                      'form': [], 'badges': [], 'rating_history': []}
+    assert [b['id'] for b in progress] == ['first_win', 'mvp', 'hot_streak']
+    assert progress[0] == {'id': 'first_win', 'emoji': '🏅', 'label': 'First win',
+                           'current': 0, 'target': 1}
 
     def play(court_id):
         g = make_game(client, a['token'], court_id, hours_ahead=1)

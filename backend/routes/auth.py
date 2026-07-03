@@ -485,7 +485,7 @@ def my_stats():
             'your_wins': top['wins'],
         }
 
-    from backend.models import player_badges, rating_history_for
+    from backend.models import badge_progress, player_badges, rating_history_for
     rating_history = rating_history_for(user)
     badges = player_badges(user)
 
@@ -498,6 +498,7 @@ def my_stats():
         'top_rival': top_rival,
         'form': form,
         'badges': badges,
+        'badge_progress': badge_progress(user),
         'rating_history': rating_history,
     })
 

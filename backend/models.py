@@ -270,9 +270,9 @@ def rating_history_for(user, limit=20):
     return history
 
 
-def player_badges(user):
-    """Achievement badges derived from live data — shared by /me/stats and
-    public profiles so both always agree."""
+def _badge_defs(user):
+    """(id, emoji, label, current, target) for every badge — the single source
+    of truth for both earned lists and progress views."""
     games = (
         Game.query.join(GamePlayer)
         .filter(
@@ -296,18 +296,36 @@ def player_badges(user):
         db.or_(Friendship.requester_id == user.id, Friendship.addressee_id == user.id),
     ).count()
     mvp_count = GameMvpVote.query.filter_by(votee_id=user.id).count()
-    defs = [
-        ('first_win', '🏅', 'First win', wins >= 1),
-        ('ten_games', '🔟', '10 games played', len(games) >= 10),
-        ('explorer', '🧭', 'Played 5 courts', len(courts) >= 5),
-        ('hot_streak', '🔥', '3-win streak', (user.best_streak or 0) >= 3),
-        ('mvp', '🌟', 'Voted MVP', mvp_count >= 1),
-        ('social', '🤝', '5 friends', friend_count >= 5),
+    return [
+        ('first_win', '🏅', 'First win', wins, 1),
+        ('ten_games', '🔟', '10 games played', len(games), 10),
+        ('explorer', '🧭', 'Played 5 courts', len(courts), 5),
+        ('hot_streak', '🔥', '3-win streak', user.best_streak or 0, 3),
+        ('mvp', '🌟', 'Voted MVP', mvp_count, 1),
+        ('social', '🤝', '5 friends', friend_count, 5),
     ]
+
+
+def player_badges(user):
+    """Earned achievement badges — shared by /me/stats and public profiles."""
     return [
         {'id': bid, 'emoji': emoji, 'label': label}
-        for bid, emoji, label, earned in defs if earned
+        for bid, emoji, label, current, target in _badge_defs(user)
+        if current >= target
     ]
+
+
+def badge_progress(user):
+    """The closest few unearned badges, with how far along the player is.
+    Own-profile only — a nudge toward the next milestone."""
+    locked = [
+        {'id': bid, 'emoji': emoji, 'label': label, 'current': min(current, target), 'target': target}
+        for bid, emoji, label, current, target in _badge_defs(user)
+        if current < target
+    ]
+    # Nearest to completion first.
+    locked.sort(key=lambda b: (b['target'] - b['current'], b['target']))
+    return locked[:3]
 
 
 def is_blocked_between(user_a_id, user_b_id):
