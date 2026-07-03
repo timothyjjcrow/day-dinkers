@@ -3114,6 +3114,9 @@
           <button id="up-block" style="background:transparent;color:${user.is_blocked ? 'var(--ink-soft)' : '#e03131'};font-size:13px;font-weight:600">
             ${user.is_blocked ? 'Unblock user' : '🚫 Block user'}
           </button>
+          <button id="up-report" style="background:transparent;color:var(--ink-soft);font-size:13px;font-weight:600;margin-left:14px">
+            ⚑ Report
+          </button>
         </div>` : ''}
     `);
 
@@ -3123,6 +3126,21 @@
       openCourtDetail(Number(row.dataset.pcourt));
     }));
 
+    modal.querySelector('#up-report')?.addEventListener('click', () => {
+      const sheet = openModal(`
+        ${modalHead('⚑ Report ' + esc(user.display_name.split(' ')[0]))}
+        <p class="row-sub" style="margin-bottom:12px">What's going on? Reports go to the Third Shot team.</p>
+        ${['Harassment or abusive messages', 'Fake or manipulated scores', 'Spam or fake account', 'Something else']
+          .map((r) => `<button class="btn btn-secondary btn-block" data-report-reason="${esc(r)}" style="margin-bottom:8px;text-align:left">${esc(r)}</button>`).join('')}
+      `);
+      sheet.querySelectorAll('[data-report-reason]').forEach((b) => b.addEventListener('click', async () => {
+        try {
+          await api(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason: b.dataset.reportReason }) });
+          closeModal(sheet);
+          toast('Reported — thanks for keeping the courts friendly 🌿');
+        } catch (e) { toast(e.message); }
+      }));
+    });
     modal.querySelector('#up-block')?.addEventListener('click', async () => {
       if (user.is_blocked) {
         try {

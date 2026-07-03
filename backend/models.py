@@ -347,6 +347,18 @@ class Message(TimestampMixin, db.Model):
         }
 
 
+class UserReport(TimestampMixin, db.Model):
+    """A player flagging another for review. Write-only audit trail for now —
+    surfaced to operators out-of-band until an admin view exists."""
+    id = db.Column(db.Integer, primary_key=True)
+    reporter_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    reported_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    reason = db.Column(db.String(500), nullable=False, default='')
+
+    reporter = db.relationship('User', foreign_keys=[reporter_id])
+    reported = db.relationship('User', foreign_keys=[reported_id])
+
+
 class CourtChatRead(TimestampMixin, db.Model):
     """How far a player has read a court's chat room — powers the unread
     badge on court detail. No row until they open that chat once."""

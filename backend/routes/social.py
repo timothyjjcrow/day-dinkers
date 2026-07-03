@@ -350,6 +350,32 @@ def user_profile(user_id):
     return jsonify(payload)
 
 
+@social_bp.post('/users/<int:user_id>/report')
+@rate_limit(10, 3600)
+@login_required
+def report_user(user_id):
+    """Flag a player for review. One live report per pair per day —
+    repeat taps are acknowledged without stacking rows."""
+    from backend.models import UserReport
+    target = db.session.get(User, user_id)
+    if not target or target.deleted_at:
+        return jsonify({'error': 'user_not_found'}), 404
+    if target.id == g.current_user.id:
+        return jsonify({'error': 'cannot_report_self'}), 400
+    reason = str((request.get_json(silent=True) or {}).get('reason') or '').strip()[:500]
+    recent = UserReport.query.filter(
+        UserReport.reporter_id == g.current_user.id,
+        UserReport.reported_id == target.id,
+        UserReport.created_at >= utcnow() - timedelta(hours=24),
+    ).first()
+    if not recent:
+        db.session.add(UserReport(
+            reporter_id=g.current_user.id, reported_id=target.id, reason=reason,
+        ))
+        db.session.commit()
+    return jsonify({'reported': True})
+
+
 @social_bp.get('/users/blocked')
 @login_required
 def list_blocked():

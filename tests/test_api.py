@@ -1016,6 +1016,30 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_report_user(client, app):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah = auth_headers(a['token'])
+
+    res = client.post(f"/api/users/{b['user']['id']}/report",
+                      json={'reason': 'Fake or manipulated scores'}, headers=ah)
+    assert res.status_code == 200 and res.get_json()['reported'] is True
+    # Repeat taps within a day acknowledge but don't stack rows.
+    client.post(f"/api/users/{b['user']['id']}/report", json={'reason': 'again'}, headers=ah)
+    with app.app_context():
+        from backend.models import UserReport
+        rows = UserReport.query.all()
+        assert len(rows) == 1
+        assert rows[0].reporter_id == a['user']['id']
+        assert rows[0].reported_id == b['user']['id']
+        assert rows[0].reason == 'Fake or manipulated scores'
+
+    # Guards: no self-reports, no ghosts, auth required.
+    assert client.post(f"/api/users/{a['user']['id']}/report", json={}, headers=ah).status_code == 400
+    assert client.post('/api/users/99999/report', json={}, headers=ah).status_code == 404
+    assert client.post(f"/api/users/{b['user']['id']}/report", json={}).status_code == 401
+
+
 def test_blocked_players_list(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
