@@ -345,6 +345,19 @@ class Message(TimestampMixin, db.Model):
         }
 
 
+class CourtChatRead(TimestampMixin, db.Model):
+    """How far a player has read a court's chat room — powers the unread
+    badge on court detail. No row until they open that chat once."""
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'court_id', name='uq_court_chat_read'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
+
+
 GAME_TYPES = ['casual', 'ranked']
 GAME_STATUSES = ['upcoming', 'awaiting_confirmation', 'completed', 'cancelled']
 # Who can see / join a game:

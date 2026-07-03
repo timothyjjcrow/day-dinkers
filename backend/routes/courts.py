@@ -13,9 +13,9 @@ from sqlalchemy import func
 
 from backend.app import db
 from backend.models import (
-    COURT_CONDITIONS, CheckIn, Court, CourtCondition, CourtEditSuggestion,
-    CourtPhoto, CourtReview, FavoriteCourt, Game, GamePlayer, Notification,
-    iso, notify, utcnow,
+    COURT_CONDITIONS, CheckIn, Court, CourtChatRead, CourtCondition,
+    CourtEditSuggestion, CourtPhoto, CourtReview, FavoriteCourt, Game,
+    GamePlayer, Message, Notification, iso, notify, utcnow,
 )
 from backend.routes.auth import active_checkin_for, login_required, optional_current_user, presence_payload
 from backend.routes.social import friend_ids
@@ -423,6 +423,18 @@ def court_detail(court_id):
         for user, visits in regular_rows
     ]
     payload['busy_times'] = _busy_times(court)
+    # Court-chat unread count — only once they've opened that chat before,
+    # so untouched chat rooms don't nag.
+    payload['chat_unread'] = 0
+    if current_user:
+        marker = CourtChatRead.query.filter_by(
+            user_id=current_user.id, court_id=court.id,
+        ).first()
+        if marker:
+            payload['chat_unread'] = Message.query.filter(
+                Message.court_id == court.id,
+                Message.id > marker.last_read_message_id,
+            ).count()
     payload['players_here'] = players_here
     payload['friends_here'] = sum(1 for p in players_here if p['is_friend'])
     viewer_id = current_user.id if current_user else None

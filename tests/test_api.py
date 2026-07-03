@@ -1010,6 +1010,34 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_court_chat_unread_badge(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def unread(headers=None):
+        return client.get(f'/api/courts/{court_id}', headers=headers).get_json()['chat_unread']
+
+    # Chatter in a room you've never opened doesn't nag (and anon sees 0).
+    client.post(f'/api/courts/{court_id}/chat', json={'body': 'anyone on?'}, headers=ah)
+    assert unread(bh) == 0
+    assert unread() == 0
+
+    # Opening the chat sets the read marker…
+    client.get(f'/api/courts/{court_id}/chat', headers=bh)
+    assert unread(bh) == 0
+    # …so the next message shows as unread, until Ben reads again.
+    client.post(f'/api/courts/{court_id}/chat', json={'body': 'games at 6?'}, headers=ah)
+    client.post(f'/api/courts/{court_id}/chat', json={'body': 'bring water'}, headers=ah)
+    assert unread(bh) == 2
+    client.get(f'/api/courts/{court_id}/chat', headers=bh)
+    assert unread(bh) == 0
+    # Ana only ever posted (never opened the room), so she has no marker
+    # and — by the no-nag rule — no unread count either.
+    assert unread(ah) == 0
+
+
 def test_favorite_courts(client):
     a = register(client, 'a@example.com')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
