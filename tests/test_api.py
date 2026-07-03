@@ -1337,6 +1337,10 @@ def test_my_stats(client):
     assert len(history) == 2  # baseline + the ranked game
     assert history[0]['at'] is None and history[0]['rating'] == 1200
     assert history[-1]['rating'] == me_now['rating'] > 1200
+    # Public profiles expose the same trajectory (viewed by Ben).
+    profile = client.get(f"/api/users/{a['user']['id']}",
+                         headers=auth_headers(b['token'])).get_json()
+    assert profile['rating_history'] == history
 
     # Auth required.
     assert client.get('/api/me/stats').status_code == 401

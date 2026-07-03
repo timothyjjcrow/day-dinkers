@@ -3032,6 +3032,7 @@
         <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Ranked losses</div></div>
       </div>
       ${formStripHtml(user.form)}
+      ${ratingSparklineHtml(user.rating_history)}
       ${(user.badges || []).length ? `
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
           ${user.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}

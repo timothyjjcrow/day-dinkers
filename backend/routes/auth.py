@@ -22,7 +22,6 @@ from backend.models import (
     Notification,
     SKILL_LEVELS,
     User,
-    iso,
     notify,
     utcnow,
 )
@@ -433,26 +432,8 @@ def my_stats():
             'your_wins': top['wins'],
         }
 
-    # Ranked rating trajectory: walk newest→oldest subtracting each game's
-    # delta from the current rating, then flip to chronological order.
-    rating_history = []
-    rating = user.rating
-    for game in completed:
-        if game.game_type != 'ranked':
-            continue
-        mine = next((p for p in game.players if p.user_id == user.id), None)
-        if not mine or mine.rating_delta is None:
-            continue
-        rating_history.append({'at': iso(game.completed_at), 'rating': rating})
-        rating -= mine.rating_delta
-        if len(rating_history) >= 20:
-            break
-    if rating_history:
-        # Baseline before the earliest shown game, so the line has a start.
-        rating_history.append({'at': None, 'rating': rating})
-        rating_history.reverse()
-
-    from backend.models import player_badges
+    from backend.models import player_badges, rating_history_for
+    rating_history = rating_history_for(user)
     badges = player_badges(user)
 
     return jsonify({

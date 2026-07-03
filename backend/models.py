@@ -227,6 +227,37 @@ class BlockedUser(TimestampMixin, db.Model):
     blocked = db.relationship('User', foreign_keys=[blocked_id])
 
 
+def rating_history_for(user, limit=20):
+    """Ranked rating trajectory (chronological), rebuilt by walking completed
+    ranked games newest→oldest and subtracting each game's rating delta from
+    the player's current rating. Shared by /me/stats and public profiles."""
+    rows = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status == 'completed',
+            Game.game_type == 'ranked',
+            Game.completed_at.isnot(None),
+        )
+        .order_by(Game.completed_at.desc())
+        .limit(limit)
+        .all()
+    )
+    history = []
+    rating = user.rating
+    for game in rows:
+        mine = next((p for p in game.players if p.user_id == user.id), None)
+        if not mine or mine.rating_delta is None:
+            continue
+        history.append({'at': iso(game.completed_at), 'rating': rating})
+        rating -= mine.rating_delta
+    if history:
+        # Baseline before the earliest shown game, so the line has a start.
+        history.append({'at': None, 'rating': rating})
+        history.reverse()
+    return history
+
+
 def player_badges(user):
     """Achievement badges derived from live data — shared by /me/stats and
     public profiles so both always agree."""

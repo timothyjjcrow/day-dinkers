@@ -21,6 +21,7 @@ from backend.models import (
     is_blocked_between,
     notify,
     player_badges,
+    rating_history_for,
     utcnow,
 )
 from datetime import timedelta
@@ -241,6 +242,7 @@ def user_profile(user_id):
     )
     payload['recent_games'] = [game.to_dict(user.id) for game in recent]
     payload['badges'] = player_badges(user)
+    payload['rating_history'] = rating_history_for(user)
     # Last-5 form from the profile owner's perspective, newest first.
     payload['form'] = [
         'W' if g['you_won'] else 'L'
