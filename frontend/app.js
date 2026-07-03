@@ -1185,7 +1185,7 @@
           if (p.looking_for_game) badges.push('<span class="tag live" style="margin:0 0 0 6px">Wants to play</span>');
           const record = (p.ranked_wins + p.ranked_losses) > 0 ? ` · ${p.ranked_wins}W–${p.ranked_losses}L` : '';
           const actions = p.is_me ? '' : `
-            <button class="btn btn-sm" data-challenge="${p.id}" title="Challenge to a ranked match" style="background:#ede9fe;color:#5b21b6">⚔️</button>
+            <button class="btn btn-sm" data-challenge="${p.id}" title="Challenge to a ranked match" style="background:var(--violet-100);color:var(--violet-700)">⚔️</button>
             <button class="btn btn-secondary btn-sm" data-msg-user="${p.id}" title="Message">💬</button>
             ${!p.is_friend ? `<button class="btn btn-primary btn-sm" data-add-friend-inline="${p.id}" title="Add friend">＋</button>` : ''}`;
           return `
@@ -1268,7 +1268,7 @@
       ${court.latest_condition ? (() => {
         const c = COURT_CONDITION_LABELS[court.latest_condition.condition] || ['📣', court.latest_condition.condition];
         const mins = Math.max(1, Math.round((Date.now() - new Date(court.latest_condition.reported_at)) / 60000));
-        return `<div class="card row" style="margin-top:12px;padding:10px 14px;background:${court.latest_condition.condition === 'good' ? 'var(--green-50)' : '#fef3c7'}">
+        return `<div class="card row" style="margin-top:12px;padding:10px 14px;background:${court.latest_condition.condition === 'good' ? 'var(--green-50)' : 'var(--amber-50)'}">
           <span style="font-size:18px">${c[0]}</span>
           <div class="row-main">
             <div class="row-title" style="font-size:14px">${c[1]}</div>
@@ -2396,7 +2396,7 @@
       </div>
       ${singles ? '' : '<p class="row-sub" style="margin-bottom:8px">Tap a player to switch their team.</p>'}
       <div id="sc-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px"></div>
-      <div id="sc-uneven" class="row-sub" style="color:#b45309;font-weight:700;margin-bottom:10px;display:none"></div>
+      <div id="sc-uneven" class="row-sub" style="color:var(--amber-700);font-weight:700;margin-bottom:10px;display:none"></div>
       <div class="score-grid">
         <div class="score-panel" id="sc-panel-1">
           <div class="score-team-label" id="sc-label-1"></div>
