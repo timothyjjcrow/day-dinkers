@@ -3773,13 +3773,18 @@
 
     const team1 = game.players.filter((p) => p.team === 1);
     const team2 = game.players.filter((p) => p.team === 2);
+    // Host can remove other players from an upcoming game (no-show swap).
+    const canRemove = (p) => game.is_creator && game.status === 'upcoming' && p.user_id !== game.creator_id;
     const playerRow = (p) => `
-      <div class="row" style="margin-bottom:8px" data-view-user="${p.user_id}">
-        ${avatarHtml(p, 'sm')}
-        <div class="row-main">
-          <div class="row-title" style="font-size:14px">${esc(p.display_name)}${p.user_id === game.creator_id ? ' <span class="tag" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">Host</span>' : ''}${p.attending && game.status === 'upcoming' ? ' <span class="tag live" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">👋 Coming</span>' : ''}</div>
-          <div class="row-sub">${skillLabel(p.skill_level)} · ${p.rating}${p.rating_delta != null ? ` · <span class="${p.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${p.rating_delta >= 0 ? '+' : ''}${p.rating_delta}</span>` : ''}</div>
+      <div class="row" style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer" data-view-user="${p.user_id}">
+          ${avatarHtml(p, 'sm')}
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px">${esc(p.display_name)}${p.user_id === game.creator_id ? ' <span class="tag" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">Host</span>' : ''}${p.attending && game.status === 'upcoming' ? ' <span class="tag live" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">👋 Coming</span>' : ''}</div>
+            <div class="row-sub">${skillLabel(p.skill_level)} · ${p.rating}${p.rating_delta != null ? ` · <span class="${p.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${p.rating_delta >= 0 ? '+' : ''}${p.rating_delta}</span>` : ''}</div>
+          </div>
         </div>
+        ${canRemove(p) ? `<button class="btn btn-secondary btn-sm" data-remove-player="${p.user_id}" title="Remove from game" aria-label="Remove ${esc(p.display_name)}">✕</button>` : ''}
       </div>`;
     const playersHtml = (team1.length && team2.length)
       ? `<div class="form-grid">
@@ -4051,6 +4056,15 @@
           if (state.tab === 'play') renderPlay();
         } catch (e) { toast(e.message); reopenFresh(); }
       });
+      box.querySelectorAll('[data-remove-player]').forEach((b) => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const uid = Number(b.dataset.removePlayer);
+        if (!confirm('Remove this player from the game?')) return;
+        try {
+          render(await api(`/games/${gameId}/remove/${uid}`, { method: 'POST' }));
+          toast('Player removed');
+        } catch (err) { toast(err.message); }
+      }));
       bindUserButtons(box);
     }
 

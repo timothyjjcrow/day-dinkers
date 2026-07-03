@@ -1088,6 +1088,46 @@ def test_clear_notifications(client):
     assert client.delete('/api/notifications').status_code == 401
 
 
+def test_host_removes_player(client):
+    a = register(client, 'a@example.com', 'Ana')   # host
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=2)  # max 4
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    client.post(f"/api/games/{game['id']}/join", headers=ch)
+
+    # Non-host can't remove anyone.
+    assert client.post(f"/api/games/{game['id']}/remove/{c['user']['id']}",
+                       headers=bh).status_code == 403
+    # Host can't remove themselves via this route.
+    assert client.post(f"/api/games/{game['id']}/remove/{a['user']['id']}",
+                       headers=ah).status_code == 400
+
+    # Host removes Ben → he's gone, spot freed, and he's notified.
+    res = client.post(f"/api/games/{game['id']}/remove/{b['user']['id']}", headers=ah)
+    assert res.status_code == 200
+    players = {p['user_id'] for p in res.get_json()['players']}
+    assert b['user']['id'] not in players and res.get_json()['spots_left'] == 2
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert 'game_cancelled' in kinds
+
+    # Removing someone not in the game is a 404.
+    assert client.post(f"/api/games/{game['id']}/remove/{b['user']['id']}",
+                       headers=ah).status_code == 404
+
+    # A removed spot pulls from the waitlist: fill the game, waitlist Ben, remove Cam.
+    d = register(client, 'd@example.com', 'Dee')
+    e = register(client, 'e@example.com', 'Eve')
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(d['token']))
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(e['token']))  # now full: a,c,d,e
+    client.post(f"/api/games/{game['id']}/waitlist", headers=bh)
+    client.post(f"/api/games/{game['id']}/remove/{c['user']['id']}", headers=ah)
+    players = {p['user_id'] for p in client.get(f"/api/games/{game['id']}", headers=ah).get_json()['players']}
+    assert b['user']['id'] in players and c['user']['id'] not in players
+
+
 def test_invite_to_existing_game(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

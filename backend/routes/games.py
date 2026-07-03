@@ -563,6 +563,38 @@ def leave_game(game_id):
     return jsonify(game.to_dict(g.current_user.id))
 
 
+@games_bp.post('/games/<int:game_id>/remove/<int:user_id>')
+@rate_limit(30, 60)
+@login_required
+def remove_player(game_id, user_id):
+    """Host drops another player from an upcoming game (no-show swap).
+    Frees a spot, promotes from the waitlist, and notifies the removed player."""
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.creator_id != g.current_user.id:
+        return jsonify({'error': 'host_only'}), 403
+    if game.status != 'upcoming':
+        return jsonify({'error': 'game_not_open'}), 400
+    if user_id == g.current_user.id:
+        return jsonify({'error': 'cannot_remove_self'}), 400
+    player = next((p for p in game.players if p.user_id == user_id), None)
+    if not player:
+        return jsonify({'error': 'not_in_game'}), 404
+
+    game.players.remove(player)
+    court_name = game.court.name if game.court else 'the court'
+    notify(
+        user_id,
+        'game_cancelled',
+        f'{g.current_user.display_name} removed you from the game at {court_name}',
+        related_game_id=game.id,
+    )
+    _promote_from_waitlist(game)
+    db.session.commit()
+    return jsonify(game.to_dict(g.current_user.id))
+
+
 @games_bp.post('/games/<int:game_id>/cancel')
 @rate_limit(30, 60)
 @login_required
