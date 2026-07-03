@@ -438,12 +438,17 @@
       : L.layerGroup();
     state.markers.addTo(state.map);
 
-    $('#map-filters').addEventListener('click', (e) => {
+    $('#map-filters').addEventListener('click', async (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       state.mapFilter = btn.dataset.filter;
       document.querySelectorAll('#map-filters button').forEach((b) => b.classList.toggle('active', b === btn));
-      fetchCourtsInView();
+      await fetchCourtsInView();
+      // Saved courts can be anywhere — zoom out to fit them all.
+      if (state.mapFilter === 'saved' && state.courtsInView.length) {
+        const pts = state.courtsInView.filter((c) => c.latitude != null).map((c) => [c.latitude, c.longitude]);
+        if (pts.length) state.map.fitBounds(pts, { maxZoom: 13, padding: [50, 50] });
+      }
     });
 
     state.map.on('moveend', () => {
@@ -572,6 +577,17 @@
   async function fetchCourtsInView() {
     if (!state.map) return;
     if (state.searchQ) return; // search results own the list and markers right now
+
+    // Saved filter ignores the bbox — your courts show wherever they are.
+    if (state.mapFilter === 'saved') {
+      try {
+        const favs = await api('/courts/favorites');
+        state.courtsInView = favs.items;
+        drawMarkers(favs.items);
+        renderCourtList(favs.items, [], { savedOnly: true });
+      } catch { /* network hiccup */ }
+      return;
+    }
     if (state.favIds === null) await loadFavIds();
     const b = state.map.getBounds();
     const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(4)).join(',');
@@ -741,10 +757,25 @@
     return sorted;
   }
 
-  async function renderCourtList(courts, places = []) {
+  async function renderCourtList(courts, places = [], { savedOnly = false } = {}) {
     const el = $('#court-list-items');
     courts = sortCourts(courts);
     let html = '';
+
+    // The Saved map filter already IS the favorites list — render it directly,
+    // no "saved vs in view" split, with a filter-specific empty state.
+    if (savedOnly) {
+      html += courts.length
+        ? '<div class="section-label" style="margin-top:4px">⭐ Saved courts</div>'
+          + courts.slice(0, 60).map(courtRowHtml).join('')
+        : '<div class="empty-state" style="padding:18px"><span class="big">⭐</span>No saved courts yet.<br>Tap ☆ on any court to pin it here.</div>';
+      html += '<button class="btn btn-secondary btn-block" id="list-add-court" style="margin-top:10px">➕ Missing a court? Add it</button>';
+      el.innerHTML = html;
+      el.querySelector('#list-add-court').addEventListener('click', openAddCourtSheet);
+      el.querySelectorAll('[data-court]').forEach((row) =>
+        row.addEventListener('click', () => openCourtDetail(Number(row.dataset.court))));
+      return;
+    }
 
     if (places.length) {
       html += '<div class="section-label" style="margin-top:4px">📍 Jump to area</div>';
