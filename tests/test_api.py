@@ -1267,7 +1267,7 @@ def test_my_stats(client):
     stats = client.get('/api/me/stats', headers=ah).get_json()
     assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0,
                      'top_court': None, 'best_partner': None, 'top_rival': None,
-                     'form': [], 'badges': []}
+                     'form': [], 'badges': [], 'rating_history': []}
 
     def play(court_id):
         g = make_game(client, a['token'], court_id, hours_ahead=1)
@@ -1311,6 +1311,23 @@ def test_my_stats(client):
     assert stats['form'] == ['W', 'W', 'W', 'W']  # all four wins, newest first
     # Winning earns the first badge; the rest need more history.
     assert [b['id'] for b in stats['badges']] == ['first_win']
+    # Casual games don't move the rating — no trajectory yet.
+    assert stats['rating_history'] == []
+
+    # One confirmed ranked win draws the first trajectory segment.
+    ranked = make_game(client, a['token'], larson, game_type='ranked', hours_ahead=1)
+    client.post(f"/api/games/{ranked['id']}/join", headers=auth_headers(b['token']))
+    client.post(f"/api/games/{ranked['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 9,
+    }, headers=ah)
+    client.post(f"/api/games/{ranked['id']}/confirm", headers=auth_headers(b['token']))
+    stats = client.get('/api/me/stats', headers=ah).get_json()
+    me_now = client.get('/api/me', headers=ah).get_json()['user']
+    history = stats['rating_history']
+    assert len(history) == 2  # baseline + the ranked game
+    assert history[0]['at'] is None and history[0]['rating'] == 1200
+    assert history[-1]['rating'] == me_now['rating'] > 1200
 
     # Auth required.
     assert client.get('/api/me/stats').status_code == 401

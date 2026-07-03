@@ -997,6 +997,30 @@
     toast('Calendar event downloaded 📅');
   }
 
+  // Tiny SVG sparkline of the ranked-rating trajectory.
+  function ratingSparklineHtml(history) {
+    if (!history || history.length < 2) return '';
+    const w = 280, h = 44, pad = 3;
+    const vals = history.map((p) => p.rating);
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const span = Math.max(1, max - min);
+    const pts = vals.map((v, i) =>
+      `${(pad + (i * (w - 2 * pad)) / (vals.length - 1)).toFixed(1)},${(h - pad - ((v - min) * (h - 2 * pad)) / span).toFixed(1)}`);
+    const [lastX, lastY] = pts[pts.length - 1].split(',');
+    const delta = vals[vals.length - 1] - vals[0];
+    return `
+      <div style="margin-top:12px">
+        <div class="row-sub" style="display:flex;justify-content:space-between;margin-bottom:2px">
+          <span>📈 Rating history</span>
+          <span>${delta === 0 ? `${max}` : `${delta > 0 ? '+' : ''}${delta} · now ${vals[vals.length - 1]}`}</span>
+        </div>
+        <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;display:block" preserveAspectRatio="none" role="img" aria-label="Rating over your last ranked games">
+          <polyline points="${pts.join(' ')}" fill="none" stroke="var(--green-600)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <circle cx="${lastX}" cy="${lastY}" r="3" fill="var(--green-600)"/>
+        </svg>
+      </div>`;
+  }
+
   function formStripHtml(form) {
     if (!form || !form.length) return '';
     return `
@@ -3225,6 +3249,7 @@
             `<div class="row-sub" style="text-align:center;margin-top:8px">${extras.join('<br>')}</div>`);
         }
         el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', formStripHtml(stats.form));
+        el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', ratingSparklineHtml(stats.rating_history));
         if ((stats.badges || []).length) {
           el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', `
             <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
