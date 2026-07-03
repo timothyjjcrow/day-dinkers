@@ -31,10 +31,81 @@
   --violet-500: #8b5cf6;
   --violet-600: #7c3aed;
   --violet-700: #5b21b6;
+  --violet-badge: #5b21b6;
   --blue-600: #2563eb;
   --blue-800: #1e40af;
   --track: #e8eee9;
+  --solid: #1c2520;
+  --on-solid: #ffffff;
+  --glass: rgba(255, 255, 255, 0.94);
+  --shimmer: rgba(255, 255, 255, 0.65);
 }
+
+/* ---------- Dark theme ----------
+   Explicit choice via html[data-theme=dark]; auto mode follows the OS
+   unless the user pinned light. Accent greens/violets/blues keep their
+   light values — they read fine on dark surfaces. */
+html[data-theme="dark"] {
+  --bg: #111614;
+  --card: #1b241f;
+  --ink: #e6eee8;
+  --ink-soft: #94a89b;
+  --line: #2b362f;
+  --track: #242e28;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  --green-50: #16241b;
+  --green-100: #1e3a28;
+  --amber-50: #38290e;
+  --amber-100: #6b4e12;
+  --amber-700: #fbbf24;
+  --amber-800: #fcd34d;
+  --yellow-50: #33290d;
+  --orange-50: #33200f;
+  --orange-200: #7c4a26;
+  --red-50: #3b1a1a;
+  --red-700: #f87171;
+  --violet-50: #251c3a;
+  --violet-100: #322357;
+  --violet-200: #4a3585;
+  --violet-700: #c4b5fd;
+  --violet-badge: #7c3aed;
+  --solid: #e6eee8;
+  --on-solid: #16201a;
+  --glass: rgba(27, 36, 31, 0.92);
+  --shimmer: rgba(255, 255, 255, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]):not([data-theme="dark"]) {
+  --bg: #111614;
+  --card: #1b241f;
+  --ink: #e6eee8;
+  --ink-soft: #94a89b;
+  --line: #2b362f;
+  --track: #242e28;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  --green-50: #16241b;
+  --green-100: #1e3a28;
+  --amber-50: #38290e;
+  --amber-100: #6b4e12;
+  --amber-700: #fbbf24;
+  --amber-800: #fcd34d;
+  --yellow-50: #33290d;
+  --orange-50: #33200f;
+  --orange-200: #7c4a26;
+  --red-50: #3b1a1a;
+  --red-700: #f87171;
+  --violet-50: #251c3a;
+  --violet-100: #322357;
+  --violet-200: #4a3585;
+  --violet-700: #c4b5fd;
+  --violet-badge: #7c3aed;
+  --solid: #e6eee8;
+  --on-solid: #16201a;
+  --glass: rgba(27, 36, 31, 0.92);
+  --shimmer: rgba(255, 255, 255, 0.08);
+  }
+}
+
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overscroll-behavior: none; }
@@ -119,7 +190,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .active-game-banner.state-confirm { background: linear-gradient(90deg, var(--amber-700), var(--amber-500)); }
-.active-game-banner.state-waiting { background: var(--ink); }
+.active-game-banner.state-waiting { background: var(--solid); color: var(--on-solid); }
 
 /* Lift floating controls when the banner is showing */
 .has-banner .fab { bottom: 132px; }
@@ -180,7 +251,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
   font-size: 12.5px; font-weight: 700; color: var(--ink-soft); box-shadow: var(--shadow);
   white-space: nowrap;
 }
-.map-filters button.active { background: var(--ink); color: #fff; }
+.map-filters button.active { background: var(--solid); color: var(--on-solid); }
 
 .cluster-icon {
   background: var(--green-900); color: #fff; border: 3px solid rgba(255,255,255,.85);
@@ -251,7 +322,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .presence-banner button { margin-left: auto; color: var(--green-200); font-weight: 700; font-size: 13px; }
 .pill-btn {
   position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 700;
-  background: var(--ink); color: #fff; border-radius: 999px; padding: 10px 20px;
+  background: var(--solid); color: var(--on-solid); border-radius: 999px; padding: 10px 20px;
   font-weight: 600; font-size: 14px; box-shadow: var(--shadow);
 }
 .court-marker {
@@ -273,7 +344,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 
 .marker-game-badge {
   position: absolute; top: -6px; right: -7px;
-  background: var(--violet-700); color: #fff; font-size: 9px; font-weight: 800;
+  background: var(--violet-badge); color: #fff; font-size: 9px; font-weight: 800;
   min-width: 15px; height: 15px; border-radius: 8px; border: 1.5px solid var(--card);
   display: flex; align-items: center; justify-content: center; padding: 0 3px;
 }
@@ -295,7 +366,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
   border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 700;
   color: var(--ink-soft); white-space: nowrap;
 }
-.list-sort button.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+.list-sort button.active { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
 
 /* ---------- Cards & rows ---------- */
 .card {
@@ -309,7 +380,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .tour-dots { display: flex; gap: 7px; justify-content: center; }
 .tour-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
 .tour-dot.on { background: var(--green-600); }
-.map-topbar input { backdrop-filter: blur(8px); background: rgba(255,255,255,.94); }
+.map-topbar input { backdrop-filter: blur(8px); background: var(--glass); }
 .row { display: flex; align-items: center; gap: 12px; }
 .row-main { flex: 1; min-width: 0; }
 .row-title { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -368,7 +439,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .sk-shimmer { position: relative; overflow: hidden; }
 .sk-shimmer::after {
   content: ''; position: absolute; inset: 0; transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.65), transparent);
+  background: linear-gradient(90deg, transparent, var(--shimmer), transparent);
   animation: shimmer 1.3s infinite;
 }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
@@ -596,7 +667,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .vis-cards button { padding: 9px 3px; }
 .vis-cards button small { font-size: 9.5px; line-height: 1.1; }
 .vis-cards button[data-vis="private"].active { border-color: var(--violet-500); background: var(--violet-50); }
-.quick-times button.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+.quick-times button.active { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
 .invite-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .invite-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -659,7 +730,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); z-index: 3000;
-  background: var(--ink); color: #fff; padding: 11px 20px; border-radius: 999px;
+  background: var(--solid); color: var(--on-solid); padding: 11px 20px; border-radius: 999px;
   font-size: 14px; font-weight: 600; box-shadow: 0 6px 24px rgba(0,0,0,.3);
   white-space: nowrap; max-width: 90vw; overflow: hidden; text-overflow: ellipsis;
 }

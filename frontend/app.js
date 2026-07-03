@@ -416,7 +416,7 @@
       state.areaLoc = [state.me.home_lat, state.me.home_lng];
     }
     state.map = L.map('map', { zoomControl: false }).setView(center, zoom);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    state.tileLayer = L.tileLayer(themeTileUrl(), {
       attribution: '&copy; OpenStreetMap &copy; CARTO',
       maxZoom: 19,
     }).addTo(state.map);
@@ -494,6 +494,32 @@
     if (!saved && !(state.me && state.me.home_lat != null)) locateMe(true);
     fetchCourtsInView();
   }
+
+  // ---------- Theme ----------
+  // 'auto' follows the OS; 'light'/'dark' pin it. Stored per device.
+  function themePref() { return localStorage.getItem('pp_theme') || 'auto'; }
+  function themeIsDark() {
+    const pref = themePref();
+    return pref === 'dark'
+      || (pref === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  function themeTileUrl() {
+    return themeIsDark()
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+  }
+  function applyTheme() {
+    const pref = themePref();
+    if (pref === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.dataset.theme = pref;
+    const dark = themeIsDark();
+    document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', dark ? 'dark' : 'light');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111614' : '#14532d');
+    if (state.tileLayer) state.tileLayer.setUrl(themeTileUrl());
+  }
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (themePref() === 'auto') applyTheme();
+  });
 
   function locateMe(silent) {
     if (!navigator.geolocation) return;
@@ -3166,6 +3192,17 @@
         </button>
       </div>
       <div class="card row" style="margin-bottom:10px">
+        <span style="font-size:20px">🌗</span>
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">Appearance</div>
+          <div class="row-sub">Dark theme, or follow your device</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          ${['auto', 'light', 'dark'].map((t) => `
+            <button class="btn btn-sm ${themePref() === t ? 'btn-primary' : 'btn-secondary'}" data-theme-pick="${t}">${t === 'auto' ? 'Auto' : t === 'light' ? '☀️' : '🌙'}</button>`).join('')}
+        </div>
+      </div>
+      <div class="card row" style="margin-bottom:10px">
         <span style="font-size:20px">💌</span>
         <div class="row-main">
           <div class="row-title" style="font-size:14px">Invite friends</div>
@@ -3201,6 +3238,11 @@
         }
       } catch { /* user cancelled share */ }
     });
+    el.querySelectorAll('[data-theme-pick]').forEach((b) => b.addEventListener('click', () => {
+      localStorage.setItem('pp_theme', b.dataset.themePick);
+      applyTheme();
+      renderProfile();
+    }));
     el.querySelector('#pf-auto').addEventListener('click', (e) => {
       const off = localStorage.getItem('pp_auto_checkin') === 'off';
       localStorage.setItem('pp_auto_checkin', off ? 'on' : 'off');
@@ -4138,6 +4180,7 @@
   }
 
   async function boot() {
+    applyTheme();
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
