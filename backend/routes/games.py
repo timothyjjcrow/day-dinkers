@@ -323,10 +323,23 @@ def create_game():
             )
     else:
         # Open games ping players who saved this court — they opted into
-        # hearing about it. Friends see it in their feed already.
+        # hearing about it. Friends see it in their feed already. One ping
+        # per creator per fan per 3h, so create/cancel churn can't spam.
+        from backend.models import Notification
         fans = FavoriteCourt.query.filter_by(court_id=court.id).limit(200).all()
+        recently_pinged = {
+            n.user_id
+            for n in Notification.query.filter(
+                Notification.kind == 'court_game',
+                Notification.related_user_id == g.current_user.id,
+                Notification.created_at >= utcnow() - timedelta(hours=3),
+                Notification.user_id.in_([f.user_id for f in fans]),
+            )
+        } if fans else set()
         for fan in fans:
             if fan.user_id == g.current_user.id or fan.user_id in invited_ids:
+                continue
+            if fan.user_id in recently_pinged:
                 continue
             if is_blocked_between(g.current_user.id, fan.user_id):
                 continue

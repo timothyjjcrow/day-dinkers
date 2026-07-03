@@ -1157,6 +1157,10 @@ def test_open_game_notifies_court_fans(client):
     make_game(client, a['token'], court_id, visibility='friends')
     assert len(court_game_notes(b)) == 1
 
+    # Create/cancel churn can't spam: a second open game within 3h stays quiet.
+    make_game(client, a['token'], court_id, visibility='open')
+    assert len(court_game_notes(b)) == 1
+
 
 def test_visibility_modes_feed_access(client):
     """Open shows to everyone nearby; friends only to friends; private only to invitees."""
