@@ -1087,6 +1087,37 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_on_my_way_ping(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Not friends yet → can't ping.
+    assert client.post(f"/api/players/{b['user']['id']}/coming", headers=ah).status_code == 403
+
+    # Befriend, Ben checks in looking for a game.
+    client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah)
+    fid = client.get('/api/friends', headers=bh).get_json()['incoming'][0]['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=bh)
+    client.post(f'/api/courts/{court_id}/checkin', json={'looking_for_game': True}, headers=bh)
+
+    # Ana says she's on her way → Ben gets a court-tagged ping.
+    res = client.post(f"/api/players/{b['user']['id']}/coming", headers=ah)
+    assert res.status_code == 200 and res.get_json()['sent'] is True
+    notes = [n for n in client.get('/api/notifications', headers=bh).get_json()['items']
+             if n['kind'] == 'player_coming']
+    assert len(notes) == 1
+    assert 'Ana' in notes[0]['title'] and 'Larson Park' in notes[0]['title']
+    assert notes[0]['related_user_id'] == a['user']['id']
+
+    # Can't ping yourself.
+    assert client.post(f"/api/players/{a['user']['id']}/coming", headers=ah).status_code == 400
+    # Blocking severs it (Ben blocks Ana).
+    client.post(f"/api/users/{a['user']['id']}/block", headers=bh)
+    assert client.post(f"/api/players/{b['user']['id']}/coming", headers=ah).status_code == 403
+
+
 def test_mutual_friends_on_profile(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

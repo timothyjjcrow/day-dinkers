@@ -506,6 +506,34 @@ def friends_digest():
     })
 
 
+@social_bp.post('/players/<int:user_id>/coming')
+@rate_limit(30, 3600)
+@login_required
+def coming_to_play(user_id):
+    """Tell a friend who's out looking for a game that you're on your way."""
+    target = db.session.get(User, user_id)
+    if not target or target.deleted_at:
+        return jsonify({'error': 'user_not_found'}), 404
+    if target.id == g.current_user.id:
+        return jsonify({'error': 'cannot_ping_self'}), 400
+    if user_id not in friend_ids(g.current_user.id) or is_blocked_between(g.current_user.id, user_id):
+        return jsonify({'error': 'not_friends'}), 403
+    checkin = (
+        CheckIn.query.filter_by(user_id=target.id, checked_out_at=None)
+        .order_by(CheckIn.id.desc())
+        .first()
+    )
+    where = f' at {checkin.court.name}' if checkin and checkin.court else ''
+    notify(
+        target.id,
+        'player_coming',
+        f'{g.current_user.display_name} is coming to play{where}! 🎾',
+        related_user_id=g.current_user.id,
+    )
+    db.session.commit()
+    return jsonify({'sent': True})
+
+
 @social_bp.get('/friends/suggestions')
 @login_required
 def friend_suggestions():

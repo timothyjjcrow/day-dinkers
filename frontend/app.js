@@ -2934,7 +2934,9 @@
                 ? `📍 At ${esc(f.checked_in_court.name)}${f.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-accent)">wants to play!</b>' : ''}`
                 : `${skillLabel(f.skill_level)} · ${f.rating}`}</div>
             </div>
-            <button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game">🎾</button>
+            ${f.checked_in_court && f.checked_in_court.looking_for_game
+              ? `<button class="btn btn-primary btn-sm" data-coming="${f.id}" title="Tell them you're on your way">🎾 On my way</button>`
+              : `<button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game">🎾</button>`}
             <button class="btn btn-secondary btn-sm" data-msg="${f.id}">💬</button>
           </div>`).join('')
       : '<div class="empty-state" style="padding:18px">No friends yet — search above to find players.</div>';
@@ -2990,6 +2992,14 @@
         : null;
       openNewGameModal(court, 'casual');
       toast('Schedule it — your friends get notified 🔔');
+    }));
+    el.querySelectorAll('[data-coming]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        await api(`/players/${b.dataset.coming}/coming`, { method: 'POST' });
+        toast("They know you're on your way 🎾");
+        b.textContent = '✓ Sent';
+      } catch (e) { toast(e.message); b.disabled = false; }
     }));
     // Suggestion "＋ Add" buttons (search results wire their own separately).
     el.querySelectorAll('.card > [data-add-friend], .card [data-add-friend]:not(#friend-search-results [data-add-friend])').forEach((b) => {
@@ -4292,11 +4302,11 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
       if (n.related_game_id) return { type: 'game', id: n.related_game_id };
-      if (n.related_user_id && (n.kind === 'friend_request' || n.kind === 'friend_accept' || n.kind === 'friend_checkin')) {
+      if (n.related_user_id && (n.kind === 'friend_request' || n.kind === 'friend_accept' || n.kind === 'friend_checkin' || n.kind === 'player_coming')) {
         return { type: 'user', id: n.related_user_id };
       }
       return null;
