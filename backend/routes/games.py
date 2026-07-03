@@ -714,12 +714,29 @@ def leave_game(game_id):
         return jsonify({'error': 'game_not_open'}), 400
 
     game.players.remove(player)
+    court_name = game.court.name if game.court else 'the court'
     if game.creator_id == g.current_user.id:
         remaining = [p for p in game.players if p.user_id != g.current_user.id]
         if remaining:
             game.creator_id = remaining[0].user_id
+            # The player who inherits hosting should know.
+            notify(
+                game.creator_id,
+                'player_left',
+                f'You\'re now hosting the game at {court_name} — {g.current_user.display_name} left',
+                related_game_id=game.id,
+            )
         else:
             game.status = 'cancelled'
+    else:
+        # Tell the host a spot just opened up in their game.
+        notify(
+            game.creator_id,
+            'player_left',
+            f'{g.current_user.display_name} left your game at {court_name} — a spot opened',
+            related_user_id=g.current_user.id,
+            related_game_id=game.id,
+        )
     if game.status == 'upcoming':
         _promote_from_waitlist(game)
     db.session.commit()

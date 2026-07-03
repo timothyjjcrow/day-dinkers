@@ -1377,6 +1377,34 @@ def test_log_past_game(client):
     }, headers=ah).status_code == 403
 
 
+def test_leave_notifies_host(client):
+    a = register(client, 'a@example.com', 'Ana')   # host
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, hours_ahead=3)
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    client.post(f"/api/games/{game['id']}/join", headers=ch)
+
+    # Ben leaves → Ana (host) is told a spot opened.
+    client.post(f"/api/games/{game['id']}/leave", headers=bh)
+    host_notes = [n for n in client.get('/api/notifications', headers=ah).get_json()['items']
+                  if n['kind'] == 'player_left']
+    assert len(host_notes) == 1
+    assert 'Ben' in host_notes[0]['title'] and 'spot opened' in host_notes[0]['title']
+    assert host_notes[0]['related_game_id'] == game['id']
+    # The leaver doesn't notify themselves.
+    assert not [n for n in client.get('/api/notifications', headers=bh).get_json()['items']
+                if n['kind'] == 'player_left']
+
+    # When the host leaves and hands off, the new host is told they're hosting.
+    client.post(f"/api/games/{game['id']}/leave", headers=ah)  # Ana leaves → Cam inherits
+    cam_notes = [n for n in client.get('/api/notifications', headers=ch).get_json()['items']
+                 if n['kind'] == 'player_left']
+    assert len(cam_notes) == 1 and 'now hosting' in cam_notes[0]['title']
+
+
 def test_reschedule_game(client):
     from datetime import timedelta
     from backend.models import utcnow
