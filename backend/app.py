@@ -160,6 +160,7 @@ def _upgrade_schema(app):
                 ('deleted_at', 'ALTER TABLE "user" ADD COLUMN deleted_at TIMESTAMP'),
                 ('availability', 'ALTER TABLE "user" ADD COLUMN availability TEXT NOT NULL DEFAULT \'[]\''),
                 ('last_recap_week', 'ALTER TABLE "user" ADD COLUMN last_recap_week VARCHAR(10) NOT NULL DEFAULT \'\''),
+                ('muted_notifications', 'ALTER TABLE "user" ADD COLUMN muted_notifications TEXT NOT NULL DEFAULT \'[]\''),
             ):
                 if col not in user_cols:
                     # SQLite uses FLOAT/DATETIME; Postgres accepts these too.

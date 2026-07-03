@@ -64,6 +64,15 @@ class User(TimestampMixin, db.Model):
     availability = db.Column(db.Text, nullable=False, default='[]')
     # Last ISO week ('YYYY-Www') a weekly recap was generated for.
     last_recap_week = db.Column(db.String(10), nullable=False, default='')
+    # JSON array of notification kinds this user has muted (only MUTEABLE ones).
+    muted_notifications = db.Column(db.Text, nullable=False, default='[]')
+
+    def muted_kinds(self):
+        try:
+            parsed = json.loads(self.muted_notifications or '[]')
+            return {k for k in parsed if k in MUTEABLE_NOTIFICATIONS}
+        except (ValueError, TypeError):
+            return set()
     # Set when the account is deleted; the anonymized row stays for opponents'
     # match history, but auth and all discovery surfaces reject it.
     deleted_at = db.Column(db.DateTime)
@@ -111,6 +120,7 @@ class User(TimestampMixin, db.Model):
         data['home_lat'] = self.home_lat
         data['home_lng'] = self.home_lng
         data['home_area'] = self.home_area
+        data['muted_notifications'] = sorted(self.muted_kinds())
         return data
 
 
@@ -698,7 +708,23 @@ class Notification(TimestampMixin, db.Model):
         }
 
 
+# Notification kinds a user may silence. Everything else (score confirmations,
+# disputes, direct invites, challenges) is essential and always delivered.
+MUTEABLE_NOTIFICATIONS = {
+    'court_game': 'New games at courts you saved',
+    'friend_checkin': 'Friends checking in to play',
+    'game_message': 'Game chat messages',
+    'session_rsvp': 'Weekly session re-RSVP reminders',
+    'weekly_recap': 'Your weekly recap',
+}
+
+
 def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=None):
+    # Respect the recipient's mute preferences for optional kinds.
+    if kind in MUTEABLE_NOTIFICATIONS:
+        recipient = db.session.get(User, user_id)
+        if recipient and kind in recipient.muted_kinds():
+            return
     db.session.add(Notification(
         user_id=user_id,
         kind=kind,

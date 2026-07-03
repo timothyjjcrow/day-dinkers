@@ -1016,6 +1016,45 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_notification_mute_preferences(client, app):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # The catalog is advertised; nothing muted by default.
+    me = client.get('/api/me', headers=bh).get_json()
+    assert 'court_game' in me['muteable_notifications']
+    assert me['user']['muted_notifications'] == []
+
+    # Ben saves Larson and mutes new-game pings there.
+    client.post(f'/api/courts/{court_id}/favorite', headers=bh)
+    res = client.patch('/api/me', json={'muted_notifications': ['court_game', 'not_a_kind']},
+                       headers=bh)
+    assert res.status_code == 200
+    assert res.get_json()['user']['muted_notifications'] == ['court_game']  # junk dropped
+
+    # Ana opens a game at that court — Ben's court_game ping is suppressed.
+    make_game(client, a['token'], court_id, visibility='open')
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert 'court_game' not in kinds
+
+    # Essential kinds ignore mutes: a direct invite still lands.
+    client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah)
+    fid = client.get('/api/friends', headers=bh).get_json()['incoming'][0]['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=bh)
+    game = make_game(client, a['token'], court_id, visibility='private',
+                     invite_user_ids=[b['user']['id']])
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert 'game_invite_direct' in kinds
+
+    # Unmuting restores delivery.
+    client.patch('/api/me', json={'muted_notifications': []}, headers=bh)
+    make_game(client, a['token'], court_id, visibility='open')
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert 'court_game' in kinds
+
+
 def test_report_user(client, app):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

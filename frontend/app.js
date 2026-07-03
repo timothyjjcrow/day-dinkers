@@ -231,6 +231,8 @@
 
   function applyMe(data) {
     state.me = data.user;
+    // Catalog of muteable kinds rides alongside the user for the settings UI.
+    if (data.muteable_notifications) state.me.muteable_notifications = data.muteable_notifications;
     state.presence = data.presence;
     state.unreadMessages = data.unread_messages || 0;
     state.pendingRequests = data.pending_friend_requests || 0;
@@ -3543,6 +3545,17 @@
         <div id="ep-court-results"></div>
       </div>
       <button class="btn btn-primary btn-block" id="ep-save">Save</button>
+      <details style="margin-top:22px">
+        <summary style="font-size:13px;font-weight:600;cursor:pointer">🔔 Notifications</summary>
+        <div style="margin-top:10px">
+          <p class="row-sub" style="margin-bottom:8px">Silence the optional ones — score confirmations, invites, and challenges always come through.</p>
+          ${Object.entries((state.me && state.me.muteable_notifications) || {}).map(([kind, label]) => `
+            <label class="row" style="gap:10px;padding:7px 0;cursor:pointer">
+              <input type="checkbox" class="ep-notif-toggle" data-kind="${kind}" ${(state.me.muted_notifications || []).includes(kind) ? '' : 'checked'} style="width:18px;height:18px;flex:0 0 auto" />
+              <span style="font-size:14px">${esc(label)}</span>
+            </label>`).join('')}
+        </div>
+      </details>
       <details style="margin-top:22px" id="ep-blocked-wrap">
         <summary style="font-size:13px;font-weight:600;cursor:pointer">🚫 Blocked players</summary>
         <div id="ep-blocked" style="margin-top:10px"><div class="row-sub">Loading…</div></div>
@@ -3672,6 +3685,9 @@
           avatar_color: color,
           avatar_url: avatarUrlInput.value.trim(),
           availability: [...modal.querySelectorAll('[data-av].active')].map((c) => c.dataset.av),
+          // Unchecked = muted.
+          muted_notifications: [...modal.querySelectorAll('.ep-notif-toggle')]
+            .filter((c) => !c.checked).map((c) => c.dataset.kind),
         };
         const courtId = modal.querySelector('#ep-court-id').value;
         if (courtId) body.home_court_id = Number(courtId);

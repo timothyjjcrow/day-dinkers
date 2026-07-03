@@ -20,6 +20,7 @@ from backend.models import (
     GamePlayer,
     Message,
     Notification,
+    MUTEABLE_NOTIFICATIONS,
     SKILL_LEVELS,
     User,
     notify,
@@ -208,6 +209,7 @@ def _me_payload(user):
         'games_to_confirm': _games_to_confirm_count(user.id),
         'latest_notification': latest.to_dict() if latest else None,
         'active_game': _active_game_payload(user),
+        'muteable_notifications': MUTEABLE_NOTIFICATIONS,
     }
 
 
@@ -528,6 +530,15 @@ def update_me():
             return jsonify({'error': 'invalid_availability'}), 400
         cleaned = [s for s in dict.fromkeys(slots) if s in AVAILABILITY_SLOTS]
         user.availability = _json.dumps(cleaned)
+    if 'muted_notifications' in payload:
+        import json as _json
+
+        from backend.models import MUTEABLE_NOTIFICATIONS
+        muted = payload.get('muted_notifications')
+        if not isinstance(muted, list):
+            return jsonify({'error': 'invalid_muted_notifications'}), 400
+        cleaned = [k for k in dict.fromkeys(muted) if k in MUTEABLE_NOTIFICATIONS]
+        user.muted_notifications = _json.dumps(cleaned)
     if 'avatar_color' in payload:
         color = str(payload.get('avatar_color') or '').strip()
         if not re.match(r'^#[0-9a-fA-F]{6}$', color):
