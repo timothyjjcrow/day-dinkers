@@ -1016,6 +1016,24 @@ def test_court_busy_times(client, app):
     assert len(busy) <= 3
 
 
+def test_clear_notifications(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+
+    # Ben sends Ana a friend request → she has a notification.
+    client.post('/api/friends/request', json={'user_id': a['user']['id']}, headers=bh)
+    assert len(client.get('/api/notifications', headers=ah).get_json()['items']) == 1
+
+    # Clearing removes only the caller's notifications.
+    res = client.delete('/api/notifications', headers=ah)
+    assert res.status_code == 200 and res.get_json()['cleared'] == 1
+    assert client.get('/api/notifications', headers=ah).get_json()['items'] == []
+    # Ben's own feed is untouched, and clearing again is a no-op.
+    assert client.delete('/api/notifications', headers=ah).get_json()['cleared'] == 0
+    assert client.delete('/api/notifications').status_code == 401
+
+
 def test_invite_to_existing_game(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

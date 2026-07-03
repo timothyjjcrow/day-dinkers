@@ -601,3 +601,12 @@ def mark_notifications_read():
     Notification.query.filter_by(user_id=g.current_user.id, read=False).update({'read': True})
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@social_bp.delete('/notifications')
+@rate_limit(20, 3600)
+@login_required
+def clear_notifications():
+    removed = Notification.query.filter_by(user_id=g.current_user.id).delete()
+    db.session.commit()
+    return jsonify({'cleared': removed})

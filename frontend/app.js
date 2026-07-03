@@ -4078,9 +4078,17 @@
     const modal = openModal(`
       ${modalHead('Activity')}
       ${enableBtn}
-      ${data.items.length ? listHtml
+      ${data.items.length ? `<div style="text-align:right;margin-bottom:6px"><button class="btn-link" id="act-clear" style="font-size:13px">Clear all</button></div>${listHtml}`
         : '<div class="empty-state"><span class="big">🔔</span>Nothing yet — go play some pickleball!<br><button class="btn btn-primary" data-goto="play" style="margin-top:10px">🎾 Find a game</button></div>'}
     `);
+    modal.querySelector('#act-clear')?.addEventListener('click', async () => {
+      try {
+        await api('/notifications', { method: 'DELETE' });
+        closeModal(modal);
+        toast('Activity cleared');
+        refreshMe();
+      } catch (e) { toast(e.message); }
+    });
     modal.querySelector('#act-enable')?.addEventListener('click', async (e) => {
       const result = await Notification.requestPermission();
       e.target.remove();
