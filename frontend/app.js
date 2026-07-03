@@ -595,8 +595,10 @@
     const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(4)).join(',');
     let url = `/courts?bbox=${bbox}&limit=250&sort=${state.listSort}`;
     if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
-    if (state.mapFilter === 'lighted') url += '&lighted=1';
-    if (state.mapFilter === 'indoor') url += '&indoor=1';
+    // Server-side amenity/attribute filters (single-select).
+    if (['lighted', 'indoor', 'restrooms', 'water', 'nets'].includes(state.mapFilter)) {
+      url += `&${state.mapFilter}=1`;
+    }
     try {
       const data = await api(url);
       let items = data.items;

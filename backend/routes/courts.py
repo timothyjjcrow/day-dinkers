@@ -206,10 +206,17 @@ def list_courts():
             Court.name.ilike(like) | Court.city.ilike(like) | Court.address.ilike(like)
         )
 
-    if str(request.args.get('lighted') or '') in {'1', 'true'}:
+    truthy = {'1', 'true'}
+    if str(request.args.get('lighted') or '') in truthy:
         query = query.filter(Court.lighted.is_(True))
-    if str(request.args.get('indoor') or '') in {'1', 'true'}:
+    if str(request.args.get('indoor') or '') in truthy:
         query = query.filter(Court.indoor.is_(True))
+    if str(request.args.get('restrooms') or '') in truthy:
+        query = query.filter(Court.has_restrooms.is_(True))
+    if str(request.args.get('water') or '') in truthy:
+        query = query.filter(Court.has_water.is_(True))
+    if str(request.args.get('nets') or '') in truthy:
+        query = query.filter(Court.nets_provided.is_(True))
 
     bbox = str(request.args.get('bbox') or '').strip()
     lat = request.args.get('lat', type=float)

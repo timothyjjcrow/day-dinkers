@@ -19,6 +19,8 @@ def app():
             longitude=-117.91,
             num_courts=6,
             lighted=True,
+            has_restrooms=True,
+            has_water=True,
         ))
         db.session.add(Court(
             name='Adorni Center',
@@ -29,6 +31,7 @@ def app():
             longitude=-124.16,
             num_courts=4,
             indoor=True,
+            nets_provided=True,
         ))
         db.session.commit()
         yield app
@@ -119,6 +122,16 @@ def test_courts_amenity_filters(client):
     assert [c['name'] for c in lighted] == ['Larson Park']
     indoor = client.get('/api/courts?indoor=1').get_json()['items']
     assert [c['name'] for c in indoor] == ['Adorni Center']
+    # Larson has restrooms + water; Adorni provides nets.
+    restrooms = client.get('/api/courts?restrooms=1').get_json()['items']
+    assert [c['name'] for c in restrooms] == ['Larson Park']
+    water = client.get('/api/courts?water=1').get_json()['items']
+    assert [c['name'] for c in water] == ['Larson Park']
+    nets = client.get('/api/courts?nets=1').get_json()['items']
+    assert [c['name'] for c in nets] == ['Adorni Center']
+    # Filters compose: restrooms AND nets → neither court has both.
+    both = client.get('/api/courts?restrooms=1&nets=1').get_json()['items']
+    assert both == []
 
 
 def test_courts_nearby_distance(client):
