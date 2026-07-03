@@ -3267,6 +3267,22 @@
               ${stats.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}
             </div>`);
         }
+        // Brag line built from real numbers, carrying the invite deep link.
+        el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
+          '<button class="btn btn-secondary btn-sm btn-block" id="pf-share-season" style="margin-top:12px">📤 Share my season</button>');
+        el.querySelector('#pf-share-season').addEventListener('click', async () => {
+          const bits = [];
+          if (me.ranked_wins + me.ranked_losses > 0) bits.push(`${me.ranked_wins}–${me.ranked_losses} ranked · rating ${me.rating}`);
+          if (stats.games_this_month) bits.push(`${stats.games_this_month} game${stats.games_this_month === 1 ? '' : 's'} this month`);
+          if (stats.week_streak >= 2) bits.push(`${stats.week_streak}-week play streak 🔥`);
+          if (stats.top_court) bits.push(`home turf: ${stats.top_court.name}`);
+          const text = `My season on Third Shot 🎾 ${bits.join(' · ')}. Come play with me!`;
+          const url = `${location.origin}/#invite/${me.id}`;
+          try {
+            if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
+            else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Season copied to share 📋'); }
+          } catch { /* user cancelled */ }
+        });
         el.querySelector('[data-pfcourt-top]')?.addEventListener('click', (e) => openCourtDetail(Number(e.currentTarget.dataset.pfcourtTop)));
         bindUserButtons(el.querySelector('#pf-play-stats'));
       }
