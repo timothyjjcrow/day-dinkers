@@ -1440,6 +1440,56 @@ def test_invite_to_existing_game(client):
                        headers=ah).status_code == 400
 
 
+def test_peak_rating(client, app):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def ranked(a_wins):
+        game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
+        client.post(f"/api/games/{game['id']}/join", headers=bh)
+        client.post(f"/api/games/{game['id']}/complete", json={
+            'team1': [a['user']['id']], 'team2': [b['user']['id']],
+            'score_team1': 11 if a_wins else 4, 'score_team2': 4 if a_wins else 11,
+        }, headers=ah)
+        client.post(f"/api/games/{game['id']}/confirm", headers=bh)
+
+    # Both start at 1200 = best_rating.
+    assert client.get('/api/me', headers=ah).get_json()['user']['best_rating'] == 1200
+
+    # Ana wins → rating up; best_rating tracks the peak.
+    ranked(True)
+    me = client.get('/api/me', headers=ah).get_json()['user']
+    assert me['best_rating'] == me['rating'] > 1200
+
+    # After a loss, rating dips but best_rating holds the peak.
+    peak = me['best_rating']
+    ranked(False)
+    me = client.get('/api/me', headers=ah).get_json()['user']
+    assert me['rating'] < peak and me['best_rating'] == peak
+
+    # Climb past 1300 via wins over fresh 1200 opponents (healthy deltas) —
+    # crossing the round-hundred fires exactly one peak notification.
+    n = 0
+    while client.get('/api/me', headers=ah).get_json()['user']['rating'] < 1305 and n < 15:
+        opp = register(client, f'opp{n}@example.com', f'Opp{n}')
+        game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
+        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(opp['token']))
+        client.post(f"/api/games/{game['id']}/complete", json={
+            'team1': [a['user']['id']], 'team2': [opp['user']['id']],
+            'score_team1': 11, 'score_team2': 5,
+        }, headers=ah)
+        client.post(f"/api/games/{game['id']}/confirm", headers=auth_headers(opp['token']))
+        n += 1
+
+    me = client.get('/api/me', headers=ah).get_json()['user']
+    assert me['rating'] >= 1300 and me['best_rating'] == me['rating']
+    notes = [x for x in client.get('/api/notifications', headers=ah).get_json()['items']
+             if 'peak rating' in x['title'].lower()]
+    assert len(notes) == 1 and '1300' in notes[0]['title']
+
+
 def test_badge_earned_notification(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')

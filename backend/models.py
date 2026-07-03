@@ -47,6 +47,7 @@ class User(TimestampMixin, db.Model):
     avatar_color = db.Column(db.String(7), nullable=False, default='#2f9e44')
     avatar_url = db.Column(db.String(500), nullable=False, default='')
     rating = db.Column(db.Integer, nullable=False, default=DEFAULT_RATING)
+    best_rating = db.Column(db.Integer, nullable=False, default=DEFAULT_RATING)
     ranked_wins = db.Column(db.Integer, nullable=False, default=0)
     ranked_losses = db.Column(db.Integer, nullable=False, default=0)
     current_streak = db.Column(db.Integer, nullable=False, default=0)
@@ -109,6 +110,7 @@ class User(TimestampMixin, db.Model):
             'avatar_color': self.avatar_color,
             'avatar_url': self.avatar_url or '',
             'rating': self.rating,
+            'best_rating': self.best_rating,
             'ranked_wins': self.ranked_wins,
             'ranked_losses': self.ranked_losses,
             'current_streak': self.current_streak,

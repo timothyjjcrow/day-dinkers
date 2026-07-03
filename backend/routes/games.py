@@ -817,6 +817,14 @@ def _apply_elo(team1_users, team2_users, team1_won):
     for user in losers:
         user.ranked_losses += 1
         user.current_streak = 0
+    # Track peak rating; congratulate on crossing a new round-hundred milestone.
+    for user in team1_users + team2_users:
+        if user.rating > user.best_rating:
+            crossed = (user.rating // 100) > (user.best_rating // 100)
+            user.best_rating = user.rating
+            if crossed:
+                notify(user.id, 'badge_earned',
+                       f'New peak rating: {(user.rating // 100) * 100}! 📈')
     return deltas
 
 

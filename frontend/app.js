@@ -3391,7 +3391,7 @@
         ${(user.mutual_friends || []).length ? `<p class="profile-sub" style="margin-top:8px">🤝 ${mutualFriendsText(user.mutual_friends)}</p>` : ''}
       </div>
       <div class="stat-grid">
-        <div class="stat-card"><div class="stat-value">${user.rating}</div><div class="stat-label">Rating</div></div>
+        <div class="stat-card"><div class="stat-value">${user.rating}</div><div class="stat-label">Rating${user.best_rating > user.rating ? ` · peak ${user.best_rating}` : ''}</div></div>
         <div class="stat-card"><div class="stat-value">${user.ranked_wins}</div><div class="stat-label">Ranked wins</div></div>
         <div class="stat-card"><div class="stat-value">${user.ranked_losses}</div><div class="stat-label">Ranked losses</div></div>
       </div>
@@ -3525,7 +3525,7 @@
         ${me.bio ? `<p class="profile-sub" style="margin-top:8px">${esc(me.bio)}</p>` : ''}
       </div>
       <div class="stat-grid">
-        <div class="stat-card"><div class="stat-value">${me.rating}</div><div class="stat-label">Rating</div></div>
+        <div class="stat-card"><div class="stat-value">${me.rating}</div><div class="stat-label">Rating${me.best_rating > me.rating ? ` · peak ${me.best_rating}` : ''}</div></div>
         <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">Ranked record · ${winPct}%</div></div>
         <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? '🔥' : ''}${me.current_streak}</div><div class="stat-label">Streak · best ${me.best_streak}</div></div>
       </div>

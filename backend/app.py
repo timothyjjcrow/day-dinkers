@@ -163,6 +163,7 @@ def _upgrade_schema(app):
                 ('muted_notifications', 'ALTER TABLE "user" ADD COLUMN muted_notifications TEXT NOT NULL DEFAULT \'[]\''),
                 ('notified_badges', 'ALTER TABLE "user" ADD COLUMN notified_badges TEXT NOT NULL DEFAULT \'[]\''),
                 ('calendar_token', 'ALTER TABLE "user" ADD COLUMN calendar_token VARCHAR(64)'),
+                ('best_rating', 'ALTER TABLE "user" ADD COLUMN best_rating INTEGER NOT NULL DEFAULT 1200'),
             ):
                 if col not in user_cols:
                     # SQLite uses FLOAT/DATETIME; Postgres accepts these too.
