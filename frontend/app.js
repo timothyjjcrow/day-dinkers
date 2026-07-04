@@ -3213,6 +3213,7 @@
           body += `
             <div class="section-label" style="margin-top:16px">Organizer</div>
             <button class="btn btn-primary btn-block" id="td-start" ${t.entry_count < 2 ? 'disabled' : ''}>▶️ Start tournament${t.entry_count < 2 ? ' (need 2+ entries)' : ''}</button>
+            <button class="btn btn-secondary btn-block" id="td-edit" style="margin-top:8px">✏️ Edit details</button>
             <button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:8px">Cancel tournament</button>`;
         }
       } else if (t.status !== 'cancelled') {
@@ -3224,6 +3225,7 @@
           body += '<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:12px">💬 Tournament chat</button>';
         }
         if (t.status === 'active' && t.is_organizer) {
+          body += '<button class="btn btn-secondary btn-block" id="td-edit" style="margin-top:8px">✏️ Edit details</button>';
           body += '<button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:8px">Cancel tournament</button>';
         }
         body += `<div class="section-label" style="margin-top:14px">${isDoubles ? 'Teams' : 'Players'}</div>`;
@@ -3242,6 +3244,7 @@
 
       // --- actions ---
       content.querySelector('#td-chat')?.addEventListener('click', () => openTournamentChat(t));
+      content.querySelector('#td-edit')?.addEventListener('click', () => openEditTournamentSheet(t, render));
       content.querySelector('#td-share')?.addEventListener('click', async () => {
         const spots = t.max_entries - t.entry_count;
         const text = `🏆 ${t.name} — ${T_FORMAT_LABEL[t.format] || t.format} ${t.event_type} tournament at ${t.court ? t.court.name : 'the court'} on ${fmtDateTime(t.starts_at)}. ${spots} spot${spots === 1 ? '' : 's'} left — register in Third Shot!`;
@@ -3329,6 +3332,56 @@
         if (JSON.stringify(fresh) !== JSON.stringify(t)) render(fresh);
       } catch { /* offline */ }
     }, 8000);
+  }
+
+  function openEditTournamentSheet(t, onSaved) {
+    const start = new Date(t.starts_at);
+    const pad = (n) => String(n).padStart(2, '0');
+    const whenVal = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T${pad(start.getHours())}:${pad(start.getMinutes())}`;
+    const inRegistration = t.status === 'registration';
+    const modal = openModal(`
+      ${modalHead('Edit tournament')}
+      <div class="form-field">
+        <label>Name</label>
+        <input type="text" id="te-name" maxlength="120" value="${esc(t.name)}" />
+      </div>
+      <div class="form-field">
+        <label>Starts</label>
+        <input type="datetime-local" id="te-when" value="${whenVal}" />
+        <div class="row-sub" style="margin-top:4px">Rescheduling notifies everyone registered.</div>
+      </div>
+      ${inRegistration ? `
+      <div class="form-field">
+        <label>Max entries</label>
+        <select id="te-max">
+          ${[4, 8, 16, 32].map((n) => `<option ${n === t.max_entries ? 'selected' : ''} ${n < t.entry_count ? 'disabled' : ''}>${n}</option>`).join('')}
+        </select>
+      </div>` : ''}
+      <div class="form-field">
+        <input type="text" id="te-desc" maxlength="200" placeholder="Details (optional)" value="${esc(t.description || '')}" />
+      </div>
+      <button class="btn btn-primary btn-block" id="te-save" style="padding:15px">Save changes</button>
+    `);
+    modal.querySelector('#te-save').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const name = modal.querySelector('#te-name').value.trim();
+      const whenRaw = modal.querySelector('#te-when').value;
+      if (name.length < 3) { toast('Name needs 3+ characters'); return; }
+      if (!whenRaw) { toast('Pick a start time'); return; }
+      const payload = {
+        name,
+        starts_at: new Date(whenRaw).toISOString(),
+        description: modal.querySelector('#te-desc').value.trim(),
+      };
+      if (inRegistration) payload.max_entries = Number(modal.querySelector('#te-max').value);
+      btn.disabled = true;
+      try {
+        const fresh = await api(`/tournaments/${t.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+        closeModal(modal);
+        toast('Tournament updated ✏️');
+        onSaved(fresh);
+      } catch (err) { toast(err.message); btn.disabled = false; }
+    });
   }
 
   async function openTournamentChat(t) {
@@ -5030,7 +5083,7 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
       if (n.related_tournament_id) return { type: 'tournament', id: n.related_tournament_id };

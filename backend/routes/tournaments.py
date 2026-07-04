@@ -205,6 +205,66 @@ def create_tournament():
     return jsonify(tournament.to_dict(g.current_user.id, detail=True)), 201
 
 
+@tournaments_bp.patch('/tournaments/<int:tournament_id>')
+@rate_limit(30, 3600)
+@login_required
+def edit_tournament(tournament_id):
+    """Organizer tweaks: rename, description, reschedule, resize. Resizing is
+    registration-only; the rest works until the tournament finishes."""
+    tournament = db.session.get(Tournament, tournament_id)
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    if tournament.organizer_id != g.current_user.id:
+        return jsonify({'error': 'not_organizer'}), 403
+    if tournament.status in ('completed', 'cancelled'):
+        return jsonify({'error': 'already_finished'}), 409
+
+    payload = request.get_json(silent=True) or {}
+
+    if 'name' in payload:
+        name = str(payload.get('name') or '').strip()[:120]
+        if len(name) < 3:
+            return jsonify({'error': 'name_required'}), 400
+        tournament.name = name
+
+    if 'description' in payload:
+        tournament.description = str(payload.get('description') or '').strip()[:500]
+
+    if 'max_entries' in payload:
+        if tournament.status != 'registration':
+            return jsonify({'error': 'registration_closed'}), 409
+        try:
+            max_entries = int(payload.get('max_entries'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_max_entries'}), 400
+        max_entries = min(max(max_entries, MIN_ENTRIES), MAX_ENTRIES_CAP)
+        if max_entries < len(tournament.entries):
+            return jsonify({'error': 'below_entry_count'}), 400
+        tournament.max_entries = max_entries
+
+    rescheduled = False
+    if 'starts_at' in payload:
+        starts_at = _parse_scheduled_at(payload.get('starts_at'))
+        if not starts_at:
+            return jsonify({'error': 'invalid_starts_at'}), 400
+        if starts_at < utcnow() - timedelta(minutes=15):
+            return jsonify({'error': 'scheduled_in_past'}), 400
+        rescheduled = starts_at != tournament.starts_at
+        tournament.starts_at = starts_at
+
+    if rescheduled:
+        for uid in tournament.participant_ids() - {g.current_user.id}:
+            notify(
+                uid,
+                'tournament_update',
+                f'{tournament.name} was rescheduled by the organizer',
+                related_user_id=g.current_user.id,
+                related_tournament_id=tournament.id,
+            )
+    db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
 @tournaments_bp.get('/tournaments/<int:tournament_id>')
 @login_required
 def tournament_detail(tournament_id):

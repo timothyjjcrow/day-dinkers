@@ -3763,3 +3763,62 @@ def test_tournament_score_correction(client):
                       json={'score1': 1, 'score2': 11}, headers=auth_headers(a['token']))
     assert res.status_code == 409
     assert res.get_json()['error'] == 'next_match_played'
+
+
+def test_tournament_organizer_edit(client):
+    """Organizer can rename/reschedule/resize; entrants are told about moves."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, max_entries=4)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+
+    # Only the organizer
+    res = client.patch(f"/api/tournaments/{t['id']}", json={'name': 'Hijacked'},
+                       headers=auth_headers(b['token']))
+    assert res.status_code == 403
+
+    # Rename + description + resize
+    res = client.patch(f"/api/tournaments/{t['id']}",
+                       json={'name': 'Renamed Slam', 'description': 'BYO paddle', 'max_entries': 8},
+                       headers=auth_headers(a['token']))
+    data = res.get_json()
+    assert res.status_code == 200
+    assert data['name'] == 'Renamed Slam' and data['max_entries'] == 8
+    # Renames alone don't spam entrants
+    notifs = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
+    assert not [n for n in notifs if n['kind'] == 'tournament_update']
+
+    # Can't shrink below the current entry count (2 entries, floor is MIN=2 → ask for 2 is fine; below via bad value)
+    res = client.patch(f"/api/tournaments/{t['id']}", json={'max_entries': 'zap'},
+                       headers=auth_headers(a['token']))
+    assert res.status_code == 400
+    # Reschedule notifies Ben
+    from datetime import timedelta
+    from backend.models import utcnow
+    new_start = (utcnow() + timedelta(hours=48)).isoformat() + 'Z'
+    res = client.patch(f"/api/tournaments/{t['id']}", json={'starts_at': new_start},
+                       headers=auth_headers(a['token']))
+    assert res.status_code == 200
+    notifs = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
+    moved = [n for n in notifs if n['kind'] == 'tournament_update']
+    assert len(moved) == 1 and moved[0]['related_tournament_id'] == t['id']
+
+    # Bad values rejected
+    assert client.patch(f"/api/tournaments/{t['id']}", json={'name': 'x'},
+                        headers=auth_headers(a['token'])).status_code == 400
+    assert client.patch(f"/api/tournaments/{t['id']}", json={'starts_at': 'nope'},
+                        headers=auth_headers(a['token'])).status_code == 400
+
+    # After start: rename still OK, resize refused
+    client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
+    assert client.patch(f"/api/tournaments/{t['id']}", json={'name': 'Live Rename'},
+                        headers=auth_headers(a['token'])).status_code == 200
+    assert client.patch(f"/api/tournaments/{t['id']}", json={'max_entries': 16},
+                        headers=auth_headers(a['token'])).status_code == 409
+
+    # After cancel: nothing editable
+    client.post(f"/api/tournaments/{t['id']}/cancel", headers=auth_headers(a['token']))
+    assert client.patch(f"/api/tournaments/{t['id']}", json={'name': 'Too Late'},
+                        headers=auth_headers(a['token'])).status_code == 409
