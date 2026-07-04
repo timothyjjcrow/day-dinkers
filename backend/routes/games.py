@@ -95,6 +95,39 @@ def calendar_feed(token):
             f'DESCRIPTION:{_ics_escape(f"{len(game.players)}/{game.max_players} players")}',
             'END:VEVENT',
         ]
+
+    # Tournaments the user is entered in (or organizing) join the feed too.
+    from backend.models import Tournament, TournamentEntry
+    entered = db.session.query(TournamentEntry.tournament_id).filter(
+        db.or_(
+            TournamentEntry.player1_id == user.id,
+            TournamentEntry.player2_id == user.id,
+        )
+    )
+    tournaments = (
+        Tournament.query.filter(
+            db.or_(Tournament.id.in_(entered), Tournament.organizer_id == user.id),
+            Tournament.status.in_(['registration', 'active']),
+            Tournament.starts_at >= utcnow() - timedelta(hours=6),
+        )
+        .order_by(Tournament.starts_at.asc())
+        .limit(50)
+        .all()
+    )
+    for tournament in tournaments:
+        court = tournament.court
+        fmt_label = 'round robin' if tournament.format == 'round_robin' else 'bracket'
+        lines += [
+            'BEGIN:VEVENT',
+            f'UID:thirdshot-tournament-{tournament.id}@thirdshot.app',
+            f'DTSTAMP:{now_stamp}',
+            f'DTSTART:{_ics_stamp(tournament.starts_at)}',
+            f'DTEND:{_ics_stamp(tournament.starts_at + timedelta(hours=4))}',
+            f'SUMMARY:{_ics_escape("🏆 " + tournament.name)}',
+            f'LOCATION:{_ics_escape(", ".join(filter(None, [court.name, court.city])) if court else "")}',
+            f'DESCRIPTION:{_ics_escape(f"Pickleball tournament ({fmt_label}, {tournament.event_type}) — {len(tournament.entries)} entries")}',
+            'END:VEVENT',
+        ]
     lines.append('END:VCALENDAR')
     return Response('\r\n'.join(lines), mimetype='text/calendar',
                     headers={'Content-Disposition': 'inline; filename="thirdshot.ics"'})

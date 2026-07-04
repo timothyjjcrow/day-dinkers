@@ -1138,6 +1138,40 @@
     toast('Calendar event downloaded 📅');
   }
 
+  function downloadTournamentIcs(t) {
+    const court = t.court || {};
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = (d) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
+    const start = new Date(t.starts_at);
+    const end = new Date(start.getTime() + 4 * 3600e3);
+    const escIcs = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/[,;]/g, (m) => '\\' + m).replace(/\n/g, '\\n');
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Third Shot//EN',
+      'BEGIN:VEVENT',
+      `UID:thirdshot-tournament-${t.id}@thirdshot.app`,
+      `DTSTAMP:${stamp(new Date())}`,
+      `DTSTART:${stamp(start)}`,
+      `DTEND:${stamp(end)}`,
+      `SUMMARY:${escIcs(`🏆 ${t.name}`)}`,
+      `LOCATION:${escIcs([court.name, court.city].filter(Boolean).join(', '))}`,
+      `DESCRIPTION:${escIcs(`Pickleball tournament · ${location.origin}/#tournament/${t.id}`)}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const blob = new Blob([ics], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pickleball-tournament-${t.id}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast('Calendar event downloaded 📅');
+  }
+
   // Tiny SVG sparkline of the ranked-rating trajectory.
   function ratingSparklineHtml(history) {
     if (!history || history.length < 2) return '';
@@ -3280,6 +3314,7 @@
         }
         body += '<button class="btn btn-secondary btn-block" id="td-share" style="margin-top:8px">📤 Share — invite players</button>';
         if (t.my_entry_id || t.is_organizer) {
+          body += '<button class="btn btn-secondary btn-block" id="td-ics" style="margin-top:8px">📅 Add to calendar</button>';
           body += '<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:8px">💬 Tournament chat</button>';
         }
         if (t.is_organizer) {
@@ -3318,6 +3353,7 @@
 
       // --- actions ---
       content.querySelector('#td-chat')?.addEventListener('click', () => openTournamentChat(t));
+      content.querySelector('#td-ics')?.addEventListener('click', () => downloadTournamentIcs(t));
       content.querySelector('#td-edit')?.addEventListener('click', () => openEditTournamentSheet(t, render));
       content.querySelector('#td-checkin')?.addEventListener('click', async (e) => {
         const btn = e.currentTarget;

@@ -4093,3 +4093,28 @@ def test_active_tournament_banner_payload(client):
                 json={'score1': 11, 'score2': 6}, headers=auth_headers(a['token']))
     me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
     assert me['active_tournament'] is None
+
+
+def test_calendar_feed_includes_tournaments(client):
+    """The personal .ics feed carries tournaments you're in or organizing."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, hours_ahead=30)
+    _register_entry(client, t['id'], b['token'])
+
+    def feed_for(who):
+        token = client.get('/api/calendar/token', headers=auth_headers(who['token'])).get_json()['token']
+        res = client.get(f'/api/calendar/{token}.ics')
+        assert res.status_code == 200
+        return res.get_data(as_text=True)
+
+    # Organizer (no entry) and entrant both see it
+    for who in (a, b):
+        ics = feed_for(who)
+        assert f'thirdshot-tournament-{t["id"]}@thirdshot.app' in ics
+        assert 'Summer Slam' in ics
+
+    # Cancelled tournaments drop out of the feed
+    client.post(f"/api/tournaments/{t['id']}/cancel", headers=auth_headers(a['token']))
+    assert f'thirdshot-tournament-{t["id"]}' not in feed_for(b)
