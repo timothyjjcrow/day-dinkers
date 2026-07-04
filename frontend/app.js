@@ -1842,8 +1842,15 @@
     if (game.status === 'upcoming') {
       const startMs = new Date(game.scheduled_at).getTime();
       const inProgress = startMs <= Date.now();
+      // Hours past its start a game isn't "live" anymore — nag for the score
+      // (2+ players) or admit it never happened.
+      const stale = Date.now() - startMs > 4 * 3600e3;
       if (game.is_joined) {
-        if (inProgress) {
+        if (inProgress && stale) {
+          banner = game.players.length >= 2
+            ? '<div class="status-banner">📝 Played? Tap to enter the score.</div>'
+            : '<div class="status-banner">😴 This one never filled up.</div>';
+        } else if (inProgress) {
           cardStyle = 'border:2px solid var(--green-600)';
           banner = `<div class="status-banner live-banner">🟢 ${game.players.length >= 2 ? 'Game time! Tap to enter the score.' : 'Live — waiting for players to join.'}</div>`;
         } else {
