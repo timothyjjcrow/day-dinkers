@@ -4572,3 +4572,37 @@ def test_health_reports_db(client):
     assert res.status_code == 200
     data = res.get_json()
     assert data['status'] == 'ok' and data['db'] is True
+
+
+def test_court_photo_likes(client):
+    """Photo hearts toggle, count, and surface per-viewer state."""
+    import base64
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    png = 'data:image/png;base64,' + base64.b64encode(b'x' * 400).decode()
+    client.post(f'/api/courts/{court_id}/photo', json={'photo': png},
+                headers=auth_headers(a['token']))
+    photo_id = client.get(f'/api/courts/{court_id}/photos').get_json()['items'][0]['id']
+
+    # Both players like it
+    res = client.post(f'/api/courts/{court_id}/photos/{photo_id}/like',
+                      headers=auth_headers(a['token']))
+    assert res.get_json() == {'liked': True, 'likes': 1}
+    res = client.post(f'/api/courts/{court_id}/photos/{photo_id}/like',
+                      headers=auth_headers(b['token']))
+    assert res.get_json() == {'liked': True, 'likes': 2}
+
+    # Per-viewer state; anonymous sees counts but no liked_by_me
+    items = client.get(f'/api/courts/{court_id}/photos',
+                       headers=auth_headers(a['token'])).get_json()['items']
+    assert items[0]['likes'] == 2 and items[0]['liked_by_me'] is True
+    anon = client.get(f'/api/courts/{court_id}/photos').get_json()['items']
+    assert anon[0]['likes'] == 2 and anon[0]['liked_by_me'] is False
+
+    # Toggle off; bogus photo 404s
+    res = client.post(f'/api/courts/{court_id}/photos/{photo_id}/like',
+                      headers=auth_headers(b['token']))
+    assert res.get_json() == {'liked': False, 'likes': 1}
+    assert client.post(f'/api/courts/{court_id}/photos/9999/like',
+                       headers=auth_headers(a['token'])).status_code == 404

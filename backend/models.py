@@ -730,6 +730,19 @@ class CourtPhoto(TimestampMixin, db.Model):
     user = db.relationship('User')
 
 
+class CourtPhotoLike(TimestampMixin, db.Model):
+    """One heart per player per court photo."""
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'photo_id', name='uq_court_photo_like'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    photo_id = db.Column(
+        db.Integer, db.ForeignKey('court_photo.id'), nullable=False, index=True,
+    )
+
+
 class CourtReview(TimestampMixin, db.Model):
     """One 1–5 star rating (+ optional comment) per user per court; editable."""
     __table_args__ = (

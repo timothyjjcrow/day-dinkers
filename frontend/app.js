@@ -4105,7 +4105,10 @@
         ${data.items.map((p) => `
           <figure class="gallery-item">
             <img src="${esc(p.url)}" alt="Photo of ${esc(court.name)}" loading="lazy" />
-            <figcaption class="row-sub">${p.caption ? `<div style="color:var(--ink);font-weight:600">${esc(p.caption)}</div>` : ''}by ${esc(p.user_name)} · ${resultDayLabel(p.created_at)}</figcaption>
+            <figcaption class="row-sub" style="display:flex;align-items:center;gap:8px">
+              <span style="flex:1">${p.caption ? `<div style="color:var(--ink);font-weight:600">${esc(p.caption)}</div>` : ''}by ${esc(p.user_name)} · ${resultDayLabel(p.created_at)}</span>
+              <button type="button" class="btn-link" data-like-photo="${p.id}" style="font-size:14px;white-space:nowrap">${p.liked_by_me ? '❤️' : '🤍'} <span data-like-count>${p.likes || ''}</span></button>
+            </figcaption>
           </figure>`).join('')}
       </div>
       <button class="btn btn-secondary btn-block" id="gal-add" style="margin-top:12px">📷 Add your photo</button>
@@ -4113,6 +4116,12 @@
     modal.querySelector('#gal-add').addEventListener('click', () => {
       if (uploadFn) uploadFn(() => { closeModal(modal); openCourtGallery(court, uploadFn); });
     });
+    modal.querySelectorAll('[data-like-photo]').forEach((btn) => btn.addEventListener('click', async () => {
+      try {
+        const res = await api(`/courts/${court.id}/photos/${btn.dataset.likePhoto}/like`, { method: 'POST' });
+        btn.innerHTML = `${res.liked ? '❤️' : '🤍'} <span data-like-count>${res.likes || ''}</span>`;
+      } catch (e) { toast(e.message); }
+    }));
   }
 
   async function openGameChat(game) {

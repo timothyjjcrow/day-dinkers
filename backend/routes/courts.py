@@ -858,13 +858,54 @@ def court_photos(court_id):
         .limit(MAX_COURT_PHOTOS)
         .all()
     )
+    from backend.models import CourtPhotoLike
+    photo_ids = [p.id for p in rows]
+    likes = {}
+    mine = set()
+    if photo_ids:
+        for like in CourtPhotoLike.query.filter(
+                CourtPhotoLike.photo_id.in_(photo_ids)).all():
+            likes[like.photo_id] = likes.get(like.photo_id, 0) + 1
+        viewer = optional_current_user()
+        if viewer:
+            mine = {
+                like.photo_id
+                for like in CourtPhotoLike.query.filter(
+                    CourtPhotoLike.photo_id.in_(photo_ids),
+                    CourtPhotoLike.user_id == viewer.id,
+                )
+            }
     return jsonify({'items': [{
         'id': p.id,
         'url': f'/api/courts/{court_id}/photos/{p.id}',
         'user_name': p.user.display_name if p.user else 'Player',
         'caption': p.caption or '',
+        'likes': likes.get(p.id, 0),
+        'liked_by_me': p.id in mine,
         'created_at': iso(p.created_at),
     } for p in rows]})
+
+
+@courts_bp.post('/courts/<int:court_id>/photos/<int:photo_id>/like')
+@rate_limit(120, 3600)
+@login_required
+def toggle_photo_like(court_id, photo_id):
+    photo = db.session.get(CourtPhoto, photo_id)
+    if not photo or photo.court_id != court_id:
+        return jsonify({'error': 'photo_not_found'}), 404
+    from backend.models import CourtPhotoLike
+    existing = CourtPhotoLike.query.filter_by(
+        user_id=g.current_user.id, photo_id=photo.id,
+    ).first()
+    if existing:
+        db.session.delete(existing)
+        liked = False
+    else:
+        db.session.add(CourtPhotoLike(user_id=g.current_user.id, photo_id=photo.id))
+        liked = True
+    db.session.commit()
+    count = CourtPhotoLike.query.filter_by(photo_id=photo.id).count()
+    return jsonify({'liked': liked, 'likes': count})
 
 
 @courts_bp.get('/courts/<int:court_id>/photos/<int:photo_id>')
