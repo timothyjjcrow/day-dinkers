@@ -1580,11 +1580,26 @@
         let photo;
         try { photo = await imageFileToDataUrl(file); }
         catch { toast('Could not read that image'); return; }
-        try {
-          await api(`/courts/${court.id}/photo`, { method: 'POST', body: JSON.stringify({ photo }) });
-          toast('Photo added 📷 Thanks for contributing!');
-          onDone();
-        } catch (e) { toast(e.message); }
+        // Optional caption before it goes up.
+        const sheet = openModal(`
+          ${modalHead('Add a caption?')}
+          <img src="${photo}" alt="Your photo" style="width:100%;border-radius:12px;margin-bottom:10px" />
+          <input type="text" id="cap-text" maxlength="140" placeholder="e.g. Fresh nets on courts 1–2! (optional)" />
+          <button class="btn btn-primary btn-block" id="cap-save" style="margin-top:12px">📷 Add photo</button>
+        `);
+        sheet.querySelector('#cap-save').addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          try {
+            await api(`/courts/${court.id}/photo`, {
+              method: 'POST',
+              body: JSON.stringify({ photo, caption: sheet.querySelector('#cap-text').value.trim() }),
+            });
+            closeModal(sheet);
+            toast('Photo added 📷 Thanks for contributing!');
+            onDone();
+          } catch (err) { toast(err.message); btn.disabled = false; }
+        });
       });
       input.click();
     };
@@ -4080,7 +4095,7 @@
         ${data.items.map((p) => `
           <figure class="gallery-item">
             <img src="${esc(p.url)}" alt="Photo of ${esc(court.name)}" loading="lazy" />
-            <figcaption class="row-sub">by ${esc(p.user_name)} · ${resultDayLabel(p.created_at)}</figcaption>
+            <figcaption class="row-sub">${p.caption ? `<div style="color:var(--ink);font-weight:600">${esc(p.caption)}</div>` : ''}by ${esc(p.user_name)} · ${resultDayLabel(p.created_at)}</figcaption>
           </figure>`).join('')}
       </div>
       <button class="btn btn-secondary btn-block" id="gal-add" style="margin-top:12px">📷 Add your photo</button>

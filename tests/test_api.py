@@ -4447,3 +4447,27 @@ def test_client_error_reporting(client):
     a = register(client, 'a@example.com', 'Ana')
     assert client.post('/api/client-errors', json={'message': 'boom'},
                        headers=auth_headers(a['token'])).status_code == 204
+
+
+def test_court_photo_captions(client):
+    """Photo uploads accept an optional caption, served back in the gallery."""
+    import base64
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    png = 'data:image/png;base64,' + base64.b64encode(b'x' * 400).decode()
+
+    res = client.post(f'/api/courts/{court_id}/photo',
+                      json={'photo': png, 'caption': '  Fresh nets on 1–2! ' + 'y' * 200},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 201, res.get_json()
+
+    photos = client.get(f'/api/courts/{court_id}/photos').get_json()['items']
+    assert photos[0]['caption'].startswith('Fresh nets on 1–2!')
+    assert len(photos[0]['caption']) <= 140  # truncated
+
+    # Caption optional
+    res = client.post(f'/api/courts/{court_id}/photo', json={'photo': png},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    photos = client.get(f'/api/courts/{court_id}/photos').get_json()['items']
+    assert photos[0]['caption'] == ''

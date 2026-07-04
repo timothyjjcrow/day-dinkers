@@ -822,6 +822,7 @@ def upload_court_photo(court_id):
         court_id=court.id,
         user_id=g.current_user.id,
         photo_data=f'data:image/{match.group(1)};base64,{match.group(2)}',
+        caption=str(payload.get('caption') or '').strip()[:140],
     )
     db.session.add(photo)
     db.session.flush()
@@ -861,6 +862,7 @@ def court_photos(court_id):
         'id': p.id,
         'url': f'/api/courts/{court_id}/photos/{p.id}',
         'user_name': p.user.display_name if p.user else 'Player',
+        'caption': p.caption or '',
         'created_at': iso(p.created_at),
     } for p in rows]})
 

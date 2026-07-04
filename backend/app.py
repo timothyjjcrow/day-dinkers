@@ -204,6 +204,13 @@ def _upgrade_schema(app):
                     + ('FALSE' if is_postgres else '0')
                 )
 
+        if 'court_photo' in tables:
+            cp_cols = {c['name'] for c in inspector.get_columns('court_photo')}
+            if 'caption' not in cp_cols:
+                statements.append(
+                    "ALTER TABLE court_photo ADD COLUMN caption VARCHAR(140) NOT NULL DEFAULT ''"
+                )
+
         if 'tournament' in tables:
             t_cols = {c['name'] for c in inspector.get_columns('tournament')}
             for col in ('reminded_at', 'day_reminded_at'):
