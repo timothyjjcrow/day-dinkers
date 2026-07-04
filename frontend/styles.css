@@ -809,3 +809,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .bm-win .bm-name, .bm-win .bm-score { color: var(--green-accent); }
 .bm-mine .bm-name { text-decoration: underline; text-decoration-color: var(--green-600); text-underline-offset: 3px; }
 .rr-win { color: var(--green-accent); font-weight: 800; }
+
+/* A button that dresses as a card row (e.g. the PWA install offer). */
+.btn-reset { border: none; font: inherit; color: inherit; background: var(--card); }

@@ -4437,14 +4437,22 @@
         </div>
         <button class="btn btn-primary btn-sm" id="pf-invite">Share</button>
       </div>
-      ${!window.matchMedia('(display-mode: standalone)').matches ? `
+      ${!window.matchMedia('(display-mode: standalone)').matches ? (state.installPrompt ? `
+        <button class="card row btn-reset" id="pf-install" style="margin-bottom:10px;width:100%;text-align:left;cursor:pointer">
+          <span style="font-size:20px">📲</span>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px">Install Third Shot</div>
+            <div class="row-sub">One tap — works offline-ish, opens full screen.</div>
+          </div>
+          <span class="chev">›</span>
+        </button>` : `
         <div class="card row" style="margin-bottom:10px">
           <span style="font-size:20px">📱</span>
           <div class="row-main">
             <div class="row-title" style="font-size:14px">Get the app feel</div>
             <div class="row-sub">In your browser menu tap <b>Add to Home Screen</b> — Third Shot installs like an app.</div>
           </div>
-        </div>` : ''}
+        </div>`) : ''}
       <button class="btn btn-secondary btn-block" id="pf-edit" style="margin-bottom:10px">✏️ Edit profile</button>
       <button class="btn btn-secondary btn-block" id="pf-activity" style="margin-bottom:10px">🔔 Activity</button>
       <button class="btn btn-danger btn-block" id="pf-logout">Log out</button>
@@ -4453,6 +4461,17 @@
       <div id="pf-history"></div>
     `;
 
+    el.querySelector('#pf-install')?.addEventListener('click', async () => {
+      const prompt = state.installPrompt;
+      if (!prompt) return;
+      state.installPrompt = null;
+      try {
+        prompt.prompt();
+        const choice = await prompt.userChoice;
+        toast(choice.outcome === 'accepted' ? 'Installing — see you on the home screen! 📲' : 'Maybe later 👍');
+      } catch { /* browser said no */ }
+      renderProfile();
+    });
     el.querySelector('#pf-invite').addEventListener('click', async () => {
       const url = `${location.origin}/#invite/${me.id}`;
       const text = `Play pickleball with me on Third Shot! 🎾`;
@@ -5623,6 +5642,11 @@
   }
   window.addEventListener('error', (e) => {
     reportClientError(e.message, e.error && e.error.stack);
+  });
+  // Stash Chrome's install offer so the profile can show a one-tap button.
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    state.installPrompt = e;
   });
   window.addEventListener('unhandledrejection', (e) => {
     const reason = e.reason || {};
