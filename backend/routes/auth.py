@@ -318,7 +318,28 @@ def _maybe_weekly_recap(user):
         .all()
     )
     played = [g_ for g_ in games if g_.completed_at.isocalendar()[:2] == (year, week)]
-    if not played:
+
+    # Tournaments won that week headline the recap.
+    from backend.models import Tournament, TournamentEntry
+    titles_won = (
+        Tournament.query
+        .join(TournamentEntry, Tournament.champion_entry_id == TournamentEntry.id)
+        .filter(
+            Tournament.status == 'completed',
+            Tournament.completed_at.isnot(None),
+            db.or_(
+                TournamentEntry.player1_id == user.id,
+                TournamentEntry.player2_id == user.id,
+            ),
+        )
+        .order_by(Tournament.completed_at.desc())
+        .limit(10)
+        .all()
+    )
+    titles_won = [t for t in titles_won
+                  if t.completed_at.isocalendar()[:2] == (year, week)]
+
+    if not played and not titles_won:
         db.session.commit()  # persist the marker; nothing to say
         return
 
@@ -335,11 +356,20 @@ def _maybe_weekly_recap(user):
                 wins += 1
             else:
                 losses += 1
-    title = f'Your week on the courts: {len(played)} game{"s" if len(played) != 1 else ""}'
-    if wins or losses:
-        title += f', {wins}–{losses}'
+    if played:
+        title = f'Your week on the courts: {len(played)} game{"s" if len(played) != 1 else ""}'
+        if wins or losses:
+            title += f', {wins}–{losses}'
+        if titles_won:
+            title += f' — and you won {titles_won[0].name}!' if len(titles_won) == 1 \
+                else f' — and {len(titles_won)} tournament titles!'
+    else:
+        title = (f'Champion week — you won {titles_won[0].name}!'
+                 if len(titles_won) == 1
+                 else f'Champion week — {len(titles_won)} tournament titles!')
     body = f'{"+" if delta >= 0 else ""}{delta} rating' if delta else 'See your stats on the profile tab'
-    notify(user.id, 'weekly_recap', title, body)
+    notify(user.id, 'weekly_recap', title, body,
+           related_tournament_id=titles_won[0].id if titles_won else None)
     db.session.commit()
 
 

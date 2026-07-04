@@ -1495,7 +1495,9 @@
           </div>`).join('')}` : ''}
       ${(court.tournaments || []).length ? `
         <div class="section-label">🏆 Tournaments here</div>
-        ${court.tournaments.map(tournamentCardHtml).join('')}` : ''}
+        ${court.tournaments.map(tournamentCardHtml).join('')}
+        <button class="btn btn-secondary btn-block btn-sm" id="cd-host-tournament" style="margin-top:4px">🏆 Host a tournament here</button>` : `
+        <button class="btn btn-secondary btn-block btn-sm" id="cd-host-tournament" style="margin-top:10px">🏆 Host a tournament here</button>`}
       <div class="section-label">Upcoming games</div>
       ${gamesHtml}
       ${(court.recent_results || []).length ? `
@@ -1666,6 +1668,9 @@
     bindUserButtons(modal);
     modal.querySelectorAll('[data-open-tournament]').forEach((card) => {
       card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
+    });
+    modal.querySelector('#cd-host-tournament')?.addEventListener('click', () => {
+      openCreateTournamentSheet(court);
     });
   }
 
@@ -2959,7 +2964,7 @@
     }
   }
 
-  async function openCreateTournamentSheet() {
+  async function openCreateTournamentSheet(presetCourt = null) {
     // Court suggestions: where you are, saved courts, then nearby.
     const suggestions = [];
     try {
@@ -3008,15 +3013,15 @@
       </div>
       <div class="form-field">
         <label>Court</label>
-        <div id="tc-court-selected" class="hidden court-selected">
-          <div class="row-main"><div class="row-title" style="font-size:14.5px" id="tc-court-name"></div></div>
+        <div id="tc-court-selected" class="${presetCourt ? '' : 'hidden'} court-selected">
+          <div class="row-main"><div class="row-title" style="font-size:14.5px" id="tc-court-name">${presetCourt ? esc(presetCourt.name) : ''}</div></div>
           <button type="button" class="btn btn-secondary btn-sm" id="tc-court-change">Change</button>
         </div>
-        <div id="tc-court-picker">
+        <div id="tc-court-picker" class="${presetCourt ? 'hidden' : ''}">
           <input type="search" id="tc-court-search" placeholder="Search courts…" />
           <div id="tc-court-results" style="margin-top:8px">${suggestionRows}</div>
         </div>
-        <input type="hidden" id="tc-court-id" value="" />
+        <input type="hidden" id="tc-court-id" value="${presetCourt ? presetCourt.id : ''}" />
       </div>
       <div class="form-field">
         <label>Starts</label>

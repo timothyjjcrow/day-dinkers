@@ -4118,3 +4118,38 @@ def test_calendar_feed_includes_tournaments(client):
     # Cancelled tournaments drop out of the feed
     client.post(f"/api/tournaments/{t['id']}/cancel", headers=auth_headers(a['token']))
     assert f'thirdshot-tournament-{t["id"]}' not in feed_for(b)
+
+
+def test_weekly_recap_mentions_tournament_titles(client):
+    """A title won last week headlines the weekly recap."""
+    from datetime import timedelta
+
+    from backend.app import db
+    from backend.models import Notification, Tournament, User, utcnow
+    from backend.routes.auth import _maybe_weekly_recap
+
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, max_entries=2)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+    client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
+    final = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()['matches'][0]
+    data = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
+                       json={'score1': 11, 'score2': 3}, headers=auth_headers(a['token'])).get_json()
+    winner_id = data['champion']['players'][0]['id']
+
+    # Time-travel the win into last week and force a fresh recap (in-context
+    # assertions only — HTTP after time-travel flakes on StaticPool).
+    row = db.session.get(Tournament, t['id'])
+    row.completed_at = utcnow() - timedelta(days=7)
+    winner = db.session.get(User, winner_id)
+    winner.last_recap_week = ''
+    db.session.commit()
+
+    _maybe_weekly_recap(winner)
+    recaps = Notification.query.filter_by(user_id=winner.id, kind='weekly_recap').all()
+    assert recaps, 'expected a recap notification'
+    assert any('you won Summer Slam' in n.title for n in recaps), [n.title for n in recaps]
+    assert any(n.related_tournament_id == t['id'] for n in recaps)
