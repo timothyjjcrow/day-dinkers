@@ -3601,7 +3601,7 @@
         return `
         <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%">
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
@@ -3993,7 +3993,7 @@
     let lastId = 0;
     const renderMsgs = (items, append) => {
       const html = items.map((m) => `
-        <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}">
+        <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}" ${m.sender_id === state.me.id ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
           ${esc(m.body)}
           <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
         </div>`).join('');
@@ -4059,7 +4059,7 @@
         return `
         <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%">
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
@@ -4145,7 +4145,7 @@
         return `
         <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%">
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
@@ -5700,6 +5700,18 @@
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     state.installPrompt = e;
+  });
+
+  // Tap your own chat bubble (any thread type) to delete it.
+  document.addEventListener('click', async (e) => {
+    const bubble = e.target.closest('.bubble.me[data-del-msg]');
+    if (!bubble) return;
+    if (!confirm('Delete this message?')) return;
+    try {
+      await api(`/messages/${bubble.dataset.delMsg}`, { method: 'DELETE' });
+      (bubble.closest('[style*="align-self"]') || bubble).remove();
+      toast('Message deleted');
+    } catch (err) { toast(err.message); }
   });
   window.addEventListener('unhandledrejection', (e) => {
     const reason = e.reason || {};

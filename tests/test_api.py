@@ -4538,3 +4538,29 @@ def test_tournament_chat_unread_badge(client):
                 headers=auth_headers(a['token']))
     detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(b['token'])).get_json()
     assert detail['chat_unread'] == 1
+
+
+def test_delete_own_message(client):
+    """You can delete your own messages in any thread; nobody else's."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # DM
+    dm = client.post(f"/api/chat/{b['user']['id']}", json={'body': 'oops typo'},
+                     headers=auth_headers(a['token'])).get_json()
+    # Court room message
+    room = client.post(f'/api/courts/{court_id}/chat', json={'body': 'court msg'},
+                       headers=auth_headers(b['token'])).get_json()
+
+    # Recipient can't delete the sender's DM
+    res = client.delete(f"/api/messages/{dm['id']}", headers=auth_headers(b['token']))
+    assert res.status_code == 403
+    # Sender can
+    res = client.delete(f"/api/messages/{dm['id']}", headers=auth_headers(a['token']))
+    assert res.status_code == 200 and res.get_json()['deleted'] is True
+    thread = client.get(f"/api/chat/{b['user']['id']}", headers=auth_headers(a['token'])).get_json()
+    assert not any(m['id'] == dm['id'] for m in thread['items'])
+    # Second delete 404s; court message deletable by its sender too
+    assert client.delete(f"/api/messages/{dm['id']}", headers=auth_headers(a['token'])).status_code == 404
+    assert client.delete(f"/api/messages/{room['id']}", headers=auth_headers(b['token'])).status_code == 200

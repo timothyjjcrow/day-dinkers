@@ -242,6 +242,22 @@ def send_tournament_message(tournament_id):
     return jsonify(message.to_dict()), 201
 
 
+@chat_bp.delete('/messages/<int:message_id>')
+@rate_limit(60, 3600)
+@login_required
+def delete_message(message_id):
+    """Remove one of your own messages — works across DMs, court rooms, game
+    threads, and tournament chats. Open threads elsewhere catch up on reload."""
+    message = db.session.get(Message, message_id)
+    if not message:
+        return jsonify({'error': 'message_not_found'}), 404
+    if message.sender_id != g.current_user.id:
+        return jsonify({'error': 'not_your_message'}), 403
+    db.session.delete(message)
+    db.session.commit()
+    return jsonify({'deleted': True})
+
+
 @chat_bp.get('/chat')
 @login_required
 def conversations():
