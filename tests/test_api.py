@@ -4048,3 +4048,48 @@ def test_tournament_reminders(client):
     client.get('/api/me', headers=auth_headers(a['token']))
     t1_reminders = [n for n in reminders_for(b) if n['related_tournament_id'] == t['id']]
     assert len(t1_reminders) == 2  # original + re-armed after reschedule
+
+
+def test_active_tournament_banner_payload(client):
+    """/me surfaces an imminent or in-progress tournament for the banner."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Nothing yet
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_tournament'] is None
+
+    # 48h out -> still nothing
+    far = make_tournament(client, a['token'], court_id, hours_ahead=48)
+    _register_entry(client, far['id'], a['token'])
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_tournament'] is None
+
+    # 3h out -> banner, 'soon', check-in state tracked
+    soon = make_tournament(client, a['token'], court_id, hours_ahead=3)
+    _register_entry(client, soon['id'], a['token'])
+    _register_entry(client, soon['id'], b['token'])
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    at = me['active_tournament']
+    assert at['id'] == soon['id'] and at['banner_state'] == 'soon'
+    assert at['my_checked_in'] is False
+    client.post(f"/api/tournaments/{soon['id']}/checkin", headers=auth_headers(a['token']))
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_tournament']['my_checked_in'] is True
+
+    # Started -> 'live' beats 'soon'; organizers see it even without an entry
+    client.post(f"/api/tournaments/{soon['id']}/start", headers=auth_headers(a['token']))
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_tournament']['banner_state'] == 'live'
+    # Ben (entrant only) sees it too
+    me_b = client.get('/api/me', headers=auth_headers(b['token'])).get_json()
+    assert me_b['active_tournament']['id'] == soon['id']
+
+    # Completed -> gone (finish the 2-entry bracket)
+    detail = client.get(f"/api/tournaments/{soon['id']}", headers=auth_headers(a['token'])).get_json()
+    m = detail['matches'][0]
+    client.post(f"/api/tournaments/{soon['id']}/matches/{m['id']}/score",
+                json={'score1': 11, 'score2': 6}, headers=auth_headers(a['token']))
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_tournament'] is None

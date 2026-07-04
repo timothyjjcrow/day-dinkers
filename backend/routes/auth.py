@@ -187,6 +187,48 @@ def _active_game_payload(user):
     return candidates[0][1]
 
 
+def _active_tournament_payload(user):
+    """The most relevant tournament for the banner: one that's under way, or
+    one you're entered in (or organizing) that starts within 24h. The game
+    banner still wins client-side when both exist."""
+    from datetime import timedelta
+
+    from backend.models import Tournament, TournamentEntry
+    now = utcnow()
+    entered = db.session.query(TournamentEntry.tournament_id).filter(
+        db.or_(
+            TournamentEntry.player1_id == user.id,
+            TournamentEntry.player2_id == user.id,
+        )
+    )
+    rows = (
+        Tournament.query.filter(
+            db.or_(Tournament.id.in_(entered), Tournament.organizer_id == user.id),
+            db.or_(
+                Tournament.status == 'active',
+                db.and_(
+                    Tournament.status == 'registration',
+                    Tournament.starts_at <= now + timedelta(hours=24),
+                    Tournament.starts_at >= now - timedelta(hours=6),
+                ),
+            ),
+        )
+        .order_by(Tournament.starts_at.asc())
+        .limit(5)
+        .all()
+    )
+    if not rows:
+        return None
+    # An in-progress bracket beats one that's merely imminent.
+    rows.sort(key=lambda t: (t.status != 'active', t.starts_at))
+    tournament = rows[0]
+    data = tournament.to_dict(user.id)
+    data['banner_state'] = 'live' if tournament.status == 'active' else 'soon'
+    my_entry = tournament.entry_for(user.id)
+    data['my_checked_in'] = bool(my_entry and my_entry.checked_in_at)
+    return data
+
+
 def _me_payload(user):
     unread_messages = Message.query.filter_by(recipient_id=user.id, read_at=None).count()
     pending_requests = Friendship.query.filter_by(
@@ -209,6 +251,7 @@ def _me_payload(user):
         'games_to_confirm': _games_to_confirm_count(user.id),
         'latest_notification': latest.to_dict() if latest else None,
         'active_game': _active_game_payload(user),
+        'active_tournament': _active_tournament_payload(user),
         'muteable_notifications': MUTEABLE_NOTIFICATIONS,
     }
 

@@ -256,6 +256,7 @@
     // Live updates: pop a toast when something new lands while the app is open.
     state.unreadNotifications = data.unread_notifications || 0;
     state.activeGame = data.active_game || null;
+    state.activeTournament = data.active_tournament || null;
     const latest = data.latest_notification;
     if (latest) {
       if (state.lastNotifId !== null && latest.id > state.lastNotifId && !latest.read) {
@@ -287,7 +288,16 @@
   function renderActiveGameBanner() {
     const el = $('#active-game-banner');
     const game = state.activeGame;
-    if (!game || (game.banner_state === 'invited' && dismissedInvites().includes(game.id))) {
+    // A merely-upcoming game yields the slot to a live tournament, or to one
+    // starting before it — action states (live/challenge/confirm…) always win.
+    const t = state.activeTournament;
+    const tournamentWins = t && game && game.banner_state === 'upcoming'
+      && (t.banner_state === 'live'
+          || new Date(t.starts_at) < new Date(game.scheduled_at));
+    if (!game || tournamentWins
+        || (game.banner_state === 'invited' && dismissedInvites().includes(game.id))) {
+      // No game to surface — an imminent or in-progress tournament gets the slot.
+      if (renderTournamentBanner(el)) return;
       el.classList.add('hidden');
       $('#app').classList.remove('has-banner');
       return;
@@ -354,6 +364,30 @@
       }
     };
     $('#app').classList.add('has-banner');
+  }
+
+  // Returns true when it drew a tournament banner into the shared slot.
+  function renderTournamentBanner(el) {
+    const t = state.activeTournament;
+    if (!t) return false;
+    const live = t.banner_state === 'live';
+    const sub = live
+      ? 'Bracket in progress — tap for scores'
+      : (t.my_entry_id && !t.my_checked_in)
+        ? `${esc((t.court || {}).name || '')} · tap to check in`
+        : `${esc((t.court || {}).name || '')} · tap for details`;
+    el.className = `active-game-banner state-${live ? 'live' : 'upcoming'}`;
+    el.innerHTML = `
+      ${live ? '<span class="agb-dot"></span>' : '<span style="font-size:17px">🏆</span>'}
+      <div class="agb-main">
+        <div class="agb-title">${live ? `LIVE: ${esc(t.name)}` : `🏆 ${esc(t.name)} · ${fmtDateTime(t.starts_at)}`}</div>
+        <div class="agb-sub">${sub}</div>
+      </div>
+      <span class="agb-chev">›</span>`;
+    el.onclick = () => openTournamentScreen(t.id);
+    el.classList.remove('hidden');
+    $('#app').classList.add('has-banner');
+    return true;
   }
 
   function renderBadges() {
