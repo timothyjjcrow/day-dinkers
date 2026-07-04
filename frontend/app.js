@@ -1500,6 +1500,17 @@
         ${court.tournaments.map(tournamentCardHtml).join('')}
         <button class="btn btn-secondary btn-block btn-sm" id="cd-host-tournament" style="margin-top:4px">🏆 Host a tournament here</button>` : `
         <button class="btn btn-secondary btn-block btn-sm" id="cd-host-tournament" style="margin-top:10px">🏆 Host a tournament here</button>`}
+      ${(court.past_champions || []).length ? `
+        <div class="section-label">👑 Past champions here</div>
+        ${court.past_champions.map((pc) => `
+          <div class="card row" data-open-tournament="${pc.tournament_id}" style="cursor:pointer;padding:10px 14px">
+            <span style="font-size:20px">👑</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(pc.champion_name)}</div>
+              <div class="row-sub">${esc(pc.tournament_name)}${pc.completed_at ? ` · ${new Date(pc.completed_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}</div>
+            </div>
+            <span class="chev">›</span>
+          </div>`).join('')}` : ''}
       <div class="section-label">Upcoming games</div>
       ${gamesHtml}
       ${(court.recent_results || []).length ? `

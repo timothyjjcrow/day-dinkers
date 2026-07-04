@@ -471,6 +471,26 @@ def court_detail(court_id):
         .all()
     )
     payload['tournaments'] = [t.to_dict(viewer_id) for t in court_tournaments]
+    # Hall of fame: recent tournament champions crowned at this court.
+    past = (
+        Tournament.query.filter(
+            Tournament.court_id == court.id,
+            Tournament.status == 'completed',
+            Tournament.champion_entry_id.isnot(None),
+        )
+        .order_by(Tournament.completed_at.desc())
+        .limit(3)
+        .all()
+    )
+    payload['past_champions'] = [
+        {
+            'tournament_id': t.id,
+            'tournament_name': t.name,
+            'champion_name': t.champion_entry.display_name() if t.champion_entry else 'Champion',
+            'completed_at': t.completed_at.isoformat() + 'Z' if t.completed_at else None,
+        }
+        for t in past
+    ]
     payload['games'] = [game.to_dict(viewer_id) for game in upcoming]
     payload['recent_results'] = [game.to_dict(viewer_id) for game in recent_completed]
     payload['is_checked_in'] = bool(

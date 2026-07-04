@@ -4403,3 +4403,33 @@ def test_banner_shows_next_opponent(client):
     assert me['active_tournament']['my_next_opponent'] == 'Ben'
     me_d = client.get('/api/me', headers=auth_headers(d['token'])).get_json()
     assert me_d['active_tournament']['my_next_opponent'] == 'Cam'
+
+
+def test_court_past_champions(client):
+    """Court pages list recent tournament champions crowned there."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    t = make_tournament(client, a['token'], court_id, max_entries=2)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+    client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
+    detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()
+    m = detail['matches'][0]
+    ana = next(e for e in detail['entries'] if e['name'] == 'Ana')
+    s = {'score1': 11, 'score2': 3} if m['entry1_id'] == ana['id'] else {'score1': 3, 'score2': 11}
+    client.post(f"/api/tournaments/{t['id']}/matches/{m['id']}/score",
+                json=s, headers=auth_headers(a['token']))
+
+    # An active tournament at the same court must NOT appear as past champion
+    make_tournament(client, a['token'], court_id)
+
+    court = client.get(f'/api/courts/{court_id}', headers=auth_headers(a['token'])).get_json()
+    champs = court['past_champions']
+    assert len(champs) == 1
+    assert champs[0]['champion_name'] == 'Ana'
+    assert champs[0]['tournament_id'] == t['id']
+    # Other courts unaffected
+    other = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+    assert client.get(f'/api/courts/{other}').get_json()['past_champions'] == []
