@@ -2187,13 +2187,13 @@ def test_my_stats(client):
     adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
 
     # Fresh player: all zeros. Every badge is locked, and the three nearest
-    # (first win 0/1, MVP 0/1, 3-win streak 0/3) surface as progress.
+    # (first win 0/1, MVP 0/1, tournament champion 0/1) surface as progress.
     stats = client.get('/api/me/stats', headers=ah).get_json()
     progress = stats.pop('badge_progress')
     assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0,
                      'top_court': None, 'best_partner': None, 'top_rival': None,
                      'form': [], 'badges': [], 'rating_history': []}
-    assert [b['id'] for b in progress] == ['first_win', 'mvp', 'hot_streak']
+    assert [b['id'] for b in progress] == ['first_win', 'mvp', 'champion']
     assert progress[0] == {'id': 'first_win', 'emoji': '🏅', 'label': 'First win',
                            'current': 0, 'target': 1}
 
@@ -3602,3 +3602,29 @@ def test_tournament_cancel_and_lists(client):
     assert any(n['kind'] == 'tournament_cancelled' for n in notifs)
     # Registration on a cancelled tournament is refused
     _register_entry(client, t['id'], a['token'], expect=409)
+
+
+def test_tournament_champion_badge(client):
+    """Winning a tournament unlocks the 🏆 champion badge in /me/stats."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, max_entries=2)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+    client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
+    final = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()['matches'][0]
+    data = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
+                       json={'score1': 11, 'score2': 2}, headers=auth_headers(a['token'])).get_json()
+    assert data['status'] == 'completed'
+
+    winner_id = data['champion']['players'][0]['id']
+    winner = a if a['user']['id'] == winner_id else b
+    loser = b if winner is a else a
+    stats = client.get('/api/me/stats', headers=auth_headers(winner['token'])).get_json()
+    assert any(bd['id'] == 'champion' for bd in stats['badges'])
+    stats = client.get('/api/me/stats', headers=auth_headers(loser['token'])).get_json()
+    assert not any(bd['id'] == 'champion' for bd in stats['badges'])
+    # Winning triggered the badge notification
+    notifs = client.get('/api/notifications', headers=auth_headers(winner['token'])).get_json()['items']
+    assert any(n['kind'] == 'badge_earned' and 'Tournament champion' in n['title'] for n in notifs)

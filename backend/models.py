@@ -306,6 +306,18 @@ def _badge_defs(user):
         db.or_(Friendship.requester_id == user.id, Friendship.addressee_id == user.id),
     ).count()
     mvp_count = GameMvpVote.query.filter_by(votee_id=user.id).count()
+    titles = (
+        Tournament.query
+        .join(TournamentEntry, Tournament.champion_entry_id == TournamentEntry.id)
+        .filter(
+            Tournament.status == 'completed',
+            db.or_(
+                TournamentEntry.player1_id == user.id,
+                TournamentEntry.player2_id == user.id,
+            ),
+        )
+        .count()
+    )
     return [
         ('first_win', '🏅', 'First win', wins, 1),
         ('ten_games', '🔟', '10 games played', len(games), 10),
@@ -313,6 +325,7 @@ def _badge_defs(user):
         ('hot_streak', '🔥', '3-win streak', user.best_streak or 0, 3),
         ('mvp', '🌟', 'Voted MVP', mvp_count, 1),
         ('social', '🤝', '5 friends', friend_count, 5),
+        ('champion', '🏆', 'Tournament champion', titles, 1),
     ]
 
 

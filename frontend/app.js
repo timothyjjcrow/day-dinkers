@@ -3200,6 +3200,7 @@
         } else if (t.my_entry_id) {
           body += '<button class="btn btn-secondary btn-block" id="td-withdraw" style="margin-top:12px">Withdraw my entry</button>';
         }
+        body += '<button class="btn btn-secondary btn-block" id="td-share" style="margin-top:8px">📤 Share — invite players</button>';
         if (t.is_organizer) {
           body += `
             <div class="section-label" style="margin-top:16px">Organizer</div>
@@ -3227,6 +3228,15 @@
       content.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => closeModal(box)));
 
       // --- actions ---
+      content.querySelector('#td-share')?.addEventListener('click', async () => {
+        const spots = t.max_entries - t.entry_count;
+        const text = `🏆 ${t.name} — ${T_FORMAT_LABEL[t.format] || t.format} ${t.event_type} tournament at ${t.court ? t.court.name : 'the court'} on ${fmtDateTime(t.starts_at)}. ${spots} spot${spots === 1 ? '' : 's'} left — register in Third Shot!`;
+        const url = `${location.origin}/#tournament/${t.id}`;
+        try {
+          if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
+          else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Copied to share 📋'); }
+        } catch { /* user cancelled */ }
+      });
       content.querySelector('#td-register')?.addEventListener('click', async (e) => {
         const btn = e.currentTarget;
         const payload = {};
