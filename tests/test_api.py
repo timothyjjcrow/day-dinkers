@@ -3449,13 +3449,14 @@ def test_tournament_single_elim_flow(client):
     entries = {e['name']: e for e in data['entries']}
     assert entries['Ana']['seed'] == 1 and entries['Dee']['seed'] == 4
 
-    # Round 1: seed 1 vs 4, seed 2 vs 3
+    # Round 1: seed 1 vs 4, seed 2 vs 3; last round holds final + bronze match
     r1 = [m for m in data['matches'] if m['round'] == 1]
     assert len(r1) == 2 and all(m['status'] == 'ready' for m in r1)
     m0 = next(m for m in r1 if m['position'] == 0)
     assert {m0['entry1_id'], m0['entry2_id']} == {entries['Ana']['id'], entries['Dee']['id']}
-    final = next(m for m in data['matches'] if m['round'] == 2)
-    assert final['status'] == 'pending'
+    final = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 0)
+    third = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 1)
+    assert final['status'] == 'pending' and third['status'] == 'pending'
 
     # A non-participant can't score
     outsider = register(client, 'x@example.com')
@@ -3475,20 +3476,31 @@ def test_tournament_single_elim_flow(client):
     res = client.post(f"/api/tournaments/{t['id']}/matches/{m1['id']}/score",
                       json={'score1': 9, 'score2': 11}, headers=auth_headers(a['token']))
     data = res.get_json()
-    final = next(m for m in data['matches'] if m['round'] == 2)
+    final = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 0)
     assert final['status'] == 'ready'
     assert {final['entry1_id'], final['entry2_id']} == {entries['Ana']['id'], entries['Cam']['id']}
+    # Semifinal losers (Dee, Ben) dropped into the bronze match
+    third = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 1)
+    assert third['status'] == 'ready'
+    assert {third['entry1_id'], third['entry2_id']} == {entries['Dee']['id'], entries['Ben']['id']}
 
     # Cam got a "match is set" notification
     notifs = client.get('/api/notifications', headers=auth_headers(c['token'])).get_json()['items']
     assert any(n['kind'] == 'tournament_match' for n in notifs)
 
-    # Final: Ana wins the tournament
+    # Final alone doesn't finish it — the bronze match is still pending
     res = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
                       json={'score1': 11, 'score2': 7}, headers=auth_headers(c['token']))
     data = res.get_json()
+    assert data['status'] == 'active'
+    # Bronze: Ben beats Dee -> tournament completes, champion = Ana, Ben 3rd
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{third['id']}/score",
+                      json={'score1': 5, 'score2': 11}, headers=auth_headers(d['token']))
+    data = res.get_json()
     assert data['status'] == 'completed'
     assert data['champion']['name'] == 'Ana'
+    third = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 1)
+    assert third['winner_entry_id'] == entries['Ben']['id']
     notifs = client.get('/api/notifications', headers=auth_headers(d['token'])).get_json()['items']
     assert any(n['kind'] == 'tournament_result' and 'Ana won' in n['title'] for n in notifs)
 
@@ -3523,6 +3535,8 @@ def test_tournament_byes_with_three_entries(client):
     assert bye['winner_entry_id'] == entries['Ana']['id']
     final = next(m for m in data['matches'] if m['round'] == 2)
     assert final['entry1_id'] == entries['Ana']['id']  # bye winner already advanced
+    # 3 entries -> a bye semifinal produces no loser, so no bronze match
+    assert not any(m for m in data['matches'] if m['round'] == 2 and m['position'] == 1)
 
     # Ben vs Cam, then the final
     res = client.post(f"/api/tournaments/{t['id']}/matches/{playable['id']}/score",
@@ -3697,22 +3711,32 @@ def test_tournament_score_correction(client):
 
     r1 = [m for m in data['matches'] if m['round'] == 1]
     m0, m1 = r1[0], r1[1]
-    # Enter m0 with the wrong winner, then correct it — final's slot must follow
+    the_final = lambda d: next(m for m in d['matches'] if m['round'] == 2 and m['position'] == 0)
+    the_third = lambda d: next(m for m in d['matches'] if m['round'] == 2 and m['position'] == 1)
+    # Enter m0 with the wrong winner, then correct it — final AND bronze
+    # slots must both follow the swap
     data = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
                        json={'score1': 5, 'score2': 11}, headers=auth_headers(a['token'])).get_json()
-    final = next(m for m in data['matches'] if m['round'] == 2)
-    assert final['entry1_id'] == m0['entry2_id']
+    assert the_final(data)['entry1_id'] == m0['entry2_id']
+    assert the_third(data)['entry1_id'] == m0['entry1_id']
     data = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
                        json={'score1': 11, 'score2': 5}, headers=auth_headers(a['token'])).get_json()
-    final = next(m for m in data['matches'] if m['round'] == 2)
-    assert final['entry1_id'] == m0['entry1_id']
+    assert the_final(data)['entry1_id'] == m0['entry1_id']
+    assert the_third(data)['entry1_id'] == m0['entry2_id']
 
-    # Play out m1 and the final; the semi is now locked against edits
+    # Play out m1, the final, and the bronze match
     data = client.post(f"/api/tournaments/{t['id']}/matches/{m1['id']}/score",
                        json={'score1': 11, 'score2': 9}, headers=auth_headers(a['token'])).get_json()
-    final = next(m for m in data['matches'] if m['round'] == 2)
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{the_final(data)['id']}/score",
                       json={'score1': 11, 'score2': 8}, headers=auth_headers(a['token']))
+    data = res.get_json()
+    assert data['status'] == 'active'  # bronze still pending
+    # A semi correction is now locked by the played final
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
+                      json={'score1': 3, 'score2': 11}, headers=auth_headers(a['token']))
+    assert res.status_code == 409
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{the_third(data)['id']}/score",
+                      json={'score1': 11, 'score2': 6}, headers=auth_headers(a['token']))
     assert res.get_json()['status'] == 'completed'
     # (completed tournaments refuse all edits — covered elsewhere; the lock
     # below matters mid-tournament, so test it on a fresh 8-player bracket)

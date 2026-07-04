@@ -365,11 +365,52 @@ def _feeders_settled(tournament, match):
     return all(m.winner_entry_id is not None for m in feeders)
 
 
+def _final_and_third(tournament):
+    """The championship match (position 0) and, when the bracket has one,
+    the 3rd-place match (position 1) — both live in the last round."""
+    total = tournament.total_rounds()
+    final = third = None
+    for m in tournament.matches:
+        if m.round != total:
+            continue
+        if m.position == 0:
+            final = m
+        elif m.position == 1:
+            third = m
+    return final, third
+
+
+def _maybe_complete(tournament):
+    """Finish the tournament once the final — and the 3rd-place match, when
+    the bracket has one — are both decided."""
+    final, third = _final_and_third(tournament)
+    if not final or final.winner_entry_id is None:
+        return
+    if third and third.winner_entry_id is None:
+        return
+    _complete_tournament(tournament, final.winner_entry_id)
+
+
+def _notify_matchup(tournament, match, label):
+    entries = {e.id: e for e in tournament.entries}
+    e1, e2 = entries.get(match.entry1_id), entries.get(match.entry2_id)
+    if e1 and e2:
+        _notify_entry(
+            e1, 'tournament_match',
+            f'{tournament.name}: your {label} vs {e2.display_name()} is set',
+        )
+        _notify_entry(
+            e2, 'tournament_match',
+            f'{tournament.name}: your {label} vs {e1.display_name()} is set',
+        )
+
+
 def _advance_winner(tournament, match, total_rounds, notify_ready=True):
-    """Push a decided match's winner into the next round's slot; crown the
-    champion when the final is decided."""
+    """Push a decided match's winner into the next round's slot (and a
+    semifinal loser into the 3rd-place match); crown the champion when the
+    last round is decided."""
     if match.round >= total_rounds:
-        _complete_tournament(tournament, match.winner_entry_id)
+        _maybe_complete(tournament)
         return
     nxt = next(
         (m for m in tournament.matches
@@ -383,18 +424,20 @@ def _advance_winner(tournament, match, total_rounds, notify_ready=True):
     else:
         nxt.entry2_id = match.winner_entry_id
     if notify_ready and nxt.entry1_id and nxt.entry2_id:
-        entries = {e.id: e for e in tournament.entries}
-        e1, e2 = entries.get(nxt.entry1_id), entries.get(nxt.entry2_id)
-        if e1 and e2:
-            label = _round_label(nxt.round, tournament.total_rounds())
-            _notify_entry(
-                e1, 'tournament_match',
-                f'{tournament.name}: your {label} vs {e2.display_name()} is set',
-            )
-            _notify_entry(
-                e2, 'tournament_match',
-                f'{tournament.name}: your {label} vs {e1.display_name()} is set',
-            )
+        _notify_matchup(tournament, nxt, _round_label(nxt.round, tournament.total_rounds()))
+
+    # Semifinal losers drop into the 3rd-place match.
+    if match.round == total_rounds - 1:
+        _, third = _final_and_third(tournament)
+        if third:
+            loser_id = match.entry2_id if match.winner_entry_id == match.entry1_id \
+                else match.entry1_id
+            if match.position % 2 == 0:
+                third.entry1_id = loser_id
+            else:
+                third.entry2_id = loser_id
+            if notify_ready and third.entry1_id and third.entry2_id:
+                _notify_matchup(tournament, third, '3rd-place match')
 
 
 def _round_label(round_num, total_rounds):
@@ -472,6 +515,12 @@ def start_tournament(tournament_id):
                     match.entry1_id = slots[pos * 2]
                     match.entry2_id = slots[pos * 2 + 1]
                 db.session.add(match)
+        # A bronze match needs two semifinal losers — guaranteed only when at
+        # least 4 entries exist (3-entry brackets have a bye semifinal).
+        if len(entries) >= 4:
+            db.session.add(TournamentMatch(
+                tournament=tournament, round=total_rounds, position=1,
+            ))
         _propagate_bye_wins(tournament)
 
     tournament.status = 'active'
@@ -520,9 +569,11 @@ def score_match(tournament_id, match_id):
     total = tournament.total_rounds()
     previous_winner = match.winner_entry_id
     new_winner = match.entry1_id if score1 > score2 else match.entry2_id
+    is_semifinal = tournament.format == 'single_elim' and match.round == total - 1
 
     if previous_winner is not None and tournament.format == 'single_elim':
-        # A correction is only safe while the fed match hasn't been played.
+        # A correction is only safe while the matches it feeds haven't been
+        # played — for a semifinal that's both the final and the 3rd-place match.
         nxt = next(
             (m for m in tournament.matches
              if m.round == match.round + 1 and m.position == match.position // 2),
@@ -530,6 +581,10 @@ def score_match(tournament_id, match_id):
         )
         if nxt and nxt.winner_entry_id is not None:
             return jsonify({'error': 'next_match_played'}), 409
+        if is_semifinal:
+            _, third = _final_and_third(tournament)
+            if third and third.winner_entry_id is not None:
+                return jsonify({'error': 'next_match_played'}), 409
 
     match.score1, match.score2 = score1, score2
     match.winner_entry_id = new_winner

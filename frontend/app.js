@@ -3080,18 +3080,23 @@
           <span class="bm-score">${score != null ? score : (m.status === 'bye' && isWinner ? 'bye' : '')}</span>
         </div>`;
     };
+    const matchHtml = (m) => `
+      <div class="bm ${m.status === 'ready' && t.status === 'active' ? 'bm-ready' : ''}" data-tmatch="${m.id}">
+        ${sideHtml(m, m.entry1_id, m.score1)}
+        ${sideHtml(m, m.entry2_id, m.score2)}
+      </div>`;
+    // The bronze match shares the last round but gets its own caption.
+    const isThirdPlace = (m) => m.round === t.total_rounds && m.position === 1;
     const rounds = [];
     for (let r = 1; r <= t.total_rounds; r++) {
-      const ms = t.matches.filter((m) => m.round === r);
+      const ms = t.matches.filter((m) => m.round === r && !isThirdPlace(m));
+      const third = r === t.total_rounds ? t.matches.find(isThirdPlace) : null;
       rounds.push(`
         <div class="bracket-round">
           <div class="bracket-round-title">${tournamentRoundLabel(r, t.total_rounds)}</div>
           <div class="bracket-round-matches">
-          ${ms.map((m) => `
-            <div class="bm ${m.status === 'ready' && t.status === 'active' ? 'bm-ready' : ''}" data-tmatch="${m.id}">
-              ${sideHtml(m, m.entry1_id, m.score1)}
-              ${sideHtml(m, m.entry2_id, m.score2)}
-            </div>`).join('')}
+          ${ms.map(matchHtml).join('')}
+          ${third ? `<div><div class="bracket-round-title" style="margin:8px 0 6px">🥉 3rd place</div>${matchHtml(third)}</div>` : ''}
           </div>
         </div>`);
     }
@@ -3399,7 +3404,9 @@
     const e1 = entries[match.entry1_id];
     const e2 = entries[match.entry2_id];
     const roundLabel = t.format === 'round_robin'
-      ? `Round ${match.round}` : tournamentRoundLabel(match.round, t.total_rounds || 1);
+      ? `Round ${match.round}`
+      : (match.round === t.total_rounds && match.position === 1)
+        ? '3rd-place match' : tournamentRoundLabel(match.round, t.total_rounds || 1);
     const modal = openModal(`
       ${modalHead('Match score')}
       <div class="row-sub" style="margin:-4px 0 12px">${esc(t.name)} · ${roundLabel}</div>
