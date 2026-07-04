@@ -882,6 +882,8 @@ class TournamentEntry(TimestampMixin, db.Model):
     player1_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     player2_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True)
     seed = db.Column(db.Integer)
+    # Day-of arrival confirmation ("we're here"), settable from 24h out.
+    checked_in_at = db.Column(db.DateTime)
 
     tournament = db.relationship(
         'Tournament', back_populates='entries', foreign_keys=[tournament_id],
@@ -906,6 +908,7 @@ class TournamentEntry(TimestampMixin, db.Model):
             'seed': self.seed,
             'name': self.display_name(),
             'rating': self.avg_rating(),
+            'checked_in': self.checked_in_at is not None,
             'players': [p.to_public_dict() for p in self.players()],
         }
 

@@ -204,6 +204,14 @@ def _upgrade_schema(app):
                     + ('FALSE' if is_postgres else '0')
                 )
 
+        if 'tournament_entry' in tables:
+            te_cols = {c['name'] for c in inspector.get_columns('tournament_entry')}
+            if 'checked_in_at' not in te_cols:
+                statements.append(
+                    'ALTER TABLE tournament_entry ADD COLUMN checked_in_at '
+                    + ('TIMESTAMP' if is_postgres else 'DATETIME')
+                )
+
         if 'notification' in tables:
             notif_cols = {c['name'] for c in inspector.get_columns('notification')}
             if 'related_tournament_id' not in notif_cols:

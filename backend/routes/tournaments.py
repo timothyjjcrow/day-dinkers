@@ -677,6 +677,31 @@ def _top_of_standings(tournament):
     return table[0]['entry']['id'] if table else None
 
 
+CHECKIN_OPENS_HOURS_BEFORE = 24
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/checkin')
+@rate_limit(60, 3600)
+@login_required
+def tournament_checkin(tournament_id):
+    """Day-of arrival confirmation — either partner can check the entry in,
+    from 24h before the start until the tournament wraps."""
+    tournament = db.session.get(Tournament, tournament_id)
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    if tournament.status not in ('registration', 'active'):
+        return jsonify({'error': 'tournament_not_open'}), 409
+    entry = tournament.entry_for(g.current_user.id)
+    if not entry:
+        return jsonify({'error': 'not_registered'}), 404
+    if utcnow() < tournament.starts_at - timedelta(hours=CHECKIN_OPENS_HOURS_BEFORE):
+        return jsonify({'error': 'checkin_not_open'}), 409
+    if entry.checked_in_at is None:
+        entry.checked_in_at = utcnow()
+        db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
 @tournaments_bp.post('/tournaments/<int:tournament_id>/cancel')
 @rate_limit(20, 3600)
 @login_required

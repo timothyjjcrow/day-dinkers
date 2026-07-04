@@ -3184,18 +3184,27 @@
           </div>`;
       }
 
+      const checkinOpen = Date.now() >= new Date(t.starts_at).getTime() - 24 * 3600e3
+        && (t.status === 'registration' || t.status === 'active');
+      const myEntry = t.entries.find((en) => en.id === t.my_entry_id);
+      const hereTag = (en) => (en.checked_in
+        ? ' <span class="tag" style="background:var(--green-100);color:var(--green-900)">🙋 here</span>' : '');
+      const checkinButton = (myEntry && checkinOpen && !myEntry.checked_in)
+        ? '<button class="btn btn-primary btn-block" id="td-checkin" style="margin-top:12px">🙋 Check in — we\'re here</button>' : '';
+
       if (t.status === 'registration') {
         body += `<div class="section-label">Entries (${t.entry_count}/${t.max_entries})</div>`;
         body += t.entries.length ? t.entries.map((en) => `
           <div class="card row" style="padding:10px 14px">
             ${avatarHtml(en.players[0] || {}, 'sm')}
             <div class="row-main">
-              <div class="row-title" style="font-size:14px">${esc(en.name)}</div>
+              <div class="row-title" style="font-size:14px">${esc(en.name)}${hereTag(en)}</div>
               <div class="row-sub">${en.rating} rating</div>
             </div>
             ${t.is_organizer ? `<button class="btn btn-secondary btn-sm" data-remove-entry="${en.id}" aria-label="Remove entry">Remove</button>` : ''}
           </div>`).join('')
           : `<div class="empty-state" style="padding:16px">No ${unitLabel}s yet — be the first to register!</div>`;
+        body += checkinButton;
 
         if (!t.my_entry_id && t.entry_count < t.max_entries) {
           body += isDoubles
@@ -3228,11 +3237,12 @@
           body += '<button class="btn btn-secondary btn-block" id="td-edit" style="margin-top:8px">✏️ Edit details</button>';
           body += '<button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:8px">Cancel tournament</button>';
         }
+        body += checkinButton;
         body += `<div class="section-label" style="margin-top:14px">${isDoubles ? 'Teams' : 'Players'}</div>`;
         body += t.entries.map((en) => `
           <div class="card row" style="padding:8px 14px">
             ${avatarHtml(en.players[0] || {}, 'sm')}
-            <div class="row-main"><div class="row-title" style="font-size:14px">${en.seed ? `<span class="bm-seed" style="margin-right:4px">${en.seed}</span>` : ''}${esc(en.name)}</div></div>
+            <div class="row-main"><div class="row-title" style="font-size:14px">${en.seed ? `<span class="bm-seed" style="margin-right:4px">${en.seed}</span>` : ''}${esc(en.name)}${hereTag(en)}</div></div>
             <div class="row-sub">${en.rating}</div>
           </div>`).join('');
       } else {
@@ -3245,6 +3255,14 @@
       // --- actions ---
       content.querySelector('#td-chat')?.addEventListener('click', () => openTournamentChat(t));
       content.querySelector('#td-edit')?.addEventListener('click', () => openEditTournamentSheet(t, render));
+      content.querySelector('#td-checkin')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          render(await api(`/tournaments/${t.id}/checkin`, { method: 'POST' }));
+          toast("Checked in — see you on court! 🙋");
+        } catch (err) { toast(err.message); btn.disabled = false; }
+      });
       content.querySelector('#td-share')?.addEventListener('click', async () => {
         const spots = t.max_entries - t.entry_count;
         const text = `🏆 ${t.name} — ${T_FORMAT_LABEL[t.format] || t.format} ${t.event_type} tournament at ${t.court ? t.court.name : 'the court'} on ${fmtDateTime(t.starts_at)}. ${spots} spot${spots === 1 ? '' : 's'} left — register in Third Shot!`;

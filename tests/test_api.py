@@ -3822,3 +3822,49 @@ def test_tournament_organizer_edit(client):
     client.post(f"/api/tournaments/{t['id']}/cancel", headers=auth_headers(a['token']))
     assert client.patch(f"/api/tournaments/{t['id']}", json={'name': 'Too Late'},
                         headers=auth_headers(a['token'])).status_code == 409
+
+
+def test_tournament_day_of_checkin(client):
+    """Arrival check-in opens 24h before the start; either partner counts."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    outsider = register(client, 'x@example.com', 'Xan')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Starts in 48h -> check-in not open yet
+    t = make_tournament(client, a['token'], court_id, hours_ahead=48)
+    _register_entry(client, t['id'], a['token'])
+    res = client.post(f"/api/tournaments/{t['id']}/checkin", headers=auth_headers(a['token']))
+    assert res.status_code == 409
+    assert res.get_json()['error'] == 'checkin_not_open'
+
+    # Starts in 2h -> open; non-entrants rejected
+    t2 = make_tournament(client, a['token'], court_id, hours_ahead=2)
+    _register_entry(client, t2['id'], a['token'])
+    _register_entry(client, t2['id'], b['token'])
+    assert client.post(f"/api/tournaments/{t2['id']}/checkin",
+                       headers=auth_headers(outsider['token'])).status_code == 404
+    data = client.post(f"/api/tournaments/{t2['id']}/checkin",
+                       headers=auth_headers(a['token'])).get_json()
+    entries = {e['name']: e for e in data['entries']}
+    assert entries['Ana']['checked_in'] is True
+    assert entries['Ben']['checked_in'] is False
+    # Idempotent
+    assert client.post(f"/api/tournaments/{t2['id']}/checkin",
+                       headers=auth_headers(a['token'])).status_code == 200
+
+    # Still works after the bracket starts
+    client.post(f"/api/tournaments/{t2['id']}/start", headers=auth_headers(a['token']))
+    data = client.post(f"/api/tournaments/{t2['id']}/checkin",
+                       headers=auth_headers(b['token'])).get_json()
+    entries = {e['name']: e for e in data['entries']}
+    assert entries['Ben']['checked_in'] is True
+
+    # Refused once finished
+    final = next(m for m in data['matches'] if m['round'] == 1)
+    client.post(f"/api/tournaments/{t2['id']}/matches/{final['id']}/score",
+                json={'score1': 11, 'score2': 6}, headers=auth_headers(a['token']))
+    detail = client.get(f"/api/tournaments/{t2['id']}", headers=auth_headers(a['token'])).get_json()
+    assert detail['status'] == 'completed'
+    assert client.post(f"/api/tournaments/{t2['id']}/checkin",
+                       headers=auth_headers(a['token'])).status_code == 409
