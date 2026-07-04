@@ -4617,3 +4617,26 @@ def test_send_feedback(client):
     assert res.status_code == 200 and res.get_json()['sent'] is True
     assert client.post('/api/feedback', json={'message': ''},
                        headers=auth_headers(a['token'])).status_code == 400
+
+
+def test_cancel_stale_unplayed_game(client):
+    """A host can clear a game that started hours ago but was never played."""
+    from datetime import timedelta
+
+    from backend.app import db
+    from backend.models import Game as GameModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id)
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+
+    # Time-travel the start into yesterday (in-context; then assert via HTTP,
+    # which is safe here since we mutate before any dependent reads)
+    row = db.session.get(GameModel, game['id'])
+    row.scheduled_at = utcnow() - timedelta(hours=30)
+    db.session.commit()
+
+    res = client.post(f"/api/games/{game['id']}/cancel", headers=auth_headers(a['token']))
+    assert res.status_code == 200
+    assert res.get_json()['status'] == 'cancelled'

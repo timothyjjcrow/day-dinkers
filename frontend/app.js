@@ -1850,6 +1850,9 @@
           banner = game.players.length >= 2
             ? '<div class="status-banner">📝 Played? Tap to enter the score.</div>'
             : '<div class="status-banner">😴 This one never filled up.</div>';
+          if (game.is_creator) {
+            action = `<button class="btn btn-secondary btn-sm" data-game-dismiss="${game.id}">Didn't happen</button>`;
+          }
         } else if (inProgress) {
           cardStyle = 'border:2px solid var(--green-600)';
           banner = `<div class="status-banner live-banner">🟢 ${game.players.length >= 2 ? 'Game time! Tap to enter the score.' : 'Live — waiting for players to join.'}</div>`;
@@ -1930,6 +1933,16 @@
       try {
         const game = await api(`/games/${b.dataset.gameConfirm}/confirm`, { method: 'POST' });
         showCelebration(game);
+        refreshMe();
+        refresh();
+      } catch (err) { toast(err.message); }
+    }));
+    rootEl.querySelectorAll('[data-game-dismiss]').forEach((b) => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm("Mark this game as never played? It'll be cleared from everyone's feed.")) return;
+      try {
+        await api(`/games/${b.dataset.gameDismiss}/cancel`, { method: 'POST' });
+        toast('Cleared 😴');
         refreshMe();
         refresh();
       } catch (err) { toast(err.message); }
