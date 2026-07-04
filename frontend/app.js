@@ -2826,7 +2826,7 @@
   function tournamentStatusChip(t) {
     if (t.status === 'registration') {
       const spots = t.max_entries - t.entry_count;
-      return `<span class="tag" style="background:var(--green-100);color:var(--green-900)">Registration open · ${spots} spot${spots === 1 ? '' : 's'} left</span>`;
+      return `<span class="tag" style="background:var(--green-100);color:var(--green-ink)">Registration open · ${spots} spot${spots === 1 ? '' : 's'} left</span>`;
     }
     if (t.status === 'active') return '<span class="tag" style="background:var(--amber-50);color:var(--amber-800)">⚡ In progress</span>';
     if (t.status === 'completed') return `<span class="tag" style="background:var(--violet-50);color:var(--violet-700)">🏆 ${t.champion ? esc(t.champion.name) : 'Finished'}</span>`;
@@ -2846,7 +2846,7 @@
             <div class="row-title">${esc(t.name)}</div>
             <div class="row-sub">${esc(meta)}</div>
             <div class="row-sub" style="margin-top:2px">${T_FORMAT_LABEL[t.format] || t.format} · ${t.event_type === 'doubles' ? 'Doubles' : 'Singles'} · ${t.entry_count}/${t.max_entries} ${t.event_type === 'doubles' ? 'teams' : 'players'}</div>
-            <div style="margin-top:6px">${tournamentStatusChip(t)}${t.my_entry_id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-700)">✓ You\'re in</span>' : ''}${t.is_organizer ? ' <span class="tag">Organizer</span>' : ''}</div>
+            <div style="margin-top:6px">${tournamentStatusChip(t)}${t.my_entry_id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-accent)">✓ You\'re in</span>' : ''}${t.is_organizer ? ' <span class="tag">Organizer</span>' : ''}</div>
           </div>
           <span class="chev">›</span>
         </div>
@@ -3135,7 +3135,7 @@
         <div class="row" style="padding:8px 0;border-bottom:${i === t.standings.length - 1 ? 'none' : '1px solid var(--line)'}">
           <div class="rank-num">${i + 1}</div>
           <div class="row-main">
-            <div class="row-title" style="font-size:14px">${esc(row.entry.name)}${t.my_entry_id === row.entry.id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-700)">you</span>' : ''}</div>
+            <div class="row-title" style="font-size:14px">${esc(row.entry.name)}${t.my_entry_id === row.entry.id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-accent)">you</span>' : ''}</div>
             <div class="row-sub">${row.wins}W – ${row.losses}L · ${row.point_diff >= 0 ? '+' : ''}${row.point_diff} pts</div>
           </div>
           ${i === 0 && t.status === 'completed' ? '<span style="font-size:20px">👑</span>' : ''}
@@ -3210,7 +3210,7 @@
         && (t.status === 'registration' || t.status === 'active');
       const myEntry = t.entries.find((en) => en.id === t.my_entry_id);
       const hereTag = (en) => (en.checked_in
-        ? ' <span class="tag" style="background:var(--green-100);color:var(--green-900)">🙋 here</span>' : '');
+        ? ' <span class="tag" style="background:var(--green-100);color:var(--green-ink)">🙋 here</span>' : '');
       const checkinButton = (myEntry && checkinOpen && !myEntry.checked_in)
         ? '<button class="btn btn-primary btn-block" id="td-checkin" style="margin-top:12px">🙋 Check in — we\'re here</button>' : '';
 
