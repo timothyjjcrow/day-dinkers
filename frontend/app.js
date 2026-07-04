@@ -5069,6 +5069,7 @@
         <span class="chev">›</span>
       </div>
       <div id="gs-weather"></div>
+      <div id="gs-stakes"></div>
       ${game.notes ? `<div class="row-sub" style="margin:0 0 12px 4px">“${esc(game.notes)}”</div>` : ''}
       <div class="section-label">Players (${game.players.length}/${game.max_players})</div>
       ${playersHtml}
@@ -5140,6 +5141,33 @@
           toast("You're counted in 👋");
         } catch (e) { toast(e.message); }
       });
+      // Ranked 1v1: show what's on the line and the rivalry so far.
+      if (game.game_type === 'ranked' && game.status === 'upcoming'
+          && game.players.length === 2 && state.me
+          && game.players.some((p) => p.user_id === state.me.id)) {
+        const opp = game.players.find((p) => p.user_id !== state.me.id);
+        const mine = game.players.find((p) => p.user_id === state.me.id);
+        if (opp && opp.rating != null && mine.rating != null) {
+          const expected = 1 / (1 + 10 ** ((opp.rating - mine.rating) / 400));
+          const winPts = Math.round(32 * (1 - expected));
+          const losePts = Math.round(32 * expected);
+          const el = box.querySelector('#gs-stakes');
+          if (el) {
+            el.innerHTML = `<div class="row-sub" style="text-align:center;margin:2px 0 10px">
+              ⚡ Stakes: win <b style="color:var(--green-accent)">+${winPts}</b> · lose <b>−${losePts}</b></div>`;
+            // Rivalry record loads after — it's a nice-to-have.
+            api(`/users/${opp.user_id}`).then((prof) => {
+              const h2h = prof.head_to_head;
+              if (!h2h || !document.body.contains(el)) return;
+              const lead = h2h.wins > h2h.losses ? 'You lead' : h2h.wins < h2h.losses ? 'They lead' : 'All square';
+              const a = Math.max(h2h.wins, h2h.losses);
+              const b = Math.min(h2h.wins, h2h.losses);
+              el.insertAdjacentHTML('beforeend',
+                `<div class="row-sub" style="text-align:center;margin:-6px 0 10px">🤺 ${lead} ${h2h.wins === h2h.losses ? `${h2h.wins}–${h2h.losses}` : `${a}–${b}`} vs ${esc(opp.display_name.split(' ')[0])}</div>`);
+            }).catch(() => {});
+          }
+        }
+      }
       // Playability heads-up for games starting soon (NWS summary covers ~6h).
       const startMs = new Date(game.scheduled_at).getTime();
       if (game.status === 'upcoming' && court.id
