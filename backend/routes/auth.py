@@ -226,6 +226,18 @@ def _active_tournament_payload(user):
     data['banner_state'] = 'live' if tournament.status == 'active' else 'soon'
     my_entry = tournament.entry_for(user.id)
     data['my_checked_in'] = bool(my_entry and my_entry.checked_in_at)
+    # Who this player faces next — the banner's live-state headline.
+    data['my_next_opponent'] = None
+    if my_entry and tournament.status == 'active':
+        for m in sorted(tournament.matches, key=lambda m: (m.round, m.position)):
+            if (m.winner_entry_id is None
+                    and my_entry.id in (m.entry1_id, m.entry2_id)
+                    and m.entry1_id and m.entry2_id):
+                opp_id = m.entry2_id if m.entry1_id == my_entry.id else m.entry1_id
+                opp = next((e for e in tournament.entries if e.id == opp_id), None)
+                if opp:
+                    data['my_next_opponent'] = opp.display_name()
+                break
     return data
 
 

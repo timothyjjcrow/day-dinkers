@@ -4361,3 +4361,45 @@ def test_leaderboard_shows_title_counts(client):
     by_name = {u['display_name']: u for u in board}
     assert by_name['Ana']['tournament_titles'] == 1
     assert by_name['Ben']['tournament_titles'] == 0
+
+
+def test_banner_shows_next_opponent(client):
+    """The live-tournament banner payload names who you face next."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    from backend.app import db
+    from backend.models import User
+    for email, rating in (('a@example.com', 1400), ('b@example.com', 1300),
+                          ('c@example.com', 1250), ('d@example.com', 1100)):
+        User.query.filter_by(email=email).first().rating = rating
+    db.session.commit()
+
+    t = make_tournament(client, a['token'], court_id, hours_ahead=2)
+    for p in (a, b, c, d):
+        _register_entry(client, t['id'], p['token'])
+    data = client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token'])).get_json()
+
+    # Seeds: Ana(1) vs Dee(4), Ben(2) vs Cam(3)
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_tournament']['my_next_opponent'] == 'Dee'
+
+    # Ana beats Dee -> her next match (the final) isn't set yet
+    semis = [m for m in data['matches'] if m['round'] == 1]
+    m0 = next(m for m in semis if m['position'] == 0)
+    client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
+                json={'score1': 11, 'score2': 5}, headers=auth_headers(a['token']))
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_tournament']['my_next_opponent'] is None
+
+    # Ben beats Cam -> Ana's final opponent is Ben; Dee now plays Cam for bronze
+    m1 = next(m for m in semis if m['position'] == 1)
+    client.post(f"/api/tournaments/{t['id']}/matches/{m1['id']}/score",
+                json={'score1': 11, 'score2': 8}, headers=auth_headers(a['token']))
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['active_tournament']['my_next_opponent'] == 'Ben'
+    me_d = client.get('/api/me', headers=auth_headers(d['token'])).get_json()
+    assert me_d['active_tournament']['my_next_opponent'] == 'Cam'

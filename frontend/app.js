@@ -372,7 +372,9 @@
     if (!t) return false;
     const live = t.banner_state === 'live';
     const sub = live
-      ? 'Bracket in progress — tap for scores'
+      ? (t.my_next_opponent
+          ? `Next up: vs ${esc(t.my_next_opponent)} — tap to score`
+          : 'Bracket in progress — tap for scores')
       : (t.my_entry_id && !t.my_checked_in)
         ? `${esc((t.court || {}).name || '')} · tap to check in`
         : `${esc((t.court || {}).name || '')} · tap for details`;
