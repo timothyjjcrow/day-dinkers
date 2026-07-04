@@ -4640,3 +4640,41 @@ def test_cancel_stale_unplayed_game(client):
     res = client.post(f"/api/games/{game['id']}/cancel", headers=auth_headers(a['token']))
     assert res.status_code == 200
     assert res.get_json()['status'] == 'cancelled'
+
+
+def test_my_court_rooms(client):
+    """Chat tab lists court rooms you've opened or favorited, with unread."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    other_court = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+
+    # Nothing yet
+    assert client.get('/api/chat/courts', headers=auth_headers(a['token'])).get_json()['items'] == []
+
+    # Ana opens the Larson room (marker), Ben posts twice
+    client.get(f'/api/courts/{court_id}/chat', headers=auth_headers(a['token']))
+    client.post(f'/api/courts/{court_id}/chat', json={'body': 'anyone playing?'},
+                headers=auth_headers(b['token']))
+    client.post(f'/api/courts/{court_id}/chat', json={'body': 'nets are up'},
+                headers=auth_headers(b['token']))
+    rooms = client.get('/api/chat/courts', headers=auth_headers(a['token'])).get_json()['items']
+    assert len(rooms) == 1
+    assert rooms[0]['court']['id'] == court_id
+    assert rooms[0]['unread'] == 2
+    assert rooms[0]['last_message']['body'] == 'nets are up'
+
+    # Favorited court with chatter shows up too (never opened -> all unread)
+    client.post(f'/api/courts/{other_court}/favorite', headers=auth_headers(a['token']))
+    client.post(f'/api/courts/{other_court}/chat', json={'body': 'indoor courts open late'},
+                headers=auth_headers(b['token']))
+    rooms = client.get('/api/chat/courts', headers=auth_headers(a['token'])).get_json()['items']
+    assert len(rooms) == 2
+    assert rooms[0]['court']['id'] == other_court  # newest message first
+    assert rooms[0]['unread'] == 1
+
+    # Reading the room clears its unread
+    client.get(f'/api/courts/{court_id}/chat', headers=auth_headers(a['token']))
+    rooms = client.get('/api/chat/courts', headers=auth_headers(a['token'])).get_json()['items']
+    larson = next(r for r in rooms if r['court']['id'] == court_id)
+    assert larson['unread'] == 0

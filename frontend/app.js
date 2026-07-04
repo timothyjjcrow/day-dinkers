@@ -3712,8 +3712,11 @@
     el.innerHTML = skeletonHtml(5);
     try {
       if (state.chatSeg === 'chats') {
-        const data = await api('/chat');
-        el.innerHTML = data.items.length
+        const [data, rooms] = await Promise.all([
+          api('/chat'),
+          api('/chat/courts').catch(() => ({ items: [] })),
+        ]);
+        let html = data.items.length
           ? data.items.map((c) => `
               <div class="card row" data-thread="${c.user.id}" style="cursor:pointer">
                 ${avatarHtml(c.user)}
@@ -3724,7 +3727,23 @@
                 ${c.unread ? `<span class="badge" style="position:static">${c.unread}</span>` : `<span class="row-sub">${fmtTimeShort(c.last_message.created_at)}</span>`}
               </div>`).join('')
           : '<div class="empty-state"><span class="big">💬</span>No chats yet.<br>Add some friends and say hi!<br><button class="btn btn-primary" data-goto="chat-friends" style="margin-top:10px">🤝 Find friends</button></div>';
+        if ((rooms.items || []).length) {
+          html += '<div class="section-label">🏓 Court rooms</div>';
+          html += rooms.items.map((r) => `
+            <div class="card row" data-court-room="${r.court.id}" data-court-name="${esc(r.court.name)}" style="cursor:pointer">
+              <span style="font-size:22px">🏓</span>
+              <div class="row-main">
+                <div class="row-title" style="font-size:14.5px">${esc(r.court.name)}</div>
+                <div class="row-sub">${r.last_message.sender_id === state.me.id ? 'You: ' : `${esc((r.last_message.sender_name || 'Player').split(' ')[0])}: `}${esc(r.last_message.body.slice(0, 55))}</div>
+              </div>
+              ${r.unread ? `<span class="badge" style="position:static">${r.unread}</span>` : `<span class="row-sub">${fmtTimeShort(r.last_message.created_at)}</span>`}
+            </div>`).join('');
+        }
+        el.innerHTML = html;
         el.querySelectorAll('[data-thread]').forEach((row) => row.addEventListener('click', () => openThread(Number(row.dataset.thread))));
+        el.querySelectorAll('[data-court-room]').forEach((row) => row.addEventListener('click', () => {
+          openCourtChat({ id: Number(row.dataset.courtRoom), name: row.dataset.courtName });
+        }));
       } else if (state.chatSeg === 'nearby') {
         await renderNearbyPlayers(el);
       } else {

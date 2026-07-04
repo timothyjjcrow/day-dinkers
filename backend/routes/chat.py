@@ -258,6 +258,52 @@ def delete_message(message_id):
     return jsonify({'deleted': True})
 
 
+@chat_bp.get('/chat/courts')
+@login_required
+def my_court_rooms():
+    """Court chat rooms this player is part of — rooms they've opened (read
+    marker exists) plus favorited courts with any chatter. Newest-message
+    first, with unread counts."""
+    me = g.current_user.id
+    from backend.models import FavoriteCourt
+    marker_rows = CourtChatRead.query.filter_by(user_id=me).all()
+    markers = {m.court_id: m.last_read_message_id for m in marker_rows}
+    fav_ids = {
+        f.court_id for f in FavoriteCourt.query.filter_by(user_id=me).all()
+    }
+    court_ids = set(markers) | fav_ids
+    if not court_ids:
+        return jsonify({'items': []})
+
+    latest = (
+        Message.query.filter(Message.court_id.in_(court_ids))
+        .order_by(Message.id.desc())
+        .limit(300)
+        .all()
+    )
+    by_court = {}
+    for message in latest:
+        if message.court_id not in by_court:
+            by_court[message.court_id] = message
+    items = []
+    for court_id, last in by_court.items():
+        court = db.session.get(Court, court_id)
+        if not court:
+            continue
+        unread = Message.query.filter(
+            Message.court_id == court_id,
+            Message.id > markers.get(court_id, 0),
+            Message.sender_id != me,
+        ).count()
+        items.append({
+            'court': court.to_summary_dict(),
+            'last_message': last.to_dict(),
+            'unread': unread,
+        })
+    items.sort(key=lambda item: -(item['last_message']['id']))
+    return jsonify({'items': items[:20]})
+
+
 @chat_bp.get('/chat')
 @login_required
 def conversations():
