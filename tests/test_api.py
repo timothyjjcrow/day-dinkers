@@ -4328,3 +4328,36 @@ def test_casual_tournament_leaves_ratings_alone(client):
     for p in (a, b):
         u = client.get('/api/me', headers=auth_headers(p['token'])).get_json()['user']
         assert u['rating'] == 1200 and u['ranked_wins'] == 0 and u['ranked_losses'] == 0
+
+
+def test_leaderboard_shows_title_counts(client):
+    """Leaderboard rows carry each player's tournament-title count."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Get both on the board with one ranked game
+    game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 4,
+    }, headers=auth_headers(a['token']))
+    client.post(f"/api/games/{game['id']}/confirm", headers=auth_headers(b['token']))
+
+    # Ana wins a quick tournament
+    t = make_tournament(client, a['token'], court_id, max_entries=2)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+    client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
+    m = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()['matches'][0]
+    detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()
+    ana_entry = next(e for e in detail['entries'] if e['name'] == 'Ana')
+    s = {'score1': 11, 'score2': 2} if m['entry1_id'] == ana_entry['id'] else {'score1': 2, 'score2': 11}
+    client.post(f"/api/tournaments/{t['id']}/matches/{m['id']}/score",
+                json=s, headers=auth_headers(a['token']))
+
+    board = client.get('/api/leaderboard', headers=auth_headers(b['token'])).get_json()['items']
+    by_name = {u['display_name']: u for u in board}
+    assert by_name['Ana']['tournament_titles'] == 1
+    assert by_name['Ben']['tournament_titles'] == 0

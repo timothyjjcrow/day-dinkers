@@ -1338,4 +1338,35 @@ def leaderboard():
     else:
         users = query.order_by(User.rating.desc()).limit(50).all()
 
-    return jsonify({'items': [u.to_public_dict() for u in users]})
+    return jsonify({'items': _with_title_counts(users)})
+
+
+def _with_title_counts(users):
+    """Public dicts with each player's tournament-title count (one grouped
+    query for the whole board) so the leaderboard can crown champions."""
+    from backend.models import Tournament, TournamentEntry
+    ids = {u.id for u in users}
+    counts = {}
+    if ids:
+        rows = (
+            db.session.query(TournamentEntry)
+            .join(Tournament, Tournament.champion_entry_id == TournamentEntry.id)
+            .filter(
+                Tournament.status == 'completed',
+                db.or_(
+                    TournamentEntry.player1_id.in_(ids),
+                    TournamentEntry.player2_id.in_(ids),
+                ),
+            )
+            .all()
+        )
+        for entry in rows:
+            for uid in (entry.player1_id, entry.player2_id):
+                if uid in ids:
+                    counts[uid] = counts.get(uid, 0) + 1
+    items = []
+    for user in users:
+        data = user.to_public_dict()
+        data['tournament_titles'] = counts.get(user.id, 0)
+        items.append(data)
+    return items

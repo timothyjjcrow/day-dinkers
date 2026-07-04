@@ -2079,7 +2079,7 @@
             <div class="podium-col place-${place(u)}" data-view-user="${u.id}">
               <div class="podium-medal">${['🥇', '🥈', '🥉'][place(u) - 1]}</div>
               ${avatarHtml(u)}
-              <div class="podium-name">${esc(u.display_name.split(' ')[0])}${u.current_streak >= 2 ? ' 🔥' : ''}</div>
+              <div class="podium-name">${esc(u.display_name.split(' ')[0])}${u.tournament_titles ? ' 👑' : ''}${u.current_streak >= 2 ? ' 🔥' : ''}</div>
               <div class="podium-rating">${boardVal(u)}</div>
               <div class="podium-base"></div>
             </div>`).join('') + '</div>';
@@ -2091,7 +2091,7 @@
                 <div class="rank-num">${i + 4}</div>
                 ${avatarHtml(u, 'sm')}
                 <div class="row-main">
-                  <div class="row-title" style="font-size:14px">${esc(u.display_name)}${u.current_streak >= 2 ? ` <span title="Win streak">🔥${u.current_streak}</span>` : ''}</div>
+                  <div class="row-title" style="font-size:14px">${esc(u.display_name)}${u.tournament_titles ? ` <span title="Tournament titles">👑${u.tournament_titles > 1 ? u.tournament_titles : ''}</span>` : ''}${u.current_streak >= 2 ? ` <span title="Win streak">🔥${u.current_streak}</span>` : ''}</div>
                   <div class="row-sub">${isMonth ? `${u.month_games} ranked game${u.month_games === 1 ? '' : 's'} this month` : `${u.ranked_wins}W – ${u.ranked_losses}L`}</div>
                 </div>
                 <div class="stat-value" style="font-size:16px">${boardVal(u)}</div>
