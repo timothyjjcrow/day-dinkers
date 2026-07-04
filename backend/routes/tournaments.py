@@ -105,6 +105,19 @@ def _detail_payload(tournament, user_id):
     data = tournament.to_dict(user_id, detail=True)
     if tournament.format == 'round_robin':
         data['standings'] = _standings(tournament)
+    # Chat unread badge for members (no marker yet = everything is unread).
+    data['chat_unread'] = 0
+    if user_id and (user_id == tournament.organizer_id
+                    or user_id in tournament.participant_ids()):
+        from backend.models import Message, TournamentChatRead
+        marker = TournamentChatRead.query.filter_by(
+            user_id=user_id, tournament_id=tournament.id,
+        ).first()
+        data['chat_unread'] = Message.query.filter(
+            Message.tournament_id == tournament.id,
+            Message.id > (marker.last_read_message_id if marker else 0),
+            Message.sender_id != user_id,
+        ).count()
     return data
 
 

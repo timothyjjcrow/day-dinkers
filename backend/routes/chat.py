@@ -177,6 +177,25 @@ def tournament_chat(tournament_id):
         messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
     else:
         messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+
+    # Reading the thread marks it read — powers the tournament-screen badge.
+    from backend.models import TournamentChatRead
+    latest_id = db.session.query(db.func.max(Message.id)).filter(
+        Message.tournament_id == tournament_id,
+    ).scalar() or 0
+    marker = TournamentChatRead.query.filter_by(
+        user_id=g.current_user.id, tournament_id=tournament.id,
+    ).first()
+    if not marker:
+        db.session.add(TournamentChatRead(
+            user_id=g.current_user.id, tournament_id=tournament.id,
+            last_read_message_id=latest_id,
+        ))
+        db.session.commit()
+    elif latest_id > marker.last_read_message_id:
+        marker.last_read_message_id = latest_id
+        db.session.commit()
+
     return jsonify({
         'tournament': {'id': tournament.id, 'name': tournament.name},
         'items': [m.to_dict() for m in messages],

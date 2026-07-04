@@ -451,6 +451,21 @@ class CourtChatRead(TimestampMixin, db.Model):
     last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
 
 
+class TournamentChatRead(TimestampMixin, db.Model):
+    """How far a participant has read a tournament's chat thread — powers the
+    unread badge on the tournament screen. No row = nothing read yet."""
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'tournament_id', name='uq_tournament_chat_read'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    tournament_id = db.Column(
+        db.Integer, db.ForeignKey('tournament.id'), nullable=False, index=True,
+    )
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
+
+
 class GameChatRead(TimestampMixin, db.Model):
     """How far a player has read a game's chat thread. Members with no row
     haven't read anything — every message counts as unread."""

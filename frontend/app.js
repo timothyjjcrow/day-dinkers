@@ -3368,7 +3368,7 @@
         body += '<button class="btn btn-secondary btn-block" id="td-share" style="margin-top:8px">📤 Share — invite players</button>';
         if (t.my_entry_id || t.is_organizer) {
           body += '<button class="btn btn-secondary btn-block" id="td-ics" style="margin-top:8px">📅 Add to calendar</button>';
-          body += '<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:8px">💬 Tournament chat</button>';
+          body += `<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:8px">💬 Tournament chat${t.chat_unread ? ` <span class="tag live" style="margin:0 0 0 6px">${t.chat_unread > 9 ? '9+' : t.chat_unread} new</span>` : ''}</button>`;
         }
         if (t.is_organizer) {
           body += `
@@ -3383,7 +3383,7 @@
           body += `<div class="row-sub" style="margin-top:10px">${t.is_organizer ? 'Tap a match to enter its score.' : 'Tap one of your matches to report the score.'}</div>`;
         }
         if (t.my_entry_id || t.is_organizer) {
-          body += '<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:12px">💬 Tournament chat</button>';
+          body += `<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:12px">💬 Tournament chat${t.chat_unread ? ` <span class="tag live" style="margin:0 0 0 6px">${t.chat_unread > 9 ? '9+' : t.chat_unread} new</span>` : ''}</button>`;
         }
         if (t.status === 'active' && t.is_organizer) {
           body += '<button class="btn btn-secondary btn-block" id="td-edit" style="margin-top:8px">✏️ Edit details</button>';

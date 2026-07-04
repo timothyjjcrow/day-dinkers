@@ -4504,3 +4504,37 @@ def test_decline_game_invite(client):
     client.post(f"/api/games/{game2['id']}/join", headers=auth_headers(b['token']))
     assert client.post(f"/api/games/{game2['id']}/invites/decline",
                        headers=auth_headers(b['token'])).status_code == 400
+
+
+def test_tournament_chat_unread_badge(client):
+    """Detail payload counts unread chat messages; reading the thread clears it."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    outsider = register(client, 'x@example.com', 'Xan')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+
+    client.post(f"/api/tournaments/{t['id']}/chat", json={'body': 'first'},
+                headers=auth_headers(a['token']))
+    client.post(f"/api/tournaments/{t['id']}/chat", json={'body': 'second'},
+                headers=auth_headers(a['token']))
+
+    # Ben (never opened the thread): 2 unread; Ana (sender): 0
+    detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(b['token'])).get_json()
+    assert detail['chat_unread'] == 2
+    detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()
+    assert detail['chat_unread'] == 0
+    # Non-members always see 0
+    detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(outsider['token'])).get_json()
+    assert detail['chat_unread'] == 0
+
+    # Ben opens the chat -> cleared; a new message bumps it again
+    client.get(f"/api/tournaments/{t['id']}/chat", headers=auth_headers(b['token']))
+    detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(b['token'])).get_json()
+    assert detail['chat_unread'] == 0
+    client.post(f"/api/tournaments/{t['id']}/chat", json={'body': 'third'},
+                headers=auth_headers(a['token']))
+    detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(b['token'])).get_json()
+    assert detail['chat_unread'] == 1
