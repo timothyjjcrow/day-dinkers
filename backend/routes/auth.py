@@ -268,6 +268,24 @@ def _me_payload(user):
     }
 
 
+@auth_bp.post('/client-errors')
+@rate_limit(10, 300)
+def report_client_error():
+    """Browser-side crash reports land in the server log (visible on Render)
+    — no storage, tight rate limit, hard truncation. Anonymous by design so
+    login-screen breakage reports too."""
+    payload = request.get_json(silent=True) or {}
+    user = optional_current_user()
+    current_app.logger.error(
+        'CLIENT ERROR%s: %s | at %s | %s',
+        f' (user {user.id})' if user else '',
+        str(payload.get('message') or '')[:300],
+        str(payload.get('url') or '')[:200],
+        str(payload.get('stack') or '')[:600],
+    )
+    return '', 204
+
+
 @auth_bp.post('/auth/register')
 @rate_limit(10, 600)
 def register():

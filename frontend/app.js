@@ -5603,6 +5603,32 @@
     } catch { /* already friends / requested — fine */ }
   }
 
+  // Ship unexpected browser errors to the server log — capped per session so
+  // a render loop can't flood anything.
+  let errorsReported = 0;
+  function reportClientError(message, stack) {
+    if (errorsReported >= 3) return;
+    errorsReported += 1;
+    try {
+      fetch('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: String(message || '').slice(0, 300),
+          stack: String(stack || '').slice(0, 600),
+          url: location.href.slice(0, 200),
+        }),
+      }).catch(() => {});
+    } catch { /* never let the reporter throw */ }
+  }
+  window.addEventListener('error', (e) => {
+    reportClientError(e.message, e.error && e.error.stack);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const reason = e.reason || {};
+    reportClientError(reason.message || String(e.reason), reason.stack);
+  });
+
   async function boot() {
     applyTheme();
     if ('serviceWorker' in navigator && location.protocol === 'https:') {

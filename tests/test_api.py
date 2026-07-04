@@ -4433,3 +4433,17 @@ def test_court_past_champions(client):
     # Other courts unaffected
     other = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
     assert client.get(f'/api/courts/{other}').get_json()['past_champions'] == []
+
+
+def test_client_error_reporting(client):
+    """Browser crash reports are accepted anonymously and never stored."""
+    res = client.post('/api/client-errors', json={
+        'message': 'TypeError: x is undefined', 'stack': 'x' * 10000, 'url': 'https://app/#court/1',
+    })
+    assert res.status_code == 204
+    # Junk body still 204s (payload is optional-everything)
+    assert client.post('/api/client-errors', json=None).status_code == 204
+    # Authenticated reports work too
+    a = register(client, 'a@example.com', 'Ana')
+    assert client.post('/api/client-errors', json={'message': 'boom'},
+                       headers=auth_headers(a['token'])).status_code == 204
