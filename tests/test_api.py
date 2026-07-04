@@ -4606,3 +4606,14 @@ def test_court_photo_likes(client):
     assert res.get_json() == {'liked': False, 'likes': 1}
     assert client.post(f'/api/courts/{court_id}/photos/9999/like',
                        headers=auth_headers(a['token'])).status_code == 404
+
+
+def test_send_feedback(client):
+    """Feedback requires auth and a non-trivial message."""
+    a = register(client, 'a@example.com', 'Ana')
+    assert client.post('/api/feedback', json={'message': 'love the brackets!'}).status_code == 401
+    res = client.post('/api/feedback', json={'message': 'love the brackets!'},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 200 and res.get_json()['sent'] is True
+    assert client.post('/api/feedback', json={'message': ''},
+                       headers=auth_headers(a['token'])).status_code == 400

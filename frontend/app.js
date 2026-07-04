@@ -4489,12 +4489,32 @@
         </div>`) : ''}
       <button class="btn btn-secondary btn-block" id="pf-edit" style="margin-bottom:10px">✏️ Edit profile</button>
       <button class="btn btn-secondary btn-block" id="pf-activity" style="margin-bottom:10px">🔔 Activity</button>
+      <button class="btn btn-secondary btn-block" id="pf-feedback" style="margin-bottom:10px">💡 Send feedback</button>
       <button class="btn btn-danger btn-block" id="pf-logout">Log out</button>
       <div id="pf-upcoming"></div>
       <div id="pf-courts"></div>
       <div id="pf-history"></div>
     `;
 
+    el.querySelector('#pf-feedback')?.addEventListener('click', () => {
+      const sheet = openModal(`
+        ${modalHead('💡 Send feedback')}
+        <p class="row-sub" style="margin-bottom:10px">Found a bug? Missing a feature? It goes straight to the person building Third Shot.</p>
+        <textarea id="fb-text" maxlength="2000" rows="5" placeholder="What's on your mind?" style="width:100%"></textarea>
+        <button class="btn btn-primary btn-block" id="fb-send" style="margin-top:12px">Send</button>
+      `);
+      sheet.querySelector('#fb-send').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const message = sheet.querySelector('#fb-text').value.trim();
+        if (message.length < 3) { toast('Say a little more 🙂'); return; }
+        btn.disabled = true;
+        try {
+          await api('/feedback', { method: 'POST', body: JSON.stringify({ message }) });
+          closeModal(sheet);
+          toast('Thanks — feedback sent! 💚');
+        } catch (err) { toast(err.message); btn.disabled = false; }
+      });
+    });
     el.querySelector('#pf-install')?.addEventListener('click', async () => {
       const prompt = state.installPrompt;
       if (!prompt) return;

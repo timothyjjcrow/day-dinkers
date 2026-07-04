@@ -286,6 +286,26 @@ def report_client_error():
     return '', 204
 
 
+@auth_bp.post('/feedback')
+@rate_limit(5, 3600)
+@login_required
+def send_feedback():
+    """A direct line from players to the operator: feedback lands in the
+    server log (visible on Render) tagged with who sent it."""
+    payload = request.get_json(silent=True) or {}
+    message = str(payload.get('message') or '').strip()
+    if len(message) < 3:
+        return jsonify({'error': 'message_required'}), 400
+    current_app.logger.warning(
+        'USER FEEDBACK from %s (#%s, %s): %s',
+        g.current_user.display_name,
+        g.current_user.id,
+        g.current_user.email,
+        message[:2000],
+    )
+    return jsonify({'sent': True})
+
+
 @auth_bp.post('/auth/register')
 @rate_limit(10, 600)
 def register():
