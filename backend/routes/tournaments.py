@@ -201,6 +201,33 @@ def create_tournament():
         max_entries=max_entries,
     )
     db.session.add(tournament)
+    db.session.flush()
+
+    # Ping players who saved this court — same opt-in, mute preference, and
+    # 3h anti-churn window as new-game pings (shared court_game kind).
+    from backend.models import FavoriteCourt, Notification
+    fans = FavoriteCourt.query.filter_by(court_id=court.id).limit(200).all()
+    recently_pinged = {
+        n.user_id
+        for n in Notification.query.filter(
+            Notification.kind == 'court_game',
+            Notification.related_user_id == g.current_user.id,
+            Notification.created_at >= utcnow() - timedelta(hours=3),
+            Notification.user_id.in_([f.user_id for f in fans]),
+        )
+    } if fans else set()
+    for fan in fans:
+        if fan.user_id == g.current_user.id or fan.user_id in recently_pinged:
+            continue
+        if is_blocked_between(g.current_user.id, fan.user_id):
+            continue
+        notify(
+            fan.user_id,
+            'court_game',
+            f'New tournament at {court.name} — a court you saved',
+            related_user_id=g.current_user.id,
+            related_tournament_id=tournament.id,
+        )
     db.session.commit()
     return jsonify(tournament.to_dict(g.current_user.id, detail=True)), 201
 

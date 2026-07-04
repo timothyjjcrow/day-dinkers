@@ -3928,3 +3928,33 @@ def test_court_detail_lists_tournaments(client):
     # Anonymous viewers see them too (court detail is public)
     anon = client.get(f'/api/courts/{court_id}').get_json()
     assert any(x['id'] == t['id'] for x in anon['tournaments'])
+
+
+def test_tournament_pings_court_fans(client):
+    """Creating a tournament pings players who saved that court (muteable)."""
+    a = register(client, 'a@example.com', 'Ana')
+    fan = register(client, 'b@example.com', 'Ben')
+    muted = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    for p in (fan, muted):
+        assert client.post(f'/api/courts/{court_id}/favorite',
+                           headers=auth_headers(p['token'])).status_code in (200, 201)
+    client.patch('/api/me', json={'muted_notifications': ['court_game']},
+                 headers=auth_headers(muted['token']))
+
+    t = make_tournament(client, a['token'], court_id)
+
+    notifs = client.get('/api/notifications', headers=auth_headers(fan['token'])).get_json()['items']
+    pings = [n for n in notifs if n['kind'] == 'court_game']
+    assert len(pings) == 1
+    assert 'New tournament at' in pings[0]['title']
+    assert pings[0]['related_tournament_id'] == t['id']
+
+    notifs = client.get('/api/notifications', headers=auth_headers(muted['token'])).get_json()['items']
+    assert not [n for n in notifs if n['kind'] == 'court_game']
+
+    # Anti-churn: a second tournament right away doesn't re-ping the fan
+    make_tournament(client, a['token'], court_id)
+    notifs = client.get('/api/notifications', headers=auth_headers(fan['token'])).get_json()['items']
+    assert len([n for n in notifs if n['kind'] == 'court_game']) == 1
