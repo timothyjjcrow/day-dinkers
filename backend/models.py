@@ -826,6 +826,8 @@ class Tournament(TimestampMixin, db.Model):
     event_type = db.Column(db.String(20), nullable=False, default='singles')
     max_entries = db.Column(db.Integer, nullable=False, default=8)
     status = db.Column(db.String(20), nullable=False, default='registration', index=True)
+    reminded_at = db.Column(db.DateTime)          # hour-before reminder sent
+    day_reminded_at = db.Column(db.DateTime)      # day-before reminder sent
     # use_alter breaks the tournament <-> tournament_entry FK cycle at create_all.
     champion_entry_id = db.Column(
         db.Integer,

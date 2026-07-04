@@ -305,8 +305,10 @@ def _maybe_weekly_recap(user):
 def me():
     # Lazy import: games.py imports from this module at load time.
     from backend.routes.games import expire_stale_unscored, send_game_reminders
+    from backend.routes.tournaments import send_tournament_reminders
     expire_stale_unscored()
     send_game_reminders()
+    send_tournament_reminders()
     _maybe_weekly_recap(g.current_user)
     return jsonify(_me_payload(g.current_user))
 

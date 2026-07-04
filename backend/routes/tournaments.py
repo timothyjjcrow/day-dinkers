@@ -278,6 +278,10 @@ def edit_tournament(tournament_id):
             return jsonify({'error': 'scheduled_in_past'}), 400
         rescheduled = starts_at != tournament.starts_at
         tournament.starts_at = starts_at
+        if rescheduled:
+            # Re-arm both reminders for the new time.
+            tournament.reminded_at = None
+            tournament.day_reminded_at = None
 
     if rescheduled:
         for uid in tournament.participant_ids() - {g.current_user.id}:
@@ -761,6 +765,51 @@ def score_match(tournament_id, match_id):
 def _top_of_standings(tournament):
     table = _standings(tournament)
     return table[0]['entry']['id'] if table else None
+
+
+REMINDER_LEAD_MINUTES = 65
+
+
+def send_tournament_reminders():
+    """Lazy sweep (runs on /me reads, like game reminders): hour-before and
+    day-before nudges to every participant, at most once each per tournament."""
+    now = utcnow()
+    open_statuses = ('registration', 'active')
+
+    hour_due = Tournament.query.filter(
+        Tournament.status.in_(open_statuses),
+        Tournament.reminded_at.is_(None),
+        Tournament.starts_at > now,
+        Tournament.starts_at <= now + timedelta(minutes=REMINDER_LEAD_MINUTES),
+    ).all()
+    day_due = Tournament.query.filter(
+        Tournament.status.in_(open_statuses),
+        Tournament.day_reminded_at.is_(None),
+        Tournament.starts_at > now + timedelta(hours=20),
+        Tournament.starts_at <= now + timedelta(hours=28),
+    ).all()
+
+    changed = False
+    for tournament, title in (
+        [(t, f'{t.name} starts in about an hour — check in when you arrive')
+         for t in hour_due]
+        + [(t, f'{t.name} is tomorrow — get your paddle ready')
+           for t in day_due]
+    ):
+        for uid in tournament.participant_ids():
+            notify(
+                uid,
+                'tournament_reminder',
+                title,
+                related_tournament_id=tournament.id,
+            )
+        if tournament in hour_due:
+            tournament.reminded_at = now
+        else:
+            tournament.day_reminded_at = now
+        changed = True
+    if changed:
+        db.session.commit()
 
 
 CHECKIN_OPENS_HOURS_BEFORE = 24

@@ -4007,3 +4007,44 @@ def test_tournament_partner_swap(client):
     res = client.patch(f"/api/tournaments/{t['id']}/register",
                        json={'partner_id': b['user']['id']}, headers=auth_headers(a['token']))
     assert res.status_code == 409
+
+
+def test_tournament_reminders(client):
+    """Day-before and hour-before reminders fire once; reschedule re-arms."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def reminders_for(who):
+        notifs = client.get('/api/notifications', headers=auth_headers(who['token'])).get_json()['items']
+        return [n for n in notifs if n['kind'] == 'tournament_reminder']
+
+    # Day-before: starts in ~22h
+    t = make_tournament(client, a['token'], court_id, hours_ahead=22)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+    client.get('/api/me', headers=auth_headers(a['token']))  # trigger sweep
+    assert len(reminders_for(a)) == 1
+    assert len(reminders_for(b)) == 1
+    assert 'tomorrow' in reminders_for(b)[0]['title']
+    assert reminders_for(b)[0]['related_tournament_id'] == t['id']
+    # Sweep again — no duplicates
+    client.get('/api/me', headers=auth_headers(b['token']))
+    assert len(reminders_for(b)) == 1
+
+    # Hour-before: starts in ~30min (fresh tournament)
+    t2 = make_tournament(client, a['token'], court_id, hours_ahead=0.5)
+    _register_entry(client, t2['id'], a['token'])
+    client.get('/api/me', headers=auth_headers(a['token']))
+    mine = [n for n in reminders_for(a) if n['related_tournament_id'] == t2['id']]
+    assert len(mine) == 1 and 'about an hour' in mine[0]['title']
+
+    # Reschedule re-arms the day-before reminder
+    from datetime import timedelta
+    from backend.models import utcnow
+    new_start = (utcnow() + timedelta(hours=23)).isoformat() + 'Z'
+    client.patch(f"/api/tournaments/{t['id']}", json={'starts_at': new_start},
+                 headers=auth_headers(a['token']))
+    client.get('/api/me', headers=auth_headers(a['token']))
+    t1_reminders = [n for n in reminders_for(b) if n['related_tournament_id'] == t['id']]
+    assert len(t1_reminders) == 2  # original + re-armed after reschedule
