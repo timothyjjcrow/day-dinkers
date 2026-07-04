@@ -365,6 +365,65 @@ def register_entry(tournament_id):
     return jsonify(_detail_payload(tournament, user.id)), 201
 
 
+@tournaments_bp.patch('/tournaments/<int:tournament_id>/register')
+@rate_limit(30, 3600)
+@login_required
+def swap_partner(tournament_id):
+    """The player who registered a doubles team swaps in a different partner
+    while registration is still open."""
+    tournament = db.session.get(Tournament, tournament_id)
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    if tournament.status != 'registration':
+        return jsonify({'error': 'registration_closed'}), 409
+    if tournament.event_type != 'doubles':
+        return jsonify({'error': 'not_doubles'}), 400
+    entry = tournament.entry_for(g.current_user.id)
+    if not entry:
+        return jsonify({'error': 'not_registered'}), 404
+    if entry.player1_id != g.current_user.id:
+        return jsonify({'error': 'not_entry_owner'}), 403
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        partner_id = int(payload.get('partner_id') or 0)
+    except (TypeError, ValueError):
+        partner_id = 0
+    partner = db.session.get(User, partner_id) if partner_id else None
+    if not partner or partner.deleted_at or partner.id == g.current_user.id:
+        return jsonify({'error': 'partner_required'}), 400
+    if partner.id == entry.player2_id:
+        return jsonify(_detail_payload(tournament, g.current_user.id))
+    if partner.id not in friend_ids(g.current_user.id):
+        return jsonify({'error': 'partner_not_friend'}), 403
+    if is_blocked_between(g.current_user.id, partner.id):
+        return jsonify({'error': 'blocked'}), 403
+    if tournament.entry_for(partner.id):
+        return jsonify({'error': 'partner_already_registered'}), 409
+
+    old_partner_id = entry.player2_id
+    entry.player2_id = partner.id
+    # Refresh the relationship so this response serializes the new pair.
+    entry.player2 = partner
+    if old_partner_id:
+        notify(
+            old_partner_id,
+            'tournament_withdraw',
+            f'{g.current_user.display_name} changed partners for {tournament.name}',
+            related_user_id=g.current_user.id,
+            related_tournament_id=tournament.id,
+        )
+    notify(
+        partner.id,
+        'tournament_invite',
+        f'{g.current_user.display_name} signed you up as their partner for {tournament.name}',
+        related_user_id=g.current_user.id,
+        related_tournament_id=tournament.id,
+    )
+    db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
 @tournaments_bp.delete('/tournaments/<int:tournament_id>/register')
 @rate_limit(30, 3600)
 @login_required

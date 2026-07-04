@@ -3958,3 +3958,52 @@ def test_tournament_pings_court_fans(client):
     make_tournament(client, a['token'], court_id)
     notifs = client.get('/api/notifications', headers=auth_headers(fan['token'])).get_json()['items']
     assert len([n for n in notifs if n['kind'] == 'court_game']) == 1
+
+
+def test_tournament_partner_swap(client):
+    """The registering player can swap doubles partners during registration."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    stranger = register(client, 'd@example.com', 'Dee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, event_type='doubles')
+
+    def befriend(x, y):
+        client.post('/api/friends/request', json={'user_id': y['user']['id']}, headers=auth_headers(x['token']))
+        fid = client.get('/api/friends', headers=auth_headers(y['token'])).get_json()['incoming'][0]['friendship_id']
+        client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(y['token']))
+
+    befriend(a, b)
+    befriend(a, c)
+    _register_entry(client, t['id'], a['token'], partner_id=b['user']['id'])
+
+    # Partner (player2) can't swap; strangers can't be swapped in
+    res = client.patch(f"/api/tournaments/{t['id']}/register",
+                       json={'partner_id': c['user']['id']}, headers=auth_headers(b['token']))
+    assert res.status_code == 403
+    res = client.patch(f"/api/tournaments/{t['id']}/register",
+                       json={'partner_id': stranger['user']['id']}, headers=auth_headers(a['token']))
+    assert res.status_code == 403
+
+    # Ana swaps Ben -> Cam; both sides are told
+    res = client.patch(f"/api/tournaments/{t['id']}/register",
+                       json={'partner_id': c['user']['id']}, headers=auth_headers(a['token']))
+    assert res.status_code == 200
+    entry = res.get_json()['entries'][0]
+    assert entry['name'] == 'Ana & Cam'
+    notifs = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
+    assert any(n['kind'] == 'tournament_withdraw' and 'changed partners' in n['title'] for n in notifs)
+    notifs = client.get('/api/notifications', headers=auth_headers(c['token'])).get_json()['items']
+    assert any(n['kind'] == 'tournament_invite' for n in notifs)
+
+    # Ben is free again and can enter his own team
+    _register_entry(client, t['id'], b['token'], partner_id=a['user']['id'], expect=409)  # Ana taken
+    befriend(b, stranger)
+    _register_entry(client, t['id'], b['token'], partner_id=stranger['user']['id'])
+
+    # Swap refused once the bracket starts
+    client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
+    res = client.patch(f"/api/tournaments/{t['id']}/register",
+                       json={'partner_id': b['user']['id']}, headers=auth_headers(a['token']))
+    assert res.status_code == 409

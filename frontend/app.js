@@ -3234,6 +3234,14 @@
                <button class="btn btn-primary btn-block" id="td-register">🏆 Register our team</button>`
             : '<button class="btn btn-primary btn-block" id="td-register" style="margin-top:12px">🏆 Register</button>';
         } else if (t.my_entry_id) {
+          // Entry owner of a doubles team can swap partners while registration is open.
+          if (isDoubles && myEntry && myEntry.players[0] && myEntry.players[0].id === state.me.id) {
+            body += `
+              <div class="form-field" style="margin-top:12px"><label>Swap partner (must be a friend)</label>
+                <select id="td-newpartner"><option value="">Keep ${esc(myEntry.players[1] ? myEntry.players[1].display_name : 'current partner')}</option></select>
+              </div>
+              <button class="btn btn-secondary btn-block" id="td-swap">🔁 Change partner</button>`;
+          }
           body += '<button class="btn btn-secondary btn-block" id="td-withdraw" style="margin-top:12px">Withdraw my entry</button>';
         }
         body += '<button class="btn btn-secondary btn-block" id="td-share" style="margin-top:8px">📤 Share — invite players</button>';
@@ -3308,6 +3316,16 @@
           toast("You're in! 🏆");
         } catch (err) { toast(err.message); btn.disabled = false; }
       });
+      content.querySelector('#td-swap')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const pid = Number(content.querySelector('#td-newpartner')?.value || 0);
+        if (!pid) { toast('Pick the friend to swap in'); return; }
+        btn.disabled = true;
+        try {
+          render(await api(`/tournaments/${t.id}/register`, { method: 'PATCH', body: JSON.stringify({ partner_id: pid }) }));
+          toast('Partner updated 🔁');
+        } catch (err) { toast(err.message); btn.disabled = false; }
+      });
       content.querySelector('#td-withdraw')?.addEventListener('click', async () => {
         if (!confirm('Withdraw from this tournament?')) return;
         try { render(await api(`/tournaments/${t.id}/register`, { method: 'DELETE' })); toast('Withdrawn'); }
@@ -3344,18 +3362,24 @@
         openTournamentScoreModal(t, m, refresh);
       }));
 
-      // Populate the doubles partner picker with friends not already entered.
-      const partnerSel = content.querySelector('#td-partner');
-      if (partnerSel) {
+      // Populate the doubles partner pickers (register + swap) with friends
+      // not already entered.
+      const partnerSels = [
+        content.querySelector('#td-partner'),
+        content.querySelector('#td-newpartner'),
+      ].filter(Boolean);
+      if (partnerSels.length) {
         api('/friends').then((data) => {
           const taken = new Set();
           t.entries.forEach((en) => en.players.forEach((p) => taken.add(p.id)));
-          (data.friends || []).forEach((f) => {
-            if (taken.has(f.id)) return;
-            const opt = document.createElement('option');
-            opt.value = f.id;
-            opt.textContent = f.display_name;
-            partnerSel.appendChild(opt);
+          partnerSels.forEach((sel) => {
+            (data.friends || []).forEach((f) => {
+              if (taken.has(f.id)) return;
+              const opt = document.createElement('option');
+              opt.value = f.id;
+              opt.textContent = f.display_name;
+              sel.appendChild(opt);
+            });
           });
         }).catch(() => {});
       }
