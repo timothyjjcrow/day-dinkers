@@ -2918,7 +2918,7 @@
           <div class="row-main">
             <div class="row-title">${esc(t.name)}</div>
             <div class="row-sub">${esc(meta)}</div>
-            <div class="row-sub" style="margin-top:2px">${T_FORMAT_LABEL[t.format] || t.format} · ${t.event_type === 'doubles' ? 'Doubles' : 'Singles'} · ${t.entry_count}/${t.max_entries} ${t.event_type === 'doubles' ? 'teams' : 'players'}</div>
+            <div class="row-sub" style="margin-top:2px">${T_FORMAT_LABEL[t.format] || t.format} · ${t.event_type === 'doubles' ? 'Doubles' : 'Singles'}${t.ranked ? ' · ⚡ Ranked' : ''} · ${t.entry_count}/${t.max_entries} ${t.event_type === 'doubles' ? 'teams' : 'players'}</div>
             <div style="margin-top:6px">${tournamentStatusChip(t)}${t.my_entry_id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-accent)">✓ You\'re in</span>' : ''}${t.is_organizer ? ' <span class="tag">Organizer</span>' : ''}</div>
           </div>
           <span class="chev">›</span>
@@ -3051,6 +3051,14 @@
         </div>
       </div>
       <div class="form-field">
+        <label>Play</label>
+        <div class="segmented" id="tc-ranked">
+          <button type="button" data-val="" class="active">Casual</button>
+          <button type="button" data-val="1">⚡ Ranked</button>
+        </div>
+        <div class="row-sub" style="margin-top:6px">Ranked: every match counts toward player ratings when the tournament finishes.</div>
+      </div>
+      <div class="form-field">
         <input type="text" id="tc-desc" maxlength="200" placeholder="Details (optional) — e.g. Games to 11, win by 2" />
       </div>
       <button class="btn btn-primary btn-block" id="tc-submit" style="padding:15px">Create tournament</button>
@@ -3106,6 +3114,7 @@
         : "Single elimination — lose and you're out, seeded by rating.";
     });
     segPick('#tc-event');
+    segPick('#tc-ranked');
 
     modal.querySelector('#tc-submit').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
@@ -3126,6 +3135,7 @@
             format: modal.querySelector('#tc-format button.active').dataset.val,
             event_type: modal.querySelector('#tc-event button.active').dataset.val,
             max_entries: Number(modal.querySelector('#tc-max').value),
+            ranked: !!modal.querySelector('#tc-ranked button.active').dataset.val,
             description: modal.querySelector('#tc-desc').value.trim(),
           }),
         });
@@ -3261,7 +3271,7 @@
       const meta = [
         t.court ? `${t.court.name}${t.court.city ? ', ' + t.court.city : ''}` : '',
         fmtDateTime(t.starts_at),
-        `${T_FORMAT_LABEL[t.format] || t.format} · ${isDoubles ? 'Doubles' : 'Singles'}`,
+        `${T_FORMAT_LABEL[t.format] || t.format} · ${isDoubles ? 'Doubles' : 'Singles'}${t.ranked ? ' · ⚡ Ranked' : ''}`,
       ].filter(Boolean);
 
       let body = `

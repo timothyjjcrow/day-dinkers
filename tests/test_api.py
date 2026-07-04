@@ -4254,3 +4254,77 @@ def test_tournament_abuse_payloads(client):
                       headers=auth_headers(a['token']))
     assert res.status_code == 201
     assert len(res.get_json()['body']) == 2000
+
+
+def test_ranked_tournament_applies_elo(client):
+    """Ranked tournaments settle ELO for every decided match at completion."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    from datetime import timedelta
+    from backend.models import utcnow
+    res = client.post('/api/tournaments', json={
+        'name': 'Ranked Rumble', 'court_id': court_id,
+        'starts_at': (utcnow() + timedelta(hours=2)).isoformat() + 'Z',
+        'format': 'single_elim', 'event_type': 'singles',
+        'max_entries': 4, 'ranked': True,
+    }, headers=auth_headers(a['token']))
+    t = res.get_json()
+    assert t['ranked'] is True
+
+    for p in (a, b, c, d):
+        _register_entry(client, t['id'], p['token'])
+    data = client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token'])).get_json()
+
+    def score(mid, s1, s2):
+        return client.post(f"/api/tournaments/{t['id']}/matches/{mid}/score",
+                           json={'score1': s1, 'score2': s2},
+                           headers=auth_headers(a['token'])).get_json()
+
+    semis = [m for m in data['matches'] if m['round'] == 1]
+    data = score(semis[0]['id'], 11, 5)
+    data = score(semis[1]['id'], 11, 7)
+    # No ratings move until completion (corrections stay safe)
+    me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me['user']['rating'] == 1200
+    final = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 0)
+    third = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 1)
+    data = score(final['id'], 11, 9)
+    data = score(third['id'], 11, 2)
+    assert data['status'] == 'completed'
+
+    # Everyone played 2 rated matches; champion strictly gained, 4th lost
+    champ_id = data['champion']['players'][0]['id']
+    users = {p['user']['id']: p for p in ()}
+    ratings = {}
+    for p in (a, b, c, d):
+        u = client.get('/api/me', headers=auth_headers(p['token'])).get_json()['user']
+        ratings[u['id']] = u
+    champ = ratings[champ_id]
+    assert champ['rating'] > 1200
+    assert champ['ranked_wins'] == 2 and champ['ranked_losses'] == 0
+    # Ratings are zero-sum across the field
+    assert sum(u['rating'] for u in ratings.values()) == 4800
+    # Each player got a net-rating notification
+    notifs = client.get('/api/notifications', headers=auth_headers(a['token'])).get_json()['items']
+    assert any(n['kind'] == 'ranked_result' and 'Ranked Rumble rating:' in n['title'] for n in notifs)
+
+
+def test_casual_tournament_leaves_ratings_alone(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, max_entries=2)  # ranked defaults off
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+    client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
+    m = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()['matches'][0]
+    data = client.post(f"/api/tournaments/{t['id']}/matches/{m['id']}/score",
+                       json={'score1': 11, 'score2': 1}, headers=auth_headers(a['token'])).get_json()
+    assert data['status'] == 'completed'
+    for p in (a, b):
+        u = client.get('/api/me', headers=auth_headers(p['token'])).get_json()['user']
+        assert u['rating'] == 1200 and u['ranked_wins'] == 0 and u['ranked_losses'] == 0

@@ -199,6 +199,7 @@ def create_tournament():
         format=fmt,
         event_type=event_type,
         max_entries=max_entries,
+        ranked=bool(payload.get('ranked')),
     )
     db.session.add(tournament)
     db.session.flush()
@@ -610,6 +611,33 @@ def _complete_tournament(tournament, champion_entry_id):
     # same request without a stale lazy-load.
     tournament.champion_entry = champion
     tournament.completed_at = utcnow()
+
+    # Ranked tournaments settle ELO once, here, when results are final —
+    # corrections during play never double-apply.
+    if tournament.ranked:
+        from backend.routes.games import _apply_elo
+        entries = {e.id: e for e in tournament.entries}
+        totals = {}
+        for match in sorted(tournament.matches, key=lambda m: (m.round, m.position)):
+            if match.winner_entry_id is None or match.score1 is None:
+                continue  # byes and (theoretical) undecided matches don't rate
+            e1, e2 = entries.get(match.entry1_id), entries.get(match.entry2_id)
+            if not e1 or not e2:
+                continue
+            deltas = _apply_elo(
+                e1.players(), e2.players(),
+                team1_won=match.winner_entry_id == match.entry1_id,
+            )
+            for uid, delta in deltas.items():
+                totals[uid] = totals.get(uid, 0) + delta
+        for uid, total in totals.items():
+            notify(
+                uid,
+                'ranked_result',
+                f'{tournament.name} rating: {"+" if total >= 0 else ""}{total}',
+                related_tournament_id=tournament.id,
+            )
+
     champ_name = champion.display_name() if champion else 'The winner'
     for uid in tournament.participant_ids() | {tournament.organizer_id}:
         notify(

@@ -212,6 +212,11 @@ def _upgrade_schema(app):
                         f'ALTER TABLE tournament ADD COLUMN {col} '
                         + ('TIMESTAMP' if is_postgres else 'DATETIME')
                     )
+            if 'ranked' not in t_cols:
+                statements.append(
+                    'ALTER TABLE tournament ADD COLUMN ranked BOOLEAN NOT NULL DEFAULT '
+                    + ('FALSE' if is_postgres else '0')
+                )
 
         if 'tournament_entry' in tables:
             te_cols = {c['name'] for c in inspector.get_columns('tournament_entry')}

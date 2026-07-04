@@ -825,6 +825,8 @@ class Tournament(TimestampMixin, db.Model):
     format = db.Column(db.String(20), nullable=False, default='single_elim')
     event_type = db.Column(db.String(20), nullable=False, default='singles')
     max_entries = db.Column(db.Integer, nullable=False, default=8)
+    # Ranked tournaments feed every decided match into ELO at completion.
+    ranked = db.Column(db.Boolean, nullable=False, default=False)
     status = db.Column(db.String(20), nullable=False, default='registration', index=True)
     reminded_at = db.Column(db.DateTime)          # hour-before reminder sent
     day_reminded_at = db.Column(db.DateTime)      # day-before reminder sent
@@ -878,6 +880,7 @@ class Tournament(TimestampMixin, db.Model):
             'format': self.format,
             'event_type': self.event_type,
             'status': self.status,
+            'ranked': bool(self.ranked),
             'starts_at': iso(self.starts_at),
             'max_entries': self.max_entries,
             'court': self.court.to_summary_dict() if self.court else None,
