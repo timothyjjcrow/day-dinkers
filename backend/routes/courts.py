@@ -458,6 +458,19 @@ def court_detail(court_id):
     payload['players_here'] = players_here
     payload['friends_here'] = sum(1 for p in players_here if p['is_friend'])
     viewer_id = current_user.id if current_user else None
+    # Tournaments hosted here — anything open for registration or under way.
+    from backend.models import Tournament
+    court_tournaments = (
+        Tournament.query.filter(
+            Tournament.court_id == court.id,
+            Tournament.status.in_(['registration', 'active']),
+            Tournament.starts_at >= utcnow() - timedelta(days=3),
+        )
+        .order_by(Tournament.starts_at.asc())
+        .limit(3)
+        .all()
+    )
+    payload['tournaments'] = [t.to_dict(viewer_id) for t in court_tournaments]
     payload['games'] = [game.to_dict(viewer_id) for game in upcoming]
     payload['recent_results'] = [game.to_dict(viewer_id) for game in recent_completed]
     payload['is_checked_in'] = bool(

@@ -1425,6 +1425,9 @@
             </div>
             <span class="chev">›</span>
           </div>`).join('')}` : ''}
+      ${(court.tournaments || []).length ? `
+        <div class="section-label">🏆 Tournaments here</div>
+        ${court.tournaments.map(tournamentCardHtml).join('')}` : ''}
       <div class="section-label">Upcoming games</div>
       ${gamesHtml}
       ${(court.recent_results || []).length ? `
@@ -1593,6 +1596,9 @@
 
     bindGameButtons(modal, () => { closeModal(modal); openCourtDetail(courtId); });
     bindUserButtons(modal);
+    modal.querySelectorAll('[data-open-tournament]').forEach((card) => {
+      card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
+    });
   }
 
   function openChallengeSheet(player, court) {

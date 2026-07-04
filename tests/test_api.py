@@ -3906,3 +3906,25 @@ def test_tournament_titles_on_profiles(client):
     # Ben has no titles
     prof_b = client.get(f"/api/users/{b['user']['id']}", headers=auth_headers(a['token'])).get_json()
     assert prof_b['tournament_titles']['count'] == 0
+
+
+def test_court_detail_lists_tournaments(client):
+    """Court pages surface open/active tournaments held there."""
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    other_court = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+
+    t = make_tournament(client, a['token'], court_id)
+    cancelled = make_tournament(client, a['token'], court_id)
+    client.post(f"/api/tournaments/{cancelled['id']}/cancel", headers=auth_headers(a['token']))
+    elsewhere = make_tournament(client, a['token'], other_court)
+
+    detail = client.get(f'/api/courts/{court_id}', headers=auth_headers(a['token'])).get_json()
+    ids = [x['id'] for x in detail['tournaments']]
+    assert t['id'] in ids
+    assert cancelled['id'] not in ids
+    assert elsewhere['id'] not in ids
+    assert detail['tournaments'][0]['name'] == 'Summer Slam'
+    # Anonymous viewers see them too (court detail is public)
+    anon = client.get(f'/api/courts/{court_id}').get_json()
+    assert any(x['id'] == t['id'] for x in anon['tournaments'])
