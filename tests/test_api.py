@@ -2194,6 +2194,7 @@ def test_my_stats(client):
                      'top_court': None, 'best_partner': None, 'top_rival': None,
                      'form': [], 'badges': [],
                      'tournament_titles': {'count': 0, 'recent': []},
+                     'insights': None,
                      'rating_history': []}
     assert [b['id'] for b in progress] == ['first_win', 'mvp', 'champion']
     assert progress[0] == {'id': 'first_win', 'emoji': '🏅', 'label': 'First win',
@@ -4153,3 +4154,34 @@ def test_weekly_recap_mentions_tournament_titles(client):
     assert recaps, 'expected a recap notification'
     assert any('you won Summer Slam' in n.title for n in recaps), [n.title for n in recaps]
     assert any(n.related_tournament_id == t['id'] for n in recaps)
+
+
+def test_stats_insights(client):
+    """3+ scored games unlock play-pattern insights on /me/stats."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def play(score_a, score_b):
+        game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
+        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+        client.post(f"/api/games/{game['id']}/complete", json={
+            'team1': [a['user']['id']], 'team2': [b['user']['id']],
+            'score_team1': score_a, 'score_team2': score_b,
+        }, headers=auth_headers(a['token']))
+        client.post(f"/api/games/{game['id']}/confirm", headers=auth_headers(b['token']))
+
+    play(11, 5)
+    stats = client.get('/api/me/stats', headers=auth_headers(a['token'])).get_json()
+    assert stats['insights'] is None  # not enough scored games yet
+    play(11, 7)
+    play(6, 11)
+
+    stats = client.get('/api/me/stats', headers=auth_headers(a['token'])).get_json()
+    ins = stats['insights']
+    assert ins is not None
+    # 3 games, +6 +4 -5 -> avg +1.7
+    assert ins['avg_margin'] == 1.7
+    assert ins['busiest_day']  # some weekday name
+    # All three games share a day-part -> best_part covers all of them
+    assert ins['best_part']['games'] == 3 and ins['best_part']['wins'] == 2

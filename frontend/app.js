@@ -4540,6 +4540,25 @@
         el.querySelectorAll('[data-open-tournament]').forEach((row) => {
           row.addEventListener('click', () => openTournamentScreen(Number(row.dataset.openTournament)));
         });
+        if (stats.insights) {
+          const ins = stats.insights;
+          const lines = [];
+          if (ins.best_part) {
+            const pct = Math.round((ins.best_part.wins / ins.best_part.games) * 100);
+            lines.push(`🌤 You win ${pct}% of your ${esc(ins.best_part.label.replace(/s$/, ''))} games (${ins.best_part.wins}/${ins.best_part.games})`);
+          }
+          if (ins.busiest_day) lines.push(`📆 You play most on ${esc(ins.busiest_day)}s`);
+          if (ins.avg_margin != null) {
+            lines.push(`${ins.avg_margin >= 0 ? '📈' : '📉'} Average margin: ${ins.avg_margin > 0 ? '+' : ''}${ins.avg_margin} points`);
+          }
+          if (lines.length) {
+            el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', `
+              <div class="card" style="margin-top:12px;padding:12px 14px">
+                <div style="font-weight:800;font-size:14px;text-align:center;margin-bottom:6px">📊 Your patterns</div>
+                ${lines.map((l) => `<div class="row-sub" style="padding:2px 0">${l}</div>`).join('')}
+              </div>`);
+          }
+        }
         // If the earned rating outgrew the declared level, offer a one-tap
         // upgrade (upward only — nobody wants a demotion prompt). One ask
         // per suggested level per device.

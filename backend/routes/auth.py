@@ -560,6 +560,43 @@ def my_stats():
             'your_wins': top['wins'],
         }
 
+    # Play-pattern insights from scored games: best part of day, busiest
+    # weekday, average score margin. Local time is approximated from the home
+    # longitude (15° ≈ 1h) — plenty for day-part bucketing.
+    insights = None
+    scored = []
+    for game in completed:
+        mine = next((p for p in game.players if p.user_id == user.id), None)
+        if mine and mine.team and game.score_team1 is not None:
+            my_margin = (game.score_team1 - game.score_team2) if mine.team == 1 \
+                else (game.score_team2 - game.score_team1)
+            scored.append((game, my_margin > 0, my_margin))
+    if len(scored) >= 3:
+        offset = timedelta(hours=round((user.home_lng if user.home_lng is not None else -90) / 15))
+        parts, days = {}, {}
+        margin_total = 0
+        for game, won, margin in scored:
+            local = game.scheduled_at + offset
+            part = ('mornings' if 5 <= local.hour < 12
+                    else 'afternoons' if 12 <= local.hour < 17 else 'evenings')
+            wins_n, games_n = parts.get(part, (0, 0))
+            parts[part] = (wins_n + (1 if won else 0), games_n + 1)
+            day = local.strftime('%A')
+            days[day] = days.get(day, 0) + 1
+            margin_total += margin
+        best_part = None
+        eligible = {p: wn for p, wn in parts.items() if wn[1] >= 3}
+        if eligible:
+            part, (wins_n, games_n) = max(
+                eligible.items(), key=lambda kv: kv[1][0] / kv[1][1],
+            )
+            best_part = {'label': part, 'wins': wins_n, 'games': games_n}
+        insights = {
+            'best_part': best_part,
+            'busiest_day': max(days, key=days.get) if days else None,
+            'avg_margin': round(margin_total / len(scored), 1),
+        }
+
     from backend.models import (
         badge_progress, player_badges, rating_history_for, tournament_titles,
     )
@@ -591,6 +628,7 @@ def my_stats():
         'badges': badges,
         'badge_progress': badge_progress(user),
         'tournament_titles': titles,
+        'insights': insights,
         'rating_history': rating_history,
     })
 
