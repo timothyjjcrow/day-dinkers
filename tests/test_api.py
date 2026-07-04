@@ -1771,7 +1771,7 @@ def test_weekly_recap_notification(client, app):
         _maybe_weekly_recap(db.session.get(UserModel, a['user']['id']))
 
     got = recaps(ah)
-    assert len(got) == 1
+    assert len(got) == 1, [n['title'] for n in got]  # diagnose the rare flake
     assert got[0]['title'] == 'Your week on the courts: 1 game, 1–0'
     assert got[0]['body'].startswith('+') and 'rating' in got[0]['body']
     # The marker prevents a repeat on the next app open.
@@ -4185,3 +4185,72 @@ def test_stats_insights(client):
     assert ins['busiest_day']  # some weekday name
     # All three games share a day-part -> best_part covers all of them
     assert ins['best_part']['games'] == 3 and ins['best_part']['wins'] == 2
+
+
+def test_tournament_endpoints_require_auth(client):
+    """Every tournament endpoint rejects anonymous callers outright."""
+    calls = [
+        ('get', '/api/tournaments?mine=1'), ('get', '/api/tournaments/1'),
+        ('post', '/api/tournaments'), ('patch', '/api/tournaments/1'),
+        ('post', '/api/tournaments/1/register'), ('patch', '/api/tournaments/1/register'),
+        ('delete', '/api/tournaments/1/register'), ('delete', '/api/tournaments/1/entries/1'),
+        ('post', '/api/tournaments/1/start'), ('post', '/api/tournaments/1/cancel'),
+        ('post', '/api/tournaments/1/checkin'), ('post', '/api/tournaments/1/matches/1/score'),
+        ('get', '/api/tournaments/1/chat'), ('post', '/api/tournaments/1/chat'),
+    ]
+    for method, path in calls:
+        res = getattr(client, method)(path, json={})
+        assert res.status_code == 401, (method, path, res.status_code)
+
+
+def test_tournament_abuse_payloads(client):
+    """Hostile inputs: clamped sizes, cross-tournament match IDOR, junk scores."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Size clamping on create
+    big = make_tournament(client, a['token'], court_id, max_entries=9999)
+    assert big['max_entries'] == 32
+    tiny = make_tournament(client, a['token'], court_id, max_entries=-5)
+    assert tiny['max_entries'] == 2
+
+    # Two started tournaments; try to score t1's match through t2's URL (IDOR)
+    def started_tournament():
+        t = make_tournament(client, a['token'], court_id, max_entries=2)
+        _register_entry(client, t['id'], a['token'])
+        _register_entry(client, t['id'], b['token'])
+        return client.post(f"/api/tournaments/{t['id']}/start",
+                           headers=auth_headers(a['token'])).get_json()
+
+    t1, t2 = started_tournament(), started_tournament()
+    foreign_match = t1['matches'][0]['id']
+    res = client.post(f"/api/tournaments/{t2['id']}/matches/{foreign_match}/score",
+                      json={'score1': 11, 'score2': 0}, headers=auth_headers(a['token']))
+    assert res.status_code == 404
+    # …and the foreign match is untouched
+    detail = client.get(f"/api/tournaments/{t1['id']}", headers=auth_headers(a['token'])).get_json()
+    assert detail['matches'][0]['winner_entry_id'] is None
+
+    # Junk scores
+    own_match = t1['matches'][0]['id']
+    for payload in ({'score1': 'eleven', 'score2': 3}, {'score1': -1, 'score2': 5},
+                    {'score1': 100, 'score2': 5}, {}, {'score1': None, 'score2': None}):
+        res = client.post(f"/api/tournaments/{t1['id']}/matches/{own_match}/score",
+                          json=payload, headers=auth_headers(a['token']))
+        assert res.status_code == 400, payload
+
+    # Check-in refused on a cancelled tournament
+    t3 = make_tournament(client, a['token'], court_id, hours_ahead=2)
+    _register_entry(client, t3['id'], a['token'])
+    client.post(f"/api/tournaments/{t3['id']}/cancel", headers=auth_headers(a['token']))
+    assert client.post(f"/api/tournaments/{t3['id']}/checkin",
+                       headers=auth_headers(a['token'])).status_code == 409
+
+    # Oversized chat body is truncated to 2000 chars, never 500s
+    t4 = make_tournament(client, a['token'], court_id)
+    _register_entry(client, t4['id'], a['token'])
+    res = client.post(f"/api/tournaments/{t4['id']}/chat", json={'body': 'x' * 5000},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    assert len(res.get_json()['body']) == 2000
