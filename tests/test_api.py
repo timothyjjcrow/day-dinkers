@@ -3628,3 +3628,56 @@ def test_tournament_champion_badge(client):
     # Winning triggered the badge notification
     notifs = client.get('/api/notifications', headers=auth_headers(winner['token'])).get_json()['items']
     assert any(n['kind'] == 'badge_earned' and 'Tournament champion' in n['title'] for n in notifs)
+
+
+def test_tournament_chat(client):
+    """Participants + organizer only; messages ping others once per unread."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    outsider = register(client, 'x@example.com', 'Xan')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+
+    # Outsider can't read or write
+    assert client.get(f"/api/tournaments/{t['id']}/chat",
+                      headers=auth_headers(outsider['token'])).status_code == 403
+    assert client.post(f"/api/tournaments/{t['id']}/chat", json={'body': 'hi'},
+                       headers=auth_headers(outsider['token'])).status_code == 403
+    # Missing tournament 404s
+    assert client.get('/api/tournaments/9999/chat',
+                      headers=auth_headers(a['token'])).status_code == 404
+
+    # Ana sends; Ben reads it and gets exactly one ping despite two messages
+    res = client.post(f"/api/tournaments/{t['id']}/chat", json={'body': 'Check-in at 8:30!'},
+                      headers=auth_headers(a['token']))
+    assert res.status_code == 201
+    first_id = res.get_json()['id']
+    client.post(f"/api/tournaments/{t['id']}/chat", json={'body': 'Courts 3 & 4'},
+                headers=auth_headers(a['token']))
+
+    chat = client.get(f"/api/tournaments/{t['id']}/chat",
+                      headers=auth_headers(b['token'])).get_json()
+    assert [m['body'] for m in chat['items']] == ['Check-in at 8:30!', 'Courts 3 & 4']
+    assert chat['items'][0]['tournament_id'] == t['id']
+    # since_id returns only the newer message
+    newer = client.get(f"/api/tournaments/{t['id']}/chat?since_id={first_id}",
+                       headers=auth_headers(b['token'])).get_json()
+    assert [m['body'] for m in newer['items']] == ['Courts 3 & 4']
+
+    notifs = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
+    pings = [n for n in notifs if n['kind'] == 'tournament_message']
+    assert len(pings) == 1
+    assert pings[0]['related_tournament_id'] == t['id']
+
+    # tournament_message is muteable
+    res = client.patch('/api/me', json={'muted_notifications': ['tournament_message']},
+                       headers=auth_headers(b['token']))
+    assert res.status_code == 200
+    # Mark existing read, then a new message should NOT ping Ben
+    client.post('/api/notifications/read', headers=auth_headers(b['token']))
+    client.post(f"/api/tournaments/{t['id']}/chat", json={'body': 'Bring water'},
+                headers=auth_headers(a['token']))
+    notifs = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
+    assert not [n for n in notifs if n['kind'] == 'tournament_message' and not n['read']]

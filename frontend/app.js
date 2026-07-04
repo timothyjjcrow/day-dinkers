@@ -3201,6 +3201,9 @@
           body += '<button class="btn btn-secondary btn-block" id="td-withdraw" style="margin-top:12px">Withdraw my entry</button>';
         }
         body += '<button class="btn btn-secondary btn-block" id="td-share" style="margin-top:8px">📤 Share — invite players</button>';
+        if (t.my_entry_id || t.is_organizer) {
+          body += '<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:8px">💬 Tournament chat</button>';
+        }
         if (t.is_organizer) {
           body += `
             <div class="section-label" style="margin-top:16px">Organizer</div>
@@ -3211,7 +3214,12 @@
         body += t.format === 'round_robin' ? roundRobinHtml(t) : bracketHtml(t);
         if (t.status === 'active') {
           body += `<div class="row-sub" style="margin-top:10px">${t.is_organizer ? 'Tap a match to enter its score.' : 'Tap one of your matches to report the score.'}</div>`;
-          if (t.is_organizer) body += '<button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:12px">Cancel tournament</button>';
+        }
+        if (t.my_entry_id || t.is_organizer) {
+          body += '<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:12px">💬 Tournament chat</button>';
+        }
+        if (t.status === 'active' && t.is_organizer) {
+          body += '<button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:8px">Cancel tournament</button>';
         }
         body += `<div class="section-label" style="margin-top:14px">${isDoubles ? 'Teams' : 'Players'}</div>`;
         body += t.entries.map((en) => `
@@ -3228,6 +3236,7 @@
       content.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => closeModal(box)));
 
       // --- actions ---
+      content.querySelector('#td-chat')?.addEventListener('click', () => openTournamentChat(t));
       content.querySelector('#td-share')?.addEventListener('click', async () => {
         const spots = t.max_entries - t.entry_count;
         const text = `🏆 ${t.name} — ${T_FORMAT_LABEL[t.format] || t.format} ${t.event_type} tournament at ${t.court ? t.court.name : 'the court'} on ${fmtDateTime(t.starts_at)}. ${spots} spot${spots === 1 ? '' : 's'} left — register in Third Shot!`;
@@ -3315,6 +3324,73 @@
         if (JSON.stringify(fresh) !== JSON.stringify(t)) render(fresh);
       } catch { /* offline */ }
     }, 8000);
+  }
+
+  async function openTournamentChat(t) {
+    let data;
+    try { data = await api(`/tournaments/${t.id}/chat`); } catch (e) { toast(e.message); return; }
+
+    const modal = openModal(`
+      <div class="thread">
+        <div class="thread-head">
+          <button class="modal-close" style="font-size:18px">‹</button>
+          <span style="font-size:22px">🏆</span>
+          <div class="row-main">
+            <div class="row-title">Tournament chat</div>
+            <div class="row-sub">${esc(data.tournament.name)} — players & organizer only</div>
+          </div>
+        </div>
+        <div class="thread-msgs" id="tch-msgs"></div>
+        <form class="thread-input" id="tch-form">
+          <input type="text" id="tch-text" placeholder="Message the tournament…" autocomplete="off" maxlength="500" />
+          <button type="submit" aria-label="Send">➤</button>
+        </form>
+      </div>
+    `, { chat: true });
+
+    const msgsEl = modal.querySelector('#tch-msgs');
+    let lastId = 0;
+    const renderMsgs = (items, append) => {
+      const html = items.map((m) => {
+        const mine = m.sender_id === state.me.id;
+        return `
+        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+          ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%">
+            ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${esc(m.body)}
+            <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
+          </div>
+        </div>`;
+      }).join('');
+      if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
+      else if (append) msgsEl.innerHTML = html;
+      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Coordinate the day — “what time are check-ins?”, “courts 3 & 4” 🏆</div>';
+      if (items.length) lastId = items[items.length - 1].id;
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    };
+    renderMsgs(data.items, false);
+    attachChatViewport(modal, msgsEl, modal.querySelector('#tch-text'));
+
+    const pollTimer = setInterval(async () => {
+      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      try {
+        const fresh = await api(`/tournaments/${t.id}/chat?since_id=${lastId}`);
+        if (fresh.items.length) renderMsgs(fresh.items, true);
+      } catch { /* offline */ }
+    }, 5000);
+
+    modal.querySelector('#tch-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = modal.querySelector('#tch-text');
+      const body = input.value.trim();
+      if (!body) return;
+      input.value = '';
+      try {
+        const msg = await api(`/tournaments/${t.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
+        renderMsgs([msg], true);
+      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+    });
   }
 
   function openTournamentScoreModal(t, match, refresh) {
@@ -4947,7 +5023,7 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
       if (n.related_tournament_id) return { type: 'tournament', id: n.related_tournament_id };

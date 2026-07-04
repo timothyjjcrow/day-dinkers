@@ -5,7 +5,8 @@ from sqlalchemy import or_
 from backend.app import db
 from backend.models import (
     Court, CourtChatRead, Game, GameChatRead, GamePlayer, Message,
-    Notification, User, blocked_pair_ids, is_blocked_between, notify, utcnow,
+    Notification, Tournament, User, blocked_pair_ids, is_blocked_between,
+    notify, utcnow,
 )
 from backend.security import rate_limit
 
@@ -149,6 +150,74 @@ def send_game_message(game_id):
                 body[:140],
                 related_user_id=g.current_user.id,
                 related_game_id=game.id,
+            )
+    db.session.commit()
+    return jsonify(message.to_dict()), 201
+
+
+def _tournament_member_or_403(tournament_id):
+    tournament = db.session.get(Tournament, tournament_id)
+    if not tournament:
+        return None, (jsonify({'error': 'tournament_not_found'}), 404)
+    uid = g.current_user.id
+    if uid != tournament.organizer_id and uid not in tournament.participant_ids():
+        return None, (jsonify({'error': 'participants_only'}), 403)
+    return tournament, None
+
+
+@chat_bp.get('/tournaments/<int:tournament_id>/chat')
+@login_required
+def tournament_chat(tournament_id):
+    tournament, err = _tournament_member_or_403(tournament_id)
+    if err:
+        return err
+    since_id = request.args.get('since_id', type=int)
+    query = Message.query.filter(Message.tournament_id == tournament_id)
+    if since_id:
+        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
+    else:
+        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+    return jsonify({
+        'tournament': {'id': tournament.id, 'name': tournament.name},
+        'items': [m.to_dict() for m in messages],
+    })
+
+
+@chat_bp.post('/tournaments/<int:tournament_id>/chat')
+@rate_limit(60, 60)
+@login_required
+def send_tournament_message(tournament_id):
+    tournament, err = _tournament_member_or_403(tournament_id)
+    if err:
+        return err
+    payload = request.get_json(silent=True) or {}
+    body = str(payload.get('body') or '').strip()
+    if not body:
+        return jsonify({'error': 'message_body_required'}), 400
+    message = Message(
+        sender_id=g.current_user.id, tournament_id=tournament.id, body=body[:2000],
+    )
+    db.session.add(message)
+
+    # Ping everyone else — at most one unread ping per tournament per player,
+    # mirroring game chat, so a busy thread doesn't flood the activity feed.
+    for uid in tournament.participant_ids() | {tournament.organizer_id}:
+        if uid == g.current_user.id:
+            continue
+        already_pinged = Notification.query.filter_by(
+            user_id=uid,
+            kind='tournament_message',
+            related_tournament_id=tournament.id,
+            read=False,
+        ).first()
+        if not already_pinged:
+            notify(
+                uid,
+                'tournament_message',
+                f'{g.current_user.display_name} in {tournament.name} chat',
+                body[:140],
+                related_user_id=g.current_user.id,
+                related_tournament_id=tournament.id,
             )
     db.session.commit()
     return jsonify(message.to_dict()), 201

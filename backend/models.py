@@ -370,13 +370,15 @@ def blocked_pair_ids(user_id):
 
 
 class Message(TimestampMixin, db.Model):
-    """A direct message (recipient_id), court-room message (court_id), or
-    game-thread message (game_id)."""
+    """A direct message (recipient_id), court-room message (court_id),
+    game-thread message (game_id), or tournament-thread message
+    (tournament_id)."""
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), index=True)
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), index=True)
+    tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'), index=True)
     body = db.Column(db.Text, nullable=False, default='')
     read_at = db.Column(db.DateTime)
 
@@ -392,6 +394,7 @@ class Message(TimestampMixin, db.Model):
             'recipient_id': self.recipient_id,
             'court_id': self.court_id,
             'game_id': self.game_id,
+            'tournament_id': self.tournament_id,
             'body': self.body,
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),
@@ -758,6 +761,7 @@ MUTEABLE_NOTIFICATIONS = {
     'court_game': 'New games at courts you saved',
     'friend_checkin': 'Friends checking in to play',
     'game_message': 'Game chat messages',
+    'tournament_message': 'Tournament chat messages',
     'session_rsvp': 'Weekly session re-RSVP reminders',
     'weekly_recap': 'Your weekly recap',
 }
