@@ -3681,3 +3681,61 @@ def test_tournament_chat(client):
                 headers=auth_headers(a['token']))
     notifs = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
     assert not [n for n in notifs if n['kind'] == 'tournament_message' and not n['read']]
+
+
+def test_tournament_score_correction(client):
+    """A match result can be fixed until the match it feeds has been played."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id)
+    for p in (a, b, c, d):
+        _register_entry(client, t['id'], p['token'])
+    data = client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token'])).get_json()
+
+    r1 = [m for m in data['matches'] if m['round'] == 1]
+    m0, m1 = r1[0], r1[1]
+    # Enter m0 with the wrong winner, then correct it — final's slot must follow
+    data = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
+                       json={'score1': 5, 'score2': 11}, headers=auth_headers(a['token'])).get_json()
+    final = next(m for m in data['matches'] if m['round'] == 2)
+    assert final['entry1_id'] == m0['entry2_id']
+    data = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
+                       json={'score1': 11, 'score2': 5}, headers=auth_headers(a['token'])).get_json()
+    final = next(m for m in data['matches'] if m['round'] == 2)
+    assert final['entry1_id'] == m0['entry1_id']
+
+    # Play out m1 and the final; the semi is now locked against edits
+    data = client.post(f"/api/tournaments/{t['id']}/matches/{m1['id']}/score",
+                       json={'score1': 11, 'score2': 9}, headers=auth_headers(a['token'])).get_json()
+    final = next(m for m in data['matches'] if m['round'] == 2)
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
+                      json={'score1': 11, 'score2': 8}, headers=auth_headers(a['token']))
+    assert res.get_json()['status'] == 'completed'
+    # (completed tournaments refuse all edits — covered elsewhere; the lock
+    # below matters mid-tournament, so test it on a fresh 8-player bracket)
+
+    t2 = make_tournament(client, a['token'], court_id, max_entries=8)
+    e = register(client, 'e@example.com', 'Eve')
+    f = register(client, 'f@example.com', 'Fay')
+    g = register(client, 'g@example.com', 'Gus')
+    h = register(client, 'h@example.com', 'Hal')
+    for p in (a, b, c, d, e, f, g, h):
+        _register_entry(client, t2['id'], p['token'])
+    data = client.post(f"/api/tournaments/{t2['id']}/start", headers=auth_headers(a['token'])).get_json()
+    quarters = [m for m in data['matches'] if m['round'] == 1]
+    q0, q1 = quarters[0], quarters[1]
+    client.post(f"/api/tournaments/{t2['id']}/matches/{q0['id']}/score",
+                json={'score1': 11, 'score2': 1}, headers=auth_headers(a['token']))
+    data = client.post(f"/api/tournaments/{t2['id']}/matches/{q1['id']}/score",
+                       json={'score1': 11, 'score2': 2}, headers=auth_headers(a['token'])).get_json()
+    semi0 = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 0)
+    client.post(f"/api/tournaments/{t2['id']}/matches/{semi0['id']}/score",
+                json={'score1': 11, 'score2': 3}, headers=auth_headers(a['token']))
+    # Now q0 feeds a played semi — correcting it must 409
+    res = client.post(f"/api/tournaments/{t2['id']}/matches/{q0['id']}/score",
+                      json={'score1': 1, 'score2': 11}, headers=auth_headers(a['token']))
+    assert res.status_code == 409
+    assert res.get_json()['error'] == 'next_match_played'
