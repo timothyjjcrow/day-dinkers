@@ -723,6 +723,7 @@ class Notification(TimestampMixin, db.Model):
     read = db.Column(db.Boolean, nullable=False, default=False)
     related_user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     related_game_id = db.Column(db.Integer, db.ForeignKey('game.id'))
+    related_tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'))
 
     def to_dict(self):
         return {
@@ -733,6 +734,7 @@ class Notification(TimestampMixin, db.Model):
             'read': bool(self.read),
             'related_user_id': self.related_user_id,
             'related_game_id': self.related_game_id,
+            'related_tournament_id': self.related_tournament_id,
             'created_at': iso(self.created_at),
         }
 
@@ -748,7 +750,8 @@ MUTEABLE_NOTIFICATIONS = {
 }
 
 
-def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=None):
+def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=None,
+           related_tournament_id=None):
     # Respect the recipient's mute preferences for optional kinds.
     if kind in MUTEABLE_NOTIFICATIONS:
         recipient = db.session.get(User, user_id)
@@ -761,4 +764,174 @@ def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=
         body=body,
         related_user_id=related_user_id,
         related_game_id=related_game_id,
+        related_tournament_id=related_tournament_id,
     ))
+
+
+TOURNAMENT_FORMATS = ['single_elim', 'round_robin']
+TOURNAMENT_EVENT_TYPES = ['singles', 'doubles']
+TOURNAMENT_STATUSES = ['registration', 'active', 'completed', 'cancelled']
+
+
+class Tournament(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(500), nullable=False, default='')
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
+    organizer_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    starts_at = db.Column(db.DateTime, nullable=False, index=True)
+    format = db.Column(db.String(20), nullable=False, default='single_elim')
+    event_type = db.Column(db.String(20), nullable=False, default='singles')
+    max_entries = db.Column(db.Integer, nullable=False, default=8)
+    status = db.Column(db.String(20), nullable=False, default='registration', index=True)
+    # use_alter breaks the tournament <-> tournament_entry FK cycle at create_all.
+    champion_entry_id = db.Column(
+        db.Integer,
+        db.ForeignKey('tournament_entry.id', use_alter=True, name='fk_tournament_champion'),
+    )
+    completed_at = db.Column(db.DateTime)
+
+    court = db.relationship('Court')
+    organizer = db.relationship('User', foreign_keys=[organizer_id])
+    champion_entry = db.relationship(
+        'TournamentEntry', foreign_keys=[champion_entry_id], post_update=True,
+    )
+    entries = db.relationship(
+        'TournamentEntry', back_populates='tournament', lazy='selectin',
+        order_by='TournamentEntry.id', cascade='all, delete-orphan',
+        foreign_keys='TournamentEntry.tournament_id',
+    )
+    matches = db.relationship(
+        'TournamentMatch', back_populates='tournament', lazy='selectin',
+        order_by='(TournamentMatch.round, TournamentMatch.position)',
+        cascade='all, delete-orphan',
+    )
+
+    def total_rounds(self):
+        return max((m.round for m in self.matches), default=0)
+
+    def entry_for(self, user_id):
+        return next(
+            (e for e in self.entries
+             if user_id in (e.player1_id, e.player2_id)),
+            None,
+        )
+
+    def participant_ids(self):
+        ids = set()
+        for entry in self.entries:
+            ids.add(entry.player1_id)
+            if entry.player2_id:
+                ids.add(entry.player2_id)
+        return ids
+
+    def to_dict(self, current_user_id=None, detail=False):
+        my_entry = self.entry_for(current_user_id) if current_user_id else None
+        data = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'format': self.format,
+            'event_type': self.event_type,
+            'status': self.status,
+            'starts_at': iso(self.starts_at),
+            'max_entries': self.max_entries,
+            'court': self.court.to_summary_dict() if self.court else None,
+            'organizer_id': self.organizer_id,
+            'organizer_name': self.organizer.display_name if self.organizer else None,
+            'entry_count': len(self.entries),
+            'is_organizer': self.organizer_id == current_user_id,
+            'my_entry_id': my_entry.id if my_entry else None,
+            'champion': self.champion_entry.to_dict() if self.champion_entry else None,
+            'completed_at': iso(self.completed_at),
+        }
+        if detail:
+            data['entries'] = [e.to_dict() for e in self.entries]
+            data['matches'] = [m.to_dict() for m in self.matches]
+            data['total_rounds'] = self.total_rounds()
+        return data
+
+
+class TournamentEntry(TimestampMixin, db.Model):
+    """One competing unit — a single player, or a doubles pair."""
+    __table_args__ = (
+        db.UniqueConstraint('tournament_id', 'player1_id', name='uq_tournament_player1'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    tournament_id = db.Column(
+        db.Integer, db.ForeignKey('tournament.id'), nullable=False, index=True,
+    )
+    player1_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    player2_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True)
+    seed = db.Column(db.Integer)
+
+    tournament = db.relationship(
+        'Tournament', back_populates='entries', foreign_keys=[tournament_id],
+    )
+    player1 = db.relationship('User', foreign_keys=[player1_id])
+    player2 = db.relationship('User', foreign_keys=[player2_id])
+
+    def players(self):
+        return [p for p in (self.player1, self.player2) if p]
+
+    def display_name(self):
+        names = [p.display_name for p in self.players()]
+        return ' & '.join(names) if names else 'Entry'
+
+    def avg_rating(self):
+        ratings = [p.rating for p in self.players()]
+        return sum(ratings) // len(ratings) if ratings else DEFAULT_RATING
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'seed': self.seed,
+            'name': self.display_name(),
+            'rating': self.avg_rating(),
+            'players': [p.to_public_dict() for p in self.players()],
+        }
+
+
+class TournamentMatch(TimestampMixin, db.Model):
+    """A bracket slot. Single-elim: winner of (round r, position p) feeds
+    (round r+1, position p//2), slot 1 when p is even. Round robin: every
+    pairing exists up front, grouped into rounds by the circle method."""
+    id = db.Column(db.Integer, primary_key=True)
+    tournament_id = db.Column(
+        db.Integer, db.ForeignKey('tournament.id'), nullable=False, index=True,
+    )
+    round = db.Column(db.Integer, nullable=False, default=1)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    entry1_id = db.Column(db.Integer, db.ForeignKey('tournament_entry.id'))
+    entry2_id = db.Column(db.Integer, db.ForeignKey('tournament_entry.id'))
+    score1 = db.Column(db.Integer)
+    score2 = db.Column(db.Integer)
+    winner_entry_id = db.Column(db.Integer, db.ForeignKey('tournament_entry.id'))
+
+    tournament = db.relationship('Tournament', back_populates='matches')
+    entry1 = db.relationship('TournamentEntry', foreign_keys=[entry1_id])
+    entry2 = db.relationship('TournamentEntry', foreign_keys=[entry2_id])
+    winner_entry = db.relationship('TournamentEntry', foreign_keys=[winner_entry_id])
+
+    def status(self):
+        if self.winner_entry_id is not None:
+            # A bye never had two entries or a score.
+            return 'bye' if self.score1 is None and (
+                self.entry1_id is None or self.entry2_id is None) else 'done'
+        if self.entry1_id is not None and self.entry2_id is not None:
+            return 'ready'
+        return 'pending'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'round': self.round,
+            'position': self.position,
+            'entry1_id': self.entry1_id,
+            'entry2_id': self.entry2_id,
+            'score1': self.score1,
+            'score2': self.score2,
+            'winner_entry_id': self.winner_entry_id,
+            'status': self.status(),
+        }

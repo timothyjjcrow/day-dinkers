@@ -3296,3 +3296,309 @@ def test_cancel_game(client):
     assert res.status_code == 403
     res = client.post(f"/api/games/{game['id']}/cancel", headers=auth_headers(a['token']))
     assert res.get_json()['status'] == 'cancelled'
+
+
+# ---------- Tournaments ----------
+
+def make_tournament(client, token, court_id, fmt='single_elim', event_type='singles',
+                    max_entries=8, hours_ahead=24):
+    from datetime import timedelta
+    from backend.models import utcnow
+    res = client.post('/api/tournaments', json={
+        'name': 'Summer Slam',
+        'court_id': court_id,
+        'starts_at': (utcnow() + timedelta(hours=hours_ahead)).isoformat() + 'Z',
+        'format': fmt,
+        'event_type': event_type,
+        'max_entries': max_entries,
+        'description': 'Bring water',
+    }, headers=auth_headers(token))
+    assert res.status_code == 201, res.get_json()
+    return res.get_json()
+
+
+def _register_entry(client, tid, token, partner_id=None, expect=201):
+    body = {'partner_id': partner_id} if partner_id else {}
+    res = client.post(f'/api/tournaments/{tid}/register', json=body,
+                      headers=auth_headers(token))
+    assert res.status_code == expect, res.get_json()
+    return res.get_json()
+
+
+def test_tournament_create_and_validation(client):
+    a = register(client, 'a@example.com', 'Ana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    t = make_tournament(client, a['token'], court_id)
+    assert t['status'] == 'registration'
+    assert t['format'] == 'single_elim'
+    assert t['is_organizer'] is True
+    assert t['entry_count'] == 0
+
+    # Bad payloads
+    res = client.post('/api/tournaments', json={'name': 'x', 'court_id': court_id,
+                      'starts_at': '2030-01-01T10:00:00Z'}, headers=auth_headers(a['token']))
+    assert res.status_code == 400  # name too short
+    res = client.post('/api/tournaments', json={'name': 'Valid Name', 'court_id': 99999,
+                      'starts_at': '2030-01-01T10:00:00Z'}, headers=auth_headers(a['token']))
+    assert res.status_code == 404
+    res = client.post('/api/tournaments', json={'name': 'Valid Name', 'court_id': court_id,
+                      'starts_at': 'nope'}, headers=auth_headers(a['token']))
+    assert res.status_code == 400
+
+
+def test_tournament_registration_and_withdraw(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, max_entries=2)
+
+    data = _register_entry(client, t['id'], a['token'])
+    assert data['entry_count'] == 1
+    assert data['my_entry_id']
+    # Double-register blocked
+    _register_entry(client, t['id'], a['token'], expect=409)
+    _register_entry(client, t['id'], b['token'])
+    # Full
+    _register_entry(client, t['id'], c['token'], expect=409)
+
+    # Organizer sees join notifications
+    notifs = client.get('/api/notifications', headers=auth_headers(a['token'])).get_json()['items']
+    assert any(n['kind'] == 'tournament_join' and n['related_tournament_id'] == t['id'] for n in notifs)
+
+    # Ben withdraws, Cam can now join
+    res = client.delete(f"/api/tournaments/{t['id']}/register", headers=auth_headers(b['token']))
+    assert res.status_code == 200
+    assert res.get_json()['entry_count'] == 1
+    _register_entry(client, t['id'], c['token'])
+
+    # Organizer can remove an entry
+    detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()
+    cam_entry = next(e for e in detail['entries'] if e['name'] == 'Cam')
+    res = client.delete(f"/api/tournaments/{t['id']}/entries/{cam_entry['id']}",
+                        headers=auth_headers(b['token']))
+    assert res.status_code == 403
+    res = client.delete(f"/api/tournaments/{t['id']}/entries/{cam_entry['id']}",
+                        headers=auth_headers(a['token']))
+    assert res.status_code == 200
+    assert res.get_json()['entry_count'] == 1
+
+
+def test_tournament_doubles_partner_rules(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, event_type='doubles')
+
+    # No partner -> rejected
+    _register_entry(client, t['id'], a['token'], expect=400)
+    # Stranger partner -> rejected
+    _register_entry(client, t['id'], a['token'], partner_id=b['user']['id'], expect=403)
+
+    # Befriend then register as a pair
+    client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=auth_headers(a['token']))
+    fid = client.get('/api/friends', headers=auth_headers(b['token'])).get_json()['incoming'][0]['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=auth_headers(b['token']))
+    data = _register_entry(client, t['id'], a['token'], partner_id=b['user']['id'])
+    entry = data['entries'][0]
+    assert entry['name'] == 'Ana & Ben'
+    assert len(entry['players']) == 2
+
+    # Partner got the heads-up
+    notifs = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
+    assert any(n['kind'] == 'tournament_invite' for n in notifs)
+
+    # Ben (player2) can't register again; neither can a team drafting Ben
+    _register_entry(client, t['id'], b['token'], partner_id=a['user']['id'], expect=409)
+    client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=auth_headers(c['token']))
+    fid2 = client.get('/api/friends', headers=auth_headers(b['token'])).get_json()['incoming'][0]['friendship_id']
+    client.post(f'/api/friends/{fid2}/respond', json={'accept': True}, headers=auth_headers(b['token']))
+    _register_entry(client, t['id'], c['token'], partner_id=b['user']['id'], expect=409)
+
+
+def test_tournament_single_elim_flow(client):
+    """4 players -> 2 semis + final; scores advance; champion crowned."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id)
+
+    # Give players distinct ratings so seeding is deterministic: Ana > Ben > Cam > Dee
+    from backend.app import db
+    from backend.models import User
+    for email, rating in (('a@example.com', 1400), ('b@example.com', 1300),
+                          ('c@example.com', 1250), ('d@example.com', 1100)):
+        User.query.filter_by(email=email).first().rating = rating
+    db.session.commit()
+
+    for p in (a, b, c, d):
+        _register_entry(client, t['id'], p['token'])
+
+    # Only the organizer can start
+    res = client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(b['token']))
+    assert res.status_code == 403
+    res = client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data['status'] == 'active'
+    assert data['total_rounds'] == 2
+    entries = {e['name']: e for e in data['entries']}
+    assert entries['Ana']['seed'] == 1 and entries['Dee']['seed'] == 4
+
+    # Round 1: seed 1 vs 4, seed 2 vs 3
+    r1 = [m for m in data['matches'] if m['round'] == 1]
+    assert len(r1) == 2 and all(m['status'] == 'ready' for m in r1)
+    m0 = next(m for m in r1 if m['position'] == 0)
+    assert {m0['entry1_id'], m0['entry2_id']} == {entries['Ana']['id'], entries['Dee']['id']}
+    final = next(m for m in data['matches'] if m['round'] == 2)
+    assert final['status'] == 'pending'
+
+    # A non-participant can't score
+    outsider = register(client, 'x@example.com')
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
+                      json={'score1': 11, 'score2': 5}, headers=auth_headers(outsider['token']))
+    assert res.status_code == 403
+    # Tie score rejected
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
+                      json={'score1': 11, 'score2': 11}, headers=auth_headers(a['token']))
+    assert res.status_code == 400
+
+    # Ana beats Dee; Cam upsets Ben (scored by organizer)
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
+                      json={'score1': 11, 'score2': 5}, headers=auth_headers(a['token']))
+    assert res.status_code == 200
+    m1 = next(m for m in res.get_json()['matches'] if m['round'] == 1 and m['position'] == 1)
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{m1['id']}/score",
+                      json={'score1': 9, 'score2': 11}, headers=auth_headers(a['token']))
+    data = res.get_json()
+    final = next(m for m in data['matches'] if m['round'] == 2)
+    assert final['status'] == 'ready'
+    assert {final['entry1_id'], final['entry2_id']} == {entries['Ana']['id'], entries['Cam']['id']}
+
+    # Cam got a "match is set" notification
+    notifs = client.get('/api/notifications', headers=auth_headers(c['token'])).get_json()['items']
+    assert any(n['kind'] == 'tournament_match' for n in notifs)
+
+    # Final: Ana wins the tournament
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
+                      json={'score1': 11, 'score2': 7}, headers=auth_headers(c['token']))
+    data = res.get_json()
+    assert data['status'] == 'completed'
+    assert data['champion']['name'] == 'Ana'
+    notifs = client.get('/api/notifications', headers=auth_headers(d['token'])).get_json()['items']
+    assert any(n['kind'] == 'tournament_result' and 'Ana won' in n['title'] for n in notifs)
+
+    # No more scoring after completion
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
+                      json={'score1': 5, 'score2': 11}, headers=auth_headers(a['token']))
+    assert res.status_code == 409
+
+
+def test_tournament_byes_with_three_entries(client):
+    """3 entries in a 4-slot bracket: top seed gets a bye straight to the final."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id)
+
+    from backend.app import db
+    from backend.models import User
+    for email, rating in (('a@example.com', 1400), ('b@example.com', 1300), ('c@example.com', 1200)):
+        User.query.filter_by(email=email).first().rating = rating
+    db.session.commit()
+
+    for p in (a, b, c):
+        _register_entry(client, t['id'], p['token'])
+    data = client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token'])).get_json()
+
+    r1 = [m for m in data['matches'] if m['round'] == 1]
+    bye = next(m for m in r1 if m['status'] == 'bye')
+    playable = next(m for m in r1 if m['status'] == 'ready')
+    entries = {e['name']: e for e in data['entries']}
+    assert bye['winner_entry_id'] == entries['Ana']['id']
+    final = next(m for m in data['matches'] if m['round'] == 2)
+    assert final['entry1_id'] == entries['Ana']['id']  # bye winner already advanced
+
+    # Ben vs Cam, then the final
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{playable['id']}/score",
+                      json={'score1': 11, 'score2': 8}, headers=auth_headers(b['token']))
+    final = next(m for m in res.get_json()['matches'] if m['round'] == 2)
+    assert final['status'] == 'ready'
+    res = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
+                      json={'score1': 11, 'score2': 9}, headers=auth_headers(a['token']))
+    assert res.get_json()['champion']['name'] == 'Ana'
+
+
+def test_tournament_round_robin_standings(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id, fmt='round_robin')
+
+    for p in (a, b, c):
+        _register_entry(client, t['id'], p['token'])
+    data = client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token'])).get_json()
+    # 3 entries -> 3 matches, everyone plays everyone
+    assert len(data['matches']) == 3
+    assert all(m['status'] == 'ready' for m in data['matches'])
+    entries = {e['name']: e for e in data['entries']}
+
+    def score(match, s1, s2):
+        res = client.post(f"/api/tournaments/{t['id']}/matches/{match['id']}/score",
+                          json={'score1': s1, 'score2': s2}, headers=auth_headers(a['token']))
+        assert res.status_code == 200, res.get_json()
+        return res.get_json()
+
+    def match_between(data, x, y):
+        return next(m for m in data['matches']
+                    if {m['entry1_id'], m['entry2_id']} == {entries[x]['id'], entries[y]['id']})
+
+    # Ana beats Ben, Ana beats Cam, Ben beats Cam -> Ana 2-0, Ben 1-1, Cam 0-2
+    def oriented(m, first):
+        return (11, 4) if m['entry1_id'] == entries[first]['id'] else (4, 11)
+
+    m = match_between(data, 'Ana', 'Ben'); data = score(m, *oriented(m, 'Ana'))
+    m = match_between(data, 'Ana', 'Cam'); data = score(m, *oriented(m, 'Ana'))
+    m = match_between(data, 'Ben', 'Cam'); data = score(m, *oriented(m, 'Ben'))
+
+    assert data['status'] == 'completed'
+    assert data['champion']['name'] == 'Ana'
+    names = [row['entry']['name'] for row in data['standings']]
+    assert names == ['Ana', 'Ben', 'Cam']
+    assert data['standings'][0]['wins'] == 2
+    assert data['standings'][2]['losses'] == 2
+
+
+def test_tournament_cancel_and_lists(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    t = make_tournament(client, a['token'], court_id)
+    _register_entry(client, t['id'], b['token'])
+
+    # Nearby list (Larson Park is at 33.66,-117.91)
+    res = client.get('/api/tournaments?lat=33.66&lng=-117.91&radius=50',
+                     headers=auth_headers(b['token']))
+    assert any(item['id'] == t['id'] for item in res.get_json()['items'])
+    # Far away -> not listed
+    res = client.get('/api/tournaments?lat=40.81&lng=-124.16&radius=50',
+                     headers=auth_headers(b['token']))
+    assert not any(item['id'] == t['id'] for item in res.get_json()['items'])
+    # Mine (entrant, not organizer)
+    res = client.get('/api/tournaments?mine=1', headers=auth_headers(b['token']))
+    assert any(item['id'] == t['id'] for item in res.get_json()['items'])
+
+    res = client.post(f"/api/tournaments/{t['id']}/cancel", headers=auth_headers(b['token']))
+    assert res.status_code == 403
+    res = client.post(f"/api/tournaments/{t['id']}/cancel", headers=auth_headers(a['token']))
+    assert res.get_json()['status'] == 'cancelled'
+    notifs = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()['items']
+    assert any(n['kind'] == 'tournament_cancelled' for n in notifs)
+    # Registration on a cancelled tournament is refused
+    _register_entry(client, t['id'], a['token'], expect=409)

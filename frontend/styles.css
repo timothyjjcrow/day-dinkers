@@ -770,3 +770,42 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 .podium-col.place-2 .podium-base { height: 32px; }
 .podium-col.place-3 .podium-base { height: 22px; background: linear-gradient(180deg, var(--orange-200), var(--orange-50)); }
 .you-row { border: 2px solid var(--green-600); }
+
+/* ---------- Tournament brackets ---------- */
+.bracket {
+  display: flex; gap: 14px; overflow-x: auto; padding: 6px 2px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+.bracket-round { min-width: 176px; display: flex; flex-direction: column; }
+.bracket-round-title {
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--ink-soft); margin-bottom: 8px; text-align: center;
+}
+/* Later rounds center their matches vertically between their feeders. */
+.bracket-round-matches {
+  flex: 1; display: flex; flex-direction: column; justify-content: space-around; gap: 10px;
+}
+.bm {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden; box-shadow: var(--shadow);
+}
+.bm-ready { cursor: pointer; border-color: var(--green-600); }
+.bm-ready:active { background: var(--green-50); }
+.bm-side {
+  display: flex; align-items: center; gap: 7px; padding: 8px 10px; font-size: 13.5px;
+}
+.bm-side + .bm-side { border-top: 1px solid var(--line); }
+.bm-seed {
+  min-width: 17px; height: 17px; border-radius: 50%; background: var(--track);
+  color: var(--ink-soft); font-size: 10.5px; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.bm-name {
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-weight: 600;
+}
+.bm-score { font-weight: 800; font-size: 13px; color: var(--ink-soft); }
+.bm-win { background: var(--green-50); }
+.bm-win .bm-name, .bm-win .bm-score { color: var(--green-accent); }
+.bm-mine .bm-name { text-decoration: underline; text-decoration-color: var(--green-600); text-underline-offset: 3px; }
+.rr-win { color: var(--green-accent); font-weight: 800; }

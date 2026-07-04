@@ -1969,6 +1969,7 @@
     const el = $('#play-content');
     el.innerHTML = skeletonHtml(5);
     const loc = areaLatLng();
+    if (seg === 'brackets') { await renderTournaments(el); return; }
     try {
       if (seg === 'scores') {
         const scope = state.boardScope || 'near';
@@ -2808,6 +2809,542 @@
           showCelebration(updated);
         }
         refreshMe();
+        refresh();
+      } catch (err) { toast(err.message); btn.disabled = false; }
+    });
+  }
+
+  // ---------- Tournaments ----------
+  const T_FORMAT_LABEL = { single_elim: 'Single elimination', round_robin: 'Round robin' };
+
+  function tournamentStatusChip(t) {
+    if (t.status === 'registration') {
+      const spots = t.max_entries - t.entry_count;
+      return `<span class="tag" style="background:var(--green-100);color:var(--green-900)">Registration open · ${spots} spot${spots === 1 ? '' : 's'} left</span>`;
+    }
+    if (t.status === 'active') return '<span class="tag" style="background:var(--amber-50);color:var(--amber-800)">⚡ In progress</span>';
+    if (t.status === 'completed') return `<span class="tag" style="background:var(--violet-50);color:var(--violet-700)">🏆 ${t.champion ? esc(t.champion.name) : 'Finished'}</span>`;
+    return '<span class="tag">Cancelled</span>';
+  }
+
+  function tournamentCardHtml(t) {
+    const meta = [
+      t.court ? `${t.court.name}${t.court.city ? ', ' + t.court.city : ''}` : '',
+      fmtDateTime(t.starts_at),
+    ].filter(Boolean).join(' · ');
+    return `
+      <div class="card" data-open-tournament="${t.id}" style="cursor:pointer;padding:14px 16px">
+        <div class="row" style="padding:0;gap:10px;align-items:flex-start">
+          <span style="font-size:26px">🏆</span>
+          <div class="row-main">
+            <div class="row-title">${esc(t.name)}</div>
+            <div class="row-sub">${esc(meta)}</div>
+            <div class="row-sub" style="margin-top:2px">${T_FORMAT_LABEL[t.format] || t.format} · ${t.event_type === 'doubles' ? 'Doubles' : 'Singles'} · ${t.entry_count}/${t.max_entries} ${t.event_type === 'doubles' ? 'teams' : 'players'}</div>
+            <div style="margin-top:6px">${tournamentStatusChip(t)}${t.my_entry_id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-700)">✓ You\'re in</span>' : ''}${t.is_organizer ? ' <span class="tag">Organizer</span>' : ''}</div>
+          </div>
+          <span class="chev">›</span>
+        </div>
+      </div>`;
+  }
+
+  async function renderTournaments(el) {
+    const loc = areaLatLng();
+    try {
+      const [mine, nearby] = await Promise.all([
+        api('/tournaments?mine=1'),
+        api(`/tournaments?lat=${loc.lat}&lng=${loc.lng}&radius=60`).catch(() => ({ items: [] })),
+      ]);
+      const mineIds = new Set(mine.items.map((t) => t.id));
+      const nearbyOnly = (nearby.items || []).filter((t) => !mineIds.has(t.id));
+      const live = mine.items.filter((t) => t.status !== 'completed');
+      const past = mine.items.filter((t) => t.status === 'completed');
+
+      let html = '<button class="btn btn-primary btn-block" id="tour-create" style="margin:2px 0 14px">🏆 Create a tournament</button>';
+      if (live.length) {
+        html += '<div class="section-label">Your tournaments</div>';
+        html += live.map(tournamentCardHtml).join('');
+      }
+      if (nearbyOnly.length) {
+        html += '<div class="section-label">Nearby tournaments</div>';
+        html += nearbyOnly.map(tournamentCardHtml).join('');
+      }
+      if (past.length) {
+        html += '<div class="section-label">Past tournaments</div>';
+        html += past.map(tournamentCardHtml).join('');
+      }
+      if (!live.length && !nearbyOnly.length && !past.length) {
+        html += '<div class="empty-state"><span class="big">🏆</span>No tournaments around yet.<br>Set one up and crown a champion!</div>';
+      }
+      el.innerHTML = html;
+      el.querySelector('#tour-create').addEventListener('click', openCreateTournamentSheet);
+      el.querySelectorAll('[data-open-tournament]').forEach((card) => {
+        card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
+      });
+    } catch (e) {
+      renderError(el, e.message, () => renderTournaments(el));
+    }
+  }
+
+  async function openCreateTournamentSheet() {
+    // Court suggestions: where you are, saved courts, then nearby.
+    const suggestions = [];
+    try {
+      const c = areaLatLng();
+      const [favs, near] = await Promise.all([
+        api('/courts/favorites').catch(() => ({ items: [] })),
+        api(`/courts?lat=${c.lat}&lng=${c.lng}&radius=30&limit=6`).catch(() => ({ items: [] })),
+      ]);
+      const seen = new Set();
+      if (state.presence && state.presence.checked_in) {
+        suggestions.push({ id: state.presence.court_id, name: state.presence.court_name, city: '', tag: "📍 You're here" });
+        seen.add(state.presence.court_id);
+      }
+      (favs.items || []).forEach((ct) => {
+        if (!seen.has(ct.id) && suggestions.length < 5) { suggestions.push({ ...ct, tag: '⭐ Saved' }); seen.add(ct.id); }
+      });
+      (near.items || []).forEach((ct) => {
+        if (!seen.has(ct.id) && suggestions.length < 5) {
+          suggestions.push({ ...ct, tag: ct.distance_miles != null ? `${ct.distance_miles} mi` : 'Nearby' });
+          seen.add(ct.id);
+        }
+      });
+    } catch { /* suggestions are optional */ }
+
+    const suggestionRows = suggestions.map((c) => `
+      <button type="button" class="court-suggestion" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}">
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+          <div class="row-sub">${esc(c.city || '')}</div>
+        </div>
+        <span class="tag" style="margin:0">${esc(c.tag)}</span>
+      </button>`).join('');
+
+    // Default start: tomorrow 9:00 local.
+    const start = new Date();
+    start.setDate(start.getDate() + 1);
+    start.setHours(9, 0, 0, 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    const defaultWhen = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T${pad(start.getHours())}:${pad(start.getMinutes())}`;
+
+    const modal = openModal(`
+      ${modalHead('Create a tournament')}
+      <div class="form-field">
+        <label>Name</label>
+        <input type="text" id="tc-name" maxlength="120" placeholder="e.g. Saturday Slam" />
+      </div>
+      <div class="form-field">
+        <label>Court</label>
+        <div id="tc-court-selected" class="hidden court-selected">
+          <div class="row-main"><div class="row-title" style="font-size:14.5px" id="tc-court-name"></div></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="tc-court-change">Change</button>
+        </div>
+        <div id="tc-court-picker">
+          <input type="search" id="tc-court-search" placeholder="Search courts…" />
+          <div id="tc-court-results" style="margin-top:8px">${suggestionRows}</div>
+        </div>
+        <input type="hidden" id="tc-court-id" value="" />
+      </div>
+      <div class="form-field">
+        <label>Starts</label>
+        <input type="datetime-local" id="tc-when" value="${defaultWhen}" />
+      </div>
+      <div class="form-field">
+        <label>Format</label>
+        <div class="segmented" id="tc-format">
+          <button type="button" data-val="single_elim" class="active">🗂 Bracket</button>
+          <button type="button" data-val="round_robin">🔁 Round robin</button>
+        </div>
+        <div class="row-sub" id="tc-format-hint" style="margin-top:6px">Single elimination — lose and you're out, seeded by rating.</div>
+      </div>
+      <div class="form-grid">
+        <div class="form-field">
+          <label>Event</label>
+          <div class="segmented" id="tc-event">
+            <button type="button" data-val="singles" class="active">Singles</button>
+            <button type="button" data-val="doubles">Doubles</button>
+          </div>
+        </div>
+        <div class="form-field">
+          <label>Max entries</label>
+          <select id="tc-max">
+            <option>4</option><option selected>8</option><option>16</option><option>32</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-field">
+        <input type="text" id="tc-desc" maxlength="200" placeholder="Details (optional) — e.g. Games to 11, win by 2" />
+      </div>
+      <button class="btn btn-primary btn-block" id="tc-submit" style="padding:15px">Create tournament</button>
+    `);
+
+    const setCourt = (id, name) => {
+      modal.querySelector('#tc-court-id').value = id || '';
+      modal.querySelector('#tc-court-name').textContent = name || '';
+      modal.querySelector('#tc-court-selected').classList.toggle('hidden', !id);
+      modal.querySelector('#tc-court-picker').classList.toggle('hidden', !!id);
+    };
+    modal.querySelector('#tc-court-change').addEventListener('click', () => setCourt(null, null));
+    const bindCourtPicks = () => {
+      modal.querySelectorAll('[data-pick-court]').forEach((row) => row.addEventListener('click', () => {
+        setCourt(row.dataset.pickCourt, row.dataset.pickName);
+      }));
+    };
+    bindCourtPicks();
+    let searchTimer;
+    modal.querySelector('#tc-court-search').addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      const q = e.target.value.trim();
+      searchTimer = setTimeout(async () => {
+        const resultsEl = modal.querySelector('#tc-court-results');
+        if (q.length < 2) { resultsEl.innerHTML = suggestionRows; bindCourtPicks(); return; }
+        let url = `/courts?q=${encodeURIComponent(q)}&limit=6`;
+        if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
+        try {
+          const data = await api(url);
+          resultsEl.innerHTML = data.items.map((c) => `
+            <button type="button" class="court-suggestion" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}">
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+                <div class="row-sub">${esc(c.city || '')}</div>
+              </div>
+            </button>`).join('') || '<div class="row-sub" style="padding:8px 2px">No courts found</div>';
+          bindCourtPicks();
+        } catch { /* keep old results */ }
+      }, 300);
+    });
+
+    const segPick = (selId, hintFn) => {
+      modal.querySelector(selId).addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        modal.querySelectorAll(`${selId} button`).forEach((b) => b.classList.toggle('active', b === btn));
+        if (hintFn) hintFn(btn.dataset.val);
+      });
+    };
+    segPick('#tc-format', (val) => {
+      modal.querySelector('#tc-format-hint').textContent = val === 'round_robin'
+        ? 'Round robin — everyone plays everyone; best record wins.'
+        : "Single elimination — lose and you're out, seeded by rating.";
+    });
+    segPick('#tc-event');
+
+    modal.querySelector('#tc-submit').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const name = modal.querySelector('#tc-name').value.trim();
+      const courtId = Number(modal.querySelector('#tc-court-id').value);
+      const whenRaw = modal.querySelector('#tc-when').value;
+      if (name.length < 3) { toast('Give your tournament a name (3+ characters)'); return; }
+      if (!courtId) { toast('Pick a court'); return; }
+      if (!whenRaw) { toast('Pick a start time'); return; }
+      btn.disabled = true;
+      try {
+        const t = await api('/tournaments', {
+          method: 'POST',
+          body: JSON.stringify({
+            name,
+            court_id: courtId,
+            starts_at: new Date(whenRaw).toISOString(),
+            format: modal.querySelector('#tc-format button.active').dataset.val,
+            event_type: modal.querySelector('#tc-event button.active').dataset.val,
+            max_entries: Number(modal.querySelector('#tc-max').value),
+            description: modal.querySelector('#tc-desc').value.trim(),
+          }),
+        });
+        closeModal(modal);
+        toast('Tournament created 🏆 Share it so players can register!');
+        if (state.tab === 'play' && state.playSeg === 'brackets') renderPlay();
+        openTournamentScreen(t.id);
+      } catch (err) { toast(err.message); btn.disabled = false; }
+    });
+  }
+
+  function tournamentRoundLabel(round, total) {
+    const remaining = total - round;
+    if (remaining === 0) return 'Final';
+    if (remaining === 1) return 'Semifinals';
+    if (remaining === 2) return 'Quarterfinals';
+    return `Round ${round}`;
+  }
+
+  function bracketHtml(t) {
+    const entries = {};
+    t.entries.forEach((en) => { entries[en.id] = en; });
+    const sideHtml = (m, entryId, score) => {
+      const en = entryId ? entries[entryId] : null;
+      const isWinner = m.winner_entry_id && m.winner_entry_id === entryId;
+      const mineCls = t.my_entry_id && entryId === t.my_entry_id ? 'bm-mine' : '';
+      return `
+        <div class="bm-side ${isWinner ? 'bm-win' : ''} ${mineCls}">
+          <span class="bm-seed">${en && en.seed ? en.seed : ''}</span>
+          <span class="bm-name">${en ? esc(en.name) : '<span style="opacity:.45">—</span>'}</span>
+          <span class="bm-score">${score != null ? score : (m.status === 'bye' && isWinner ? 'bye' : '')}</span>
+        </div>`;
+    };
+    const rounds = [];
+    for (let r = 1; r <= t.total_rounds; r++) {
+      const ms = t.matches.filter((m) => m.round === r);
+      rounds.push(`
+        <div class="bracket-round">
+          <div class="bracket-round-title">${tournamentRoundLabel(r, t.total_rounds)}</div>
+          <div class="bracket-round-matches">
+          ${ms.map((m) => `
+            <div class="bm ${m.status === 'ready' && t.status === 'active' ? 'bm-ready' : ''}" data-tmatch="${m.id}">
+              ${sideHtml(m, m.entry1_id, m.score1)}
+              ${sideHtml(m, m.entry2_id, m.score2)}
+            </div>`).join('')}
+          </div>
+        </div>`);
+    }
+    return `<div class="bracket">${rounds.join('')}</div>`;
+  }
+
+  function roundRobinHtml(t) {
+    const entries = {};
+    t.entries.forEach((en) => { entries[en.id] = en; });
+    let html = '';
+    if (t.standings && t.standings.length) {
+      html += '<div class="section-label">Standings</div><div class="card" style="padding:6px 14px">';
+      html += t.standings.map((row, i) => `
+        <div class="row" style="padding:8px 0;border-bottom:${i === t.standings.length - 1 ? 'none' : '1px solid var(--line)'}">
+          <div class="rank-num">${i + 1}</div>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px">${esc(row.entry.name)}${t.my_entry_id === row.entry.id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-700)">you</span>' : ''}</div>
+            <div class="row-sub">${row.wins}W – ${row.losses}L · ${row.point_diff >= 0 ? '+' : ''}${row.point_diff} pts</div>
+          </div>
+          ${i === 0 && t.status === 'completed' ? '<span style="font-size:20px">👑</span>' : ''}
+        </div>`).join('');
+      html += '</div>';
+    }
+    const roundsSeen = [...new Set(t.matches.map((m) => m.round))].sort((a, b) => a - b);
+    html += '<div class="section-label">Matches</div>';
+    roundsSeen.forEach((r) => {
+      const ms = t.matches.filter((m) => m.round === r);
+      if (roundsSeen.length > 1) html += `<div class="row-sub" style="margin:4px 2px">Round ${r}</div>`;
+      ms.forEach((m) => {
+        const e1 = entries[m.entry1_id], e2 = entries[m.entry2_id];
+        const done = m.status === 'done';
+        html += `
+          <div class="card row ${m.status === 'ready' && t.status === 'active' ? 'bm-ready' : ''}" data-tmatch="${m.id}" style="padding:10px 14px">
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">
+                <span class="${done && m.winner_entry_id === m.entry1_id ? 'rr-win' : ''}">${e1 ? esc(e1.name) : '—'}</span>
+                <span style="opacity:.55;font-weight:400"> vs </span>
+                <span class="${done && m.winner_entry_id === m.entry2_id ? 'rr-win' : ''}">${e2 ? esc(e2.name) : '—'}</span>
+              </div>
+            </div>
+            <div class="stat-value" style="font-size:15px">${done ? `${m.score1}–${m.score2}` : ''}</div>
+          </div>`;
+      });
+    });
+    return html;
+  }
+
+  async function openTournamentScreen(tournamentId) {
+    let t;
+    try { t = await api(`/tournaments/${tournamentId}`); } catch (e) {
+      toast(e.message);
+      clearDeadDeepLink(`#tournament/${tournamentId}`);
+      return;
+    }
+
+    const box = openModal(modalHead('Tournament'));
+    const content = box.querySelector('.modal');
+
+    const refresh = async () => {
+      try { render(await api(`/tournaments/${tournamentId}`)); } catch { /* offline */ }
+    };
+
+    const render = (data) => {
+      t = data;
+      const isDoubles = t.event_type === 'doubles';
+      const unitLabel = isDoubles ? 'team' : 'player';
+      const meta = [
+        t.court ? `${t.court.name}${t.court.city ? ', ' + t.court.city : ''}` : '',
+        fmtDateTime(t.starts_at),
+        `${T_FORMAT_LABEL[t.format] || t.format} · ${isDoubles ? 'Doubles' : 'Singles'}`,
+      ].filter(Boolean);
+
+      let body = `
+        ${modalHead(t.name)}
+        <div class="row-sub" style="margin:-6px 0 6px">${meta.map(esc).join(' · ')}</div>
+        <div style="margin-bottom:12px">${tournamentStatusChip(t)}</div>
+        ${t.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(t.description)}</div>` : ''}`;
+
+      if (t.status === 'completed' && t.champion) {
+        body += `
+          <div class="card" style="text-align:center;padding:18px;background:var(--violet-50);border:1px solid var(--violet-200)">
+            <div style="font-size:34px">👑</div>
+            <div style="font-weight:800;font-size:17px;color:var(--violet-700)">${esc(t.champion.name)}</div>
+            <div class="row-sub">Tournament champion${isDoubles ? 's' : ''}</div>
+          </div>`;
+      }
+
+      if (t.status === 'registration') {
+        body += `<div class="section-label">Entries (${t.entry_count}/${t.max_entries})</div>`;
+        body += t.entries.length ? t.entries.map((en) => `
+          <div class="card row" style="padding:10px 14px">
+            ${avatarHtml(en.players[0] || {}, 'sm')}
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(en.name)}</div>
+              <div class="row-sub">${en.rating} rating</div>
+            </div>
+            ${t.is_organizer ? `<button class="btn btn-secondary btn-sm" data-remove-entry="${en.id}" aria-label="Remove entry">Remove</button>` : ''}
+          </div>`).join('')
+          : `<div class="empty-state" style="padding:16px">No ${unitLabel}s yet — be the first to register!</div>`;
+
+        if (!t.my_entry_id && t.entry_count < t.max_entries) {
+          body += isDoubles
+            ? `<div class="form-field" style="margin-top:12px"><label>Your partner (must be a friend)</label><select id="td-partner"><option value="">Choose a partner…</option></select></div>
+               <button class="btn btn-primary btn-block" id="td-register">🏆 Register our team</button>`
+            : '<button class="btn btn-primary btn-block" id="td-register" style="margin-top:12px">🏆 Register</button>';
+        } else if (t.my_entry_id) {
+          body += '<button class="btn btn-secondary btn-block" id="td-withdraw" style="margin-top:12px">Withdraw my entry</button>';
+        }
+        if (t.is_organizer) {
+          body += `
+            <div class="section-label" style="margin-top:16px">Organizer</div>
+            <button class="btn btn-primary btn-block" id="td-start" ${t.entry_count < 2 ? 'disabled' : ''}>▶️ Start tournament${t.entry_count < 2 ? ' (need 2+ entries)' : ''}</button>
+            <button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:8px">Cancel tournament</button>`;
+        }
+      } else if (t.status !== 'cancelled') {
+        body += t.format === 'round_robin' ? roundRobinHtml(t) : bracketHtml(t);
+        if (t.status === 'active') {
+          body += `<div class="row-sub" style="margin-top:10px">${t.is_organizer ? 'Tap a match to enter its score.' : 'Tap one of your matches to report the score.'}</div>`;
+          if (t.is_organizer) body += '<button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:12px">Cancel tournament</button>';
+        }
+        body += `<div class="section-label" style="margin-top:14px">${isDoubles ? 'Teams' : 'Players'}</div>`;
+        body += t.entries.map((en) => `
+          <div class="card row" style="padding:8px 14px">
+            ${avatarHtml(en.players[0] || {}, 'sm')}
+            <div class="row-main"><div class="row-title" style="font-size:14px">${en.seed ? `<span class="bm-seed" style="margin-right:4px">${en.seed}</span>` : ''}${esc(en.name)}</div></div>
+            <div class="row-sub">${en.rating}</div>
+          </div>`).join('');
+      } else {
+        body += '<div class="empty-state" style="padding:16px">This tournament was cancelled.</div>';
+      }
+
+      content.innerHTML = body;
+      content.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => closeModal(box)));
+
+      // --- actions ---
+      content.querySelector('#td-register')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const payload = {};
+        if (isDoubles) {
+          const pid = Number(content.querySelector('#td-partner')?.value || 0);
+          if (!pid) { toast('Choose your doubles partner'); return; }
+          payload.partner_id = pid;
+        }
+        btn.disabled = true;
+        try {
+          render(await api(`/tournaments/${t.id}/register`, { method: 'POST', body: JSON.stringify(payload) }));
+          toast("You're in! 🏆");
+        } catch (err) { toast(err.message); btn.disabled = false; }
+      });
+      content.querySelector('#td-withdraw')?.addEventListener('click', async () => {
+        if (!confirm('Withdraw from this tournament?')) return;
+        try { render(await api(`/tournaments/${t.id}/register`, { method: 'DELETE' })); toast('Withdrawn'); }
+        catch (err) { toast(err.message); }
+      });
+      content.querySelectorAll('[data-remove-entry]').forEach((btn) => btn.addEventListener('click', async () => {
+        if (!confirm('Remove this entry?')) return;
+        try { render(await api(`/tournaments/${t.id}/entries/${btn.dataset.removeEntry}`, { method: 'DELETE' })); }
+        catch (err) { toast(err.message); }
+      }));
+      content.querySelector('#td-start')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        if (!confirm(`Start the tournament with ${t.entry_count} entries? Registration closes and the bracket is generated.`)) return;
+        btn.disabled = true;
+        try { render(await api(`/tournaments/${t.id}/start`, { method: 'POST' })); toast('Bracket is live! 🏁'); }
+        catch (err) { toast(err.message); btn.disabled = false; }
+      });
+      content.querySelector('#td-cancel')?.addEventListener('click', async () => {
+        if (!confirm('Cancel this tournament? Everyone registered will be notified.')) return;
+        try {
+          await api(`/tournaments/${t.id}/cancel`, { method: 'POST' });
+          toast('Tournament cancelled');
+          closeModal(box);
+          if (state.tab === 'play' && state.playSeg === 'brackets') renderPlay();
+        } catch (err) { toast(err.message); }
+      });
+      content.querySelectorAll('[data-tmatch]').forEach((card) => card.addEventListener('click', () => {
+        const m = t.matches.find((mm) => mm.id === Number(card.dataset.tmatch));
+        if (!m || t.status !== 'active') return;
+        if (m.entry1_id == null || m.entry2_id == null) return;
+        const involved = t.my_entry_id && (m.entry1_id === t.my_entry_id || m.entry2_id === t.my_entry_id);
+        if (!t.is_organizer && !involved) { toast('Only the players in this match (or the organizer) can enter its score'); return; }
+        if (m.status === 'done' && !t.is_organizer) { toast('Score is in — ask the organizer to correct it'); return; }
+        openTournamentScoreModal(t, m, refresh);
+      }));
+
+      // Populate the doubles partner picker with friends not already entered.
+      const partnerSel = content.querySelector('#td-partner');
+      if (partnerSel) {
+        api('/friends').then((data) => {
+          const taken = new Set();
+          t.entries.forEach((en) => en.players.forEach((p) => taken.add(p.id)));
+          (data.friends || []).forEach((f) => {
+            if (taken.has(f.id)) return;
+            const opt = document.createElement('option');
+            opt.value = f.id;
+            opt.textContent = f.display_name;
+            partnerSel.appendChild(opt);
+          });
+        }).catch(() => {});
+      }
+    };
+
+    render(t);
+
+    // Live sync while open — registrations and scores land from other phones.
+    const poll = setInterval(async () => {
+      if (!document.body.contains(box)) { clearInterval(poll); return; }
+      if (t.status !== 'active' && t.status !== 'registration') return;
+      try {
+        const fresh = await api(`/tournaments/${tournamentId}`);
+        if (JSON.stringify(fresh) !== JSON.stringify(t)) render(fresh);
+      } catch { /* offline */ }
+    }, 8000);
+  }
+
+  function openTournamentScoreModal(t, match, refresh) {
+    const entries = {};
+    t.entries.forEach((en) => { entries[en.id] = en; });
+    const e1 = entries[match.entry1_id];
+    const e2 = entries[match.entry2_id];
+    const roundLabel = t.format === 'round_robin'
+      ? `Round ${match.round}` : tournamentRoundLabel(match.round, t.total_rounds || 1);
+    const modal = openModal(`
+      ${modalHead('Match score')}
+      <div class="row-sub" style="margin:-4px 0 12px">${esc(t.name)} · ${roundLabel}</div>
+      <div class="form-grid">
+        <div class="form-field">
+          <label>${esc(e1 ? e1.name : '—')}</label>
+          <input type="number" id="ts-1" min="0" max="99" inputmode="numeric" placeholder="0" value="${match.score1 ?? ''}" />
+        </div>
+        <div class="form-field">
+          <label>${esc(e2 ? e2.name : '—')}</label>
+          <input type="number" id="ts-2" min="0" max="99" inputmode="numeric" placeholder="0" value="${match.score2 ?? ''}" />
+        </div>
+      </div>
+      <button class="btn btn-primary btn-block" id="ts-save" style="margin-top:14px">Save score</button>
+    `);
+    modal.querySelector('#ts-save').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const raw1 = modal.querySelector('#ts-1').value;
+      const raw2 = modal.querySelector('#ts-2').value;
+      const s1 = Number(raw1);
+      const s2 = Number(raw2);
+      if (raw1 === '' || raw2 === '' || Number.isNaN(s1) || Number.isNaN(s2)) { toast('Enter both scores'); return; }
+      if (s1 === s2) { toast('No ties in pickleball — someone won!'); return; }
+      btn.disabled = true;
+      try {
+        await api(`/tournaments/${t.id}/matches/${match.id}/score`, {
+          method: 'POST',
+          body: JSON.stringify({ score1: s1, score2: s2 }),
+        });
+        closeModal(modal);
+        toast('Score saved ✅');
         refresh();
       } catch (err) { toast(err.message); btn.disabled = false; }
     });
@@ -4400,9 +4937,10 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
+      if (n.related_tournament_id) return { type: 'tournament', id: n.related_tournament_id };
       if (n.related_game_id) return { type: 'game', id: n.related_game_id };
       if (n.related_user_id && (n.kind === 'friend_request' || n.kind === 'friend_accept' || n.kind === 'friend_checkin' || n.kind === 'player_coming')) {
         return { type: 'user', id: n.related_user_id };
@@ -4451,7 +4989,8 @@
     modal.querySelectorAll('[data-notif-type]').forEach((row) => {
       row.addEventListener('click', () => {
         closeModal(modal);
-        if (row.dataset.notifType === 'game') openGameScreen(Number(row.dataset.notifId));
+        if (row.dataset.notifType === 'tournament') openTournamentScreen(Number(row.dataset.notifId));
+        else if (row.dataset.notifType === 'game') openGameScreen(Number(row.dataset.notifId));
         else openUserProfile(Number(row.dataset.notifId));
       });
     });
@@ -4708,6 +5247,8 @@
     if (courtMatch) { openCourtDetail(Number(courtMatch[1])); return; }
     const gameMatch = location.hash.match(/^#game\/(\d+)$/);
     if (gameMatch) { openGameScreen(Number(gameMatch[1])); return; }
+    const tournamentMatch = location.hash.match(/^#tournament\/(\d+)$/);
+    if (tournamentMatch) { openTournamentScreen(Number(tournamentMatch[1])); return; }
     const inviteMatch = location.hash.match(/^#invite\/(\d+)$/);
     if (inviteMatch) {
       try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
