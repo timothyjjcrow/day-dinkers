@@ -4564,3 +4564,11 @@ def test_delete_own_message(client):
     # Second delete 404s; court message deletable by its sender too
     assert client.delete(f"/api/messages/{dm['id']}", headers=auth_headers(a['token'])).status_code == 404
     assert client.delete(f"/api/messages/{room['id']}", headers=auth_headers(b['token'])).status_code == 200
+
+
+def test_health_reports_db(client):
+    """Health pings the database and says so."""
+    res = client.get('/health')
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data['status'] == 'ok' and data['db'] is True

@@ -3995,7 +3995,7 @@
       const html = items.map((m) => `
         <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}" ${m.sender_id === state.me.id ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
           ${esc(m.body)}
-          <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
+          <div class="bubble-time">${fmtTimeShort(m.created_at)}${m.sender_id === state.me.id && m.read_at ? ' · <span title="Seen">✓✓</span>' : ''}</div>
         </div>`).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;

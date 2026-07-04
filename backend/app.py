@@ -307,7 +307,19 @@ def create_app(config_name=None):
 
     @app.get('/health')
     def health():
-        return jsonify({'status': 'ok', 'env': app.config.get('APP_ENV')})
+        # A cheap DB ping keeps the health check honest — Render flags 503s.
+        from sqlalchemy import text
+        try:
+            db.session.execute(text('SELECT 1'))
+            db_ok = True
+        except Exception:
+            app.logger.exception('Health check: database unreachable')
+            db_ok = False
+        return jsonify({
+            'status': 'ok' if db_ok else 'degraded',
+            'db': db_ok,
+            'env': app.config.get('APP_ENV'),
+        }), (200 if db_ok else 503)
 
     @app.get('/')
     def index():
