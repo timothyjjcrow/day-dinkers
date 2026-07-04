@@ -299,6 +299,8 @@ def user_profile(user_id):
     )
     payload['recent_games'] = [game.to_dict(user.id) for game in recent]
     payload['badges'] = player_badges(user)
+    from backend.models import tournament_titles
+    payload['tournament_titles'] = tournament_titles(user)
     payload['rating_history'] = rating_history_for(user)
     # Last-5 form from the profile owner's perspective, newest first.
     payload['form'] = [

@@ -3058,6 +3058,22 @@
     });
   }
 
+  // "🏆 2 tournament titles" strip with the latest wins, tappable through to
+  // each tournament. Shared by public profiles and own stats.
+  function tournamentTitlesHtml(titles) {
+    if (!titles || !titles.count) return '';
+    return `
+      <div class="card" style="margin-top:12px;padding:12px 14px">
+        <div style="font-weight:800;font-size:14px;text-align:center">👑 ${titles.count} tournament title${titles.count === 1 ? '' : 's'}</div>
+        ${(titles.recent || []).map((t) => `
+          <div class="row" data-open-tournament="${t.id}" style="cursor:pointer;padding:7px 0 0;gap:8px">
+            <span>🏆</span>
+            <div class="row-main"><div class="row-title" style="font-size:13.5px">${esc(t.name)}</div></div>
+            <div class="row-sub">${t.completed_at ? new Date(t.completed_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}</div>
+          </div>`).join('')}
+      </div>`;
+  }
+
   function tournamentRoundLabel(round, total) {
     const remaining = total - round;
     if (remaining === 0) return 'Final';
@@ -4106,6 +4122,7 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
           ${user.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}
         </div>` : ''}
+      ${tournamentTitlesHtml(user.tournament_titles)}
       ${h2hHtml}
       ${availHtml}
       <div class="action-row">${friendAction}</div>
@@ -4124,6 +4141,9 @@
     `);
 
     bindGameButtons(modal, () => { closeModal(modal); openUserProfile(userId); });
+    modal.querySelectorAll('[data-open-tournament]').forEach((row) => row.addEventListener('click', () => {
+      openTournamentScreen(Number(row.dataset.openTournament));
+    }));
     modal.querySelectorAll('[data-pcourt]').forEach((row) => row.addEventListener('click', () => {
       closeModal(modal);
       openCourtDetail(Number(row.dataset.pcourt));
@@ -4410,6 +4430,11 @@
               ${[...earned, ...locked].join('')}
             </div>`);
         }
+        el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
+          tournamentTitlesHtml(stats.tournament_titles));
+        el.querySelectorAll('[data-open-tournament]').forEach((row) => {
+          row.addEventListener('click', () => openTournamentScreen(Number(row.dataset.openTournament)));
+        });
         // If the earned rating outgrew the declared level, offer a one-tap
         // upgrade (upward only — nobody wants a demotion prompt). One ask
         // per suggested level per device.

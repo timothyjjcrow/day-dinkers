@@ -351,6 +351,31 @@ def badge_progress(user):
     return locked[:3]
 
 
+def tournament_titles(user, limit=3):
+    """Tournaments this player has won (solo or as a doubles pair) — count
+    plus the most recent few. Shared by /me/stats and public profiles."""
+    won = (
+        Tournament.query
+        .join(TournamentEntry, Tournament.champion_entry_id == TournamentEntry.id)
+        .filter(
+            Tournament.status == 'completed',
+            db.or_(
+                TournamentEntry.player1_id == user.id,
+                TournamentEntry.player2_id == user.id,
+            ),
+        )
+        .order_by(Tournament.completed_at.desc())
+    )
+    recent = won.limit(limit).all()
+    return {
+        'count': won.count(),
+        'recent': [
+            {'id': t.id, 'name': t.name, 'completed_at': iso(t.completed_at)}
+            for t in recent
+        ],
+    }
+
+
 def is_blocked_between(user_a_id, user_b_id):
     """True when either user has blocked the other."""
     return db.session.query(BlockedUser.id).filter(

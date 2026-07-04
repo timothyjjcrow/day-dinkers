@@ -2192,7 +2192,9 @@ def test_my_stats(client):
     progress = stats.pop('badge_progress')
     assert stats == {'games_total': 0, 'games_this_month': 0, 'week_streak': 0,
                      'top_court': None, 'best_partner': None, 'top_rival': None,
-                     'form': [], 'badges': [], 'rating_history': []}
+                     'form': [], 'badges': [],
+                     'tournament_titles': {'count': 0, 'recent': []},
+                     'rating_history': []}
     assert [b['id'] for b in progress] == ['first_win', 'mvp', 'champion']
     assert progress[0] == {'id': 'first_win', 'emoji': '🏅', 'label': 'First win',
                            'current': 0, 'target': 1}
@@ -3868,3 +3870,39 @@ def test_tournament_day_of_checkin(client):
     assert detail['status'] == 'completed'
     assert client.post(f"/api/tournaments/{t2['id']}/checkin",
                        headers=auth_headers(a['token'])).status_code == 409
+
+
+def test_tournament_titles_on_profiles(client):
+    """Winning tournaments surfaces a titles count on stats and profiles."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def play_and_win(winner, loser):
+        t = make_tournament(client, winner['token'], court_id, max_entries=2)
+        _register_entry(client, t['id'], winner['token'])
+        _register_entry(client, t['id'], loser['token'])
+        client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(winner['token']))
+        detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(winner['token'])).get_json()
+        m = detail['matches'][0]
+        winner_entry = next(e for e in detail['entries']
+                            if e['players'][0]['id'] == winner['user']['id'])
+        s = {'score1': 11, 'score2': 4} if m['entry1_id'] == winner_entry['id'] else {'score1': 4, 'score2': 11}
+        client.post(f"/api/tournaments/{t['id']}/matches/{m['id']}/score",
+                    json=s, headers=auth_headers(winner['token']))
+        return t
+
+    t1 = play_and_win(a, b)
+    play_and_win(a, b)
+
+    stats = client.get('/api/me/stats', headers=auth_headers(a['token'])).get_json()
+    assert stats['tournament_titles']['count'] == 2
+    assert len(stats['tournament_titles']['recent']) == 2
+    assert stats['tournament_titles']['recent'][0]['name'] == 'Summer Slam'
+
+    prof = client.get(f"/api/users/{a['user']['id']}", headers=auth_headers(b['token'])).get_json()
+    assert prof['tournament_titles']['count'] == 2
+    assert any(r['id'] == t1['id'] for r in prof['tournament_titles']['recent'])
+    # Ben has no titles
+    prof_b = client.get(f"/api/users/{b['user']['id']}", headers=auth_headers(a['token'])).get_json()
+    assert prof_b['tournament_titles']['count'] == 0

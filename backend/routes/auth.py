@@ -485,9 +485,12 @@ def my_stats():
             'your_wins': top['wins'],
         }
 
-    from backend.models import badge_progress, player_badges, rating_history_for
+    from backend.models import (
+        badge_progress, player_badges, rating_history_for, tournament_titles,
+    )
     rating_history = rating_history_for(user)
     badges = player_badges(user)
+    titles = tournament_titles(user)
 
     # Congratulate the player once for each newly-earned badge.
     import json as _json
@@ -512,6 +515,7 @@ def my_stats():
         'form': form,
         'badges': badges,
         'badge_progress': badge_progress(user),
+        'tournament_titles': titles,
         'rating_history': rating_history,
     })
 
