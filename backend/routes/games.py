@@ -706,6 +706,37 @@ def invite_to_game(game_id):
     return jsonify({'invited': True})
 
 
+@games_bp.post('/games/<int:game_id>/invites/decline')
+@rate_limit(60, 3600)
+@login_required
+def decline_invite(game_id):
+    """Politely turn down a personal game invite: the invite is removed (the
+    game drops off your surfaces) and the host hears about it."""
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    invite = GameInvite.query.filter_by(
+        game_id=game.id, user_id=g.current_user.id,
+    ).first()
+    if not invite:
+        return jsonify({'error': 'not_invited'}), 404
+    if any(p.user_id == g.current_user.id for p in game.players):
+        return jsonify({'error': 'already_joined'}), 400
+
+    db.session.delete(invite)
+    if game.status == 'upcoming':
+        court_name = game.court.name if game.court else 'the court'
+        notify(
+            game.creator_id,
+            'invite_declined',
+            f"{g.current_user.display_name} can't make your game at {court_name}",
+            related_user_id=g.current_user.id,
+            related_game_id=game.id,
+        )
+    db.session.commit()
+    return jsonify({'declined': True})
+
+
 def _promote_from_waitlist(game):
     """Fill open spots from the waitlist queue, in order."""
     while game.waitlist and len(game.players) < game.max_players:

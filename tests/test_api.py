@@ -4471,3 +4471,36 @@ def test_court_photo_captions(client):
     assert res.status_code == 201
     photos = client.get(f'/api/courts/{court_id}/photos').get_json()['items']
     assert photos[0]['caption'] == ''
+
+
+def test_decline_game_invite(client):
+    """Declining a personal invite removes it and notifies the host."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    outsider = register(client, 'x@example.com', 'Xan')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, a['token'], court_id, visibility='private',
+                     invite_user_ids=[b['user']['id']])
+
+    # Only invitees can decline
+    assert client.post(f"/api/games/{game['id']}/invites/decline",
+                       headers=auth_headers(outsider['token'])).status_code == 404
+
+    res = client.post(f"/api/games/{game['id']}/invites/decline",
+                      headers=auth_headers(b['token']))
+    assert res.status_code == 200 and res.get_json()['declined'] is True
+    # Host got the heads-up
+    notifs = client.get('/api/notifications', headers=auth_headers(a['token'])).get_json()['items']
+    assert any(n['kind'] == 'invite_declined' and "can't make your game" in n['title'] for n in notifs)
+    # The private game is no longer visible to Ben, and a second decline 404s
+    detail = client.get(f"/api/games/{game['id']}", headers=auth_headers(b['token'])).get_json()
+    assert detail.get('is_joined') is False
+    assert client.post(f"/api/games/{game['id']}/invites/decline",
+                       headers=auth_headers(b['token'])).status_code == 404
+
+    # A joined player can't "decline" (invite + join edge)
+    game2 = make_game(client, a['token'], court_id, visibility='private',
+                      invite_user_ids=[b['user']['id']])
+    client.post(f"/api/games/{game2['id']}/join", headers=auth_headers(b['token']))
+    assert client.post(f"/api/games/{game2['id']}/invites/decline",
+                       headers=auth_headers(b['token'])).status_code == 400
