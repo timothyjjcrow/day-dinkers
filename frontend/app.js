@@ -465,6 +465,48 @@
     } catch { /* user cancelled share */ }
   }
 
+  // Pull-to-refresh on the scrolling tabs — installed PWAs don't get the
+  // browser's reload gesture, and these feeds otherwise wait on slow polls.
+  function setupPullToRefresh() {
+    const configs = [
+      ['#tab-play', '#play-content', () => renderPlay()],
+      ['#tab-chat', '#chat-content', () => renderChat()],
+      ['#tab-profile', '#profile-content', () => renderProfile()],
+    ];
+    configs.forEach(([panelSel, scrollSel, refresh]) => {
+      const panel = document.querySelector(panelSel);
+      const el = document.querySelector(scrollSel);
+      if (!panel || !el) return;
+      const spinner = document.createElement('div');
+      spinner.className = 'ptr-spinner';
+      panel.appendChild(spinner);
+      let startY = null;
+      let armed = false;
+      el.addEventListener('touchstart', (e) => {
+        startY = el.scrollTop <= 0 ? e.touches[0].clientY : null;
+        armed = false;
+      }, { passive: true });
+      el.addEventListener('touchmove', (e) => {
+        if (startY == null) return;
+        const dy = e.touches[0].clientY - startY;
+        if (dy <= 0 || el.scrollTop > 0) { spinner.style.opacity = '0'; armed = false; return; }
+        const pull = Math.min(dy, 110);
+        spinner.style.opacity = String(Math.min(pull / 70, 1));
+        spinner.style.transform = `translateX(-50%) translateY(${pull * 0.5}px) rotate(${pull * 3}deg)`;
+        armed = pull >= 70;
+      }, { passive: true });
+      el.addEventListener('touchend', async () => {
+        startY = null;
+        if (!armed) { spinner.style.opacity = '0'; return; }
+        armed = false;
+        spinner.classList.add('spin');
+        try { await refresh(); await refreshMe(); } catch { /* offline */ }
+        spinner.classList.remove('spin');
+        spinner.style.opacity = '0';
+      }, { passive: true });
+    });
+  }
+
   // Empty-state CTA buttons: any element with data-goto jumps to the right
   // spot in the app (works inside modals too — closes them first).
   function setupEmptyStateCtas() {
@@ -7305,6 +7347,7 @@
     setupPlay();
     setupChat();
     setupEmptyStateCtas();
+    setupPullToRefresh();
     setupConnectivity();
     if (state.token) {
       try {
