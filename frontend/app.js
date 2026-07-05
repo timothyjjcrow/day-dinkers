@@ -5781,6 +5781,10 @@
           </div>
           <button class="btn btn-secondary btn-sm" id="pf-checkout">Check out</button>
         </div>` : ''}
+      <div id="pf-upcoming"></div>
+      <div id="pf-courts"></div>
+      <div id="pf-history"></div>
+      <div class="section-label">Settings</div>
       <div class="card row" style="margin-bottom:10px">
         <span style="font-size:20px">🏠</span>
         <div class="row-main">
@@ -5846,9 +5850,6 @@
       <button class="btn btn-secondary btn-block" id="pf-activity" style="margin-bottom:10px">🔔 Activity</button>
       <button class="btn btn-secondary btn-block" id="pf-feedback" style="margin-bottom:10px">💡 Send feedback</button>
       <button class="btn btn-danger btn-block" id="pf-logout">Log out</button>
-      <div id="pf-upcoming"></div>
-      <div id="pf-courts"></div>
-      <div id="pf-history"></div>
     `;
 
     el.querySelector('#pf-feedback')?.addEventListener('click', () => {
