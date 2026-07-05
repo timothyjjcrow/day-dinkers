@@ -187,6 +187,12 @@
   function fmtDuration(minutes) {
     if (!minutes || minutes < 1) return 'just now';
     if (minutes < 60) return `${minutes}m`;
+    // Past two days, "124h 22m" stops being readable — roll into days.
+    if (minutes >= 2880) {
+      const d = Math.floor(minutes / 1440);
+      const rh = Math.round((minutes % 1440) / 60);
+      return rh ? `${d}d ${rh}h` : `${d}d`;
+    }
     const h = Math.floor(minutes / 60);
     const m = minutes % 60;
     return m ? `${h}h ${m}m` : `${h}h`;
@@ -3355,7 +3361,11 @@
   function tournamentCardHtml(t) {
     const meta = [
       t.court ? `${t.court.name}${t.court.city ? ', ' + t.court.city : ''}` : '',
-      fmtDateTime(t.starts_at),
+      // A finished tournament's card shouldn't advertise its (possibly still
+      // future) start time as if it were upcoming.
+      t.status === 'completed'
+        ? `🏁 Ended${t.completed_at ? ` ${new Date(t.completed_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}`
+        : fmtDateTime(t.starts_at),
     ].filter(Boolean).join(' · ');
     return `
       <div class="card" data-open-tournament="${t.id}" style="cursor:pointer;padding:14px 16px">
@@ -6130,7 +6140,7 @@
         <p class="row-sub" style="margin-bottom:6px">Tap when you typically play — helps players find partners on their schedule.</p>
         ${AVAIL_PARTS.map(([part, emoji, partLabel]) => `
           <div class="av-row">
-            <span class="av-emoji" title="${partLabel}" style="display:inline-flex;flex-direction:column;align-items:center;min-width:34px">${emoji}<span style="font-size:8.5px;font-weight:700;color:var(--ink-soft);letter-spacing:.02em">${partLabel.slice(0, -1).toUpperCase()}</span></span>
+            <span class="av-emoji" title="${partLabel}" style="display:inline-flex;flex-direction:column;align-items:center;min-width:56px">${emoji}<span style="font-size:8px;font-weight:700;color:var(--ink-soft);letter-spacing:.02em">${partLabel.slice(0, -1).toUpperCase()}</span></span>
             ${AVAIL_DAYS.map((d) => `
               <button type="button" class="av-chip ${(me.availability || []).includes(`${d}-${part}`) ? 'active' : ''}" data-av="${d}-${part}" aria-label="${partLabel} ${d}">${d[0].toUpperCase()}</button>`).join('')}
           </div>`).join('')}
@@ -6747,7 +6757,7 @@
           ${n.read ? '' : '<span class="notif-dot"></span>'}
           <span style="font-size:20px">${icons[n.kind] || '🔔'}</span>
           <div class="row-main">
-            <div class="row-title" style="font-size:14px;${n.read ? '' : 'font-weight:800'}">${esc(n.title)}</div>
+            <div class="row-title notif-title" style="font-size:14px;${n.read ? '' : 'font-weight:800'}">${esc(n.title)}</div>
             <div class="row-sub">${time}</div>
           </div>
           ${t ? '<span class="chev">›</span>' : ''}
