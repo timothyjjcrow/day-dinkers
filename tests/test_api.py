@@ -4885,3 +4885,28 @@ def test_club_invite_friends(client):
     client.post(f'/api/clubs/{cid}/join', headers=bh)
     assert client.post(f'/api/clubs/{cid}/invite', json={'user_id': b['user']['id']},
                        headers=ah).status_code == 400
+
+
+def test_club_abuse_guards(client):
+    """QP#30: blocked players can't join your club; club-ownership is capped."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    cid = make_club(client, ah)['id']
+
+    # Ana blocks Ben → Ben can't slip into her club.
+    client.post(f"/api/users/{b['user']['id']}/block", headers=ah)
+    assert client.post(f'/api/clubs/{cid}/join', headers=bh).status_code == 403
+    client.post(f"/api/users/{b['user']['id']}/unblock", headers=ah)
+    assert client.post(f'/api/clubs/{cid}/join', headers=bh).status_code == 200
+
+    # You can't use the remove endpoint on yourself.
+    assert client.post(f'/api/clubs/{cid}/remove', json={'user_id': a['user']['id']},
+                       headers=ah).status_code == 400
+
+    # Ownership cap: 5 clubs per player.
+    for i in range(4):
+        make_club(client, ah, f'Overflow Club {i}')
+    res = client.post('/api/clubs', json={'name': 'One Too Many'}, headers=ah)
+    assert res.status_code == 400
+    assert res.get_json()['error'] == 'too_many_clubs_owned'
