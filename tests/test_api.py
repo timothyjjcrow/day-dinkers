@@ -4846,3 +4846,42 @@ def test_club_survives_owner_account_deletion(client):
     assert detail['my_role'] == 'owner'
     assert detail['member_count'] == 1
     assert client.get(f'/api/clubs/{solo_cid}', headers=bh).status_code == 404
+
+
+def befriend(client, h1, h2, user2_id):
+    client.post('/api/friends/request', json={'user_id': user2_id}, headers=h1)
+    data = client.get('/api/friends', headers=h2).get_json()
+    fid = data['incoming'][0]['friendship_id']
+    client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=h2)
+
+
+def test_club_invite_friends(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    cid = make_club(client, ah)['id']
+
+    # Only friends can be invited, and only by members.
+    assert client.post(f'/api/clubs/{cid}/invite', json={'user_id': b['user']['id']},
+                       headers=ah).status_code == 403  # not friends yet
+    befriend(client, ah, bh, b['user']['id'])
+    assert client.post(f'/api/clubs/{cid}/invite', json={'user_id': a['user']['id']},
+                       headers=ch).status_code == 403  # Cam isn't a member
+    assert client.post(f'/api/clubs/{cid}/invite', json={'user_id': 99999},
+                       headers=ah).status_code == 404
+
+    res = client.post(f'/api/clubs/{cid}/invite', json={'user_id': b['user']['id']}, headers=ah)
+    assert res.status_code == 200 and res.get_json()['invited'] is True
+
+    # The invite is a deep-linking notification; re-inviting doesn't stack.
+    client.post(f'/api/clubs/{cid}/invite', json={'user_id': b['user']['id']}, headers=ah)
+    invites = [n for n in client.get('/api/notifications', headers=bh).get_json()['items']
+               if n['kind'] == 'club_invite']
+    assert len(invites) == 1
+    assert invites[0]['related_club_id'] == cid
+
+    # Members can't be re-invited.
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+    assert client.post(f'/api/clubs/{cid}/invite', json={'user_id': b['user']['id']},
+                       headers=ah).status_code == 400

@@ -1517,6 +1517,7 @@
             </div>
             <span class="chev">›</span>
           </div>`).join('')}` : ''}
+      <div id="cd-clubs"></div>
       <div class="section-label">Upcoming games</div>
       ${gamesHtml}
       ${(court.recent_results || []).length ? `
@@ -1537,6 +1538,27 @@
         ${weatherEmoji(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''} · ${w.rain_soon ? '🌧 rain likely soon' : 'dry for the next few hours'}
       </div>`;
     }).catch(() => { /* forecast is a nicety */ });
+
+    // Clubs that call this court home — loads after the sheet, never blocks.
+    api(`/clubs?court_id=${court.id}`).then((data) => {
+      const clubsEl = modal.querySelector('#cd-clubs');
+      if (!clubsEl || !(data.items || []).length) return;
+      clubsEl.innerHTML = `
+        <div class="section-label">🏛 Clubs based here</div>
+        ${data.items.map((cl) => `
+          <div class="card row" data-open-club="${cl.id}" style="cursor:pointer;padding:11px">
+            <span style="font-size:20px">🏛</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(cl.name)}</div>
+              <div class="row-sub">${cl.member_count} member${cl.member_count === 1 ? '' : 's'}${cl.description ? ` · ${esc(cl.description.slice(0, 60))}` : ''}</div>
+            </div>
+            ${cl.joined ? '<span class="tag" style="margin:0">Member ✓</span>' : '<span class="chev">›</span>'}
+          </div>`).join('')}`;
+      clubsEl.querySelectorAll('[data-open-club]').forEach((row) => row.addEventListener('click', () => {
+        closeModal(modal);
+        openClubScreen(Number(row.dataset.openClub));
+      }));
+    }).catch(() => { /* clubs section is a nicety */ });
 
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
       if (checkedIn) {
@@ -4287,6 +4309,7 @@
       ${club.joined
         ? '<button class="btn btn-primary btn-block" id="club-chat-btn" style="margin-bottom:8px">💬 Open club chat</button>'
         : '<button class="btn btn-primary btn-block" id="club-join-btn" style="margin-bottom:8px">🙌 Join this club</button>'}
+      ${club.joined ? '<button class="btn btn-secondary btn-block" id="club-invite" style="margin-bottom:8px">🎟 Invite friends</button>' : ''}
       <button class="btn btn-secondary btn-block" id="club-share" style="margin-bottom:8px">📤 Share club</button>
       <div class="section-label">👥 ${club.member_count} member${club.member_count === 1 ? '' : 's'}</div>
       ${membersHtml}
@@ -4320,6 +4343,10 @@
         openClubChat(joined);
         renderChat();
       } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#club-invite')?.addEventListener('click', () => {
+      closeModal(modal);
+      openClubInviteSheet(club);
     });
     modal.querySelector('#club-share').addEventListener('click', async () => {
       const url = `${location.origin}/#club/${club.id}`;
@@ -4360,6 +4387,36 @@
         await api(`/clubs/${club.id}/remove`, { method: 'POST', body: JSON.stringify({ user_id: Number(btn.dataset.boot) }) });
         toast('Player removed');
         reopenInfo();
+      } catch (e) { toast(e.message); }
+    }));
+  }
+
+  async function openClubInviteSheet(club) {
+    let data;
+    try { data = await api('/friends'); } catch (e) { toast(e.message); return; }
+    const memberIds = new Set((club.members || []).map((m) => m.id));
+    const candidates = (data.friends || []).filter((f) => !memberIds.has(f.id));
+
+    const modal = openModal(`
+      ${modalHead(`🎟 Invite friends to ${esc(club.name)}`)}
+      ${candidates.length ? candidates.map((f) => `
+        <div class="card row">
+          ${avatarHtml(f)}
+          <div class="row-main">
+            <div class="row-title">${esc(f.display_name)}</div>
+            <div class="row-sub">${skillLabel(f.skill_level)} · ${f.rating}</div>
+          </div>
+          <button class="btn btn-primary btn-sm" data-invite="${f.id}">Invite</button>
+        </div>`).join('')
+        : '<div class="empty-state"><span class="big">🤝</span>All your friends are already in — or you haven\'t added any yet.<br>Share the club link instead!</div>'}
+    `);
+    modal.querySelectorAll('[data-invite]').forEach((btn) => btn.addEventListener('click', async () => {
+      try {
+        await api(`/clubs/${club.id}/invite`, { method: 'POST', body: JSON.stringify({ user_id: Number(btn.dataset.invite) }) });
+        btn.textContent = 'Invited ✓';
+        btn.disabled = true;
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-secondary');
       } catch (e) { toast(e.message); }
     }));
   }
@@ -5789,7 +5846,7 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
       if (n.related_club_id) return { type: 'club', id: n.related_club_id };

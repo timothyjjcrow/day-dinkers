@@ -305,6 +305,48 @@ def remove_member(club_id):
     return jsonify({'removed': True})
 
 
+@clubs_bp.post('/clubs/<int:club_id>/invite')
+@rate_limit(30, 3600)
+@login_required
+def invite_to_club(club_id):
+    """Any member can invite a friend — the invite is a tappable notification
+    that deep-links to the club's join screen."""
+    from backend.models import User
+    from backend.routes.social import friend_ids
+
+    club, err = _club_or_404(club_id)
+    if err:
+        return err
+    if not _membership(club):
+        return jsonify({'error': 'members_only'}), 403
+    payload = request.get_json(silent=True) or {}
+    target_id = int(payload.get('user_id') or 0)
+    target = db.session.get(User, target_id)
+    if not target or target.deleted_at:
+        return jsonify({'error': 'user_not_found'}), 404
+    if target_id in club.member_ids():
+        return jsonify({'error': 'already_member'}), 400
+    if target_id not in friend_ids(g.current_user.id):
+        return jsonify({'error': 'friends_only'}), 403
+
+    # One pending invite per club per player — re-inviting is a no-op.
+    already = Notification.query.filter_by(
+        user_id=target_id, kind='club_invite',
+        related_club_id=club.id, read=False,
+    ).first()
+    if not already:
+        notify(
+            target_id,
+            'club_invite',
+            f'{g.current_user.display_name} invited you to join {club.name}',
+            club.description[:140],
+            related_user_id=g.current_user.id,
+            related_club_id=club.id,
+        )
+        db.session.commit()
+    return jsonify({'invited': True})
+
+
 @clubs_bp.get('/clubs/<int:club_id>/chat')
 @login_required
 def club_chat(club_id):
