@@ -248,6 +248,7 @@
     localStorage.removeItem('pp_token');
     clearInterval(state.mePollTimer);
     clearInterval(state.threadPollTimer);
+    if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => { /* fine */ });
     $('#main-screen').classList.add('hidden');
     $('#auth-screen').classList.remove('hidden');
   }
@@ -417,6 +418,13 @@
     const unread = state.unreadNotifications || 0;
     bellBadge.textContent = unread > 99 ? '99+' : String(unread);
     bellBadge.classList.toggle('hidden', unread === 0);
+
+    // Installed-app icon badge (iOS 16.4+/Chrome): everything that begs a look.
+    if ('setAppBadge' in navigator) {
+      const appTotal = total + state.gamesToConfirm + unread;
+      (appTotal ? navigator.setAppBadge(appTotal) : navigator.clearAppBadge())
+        .catch(() => { /* permission or platform says no — fine */ });
+    }
   }
 
   async function refreshMe() {
