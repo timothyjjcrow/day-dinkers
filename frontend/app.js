@@ -4661,7 +4661,18 @@
       msgsEl.scrollTop = msgsEl.scrollHeight;
       hydrateImages();
     };
+    // Live ✓✓: flip 'Seen' onto already-rendered bubbles as the partner reads.
+    const markSeen = (upTo) => {
+      if (!upTo) return;
+      msgsEl.querySelectorAll('.bubble.me[data-del-msg]').forEach((b) => {
+        const t = b.querySelector('.bubble-time');
+        if (Number(b.dataset.delMsg) <= upTo && t && !t.textContent.includes('✓✓')) {
+          t.insertAdjacentHTML('beforeend', ' · <span title="Seen">✓✓</span>');
+        }
+      });
+    };
     renderMsgs(data.items, false);
+    markSeen(data.partner_read_up_to);
     attachChatViewport(modal, msgsEl, modal.querySelector('#thread-text'));
     refreshMe();
 
@@ -4671,6 +4682,7 @@
       try {
         const fresh = await api(`/chat/${userId}?since_id=${lastId}`);
         if (fresh.items.length) renderMsgs(fresh.items, true);
+        markSeen(fresh.partner_read_up_to);
       } catch { /* offline */ }
     }, 4000);
 

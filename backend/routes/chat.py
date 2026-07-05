@@ -400,9 +400,18 @@ def thread(user_id):
     if changed:
         db.session.commit()
 
+    # Watermark for live ✓✓: the newest of my messages the partner has read.
+    # Polls carry it too, so receipts flip without reopening the thread.
+    read_up_to = db.session.query(db.func.max(Message.id)).filter(
+        Message.sender_id == me,
+        Message.recipient_id == user_id,
+        Message.read_at.isnot(None),
+    ).scalar() or 0
+
     return jsonify({
         'user': partner.to_public_dict(),
         'items': [m.to_dict() for m in messages],
+        'partner_read_up_to': read_up_to,
     })
 
 

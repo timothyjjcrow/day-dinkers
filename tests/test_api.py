@@ -5524,3 +5524,22 @@ def test_room_photo_messages_and_authz(client):
                       headers=ah).status_code == 200
     assert client.get(f"/api/messages/{res.get_json()['id']}/image",
                       headers=ch).status_code == 403
+
+
+def test_dm_read_watermark_for_live_receipts(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+
+    client.post(f"/api/chat/{b['user']['id']}", json={'body': 'one'}, headers=ah)
+    m2 = client.post(f"/api/chat/{b['user']['id']}", json={'body': 'two'}, headers=ah).get_json()
+
+    # Ben hasn't opened the thread: Ana's watermark is 0.
+    thread = client.get(f"/api/chat/{b['user']['id']}", headers=ah).get_json()
+    assert thread['partner_read_up_to'] == 0
+
+    # Ben opens it (marks read) → Ana's next poll carries the watermark, so
+    # her ✓✓ can flip without reopening.
+    client.get(f"/api/chat/{a['user']['id']}", headers=bh)
+    thread = client.get(f"/api/chat/{b['user']['id']}?since_id={m2['id']}", headers=ah).get_json()
+    assert thread['partner_read_up_to'] == m2['id']
