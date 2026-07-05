@@ -817,7 +817,8 @@ def _promote_from_waitlist(game):
         notify(
             entry.user_id,
             'game_join',
-            f'A spot opened — you\'re in at {game.court.name if game.court else "the court"}! 🎾',
+            # No emoji in titles — the feed prepends the per-kind icon.
+            f'A spot opened — you\'re in at {game.court.name if game.court else "the court"}!',
             related_game_id=game.id,
         )
 

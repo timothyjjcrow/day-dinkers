@@ -576,7 +576,8 @@ def coming_to_play(user_id):
     notify(
         target.id,
         'player_coming',
-        f'{g.current_user.display_name} is coming to play{where}! 🎾',
+        # No emoji in titles — the feed prepends the per-kind icon.
+        f'{g.current_user.display_name} is coming to play{where}!',
         related_user_id=g.current_user.id,
     )
     db.session.commit()
