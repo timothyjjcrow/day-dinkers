@@ -20,6 +20,17 @@
   <meta name="apple-mobile-web-app-title" content="Third Shot" />
 </head>
 <body>
+  <!-- Inline pickleball glyph (there is no pickleball emoji) — referenced via <use href="#pb">. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="pb" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="45" fill="#d5e64f" stroke="#9aad3f" stroke-width="3"/>
+      <g fill="#33420f">
+        <circle cx="50" cy="25" r="6.8"/><circle cx="73" cy="38" r="6.8"/><circle cx="73" cy="62" r="6.8"/>
+        <circle cx="50" cy="75" r="6.8"/><circle cx="27" cy="62" r="6.8"/><circle cx="27" cy="38" r="6.8"/>
+        <circle cx="50" cy="50" r="6.8"/>
+      </g>
+    </symbol>
+  </svg>
   <div id="app">
     <div id="offline-banner" class="offline-banner hidden">📡 You're offline — reconnect to sync</div>
     <!-- Auth screen -->
@@ -57,7 +68,7 @@
           <button data-filter="all" class="active">All</button>
           <button data-filter="saved">⭐ Saved</button>
           <button data-filter="active">🟢 Playing now</button>
-          <button data-filter="games">🎾 Games</button>
+          <button data-filter="games"><svg class="pb-ic"><use href="#pb"/></svg> Games</button>
           <button data-filter="lighted">💡 Lighted</button>
           <button data-filter="indoor">🏠 Indoor</button>
           <button data-filter="nets">🥅 Nets</button>
@@ -74,7 +85,7 @@
             <button data-sort="distance" class="active">📍 Nearby</button>
             <button data-sort="active">🔥 Active now</button>
             <button data-sort="rating">⭐ Top rated</button>
-            <button data-sort="courts">🎾 Most courts</button>
+            <button data-sort="courts"><svg class="pb-ic"><use href="#pb"/></svg> Most courts</button>
           </div>
           <div id="court-list-items"></div>
         </div>

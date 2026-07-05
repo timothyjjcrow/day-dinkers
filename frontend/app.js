@@ -454,7 +454,7 @@
   async function shareInviteLink() {
     if (!state.me) return;
     const url = `${location.origin}/u/${state.me.id}`; // short link → OG preview in chat apps
-    const text = 'Play pickleball with me on Third Shot! 🎾';
+    const text = 'Play pickleball with me on Third Shot! 🏓';
     try {
       if (navigator.share) {
         await navigator.share({ title: 'Third Shot', text, url });
@@ -825,7 +825,7 @@
       if (!data.count) { el.classList.add('hidden'); return; }
       const names = data.players.map((p) => esc(p.display_name.split(' ')[0]));
       const who = data.count === 1 ? `${names[0]} wants` : `${data.count} players near you want`;
-      el.innerHTML = `🎾 ${who} to play now <span class="chev">›</span>`;
+      el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> ${who} to play now <span class="chev">›</span>`;
       el.classList.remove('hidden');
       el.classList.toggle('below', !$('#presence-banner').classList.contains('hidden'));
     } catch { el.classList.add('hidden'); }
@@ -1528,7 +1528,7 @@
           }),
         });
         closeModal(modal);
-        toast('Court added — thanks for growing the map! 🎾');
+        toast('Court added — thanks for growing the map! 🏓');
         if (state.favIds) state.favIds.add(court.id);
         fetchCourtsInView();
         openCourtDetail(court.id);
@@ -2183,7 +2183,7 @@
         <h3 style="margin:6px 0 2px">Check in at ${esc(court.name)}</h3>
         <p class="row-sub" style="margin-bottom:18px">Friends will see you're here.</p>
         <button class="btn btn-primary btn-block" id="ci-lfg" style="margin-bottom:10px;padding:16px">
-          🎾 I'm looking for players
+          <svg class="pb-ic"><use href="#pb"/></svg> I'm looking for players
         </button>
         <button class="btn btn-secondary btn-block" id="ci-play" style="padding:16px">
           👍 Just playing with my group
@@ -2198,7 +2198,7 @@
           body: JSON.stringify({ looking_for_game: looking }),
         });
         closeModal(modal);
-        toast(looking ? `You're in — players can find you 🎾` : `Checked in at ${court.name}`);
+        toast(looking ? `You're in — players can find you 🏓` : `Checked in at ${court.name}`);
         await refreshMe();
         fetchCourtsInView();
         maybeAskHours(court);
@@ -2389,8 +2389,8 @@
     if (game.status === 'completed' && game.score_team1 != null) {
       const score = `${game.score_team1}–${game.score_team2}`;
       if (game.you_won === true) return `Just won ${score}${courtName ? ` at ${courtName}` : ''} 🏆 Come play on Third Shot!`;
-      if (game.you_won === false) return `Battled to ${score}${courtName ? ` at ${courtName}` : ''} — rematch soon 🎾`;
-      return `Final: ${score}${courtName ? ` at ${courtName}` : ''} on Third Shot 🎾`;
+      if (game.you_won === false) return `Battled to ${score}${courtName ? ` at ${courtName}` : ''} — rematch soon 🏓`;
+      return `Final: ${score}${courtName ? ` at ${courtName}` : ''} on Third Shot 🏓`;
     }
     return `Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${fmtDateTime(game.scheduled_at)}`;
   }
@@ -2410,7 +2410,7 @@
     const ranked = game.game_type === 'ranked';
     const me = state.me || {};
     const streak = won && ranked ? (me.current_streak || 0) + 1 : 0;
-    const emoji = won === true ? '🏆' : won === false ? '🤝' : '🎾';
+    const emoji = won === true ? '🏆' : won === false ? '🤝' : '🏓';
     const headline = won === true ? 'Victory!' : won === false ? 'Good game!' : 'Game recorded!';
     const sub = won === true
       ? 'That one goes in the books.'
@@ -2680,7 +2680,7 @@
         html += `<div class="section-label">📅 ${sel === 0 ? 'Today' : week[sel].toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</div>`;
         html += dayEvents.length
           ? dayEvents.map((ev) => (ev.type === 'tournament' ? tournamentCardHtml(ev.item) : gameCardHtml(ev.item))).join('')
-          : '<div class="empty-state" style="padding:18px">Nothing on the calendar yet.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button></div>';
+          : '<div class="empty-state" style="padding:18px">Nothing on the calendar yet.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px"><svg class="pb-ic"><use href="#pb"/></svg> Start a game</button></div>';
         if (state.playSeg !== seg) return; // a newer segment render owns the panel
         el.innerHTML = html;
         bindWeekStrip();
@@ -2692,7 +2692,7 @@
       }
 
       if (toScore.length) {
-        html += '<div class="section-label" style="margin-top:6px">🎾 Played — enter the score</div>';
+        html += '<div class="section-label" style="margin-top:6px"><svg class="pb-ic"><use href="#pb"/></svg> Played — enter the score</div>';
         html += toScore.map((g) => gameCardHtml(g)).join('');
       }
       if (toConfirm.length) {
@@ -2733,7 +2733,7 @@
         html += '<div class="section-label">Nearby games</div>';
         html += restNearby.length
           ? restNearby.map((g) => gameCardHtml(g)).join('')
-          : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button><br><button class="btn btn-secondary btn-sm" data-invite-share style="margin-top:8px">💌 Invite friends to play</button></div>';
+          : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px"><svg class="pb-ic"><use href="#pb"/></svg> Start a game</button><br><button class="btn btn-secondary btn-sm" data-invite-share style="margin-top:8px">💌 Invite friends to play</button></div>';
       }
       if (weeklySessions.length) {
         html += '<div class="section-label">🔁 Weekly open play</div>';
@@ -2885,7 +2885,7 @@
           score_team2: s2,
         }) });
         closeModal(modal);
-        toast(s1 > s2 ? 'Logged — nice win! 🎾' : 'Game logged 🎾');
+        toast(s1 > s2 ? 'Logged — nice win! 🏓' : 'Game logged 🏓');
         refreshMe();
         if (state.tab === 'play') renderPlay();
       } catch (err) { toast(err.message); btn.disabled = false; }
@@ -3014,7 +3014,7 @@
           <label>Type</label>
           <div class="type-cards" id="ng-type">
             <button type="button" data-val="casual" class="${defaultType === 'casual' ? 'active' : ''}">
-              <span style="font-size:20px">🎾</span><b>Casual</b><small>Just for fun</small>
+              <span style="font-size:20px"><svg class="pb-ic"><use href="#pb"/></svg></span><b>Casual</b><small>Just for fun</small>
             </button>
             <button type="button" data-val="ranked" class="${defaultType === 'ranked' ? 'active' : ''}">
               <span style="font-size:20px">🏆</span><b>Ranked</b><small>Counts for rating</small>
@@ -3313,7 +3313,7 @@
           }),
         });
         closeModal(modal);
-        toast(nowMode ? "Game on! It's live in My games 🎾" : 'Game scheduled! 🎾');
+        toast(nowMode ? "Game on! It's live in My games 🏓" : 'Game scheduled! 🏓');
         if (state.tab === 'play') { state.playSeg = 'games'; renderPlay(); }
         document.querySelectorAll('#play-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === state.playSeg));
         refreshMe();
@@ -3333,7 +3333,7 @@
     const modal = openModal(`
       <div class="modal-head">
         <div style="flex:1">
-          <h3>${game.game_type === 'ranked' ? '🏆 Record ranked score' : '🎾 Record score'}</h3>
+          <h3>${game.game_type === 'ranked' ? '🏆 Record ranked score' : '<svg class="pb-ic"><use href="#pb"/></svg> Record score'}</h3>
           <div class="row-sub">${esc(court.name || '')}</div>
         </div>
         <button class="modal-close" aria-label="Close">✕</button>
@@ -4829,15 +4829,15 @@
                 : `${skillLabel(f.skill_level)} · ${f.rating}`}</div>
             </div>
             ${f.checked_in_court && f.checked_in_court.looking_for_game
-              ? `<button class="btn btn-primary btn-sm" data-coming="${f.id}" title="Tell them you're on your way">🎾 On my way</button>`
-              : `<button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game">🎾</button>`}
+              ? `<button class="btn btn-primary btn-sm" data-coming="${f.id}" title="Tell them you're on your way"><svg class="pb-ic"><use href="#pb"/></svg> On my way</button>`
+              : `<button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game"><svg class="pb-ic"><use href="#pb"/></svg></button>`}
             <button class="btn btn-secondary btn-sm" data-msg="${f.id}">💬</button>
           </div>`).join('')
       : (wantedSlots ? '' : '<div class="empty-state" style="padding:18px">No friends yet — search above to find players.</div>');
 
     // People you've actually played with but haven't friended.
     if (suggestions && suggestions.items && suggestions.items.length) {
-      html += '<div class="section-label">🎾 Players you\'ve played with</div>';
+      html += '<div class="section-label"><svg class="pb-ic"><use href="#pb"/></svg> Players you\'ve played with</div>';
       html += suggestions.items.map((s) => `
         <div class="card row">
           ${avatarHtml(s)}
@@ -4897,7 +4897,7 @@
       b.disabled = true;
       try {
         await api(`/players/${b.dataset.coming}/coming`, { method: 'POST' });
-        toast("They know you're on your way 🎾");
+        toast("They know you're on your way 🏓");
         b.textContent = '✓ Sent';
       } catch (e) { toast(e.message); b.disabled = false; }
     }));
@@ -5303,10 +5303,10 @@
             <span class="chev">›</span>
           </div>`).join('')}` : ''}
       ${(club.upcoming_games || []).length ? `
-        <div class="section-label">🎾 Upcoming club games</div>
+        <div class="section-label"><svg class="pb-ic"><use href="#pb"/></svg> Upcoming club games</div>
         ${club.upcoming_games.map((gm) => `
           <div class="card row" data-open-game="${gm.id}" style="cursor:pointer;padding:11px">
-            <span style="font-size:20px">${gm.game_type === 'ranked' ? '🏆' : '🎾'}</span>
+            <span style="font-size:20px">${gm.game_type === 'ranked' ? '🏆' : '<svg class="pb-ic"><use href="#pb"/></svg>'}</span>
             <div class="row-main">
               <div class="row-title" style="font-size:14px">${esc((gm.court && gm.court.name) || 'Court')}</div>
               <div class="row-sub">${fmtDateTime(gm.scheduled_at)} · ${gm.players.length}/${gm.max_players} in${gm.spots_left ? ` · ${gm.spots_left} spot${gm.spots_left === 1 ? '' : 's'} left` : ' · full'}</div>
@@ -5630,7 +5630,7 @@
       <div class="thread">
         <div class="thread-head">
           <button class="modal-close" style="font-size:18px">‹</button>
-          <span style="font-size:22px">🎾</span>
+          <span style="font-size:22px"><svg class="pb-ic"><use href="#pb"/></svg></span>
           <div class="row-main">
             <div class="row-title">Game chat</div>
             <div class="row-sub">${esc(data.game.court_name)} — only players in this game can read it</div>
@@ -5662,7 +5662,7 @@
       }).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
-      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Coordinate with your game — “running late”, “bringing balls” 🎾</div>';
+      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Coordinate with your game — “running late”, “bringing balls” <svg class="pb-ic"><use href="#pb"/></svg></div>';
       if (items.length) lastId = items[items.length - 1].id;
       msgsEl.scrollTop = msgsEl.scrollHeight;
       hydrateChatImages(msgsEl);
@@ -5755,7 +5755,7 @@
         ${availLines.map((l) => `<div class="row-sub">${l}</div>`).join('')}
         ${userId !== state.me.id && sharedAvailabilityText(state.me.availability, user.availability)
           ? `<div class="row-sub" style="margin-top:6px;color:var(--green-accent);font-weight:700">🤝 You both play: ${esc(sharedAvailabilityText(state.me.availability, user.availability))}</div>
-             <button class="btn btn-secondary btn-sm btn-block" id="up-schedule-shared" style="margin-top:8px">🎾 Schedule at a shared time</button>` : ''}
+             <button class="btn btn-secondary btn-sm btn-block" id="up-schedule-shared" style="margin-top:8px"><svg class="pb-ic"><use href="#pb"/></svg> Schedule at a shared time</button>` : ''}
       </div>` : '';
     const courtRow = (c) => `
       <div class="card row" data-pcourt="${c.id}" style="cursor:pointer">
@@ -5897,7 +5897,7 @@
       const slot = shared.sort((x, y) => daysUntil(x) - daysUntil(y))[0];
       closeModal(modal);
       openNewGameModal(null, 'casual', false, slot);
-      toast(`Pick a court — invite ${esc(user.display_name.split(' ')[0])} below 🎾`);
+      toast(`Pick a court — invite ${esc(user.display_name.split(' ')[0])} below 🏓`);
     });
   }
 
@@ -6186,7 +6186,7 @@
           el.querySelector('#pf-skill-up').addEventListener('click', async () => {
             try {
               applyMe(await api('/me', { method: 'PATCH', body: JSON.stringify({ skill_level: suggested }) }));
-              toast(`You're ${skillLabel(suggested)} now — go earn the next one 🎾`);
+              toast(`You're ${skillLabel(suggested)} now — go earn the next one 🏓`);
               renderProfile();
             } catch (e) { toast(e.message); }
           });
@@ -6205,7 +6205,7 @@
           if (stats.games_this_month) bits.push(`${stats.games_this_month} game${stats.games_this_month === 1 ? '' : 's'} this month`);
           if (stats.week_streak >= 2) bits.push(`${stats.week_streak}-week play streak 🔥`);
           if (stats.top_court) bits.push(`home turf: ${stats.top_court.name}`);
-          const text = `My season on Third Shot 🎾 ${bits.join(' · ')}. Come play with me!`;
+          const text = `My season on Third Shot 🏓 ${bits.join(' · ')}. Come play with me!`;
           const url = `${location.origin}/u/${me.id}`; // short link → OG preview in chat apps
           try {
             if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
@@ -6503,7 +6503,7 @@
     const isChallenge = game.notes.startsWith('⚔️');
     const live = game.status === 'upcoming' && new Date(game.scheduled_at).getTime() <= Date.now();
 
-    let emoji = '🎾';
+    let emoji = '🏓';
     let headline = fmtDateTime(game.scheduled_at);
     let subline = `${game.players.length}/${game.max_players} players`;
     if (game.status === 'completed') {
@@ -6553,7 +6553,7 @@
     let actions = '';
     if (game.status === 'upcoming') {
       if (!game.is_joined && game.spots_left > 0) {
-        actions = `<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${isChallenge ? '⚔️ Accept challenge' : '🎾 Join this game'}</button>`;
+        actions = `<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${isChallenge ? '⚔️ Accept challenge' : '<svg class="pb-ic"><use href="#pb"/></svg> Join this game'}</button>`;
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
         }
@@ -6698,7 +6698,7 @@
                 <button class="btn btn-secondary btn-block" data-invite-friend="${f.id}" style="margin-bottom:8px;text-align:left;display:flex;align-items:center;gap:8px">
                   ${avatarHtml(f, 'sm')} ${esc(f.display_name)}
                 </button>`).join('')
-            : `<div class="empty-state" style="padding:18px">${friends.length ? 'All your friends are already in this game 🎾' : 'Add friends first to invite them.'}</div>`}</div>
+            : `<div class="empty-state" style="padding:18px">${friends.length ? 'All your friends are already in this game <svg class="pb-ic"><use href="#pb"/></svg>' : 'Add friends first to invite them.'}</div>`}</div>
         `);
         sheet.querySelectorAll('[data-invite-friend]').forEach((b) => b.addEventListener('click', async () => {
           b.disabled = true;
@@ -6789,7 +6789,7 @@
       box.querySelector('#gs-join')?.addEventListener('click', async () => {
         try {
           await api(`/games/${gameId}/join`, { method: 'POST' });
-          toast(isChallenge ? 'Challenge accepted! ⚔️' : "You're in! 🎾");
+          toast(isChallenge ? 'Challenge accepted! ⚔️' : "You're in! 🏓");
           refreshMe(); reopenFresh();
         } catch (e) { toast(e.message); reopenFresh(); }
       });
@@ -6919,7 +6919,7 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣', league_update: '📦', league_match: '🎯', league_message: '💬', nearby_games: '🗓', streak_nag: '🔥' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🏓', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🏓', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣', league_update: '📦', league_match: '🎯', league_message: '💬', nearby_games: '🗓', streak_nag: '🔥' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
       if (n.related_league_id) return { type: 'league', id: n.related_league_id };
@@ -6958,7 +6958,7 @@
       ${modalHead('Activity')}
       ${enableBtn}
       ${data.items.length ? `<div style="text-align:right;margin-bottom:6px"><button class="btn-link" id="act-clear" style="font-size:13px">Clear all</button></div>${listHtml}`
-        : '<div class="empty-state"><span class="big">🔔</span>Nothing yet — go play some pickleball!<br><button class="btn btn-primary" data-goto="play" style="margin-top:10px">🎾 Find a game</button></div>'}
+        : '<div class="empty-state"><span class="big">🔔</span>Nothing yet — go play some pickleball!<br><button class="btn btn-primary" data-goto="play" style="margin-top:10px"><svg class="pb-ic"><use href="#pb"/></svg> Find a game</button></div>'}
     `);
     modal.querySelector('#act-clear')?.addEventListener('click', async () => {
       try {
@@ -7182,7 +7182,7 @@
     const steps = [
       { emoji: '🗺️', title: 'Find courts near you', body: "Browse the map, tap a court to see who's playing, and check in when you arrive." },
       { emoji: '🤝', title: 'Meet players', body: 'See players nearby and your friends — then add, message, or challenge them.' },
-      { emoji: '🎾', title: 'Play a game', body: 'Start a game now or schedule one — casual, ranked, or a weekly open-play session.' },
+      { emoji: '🏓', title: 'Play a game', body: 'Start a game now or schedule one — casual, ranked, or a weekly open-play session.' },
     ];
     let i = 0;
     const modal = openModal('');
@@ -7196,7 +7196,7 @@
           <h3 style="margin:6px 0 2px">${esc(s.title)}</h3>
           <p class="row-sub" style="margin-bottom:14px">${esc(s.body)}</p>
           <div class="tour-dots">${steps.map((_, k) => `<span class="tour-dot ${k === i ? 'on' : ''}"></span>`).join('')}</div>
-          <button class="btn btn-primary btn-block" id="tour-next" style="padding:14px;margin-top:14px">${last ? "Let's play 🎾" : 'Next'}</button>
+          <button class="btn btn-primary btn-block" id="tour-next" style="padding:14px;margin-top:14px">${last ? 'Let\'s play <svg class="pb-ic"><use href="#pb"/></svg>' : 'Next'}</button>
           ${last ? '' : '<button class="btn-link btn-block" id="tour-skip">Skip</button>'}
         </div>`;
       box.querySelector('#tour-next').onclick = () => {
@@ -7255,7 +7255,7 @@
     const el = document.createElement('div');
     el.className = 'usual-nudge';
     el.innerHTML = `
-      <span style="font-size:20px">🎾</span>
+      <span style="font-size:20px"><svg class="pb-ic"><use href="#pb"/></svg></span>
       <div class="row-main">
         <b>Your usual time to play!</b>
         <div class="row-sub">${openGames ? `${openGames} open game${openGames === 1 ? '' : 's'} near you` : 'No games nearby yet — start one?'}</div>
@@ -7274,7 +7274,7 @@
     window.addEventListener('offline', sync);
     window.addEventListener('online', () => {
       sync();
-      toast('Back online 🎾');
+      toast('Back online 🏓');
       if (state.token) refreshMe();
     });
     sync();
@@ -7447,7 +7447,7 @@
         if (!tagline || document.querySelector('.invite-hello')) return;
         const el = document.createElement('div');
         el.className = 'invite-hello';
-        el.innerHTML = `${avatarHtml(card, 'sm')} <span><b>${esc(card.display_name)}</b> invited you to play 🎾</span>`;
+        el.innerHTML = `${avatarHtml(card, 'sm')} <span><b>${esc(card.display_name)}</b> invited you to play <svg class="pb-ic"><use href="#pb"/></svg></span>`;
         tagline.after(el);
       }).catch(() => { /* inviter gone — sign up normally */ });
     }

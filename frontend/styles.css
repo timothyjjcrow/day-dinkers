@@ -563,6 +563,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 }
 .modal-head.scrolled { border-bottom: 1px solid var(--line); border-radius: 0; }
 .modal-head h3 { font-size: 18px; flex: 1; }
+/* Inline pickleball icon (no pickleball emoji exists) — sized to match adjacent text. */
+.pb-ic { width: 1em; height: 1em; display: inline-block; vertical-align: -0.15em; flex: none; }
 .chat-modal .modal-head, .court-modal .modal-head { position: static; margin: 0; }
 .modal-close { font-size: 22px; color: var(--ink-soft); padding: 4px 8px; }
 .form-field { margin-bottom: 14px; }
