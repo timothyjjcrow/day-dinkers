@@ -67,6 +67,10 @@ class BaseConfig:
     # Largest legitimate request is a court-photo upload (~500KB image → ~700KB
     # base64 JSON); cap everything at 2MB so oversized bodies get 413s.
     MAX_CONTENT_LENGTH = _get_int('MAX_CONTENT_LENGTH', 2 * 1024 * 1024)
+    # Web push — dark until both VAPID keys are set in the environment.
+    VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
+    VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
+    VAPID_CLAIMS_EMAIL = os.getenv('VAPID_CLAIMS_EMAIL', 'mailto:timothyjjcrow@gmail.com')
 
 
 class DevelopmentConfig(BaseConfig):

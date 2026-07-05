@@ -346,6 +346,7 @@ def _register_blueprints(app):
     from backend.routes.auth import auth_bp
     from backend.routes.chat import chat_bp
     from backend.routes.clubs import clubs_bp
+    from backend.routes.push import push_bp
     from backend.routes.courts import courts_bp
     from backend.routes.games import games_bp
     from backend.routes.social import social_bp
@@ -358,6 +359,7 @@ def _register_blueprints(app):
     app.register_blueprint(chat_bp, url_prefix='/api')
     app.register_blueprint(tournaments_bp, url_prefix='/api')
     app.register_blueprint(clubs_bp, url_prefix='/api')
+    app.register_blueprint(push_bp, url_prefix='/api')
 
 
 app = create_app()

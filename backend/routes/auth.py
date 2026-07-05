@@ -503,6 +503,9 @@ def delete_me():
     GameInvite.query.filter_by(user_id=user.id).delete(synchronize_session=False)
     FavoriteCourt.query.filter_by(user_id=user.id).delete(synchronize_session=False)
 
+    from backend.models import PushSubscription
+    PushSubscription.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+
     # Clubs: hand owned clubs to the longest-standing member; disband empty ones.
     from backend.models import ClubChatRead, ClubMember
     from backend.routes.clubs import _delete_club

@@ -853,6 +853,12 @@ def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=
         related_tournament_id=related_tournament_id,
         related_club_id=related_club_id,
     ))
+    # Mirror to the user's devices (no-op unless VAPID keys are configured).
+    try:
+        from backend.services.push import send_to_user
+        send_to_user(user_id, title, body)
+    except Exception:
+        pass  # push is best-effort; never break the transaction
 
 
 TOURNAMENT_FORMATS = ['single_elim', 'round_robin']
@@ -1094,3 +1100,21 @@ class ClubChatRead(TimestampMixin, db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     club_id = db.Column(db.Integer, db.ForeignKey('club.id'), nullable=False, index=True)
     last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
+
+
+class PushSubscription(TimestampMixin, db.Model):
+    """A browser push endpoint for one of a user's devices. Dead endpoints
+    (410/404 from the push service) are pruned automatically on send."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    endpoint = db.Column(db.Text, nullable=False)
+    p256dh = db.Column(db.String(255), nullable=False)
+    auth = db.Column(db.String(255), nullable=False)
+
+    user = db.relationship('User')
+
+    def subscription_info(self):
+        return {
+            'endpoint': self.endpoint,
+            'keys': {'p256dh': self.p256dh, 'auth': self.auth},
+        }

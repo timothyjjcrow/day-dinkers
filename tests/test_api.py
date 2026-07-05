@@ -5027,3 +5027,47 @@ def test_club_tournaments(client):
     # The club screen lists it while open/underway.
     detail = client.get(f'/api/clubs/{cid}', headers=bh).get_json()
     assert [x['name'] for x in detail['tournaments']] == ['Club Clash']
+
+
+# ---------- Web push ----------
+
+def test_push_subscription_lifecycle(client, app):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+
+    # Dark by default: no keys → client is told to skip push setup.
+    assert client.get('/api/push/public-key', headers=ah).get_json() == {'enabled': False}
+    app.config['VAPID_PRIVATE_KEY'] = 'test-private'
+    app.config['VAPID_PUBLIC_KEY'] = 'test-public'
+    conf = client.get('/api/push/public-key', headers=ah).get_json()
+    assert conf == {'enabled': True, 'key': 'test-public'}
+
+    # Subscriptions validate their shape.
+    assert client.post('/api/push/subscribe', json={'endpoint': 'http://insecure'},
+                       headers=ah).status_code == 400
+    sub = {'endpoint': 'https://push.example/abc', 'keys': {'p256dh': 'k1', 'auth': 'a1'}}
+    assert client.post('/api/push/subscribe', json=sub, headers=ah).status_code == 201
+
+    from backend.models import PushSubscription
+    row = PushSubscription.query.one()
+    assert row.user_id == a['user']['id'] and row.p256dh == 'k1'
+
+    # Same endpoint, different account: rebinds instead of duplicating.
+    sub['keys']['p256dh'] = 'k2'
+    client.post('/api/push/subscribe', json=sub, headers=bh)
+    row = PushSubscription.query.one()
+    assert row.user_id == b['user']['id'] and row.p256dh == 'k2'
+
+    # Unsubscribe only removes your own binding.
+    client.post('/api/push/unsubscribe', json={'endpoint': sub['endpoint']}, headers=ah)
+    assert PushSubscription.query.count() == 1
+    client.post('/api/push/unsubscribe', json={'endpoint': sub['endpoint']}, headers=bh)
+    assert PushSubscription.query.count() == 0
+
+    # Account deletion drops the device bindings too.
+    from backend.app import db
+    db.session.expunge_all()  # sqlite reuses the deleted PK; drop stale instances
+    client.post('/api/push/subscribe', json=sub, headers=bh)
+    client.delete('/api/me', json={'password': 'secret123'}, headers=bh)
+    assert PushSubscription.query.count() == 0

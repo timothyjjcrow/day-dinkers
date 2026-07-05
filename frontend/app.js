@@ -225,6 +225,7 @@
         showMain();
         openDeepLink();
         handleInviteRef();
+        syncPushSubscription();
       } catch (err) {
         errEl.textContent = err.message;
         errEl.classList.remove('hidden');
@@ -5998,6 +5999,7 @@
       const result = await Notification.requestPermission();
       e.target.remove();
       toast(result === 'granted' ? 'Notifications on 🔔' : 'Notifications stay off');
+      if (result === 'granted') syncPushSubscription();
     });
     modal.querySelectorAll('[data-notif-type]').forEach((row) => {
       row.addEventListener('click', () => {
@@ -6326,6 +6328,31 @@
     reportClientError(reason.message || String(e.reason), reason.stack);
   });
 
+  // --- Web push: mirror in-app notifications to this device. Quietly does
+  // nothing unless the server has VAPID keys and the user granted permission.
+  function urlBase64ToUint8Array(base64) {
+    const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+    const raw = atob((base64 + padding).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  }
+  async function syncPushSubscription() {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      const conf = await api('/push/public-key');
+      if (!conf.enabled) return;
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(conf.key),
+        });
+      }
+      await api('/push/subscribe', { method: 'POST', body: JSON.stringify(sub.toJSON()) });
+    } catch { /* push is a bonus, never block the app */ }
+  }
+
   async function boot() {
     applyTheme();
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
@@ -6357,6 +6384,7 @@
         applyMe(await api('/me'));
         showMain();
         openDeepLink();
+        syncPushSubscription();
         return;
       } catch { /* fall through to auth */ }
     }
