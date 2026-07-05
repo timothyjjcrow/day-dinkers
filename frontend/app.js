@@ -5663,18 +5663,30 @@
     });
 
     el.querySelector('#pf-calendar').addEventListener('click', async () => {
+      let webcal;
+      let feed;
       try {
         const { token } = await api('/calendar/token');
         // webcal:// prompts a subscribe (auto-updating), unlike a one-off .ics.
-        const feed = `${location.host}/api/calendar/${token}.ics`;
-        const webcal = `webcal://${feed}`;
+        feed = `${location.host}/api/calendar/${token}.ics`;
+        webcal = `webcal://${feed}`;
+      } catch (e) { toast(e.message); return; }
+      try {
         if (navigator.share) {
           await navigator.share({ title: 'My Third Shot games', url: `${location.protocol}//${feed}` });
         } else {
           await navigator.clipboard.writeText(webcal);
           toast('Calendar link copied — add it in your calendar app 📅');
         }
-      } catch (e) { toast(e.message); }
+      } catch {
+        // Share cancelled or clipboard blocked — show the link so the user
+        // can copy it themselves instead of a raw browser error.
+        openModal(`
+          ${modalHead('📅 Games calendar')}
+          <p class="row-sub" style="margin-bottom:10px">In your calendar app, choose “Subscribe” or “Add calendar by URL” and paste this link — your games will stay in sync.</p>
+          <input type="text" readonly value="${esc(webcal)}" onclick="this.select()" style="font-size:12.5px" />
+        `);
+      }
     });
     el.querySelector('#pf-home').addEventListener('click', () => {
       openHomeAreaSheet({ onSet: renderProfile });
@@ -5909,11 +5921,11 @@
       <div class="form-field">
         <label>Usually plays</label>
         <p class="row-sub" style="margin-bottom:6px">Tap when you typically play — helps players find partners on their schedule.</p>
-        ${AVAIL_PARTS.map(([part, emoji]) => `
+        ${AVAIL_PARTS.map(([part, emoji, partLabel]) => `
           <div class="av-row">
-            <span class="av-emoji" title="${part}">${emoji}</span>
+            <span class="av-emoji" title="${partLabel}" style="display:inline-flex;flex-direction:column;align-items:center;min-width:34px">${emoji}<span style="font-size:8.5px;font-weight:700;color:var(--ink-soft);letter-spacing:.02em">${partLabel.slice(0, -1).toUpperCase()}</span></span>
             ${AVAIL_DAYS.map((d) => `
-              <button type="button" class="av-chip ${(me.availability || []).includes(`${d}-${part}`) ? 'active' : ''}" data-av="${d}-${part}">${d[0].toUpperCase()}</button>`).join('')}
+              <button type="button" class="av-chip ${(me.availability || []).includes(`${d}-${part}`) ? 'active' : ''}" data-av="${d}-${part}" aria-label="${partLabel} ${d}">${d[0].toUpperCase()}</button>`).join('')}
           </div>`).join('')}
       </div>
       <div class="form-field">
@@ -6036,7 +6048,10 @@
         modal.querySelector('#ep-pw-current').value = '';
         modal.querySelector('#ep-pw-new').value = '';
         toast('Password updated 🔒');
-      } catch (e) { toast(e.message); }
+      } catch (e) {
+        // The generic auth message talks about email — confusing here.
+        toast(/email or password/i.test(e.message) ? 'Current password is incorrect' : e.message);
+      }
     });
 
     modal.querySelector('#ep-delete').addEventListener('click', async (e) => {
@@ -6076,6 +6091,19 @@
         renderProfile();
       } catch (e) { toast(e.message); }
     });
+
+    // Notification switches live below the Save button — apply them the
+    // instant they're flipped so closing the sheet can't lose the change.
+    modal.querySelectorAll('.ep-notif-toggle').forEach((t) => t.addEventListener('change', async () => {
+      const muted = [...modal.querySelectorAll('.ep-notif-toggle')]
+        .filter((c) => !c.checked).map((c) => c.dataset.kind);
+      try {
+        applyMe(await api('/me', { method: 'PATCH', body: JSON.stringify({ muted_notifications: muted }) }));
+      } catch (e) {
+        t.checked = !t.checked; // roll the switch back so the UI stays honest
+        toast(e.message);
+      }
+    }));
   }
 
   function gameFingerprint(game) {
