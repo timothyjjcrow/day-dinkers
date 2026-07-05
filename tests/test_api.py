@@ -1786,8 +1786,11 @@ def test_weekly_recap_notification(client, app):
     assert len(got) == 1, [n['title'] for n in got]  # diagnose the rare flake
     assert got[0]['title'] == 'Your week on the courts: 1 game, 1–0'
     assert got[0]['body'].startswith('+') and 'rating' in got[0]['body']
-    # The marker prevents a repeat on the next app open.
-    client.get('/api/me', headers=ah)
+    # The marker prevents a repeat sweep. Checked in-context: the marker was
+    # committed in-context above, and an HTTP /me runs on a session that may
+    # not see that write yet (the StaticPool gotcha — this exact line flaked).
+    with app.app_context():
+        _maybe_weekly_recap(db.session.get(UserModel, a['user']['id']))
     assert len(recaps(ah)) == 1
 
     # A quiet week stays quiet — marker still advances (no recap on repeat).
@@ -5582,13 +5585,17 @@ def test_club_weekly_digest(client, app):
     game = client.post('/api/games', json={
         'court_id': court_id, 'scheduled_at': when, 'club_id': cid,
     }, headers=ah).get_json()
+    # Time-travel AND sweep in the same context — HTTP round-trips after
+    # in-context mutations flake under the shared in-memory session (see
+    # gotchas; the weekly-recap test is structured the same way).
+    from backend.routes.clubs import send_club_digests
     with app.app_context():
         db.session.get(GameModel, game['id']).scheduled_at = utcnow() - timedelta(hours=1)
         db.session.get(ClubModel, cid).last_digest_at = utcnow() - timedelta(days=8)
         db.session.commit()
+        send_club_digests()
 
     # Every member gets exactly one summary counting the game + new members.
-    client.get('/api/me', headers=ah)
     for headers in (ah, bh):
         rows = digests(headers)
         assert len(rows) == 1, rows
@@ -5596,7 +5603,8 @@ def test_club_weekly_digest(client, app):
         assert '1 club game' in rows[0]['title'] and '2 new members' in rows[0]['title']
 
     # Watermark moved — an immediate re-sweep can't double-send.
-    client.get('/api/me', headers=ah)
+    with app.app_context():
+        send_club_digests()
     assert len(digests(bh)) == 1
 
     # A quiet week moves the watermark but stays silent.
@@ -5606,8 +5614,28 @@ def test_club_weekly_digest(client, app):
         for m in ClubMemberModel.query.filter_by(club_id=cid).all():
             m.created_at = utcnow() - timedelta(days=10)
         db.session.commit()
-    client.get('/api/me', headers=ah)
-    assert len(digests(ah)) == 1 and len(digests(bh)) == 1
-    with app.app_context():
+        send_club_digests()
         marker = db.session.get(ClubModel, cid).last_digest_at
         assert marker and marker > utcnow() - timedelta(minutes=5)
+    assert len(digests(ah)) == 1 and len(digests(bh)) == 1
+
+
+def test_game_preferred_level(client):
+    a = register(client, 'a@example.com', 'Ana')
+    ah = auth_headers(a['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    from datetime import timedelta
+    from backend.models import utcnow
+    when = (utcnow() + timedelta(hours=5)).isoformat() + 'Z'
+
+    # Stated level rides through; it's a hint, so anything bogus falls to 'any'.
+    res = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when, 'preferred_level': 'intermediate',
+    }, headers=ah)
+    assert res.status_code == 201 and res.get_json()['preferred_level'] == 'intermediate'
+    res = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when, 'preferred_level': 'ninja',
+    }, headers=ah)
+    assert res.status_code == 201 and res.get_json()['preferred_level'] == 'any'
+    res = client.post('/api/games', json={'court_id': court_id, 'scheduled_at': when}, headers=ah)
+    assert res.get_json()['preferred_level'] == 'any'

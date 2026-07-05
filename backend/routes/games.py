@@ -12,6 +12,7 @@ from backend.models import (
     GAME_RECURRENCES,
     GAME_TYPES,
     GAME_VISIBILITIES,
+    SKILL_LEVELS,
     Game,
     GameInvite,
     GameMvpVote,
@@ -540,6 +541,11 @@ def create_game():
     if game_type == 'ranked':
         recurrence = 'none'
 
+    # Preferred level is a hint for joiners, never a hard gate.
+    preferred_level = str(payload.get('preferred_level') or 'any').strip().lower()
+    if preferred_level not in SKILL_LEVELS:
+        preferred_level = 'any'
+
     # Hosting on behalf of a club: members only, and never private (a club
     # game's whole point is that the club can see and join it).
     club = None
@@ -564,6 +570,7 @@ def create_game():
         visibility=visibility,
         recurrence=recurrence,
         max_players=max_players,
+        preferred_level=preferred_level,
         notes=str(payload.get('notes') or '').strip()[:500],
     )
     db.session.add(game)

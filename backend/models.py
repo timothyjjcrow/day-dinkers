@@ -556,6 +556,8 @@ class Game(TimestampMixin, db.Model):
     recurrence = db.Column(db.String(16), nullable=False, default='none')
     max_players = db.Column(db.Integer, nullable=False, default=4)
     notes = db.Column(db.String(500), nullable=False, default='')
+    # Expectation-setting for open games: 'any' or one of SKILL_LEVELS.
+    preferred_level = db.Column(db.String(16), nullable=False, default='any')
     # 32 chars: must fit 'awaiting_confirmation' (Postgres enforces this, SQLite doesn't)
     status = db.Column(db.String(32), nullable=False, default='upcoming', index=True)
     score_team1 = db.Column(db.Integer)
@@ -633,6 +635,7 @@ class Game(TimestampMixin, db.Model):
             'recurrence': self.recurrence,
             'max_players': self.max_players,
             'notes': self.notes,
+            'preferred_level': self.preferred_level,
             'status': self.status,
             'score_team1': self.score_team1,
             'score_team2': self.score_team2,

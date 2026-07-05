@@ -2194,6 +2194,10 @@
     // Discovery aids: flag joinable games near your rating or at your usual slot.
     const reasons = gameMatchReasons(game);
     let levelTag = '';
+    // Host's stated level hint comes first; the personal match badges follow.
+    if (game.preferred_level && game.preferred_level !== 'any') {
+      levelTag += `<span class="tag" style="margin:0 0 0 6px">🎚 ${skillLabel(game.preferred_level)}</span>`;
+    }
     if (reasons.includes('skill')) {
       levelTag += '<span class="tag live" style="margin:0 0 0 6px">⚖️ Your level</span>';
     }
@@ -2979,6 +2983,17 @@
       </div>
 
       <div class="form-field">
+        <label>Level (a hint, not a gate)</label>
+        <div class="quick-times" id="ng-level" style="margin-top:2px">
+          <button type="button" data-level="any" class="active">Anyone</button>
+          <button type="button" data-level="beginner">Beginner</button>
+          <button type="button" data-level="intermediate">Intermediate</button>
+          <button type="button" data-level="advanced">Advanced</button>
+          <button type="button" data-level="pro">Pro</button>
+        </div>
+      </div>
+
+      <div class="form-field">
         <label>Who can join?</label>
         <div class="type-cards vis-cards" id="ng-vis">
           <button type="button" data-vis="open" class="active"><span style="font-size:19px">🌍</span><b>Anyone</b><small>Nearby players</small></button>
@@ -3153,6 +3168,15 @@
       syncRecurring();
     });
 
+    // --- Preferred level ---
+    let preferredLevel = 'any';
+    modal.querySelector('#ng-level').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      preferredLevel = btn.dataset.level;
+      modal.querySelectorAll('#ng-level button').forEach((b) => b.classList.toggle('active', b === btn));
+    });
+
     // --- Club banner ---
     let clubId = null;
     const clubHintEl = modal.querySelector('#ng-club-hint');
@@ -3232,6 +3256,7 @@
             visibility,
             recurrence: recurringBox.checked ? 'weekly' : 'none',
             max_players: Number(modal.querySelector('#ng-max').value),
+            preferred_level: preferredLevel,
             notes: modal.querySelector('#ng-notes').value.trim(),
             invite_user_ids: visibility === 'private' ? [...inviteIds] : [],
             club_id: clubId,
@@ -6495,7 +6520,7 @@
     return `
       <div class="modal-head">
         <div style="flex:1">
-          <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}${game.club_name ? `<span class="tag" style="margin:0 0 0 6px">🏛 ${esc(game.club_name)}</span>` : ''}</h3>
+          <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}${game.preferred_level && game.preferred_level !== 'any' ? `<span class="tag" style="margin:0 0 0 6px">🎚 ${skillLabel(game.preferred_level)}</span>` : ''}${game.club_name ? `<span class="tag" style="margin:0 0 0 6px">🏛 ${esc(game.club_name)}</span>` : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
         ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="Game chat" aria-label="Game chat" style="box-shadow:none;font-size:17px;position:relative">💬${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}

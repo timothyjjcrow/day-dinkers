@@ -197,6 +197,10 @@ def _upgrade_schema(app):
                 )
             if 'club_id' not in game_cols:
                 statements.append('ALTER TABLE game ADD COLUMN club_id INTEGER')
+            if 'preferred_level' not in game_cols:
+                statements.append(
+                    "ALTER TABLE game ADD COLUMN preferred_level VARCHAR(16) NOT NULL DEFAULT 'any'"
+                )
 
         if 'court' in tables:
             court_cols = {c['name'] for c in inspector.get_columns('court')}
