@@ -1355,7 +1355,10 @@
       tags.push(`<span class="tag ${r.wins >= r.losses ? 'live' : ''}" style="margin:0">🎯 You're ${r.wins}–${r.losses} here</span>`);
     }
 
-    const mapsUrl = `https://maps.apple.com/?daddr=${encodeURIComponent(`${court.address} ${court.city}`)}&ll=${court.latitude},${court.longitude}`;
+    // Apple devices get Apple Maps; everyone else gets Google directions.
+    const mapsUrl = /iPhone|iPad|Macintosh/.test(navigator.userAgent)
+      ? `https://maps.apple.com/?daddr=${encodeURIComponent(`${court.address} ${court.city}`)}&ll=${court.latitude},${court.longitude}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${court.latitude},${court.longitude}`;
 
     const playersHtml = court.players_here.length
       ? court.players_here.map((p) => {
@@ -3863,9 +3866,30 @@
       </div>`;
     }
 
+    // "Who plays when" — filter friends by their usual-play slots.
+    const SLOT_FILTERS = [
+      ['', 'All'],
+      ['sat-am,sat-pm', 'Sat'],
+      ['sun-am,sun-pm', 'Sun'],
+      ['mon-eve,tue-eve,wed-eve,thu-eve,fri-eve', 'Weekday eve'],
+      ['sat-am,sun-am,mon-am,tue-am,wed-am,thu-am,fri-am', 'Mornings'],
+    ];
+    const slotFilter = state.friendSlotFilter || '';
+    const wantedSlots = slotFilter ? slotFilter.split(',') : null;
+    const shownFriends = wantedSlots
+      ? data.friends.filter((f) => (f.availability || []).some((s) => wantedSlots.includes(s)))
+      : data.friends;
+
     html += `<div class="section-label">Friends (${data.friends.length})</div>`;
-    html += data.friends.length
-      ? data.friends.map((f) => `
+    if (data.friends.length > 1) {
+      html += `<div class="quick-times" id="friend-slots" style="margin:0 0 10px">${SLOT_FILTERS
+        .map(([v, label]) => `<button type="button" data-slots="${v}" class="${v === slotFilter ? 'active' : ''}">${label}</button>`).join('')}</div>`;
+    }
+    if (wantedSlots && !shownFriends.length) {
+      html += '<div class="empty-state" style="padding:14px">No friends usually play then — try another time.</div>';
+    }
+    html += shownFriends.length
+      ? shownFriends.map((f) => `
           <div class="card row">
             ${avatarHtml(f)}
             <div class="row-main" data-view-user="${f.id}" style="cursor:pointer">
@@ -3879,7 +3903,7 @@
               : `<button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game">🎾</button>`}
             <button class="btn btn-secondary btn-sm" data-msg="${f.id}">💬</button>
           </div>`).join('')
-      : '<div class="empty-state" style="padding:18px">No friends yet — search above to find players.</div>';
+      : (wantedSlots ? '' : '<div class="empty-state" style="padding:18px">No friends yet — search above to find players.</div>');
 
     // People you've actually played with but haven't friended.
     if (suggestions && suggestions.items && suggestions.items.length) {
@@ -3925,6 +3949,12 @@
         renderChat();
       } catch (e) { toast(e.message); }
     }));
+    el.querySelector('#friend-slots')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      state.friendSlotFilter = btn.dataset.slots;
+      renderChat();
+    });
     el.querySelectorAll('[data-msg]').forEach((b) => b.addEventListener('click', () => openThread(Number(b.dataset.msg))));
     el.querySelectorAll('[data-invite]').forEach((b) => b.addEventListener('click', () => {
       const court = b.dataset.inviteCourt
