@@ -4959,3 +4959,31 @@ def test_club_games(client):
     detail = client.get(f'/api/clubs/{cid}', headers=bh).get_json()
     assert len(detail['upcoming_games']) == 2
     assert detail['upcoming_games'][0]['club_name'] == 'Dink Dynasty'
+
+
+def test_club_leaderboard_records(client):
+    from datetime import timedelta
+    from backend.app import db
+    from backend.models import Game, GamePlayer, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # A finished club game: Ana beat Ben 11–7 under the club banner.
+    game = Game(
+        court_id=court_id, creator_id=a['user']['id'], club_id=cid,
+        scheduled_at=utcnow() - timedelta(days=1), status='completed',
+        score_team1=11, score_team2=7, completed_at=utcnow(),
+    )
+    db.session.add(game)
+    db.session.flush()
+    db.session.add(GamePlayer(game_id=game.id, user_id=a['user']['id'], team=1))
+    db.session.add(GamePlayer(game_id=game.id, user_id=b['user']['id'], team=2))
+    db.session.commit()
+
+    detail = client.get(f'/api/clubs/{cid}', headers=ah).get_json()
+    records = {m['display_name']: (m['club_wins'], m['club_losses']) for m in detail['members']}
+    assert records == {'Ana': (1, 0), 'Ben': (0, 1)}

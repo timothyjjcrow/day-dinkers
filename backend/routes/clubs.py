@@ -137,13 +137,35 @@ def club_detail(club_id):
         return err
     members = sorted(club.members, key=lambda m: (m.role != 'owner', m.created_at, m.id))
     data = _club_payload(club, _membership(club))
+
+    # Per-member record in completed club games — powers the leaderboard.
+    from backend.models import Game, utcnow
+    club_record = {}
+    finished = Game.query.filter(
+        Game.club_id == club.id, Game.status == 'completed',
+    ).all()
+    for game in finished:
+        if game.score_team1 is None or game.score_team2 is None:
+            continue
+        winning_team = 1 if game.score_team1 > game.score_team2 else 2
+        for player in game.players:
+            if not player.team:
+                continue
+            record = club_record.setdefault(player.user_id, [0, 0])
+            record[0 if player.team == winning_team else 1] += 1
+
     data['members'] = [
-        {**m.user.to_public_dict(), 'role': m.role} for m in members
+        {
+            **m.user.to_public_dict(),
+            'role': m.role,
+            'club_wins': club_record.get(m.user_id, [0, 0])[0],
+            'club_losses': club_record.get(m.user_id, [0, 0])[1],
+        }
+        for m in members
         if m.user and not m.user.deleted_at
     ]
 
     # The club's next few games — hosted under the club banner.
-    from backend.models import Game, utcnow
     upcoming = (
         Game.query.filter(
             Game.club_id == club.id,

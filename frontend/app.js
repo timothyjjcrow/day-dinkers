@@ -4321,15 +4321,24 @@
 
   function openClubInfo(club) {
     const isOwner = club.my_role === 'owner';
-    const membersHtml = (club.members || []).map((m) => `
-      <div class="card row">
-        <div data-view-user="${m.id}" style="cursor:pointer">${avatarHtml(m)}</div>
+    // Members double as the club leaderboard — ranked by rating, with club-game
+    // records once the club has played under its banner.
+    const ranked = [...(club.members || [])].sort((a, b) => b.rating - a.rating);
+    const membersHtml = ranked.map((m, i) => {
+      const medal = ['🥇', '🥈', '🥉'][i] || `${i + 1}`;
+      const overall = (m.ranked_wins + m.ranked_losses) > 0 ? ` · ${m.ranked_wins}W–${m.ranked_losses}L` : '';
+      const clubRec = (m.club_wins || m.club_losses) ? ` · 🏛 ${m.club_wins}–${m.club_losses}` : '';
+      return `
+      <div class="card row" style="padding:11px">
+        <span style="font-size:16px;width:24px;text-align:center;font-weight:700">${medal}</span>
+        <div data-view-user="${m.id}" style="cursor:pointer">${avatarHtml(m, 'sm')}</div>
         <div class="row-main" data-view-user="${m.id}" style="cursor:pointer">
-          <div class="row-title">${esc(m.display_name)}${m.role === 'owner' ? ' 👑' : ''}</div>
-          <div class="row-sub">${skillLabel(m.skill_level)} · ${m.rating}</div>
+          <div class="row-title" style="font-size:14px">${esc(m.display_name)}${m.role === 'owner' ? ' 👑' : ''}${m.current_streak >= 2 ? ' 🔥' : ''}</div>
+          <div class="row-sub">${skillLabel(m.skill_level)} · ${m.rating}${overall}${clubRec}</div>
         </div>
         ${isOwner && m.id !== state.me.id ? `<button class="btn btn-secondary btn-sm" data-boot="${m.id}" title="Remove from club">✕</button>` : ''}
-      </div>`).join('');
+      </div>`;
+    }).join('');
 
     const modal = openModal(`
       ${modalHead(`🏛 ${esc(club.name)}`)}
@@ -4359,7 +4368,9 @@
         : '<button class="btn btn-primary btn-block" id="club-join-btn" style="margin-bottom:8px">🙌 Join this club</button>'}
       ${club.joined ? '<button class="btn btn-secondary btn-block" id="club-invite" style="margin-bottom:8px">🎟 Invite friends</button>' : ''}
       <button class="btn btn-secondary btn-block" id="club-share" style="margin-bottom:8px">📤 Share club</button>
-      <div class="section-label">👥 ${club.member_count} member${club.member_count === 1 ? '' : 's'}</div>
+      <div class="section-label">🏆 Leaderboard · ${club.member_count} member${club.member_count === 1 ? '' : 's'}</div>
+      ${(club.members || []).some((m) => m.club_wins || m.club_losses)
+        ? '<div class="row-sub" style="margin:-2px 0 8px 2px">🏛 = record in club games</div>' : ''}
       ${membersHtml}
       ${isOwner ? `
         <div style="display:flex;gap:8px;margin-top:12px">
