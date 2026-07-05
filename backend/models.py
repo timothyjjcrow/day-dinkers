@@ -326,6 +326,9 @@ def _badge_defs(user):
         ('mvp', '🌟', 'Voted MVP', mvp_count, 1),
         ('social', '🤝', '5 friends', friend_count, 5),
         ('champion', '🏆', 'Tournament champion', titles, 1),
+        ('sharpshooter', '🎯', '10 ranked wins', user.ranked_wins or 0, 10),
+        ('globetrotter', '🗺', 'Played 15 courts', len(courts), 15),
+        ('century', '💯', '100 games played', len(games), 100),
     ]
 
 

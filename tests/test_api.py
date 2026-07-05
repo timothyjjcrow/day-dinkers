@@ -4678,3 +4678,23 @@ def test_my_court_rooms(client):
     rooms = client.get('/api/chat/courts', headers=auth_headers(a['token'])).get_json()['items']
     larson = next(r for r in rooms if r['court']['id'] == court_id)
     assert larson['unread'] == 0
+
+
+def test_new_longterm_badges(client):
+    """Sharpshooter counts ranked wins; the new badges stay out of the
+    closest-three progress list for fresh players."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    stats = client.get('/api/me/stats', headers=auth_headers(a['token'])).get_json()
+    ids = [x['id'] for x in stats['badge_progress']]
+    assert 'sharpshooter' not in ids and 'century' not in ids  # far targets stay out of top 3
+
+    # Grind Ana to 10 ranked wins -> sharpshooter earned
+    from backend.app import db
+    from backend.models import User
+    User.query.filter_by(email='a@example.com').first().ranked_wins = 10
+    db.session.commit()
+    stats = client.get('/api/me/stats', headers=auth_headers(a['token'])).get_json()
+    assert any(x['id'] == 'sharpshooter' for x in stats['badges'])

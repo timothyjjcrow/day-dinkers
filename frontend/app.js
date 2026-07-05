@@ -1480,11 +1480,11 @@
       ${playersHtml}
       ${(court.regulars || []).length ? `
         <div class="section-label">Court regulars</div>
-        ${court.regulars.map((p) => `
+        ${court.regulars.map((p, i) => `
           <div class="card row" data-view-user="${p.id}" style="cursor:pointer;padding:11px">
             ${avatarHtml(p, 'sm')}
             <div class="row-main">
-              <div class="row-title" style="font-size:14px">${esc(p.display_name)}</div>
+              <div class="row-title" style="font-size:14px">${esc(p.display_name)}${i === 0 && p.visits >= 3 ? ' <span class="tag" style="margin:0 0 0 4px;background:var(--amber-50);color:var(--amber-800)">👑 Mayor</span>' : ''}</div>
               <div class="row-sub">${skillLabel(p.skill_level)} · ${p.rating} · ${p.visits} visit${p.visits === 1 ? '' : 's'} recently</div>
             </div>
             <span class="chev">›</span>
