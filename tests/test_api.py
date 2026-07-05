@@ -5318,3 +5318,42 @@ def test_league_chat_and_deadline_reminders(client):
     assert '2 box matches' in reminders(heads[2])[0]
     # Round didn't advance early.
     assert client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()['current_round'] == 1
+
+
+def test_club_linked_leagues(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    base = {
+        'name': 'Dynasty Ladder', 'court_id': court_id,
+        'starts_at': (utcnow() + timedelta(days=3)).isoformat() + 'Z',
+    }
+
+    assert client.post('/api/leagues', json={**base, 'club_id': cid},
+                       headers=ch).status_code == 403
+    assert client.post('/api/leagues', json={**base, 'club_id': 999},
+                       headers=ah).status_code == 404
+
+    res = client.post('/api/leagues', json={**base, 'club_id': cid}, headers=ah)
+    assert res.status_code == 201, res.get_json()
+    lg = res.get_json()
+    assert lg['club_id'] == cid and lg['club_name'] == 'Dink Dynasty'
+
+    # Members invited (deep-linking to the league), outsiders not.
+    pings = [n for n in client.get('/api/notifications', headers=bh).get_json()['items']
+             if n['kind'] == 'club_game']
+    assert len(pings) == 1
+    assert pings[0]['related_league_id'] == lg['id']
+    assert 'Dynasty Ladder' in pings[0]['title']
+    assert not [n for n in client.get('/api/notifications', headers=ch).get_json()['items']
+                if n['kind'] == 'club_game']
+
+    # Club screen lists it while open.
+    detail = client.get(f'/api/clubs/{cid}', headers=bh).get_json()
+    assert [x['name'] for x in detail['leagues']] == ['Dynasty Ladder']

@@ -3138,7 +3138,7 @@
     let body = `
       ${modalHead(`📦 ${esc(lg.name)}`)}
       <div class="row-sub" style="margin:-6px 0 6px">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size} · new round every ${lg.round_days} days</div>
-      <div style="margin-bottom:12px">${statusChip}</div>
+      <div style="margin-bottom:12px">${statusChip}${lg.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(lg.club_name)}</span>` : ''}</div>
       ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}
       ${lg.joined ? `<button class="btn btn-secondary btn-block" id="lg-chat" style="margin-bottom:10px;position:relative">💬 League chat${lg.chat_unread ? ` <span class="badge" style="position:static;margin-left:6px">${lg.chat_unread > 9 ? '9+' : lg.chat_unread}</span>` : ''}</button>` : ''}`;
 
@@ -3336,12 +3336,14 @@
     });
   }
 
-  function openCreateLeagueSheet() {
+  async function openCreateLeagueSheet() {
     const start = new Date();
     start.setDate(start.getDate() + 3);
     start.setHours(18, 0, 0, 0);
     const pad = (n) => String(n).padStart(2, '0');
     const defaultWhen = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T${pad(start.getHours())}:${pad(start.getMinutes())}`;
+    let myClubs = [];
+    try { myClubs = (await api('/clubs/mine')).items || []; } catch { /* clubs optional */ }
 
     const modal = openModal(`
       ${modalHead('Start a box league')}
@@ -3366,12 +3368,32 @@
           <select id="lc-box"><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
         </div>
       </div>
+      ${myClubs.length ? `
+      <div class="form-field">
+        <label>Host under a club banner?</label>
+        <div class="quick-times" id="lc-club">
+          <button type="button" data-club-id="" class="active">Just me</button>
+          ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}">🏛 ${esc(cl.name)}</button>`).join('')}
+        </div>
+        <div class="row-sub" id="lc-club-hint" style="margin-top:6px"></div>
+      </div>` : ''}
       <div class="form-field">
         <input type="text" id="lc-desc" maxlength="200" placeholder="Details (optional) — e.g. Play your box by Sunday each week" />
       </div>
       <button class="btn btn-primary btn-block" id="lc-submit" style="padding:15px">Create league</button>
     `);
     clubCourtPicker(modal, 'lc');
+    let lcClubId = null;
+    modal.querySelector('#lc-club')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      lcClubId = Number(btn.dataset.clubId) || null;
+      modal.querySelectorAll('#lc-club button').forEach((b) => b.classList.toggle('active', b === btn));
+      const picked = myClubs.find((cl) => cl.id === lcClubId);
+      modal.querySelector('#lc-club-hint').textContent = picked && picked.member_count > 1
+        ? `📣 The other ${picked.member_count - 1} member${picked.member_count === 2 ? '' : 's'} of ${picked.name} will be invited to sign up.`
+        : '';
+    });
     modal.querySelector('#lc-submit').addEventListener('click', async (e) => {
       const name = modal.querySelector('#lc-name').value.trim();
       const courtId = Number(modal.querySelector('#lc-court-id').value);
@@ -3388,6 +3410,7 @@
           starts_at: new Date(whenRaw).toISOString(),
           box_size: Number(modal.querySelector('#lc-box').value),
           description: modal.querySelector('#lc-desc').value.trim(),
+          club_id: lcClubId,
         }) });
         closeModal(modal);
         toast('League created 📦 Share it so players can sign up!');
@@ -4708,6 +4731,17 @@
           </div>
           <span class="chev">›</span>
         </div>` : ''}
+      ${(club.leagues || []).length ? `
+        <div class="section-label">📦 Club leagues</div>
+        ${club.leagues.map((lg) => `
+          <div class="card row" data-open-club-league="${lg.id}" style="cursor:pointer;padding:11px">
+            <span style="font-size:20px">📦</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(lg.name)}</div>
+              <div class="row-sub">${lg.status === 'registration' ? `Signups open · ${lg.member_count}/${lg.max_players}` : `Round ${lg.current_round} · ${lg.member_count} players`}</div>
+            </div>
+            <span class="chev">›</span>
+          </div>`).join('')}` : ''}
       ${(club.tournaments || []).length ? `
         <div class="section-label">🏆 Club tournaments</div>
         ${club.tournaments.map((t) => `
@@ -4764,6 +4798,10 @@
     modal.querySelectorAll('[data-open-club-tournament]').forEach((row) => row.addEventListener('click', () => {
       closeModal(modal);
       openTournamentScreen(Number(row.dataset.openClubTournament));
+    }));
+    modal.querySelectorAll('[data-open-club-league]').forEach((row) => row.addEventListener('click', () => {
+      closeModal(modal);
+      openLeagueScreen(Number(row.dataset.openClubLeague));
     }));
     modal.querySelector('#club-chat-btn')?.addEventListener('click', () => {
       closeModal(modal);

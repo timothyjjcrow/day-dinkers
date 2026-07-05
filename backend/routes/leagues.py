@@ -89,11 +89,24 @@ def create_league():
         round_days = 7
     round_days = min(max(round_days, 3), 28)
 
+    # Running under a club banner: members only.
+    club = None
+    if payload.get('club_id'):
+        from backend.models import Club, ClubMember
+        club = db.session.get(Club, int(payload.get('club_id')))
+        if not club:
+            return jsonify({'error': 'club_not_found'}), 404
+        if not ClubMember.query.filter_by(
+            club_id=club.id, user_id=g.current_user.id,
+        ).first():
+            return jsonify({'error': 'members_only'}), 403
+
     league = League(
         name=name,
         description=str(payload.get('description') or '').strip()[:500],
         court_id=court.id,
         organizer_id=g.current_user.id,
+        club=club,
         starts_at=starts_at,
         box_size=box_size,
         round_days=round_days,
@@ -101,6 +114,22 @@ def create_league():
     )
     db.session.add(league)
     db.session.add(LeagueMember(league=league, user_id=g.current_user.id))
+    db.session.flush()  # notifications below need league.id
+
+    # Club members hear about their club's league first-class.
+    if club:
+        for member in club.members:
+            if member.user_id == g.current_user.id:
+                continue
+            if is_blocked_between(g.current_user.id, member.user_id):
+                continue
+            notify(
+                member.user_id,
+                'club_game',
+                f'{club.name}: new box league — {name}. Signups open',
+                related_user_id=g.current_user.id,
+                related_league_id=league.id,
+            )
     db.session.commit()
     return jsonify(league.to_dict(g.current_user.id, detail=True)), 201
 

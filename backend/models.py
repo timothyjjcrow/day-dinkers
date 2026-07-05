@@ -1155,6 +1155,8 @@ class League(TimestampMixin, db.Model):
     description = db.Column(db.String(500), nullable=False, default='')
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
     organizer_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # Set when the league runs under a club's banner.
+    club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
     starts_at = db.Column(db.DateTime, nullable=False, index=True)
     box_size = db.Column(db.Integer, nullable=False, default=4)
     round_days = db.Column(db.Integer, nullable=False, default=7)
@@ -1169,6 +1171,7 @@ class League(TimestampMixin, db.Model):
 
     court = db.relationship('Court')
     organizer = db.relationship('User', foreign_keys=[organizer_id])
+    club = db.relationship('Club', foreign_keys=[club_id])
     champion = db.relationship('User', foreign_keys=[champion_user_id])
     members = db.relationship(
         'LeagueMember', back_populates='league', lazy='selectin',
@@ -1192,6 +1195,8 @@ class League(TimestampMixin, db.Model):
             'court': self.court.to_summary_dict() if self.court else None,
             'organizer_id': self.organizer_id,
             'organizer_name': self.organizer.display_name if self.organizer else None,
+            'club_id': self.club_id,
+            'club_name': self.club.name if self.club else None,
             'starts_at': iso(self.starts_at),
             'box_size': self.box_size,
             'round_days': self.round_days,

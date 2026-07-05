@@ -265,6 +265,8 @@ def _upgrade_schema(app):
                 )
             if 'champion_user_id' not in league_cols:
                 statements.append('ALTER TABLE league ADD COLUMN champion_user_id INTEGER')
+            if 'club_id' not in league_cols:
+                statements.append('ALTER TABLE league ADD COLUMN club_id INTEGER')
 
         if 'league_member' in tables:
             lm_cols = {c['name'] for c in inspector.get_columns('league_member')}

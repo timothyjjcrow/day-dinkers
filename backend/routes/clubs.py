@@ -192,6 +192,19 @@ def club_detail(club_id):
         .all()
     )
     data['tournaments'] = [t.to_dict(g.current_user.id) for t in tournaments]
+
+    # Club box leagues still open or underway.
+    from backend.models import League
+    leagues = (
+        League.query.filter(
+            League.club_id == club.id,
+            League.status.in_(['registration', 'active']),
+        )
+        .order_by(League.starts_at.asc())
+        .limit(5)
+        .all()
+    )
+    data['leagues'] = [lg.to_dict(g.current_user.id) for lg in leagues]
     return jsonify(data)
 
 
