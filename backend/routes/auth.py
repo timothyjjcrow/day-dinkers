@@ -428,10 +428,12 @@ def _maybe_weekly_recap(user):
 def me():
     # Lazy import: games.py imports from this module at load time.
     from backend.routes.games import expire_stale_unscored, send_game_reminders
+    from backend.routes.leagues import advance_due_league_rounds
     from backend.routes.tournaments import send_tournament_reminders
     expire_stale_unscored()
     send_game_reminders()
     send_tournament_reminders()
+    advance_due_league_rounds()
     _maybe_weekly_recap(g.current_user)
     return jsonify(_me_payload(g.current_user))
 
@@ -687,11 +689,13 @@ def my_stats():
         }
 
     from backend.models import (
-        badge_progress, player_badges, rating_history_for, tournament_titles,
+        badge_progress, league_titles, player_badges, rating_history_for,
+        tournament_titles,
     )
     rating_history = rating_history_for(user)
     badges = player_badges(user)
     titles = tournament_titles(user)
+    lg_titles = league_titles(user)
 
     # Congratulate the player once for each newly-earned badge.
     import json as _json
@@ -717,6 +721,7 @@ def my_stats():
         'badges': badges,
         'badge_progress': badge_progress(user),
         'tournament_titles': titles,
+        'league_titles': lg_titles,
         'insights': insights,
         'rating_history': rating_history,
     })

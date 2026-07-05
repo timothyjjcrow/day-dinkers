@@ -254,6 +254,16 @@ def _upgrade_schema(app):
                     'ALTER TABLE notification ADD COLUMN related_league_id INTEGER'
                 )
 
+        if 'league' in tables:
+            league_cols = {c['name'] for c in inspector.get_columns('league')}
+            if 'round_started_at' not in league_cols:
+                statements.append(
+                    'ALTER TABLE league ADD COLUMN round_started_at '
+                    + ('TIMESTAMP' if is_postgres else 'DATETIME')
+                )
+            if 'champion_user_id' not in league_cols:
+                statements.append('ALTER TABLE league ADD COLUMN champion_user_id INTEGER')
+
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}
             if 'reminded_at' not in gp_cols:

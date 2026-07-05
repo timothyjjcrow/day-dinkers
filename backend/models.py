@@ -379,6 +379,23 @@ def tournament_titles(user, limit=3):
     }
 
 
+def league_titles(user, limit=3):
+    """Box-league seasons this player has won — mirrors tournament_titles."""
+    won = (
+        League.query
+        .filter(League.status == 'completed', League.champion_user_id == user.id)
+        .order_by(League.completed_at.desc())
+    )
+    recent = won.limit(limit).all()
+    return {
+        'count': won.count(),
+        'recent': [
+            {'id': lg.id, 'name': lg.name, 'completed_at': iso(lg.completed_at)}
+            for lg in recent
+        ],
+    }
+
+
 def is_blocked_between(user_a_id, user_b_id):
     """True when either user has blocked the other."""
     return db.session.query(BlockedUser.id).filter(
@@ -1141,10 +1158,15 @@ class League(TimestampMixin, db.Model):
     max_players = db.Column(db.Integer, nullable=False, default=16)
     status = db.Column(db.String(20), nullable=False, default='registration', index=True)
     current_round = db.Column(db.Integer, nullable=False, default=0)
+    # When the current round opened — the auto-advance sweep closes the round
+    # once round_days have elapsed.
+    round_started_at = db.Column(db.DateTime)
+    champion_user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     completed_at = db.Column(db.DateTime)
 
     court = db.relationship('Court')
     organizer = db.relationship('User', foreign_keys=[organizer_id])
+    champion = db.relationship('User', foreign_keys=[champion_user_id])
     members = db.relationship(
         'LeagueMember', back_populates='league', lazy='selectin',
         order_by='LeagueMember.id', cascade='all, delete-orphan',
@@ -1177,6 +1199,9 @@ class League(TimestampMixin, db.Model):
             'joined': mine is not None,
             'my_box': mine.box if mine else None,
             'is_organizer': self.organizer_id == current_user_id,
+            'round_started_at': iso(self.round_started_at),
+            'champion_user_id': self.champion_user_id,
+            'champion_name': self.champion.display_name if self.champion else None,
             'completed_at': iso(self.completed_at),
         }
         if detail:

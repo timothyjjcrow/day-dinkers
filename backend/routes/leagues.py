@@ -213,6 +213,7 @@ def start_league(league_id):
 
     league.status = 'active'
     league.current_round = 1
+    league.round_started_at = utcnow()
     _generate_round(league)
 
     for member in league.members:
@@ -284,20 +285,9 @@ def report_match(league_id, match_id):
     return jsonify(match.to_dict())
 
 
-@leagues_bp.post('/leagues/<int:league_id>/advance')
-@rate_limit(10, 3600)
-@login_required
-def advance_round(league_id):
+def _do_advance(league, actor_id=None):
     """Close the round: box winners move up, last place moves down, next
     round's matches are generated. Unplayed matches simply score no points."""
-    league, err = _league_or_404(league_id)
-    if err:
-        return err
-    if league.organizer_id != g.current_user.id:
-        return jsonify({'error': 'organizer_only'}), 403
-    if league.status != 'active':
-        return jsonify({'error': 'not_active'}), 400
-
     boxes = _boxes_of(league)
     box_numbers = sorted(boxes)
     for box_number in box_numbers:
@@ -307,17 +297,47 @@ def advance_round(league_id):
         if box_number < box_numbers[-1] and len(standing) > 1:
             standing[-1].box = box_number + 1         # last place drops
     league.current_round += 1
+    league.round_started_at = utcnow()
     _generate_round(league)
 
     for member in league.members:
-        if member.user_id != g.current_user.id:
+        if member.user_id != actor_id:
             notify(
                 member.user_id,
                 'league_update',
                 f'{league.name}: round {league.current_round} is up — you are in box {member.box}',
-                related_user_id=g.current_user.id,
+                related_user_id=actor_id,
                 related_league_id=league.id,
             )
+
+
+def advance_due_league_rounds():
+    """Lazy sweep (runs on /me reads, like tournament reminders): once a
+    round's window has elapsed, close it exactly like the organizer button
+    would — one round per sweep so a dormant league doesn't fast-forward."""
+    from datetime import timedelta
+    now = utcnow()
+    for league in League.query.filter_by(status='active').all():
+        if not league.round_started_at:
+            league.round_started_at = now  # legacy rows from before this column
+            continue
+        if now >= league.round_started_at + timedelta(days=league.round_days):
+            _do_advance(league, actor_id=None)
+    db.session.commit()
+
+
+@leagues_bp.post('/leagues/<int:league_id>/advance')
+@rate_limit(10, 3600)
+@login_required
+def advance_round(league_id):
+    league, err = _league_or_404(league_id)
+    if err:
+        return err
+    if league.organizer_id != g.current_user.id:
+        return jsonify({'error': 'organizer_only'}), 403
+    if league.status != 'active':
+        return jsonify({'error': 'not_active'}), 400
+    _do_advance(league, actor_id=g.current_user.id)
     db.session.commit()
     return jsonify(league.to_dict(g.current_user.id, detail=True))
 
@@ -339,6 +359,9 @@ def complete_league(league_id):
     league.completed_at = utcnow()
     boxes = _boxes_of(league)
     champion = boxes[min(boxes)][0] if boxes else None
+    # Assign the relationship, not the FK — champion_name serializes in this
+    # same request.
+    league.champion = champion.user if champion else None
     for member in league.members:
         if member.user_id == g.current_user.id:
             continue

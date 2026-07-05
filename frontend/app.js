@@ -1519,6 +1519,7 @@
             <span class="chev">›</span>
           </div>`).join('')}` : ''}
       <div id="cd-clubs"></div>
+      <div id="cd-leagues"></div>
       <div class="section-label">Upcoming games</div>
       ${gamesHtml}
       ${(court.recent_results || []).length ? `
@@ -1560,6 +1561,27 @@
         openClubScreen(Number(row.dataset.openClub));
       }));
     }).catch(() => { /* clubs section is a nicety */ });
+
+    // Box leagues running at this court — same lazy pattern as clubs.
+    api(`/leagues?court_id=${court.id}`).then((data) => {
+      const leaguesEl = modal.querySelector('#cd-leagues');
+      if (!leaguesEl || !(data.items || []).length) return;
+      leaguesEl.innerHTML = `
+        <div class="section-label">📦 Leagues here</div>
+        ${data.items.map((lg) => `
+          <div class="card row" data-open-league="${lg.id}" style="cursor:pointer;padding:11px">
+            <span style="font-size:20px">📦</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(lg.name)}</div>
+              <div class="row-sub">${lg.status === 'registration' ? `Signups open · ${lg.member_count}/${lg.max_players}` : lg.status === 'completed' ? `🏁 Season complete${lg.champion_name ? ` · 👑 ${esc(lg.champion_name)}` : ''}` : `Round ${lg.current_round} · ${lg.member_count} players`}${lg.joined && lg.status !== 'completed' ? ' · ✓ in' : ''}</div>
+            </div>
+            <span class="chev">›</span>
+          </div>`).join('')}`;
+      leaguesEl.querySelectorAll('[data-open-league]').forEach((row) => row.addEventListener('click', () => {
+        closeModal(modal);
+        openLeagueScreen(Number(row.dataset.openLeague));
+      }));
+    }).catch(() => { /* leagues section is a nicety */ });
 
     modal.querySelector('#cd-checkin').addEventListener('click', async () => {
       if (checkedIn) {
@@ -3077,7 +3099,7 @@
           <span style="font-size:22px">📦</span>
           <div class="row-main">
             <div class="row-title" style="font-size:14.5px">${esc(lg.name)}</div>
-            <div class="row-sub">${lg.court ? esc(lg.court.name) + ' · ' : ''}${lg.status === 'registration' ? `Signups open · ${lg.member_count}/${lg.max_players}` : `Round ${lg.current_round} · ${lg.member_count} players`}${lg.joined ? (lg.my_box ? ` · 📦 your box: ${lg.my_box}` : ' · ✓ in') : ''}</div>
+            <div class="row-sub">${lg.court ? esc(lg.court.name) + ' · ' : ''}${lg.status === 'registration' ? `Signups open · ${lg.member_count}/${lg.max_players}` : lg.status === 'completed' ? `🏁 Season complete${lg.champion_name ? ` · 👑 ${esc(lg.champion_name)}` : ''}` : `Round ${lg.current_round} · ${lg.member_count} players`}${lg.joined && lg.status === 'active' ? (lg.my_box ? ` · 📦 your box: ${lg.my_box}` : ' · ✓ in') : ''}</div>
           </div>
           <span class="chev">›</span>
         </div>`).join('');
@@ -3119,16 +3141,14 @@
       <div style="margin-bottom:12px">${statusChip}</div>
       ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}`;
 
-    if (lg.status === 'completed') {
-      const top = [...lg.members].filter((m) => m.box === Math.min(...lg.members.map((x) => x.box || 99))).sort(rankMember)[0];
-      if (top && top.user) {
-        body += `
-          <div class="card" style="text-align:center;padding:18px;background:var(--violet-50);border:1px solid var(--violet-200)">
-            <div style="font-size:34px">👑</div>
-            <div style="font-weight:800;font-size:17px;color:var(--violet-700)">${esc(top.user.display_name)}</div>
-            <div class="row-sub">Season champion · ${top.points} pts</div>
-          </div>`;
-      }
+    if (lg.status === 'completed' && lg.champion_name) {
+      const champ = lg.members.find((m) => m.user && m.user.id === lg.champion_user_id);
+      body += `
+        <div class="card" style="text-align:center;padding:18px;background:var(--violet-50);border:1px solid var(--violet-200)">
+          <div style="font-size:34px">👑</div>
+          <div style="font-weight:800;font-size:17px;color:var(--violet-700)">${esc(lg.champion_name)}</div>
+          <div class="row-sub">Season champion${champ ? ` · ${champ.points} pts` : ''}</div>
+        </div>`;
     }
 
     if (lg.status === 'registration') {
@@ -3514,14 +3534,26 @@
 
   // "🏆 2 tournament titles" strip with the latest wins, tappable through to
   // each tournament. Shared by public profiles and own stats.
-  function tournamentTitlesHtml(titles) {
-    if (!titles || !titles.count) return '';
+  function tournamentTitlesHtml(titles, leagueTitles) {
+    const tCount = (titles && titles.count) || 0;
+    const lCount = (leagueTitles && leagueTitles.count) || 0;
+    if (!tCount && !lCount) return '';
+    const headline = [
+      tCount ? `${tCount} tournament title${tCount === 1 ? '' : 's'}` : '',
+      lCount ? `${lCount} league title${lCount === 1 ? '' : 's'}` : '',
+    ].filter(Boolean).join(' · ');
     return `
       <div class="card" style="margin-top:12px;padding:12px 14px">
-        <div style="font-weight:800;font-size:14px;text-align:center">👑 ${titles.count} tournament title${titles.count === 1 ? '' : 's'}</div>
-        ${(titles.recent || []).map((t) => `
+        <div style="font-weight:800;font-size:14px;text-align:center">👑 ${headline}</div>
+        ${((titles && titles.recent) || []).map((t) => `
           <div class="row" data-open-tournament="${t.id}" style="cursor:pointer;padding:7px 0 0;gap:8px">
             <span>🏆</span>
+            <div class="row-main"><div class="row-title" style="font-size:13.5px">${esc(t.name)}</div></div>
+            <div class="row-sub">${t.completed_at ? new Date(t.completed_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}</div>
+          </div>`).join('')}
+        ${((leagueTitles && leagueTitles.recent) || []).map((t) => `
+          <div class="row" data-open-league="${t.id}" style="cursor:pointer;padding:7px 0 0;gap:8px">
+            <span>📦</span>
             <div class="row-main"><div class="row-title" style="font-size:13.5px">${esc(t.name)}</div></div>
             <div class="row-sub">${t.completed_at ? new Date(t.completed_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}</div>
           </div>`).join('')}
@@ -5086,7 +5118,7 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
           ${user.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}
         </div>` : ''}
-      ${tournamentTitlesHtml(user.tournament_titles)}
+      ${tournamentTitlesHtml(user.tournament_titles, user.league_titles)}
       ${h2hHtml}
       ${availHtml}
       <div class="action-row">${friendAction}</div>
@@ -5107,6 +5139,9 @@
     bindGameButtons(modal, () => { closeModal(modal); openUserProfile(userId); });
     modal.querySelectorAll('[data-open-tournament]').forEach((row) => row.addEventListener('click', () => {
       openTournamentScreen(Number(row.dataset.openTournament));
+    }));
+    modal.querySelectorAll('[data-open-league]').forEach((row) => row.addEventListener('click', () => {
+      openLeagueScreen(Number(row.dataset.openLeague));
     }));
     modal.querySelectorAll('[data-pcourt]').forEach((row) => row.addEventListener('click', () => {
       closeModal(modal);
@@ -5434,9 +5469,12 @@
             </div>`);
         }
         el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
-          tournamentTitlesHtml(stats.tournament_titles));
+          tournamentTitlesHtml(stats.tournament_titles, stats.league_titles));
         el.querySelectorAll('[data-open-tournament]').forEach((row) => {
           row.addEventListener('click', () => openTournamentScreen(Number(row.dataset.openTournament)));
+        });
+        el.querySelectorAll('[data-open-league]').forEach((row) => {
+          row.addEventListener('click', () => openLeagueScreen(Number(row.dataset.openLeague)));
         });
         if (stats.insights) {
           const ins = stats.insights;

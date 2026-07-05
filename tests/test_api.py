@@ -2194,6 +2194,7 @@ def test_my_stats(client):
                      'top_court': None, 'best_partner': None, 'top_rival': None,
                      'form': [], 'badges': [],
                      'tournament_titles': {'count': 0, 'recent': []},
+                     'league_titles': {'count': 0, 'recent': []},
                      'insights': None,
                      'rating_history': []}
     assert [b['id'] for b in progress] == ['first_win', 'mvp', 'champion']
@@ -5213,3 +5214,51 @@ def test_league_leave_cancel_and_listing(client):
     assert client.get('/api/leagues', headers=heads[2]).get_json()['items'] == []
     # Cancelled leagues don't linger in members' lists either.
     assert client.get('/api/leagues', headers=heads[0]).get_json()['items'] == []
+
+
+def test_league_auto_advance_and_champion_titles(client):
+    from datetime import timedelta
+    from backend.app import db
+    from backend.models import League, utcnow
+    users = league_players(client, 3)
+    heads = [auth_headers(u['token']) for u in users]
+    lid = make_league(client, heads[0], box_size=3)['id']
+    for h in heads[1:]:
+        client.post(f'/api/leagues/{lid}/join', headers=h)
+    client.post(f'/api/leagues/{lid}/start', headers=heads[0])
+
+    # A fresh round doesn't advance on /me sweeps…
+    client.get('/api/me', headers=heads[1])
+    assert client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()['current_round'] == 1
+
+    # …but once round_days elapse, any /me read closes it automatically.
+    lg = db.session.get(League, lid)
+    lg.round_started_at = utcnow() - timedelta(days=8)
+    db.session.commit()
+    client.get('/api/me', headers=heads[1])
+    detail = client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()
+    assert detail['current_round'] == 2
+    # The new round's window is fresh — no double-advance on the next sweep.
+    client.get('/api/me', headers=heads[1])
+    assert client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()['current_round'] == 2
+    p1_titles = [n['title'] for n in client.get('/api/notifications', headers=heads[1]).get_json()['items']
+                 if n['kind'] == 'league_update']
+    assert any('round 2 is up' in t for t in p1_titles)
+
+    # Player1 wins a round-2 match, organizer completes: champion recorded
+    # and surfaced as a league title on stats + public profile.
+    match = next(m for m in detail['matches']
+                 if {m['player1']['id'], m['player2']['id']} ==
+                 {users[0]['user']['id'], users[1]['user']['id']})
+    s1 = 11 if match['player1']['id'] == users[1]['user']['id'] else 2
+    client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                json={'score1': s1, 'score2': 13 - s1}, headers=heads[1])
+    done = client.post(f'/api/leagues/{lid}/complete', headers=heads[0]).get_json()
+    assert done['champion_user_id'] == users[1]['user']['id']
+    assert done['champion_name'] == 'Player1'
+
+    stats = client.get('/api/me/stats', headers=heads[1]).get_json()
+    assert stats['league_titles']['count'] == 1
+    assert stats['league_titles']['recent'][0]['name'] == 'Monday Night Box League'
+    profile = client.get(f"/api/users/{users[1]['user']['id']}", headers=heads[0]).get_json()
+    assert profile['league_titles']['count'] == 1
