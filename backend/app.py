@@ -249,6 +249,10 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE notification ADD COLUMN related_club_id INTEGER'
                 )
+            if 'related_league_id' not in notif_cols:
+                statements.append(
+                    'ALTER TABLE notification ADD COLUMN related_league_id INTEGER'
+                )
 
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}
@@ -346,6 +350,7 @@ def _register_blueprints(app):
     from backend.routes.auth import auth_bp
     from backend.routes.chat import chat_bp
     from backend.routes.clubs import clubs_bp
+    from backend.routes.leagues import leagues_bp
     from backend.routes.push import push_bp
     from backend.routes.courts import courts_bp
     from backend.routes.games import games_bp
@@ -360,6 +365,7 @@ def _register_blueprints(app):
     app.register_blueprint(tournaments_bp, url_prefix='/api')
     app.register_blueprint(clubs_bp, url_prefix='/api')
     app.register_blueprint(push_bp, url_prefix='/api')
+    app.register_blueprint(leagues_bp, url_prefix='/api')
 
 
 app = create_app()

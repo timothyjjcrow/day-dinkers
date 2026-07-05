@@ -5071,3 +5071,145 @@ def test_push_subscription_lifecycle(client, app):
     client.post('/api/push/subscribe', json=sub, headers=bh)
     client.delete('/api/me', json={'password': 'secret123'}, headers=bh)
     assert PushSubscription.query.count() == 0
+
+
+# ---------- Box leagues ----------
+
+def make_league(client, headers, **extra):
+    from datetime import timedelta
+    from backend.models import utcnow
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    res = client.post('/api/leagues', json={
+        'name': 'Monday Night Box League', 'court_id': court_id,
+        'starts_at': (utcnow() + timedelta(days=3)).isoformat() + 'Z',
+        **extra,
+    }, headers=headers)
+    assert res.status_code == 201, res.get_json()
+    return res.get_json()
+
+
+def league_players(client, n):
+    """Register n players with strictly descending ratings (via direct set)."""
+    from backend.app import db
+    from backend.models import User
+    users = []
+    for i in range(n):
+        u = register(client, f'p{i}@example.com', f'Player{i}')
+        db.session.get(User, u['user']['id']).rating = 1500 - i * 50
+        users.append(u)
+    db.session.commit()
+    return users
+
+
+def test_league_lifecycle_boxes_and_standings(client):
+    users = league_players(client, 6)
+    heads = [auth_headers(u['token']) for u in users]
+    lg = make_league(client, heads[0], box_size=3)
+    lid = lg['id']
+    assert lg['joined'] and lg['is_organizer']
+
+    for h in heads[1:]:
+        assert client.post(f'/api/leagues/{lid}/join', headers=h).status_code == 200
+    assert client.post(f'/api/leagues/{lid}/join', headers=heads[1]).status_code == 400
+
+    # Only the organizer can start; boxes seed by rating (top 3 in box 1).
+    assert client.post(f'/api/leagues/{lid}/start', headers=heads[1]).status_code == 403
+    started = client.post(f'/api/leagues/{lid}/start', headers=heads[0]).get_json()
+    assert started['status'] == 'active' and started['current_round'] == 1
+    box_of = {m['user']['display_name']: m['box'] for m in started['members']}
+    assert box_of == {'Player0': 1, 'Player1': 1, 'Player2': 1,
+                      'Player3': 2, 'Player4': 2, 'Player5': 2}
+    # Round robin inside each 3-box: 3 matches per box.
+    assert len(started['matches']) == 6
+    assert client.post(f'/api/leagues/{lid}/join', headers=heads[0]).status_code == 400
+
+    # Report a match: only its players, only once, scores validated.
+    match = next(m for m in started['matches']
+                 if {m['player1']['id'], m['player2']['id']} ==
+                 {users[0]['user']['id'], users[1]['user']['id']})
+    assert client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                       json={'score1': 11, 'score2': 11}, headers=heads[0]).status_code == 400
+    assert client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                       json={'score1': 11, 'score2': 7}, headers=heads[5]).status_code == 403
+    res = client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                      json={'score1': 11, 'score2': 7}, headers=heads[1])
+    assert res.status_code == 200
+    assert res.get_json()['winner_id'] == users[0]['user']['id']
+    assert client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                       json={'score1': 5, 'score2': 11}, headers=heads[0]).status_code == 400
+
+    # Standings: win = 3 points, loss = 1. Opponent got a league_match ping.
+    detail = client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()
+    standings = {m['user']['display_name']: (m['points'], m['wins'], m['losses'])
+                 for m in detail['members']}
+    assert standings['Player0'] == (3, 1, 0)
+    assert standings['Player1'] == (1, 0, 1)
+    zero_kinds = [n['kind'] for n in client.get('/api/notifications', headers=heads[0]).get_json()['items']]
+    assert 'league_match' in zero_kinds
+
+
+def test_league_advance_promotion_and_completion(client):
+    users = league_players(client, 6)
+    heads = [auth_headers(u['token']) for u in users]
+    lid = make_league(client, heads[0], box_size=3)['id']
+    for h in heads[1:]:
+        client.post(f'/api/leagues/{lid}/join', headers=h)
+    started = client.post(f'/api/leagues/{lid}/start', headers=heads[0]).get_json()
+
+    # Box 2's Player5 (lowest rated) wins both their matches.
+    p5 = users[5]['user']['id']
+    for match in started['matches']:
+        ids = {match['player1']['id'], match['player2']['id']}
+        if p5 in ids and match['box'] == 2:
+            s1 = 11 if match['player1']['id'] == p5 else 3
+            client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                        json={'score1': s1, 'score2': 14 - s1}, headers=heads[5])
+    # Box 1: Player2 (lowest in box 1) loses to Player0.
+    m01 = next(m for m in started['matches'] if m['box'] == 1 and
+               {m['player1']['id'], m['player2']['id']} ==
+               {users[0]['user']['id'], users[2]['user']['id']})
+    s1 = 11 if m01['player1']['id'] == users[0]['user']['id'] else 4
+    client.post(f"/api/leagues/{lid}/matches/{m01['id']}/score",
+                json={'score1': s1, 'score2': 15 - s1}, headers=heads[0])
+
+    advanced = client.post(f'/api/leagues/{lid}/advance', headers=heads[0]).get_json()
+    assert advanced['current_round'] == 2
+    box_of = {m['user']['display_name']: m['box'] for m in advanced['members']}
+    assert box_of['Player5'] == 1   # box-2 winner promoted
+    # Player1 sat out (0 pts) while Player2 at least played (1 pt for the
+    # loss) — sitting out is what relegates you.
+    assert box_of['Player1'] == 2
+    assert box_of['Player2'] == 1
+    assert len(advanced['matches']) == 6  # fresh round-robin in both boxes
+
+    # Completion crowns whoever tops box 1 on season points — Player5's two
+    # round-1 wins (6 pts) beat Player0's one (3 pts).
+    done = client.post(f'/api/leagues/{lid}/complete', headers=heads[0]).get_json()
+    assert done['status'] == 'completed'
+    assert done['champion']['user']['display_name'] == 'Player5'
+    champ_notes = [n for n in client.get('/api/notifications', headers=heads[0]).get_json()['items']
+                   if n['kind'] == 'league_update']
+    # Organizer is Player0 and doesn't self-notify; check a member got the wrap-up.
+    p1_notes = [n['title'] for n in client.get('/api/notifications', headers=heads[1]).get_json()['items']
+                if n['kind'] == 'league_update']
+    assert any('wrapped up' in t for t in p1_notes)
+
+
+def test_league_leave_cancel_and_listing(client):
+    users = league_players(client, 4)
+    heads = [auth_headers(u['token']) for u in users]
+    lid = make_league(client, heads[0])['id']
+    client.post(f'/api/leagues/{lid}/join', headers=heads[1])
+
+    # Organizer can't leave; members can while registration is open.
+    assert client.post(f'/api/leagues/{lid}/leave', headers=heads[0]).status_code == 400
+    assert client.post(f'/api/leagues/{lid}/leave', headers=heads[1]).status_code == 200
+
+    listed = client.get('/api/leagues', headers=heads[2]).get_json()['items']
+    assert [x['id'] for x in listed] == [lid]
+
+    assert client.post(f'/api/leagues/{lid}/cancel', headers=heads[1]).status_code == 403
+    assert client.post(f'/api/leagues/{lid}/cancel', headers=heads[0]).get_json()['cancelled'] is True
+    assert client.get('/api/leagues', headers=heads[2]).get_json()['items'] == []
+    # Cancelled leagues don't linger in members' lists either.
+    assert client.get('/api/leagues', headers=heads[0]).get_json()['items'] == []

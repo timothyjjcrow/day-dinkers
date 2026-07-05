@@ -806,6 +806,7 @@ class Notification(TimestampMixin, db.Model):
     related_game_id = db.Column(db.Integer, db.ForeignKey('game.id'))
     related_tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'))
     related_club_id = db.Column(db.Integer, db.ForeignKey('club.id'))
+    related_league_id = db.Column(db.Integer, db.ForeignKey('league.id'))
 
     def to_dict(self):
         return {
@@ -818,6 +819,7 @@ class Notification(TimestampMixin, db.Model):
             'related_game_id': self.related_game_id,
             'related_tournament_id': self.related_tournament_id,
             'related_club_id': self.related_club_id,
+            'related_league_id': self.related_league_id,
             'created_at': iso(self.created_at),
         }
 
@@ -837,7 +839,7 @@ MUTEABLE_NOTIFICATIONS = {
 
 
 def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=None,
-           related_tournament_id=None, related_club_id=None):
+           related_tournament_id=None, related_club_id=None, related_league_id=None):
     # Respect the recipient's mute preferences for optional kinds.
     if kind in MUTEABLE_NOTIFICATIONS:
         recipient = db.session.get(User, user_id)
@@ -852,6 +854,7 @@ def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=
         related_game_id=related_game_id,
         related_tournament_id=related_tournament_id,
         related_club_id=related_club_id,
+        related_league_id=related_league_id,
     ))
     # Mirror to the user's devices (no-op unless VAPID keys are configured).
     try:
@@ -1117,4 +1120,127 @@ class PushSubscription(TimestampMixin, db.Model):
         return {
             'endpoint': self.endpoint,
             'keys': {'p256dh': self.p256dh, 'auth': self.auth},
+        }
+
+
+LEAGUE_STATUSES = ['registration', 'active', 'completed', 'cancelled']
+
+
+class League(TimestampMixin, db.Model):
+    """A box league: players are grouped into rating-seeded boxes and play a
+    round robin within their box each round; box winners move up, last place
+    moves down. Runs until the organizer completes it."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(500), nullable=False, default='')
+    court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
+    organizer_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    starts_at = db.Column(db.DateTime, nullable=False, index=True)
+    box_size = db.Column(db.Integer, nullable=False, default=4)
+    round_days = db.Column(db.Integer, nullable=False, default=7)
+    max_players = db.Column(db.Integer, nullable=False, default=16)
+    status = db.Column(db.String(20), nullable=False, default='registration', index=True)
+    current_round = db.Column(db.Integer, nullable=False, default=0)
+    completed_at = db.Column(db.DateTime)
+
+    court = db.relationship('Court')
+    organizer = db.relationship('User', foreign_keys=[organizer_id])
+    members = db.relationship(
+        'LeagueMember', back_populates='league', lazy='selectin',
+        order_by='LeagueMember.id', cascade='all, delete-orphan',
+    )
+    matches = db.relationship(
+        'LeagueMatch', back_populates='league', lazy='selectin',
+        order_by='(LeagueMatch.round, LeagueMatch.box, LeagueMatch.id)',
+        cascade='all, delete-orphan',
+    )
+
+    def member_for(self, user_id):
+        return next((m for m in self.members if m.user_id == user_id), None)
+
+    def to_dict(self, current_user_id=None, detail=False):
+        mine = self.member_for(current_user_id) if current_user_id else None
+        data = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'court': self.court.to_summary_dict() if self.court else None,
+            'organizer_id': self.organizer_id,
+            'organizer_name': self.organizer.display_name if self.organizer else None,
+            'starts_at': iso(self.starts_at),
+            'box_size': self.box_size,
+            'round_days': self.round_days,
+            'max_players': self.max_players,
+            'status': self.status,
+            'current_round': self.current_round,
+            'member_count': len(self.members),
+            'joined': mine is not None,
+            'my_box': mine.box if mine else None,
+            'is_organizer': self.organizer_id == current_user_id,
+            'completed_at': iso(self.completed_at),
+        }
+        if detail:
+            data['members'] = [m.to_dict() for m in self.members]
+            data['matches'] = [
+                m.to_dict() for m in self.matches if m.round == self.current_round
+            ]
+        return data
+
+
+class LeagueMember(TimestampMixin, db.Model):
+    __table_args__ = (
+        db.UniqueConstraint('league_id', 'user_id', name='uq_league_member'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('league.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    box = db.Column(db.Integer)  # 1-based; NULL until the league starts
+    points = db.Column(db.Integer, nullable=False, default=0)
+    wins = db.Column(db.Integer, nullable=False, default=0)
+    losses = db.Column(db.Integer, nullable=False, default=0)
+
+    league = db.relationship('League', back_populates='members')
+    user = db.relationship('User')
+
+    def to_dict(self):
+        return {
+            'user': self.user.to_public_dict() if self.user else None,
+            'box': self.box,
+            'points': self.points,
+            'wins': self.wins,
+            'losses': self.losses,
+        }
+
+
+class LeagueMatch(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('league.id'), nullable=False, index=True)
+    round = db.Column(db.Integer, nullable=False)
+    box = db.Column(db.Integer, nullable=False)
+    player1_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    player2_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    score1 = db.Column(db.Integer)
+    score2 = db.Column(db.Integer)
+    winner_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    reported_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    league = db.relationship('League', back_populates='matches')
+    player1 = db.relationship('User', foreign_keys=[player1_id])
+    player2 = db.relationship('User', foreign_keys=[player2_id])
+
+    def to_dict(self):
+        def player(u):
+            return {'id': u.id, 'display_name': u.display_name,
+                    'avatar_color': u.avatar_color, 'avatar_url': u.avatar_url or '',
+                    'rating': u.rating} if u else None
+        return {
+            'id': self.id,
+            'round': self.round,
+            'box': self.box,
+            'player1': player(self.player1),
+            'player2': player(self.player2),
+            'score1': self.score1,
+            'score2': self.score2,
+            'winner_id': self.winner_id,
         }

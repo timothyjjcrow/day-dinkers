@@ -506,6 +506,24 @@ def delete_me():
     from backend.models import PushSubscription
     PushSubscription.query.filter_by(user_id=user.id).delete(synchronize_session=False)
 
+    # Leagues: cancel ones they organize that haven't finished; drop their
+    # not-yet-started registrations (active/completed keep the anonymized shell).
+    from backend.models import League, LeagueMember
+    for lg in League.query.filter(
+        League.organizer_id == user.id,
+        League.status.in_(['registration', 'active']),
+    ).all():
+        lg.status = 'cancelled'
+        for member in lg.members:
+            if member.user_id != user.id:
+                notify(
+                    member.user_id, 'league_update',
+                    f'{lg.name} was cancelled', related_league_id=lg.id,
+                )
+    for membership in LeagueMember.query.filter_by(user_id=user.id).all():
+        if membership.league and membership.league.status == 'registration':
+            membership.league.members.remove(membership)
+
     # Clubs: hand owned clubs to the longest-standing member; disband empty ones.
     from backend.models import ClubChatRead, ClubMember
     from backend.routes.clubs import _delete_club

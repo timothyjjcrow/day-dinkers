@@ -3043,9 +3043,10 @@
   async function renderTournaments(el) {
     const loc = areaLatLng();
     try {
-      const [mine, nearby] = await Promise.all([
+      const [mine, nearby, leagues] = await Promise.all([
         api('/tournaments?mine=1'),
         api(`/tournaments?lat=${loc.lat}&lng=${loc.lng}&radius=60`).catch(() => ({ items: [] })),
+        api('/leagues').catch(() => ({ items: [] })),
       ]);
       const mineIds = new Set(mine.items.map((t) => t.id));
       const nearbyOnly = (nearby.items || []).filter((t) => !mineIds.has(t.id));
@@ -3068,14 +3069,239 @@
       if (!live.length && !nearbyOnly.length && !past.length) {
         html += '<div class="empty-state"><span class="big">🏆</span>No tournaments around yet.<br>Set one up and crown a champion!</div>';
       }
+
+      // Box leagues: season-long ladders alongside one-day brackets.
+      html += '<div class="section-label">📦 Box leagues</div>';
+      html += (leagues.items || []).map((lg) => `
+        <div class="card row" data-open-league="${lg.id}" style="cursor:pointer;padding:12px 14px">
+          <span style="font-size:22px">📦</span>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14.5px">${esc(lg.name)}</div>
+            <div class="row-sub">${lg.court ? esc(lg.court.name) + ' · ' : ''}${lg.status === 'registration' ? `Signups open · ${lg.member_count}/${lg.max_players}` : `Round ${lg.current_round} · ${lg.member_count} players`}${lg.joined ? (lg.my_box ? ` · 📦 your box: ${lg.my_box}` : ' · ✓ in') : ''}</div>
+          </div>
+          <span class="chev">›</span>
+        </div>`).join('');
+      html += '<button class="btn btn-secondary btn-block btn-sm" id="league-create" style="margin-top:4px">📦 Start a box league</button>';
+
       el.innerHTML = html;
       el.querySelector('#tour-create').addEventListener('click', openCreateTournamentSheet);
+      el.querySelector('#league-create').addEventListener('click', openCreateLeagueSheet);
+      el.querySelectorAll('[data-open-league]').forEach((card) => {
+        card.addEventListener('click', () => openLeagueScreen(Number(card.dataset.openLeague)));
+      });
       el.querySelectorAll('[data-open-tournament]').forEach((card) => {
         card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
       });
     } catch (e) {
       renderError(el, e.message, () => renderTournaments(el));
     }
+  }
+
+  // ---------- Box leagues ----------
+
+  async function openLeagueScreen(leagueId) {
+    let lg;
+    try { lg = await api(`/leagues/${leagueId}`); }
+    catch (e) { toast(e.message); clearDeadDeepLink(`#league/${leagueId}`); return; }
+    try { history.replaceState(null, '', `#league/${lg.id}`); } catch { /* ignore */ }
+
+    const statusChip = {
+      registration: '<span class="tag live" style="margin:0">Signups open</span>',
+      active: `<span class="tag ranked" style="margin:0">Round ${lg.current_round}</span>`,
+      completed: '<span class="tag" style="margin:0">Season complete</span>',
+      cancelled: '<span class="tag warn" style="margin:0">Cancelled</span>',
+    }[lg.status] || '';
+
+    const rankMember = (a, b) => (b.points - a.points) || (b.wins - a.wins) || ((b.user?.rating || 0) - (a.user?.rating || 0));
+    let body = `
+      ${modalHead(`📦 ${esc(lg.name)}`)}
+      <div class="row-sub" style="margin:-6px 0 6px">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size} · new round every ${lg.round_days} days</div>
+      <div style="margin-bottom:12px">${statusChip}</div>
+      ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}`;
+
+    if (lg.status === 'completed') {
+      const top = [...lg.members].filter((m) => m.box === Math.min(...lg.members.map((x) => x.box || 99))).sort(rankMember)[0];
+      if (top && top.user) {
+        body += `
+          <div class="card" style="text-align:center;padding:18px;background:var(--violet-50);border:1px solid var(--violet-200)">
+            <div style="font-size:34px">👑</div>
+            <div style="font-weight:800;font-size:17px;color:var(--violet-700)">${esc(top.user.display_name)}</div>
+            <div class="row-sub">Season champion · ${top.points} pts</div>
+          </div>`;
+      }
+    }
+
+    if (lg.status === 'registration') {
+      body += `<div class="row-sub" style="margin-bottom:10px">Starts ${fmtDateTime(lg.starts_at)}. Players are seeded into boxes by rating; play everyone in your box each round — winners move up, last place drops down.</div>`;
+      body += '<div class="section-label">Signed up</div>';
+      body += lg.members.map((m) => `
+        <div class="card row" data-view-user="${m.user.id}" style="cursor:pointer;padding:10px 14px">
+          ${avatarHtml(m.user, 'sm')}
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px">${esc(m.user.display_name)}${m.user.id === lg.organizer_id ? ' <span class="tag" style="margin:0 0 0 4px">Organizer</span>' : ''}</div>
+            <div class="row-sub">${skillLabel(m.user.skill_level)} · ${m.user.rating}</div>
+          </div>
+        </div>`).join('');
+      if (!lg.joined) body += '<button class="btn btn-primary btn-block" id="lg-join" style="margin-top:10px;padding:15px">🙌 Sign me up</button>';
+      else if (!lg.is_organizer) body += '<button class="btn btn-secondary btn-block" id="lg-leave" style="margin-top:10px">Withdraw</button>';
+      if (lg.is_organizer) {
+        body += `<button class="btn btn-primary btn-block" id="lg-start" style="margin-top:10px;padding:15px" ${lg.member_count < 3 ? 'disabled' : ''}>🏁 Seed boxes & start${lg.member_count < 3 ? ' (need 3+)' : ''}</button>`;
+        body += '<button class="btn btn-secondary btn-block" id="lg-cancel" style="margin-top:8px;color:#c92a2a">🗑 Cancel league</button>';
+      }
+    }
+
+    if (lg.status === 'active' || lg.status === 'completed') {
+      // My unplayed matches this round, front and center.
+      const myId = state.me.id;
+      const mine = (lg.matches || []).filter((m) => !m.winner_id && (m.player1.id === myId || m.player2.id === myId));
+      if (lg.status === 'active' && mine.length) {
+        body += '<div class="section-label">🎯 Your matches this round</div>';
+        body += mine.map((m) => {
+          const opp = m.player1.id === myId ? m.player2 : m.player1;
+          return `
+          <div class="card row" style="padding:11px">
+            ${avatarHtml(opp, 'sm')}
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">vs ${esc(opp.display_name)}</div>
+              <div class="row-sub">Box ${m.box} · ${opp.rating}</div>
+            </div>
+            <button class="btn btn-primary btn-sm" data-report-match="${m.id}" data-opp="${esc(opp.display_name)}" data-first="${m.player1.id === myId ? 1 : 2}">Enter score</button>
+          </div>`;
+        }).join('');
+      }
+
+      const boxes = {};
+      lg.members.forEach((m) => { if (m.box) (boxes[m.box] = boxes[m.box] || []).push(m); });
+      Object.keys(boxes).sort((a, b) => a - b).forEach((bn) => {
+        body += `<div class="section-label">📦 Box ${bn}${Number(bn) === 1 ? ' · top box' : ''}</div>`;
+        body += boxes[bn].sort(rankMember).map((m, i) => `
+          <div class="card row" data-view-user="${m.user.id}" style="cursor:pointer;padding:9px 14px">
+            <span style="font-size:14px;width:20px;text-align:center;font-weight:700">${i + 1}</span>
+            ${avatarHtml(m.user, 'sm')}
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(m.user.display_name)}${m.user.id === myId ? ' <span class="tag" style="margin:0 0 0 4px">You</span>' : ''}</div>
+              <div class="row-sub">${m.wins}–${m.losses} this season</div>
+            </div>
+            <b style="font-size:14px">${m.points} pt${m.points === 1 ? '' : 's'}</b>
+          </div>`).join('');
+        // Round results within this box.
+        const decided = (lg.matches || []).filter((m) => m.box === Number(bn) && m.winner_id);
+        if (decided.length) {
+          body += decided.map((m) => `
+            <div class="row-sub" style="margin:0 0 4px 8px">${esc(m.player1.display_name.split(' ')[0])} ${m.score1}–${m.score2} ${esc(m.player2.display_name.split(' ')[0])}</div>`).join('');
+        }
+      });
+
+      if (lg.status === 'active' && lg.is_organizer) {
+        body += `
+          <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="btn btn-primary" id="lg-advance" style="flex:1">⏭ Close round ${lg.current_round}</button>
+            <button class="btn btn-secondary" id="lg-complete" style="flex:1">👑 Finish season</button>
+          </div>
+          <button class="btn btn-secondary btn-block" id="lg-cancel" style="margin-top:8px;color:#c92a2a">🗑 Cancel league</button>`;
+      }
+    }
+
+    const modal = openModal(body);
+    bindUserButtons(modal);
+    const reopen = () => { closeModal(modal); openLeagueScreen(lg.id); };
+    const act = (path, confirmMsg) => async () => {
+      if (confirmMsg && !window.confirm(confirmMsg)) return;
+      try { await api(`/leagues/${lg.id}/${path}`, { method: 'POST' }); reopen(); }
+      catch (e) { toast(e.message); }
+    };
+    modal.querySelector('#lg-join')?.addEventListener('click', act('join'));
+    modal.querySelector('#lg-leave')?.addEventListener('click', act('leave'));
+    modal.querySelector('#lg-start')?.addEventListener('click', act('start'));
+    modal.querySelector('#lg-advance')?.addEventListener('click', act('advance', `Close round ${lg.current_round}? Box winners move up, last place drops.`));
+    modal.querySelector('#lg-complete')?.addEventListener('click', act('complete', 'Finish the season and crown the champion?'));
+    modal.querySelector('#lg-cancel')?.addEventListener('click', act('cancel', 'Cancel this league for everyone?'));
+    modal.querySelectorAll('[data-report-match]').forEach((btn) => btn.addEventListener('click', () => {
+      openLeagueScoreSheet(lg, Number(btn.dataset.reportMatch), btn.dataset.opp, Number(btn.dataset.first), reopen);
+    }));
+  }
+
+  function openLeagueScoreSheet(lg, matchId, oppName, myPosition, done) {
+    const modal = openModal(`
+      ${modalHead(`🎯 Score vs ${esc(oppName)}`)}
+      <div class="form-grid">
+        <div class="form-field"><label>Your score</label><input type="number" id="ls-me" min="0" max="99" inputmode="numeric" /></div>
+        <div class="form-field"><label>${esc(oppName.split(' ')[0])}'s score</label><input type="number" id="ls-opp" min="0" max="99" inputmode="numeric" /></div>
+      </div>
+      <button class="btn btn-primary btn-block" id="ls-save" style="padding:15px">Save result</button>
+    `);
+    modal.querySelector('#ls-save').addEventListener('click', async () => {
+      const me = Number(modal.querySelector('#ls-me').value);
+      const opp = Number(modal.querySelector('#ls-opp').value);
+      if (Number.isNaN(me) || Number.isNaN(opp) || me === opp) { toast('Enter two different scores'); return; }
+      const body = myPosition === 1 ? { score1: me, score2: opp } : { score1: opp, score2: me };
+      try {
+        await api(`/leagues/${lg.id}/matches/${matchId}/score`, { method: 'POST', body: JSON.stringify(body) });
+        toast(me > opp ? 'W in the books 💪' : 'Result saved');
+        closeModal(modal);
+        done();
+      } catch (e) { toast(e.message); }
+    });
+  }
+
+  function openCreateLeagueSheet() {
+    const start = new Date();
+    start.setDate(start.getDate() + 3);
+    start.setHours(18, 0, 0, 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    const defaultWhen = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T${pad(start.getHours())}:${pad(start.getMinutes())}`;
+
+    const modal = openModal(`
+      ${modalHead('Start a box league')}
+      <p class="row-sub" style="margin:-6px 0 12px">A season-long ladder: players are seeded into boxes by rating and play everyone in their box each round. Winners move up a box, last place drops.</p>
+      <div class="form-field">
+        <label>Name</label>
+        <input type="text" id="lc-name" maxlength="120" placeholder="e.g. Riverside Winter Ladder" />
+      </div>
+      <div class="form-field">
+        <label>Home court</label>
+        <input type="search" id="lc-court-search" placeholder="Search courts…" autocomplete="off" />
+        <input type="hidden" id="lc-court-id" value="" />
+        <div id="lc-court-results" style="margin-top:8px"></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-field">
+          <label>First round starts</label>
+          <input type="datetime-local" id="lc-when" value="${defaultWhen}" />
+        </div>
+        <div class="form-field">
+          <label>Box size</label>
+          <select id="lc-box"><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
+        </div>
+      </div>
+      <div class="form-field">
+        <input type="text" id="lc-desc" maxlength="200" placeholder="Details (optional) — e.g. Play your box by Sunday each week" />
+      </div>
+      <button class="btn btn-primary btn-block" id="lc-submit" style="padding:15px">Create league</button>
+    `);
+    clubCourtPicker(modal, 'lc');
+    modal.querySelector('#lc-submit').addEventListener('click', async (e) => {
+      const name = modal.querySelector('#lc-name').value.trim();
+      const courtId = Number(modal.querySelector('#lc-court-id').value);
+      const whenRaw = modal.querySelector('#lc-when').value;
+      if (name.length < 3) { toast('Give your league a name (3+ characters)'); return; }
+      if (!courtId) { toast('Pick a home court'); return; }
+      if (!whenRaw) { toast('Pick a start time'); return; }
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const lg = await api('/leagues', { method: 'POST', body: JSON.stringify({
+          name,
+          court_id: courtId,
+          starts_at: new Date(whenRaw).toISOString(),
+          box_size: Number(modal.querySelector('#lc-box').value),
+          description: modal.querySelector('#lc-desc').value.trim(),
+        }) });
+        closeModal(modal);
+        toast('League created 📦 Share it so players can sign up!');
+        openLeagueScreen(lg.id);
+      } catch (err) { toast(err.message); btn.disabled = false; }
+    });
   }
 
   async function openCreateTournamentSheet(presetCourt = null) {
@@ -5950,9 +6176,10 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣', league_update: '📦', league_match: '🎯' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
+      if (n.related_league_id) return { type: 'league', id: n.related_league_id };
       if (n.related_club_id) return { type: 'club', id: n.related_club_id };
       if (n.related_tournament_id) return { type: 'tournament', id: n.related_tournament_id };
       if (n.related_game_id) return { type: 'game', id: n.related_game_id };
@@ -6007,6 +6234,7 @@
         if (row.dataset.notifType === 'tournament') openTournamentScreen(Number(row.dataset.notifId));
         else if (row.dataset.notifType === 'game') openGameScreen(Number(row.dataset.notifId));
         else if (row.dataset.notifType === 'club') openClubScreen(Number(row.dataset.notifId));
+        else if (row.dataset.notifType === 'league') openLeagueScreen(Number(row.dataset.notifId));
         else openUserProfile(Number(row.dataset.notifId));
       });
     });
@@ -6267,6 +6495,8 @@
     if (tournamentMatch) { openTournamentScreen(Number(tournamentMatch[1])); return; }
     const clubMatch = location.hash.match(/^#club\/(\d+)$/);
     if (clubMatch) { openClubScreen(Number(clubMatch[1])); return; }
+    const leagueMatch = location.hash.match(/^#league\/(\d+)$/);
+    if (leagueMatch) { openLeagueScreen(Number(leagueMatch[1])); return; }
     const inviteMatch = location.hash.match(/^#invite\/(\d+)$/);
     if (inviteMatch) {
       try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
