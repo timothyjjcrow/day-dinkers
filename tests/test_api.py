@@ -1319,6 +1319,18 @@ def test_calendar_feed(client):
     assert f'thirdshot-game-{game["id"]}@thirdshot.app' in body
     assert 'Larson Park' in body
 
+    # An active box league adds its round deadline to the feed.
+    c = register(client, 'c@example.com', 'Cam')
+    lg = make_league(client, ah, box_size=3, max_players=3)
+    lid = lg['id']
+    client.post(f'/api/leagues/{lid}/join', headers=auth_headers(b['token']))
+    client.post(f'/api/leagues/{lid}/join', headers=auth_headers(c['token']))
+    started = client.post(f'/api/leagues/{lid}/start', headers=ah).get_json()
+    assert started['status'] == 'active'
+    body = client.get(f'/api/calendar/{tok}.ics').get_data(as_text=True)
+    assert f'thirdshot-league-{lid}-round-1@thirdshot.app' in body
+    assert 'round 1 deadline' in body
+
     # A bogus token → 404, not a leak.
     assert client.get('/api/calendar/not-a-real-token.ics').status_code == 404
 

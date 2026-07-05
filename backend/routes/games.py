@@ -128,6 +128,35 @@ def calendar_feed(token):
             f'DESCRIPTION:{_ics_escape(f"Pickleball tournament ({fmt_label}, {tournament.event_type}) — {len(tournament.entries)} entries")}',
             'END:VEVENT',
         ]
+    # Active box-league round deadlines: get your matches in before this.
+    from backend.models import League, LeagueMember
+    leagues = (
+        League.query.join(LeagueMember, LeagueMember.league_id == League.id)
+        .filter(
+            LeagueMember.user_id == user.id,
+            League.status == 'active',
+            League.round_started_at.isnot(None),
+        )
+        .limit(20)
+        .all()
+    )
+    for league in leagues:
+        deadline = league.round_started_at + timedelta(days=league.round_days)
+        if deadline < utcnow() - timedelta(hours=6):
+            continue  # the lazy sweep will roll this round over shortly
+        court = league.court
+        lines += [
+            'BEGIN:VEVENT',
+            f'UID:thirdshot-league-{league.id}-round-{league.current_round}@thirdshot.app',
+            f'DTSTAMP:{now_stamp}',
+            f'DTSTART:{_ics_stamp(deadline - timedelta(hours=1))}',
+            f'DTEND:{_ics_stamp(deadline)}',
+            f'SUMMARY:{_ics_escape(f"📦 {league.name} — round {league.current_round} deadline")}',
+            f'LOCATION:{_ics_escape(", ".join(filter(None, [court.name, court.city])) if court else "")}',
+            f'DESCRIPTION:{_ics_escape("Play your box matches before the round closes")}',
+            'END:VEVENT',
+        ]
+
     lines.append('END:VCALENDAR')
     return Response('\r\n'.join(lines), mimetype='text/calendar',
                     headers={'Content-Disposition': 'inline; filename="thirdshot.ics"'})
