@@ -59,6 +59,8 @@ class User(TimestampMixin, db.Model):
     last_location_at = db.Column(db.DateTime)
     # Coarse presence: touched (throttled) on any authed request.
     last_active_at = db.Column(db.DateTime)
+    # ISO-week marker for the open-games-near-you digest.
+    last_games_digest_week = db.Column(db.String(10), nullable=False, default='')
     # Persisted home area — the app centers the map/feeds here on launch.
     home_lat = db.Column(db.Float)
     home_lng = db.Column(db.Float)
@@ -918,6 +920,7 @@ MUTEABLE_NOTIFICATIONS = {
     'club_game': 'New games from your clubs',
     'league_message': 'League chat messages',
     'session_rsvp': 'Weekly session re-RSVP reminders',
+    'nearby_games': 'Weekly digest of open games near you',
     'weekly_recap': 'Your weekly recap',
 }
 

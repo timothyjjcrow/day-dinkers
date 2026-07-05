@@ -428,6 +428,51 @@ def _maybe_weekly_recap(user):
     db.session.commit()
 
 
+def _maybe_nearby_games_digest(user):
+    """Once a week: 'N open games near you this week'. Quiet weeks and users
+    without a home area just advance the marker — no empty pings."""
+    from datetime import timedelta
+
+    if user.home_lat is None:
+        return
+    now = utcnow()
+    year, week, _ = now.isocalendar()
+    this_week = f'{year}-W{week:02d}'
+    if user.last_games_digest_week == this_week:
+        return
+    user.last_games_digest_week = this_week
+
+    from backend.routes.courts import haversine_miles
+    candidates = (
+        Game.query.join(Court, Game.court_id == Court.id)
+        .filter(
+            Game.status == 'upcoming',
+            Game.visibility == 'open',
+            Game.creator_id != user.id,
+            Game.scheduled_at >= now,
+            Game.scheduled_at <= now + timedelta(days=7),
+            # ~35mi bbox prefilter; the haversine below applies the real radius.
+            Court.latitude.between(user.home_lat - 0.5, user.home_lat + 0.5),
+            Court.longitude.between(user.home_lng - 0.6, user.home_lng + 0.6),
+        )
+        .limit(50)
+        .all()
+    )
+    joined = {gp.game_id for gp in GamePlayer.query.filter_by(user_id=user.id).all()}
+    nearby = [
+        g_ for g_ in candidates
+        if g_.id not in joined and g_.court and g_.court.latitude is not None
+        and haversine_miles(user.home_lat, user.home_lng,
+                            g_.court.latitude, g_.court.longitude) <= 25
+    ]
+    if nearby:
+        n = len(nearby)
+        notify(user.id, 'nearby_games',
+               f'{n} open game{"" if n == 1 else "s"} near you this week',
+               related_game_id=nearby[0].id)
+    db.session.commit()
+
+
 @auth_bp.get('/me')
 @login_required
 def me():
@@ -442,6 +487,7 @@ def me():
     advance_due_league_rounds()
     send_club_digests()
     _maybe_weekly_recap(g.current_user)
+    _maybe_nearby_games_digest(g.current_user)
     return jsonify(_me_payload(g.current_user))
 
 

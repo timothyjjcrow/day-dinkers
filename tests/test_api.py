@@ -5818,3 +5818,41 @@ def test_room_chat_hearts(client):
                            headers=ah).get_json()
     assert client.post(f"/api/messages/{club_msg['id']}/heart", headers=ch).status_code == 403
     assert client.post(f"/api/messages/{club_msg['id']}/heart", headers=ah).status_code == 200
+
+
+def test_nearby_games_digest(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def digests(headers):
+        return [n for n in client.get('/api/notifications', headers=headers).get_json()['items']
+                if n['kind'] == 'nearby_games']
+
+    # No home area → no digest, ever.
+    client.get('/api/me', headers=ah)
+    assert digests(ah) == []
+
+    # Ben hosts an open game at Larson; Ana lives nearby → one ping this week.
+    when = (utcnow() + timedelta(days=2)).isoformat() + 'Z'
+    game = client.post('/api/games', json={'court_id': court_id, 'scheduled_at': when},
+                       headers=bh).get_json()
+    client.patch('/api/me', json={'home_lat': 33.66, 'home_lng': -117.91,
+                                  'home_area': 'Costa Mesa, CA'}, headers=ah)
+    client.get('/api/me', headers=ah)
+    rows = digests(ah)
+    assert len(rows) == 1 and '1 open game near you this week' in rows[0]['title']
+    assert rows[0]['related_game_id'] == game['id']
+
+    # Same week: marker blocks a repeat.
+    client.get('/api/me', headers=ah)
+    assert len(digests(ah)) == 1
+
+    # The host doesn't get pinged about their own game.
+    client.patch('/api/me', json={'home_lat': 33.66, 'home_lng': -117.91,
+                                  'home_area': 'Costa Mesa, CA'}, headers=bh)
+    client.get('/api/me', headers=bh)
+    assert digests(bh) == []

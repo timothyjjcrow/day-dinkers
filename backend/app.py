@@ -167,6 +167,7 @@ def _upgrade_schema(app):
                 ('last_lng', 'ALTER TABLE "user" ADD COLUMN last_lng DOUBLE PRECISION'),
                 ('last_location_at', 'ALTER TABLE "user" ADD COLUMN last_location_at TIMESTAMP'),
                 ('last_active_at', 'ALTER TABLE "user" ADD COLUMN last_active_at TIMESTAMP'),
+                ('last_games_digest_week', 'ALTER TABLE "user" ADD COLUMN last_games_digest_week VARCHAR(10) NOT NULL DEFAULT \'\''),
                 ('home_lat', 'ALTER TABLE "user" ADD COLUMN home_lat DOUBLE PRECISION'),
                 ('home_lng', 'ALTER TABLE "user" ADD COLUMN home_lng DOUBLE PRECISION'),
                 ('home_area', 'ALTER TABLE "user" ADD COLUMN home_area VARCHAR(120)'),
