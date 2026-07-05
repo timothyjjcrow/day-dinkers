@@ -441,9 +441,27 @@
     if (tab === 'profile') renderProfile();
   }
 
+  // One share sheet for every "invite friends" button in the app.
+  async function shareInviteLink() {
+    if (!state.me) return;
+    const url = `${location.origin}/#invite/${state.me.id}`;
+    const text = 'Play pickleball with me on Third Shot! 🎾';
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Third Shot', text, url });
+      } else {
+        await navigator.clipboard.writeText(`${text} ${url}`);
+        toast('Invite link copied 📋');
+      }
+    } catch { /* user cancelled share */ }
+  }
+
   // Empty-state CTA buttons: any element with data-goto jumps to the right
   // spot in the app (works inside modals too — closes them first).
   function setupEmptyStateCtas() {
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('[data-invite-share]')) shareInviteLink();
+    });
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-goto]');
       if (!btn) return;
@@ -2618,7 +2636,7 @@
         html += '<div class="section-label">Nearby games</div>';
         html += restNearby.length
           ? restNearby.map((g) => gameCardHtml(g)).join('')
-          : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button></div>';
+          : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button><br><button class="btn btn-secondary btn-sm" data-invite-share style="margin-top:8px">💌 Invite friends to play</button></div>';
       }
       if (weeklySessions.length) {
         html += '<div class="section-label">🔁 Weekly open play</div>';
@@ -5740,7 +5758,7 @@
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-value">${me.rating}</div><div class="stat-label">Rating${me.best_rating > me.rating ? ` · peak ${me.best_rating}` : ''}</div></div>
-        <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">Ranked record · ${winPct}%</div></div>
+        <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">${(me.ranked_wins + me.ranked_losses) ? `Ranked record · ${winPct}%` : 'Ranked record'}</div></div>
         <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? '🔥' : ''}${me.current_streak}</div><div class="stat-label">Streak · best ${me.best_streak}</div></div>
       </div>
       <div id="pf-play-stats"></div>
@@ -5853,18 +5871,7 @@
       } catch { /* browser said no */ }
       renderProfile();
     });
-    el.querySelector('#pf-invite').addEventListener('click', async () => {
-      const url = `${location.origin}/#invite/${me.id}`;
-      const text = `Play pickleball with me on Third Shot! 🎾`;
-      try {
-        if (navigator.share) {
-          await navigator.share({ title: 'Third Shot', text, url });
-        } else {
-          await navigator.clipboard.writeText(`${text} ${url}`);
-          toast('Invite link copied 📋');
-        }
-      } catch { /* user cancelled share */ }
-    });
+    el.querySelector('#pf-invite').addEventListener('click', shareInviteLink);
     el.querySelectorAll('[data-theme-pick]').forEach((b) => b.addEventListener('click', () => {
       localStorage.setItem('pp_theme', b.dataset.themePick);
       applyTheme();
