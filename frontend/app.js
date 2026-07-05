@@ -5282,7 +5282,7 @@
       ${ratingSparklineHtml(user.rating_history)}
       ${(user.badges || []).length ? `
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
-          ${user.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`).join('')}
+          ${user.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}${b.id === 'mvp' && user.mvp_awards > 1 ? ` ×${user.mvp_awards}` : ''}</span>`).join('')}
         </div>` : ''}
       ${tournamentTitlesHtml(user.tournament_titles, user.league_titles)}
       ${h2hHtml}
@@ -5625,7 +5625,7 @@
         el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', ratingSparklineHtml(stats.rating_history));
         if ((stats.badges || []).length || (stats.badge_progress || []).length) {
           const earned = (stats.badges || []).map((b) =>
-            `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}</span>`);
+            `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}${b.id === 'mvp' && stats.mvp_awards > 1 ? ` ×${stats.mvp_awards}` : ''}</span>`);
           // Locked badges show dimmed with progress toward the next milestone.
           const locked = (stats.badge_progress || []).map((b) =>
             `<span class="tag" style="margin:0;opacity:.5;filter:grayscale(1)" title="${esc(b.label)} (${b.current}/${b.target})">${b.emoji} ${esc(b.label)} ${b.current}/${b.target}</span>`);

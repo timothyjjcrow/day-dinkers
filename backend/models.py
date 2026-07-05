@@ -306,6 +306,9 @@ def _badge_defs(user):
         db.or_(Friendship.requester_id == user.id, Friendship.addressee_id == user.id),
     ).count()
     mvp_count = GameMvpVote.query.filter_by(votee_id=user.id).count()
+    league_wins = League.query.filter(
+        League.status == 'completed', League.champion_user_id == user.id,
+    ).count()
     titles = (
         Tournament.query
         .join(TournamentEntry, Tournament.champion_entry_id == TournamentEntry.id)
@@ -326,6 +329,7 @@ def _badge_defs(user):
         ('mvp', '🌟', 'Voted MVP', mvp_count, 1),
         ('social', '🤝', '5 friends', friend_count, 5),
         ('champion', '🏆', 'Tournament champion', titles, 1),
+        ('league_champion', '📦', 'League champion', league_wins, 1),
         ('sharpshooter', '🎯', '10 ranked wins', user.ranked_wins or 0, 10),
         ('globetrotter', '🗺', 'Played 15 courts', len(courts), 15),
         ('century', '💯', '100 games played', len(games), 100),
@@ -377,6 +381,26 @@ def tournament_titles(user, limit=3):
             for t in recent
         ],
     }
+
+
+def mvp_award_count(user):
+    """Games where this player actually won the MVP vote (not just received
+    one) — powers the 🌟 ×N flair on profiles."""
+    games = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status == 'completed',
+        )
+        .limit(500)
+        .all()
+    )
+    count = 0
+    for game in games:
+        summary = game._mvp_summary()
+        if summary and summary['user_id'] == user.id:
+            count += 1
+    return count
 
 
 def league_titles(user, limit=3):

@@ -2195,6 +2195,7 @@ def test_my_stats(client):
                      'form': [], 'badges': [],
                      'tournament_titles': {'count': 0, 'recent': []},
                      'league_titles': {'count': 0, 'recent': []},
+                     'mvp_awards': 0,
                      'insights': None,
                      'rating_history': []}
     assert [b['id'] for b in progress] == ['first_win', 'mvp', 'champion']
@@ -5387,3 +5388,55 @@ def test_league_abuse_guards(client):
                       json={'score1': 11, 'score2': 0}, headers=heads[0])
     assert res.status_code == 400
     assert res.get_json()['error'] == 'round_closed'
+
+
+def test_league_champion_badge_and_mvp_awards(client):
+    from datetime import timedelta
+    from backend.app import db
+    from backend.models import Game, GameMvpVote, GamePlayer, utcnow
+    users = league_players(client, 3)
+    heads = [auth_headers(u['token']) for u in users]
+
+    # Fresh players: new badge stays out of the closest-three progress list.
+    stats = client.get('/api/me/stats', headers=heads[0]).get_json()
+    assert [b['id'] for b in stats['badge_progress']] == ['first_win', 'mvp', 'champion']
+    assert stats['mvp_awards'] == 0
+
+    # Win a league season → 📦 League champion badge.
+    lid = make_league(client, heads[0], box_size=3)['id']
+    for h in heads[1:]:
+        client.post(f'/api/leagues/{lid}/join', headers=h)
+    started = client.post(f'/api/leagues/{lid}/start', headers=heads[0]).get_json()
+    match = next(m for m in started['matches']
+                 if {m['player1']['id'], m['player2']['id']} ==
+                 {users[0]['user']['id'], users[1]['user']['id']})
+    s1 = 11 if match['player1']['id'] == users[0]['user']['id'] else 4
+    client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                json={'score1': s1, 'score2': 15 - s1}, headers=heads[0])
+    client.post(f'/api/leagues/{lid}/complete', headers=heads[0])
+
+    badges = [b['id'] for b in client.get('/api/me/stats', headers=heads[0]).get_json()['badges']]
+    assert 'league_champion' in badges
+    kinds = [n['title'] for n in client.get('/api/notifications', headers=heads[0]).get_json()['items']
+             if n['kind'] == 'badge_earned']
+    assert any('League champion' in t for t in kinds)
+
+    # MVP awards: winning the vote in a completed game counts once.
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = Game(
+        court_id=court_id, creator_id=users[0]['user']['id'],
+        scheduled_at=utcnow() - timedelta(days=1), status='completed',
+        score_team1=11, score_team2=5, completed_at=utcnow(),
+    )
+    db.session.add(game)
+    db.session.flush()
+    db.session.add(GamePlayer(game_id=game.id, user_id=users[0]['user']['id'], team=1))
+    db.session.add(GamePlayer(game_id=game.id, user_id=users[1]['user']['id'], team=2))
+    db.session.add(GameMvpVote(game_id=game.id, voter_id=users[1]['user']['id'],
+                               votee_id=users[0]['user']['id']))
+    db.session.commit()
+
+    stats = client.get('/api/me/stats', headers=heads[0]).get_json()
+    assert stats['mvp_awards'] == 1
+    profile = client.get(f"/api/users/{users[0]['user']['id']}", headers=heads[1]).get_json()
+    assert profile['mvp_awards'] == 1
