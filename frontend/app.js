@@ -1637,24 +1637,23 @@
       : '<div class="empty-state" style="padding:14px">No one checked in right now — be the first!</div>';
 
     let gamesHtml = '';
+    // Group by day (backend sends them sorted by scheduled_at).
+    const gamesByDay = [];
     if (court.games.length) {
-      // Group by day (backend sends them sorted by scheduled_at).
-      const byDay = [];
       for (const g of court.games) {
         const label = upcomingDayLabel(g.scheduled_at);
-        if (!byDay.length || byDay[byDay.length - 1].label !== label) {
-          byDay.push({ label, games: [] });
+        if (!gamesByDay.length || gamesByDay[gamesByDay.length - 1].label !== label) {
+          gamesByDay.push({ label, games: [] });
         }
-        byDay[byDay.length - 1].games.push(g);
+        gamesByDay[gamesByDay.length - 1].games.push(g);
       }
-      if (byDay.length > 1) {
-        gamesHtml += `<div class="quick-times" style="margin:0 0 10px">${byDay
-          .map((d) => `<button type="button" disabled style="cursor:default">${esc(d.label)} · ${d.games.length}</button>`)
+      // Day chips filter the list below; tap again to see the whole week.
+      if (gamesByDay.length > 1) {
+        gamesHtml += `<div class="quick-times" id="cd-day-chips" style="margin:0 0 10px">${gamesByDay
+          .map((d, i) => `<button type="button" data-cd-day="${i}">${esc(d.label)} · ${d.games.length}</button>`)
           .join('')}</div>`;
       }
-      gamesHtml += byDay.map((d) => `
-        <div class="section-label" style="font-size:11px;margin-top:8px">${esc(d.label)}</div>
-        ${d.games.map((g) => gameCardHtml(g, { compact: true })).join('')}`).join('');
+      gamesHtml += '<div id="cd-games-list"></div>';
     } else {
       gamesHtml = '<div class="empty-state" style="padding:14px">No upcoming games here yet.<br><button class="btn btn-secondary btn-sm" id="cd-schedule-empty" style="margin-top:8px">📅 Schedule one</button></div>';
     }
@@ -2030,6 +2029,31 @@
 
     bindGameButtons(modal, () => { closeModal(modal); openCourtDetail(courtId); });
     bindUserButtons(modal);
+
+    // Upcoming-games day filter: one chip narrows the list to that day,
+    // tapping it again brings the whole week back. Rendered after the
+    // modal-wide bind above so each card is only ever bound once.
+    let cdDayFilter = null;
+    const renderCdGames = () => {
+      const listEl = modal.querySelector('#cd-games-list');
+      if (!listEl) return;
+      const days = cdDayFilter == null ? gamesByDay : [gamesByDay[cdDayFilter]];
+      listEl.innerHTML = days.map((d) => `
+        <div class="section-label" style="font-size:11px;margin-top:8px">${esc(d.label)}</div>
+        ${d.games.map((g) => gameCardHtml(g, { compact: true })).join('')}`).join('');
+      modal.querySelectorAll('#cd-day-chips [data-cd-day]').forEach((b) =>
+        b.classList.toggle('active', Number(b.dataset.cdDay) === cdDayFilter));
+      bindGameButtons(listEl, () => { closeModal(modal); openCourtDetail(courtId); });
+      bindUserButtons(listEl);
+    };
+    renderCdGames();
+    modal.querySelectorAll('#cd-day-chips [data-cd-day]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const i = Number(b.dataset.cdDay);
+        cdDayFilter = cdDayFilter === i ? null : i;
+        renderCdGames();
+      });
+    });
     modal.querySelectorAll('[data-open-tournament]').forEach((card) => {
       card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
     });
