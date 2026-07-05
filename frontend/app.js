@@ -3715,9 +3715,10 @@
     el.innerHTML = skeletonHtml(5);
     try {
       if (state.chatSeg === 'chats') {
-        const [data, rooms] = await Promise.all([
+        const [data, rooms, clubs] = await Promise.all([
           api('/chat'),
           api('/chat/courts').catch(() => ({ items: [] })),
+          api('/clubs/mine').catch(() => ({ items: [] })),
         ]);
         let html = data.items.length
           ? data.items.map((c) => `
@@ -3730,6 +3731,22 @@
                 ${c.unread ? `<span class="badge" style="position:static">${c.unread}</span>` : `<span class="row-sub">${fmtTimeShort(c.last_message.created_at)}</span>`}
               </div>`).join('')
           : '<div class="empty-state"><span class="big">💬</span>No chats yet.<br>Add some friends and say hi!<br><button class="btn btn-primary" data-goto="chat-friends" style="margin-top:10px">🤝 Find friends</button></div>';
+        html += '<div class="section-label">🏛 Clubs</div>';
+        html += (clubs.items || []).map((cl) => `
+          <div class="card row" data-club="${cl.id}" style="cursor:pointer">
+            <span style="font-size:22px">🏛</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14.5px">${esc(cl.name)}${cl.my_role === 'owner' ? ' 👑' : ''}</div>
+              <div class="row-sub">${cl.last_message
+                ? `${cl.last_message.sender_id === state.me.id ? 'You' : esc((cl.last_message.sender_name || 'Player').split(' ')[0])}: ${esc(cl.last_message.body.slice(0, 50))}`
+                : `${cl.member_count} member${cl.member_count === 1 ? '' : 's'}${cl.home_court_name ? ` · ${esc(cl.home_court_name)}` : ''}`}</div>
+            </div>
+            ${cl.unread ? `<span class="badge" style="position:static">${cl.unread}</span>` : (cl.last_message ? `<span class="row-sub">${fmtTimeShort(cl.last_message.created_at)}</span>` : '')}
+          </div>`).join('');
+        html += `<div style="display:flex;gap:8px;margin-top:2px">
+          <button class="btn btn-secondary" id="club-find" style="flex:1">🔎 Find clubs</button>
+          <button class="btn btn-secondary" id="club-new" style="flex:1">＋ Start a club</button>
+        </div>`;
         if ((rooms.items || []).length) {
           html += '<div class="section-label">🏓 Court rooms</div>';
           html += rooms.items.map((r) => `
@@ -3747,6 +3764,9 @@
         el.querySelectorAll('[data-court-room]').forEach((row) => row.addEventListener('click', () => {
           openCourtChat({ id: Number(row.dataset.courtRoom), name: row.dataset.courtName });
         }));
+        el.querySelectorAll('[data-club]').forEach((row) => row.addEventListener('click', () => openClubScreen(Number(row.dataset.club))));
+        el.querySelector('#club-find')?.addEventListener('click', openFindClubsSheet);
+        el.querySelector('#club-new')?.addEventListener('click', openCreateClubSheet);
       } else if (state.chatSeg === 'nearby') {
         await renderNearbyPlayers(el);
       } else {
@@ -4155,6 +4175,339 @@
         const msg = await api(`/courts/${court.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
         renderMsgs([msg], true);
       } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+    });
+  }
+
+  // ---------- Clubs ----------
+
+  async function openClubScreen(clubId) {
+    let club;
+    try { club = await api(`/clubs/${clubId}`); }
+    catch (e) { toast(e.message); clearDeadDeepLink(`#club/${clubId}`); return; }
+    try { history.replaceState(null, '', `#club/${club.id}`); } catch { /* ignore */ }
+    if (club.joined) openClubChat(club);
+    else openClubInfo(club);
+  }
+
+  async function openClubChat(club) {
+    let data;
+    try { data = await api(`/clubs/${club.id}/chat`); } catch (e) { toast(e.message); return; }
+
+    const modal = openModal(`
+      <div class="thread">
+        <div class="thread-head">
+          <button class="modal-close" style="font-size:18px">‹</button>
+          <span style="font-size:22px">🏛</span>
+          <div class="row-main" id="club-head" style="cursor:pointer">
+            <div class="row-title">${esc(club.name)}</div>
+            <div class="row-sub">${club.member_count} member${club.member_count === 1 ? '' : 's'} · tap for club info ›</div>
+          </div>
+        </div>
+        <div class="thread-msgs" id="clb-msgs"></div>
+        <form class="thread-input" id="clb-form">
+          <input type="text" id="clb-text" placeholder="Message the club…" autocomplete="off" maxlength="500" />
+          <button type="submit" aria-label="Send">➤</button>
+        </form>
+      </div>
+    `, { chat: true });
+
+    const msgsEl = modal.querySelector('#clb-msgs');
+    let lastId = 0;
+    const renderMsgs = (items, append) => {
+      const html = items.map((m) => {
+        const mine = m.sender_id === state.me.id;
+        return `
+        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+          ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+            ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${esc(m.body)}
+            <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
+          </div>
+        </div>`;
+      }).join('');
+      if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
+      else if (append) msgsEl.innerHTML = html;
+      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — rally the club! 👋</div>';
+      if (items.length) lastId = items[items.length - 1].id;
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    };
+    renderMsgs(data.items, false);
+    attachChatViewport(modal, msgsEl, modal.querySelector('#clb-text'));
+
+    const pollTimer = setInterval(async () => {
+      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      try {
+        const fresh = await api(`/clubs/${club.id}/chat?since_id=${lastId}`);
+        if (fresh.items.length) renderMsgs(fresh.items, true);
+      } catch { /* offline */ }
+    }, 5000);
+
+    modal.querySelector('#club-head').addEventListener('click', async () => {
+      closeModal(modal);
+      try { openClubInfo(await api(`/clubs/${club.id}`)); } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#clb-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = modal.querySelector('#clb-text');
+      const body = input.value.trim();
+      if (!body) return;
+      input.value = '';
+      try {
+        const msg = await api(`/clubs/${club.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
+        renderMsgs([msg], true);
+      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+    });
+  }
+
+  function openClubInfo(club) {
+    const isOwner = club.my_role === 'owner';
+    const membersHtml = (club.members || []).map((m) => `
+      <div class="card row">
+        <div data-view-user="${m.id}" style="cursor:pointer">${avatarHtml(m)}</div>
+        <div class="row-main" data-view-user="${m.id}" style="cursor:pointer">
+          <div class="row-title">${esc(m.display_name)}${m.role === 'owner' ? ' 👑' : ''}</div>
+          <div class="row-sub">${skillLabel(m.skill_level)} · ${m.rating}</div>
+        </div>
+        ${isOwner && m.id !== state.me.id ? `<button class="btn btn-secondary btn-sm" data-boot="${m.id}" title="Remove from club">✕</button>` : ''}
+      </div>`).join('');
+
+    const modal = openModal(`
+      ${modalHead(`🏛 ${esc(club.name)}`)}
+      ${club.description ? `<div class="row-sub" style="margin:-6px 0 12px">${esc(club.description)}</div>` : ''}
+      ${club.home_court_id ? `
+        <div class="card row" id="club-court" style="cursor:pointer">
+          <span style="font-size:20px">📍</span>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px">${esc(club.home_court_name)}</div>
+            <div class="row-sub">Home court${club.home_court_city ? ` · ${esc(club.home_court_city)}` : ''}</div>
+          </div>
+          <span class="chev">›</span>
+        </div>` : ''}
+      ${club.joined
+        ? '<button class="btn btn-primary btn-block" id="club-chat-btn" style="margin-bottom:8px">💬 Open club chat</button>'
+        : '<button class="btn btn-primary btn-block" id="club-join-btn" style="margin-bottom:8px">🙌 Join this club</button>'}
+      <button class="btn btn-secondary btn-block" id="club-share" style="margin-bottom:8px">📤 Share club</button>
+      <div class="section-label">👥 ${club.member_count} member${club.member_count === 1 ? '' : 's'}</div>
+      ${membersHtml}
+      ${isOwner ? `
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-secondary" id="club-edit" style="flex:1">✏️ Edit</button>
+          <button class="btn btn-secondary" id="club-delete" style="flex:1;color:#c92a2a">🗑 Disband</button>
+        </div>`
+        : (club.joined ? '<button class="btn btn-secondary btn-block" id="club-leave" style="margin-top:12px">🚪 Leave club</button>' : '')}
+    `);
+    bindUserButtons(modal);
+
+    const reopenInfo = async () => {
+      closeModal(modal);
+      try { openClubInfo(await api(`/clubs/${club.id}`)); } catch (e) { toast(e.message); }
+    };
+
+    modal.querySelector('#club-court')?.addEventListener('click', () => {
+      closeModal(modal);
+      openCourtDetail(club.home_court_id);
+    });
+    modal.querySelector('#club-chat-btn')?.addEventListener('click', () => {
+      closeModal(modal);
+      openClubChat(club);
+    });
+    modal.querySelector('#club-join-btn')?.addEventListener('click', async () => {
+      try {
+        const joined = await api(`/clubs/${club.id}/join`, { method: 'POST' });
+        toast('Welcome to the club! 🎉');
+        closeModal(modal);
+        openClubChat(joined);
+        renderChat();
+      } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#club-share').addEventListener('click', async () => {
+      const url = `${location.origin}/#club/${club.id}`;
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: 'Third Shot', text: `Join my pickleball club: ${club.name}`, url });
+        } else {
+          await navigator.clipboard.writeText(url);
+          toast('Link copied 📋');
+        }
+      } catch { /* user cancelled share */ }
+    });
+    modal.querySelector('#club-leave')?.addEventListener('click', async () => {
+      if (!window.confirm(`Leave ${club.name}?`)) return;
+      try {
+        await api(`/clubs/${club.id}/leave`, { method: 'POST' });
+        toast('You left the club');
+        closeModal(modal);
+        renderChat();
+      } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#club-delete')?.addEventListener('click', async () => {
+      if (!window.confirm(`Disband ${club.name}? This deletes its chat for everyone.`)) return;
+      try {
+        await api(`/clubs/${club.id}`, { method: 'DELETE' });
+        toast('Club disbanded');
+        closeModal(modal);
+        renderChat();
+      } catch (e) { toast(e.message); }
+    });
+    modal.querySelector('#club-edit')?.addEventListener('click', () => {
+      closeModal(modal);
+      openEditClubSheet(club);
+    });
+    modal.querySelectorAll('[data-boot]').forEach((btn) => btn.addEventListener('click', async () => {
+      if (!window.confirm('Remove this player from the club?')) return;
+      try {
+        await api(`/clubs/${club.id}/remove`, { method: 'POST', body: JSON.stringify({ user_id: Number(btn.dataset.boot) }) });
+        toast('Player removed');
+        reopenInfo();
+      } catch (e) { toast(e.message); }
+    }));
+  }
+
+  function clubCourtPicker(modal, prefix) {
+    // Lightweight court search for the club forms; fills the hidden id field.
+    let searchTimer;
+    modal.querySelector(`#${prefix}-court-search`).addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      const q = e.target.value.trim();
+      searchTimer = setTimeout(async () => {
+        const resultsEl = modal.querySelector(`#${prefix}-court-results`);
+        if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+        let url = `/courts?q=${encodeURIComponent(q)}&limit=5`;
+        if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
+        try {
+          const data = await api(url);
+          resultsEl.innerHTML = data.items.map((c) => `
+            <button type="button" class="court-suggestion" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}">
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+                <div class="row-sub">${esc(c.city || '')}</div>
+              </div>
+            </button>`).join('') || '<div class="row-sub" style="padding:8px 2px">No courts found</div>';
+          resultsEl.querySelectorAll('[data-pick-court]').forEach((row) => row.addEventListener('click', () => {
+            modal.querySelector(`#${prefix}-court-id`).value = row.dataset.pickCourt;
+            modal.querySelector(`#${prefix}-court-search`).value = row.dataset.pickName;
+            resultsEl.innerHTML = '';
+          }));
+        } catch { /* keep old results */ }
+      }, 300);
+    });
+  }
+
+  function openCreateClubSheet() {
+    const modal = openModal(`
+      ${modalHead('Start a club')}
+      <p class="row-sub" style="margin:-6px 0 12px">A club is your crew — a private chat room, a roster, and a home base other players can find and join.</p>
+      <div class="form-field">
+        <label>Club name</label>
+        <input type="text" id="cb-name" maxlength="80" placeholder="e.g. Sunrise Dinkers" />
+      </div>
+      <div class="form-field">
+        <label>What's the club about? (optional)</label>
+        <input type="text" id="cb-desc" maxlength="200" placeholder="e.g. Early birds, all levels welcome" />
+      </div>
+      <div class="form-field">
+        <label>Home court (optional)</label>
+        <input type="search" id="cb-court-search" placeholder="Search courts…" autocomplete="off" />
+        <input type="hidden" id="cb-court-id" value="" />
+        <div id="cb-court-results" style="margin-top:8px"></div>
+      </div>
+      <button class="btn btn-primary btn-block" id="cb-submit" style="padding:15px">Create club</button>
+    `);
+    clubCourtPicker(modal, 'cb');
+    modal.querySelector('#cb-submit').addEventListener('click', async () => {
+      const name = modal.querySelector('#cb-name').value.trim();
+      if (name.length < 3) { toast('Give your club a name (3+ characters)'); return; }
+      const courtId = Number(modal.querySelector('#cb-court-id').value) || null;
+      try {
+        const club = await api('/clubs', { method: 'POST', body: JSON.stringify({
+          name,
+          description: modal.querySelector('#cb-desc').value.trim(),
+          home_court_id: courtId,
+        }) });
+        toast('Club created! 🏛');
+        closeModal(modal);
+        openClubChat(club);
+        renderChat();
+      } catch (e) { toast(e.message); }
+    });
+  }
+
+  function openEditClubSheet(club) {
+    const modal = openModal(`
+      ${modalHead('Edit club')}
+      <div class="form-field">
+        <label>Club name</label>
+        <input type="text" id="ce-name" maxlength="80" value="${esc(club.name)}" />
+      </div>
+      <div class="form-field">
+        <label>Description</label>
+        <input type="text" id="ce-desc" maxlength="200" value="${esc(club.description || '')}" />
+      </div>
+      <div class="form-field">
+        <label>Home court</label>
+        <input type="search" id="ce-court-search" placeholder="Search courts…" value="${esc(club.home_court_name || '')}" autocomplete="off" />
+        <input type="hidden" id="ce-court-id" value="${club.home_court_id || ''}" />
+        <div id="ce-court-results" style="margin-top:8px"></div>
+      </div>
+      <button class="btn btn-primary btn-block" id="ce-save">Save changes</button>
+    `);
+    clubCourtPicker(modal, 'ce');
+    modal.querySelector('#ce-save').addEventListener('click', async () => {
+      const name = modal.querySelector('#ce-name').value.trim();
+      if (name.length < 3) { toast('Club name needs 3+ characters'); return; }
+      const searchVal = modal.querySelector('#ce-court-search').value.trim();
+      const body = {
+        name,
+        description: modal.querySelector('#ce-desc').value.trim(),
+        home_court_id: searchVal ? (Number(modal.querySelector('#ce-court-id').value) || null) : null,
+      };
+      try {
+        await api(`/clubs/${club.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        toast('Club updated');
+        closeModal(modal);
+        openClubScreen(club.id);
+        renderChat();
+      } catch (e) { toast(e.message); }
+    });
+  }
+
+  async function openFindClubsSheet() {
+    const modal = openModal(`
+      ${modalHead('Find a club')}
+      <div class="form-field" style="margin-top:4px">
+        <input type="search" id="fc-search" placeholder="Search clubs by name…" autocomplete="off" />
+      </div>
+      <div id="fc-results">${skeletonHtml(3)}</div>
+    `);
+    const resultsEl = modal.querySelector('#fc-results');
+    const renderResults = (items) => {
+      resultsEl.innerHTML = items.length ? items.map((cl) => `
+        <div class="card row" data-open-club="${cl.id}" style="cursor:pointer">
+          <span style="font-size:22px">🏛</span>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14.5px">${esc(cl.name)}</div>
+            <div class="row-sub">${cl.member_count} member${cl.member_count === 1 ? '' : 's'}${cl.home_court_name ? ` · 📍 ${esc(cl.home_court_name)}${cl.home_court_city ? `, ${esc(cl.home_court_city)}` : ''}` : ''}</div>
+          </div>
+          ${cl.joined ? '<span class="tag" style="margin:0">Member ✓</span>' : '<span class="chev">›</span>'}
+        </div>`).join('')
+        : '<div class="empty-state"><span class="big">🏛</span>No clubs found.<br>Start one and invite your crew!</div>';
+      resultsEl.querySelectorAll('[data-open-club]').forEach((row) => row.addEventListener('click', () => {
+        closeModal(modal);
+        openClubScreen(Number(row.dataset.openClub));
+      }));
+    };
+    const load = async (q) => {
+      try {
+        const data = await api(`/clubs${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+        renderResults(data.items);
+      } catch (e) { resultsEl.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; }
+    };
+    load('');
+    let searchTimer;
+    modal.querySelector('#fc-search').addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => load(e.target.value.trim()), 300);
     });
   }
 
@@ -5436,9 +5789,10 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
+      if (n.related_club_id) return { type: 'club', id: n.related_club_id };
       if (n.related_tournament_id) return { type: 'tournament', id: n.related_tournament_id };
       if (n.related_game_id) return { type: 'game', id: n.related_game_id };
       if (n.related_user_id && (n.kind === 'friend_request' || n.kind === 'friend_accept' || n.kind === 'friend_checkin' || n.kind === 'player_coming')) {
@@ -5490,6 +5844,7 @@
         closeModal(modal);
         if (row.dataset.notifType === 'tournament') openTournamentScreen(Number(row.dataset.notifId));
         else if (row.dataset.notifType === 'game') openGameScreen(Number(row.dataset.notifId));
+        else if (row.dataset.notifType === 'club') openClubScreen(Number(row.dataset.notifId));
         else openUserProfile(Number(row.dataset.notifId));
       });
     });
@@ -5748,6 +6103,8 @@
     if (gameMatch) { openGameScreen(Number(gameMatch[1])); return; }
     const tournamentMatch = location.hash.match(/^#tournament\/(\d+)$/);
     if (tournamentMatch) { openTournamentScreen(Number(tournamentMatch[1])); return; }
+    const clubMatch = location.hash.match(/^#club\/(\d+)$/);
+    if (clubMatch) { openClubScreen(Number(clubMatch[1])); return; }
     const inviteMatch = location.hash.match(/^#invite\/(\d+)$/);
     if (inviteMatch) {
       try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }

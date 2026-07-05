@@ -4698,3 +4698,151 @@ def test_new_longterm_badges(client):
     db.session.commit()
     stats = client.get('/api/me/stats', headers=auth_headers(a['token'])).get_json()
     assert any(x['id'] == 'sharpshooter' for x in stats['badges'])
+
+
+# ---------- Clubs ----------
+
+def make_club(client, headers, name='Dink Dynasty', **extra):
+    res = client.post('/api/clubs', json={'name': name, **extra}, headers=headers)
+    assert res.status_code == 201, res.get_json()
+    return res.get_json()
+
+
+def test_club_create_validation_and_search(client):
+    a = register(client, 'a@example.com', 'Ana')
+    ah = auth_headers(a['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    assert client.post('/api/clubs', json={'name': 'ab'}, headers=ah).status_code == 400
+    assert client.post('/api/clubs', json={'name': 'X', 'home_court_id': 99999},
+                       headers=ah).status_code == 400  # short name checked first
+    assert client.post('/api/clubs', json={'name': 'Valid name', 'home_court_id': 99999},
+                       headers=ah).status_code == 404
+
+    club = make_club(client, ah, 'Dink Dynasty', description='Weekend warriors',
+                     home_court_id=court_id)
+    assert club['member_count'] == 1
+    assert club['my_role'] == 'owner'
+    assert club['home_court_name'] == 'Larson Park'
+
+    # Search by name and by home court; joined flag reflects the caller.
+    b = register(client, 'b@example.com', 'Ben')
+    bh = auth_headers(b['token'])
+    found = client.get('/api/clubs?q=dynasty', headers=bh).get_json()['items']
+    assert [c['name'] for c in found] == ['Dink Dynasty']
+    assert found[0]['joined'] is False
+    at_court = client.get(f'/api/clubs?court_id={court_id}', headers=ah).get_json()['items']
+    assert at_court[0]['joined'] is True
+    assert client.get('/api/clubs?q=zzznope', headers=ah).get_json()['items'] == []
+
+
+def test_club_join_leave_and_ownership_transfer(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+
+    club = make_club(client, ah)
+    cid = club['id']
+
+    res = client.post(f'/api/clubs/{cid}/join', headers=bh)
+    assert res.status_code == 200 and res.get_json()['joined'] is True
+    assert client.post(f'/api/clubs/{cid}/join', headers=bh).status_code == 400
+    client.post(f'/api/clubs/{cid}/join', headers=ch)
+
+    # Owner ping about the new member.
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=ah).get_json()['items']]
+    assert kinds.count('club_join') == 2
+
+    # Owner leaving hands the club to the earliest joiner (Ben).
+    assert client.post(f'/api/clubs/{cid}/leave', headers=ah).status_code == 200
+    detail = client.get(f'/api/clubs/{cid}', headers=bh).get_json()
+    assert detail['member_count'] == 2
+    assert detail['my_role'] == 'owner'
+    assert [m['role'] for m in detail['members']][0] == 'owner'
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert 'club_update' in kinds
+
+    # Last member leaving disbands the club entirely.
+    client.post(f'/api/clubs/{cid}/leave', headers=ch)
+    res = client.post(f'/api/clubs/{cid}/leave', headers=bh)
+    assert res.get_json().get('deleted') is True
+    assert client.get(f'/api/clubs/{cid}', headers=bh).status_code == 404
+
+
+def test_club_chat_members_only_with_unread(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+
+    # Outsiders can see the roster but not the room.
+    assert client.get(f'/api/clubs/{cid}/chat', headers=ch).status_code == 403
+    assert client.post(f'/api/clubs/{cid}/chat', json={'body': 'hi'}, headers=ch).status_code == 403
+
+    client.get(f'/api/clubs/{cid}/chat', headers=bh)  # Ben opens the room once
+    client.post(f'/api/clubs/{cid}/chat', json={'body': 'Saturday 9am?'}, headers=ah)
+    client.post(f'/api/clubs/{cid}/chat', json={'body': 'Bring balls'}, headers=ah)
+
+    mine = client.get('/api/clubs/mine', headers=bh).get_json()['items']
+    assert mine[0]['unread'] == 2
+    assert mine[0]['last_message']['body'] == 'Bring balls'
+
+    # One ping per club per member, no matter how chatty the room gets.
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert kinds.count('club_message') == 1
+
+    # Reading the room clears the unread count.
+    thread = client.get(f'/api/clubs/{cid}/chat', headers=bh).get_json()
+    assert [m['body'] for m in thread['items']] == ['Saturday 9am?', 'Bring balls']
+    assert client.get('/api/clubs/mine', headers=bh).get_json()['items'][0]['unread'] == 0
+
+
+def test_club_owner_tools_and_delete(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+
+    # Members can't edit, remove, or delete — owner only.
+    assert client.patch(f'/api/clubs/{cid}', json={'name': 'Hijacked'}, headers=bh).status_code == 403
+    assert client.post(f'/api/clubs/{cid}/remove', json={'user_id': a['user']['id']}, headers=bh).status_code == 403
+    assert client.delete(f'/api/clubs/{cid}', headers=bh).status_code == 403
+
+    res = client.patch(f'/api/clubs/{cid}', json={'name': 'Third Shot Crew', 'description': 'd'}, headers=ah)
+    assert res.get_json()['name'] == 'Third Shot Crew'
+
+    # Owner boots Ben; Ben is notified and can no longer chat.
+    client.post(f'/api/clubs/{cid}/chat', json={'body': 'hello'}, headers=bh)
+    assert client.post(f'/api/clubs/{cid}/remove', json={'user_id': b['user']['id']}, headers=ah).status_code == 200
+    assert client.post(f'/api/clubs/{cid}/chat', json={'body': 'x'}, headers=bh).status_code == 403
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert 'club_update' in kinds
+
+    # Deleting the club takes its chat history with it.
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+    assert client.delete(f'/api/clubs/{cid}', headers=ah).get_json()['deleted'] is True
+    assert client.get(f'/api/clubs/{cid}', headers=ah).status_code == 404
+    from backend.models import Message
+    assert Message.query.filter_by(club_id=cid).count() == 0
+
+
+def test_club_survives_owner_account_deletion(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    cid = make_club(client, ah)['id']
+    solo_cid = make_club(client, ah, 'Solo Club')['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+
+    res = client.delete('/api/me', json={'password': 'secret123'}, headers=ah)
+    assert res.status_code == 200, res.get_json()
+
+    # Shared club hands ownership to Ben; the empty one is disbanded.
+    detail = client.get(f'/api/clubs/{cid}', headers=bh).get_json()
+    assert detail['my_role'] == 'owner'
+    assert detail['member_count'] == 1
+    assert client.get(f'/api/clubs/{solo_cid}', headers=bh).status_code == 404

@@ -399,14 +399,15 @@ def blocked_pair_ids(user_id):
 
 class Message(TimestampMixin, db.Model):
     """A direct message (recipient_id), court-room message (court_id),
-    game-thread message (game_id), or tournament-thread message
-    (tournament_id)."""
+    game-thread message (game_id), tournament-thread message
+    (tournament_id), or club-room message (club_id)."""
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), index=True)
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), index=True)
     tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'), index=True)
+    club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
     body = db.Column(db.Text, nullable=False, default='')
     read_at = db.Column(db.DateTime)
 
@@ -423,6 +424,7 @@ class Message(TimestampMixin, db.Model):
             'court_id': self.court_id,
             'game_id': self.game_id,
             'tournament_id': self.tournament_id,
+            'club_id': self.club_id,
             'body': self.body,
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),
@@ -797,6 +799,7 @@ class Notification(TimestampMixin, db.Model):
     related_user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     related_game_id = db.Column(db.Integer, db.ForeignKey('game.id'))
     related_tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'))
+    related_club_id = db.Column(db.Integer, db.ForeignKey('club.id'))
 
     def to_dict(self):
         return {
@@ -808,6 +811,7 @@ class Notification(TimestampMixin, db.Model):
             'related_user_id': self.related_user_id,
             'related_game_id': self.related_game_id,
             'related_tournament_id': self.related_tournament_id,
+            'related_club_id': self.related_club_id,
             'created_at': iso(self.created_at),
         }
 
@@ -819,13 +823,14 @@ MUTEABLE_NOTIFICATIONS = {
     'friend_checkin': 'Friends checking in to play',
     'game_message': 'Game chat messages',
     'tournament_message': 'Tournament chat messages',
+    'club_message': 'Club chat messages',
     'session_rsvp': 'Weekly session re-RSVP reminders',
     'weekly_recap': 'Your weekly recap',
 }
 
 
 def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=None,
-           related_tournament_id=None):
+           related_tournament_id=None, related_club_id=None):
     # Respect the recipient's mute preferences for optional kinds.
     if kind in MUTEABLE_NOTIFICATIONS:
         recipient = db.session.get(User, user_id)
@@ -839,6 +844,7 @@ def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=
         related_user_id=related_user_id,
         related_game_id=related_game_id,
         related_tournament_id=related_tournament_id,
+        related_club_id=related_club_id,
     ))
 
 
@@ -1017,3 +1023,62 @@ class TournamentMatch(TimestampMixin, db.Model):
             'winner_entry_id': self.winner_entry_id,
             'status': self.status(),
         }
+
+
+class Club(TimestampMixin, db.Model):
+    """A player-created group — a named crew that plays together. Members get
+    a private chat room; a club can claim a home court for discovery."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)
+    description = db.Column(db.String(500), nullable=False, default='')
+    creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    home_court_id = db.Column(db.Integer, db.ForeignKey('court.id'), index=True)
+
+    creator = db.relationship('User', foreign_keys=[creator_id])
+    home_court = db.relationship('Court', foreign_keys=[home_court_id])
+    members = db.relationship(
+        'ClubMember', back_populates='club', cascade='all, delete-orphan',
+    )
+
+    def member_ids(self):
+        return {m.user_id for m in self.members}
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'member_count': len(self.members),
+            'home_court_id': self.home_court_id,
+            'home_court_name': self.home_court.name if self.home_court else None,
+            'home_court_city': self.home_court.city if self.home_court else None,
+            'created_at': iso(self.created_at),
+        }
+
+
+class ClubMember(TimestampMixin, db.Model):
+    __table_args__ = (
+        db.UniqueConstraint('club_id', 'user_id', name='uq_club_member'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    club_id = db.Column(db.Integer, db.ForeignKey('club.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # 'owner' or 'member'; exactly one owner per club (transferred on leave).
+    role = db.Column(db.String(16), nullable=False, default='member')
+
+    club = db.relationship('Club', back_populates='members')
+    user = db.relationship('User')
+
+
+class ClubChatRead(TimestampMixin, db.Model):
+    """How far a member has read their club's chat — powers unread badges in
+    the Chat tab. No row until they open that chat once."""
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'club_id', name='uq_club_chat_read'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    club_id = db.Column(db.Integer, db.ForeignKey('club.id'), nullable=False, index=True)
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)

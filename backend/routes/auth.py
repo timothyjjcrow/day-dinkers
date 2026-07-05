@@ -502,6 +502,24 @@ def delete_me():
     )).delete(synchronize_session=False)
     GameInvite.query.filter_by(user_id=user.id).delete(synchronize_session=False)
     FavoriteCourt.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+
+    # Clubs: hand owned clubs to the longest-standing member; disband empty ones.
+    from backend.models import ClubChatRead, ClubMember
+    from backend.routes.clubs import _delete_club
+    for membership in ClubMember.query.filter_by(user_id=user.id).all():
+        club = membership.club
+        if membership.role == 'owner':
+            others = sorted(
+                (m for m in club.members if m.user_id != user.id),
+                key=lambda m: (m.created_at, m.id),
+            )
+            if others:
+                others[0].role = 'owner'
+            else:
+                _delete_club(club)
+                continue
+        club.members.remove(membership)  # delete-orphan keeps the collection in sync
+    ClubChatRead.query.filter_by(user_id=user.id).delete(synchronize_session=False)
     CourtReview.query.filter_by(user_id=user.id).delete(synchronize_session=False)
     CheckIn.query.filter_by(user_id=user.id).delete(synchronize_session=False)
     Notification.query.filter(or_(
