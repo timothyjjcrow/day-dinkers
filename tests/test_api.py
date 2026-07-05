@@ -5858,3 +5858,67 @@ def test_nearby_games_digest(client):
                                   'home_area': 'Costa Mesa, CA'}, headers=bh)
     client.get('/api/me', headers=bh)
     assert digests(bh) == []
+
+
+def test_streak_nag(client, app):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, User as UserModel, utcnow
+    from backend.routes.auth import _maybe_streak_nag
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Ana played a completed game; shift it into last ISO week.
+    game = make_game(client, a['token'], court_id, hours_ahead=1)
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 7,
+    }, headers=ah)
+    client.post(f"/api/games/{game['id']}/confirm", headers=bh)
+
+    def nags(headers):
+        return [n for n in client.get('/api/notifications', headers=headers).get_json()['items']
+                if n['kind'] == 'streak_nag']
+
+    with app.app_context():
+        now = utcnow()
+        target = now - timedelta(days=7)
+        week_monday = (target - timedelta(days=target.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        row = db.session.get(GameModel, game['id'])
+        row.completed_at = week_monday + timedelta(days=2, hours=12)
+        db.session.commit()
+        ana = db.session.get(UserModel, a['user']['id'])
+        # Saturday of the CURRENT week (relative to the shifted game).
+        saturday = week_monday + timedelta(days=12, hours=10)
+        wednesday = week_monday + timedelta(days=9, hours=10)
+
+        # Midweek: no nag even though the streak is at risk.
+        _maybe_streak_nag(ana, now=wednesday)
+        db.session.commit()
+    assert nags(ah) == []
+
+    # Saturday: exactly one nag; marker blocks a repeat on Sunday.
+    with app.app_context():
+        ana = db.session.get(UserModel, a['user']['id'])
+        _maybe_streak_nag(ana, now=saturday)
+        _maybe_streak_nag(ana, now=saturday + timedelta(days=1))
+    rows = nags(ah)
+    assert len(rows) == 1 and 'streak ends Sunday' in rows[0]['title']
+
+    # Ben also played last week AND already this week → no nag for him.
+    with app.app_context():
+        ben = db.session.get(UserModel, b['user']['id'])
+        # give Ben a game completed in the current week too
+        g2 = GameModel(court_id=court_id, creator_id=ben.id,
+                       scheduled_at=saturday - timedelta(days=1),
+                       status='completed', completed_at=saturday - timedelta(days=1))
+        db.session.add(g2)
+        db.session.flush()
+        from backend.models import GamePlayer as GP
+        db.session.add(GP(game=g2, user_id=ben.id))
+        db.session.commit()
+        _maybe_streak_nag(ben, now=saturday)
+    assert nags(bh) == []

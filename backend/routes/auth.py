@@ -473,6 +473,41 @@ def _maybe_nearby_games_digest(user):
     db.session.commit()
 
 
+def _maybe_streak_nag(user, now=None):
+    """Weekend heads-up when last week's play is about to lapse: played last
+    ISO week, nothing yet this week, and it's Sat/Sun. Once per week, muteable.
+    `now` is injectable so tests aren't chained to the real weekday."""
+    from datetime import timedelta
+
+    now = now or utcnow()
+    if now.isoweekday() < 6:
+        return
+    year, week, _ = now.isocalendar()
+    this_week = f'{year}-W{week:02d}'
+    if user.last_streak_nag_week == this_week:
+        return
+    user.last_streak_nag_week = this_week
+
+    recent = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status == 'completed',
+            Game.completed_at.isnot(None),
+            Game.completed_at >= now - timedelta(days=15),
+        )
+        .all()
+    )
+    prev_week = (now - timedelta(days=7)).isocalendar()[:2]
+    cur_week = now.isocalendar()[:2]
+    played_prev = any(g_.completed_at.isocalendar()[:2] == prev_week for g_ in recent)
+    played_cur = any(g_.completed_at.isocalendar()[:2] == cur_week for g_ in recent)
+    if played_prev and not played_cur:
+        notify(user.id, 'streak_nag',
+               'Your play streak ends Sunday — get a game in this week')
+    db.session.commit()
+
+
 @auth_bp.get('/me')
 @login_required
 def me():
@@ -488,6 +523,7 @@ def me():
     send_club_digests()
     _maybe_weekly_recap(g.current_user)
     _maybe_nearby_games_digest(g.current_user)
+    _maybe_streak_nag(g.current_user)
     return jsonify(_me_payload(g.current_user))
 
 
