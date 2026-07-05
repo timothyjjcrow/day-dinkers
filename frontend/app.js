@@ -445,7 +445,7 @@
   // One share sheet for every "invite friends" button in the app.
   async function shareInviteLink() {
     if (!state.me) return;
-    const url = `${location.origin}/#invite/${state.me.id}`;
+    const url = `${location.origin}/u/${state.me.id}`; // short link → OG preview in chat apps
     const text = 'Play pickleball with me on Third Shot! 🎾';
     try {
       if (navigator.share) {
@@ -5288,7 +5288,7 @@
       openClubInviteSheet(club);
     });
     modal.querySelector('#club-share').addEventListener('click', async () => {
-      const url = `${location.origin}/#club/${club.id}`;
+      const url = `${location.origin}/cl/${club.id}`; // short link → OG preview in chat apps
       try {
         if (navigator.share) {
           await navigator.share({ title: 'Third Shot', text: `Join my pickleball club: ${club.name}`, url });
@@ -6118,7 +6118,7 @@
           if (stats.week_streak >= 2) bits.push(`${stats.week_streak}-week play streak 🔥`);
           if (stats.top_court) bits.push(`home turf: ${stats.top_court.name}`);
           const text = `My season on Third Shot 🎾 ${bits.join(' · ')}. Come play with me!`;
-          const url = `${location.origin}/#invite/${me.id}`;
+          const url = `${location.origin}/u/${me.id}`; // short link → OG preview in chat apps
           try {
             if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
             else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Season copied to share 📋'); }

@@ -418,6 +418,28 @@ def create_app(config_name=None):
             bits.insert(0, court.city)
         return _share_page(court.name, ' · '.join(bits) + ' — on Third Shot', f'#court/{court_id}')
 
+    @app.get('/u/<int:user_id>')
+    def share_invite(user_id):
+        from backend.models import User
+        user = db.session.get(User, user_id)
+        if not user or user.deleted_at:
+            return 'not found', 404
+        # #invite/<id> keeps the signup friend-request flow intact.
+        return _share_page(f'Play pickleball with {user.display_name}',
+                           'Join them on Third Shot — courts, players & games near you.',
+                           f'#invite/{user_id}')
+
+    @app.get('/cl/<int:club_id>')
+    def share_club(club_id):
+        from backend.models import Club
+        club = db.session.get(Club, club_id)
+        if not club:
+            return 'not found', 404
+        n = len(club.members)
+        return _share_page(f'🏛 {club.name}',
+                           f'{n} member{"" if n == 1 else "s"} — join the club on Third Shot',
+                           f'#club/{club_id}')
+
     @app.get('/t/<int:tournament_id>')
     def share_tournament(tournament_id):
         from backend.models import Tournament

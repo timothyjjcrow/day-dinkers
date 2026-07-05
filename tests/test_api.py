@@ -5671,7 +5671,24 @@ def test_share_preview_pages(client):
     body = client.get(f'/g/{private["id"]}').get_data(as_text=True)
     assert 'Larson Park' not in body and 'A pickleball game on Third Shot' in body
 
+    # Invite link: name in the card, #invite target keeps the signup flow.
+    body = client.get(f"/u/{a['user']['id']}").get_data(as_text=True)
+    assert 'Ana' in body and f"#invite/{a['user']['id']}" in body
+
+    # Club link: name + member count.
+    cid = client.post('/api/clubs', json={'name': 'Preview Crew'},
+                      headers=ah).get_json()['id']
+    body = client.get(f'/cl/{cid}').get_data(as_text=True)
+    assert 'Preview Crew' in body and '1 member' in body and f'#club/{cid}' in body
+
+    # Deleted accounts don't serve invite cards.
+    client.delete('/api/me', json={'password': 'secret123'},
+                  headers=auth_headers(b['token']))
+    assert client.get(f"/u/{b['user']['id']}").status_code == 404
+
     # Unknown ids 404 instead of redirect-spinning.
     assert client.get('/g/999999').status_code == 404
     assert client.get('/c/999999').status_code == 404
     assert client.get('/t/999999').status_code == 404
+    assert client.get('/u/999999').status_code == 404
+    assert client.get('/cl/999999').status_code == 404
