@@ -5113,6 +5113,11 @@
             <div class="row-sub">${club.member_count} member${club.member_count === 1 ? '' : 's'} · tap for club info ›</div>
           </div>
         </div>
+        ${club.announcement ? `
+        <div class="card row" style="margin:8px 12px 0;padding:10px 14px;background:var(--green-50)">
+          <span style="font-size:17px">📣</span>
+          <div class="row-sub" style="flex:1;color:var(--ink)">${esc(club.announcement)}</div>
+        </div>` : ''}
         <div class="thread-msgs" id="clb-msgs"></div>
         <form class="thread-input" id="clb-form">
           <input type="text" id="clb-text" placeholder="Message the club…" autocomplete="off" maxlength="500" />
@@ -5449,6 +5454,10 @@
         <input type="text" id="ce-desc" maxlength="200" value="${esc(club.description || '')}" />
       </div>
       <div class="form-field">
+        <label>📣 Announcement (pinned in the club chat — members get pinged)</label>
+        <input type="text" id="ce-announce" maxlength="500" placeholder="e.g. Saturday session moved to 9 AM!" value="${esc(club.announcement || '')}" />
+      </div>
+      <div class="form-field">
         <label>Home court</label>
         <input type="search" id="ce-court-search" placeholder="Search courts…" value="${esc(club.home_court_name || '')}" autocomplete="off" />
         <input type="hidden" id="ce-court-id" value="${club.home_court_id || ''}" />
@@ -5464,6 +5473,7 @@
       const body = {
         name,
         description: modal.querySelector('#ce-desc').value.trim(),
+        announcement: modal.querySelector('#ce-announce').value.trim(),
         home_court_id: searchVal ? (Number(modal.querySelector('#ce-court-id').value) || null) : null,
       };
       try {

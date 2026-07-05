@@ -5706,3 +5706,33 @@ def test_share_preview_pages(client):
     assert client.get('/t/999999').status_code == 404
     assert client.get('/u/999999').status_code == 404
     assert client.get('/cl/999999').status_code == 404
+
+
+def test_club_announcement(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+
+    def pings():
+        return [n for n in client.get('/api/notifications', headers=bh).get_json()['items']
+                if 'announcement' in n['title']]
+
+    # Owner sets it; roster (not the owner) gets one ping; payload carries it.
+    res = client.patch(f'/api/clubs/{cid}', json={'announcement': 'Court moved to 9 AM'},
+                       headers=ah)
+    assert res.status_code == 200 and res.get_json()['announcement'] == 'Court moved to 9 AM'
+    assert len(pings()) == 1
+    assert pings()[0]['related_club_id'] == cid
+
+    # Saving the same text again doesn't re-ping; clearing it pings nobody.
+    client.patch(f'/api/clubs/{cid}', json={'announcement': 'Court moved to 9 AM'}, headers=ah)
+    assert len(pings()) == 1
+    client.patch(f'/api/clubs/{cid}', json={'announcement': ''}, headers=ah)
+    assert len(pings()) == 1
+    assert client.get(f'/api/clubs/{cid}', headers=bh).get_json()['announcement'] == ''
+
+    # Members can't set it.
+    assert client.patch(f'/api/clubs/{cid}', json={'announcement': 'hax'},
+                        headers=bh).status_code == 403

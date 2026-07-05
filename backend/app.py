@@ -288,6 +288,10 @@ def _upgrade_schema(app):
                     'ALTER TABLE club ADD COLUMN last_digest_at '
                     + ('TIMESTAMP' if is_postgres else 'DATETIME')
                 )
+            if 'announcement' not in club_cols:
+                statements.append(
+                    "ALTER TABLE club ADD COLUMN announcement VARCHAR(500) NOT NULL DEFAULT ''"
+                )
 
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}

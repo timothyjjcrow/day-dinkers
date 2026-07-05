@@ -1103,6 +1103,8 @@ class Club(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False)
     description = db.Column(db.String(500), nullable=False, default='')
+    # Owner-pinned notice shown at the top of the club screen.
+    announcement = db.Column(db.String(500), nullable=False, default='')
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     home_court_id = db.Column(db.Integer, db.ForeignKey('court.id'), index=True)
     # Watermark for the weekly activity digest (see clubs.send_club_digests).
@@ -1122,6 +1124,7 @@ class Club(TimestampMixin, db.Model):
             'id': self.id,
             'name': self.name,
             'description': self.description,
+            'announcement': self.announcement,
             'member_count': len(self.members),
             'home_court_id': self.home_court_id,
             'home_court_name': self.home_court.name if self.home_court else None,

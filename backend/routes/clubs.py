@@ -282,6 +282,18 @@ def edit_club(club_id):
         club.name = name
     if 'description' in payload:
         club.description = str(payload.get('description') or '').strip()[:500]
+    if 'announcement' in payload:
+        announcement = str(payload.get('announcement') or '').strip()[:500]
+        changed = announcement != club.announcement
+        club.announcement = announcement
+        # A fresh (non-empty) notice pings the roster once.
+        if changed and announcement:
+            for member in club.members:
+                if member.user_id == g.current_user.id:
+                    continue
+                notify(member.user_id, 'club_update',
+                       f'{club.name}: new announcement from the organizer',
+                       related_club_id=club.id)
     if 'home_court_id' in payload:
         home_court_id = payload.get('home_court_id')
         if home_court_id is not None:
