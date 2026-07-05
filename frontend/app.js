@@ -133,7 +133,8 @@
     const dayMs = 86400000;
     const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
     const diffDays = Math.round((startOf(d) - startOf(now)) / dayMs);
-    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    // Non-breaking space keeps "10:00 AM" together when a title wraps.
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(' ', ' ');
     if (diffDays === 0) return `Today · ${time}`;
     if (diffDays === 1) return `Tomorrow · ${time}`;
     if (diffDays === -1) return `Yesterday · ${time}`;
@@ -141,7 +142,7 @@
   }
   function fmtTimeShort(isoStr) {
     const d = new Date(isoStr);
-    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(' ', ' ');
   }
   const skillLabel = (s) => ({ beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced', pro: 'Pro' }[s] || s);
 
