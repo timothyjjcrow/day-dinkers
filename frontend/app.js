@@ -2286,6 +2286,7 @@
           });
         }
 
+        if (state.playSeg !== seg) return; // a newer segment render owns the panel
         el.innerHTML = html;
         el.querySelector('#board-scope').addEventListener('click', (e) => {
           const btn = e.target.closest('button');
@@ -2364,6 +2365,7 @@
         html += dayEvents.length
           ? dayEvents.map((ev) => (ev.type === 'tournament' ? tournamentCardHtml(ev.item) : gameCardHtml(ev.item))).join('')
           : '<div class="empty-state" style="padding:18px">Nothing on the calendar yet.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button></div>';
+        if (state.playSeg !== seg) return; // a newer segment render owns the panel
         el.innerHTML = html;
         bindWeekStrip();
         bindGameButtons(el, renderPlay);
@@ -2424,6 +2426,7 @@
       // Capture spontaneous pickup games that never got scheduled here.
       html += '<button class="btn btn-secondary btn-block" id="pl-log-game" style="margin-top:14px">✍️ Log a game you already played</button>';
 
+      if (state.playSeg !== seg) return; // a newer segment render owns the panel
       el.innerHTML = html;
       bindWeekStrip();
       el.querySelector('#pl-log-game')?.addEventListener('click', openLogGameSheet);
@@ -3217,6 +3220,7 @@
         </div>`).join('');
       html += '<button class="btn btn-secondary btn-block btn-sm" id="league-create" style="margin-top:4px">📦 Start a box league</button>';
 
+      if (state.playSeg !== 'brackets') return; // user already switched away
       el.innerHTML = html;
       el.querySelector('#tour-create').addEventListener('click', openCreateTournamentSheet);
       el.querySelector('#league-create').addEventListener('click', openCreateLeagueSheet);
