@@ -3136,7 +3136,7 @@
 
     const rankMember = (a, b) => (b.points - a.points) || (b.wins - a.wins) || ((b.user?.rating || 0) - (a.user?.rating || 0));
     let body = `
-      ${modalHead(`📦 ${esc(lg.name)}`)}
+      ${modalHead(`📦 ${lg.name}`)}
       <div class="row-sub" style="margin:-6px 0 6px">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size} · new round every ${lg.round_days} days</div>
       <div style="margin-bottom:12px">${statusChip}${lg.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(lg.club_name)}</span>` : ''}</div>
       ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}
@@ -3315,7 +3315,7 @@
 
   function openLeagueScoreSheet(lg, matchId, oppName, myPosition, done) {
     const modal = openModal(`
-      ${modalHead(`🎯 Score vs ${esc(oppName)}`)}
+      ${modalHead(`🎯 Score vs ${oppName}`)}
       <div class="form-grid">
         <div class="form-field"><label>Your score</label><input type="number" id="ls-me" min="0" max="99" inputmode="numeric" /></div>
         <div class="form-field"><label>${esc(oppName.split(' ')[0])}'s score</label><input type="number" id="ls-opp" min="0" max="99" inputmode="numeric" /></div>
@@ -4720,7 +4720,7 @@
     }).join('');
 
     const modal = openModal(`
-      ${modalHead(`🏛 ${esc(club.name)}`)}
+      ${modalHead(`🏛 ${club.name}`)}
       ${club.description ? `<div class="row-sub" style="margin:-6px 0 12px">${esc(club.description)}</div>` : ''}
       ${club.home_court_id ? `
         <div class="card row" id="club-court" style="cursor:pointer">
@@ -4870,7 +4870,7 @@
     const candidates = (data.friends || []).filter((f) => !memberIds.has(f.id));
 
     const modal = openModal(`
-      ${modalHead(`🎟 Invite friends to ${esc(club.name)}`)}
+      ${modalHead(`🎟 Invite friends to ${club.name}`)}
       ${candidates.length ? candidates.map((f) => `
         <div class="card row">
           ${avatarHtml(f)}
@@ -5044,7 +5044,7 @@
     let data;
     try { data = await api(`/courts/${court.id}/photos`); } catch (e) { toast(e.message); return; }
     const modal = openModal(`
-      ${modalHead(`📷 ${esc(court.name)}`)}
+      ${modalHead(`📷 ${court.name}`)}
       <div class="gallery-scroll">
         ${data.items.map((p) => `
           <figure class="gallery-item">

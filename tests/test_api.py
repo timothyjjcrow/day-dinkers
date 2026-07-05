@@ -5357,3 +5357,33 @@ def test_club_linked_leagues(client):
     # Club screen lists it while open.
     detail = client.get(f'/api/clubs/{cid}', headers=bh).get_json()
     assert [x['name'] for x in detail['leagues']] == ['Dynasty Ladder']
+
+
+def test_league_abuse_guards(client):
+    """QP#32: org-only actions, stale-round reports, post-start joins, blocked joins."""
+    users = league_players(client, 4)
+    heads = [auth_headers(u['token']) for u in users]
+    lid = make_league(client, heads[0], box_size=4)['id']
+    for h in heads[1:3]:
+        client.post(f'/api/leagues/{lid}/join', headers=h)
+
+    # Blocked players can't sign up.
+    client.post(f"/api/users/{users[3]['user']['id']}/block", headers=heads[0])
+    assert client.post(f'/api/leagues/{lid}/join', headers=heads[3]).status_code == 403
+    client.post(f"/api/users/{users[3]['user']['id']}/unblock", headers=heads[0])
+
+    started = client.post(f'/api/leagues/{lid}/start', headers=heads[0]).get_json()
+
+    # No joining or leaving once play begins; organizer-only round controls.
+    assert client.post(f'/api/leagues/{lid}/join', headers=heads[3]).status_code == 400
+    assert client.post(f'/api/leagues/{lid}/leave', headers=heads[1]).status_code == 400
+    assert client.post(f'/api/leagues/{lid}/advance', headers=heads[1]).status_code == 403
+    assert client.post(f'/api/leagues/{lid}/complete', headers=heads[1]).status_code == 403
+
+    # A match from a closed round can't be scored late.
+    match = started['matches'][0]
+    client.post(f'/api/leagues/{lid}/advance', headers=heads[0])
+    res = client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                      json={'score1': 11, 'score2': 0}, headers=heads[0])
+    assert res.status_code == 400
+    assert res.get_json()['error'] == 'round_closed'
