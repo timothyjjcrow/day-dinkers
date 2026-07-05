@@ -152,6 +152,8 @@ def _upgrade_schema(app):
                 statements.append('ALTER TABLE message ADD COLUMN club_id INTEGER')
             if 'league_id' not in columns:
                 statements.append('ALTER TABLE message ADD COLUMN league_id INTEGER')
+            if 'image_data' not in columns:
+                statements.append('ALTER TABLE message ADD COLUMN image_data TEXT')
 
         if 'user' in tables:
             user_cols = {c['name'] for c in inspector.get_columns('user')}

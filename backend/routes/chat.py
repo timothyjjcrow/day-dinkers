@@ -397,14 +397,31 @@ def send_message(user_id):
 
     payload = request.get_json(silent=True) or {}
     body = str(payload.get('body') or '').strip()
-    if not body:
+    image = str(payload.get('image') or '').strip()
+    if image and (not image.startswith('data:image/') or len(image) > 700000):
+        return jsonify({'error': 'invalid_image'}), 400
+    if not body and not image:
         return jsonify({'error': 'message_body_required'}), 400
 
     message = Message(
         sender_id=g.current_user.id,
         recipient_id=partner.id,
         body=body[:2000],
+        image_data=image or None,
     )
     db.session.add(message)
     db.session.commit()
     return jsonify(message.to_dict()), 201
+
+
+@chat_bp.get('/messages/<int:message_id>/image')
+@login_required
+def message_image(message_id):
+    """The photo attached to a DM — only the two people in the conversation
+    can fetch it."""
+    message = db.session.get(Message, message_id)
+    if not message or not message.image_data:
+        return jsonify({'error': 'image_not_found'}), 404
+    if g.current_user.id not in (message.sender_id, message.recipient_id):
+        return jsonify({'error': 'forbidden'}), 403
+    return jsonify({'image': message.image_data})

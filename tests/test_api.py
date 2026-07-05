@@ -5440,3 +5440,37 @@ def test_league_champion_badge_and_mvp_awards(client):
     assert stats['mvp_awards'] == 1
     profile = client.get(f"/api/users/{users[0]['user']['id']}", headers=heads[1]).get_json()
     assert profile['mvp_awards'] == 1
+
+
+def test_dm_photo_messages(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    img = 'data:image/jpeg;base64,' + 'A' * 200
+
+    # Validation: bogus prefix rejected; empty message still rejected.
+    assert client.post(f"/api/chat/{b['user']['id']}", json={'image': 'data:text/html,evil'},
+                       headers=ah).status_code == 400
+    assert client.post(f"/api/chat/{b['user']['id']}", json={},
+                       headers=ah).status_code == 400
+
+    # Photo-only message lands; thread payload carries has_image, not the data.
+    res = client.post(f"/api/chat/{b['user']['id']}", json={'image': img}, headers=ah)
+    assert res.status_code == 201
+    msg = res.get_json()
+    assert msg['has_image'] is True and 'image_data' not in msg
+    thread = client.get(f"/api/chat/{a['user']['id']}", headers=bh).get_json()
+    assert thread['items'][-1]['has_image'] is True
+    assert 'image' not in thread['items'][-1]
+
+    # Only the two participants can fetch the photo.
+    mid = msg['id']
+    assert client.get(f'/api/messages/{mid}/image', headers=ah).get_json()['image'] == img
+    assert client.get(f'/api/messages/{mid}/image', headers=bh).status_code == 200
+    assert client.get(f'/api/messages/{mid}/image', headers=ch).status_code == 403
+    assert client.get('/api/messages/99999/image', headers=ah).status_code == 404
+
+    # Deleting the message takes the photo with it.
+    client.delete(f'/api/messages/{mid}', headers=ah)
+    assert client.get(f'/api/messages/{mid}/image', headers=bh).status_code == 404

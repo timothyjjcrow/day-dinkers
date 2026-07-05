@@ -4220,7 +4220,7 @@
                 ${avatarHtml(c.user)}
                 <div class="row-main">
                   <div class="row-title">${esc(c.user.display_name)}</div>
-                  <div class="row-sub">${c.last_message.sender_id === state.me.id ? 'You: ' : ''}${esc(c.last_message.body.slice(0, 60))}</div>
+                  <div class="row-sub">${c.last_message.sender_id === state.me.id ? 'You: ' : ''}${c.last_message.body ? esc(c.last_message.body.slice(0, 60)) : (c.last_message.has_image ? '📷 Photo' : '')}</div>
                 </div>
                 ${c.unread ? `<span class="badge" style="position:static">${c.unread}</span>` : `<span class="row-sub">${fmtTimeShort(c.last_message.created_at)}</span>`}
               </div>`).join('')
@@ -4559,6 +4559,8 @@
         </div>
         <div class="thread-msgs" id="thread-msgs"></div>
         <form class="thread-input" id="thread-form">
+          <button type="button" id="thread-photo" aria-label="Send a photo" style="background:transparent;font-size:19px;padding:0 2px">📷</button>
+          <input type="file" id="thread-file" accept="image/*" class="hidden" />
           <input type="text" id="thread-text" placeholder="Message…" autocomplete="off" />
           <button type="submit" aria-label="Send">➤</button>
         </form>
@@ -4567,9 +4569,21 @@
 
     const msgsEl = modal.querySelector('#thread-msgs');
     let lastId = 0;
+    // Photos load lazily per bubble — thread payloads only carry has_image.
+    const hydrateImages = () => {
+      msgsEl.querySelectorAll('[data-img-id]:not([data-loaded])').forEach(async (slot) => {
+        slot.dataset.loaded = '1';
+        try {
+          const { image } = await api(`/messages/${slot.dataset.imgId}/image`);
+          slot.innerHTML = `<img src="${image}" alt="Photo" style="max-width:100%;border-radius:10px;display:block" />`;
+          msgsEl.scrollTop = msgsEl.scrollHeight;
+        } catch { slot.remove(); }
+      });
+    };
     const renderMsgs = (items, append) => {
       const html = items.map((m) => `
         <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}" ${m.sender_id === state.me.id ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+          ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
           ${esc(m.body)}
           <div class="bubble-time">${fmtTimeShort(m.created_at)}${m.sender_id === state.me.id && m.read_at ? ' · <span title="Seen">✓✓</span>' : ''}</div>
         </div>`).join('');
@@ -4578,6 +4592,7 @@
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Say hi! 👋</div>';
       if (items.length) lastId = items[items.length - 1].id;
       msgsEl.scrollTop = msgsEl.scrollHeight;
+      hydrateImages();
     };
     renderMsgs(data.items, false);
     attachChatViewport(modal, msgsEl, modal.querySelector('#thread-text'));
@@ -4602,6 +4617,22 @@
         const msg = await api(`/chat/${userId}`, { method: 'POST', body: JSON.stringify({ body }) });
         renderMsgs([msg], true);
       } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+    });
+    modal.querySelector('#thread-photo').addEventListener('click', () => modal.querySelector('#thread-file').click());
+    modal.querySelector('#thread-file').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      try {
+        const image = await imageFileToDataUrl(file, 1024);
+        const textEl = modal.querySelector('#thread-text');
+        const body = textEl.value.trim();
+        textEl.value = '';
+        const msg = await api(`/chat/${userId}`, { method: 'POST', body: JSON.stringify({ body, image }) });
+        renderMsgs([msg], true);
+      } catch (err) {
+        toast(err.message === 'image_too_large' ? 'That photo is too large — try a smaller one' : err.message);
+      }
     });
   }
 

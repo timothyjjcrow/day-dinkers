@@ -451,6 +451,9 @@ class Message(TimestampMixin, db.Model):
     club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
     league_id = db.Column(db.Integer, db.ForeignKey('league.id'), index=True)
     body = db.Column(db.Text, nullable=False, default='')
+    # Optional photo (JPEG data URL, DM-only for now). Served via its own
+    # endpoint so thread payloads stay light.
+    image_data = db.Column(db.Text)
     read_at = db.Column(db.DateTime)
 
     sender = db.relationship('User', foreign_keys=[sender_id])
@@ -469,6 +472,7 @@ class Message(TimestampMixin, db.Model):
             'club_id': self.club_id,
             'league_id': self.league_id,
             'body': self.body,
+            'has_image': bool(self.image_data),
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),
         }
