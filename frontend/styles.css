@@ -550,10 +550,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--green-600); }
 @keyframes slideUp { from { transform: translateY(60px); opacity: .4; } to { transform: none; opacity: 1; } }
 /* Keep the title + ✕ pinned at the top of any scrolling popup. The negative
    margins bleed over the modal's padding so it spans edge-to-edge and covers
-   content scrolling underneath; chat/court modals pin their own headers. */
+   content scrolling underneath; chat/court modals pin their own headers.
+   top:-10px cancels the -10px margin-top: sticky pins the MARGIN box, so the
+   offset must match the negative margin or the header stuck 10px low and leaked
+   scrolling content through the padding-top gap above it. */
 .modal-head {
   display: flex; align-items: center; gap: 8px;
-  position: sticky; top: 0; z-index: 6;
+  position: sticky; top: -10px; z-index: 6;
   background: var(--card);
   margin: -10px -18px 10px; padding: 16px 18px 12px;
   border-radius: 22px 22px 0 0;
