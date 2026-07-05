@@ -15,6 +15,17 @@ chat_bp = Blueprint('chat', __name__)
 from backend.routes.auth import login_required  # noqa: E402
 
 
+def message_image_from(payload):
+    """Validate an optional photo attachment. Returns (image, error_response);
+    exactly one is set when an image was supplied."""
+    image = str(payload.get('image') or '').strip()
+    if not image:
+        return None, None
+    if not image.startswith('data:image/') or len(image) > 700000:
+        return None, (jsonify({'error': 'invalid_image'}), 400)
+    return image, None
+
+
 @chat_bp.get('/courts/<int:court_id>/chat')
 @login_required
 def court_chat(court_id):
@@ -60,9 +71,13 @@ def send_court_message(court_id):
         return jsonify({'error': 'court_not_found'}), 404
     payload = request.get_json(silent=True) or {}
     body = str(payload.get('body') or '').strip()
-    if not body:
+    image, err = message_image_from(payload)
+    if err:
+        return err
+    if not body and not image:
         return jsonify({'error': 'message_body_required'}), 400
-    message = Message(sender_id=g.current_user.id, court_id=court.id, body=body[:2000])
+    message = Message(sender_id=g.current_user.id, court_id=court.id,
+                      body=body[:2000], image_data=image)
     db.session.add(message)
     db.session.commit()
     return jsonify(message.to_dict()), 201
@@ -125,9 +140,13 @@ def send_game_message(game_id):
         return err
     payload = request.get_json(silent=True) or {}
     body = str(payload.get('body') or '').strip()
-    if not body:
+    image, err = message_image_from(payload)
+    if err:
+        return err
+    if not body and not image:
         return jsonify({'error': 'message_body_required'}), 400
-    message = Message(sender_id=g.current_user.id, game_id=game.id, body=body[:2000])
+    message = Message(sender_id=g.current_user.id, game_id=game.id,
+                      body=body[:2000], image_data=image)
     db.session.add(message)
 
     # Tell the other players — at most one unread ping per game per player, so
@@ -211,10 +230,14 @@ def send_tournament_message(tournament_id):
         return err
     payload = request.get_json(silent=True) or {}
     body = str(payload.get('body') or '').strip()
-    if not body:
+    image, err = message_image_from(payload)
+    if err:
+        return err
+    if not body and not image:
         return jsonify({'error': 'message_body_required'}), 400
     message = Message(
-        sender_id=g.current_user.id, tournament_id=tournament.id, body=body[:2000],
+        sender_id=g.current_user.id, tournament_id=tournament.id,
+        body=body[:2000], image_data=image,
     )
     db.session.add(message)
 
@@ -417,11 +440,39 @@ def send_message(user_id):
 @chat_bp.get('/messages/<int:message_id>/image')
 @login_required
 def message_image(message_id):
-    """The photo attached to a DM — only the two people in the conversation
-    can fetch it."""
+    """The photo attached to a message — visible to exactly whoever can read
+    that thread (DM pair, game players, tournament/club/league members;
+    court rooms are open to any signed-in player)."""
     message = db.session.get(Message, message_id)
     if not message or not message.image_data:
         return jsonify({'error': 'image_not_found'}), 404
-    if g.current_user.id not in (message.sender_id, message.recipient_id):
+
+    me = g.current_user.id
+    allowed = False
+    if message.recipient_id is not None:
+        allowed = me in (message.sender_id, message.recipient_id)
+    elif message.court_id is not None:
+        allowed = True  # court rooms are readable by any signed-in player
+    elif message.game_id is not None:
+        allowed = GamePlayer.query.filter_by(
+            game_id=message.game_id, user_id=me,
+        ).first() is not None
+    elif message.tournament_id is not None:
+        tournament = db.session.get(Tournament, message.tournament_id)
+        allowed = tournament is not None and (
+            me == tournament.organizer_id or me in tournament.participant_ids()
+        )
+    elif message.club_id is not None:
+        from backend.models import ClubMember
+        allowed = ClubMember.query.filter_by(
+            club_id=message.club_id, user_id=me,
+        ).first() is not None
+    elif message.league_id is not None:
+        from backend.models import LeagueMember
+        allowed = LeagueMember.query.filter_by(
+            league_id=message.league_id, user_id=me,
+        ).first() is not None
+
+    if not allowed:
         return jsonify({'error': 'forbidden'}), 403
     return jsonify({'image': message.image_data})

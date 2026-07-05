@@ -5474,3 +5474,53 @@ def test_dm_photo_messages(client):
     # Deleting the message takes the photo with it.
     client.delete(f'/api/messages/{mid}', headers=ah)
     assert client.get(f'/api/messages/{mid}/image', headers=bh).status_code == 404
+
+
+def test_room_photo_messages_and_authz(client):
+    """Photos in room chats: senders attach, thread members fetch, outsiders 403."""
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    img = 'data:image/jpeg;base64,' + 'B' * 100
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # Court room: anyone signed in can post and view photos.
+    res = client.post(f'/api/courts/{court_id}/chat', json={'image': img}, headers=ah)
+    assert res.status_code == 201 and res.get_json()['has_image'] is True
+    assert client.get(f"/api/messages/{res.get_json()['id']}/image",
+                      headers=ch).status_code == 200
+
+    # Club room: members only — including for the photo itself.
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+    res = client.post(f'/api/clubs/{cid}/chat', json={'image': img, 'body': 'net cam'},
+                      headers=ah)
+    assert res.status_code == 201
+    mid = res.get_json()['id']
+    assert client.get(f'/api/messages/{mid}/image', headers=bh).status_code == 200
+    assert client.get(f'/api/messages/{mid}/image', headers=ch).status_code == 403
+
+    # League room: same rule.
+    from datetime import timedelta
+    from backend.models import utcnow
+    lid = client.post('/api/leagues', json={
+        'name': 'Photo Ladder', 'court_id': court_id,
+        'starts_at': (utcnow() + timedelta(days=2)).isoformat() + 'Z',
+    }, headers=ah).get_json()['id']
+    res = client.post(f'/api/leagues/{lid}/chat', json={'image': img}, headers=ah)
+    assert res.status_code == 201
+    assert client.get(f"/api/messages/{res.get_json()['id']}/image",
+                      headers=ch).status_code == 403
+
+    # Game thread: players only.
+    game = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': (utcnow() + timedelta(days=1)).isoformat() + 'Z',
+    }, headers=ah).get_json()
+    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    res = client.post(f"/api/games/{game['id']}/chat", json={'image': img}, headers=bh)
+    assert res.status_code == 201
+    assert client.get(f"/api/messages/{res.get_json()['id']}/image",
+                      headers=ah).status_code == 200
+    assert client.get(f"/api/messages/{res.get_json()['id']}/image",
+                      headers=ch).status_code == 403

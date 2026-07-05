@@ -1327,6 +1327,52 @@
     });
   }
 
+  // Lazy-load photo attachments into any chat thread (payloads only carry
+  // has_image; the image endpoint enforces per-thread permissions).
+  function hydrateChatImages(msgsEl) {
+    msgsEl.querySelectorAll('[data-img-id]:not([data-loaded])').forEach(async (slot) => {
+      slot.dataset.loaded = '1';
+      try {
+        const { image } = await api(`/messages/${slot.dataset.imgId}/image`);
+        slot.innerHTML = `<img src="${image}" alt="Photo" style="max-width:100%;border-radius:10px;display:block" />`;
+        msgsEl.scrollTop = msgsEl.scrollHeight;
+      } catch { slot.remove(); }
+    });
+  }
+
+  // Add a 📷 button + hidden file input to a chat composer form.
+  function addPhotoToComposer(modal, formSel, textSel, endpoint, renderMsgs) {
+    const form = modal.querySelector(formSel);
+    if (!form) return;
+    const file = document.createElement('input');
+    file.type = 'file';
+    file.accept = 'image/*';
+    file.className = 'hidden';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '📷';
+    btn.setAttribute('aria-label', 'Send a photo');
+    btn.style.cssText = 'background:transparent;font-size:19px;padding:0 2px';
+    form.prepend(file);
+    form.prepend(btn);
+    btn.addEventListener('click', () => file.click());
+    file.addEventListener('change', async (e) => {
+      const picked = e.target.files[0];
+      e.target.value = '';
+      if (!picked) return;
+      try {
+        const image = await imageFileToDataUrl(picked, 1024);
+        const textEl = modal.querySelector(textSel);
+        const body = textEl.value.trim();
+        textEl.value = '';
+        const msg = await api(endpoint, { method: 'POST', body: JSON.stringify({ body, image }) });
+        renderMsgs([msg], true);
+      } catch (err) {
+        toast(err.message === 'image_too_large' ? 'That photo is too large — try a smaller one' : err.message);
+      }
+    });
+  }
+
   // A dead shared link shouldn't re-toast its error on every reload.
   function clearDeadDeepLink(hash) {
     if (location.hash !== hash) return;
@@ -3334,6 +3380,7 @@
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
@@ -3344,9 +3391,11 @@
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — talk some friendly trash 👋</div>';
       if (items.length) lastId = items[items.length - 1].id;
       msgsEl.scrollTop = msgsEl.scrollHeight;
+      hydrateChatImages(msgsEl);
     };
     renderMsgs(data.items, false);
     attachChatViewport(modal, msgsEl, modal.querySelector('#lgc-text'));
+    addPhotoToComposer(modal, '#lgc-form', '#lgc-text', `/leagues/${lg.id}/chat`, renderMsgs);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
@@ -4113,6 +4162,7 @@
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
@@ -4123,9 +4173,11 @@
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Coordinate the day — “what time are check-ins?”, “courts 3 & 4” 🏆</div>';
       if (items.length) lastId = items[items.length - 1].id;
       msgsEl.scrollTop = msgsEl.scrollHeight;
+      hydrateChatImages(msgsEl);
     };
     renderMsgs(data.items, false);
     attachChatViewport(modal, msgsEl, modal.querySelector('#tch-text'));
+    addPhotoToComposer(modal, '#tch-form', '#tch-text', `/tournaments/${t.id}/chat`, renderMsgs);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
@@ -4668,6 +4720,7 @@
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
@@ -4678,9 +4731,11 @@
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — say hi to the court! 👋</div>';
       if (items.length) lastId = items[items.length - 1].id;
       msgsEl.scrollTop = msgsEl.scrollHeight;
+      hydrateChatImages(msgsEl);
     };
     renderMsgs(data.items, false);
     attachChatViewport(modal, msgsEl, modal.querySelector('#cc-text'));
+    addPhotoToComposer(modal, '#cc-form', '#cc-text', `/courts/${court.id}/chat`, renderMsgs);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
@@ -4746,6 +4801,7 @@
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
@@ -4756,9 +4812,11 @@
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — rally the club! 👋</div>';
       if (items.length) lastId = items[items.length - 1].id;
       msgsEl.scrollTop = msgsEl.scrollHeight;
+      hydrateChatImages(msgsEl);
     };
     renderMsgs(data.items, false);
     attachChatViewport(modal, msgsEl, modal.querySelector('#clb-text'));
+    addPhotoToComposer(modal, '#clb-form', '#clb-text', `/clubs/${club.id}/chat`, renderMsgs);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
@@ -5187,6 +5245,7 @@
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
@@ -5197,9 +5256,11 @@
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Coordinate with your game — “running late”, “bringing balls” 🎾</div>';
       if (items.length) lastId = items[items.length - 1].id;
       msgsEl.scrollTop = msgsEl.scrollHeight;
+      hydrateChatImages(msgsEl);
     };
     renderMsgs(data.items, false);
     attachChatViewport(modal, msgsEl, modal.querySelector('#gc-text'));
+    addPhotoToComposer(modal, '#gc-form', '#gc-text', `/games/${game.id}/chat`, renderMsgs);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }

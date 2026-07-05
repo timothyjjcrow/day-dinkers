@@ -519,11 +519,16 @@ def send_league_message(league_id):
         return err
     if not league.member_for(g.current_user.id):
         return jsonify({'error': 'members_only'}), 403
+    from backend.routes.chat import message_image_from
     payload = request.get_json(silent=True) or {}
     body = str(payload.get('body') or '').strip()
-    if not body:
+    image, err = message_image_from(payload)
+    if err:
+        return err
+    if not body and not image:
         return jsonify({'error': 'message_body_required'}), 400
-    message = Message(sender_id=g.current_user.id, league_id=league.id, body=body[:2000])
+    message = Message(sender_id=g.current_user.id, league_id=league.id,
+                      body=body[:2000], image_data=image)
     db.session.add(message)
 
     # One unread ping per league per member, mirroring the other room chats.
