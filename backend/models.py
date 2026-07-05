@@ -57,6 +57,8 @@ class User(TimestampMixin, db.Model):
     last_lat = db.Column(db.Float, index=True)
     last_lng = db.Column(db.Float, index=True)
     last_location_at = db.Column(db.DateTime)
+    # Coarse presence: touched (throttled) on any authed request.
+    last_active_at = db.Column(db.DateTime)
     # Persisted home area — the app centers the map/feeds here on launch.
     home_lat = db.Column(db.Float)
     home_lng = db.Column(db.Float)
@@ -118,6 +120,11 @@ class User(TimestampMixin, db.Model):
             'home_court_id': self.home_court_id,
             'home_court_name': self.home_court.name if self.home_court else None,
             'availability': self.availability_list(),
+            # Coarse on purpose — "in the app within ~10 minutes", nothing finer.
+            'active_now': bool(
+                self.last_active_at
+                and (utcnow() - self.last_active_at).total_seconds() < 600
+            ),
         }
 
     def to_dict(self):

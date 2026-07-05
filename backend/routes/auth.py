@@ -77,6 +77,11 @@ def login_required(view):
         if not user:
             return jsonify({'error': 'authentication_required'}), 401
         g.current_user = user
+        # Coarse presence heartbeat, throttled so it's one write per ~5 min.
+        now = utcnow()
+        if user.last_active_at is None or (now - user.last_active_at).total_seconds() > 300:
+            user.last_active_at = now
+            db.session.commit()
         return view(*args, **kwargs)
     return wrapped
 

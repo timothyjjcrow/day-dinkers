@@ -5764,3 +5764,24 @@ def test_dm_hearts(client):
     room = client.post(f'/api/courts/{court_id}/chat', json={'body': 'anyone up?'},
                        headers=ah).get_json()
     assert client.post(f"/api/messages/{room['id']}/heart", headers=bh).status_code == 400
+
+
+def test_active_now_presence(client, app):
+    from datetime import timedelta
+    from backend.models import User as UserModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+
+    # Ben's registration + this call touch his heartbeat → active to Ana.
+    client.get('/api/me', headers=bh)
+    profile = client.get(f"/api/users/{b['user']['id']}", headers=ah).get_json()
+    assert profile['active_now'] is True
+
+    # An hour of silence and the dot goes dark (checked in-context — the
+    # StaticPool gotcha forbids HTTP reads after in-context time travel).
+    with app.app_context():
+        ben = db.session.get(UserModel, b['user']['id'])
+        ben.last_active_at = utcnow() - timedelta(hours=1)
+        db.session.commit()
+        assert ben.to_public_dict()['active_now'] is False

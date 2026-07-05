@@ -4711,6 +4711,7 @@
           let sub = p.checked_in_court
             ? `📍 At ${esc(p.checked_in_court.name)}${p.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-accent)">wants to play!</b>' : ''}`
             : `${skillLabel(p.skill_level)} · ${p.rating} · ${p.distance_miles} mi away`;
+          if (p.active_now) sub = '<b style="color:var(--green-accent)">🟢 active now</b> · ' + sub;
           if (availabilityOverlap(state.me.availability, p.availability)) {
             sub += ' · <b style="color:var(--green-accent)">⏰ plays your times</b>';
           }
@@ -4968,7 +4969,7 @@
           ${avatarHtml(data.user, 'sm')}
           <div class="row-main">
             <div class="row-title">${esc(data.user.display_name)}</div>
-            <div class="row-sub">${skillLabel(data.user.skill_level)} · ${data.user.rating}</div>
+            <div class="row-sub">${data.user.active_now ? '<b style="color:var(--green-accent)">🟢 active now</b> · ' : ''}${skillLabel(data.user.skill_level)} · ${data.user.rating}</div>
           </div>
         </div>
         <div class="thread-msgs" id="thread-msgs"></div>
@@ -5764,7 +5765,7 @@
       <div class="profile-hero">
         ${avatarHtml(user)}
         <div class="profile-name">${esc(user.display_name)}</div>
-        <div class="profile-sub">${skillLabel(user.skill_level)}${user.home_court_name ? ` · 🏠 ${esc(user.home_court_name)}` : ''}</div>
+        <div class="profile-sub">${user.active_now ? '<b style="color:var(--green-accent)">🟢 active now</b> · ' : ''}${skillLabel(user.skill_level)}${user.home_court_name ? ` · 🏠 ${esc(user.home_court_name)}` : ''}</div>
         ${user.bio ? `<p class="profile-sub" style="margin-top:8px">${esc(user.bio)}</p>` : ''}
         ${(user.mutual_friends || []).length ? `<p class="profile-sub" style="margin-top:8px">🤝 ${mutualFriendsText(user.mutual_friends)}</p>` : ''}
       </div>
