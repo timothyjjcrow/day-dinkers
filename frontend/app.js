@@ -4581,14 +4581,15 @@
           else action = `<button class="btn btn-primary btn-sm" data-add-friend="${u.id}">＋ Add</button>`;
           return `
             <div class="card row" style="margin:8px 0">
-              ${avatarHtml(u)}
-              <div class="row-main">
+              <div data-view-user="${u.id}" style="cursor:pointer">${avatarHtml(u)}</div>
+              <div class="row-main" data-view-user="${u.id}" style="cursor:pointer">
                 <div class="row-title">${esc(u.display_name)}</div>
                 <div class="row-sub">${skillLabel(u.skill_level)} · ${u.rating}</div>
               </div>
               ${action}
             </div>`;
         }).join('') || '<div class="empty-state" style="padding:12px">No players found.</div>';
+        bindUserButtons(resultsEl);
 
         resultsEl.querySelectorAll('[data-add-friend]').forEach((b) => b.addEventListener('click', async () => {
           try {
