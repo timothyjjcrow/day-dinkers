@@ -2243,10 +2243,12 @@
       }
 
       // --- Games: everything actionable + yours + friends + nearby, one scroll ---
-      const [mine, friends, nearby] = await Promise.all([
+      const [mine, friends, nearby, tMine, tNear] = await Promise.all([
         api('/games?mine=1'),
         api('/games?friends=1').catch(() => ({ items: [] })),
         api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60`),
+        api('/tournaments?mine=1').catch(() => ({ items: [] })),
+        api(`/tournaments?lat=${loc.lat}&lng=${loc.lng}&radius=60`).catch(() => ({ items: [] })),
       ]);
       const nowMs = Date.now();
       const toScore = mine.items.filter((g) =>
@@ -2261,7 +2263,60 @@
       const friendsIds = new Set(friendsGames.map((g) => g.id));
       const nearbyOpen = nearby.items.filter((g) => !mineIds.has(g.id) && !friendsIds.has(g.id));
 
-      let html = '';
+      // --- "This week" planner: one strip answering "when is there play?" ---
+      const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const week = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(); d.setDate(d.getDate() + i); d.setHours(0, 0, 0, 0);
+        week.push(d);
+      }
+      const events = [];
+      const evSeen = new Set();
+      const addGameEvent = (g) => {
+        if (g.status !== 'upcoming' || evSeen.has(`g${g.id}`)) return;
+        evSeen.add(`g${g.id}`);
+        events.push({ when: new Date(g.scheduled_at), type: 'game', item: g });
+      };
+      mine.items.forEach(addGameEvent);
+      friendsGames.forEach(addGameEvent);
+      nearbyOpen.forEach(addGameEvent);
+      [...(tMine.items || []), ...(tNear.items || [])].forEach((t) => {
+        if (evSeen.has(`t${t.id}`) || (t.status !== 'registration' && t.status !== 'active')) return;
+        evSeen.add(`t${t.id}`);
+        events.push({ when: new Date(t.starts_at), type: 'tournament', item: t });
+      });
+      const countsByDay = week.map((d) => events.filter((ev) => dayKey(ev.when) === dayKey(d)).length);
+      const sel = state.weekDayFilter;
+      const dayLabelShort = (d, i) => (i === 0 ? 'Today' : i === 1 ? 'Tmrw' : d.toLocaleDateString([], { weekday: 'short' }));
+
+      let html = `<div class="quick-times" id="week-strip" style="margin:2px 0 10px">${week.map((d, i) => `
+        <button type="button" data-day-i="${i}" class="${sel === i ? 'active' : ''}">${dayLabelShort(d, i)}${countsByDay[i] ? ` · ${countsByDay[i]}` : ''}</button>`).join('')}</div>`;
+      const bindWeekStrip = () => el.querySelector('#week-strip')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-day-i]');
+        if (!btn) return;
+        const i = Number(btn.dataset.dayI);
+        state.weekDayFilter = state.weekDayFilter === i ? null : i;
+        renderPlay();
+      });
+
+      if (sel != null) {
+        // Day view: just that day's play, in time order.
+        const dayEvents = events
+          .filter((ev) => dayKey(ev.when) === dayKey(week[sel]))
+          .sort((a, b) => a.when - b.when);
+        html += `<div class="section-label">📅 ${sel === 0 ? 'Today' : week[sel].toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</div>`;
+        html += dayEvents.length
+          ? dayEvents.map((ev) => (ev.type === 'tournament' ? tournamentCardHtml(ev.item) : gameCardHtml(ev.item))).join('')
+          : '<div class="empty-state" style="padding:18px">Nothing on the calendar yet.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px">🎾 Start a game</button></div>';
+        el.innerHTML = html;
+        bindWeekStrip();
+        bindGameButtons(el, renderPlay);
+        el.querySelectorAll('[data-open-tournament]').forEach((card) => {
+          card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
+        });
+        return;
+      }
+
       if (toScore.length) {
         html += '<div class="section-label" style="margin-top:6px">🎾 Played — enter the score</div>';
         html += toScore.map((g) => gameCardHtml(g)).join('');
@@ -2314,6 +2369,7 @@
       html += '<button class="btn btn-secondary btn-block" id="pl-log-game" style="margin-top:14px">✍️ Log a game you already played</button>';
 
       el.innerHTML = html;
+      bindWeekStrip();
       el.querySelector('#pl-log-game')?.addEventListener('click', openLogGameSheet);
       bindGameButtons(el, renderPlay);
     } catch (e) {
