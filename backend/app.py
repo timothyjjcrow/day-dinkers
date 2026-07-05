@@ -154,6 +154,11 @@ def _upgrade_schema(app):
                 statements.append('ALTER TABLE message ADD COLUMN league_id INTEGER')
             if 'image_data' not in columns:
                 statements.append('ALTER TABLE message ADD COLUMN image_data TEXT')
+            if 'hearted' not in columns:
+                statements.append(
+                    'ALTER TABLE message ADD COLUMN hearted BOOLEAN NOT NULL DEFAULT '
+                    + ('FALSE' if is_postgres else '0')
+                )
 
         if 'user' in tables:
             user_cols = {c['name'] for c in inspector.get_columns('user')}

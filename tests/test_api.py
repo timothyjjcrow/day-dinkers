@@ -5736,3 +5736,31 @@ def test_club_announcement(client):
     # Members can't set it.
     assert client.patch(f'/api/clubs/{cid}', json={'announcement': 'hax'},
                         headers=bh).status_code == 403
+
+
+def test_dm_hearts(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+
+    msg = client.post(f"/api/chat/{b['user']['id']}", json={'body': 'nice rally!'},
+                      headers=ah).get_json()
+
+    # Only the recipient can heart; it toggles; both sides see it.
+    assert client.post(f"/api/messages/{msg['id']}/heart", headers=ah).status_code == 403
+    assert client.post(f"/api/messages/{msg['id']}/heart", headers=ch).status_code == 403
+    res = client.post(f"/api/messages/{msg['id']}/heart", headers=bh)
+    assert res.status_code == 200 and res.get_json()['hearted'] is True
+    thread = client.get(f"/api/chat/{b['user']['id']}", headers=ah).get_json()
+    assert msg['id'] in thread['hearted_ids']
+    assert next(m for m in thread['items'] if m['id'] == msg['id'])['hearted'] is True
+    res = client.post(f"/api/messages/{msg['id']}/heart", headers=bh)
+    assert res.get_json()['hearted'] is False
+    assert client.get(f"/api/chat/{b['user']['id']}", headers=ah).get_json()['hearted_ids'] == []
+
+    # Room messages can't be hearted (DM-only boolean).
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    room = client.post(f'/api/courts/{court_id}/chat', json={'body': 'anyone up?'},
+                       headers=ah).get_json()
+    assert client.post(f"/api/messages/{room['id']}/heart", headers=bh).status_code == 400

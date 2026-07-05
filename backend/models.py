@@ -455,6 +455,8 @@ class Message(TimestampMixin, db.Model):
     # endpoint so thread payloads stay light.
     image_data = db.Column(db.Text)
     read_at = db.Column(db.DateTime)
+    # DM-only ❤️ from the recipient (rooms would need a table; DMs don't).
+    hearted = db.Column(db.Boolean, nullable=False, default=False)
 
     sender = db.relationship('User', foreign_keys=[sender_id])
     recipient = db.relationship('User', foreign_keys=[recipient_id])
@@ -473,6 +475,7 @@ class Message(TimestampMixin, db.Model):
             'league_id': self.league_id,
             'body': self.body,
             'has_image': bool(self.image_data),
+            'hearted': self.hearted,
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),
         }

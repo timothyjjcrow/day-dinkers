@@ -4952,10 +4952,11 @@
     };
     const renderMsgs = (items, append) => {
       const html = items.map((m) => `
-        <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}" ${m.sender_id === state.me.id ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+        <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}" ${m.sender_id === state.me.id ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-heart-msg="${m.id}" title="Tap to ❤️"`}>
           ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
           ${esc(m.body)}
           <div class="bubble-time">${fmtTimeShort(m.created_at)}${m.sender_id === state.me.id && m.read_at ? ' · <span title="Seen">✓✓</span>' : ''}</div>
+          ${m.hearted ? '<span class="bubble-heart">❤️</span>' : ''}
         </div>`).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
@@ -4974,8 +4975,20 @@
         }
       });
     };
+    // Live ❤️: the partner's hearts land on my rendered bubbles each poll.
+    const applyHearts = (ids) => {
+      if (!ids) return;
+      const set = new Set(ids);
+      msgsEl.querySelectorAll('.bubble.me[data-del-msg]').forEach((b) => {
+        const has = b.querySelector('.bubble-heart');
+        const want = set.has(Number(b.dataset.delMsg));
+        if (want && !has) b.insertAdjacentHTML('beforeend', '<span class="bubble-heart">❤️</span>');
+        if (!want && has) has.remove();
+      });
+    };
     renderMsgs(data.items, false);
     markSeen(data.partner_read_up_to);
+    applyHearts(data.hearted_ids);
     attachChatViewport(modal, msgsEl, modal.querySelector('#thread-text'));
     refreshMe();
 
@@ -4986,6 +4999,7 @@
         const fresh = await api(`/chat/${userId}?since_id=${lastId}`);
         if (fresh.items.length) renderMsgs(fresh.items, true);
         markSeen(fresh.partner_read_up_to);
+        applyHearts(fresh.hearted_ids);
       } catch { /* offline */ }
     }, 4000);
 
@@ -7204,6 +7218,18 @@
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     state.installPrompt = e;
+  });
+
+  // Tap a partner's DM bubble to ❤️ it (tap again to take it back).
+  document.addEventListener('click', async (e) => {
+    const bubble = e.target.closest('.bubble.them[data-heart-msg]');
+    if (!bubble) return;
+    try {
+      const res = await api(`/messages/${bubble.dataset.heartMsg}/heart`, { method: 'POST' });
+      const badge = bubble.querySelector('.bubble-heart');
+      if (res.hearted && !badge) bubble.insertAdjacentHTML('beforeend', '<span class="bubble-heart">❤️</span>');
+      if (!res.hearted && badge) badge.remove();
+    } catch (err) { toast(err.message); }
   });
 
   // Tap your own chat bubble (any thread type) to delete it.

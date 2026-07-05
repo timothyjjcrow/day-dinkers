@@ -281,6 +281,24 @@ def delete_message(message_id):
     return jsonify({'deleted': True})
 
 
+@chat_bp.post('/messages/<int:message_id>/heart')
+@rate_limit(60, 60)
+@login_required
+def heart_message(message_id):
+    """Toggle a ❤️ on a DM you received. DM-only: two people means a plain
+    boolean covers it; room chats would need per-user rows."""
+    message = db.session.get(Message, message_id)
+    if not message:
+        return jsonify({'error': 'message_not_found'}), 404
+    if message.recipient_id is None:
+        return jsonify({'error': 'dm_only'}), 400
+    if message.recipient_id != g.current_user.id:
+        return jsonify({'error': 'not_your_thread'}), 403
+    message.hearted = not message.hearted
+    db.session.commit()
+    return jsonify({'hearted': message.hearted})
+
+
 @chat_bp.get('/chat/courts')
 @login_required
 def my_court_rooms():
@@ -408,10 +426,18 @@ def thread(user_id):
         Message.read_at.isnot(None),
     ).scalar() or 0
 
+    # Hearts on MY messages ride every poll so they light up live.
+    hearted_ids = [row[0] for row in db.session.query(Message.id).filter(
+        Message.sender_id == me,
+        Message.recipient_id == user_id,
+        Message.hearted.is_(True),
+    ).order_by(Message.id.desc()).limit(100).all()]
+
     return jsonify({
         'user': partner.to_public_dict(),
         'items': [m.to_dict() for m in messages],
         'partner_read_up_to': read_up_to,
+        'hearted_ids': hearted_ids,
     })
 
 
