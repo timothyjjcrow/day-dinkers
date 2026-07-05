@@ -4114,7 +4114,11 @@
       const unitLabel = isDoubles ? 'team' : 'player';
       const meta = [
         t.court ? `${t.court.name}${t.court.city ? ', ' + t.court.city : ''}` : '',
-        fmtDateTime(t.starts_at),
+        // Same honesty rule as the cards: a finished tournament shouldn't
+        // advertise its (possibly still future) start time.
+        t.status === 'completed'
+          ? `🏁 Ended${t.completed_at ? ` ${new Date(t.completed_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}`
+          : fmtDateTime(t.starts_at),
         `${T_FORMAT_LABEL[t.format] || t.format} · ${isDoubles ? 'Doubles' : 'Singles'}${t.ranked ? ' · ⚡ Ranked' : ''}`,
       ].filter(Boolean);
 
