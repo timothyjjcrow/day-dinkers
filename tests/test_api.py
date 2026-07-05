@@ -5759,11 +5759,13 @@ def test_dm_hearts(client):
     assert res.get_json()['hearted'] is False
     assert client.get(f"/api/chat/{b['user']['id']}", headers=ah).get_json()['hearted_ids'] == []
 
-    # Room messages can't be hearted (DM-only boolean).
+    # Room messages take per-user hearts instead of the DM boolean
+    # (full coverage lives in test_room_chat_hearts).
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     room = client.post(f'/api/courts/{court_id}/chat', json={'body': 'anyone up?'},
                        headers=ah).get_json()
-    assert client.post(f"/api/messages/{room['id']}/heart", headers=bh).status_code == 400
+    res = client.post(f"/api/messages/{room['id']}/heart", headers=bh)
+    assert res.status_code == 200 and res.get_json()['heart_count'] == 1
 
 
 def test_active_now_presence(client, app):
@@ -5785,3 +5787,34 @@ def test_active_now_presence(client, app):
         ben.last_active_at = utcnow() - timedelta(hours=1)
         db.session.commit()
         assert ben.to_public_dict()['active_now'] is False
+
+
+def test_room_chat_hearts(client):
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    msg = client.post(f'/api/courts/{court_id}/chat', json={'body': 'great games today'},
+                      headers=ah).get_json()
+
+    # Court rooms: any signed-in player can heart; counts stack per user.
+    res = client.post(f"/api/messages/{msg['id']}/heart", headers=bh)
+    assert res.status_code == 200 and res.get_json() == {'hearted': True, 'heart_count': 1}
+    res = client.post(f"/api/messages/{msg['id']}/heart", headers=ch)
+    assert res.get_json()['heart_count'] == 2
+    room = client.get(f'/api/courts/{court_id}/chat', headers=ah).get_json()
+    mine = next(m for m in room['items'] if m['id'] == msg['id'])
+    assert mine['heart_count'] == 2
+    assert set(mine['heart_user_ids']) == {b['user']['id'], c['user']['id']}
+
+    # Toggling off removes only that user's row.
+    res = client.post(f"/api/messages/{msg['id']}/heart", headers=bh)
+    assert res.get_json() == {'hearted': False, 'heart_count': 1}
+
+    # Membership gate: Cam isn't in Ana's club, so its room rejects him.
+    cid = client.post('/api/clubs', json={'name': 'Hearts Club'}, headers=ah).get_json()['id']
+    club_msg = client.post(f'/api/clubs/{cid}/chat', json={'body': 'members only'},
+                           headers=ah).get_json()
+    assert client.post(f"/api/messages/{club_msg['id']}/heart", headers=ch).status_code == 403
+    assert client.post(f"/api/messages/{club_msg['id']}/heart", headers=ah).status_code == 200

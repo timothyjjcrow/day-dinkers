@@ -483,9 +483,32 @@ class Message(TimestampMixin, db.Model):
             'body': self.body,
             'has_image': bool(self.image_data),
             'hearted': self.hearted,
+            'heart_count': len(self.hearts),
+            'heart_user_ids': [h.user_id for h in self.hearts],
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),
         }
+
+
+class MessageHeart(TimestampMixin, db.Model):
+    """A per-user ❤️ on a room-chat message (DMs use Message.hearted — two
+    people only ever need a boolean). ondelete CASCADE so the bulk message
+    purges (club disband etc.) don't strand rows on Postgres."""
+    __table_args__ = (
+        db.UniqueConstraint('message_id', 'user_id', name='uq_message_heart'),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(
+        db.Integer, db.ForeignKey('message.id', ondelete='CASCADE'),
+        nullable=False, index=True,
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+
+    message = db.relationship(
+        'Message',
+        backref=db.backref('hearts', lazy='selectin', cascade='all, delete-orphan',
+                           passive_deletes=True),
+    )
 
 
 class UserReport(TimestampMixin, db.Model):

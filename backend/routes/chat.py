@@ -285,18 +285,33 @@ def delete_message(message_id):
 @rate_limit(60, 60)
 @login_required
 def heart_message(message_id):
-    """Toggle a ❤️ on a DM you received. DM-only: two people means a plain
-    boolean covers it; room chats would need per-user rows."""
+    """Toggle a ❤️ on a message. DMs flip a boolean (two people); room chats
+    keep one MessageHeart row per admirer, gated by thread membership."""
+    from backend.models import MessageHeart
     message = db.session.get(Message, message_id)
     if not message:
         return jsonify({'error': 'message_not_found'}), 404
-    if message.recipient_id is None:
-        return jsonify({'error': 'dm_only'}), 400
-    if message.recipient_id != g.current_user.id:
-        return jsonify({'error': 'not_your_thread'}), 403
-    message.hearted = not message.hearted
+    me = g.current_user.id
+
+    if message.recipient_id is not None:
+        if message.recipient_id != me:
+            return jsonify({'error': 'not_your_thread'}), 403
+        message.hearted = not message.hearted
+        db.session.commit()
+        return jsonify({'hearted': message.hearted})
+
+    if not _can_read_message(message, me):
+        return jsonify({'error': 'forbidden'}), 403
+    existing = MessageHeart.query.filter_by(message_id=message.id, user_id=me).first()
+    if existing:
+        db.session.delete(existing)
+        hearted = False
+    else:
+        db.session.add(MessageHeart(message_id=message.id, user_id=me))
+        hearted = True
     db.session.commit()
-    return jsonify({'hearted': message.hearted})
+    count = MessageHeart.query.filter_by(message_id=message.id).count()
+    return jsonify({'hearted': hearted, 'heart_count': count})
 
 
 @chat_bp.get('/chat/courts')
@@ -481,33 +496,34 @@ def message_image(message_id):
     message = db.session.get(Message, message_id)
     if not message or not message.image_data:
         return jsonify({'error': 'image_not_found'}), 404
-
-    me = g.current_user.id
-    allowed = False
-    if message.recipient_id is not None:
-        allowed = me in (message.sender_id, message.recipient_id)
-    elif message.court_id is not None:
-        allowed = True  # court rooms are readable by any signed-in player
-    elif message.game_id is not None:
-        allowed = GamePlayer.query.filter_by(
-            game_id=message.game_id, user_id=me,
-        ).first() is not None
-    elif message.tournament_id is not None:
-        tournament = db.session.get(Tournament, message.tournament_id)
-        allowed = tournament is not None and (
-            me == tournament.organizer_id or me in tournament.participant_ids()
-        )
-    elif message.club_id is not None:
-        from backend.models import ClubMember
-        allowed = ClubMember.query.filter_by(
-            club_id=message.club_id, user_id=me,
-        ).first() is not None
-    elif message.league_id is not None:
-        from backend.models import LeagueMember
-        allowed = LeagueMember.query.filter_by(
-            league_id=message.league_id, user_id=me,
-        ).first() is not None
-
-    if not allowed:
+    if not _can_read_message(message, g.current_user.id):
         return jsonify({'error': 'forbidden'}), 403
     return jsonify({'image': message.image_data})
+
+
+def _can_read_message(message, me):
+    """Thread-scoped read access — shared by image fetches and reactions."""
+    if message.recipient_id is not None:
+        return me in (message.sender_id, message.recipient_id)
+    if message.court_id is not None:
+        return True  # court rooms are readable by any signed-in player
+    if message.game_id is not None:
+        return GamePlayer.query.filter_by(
+            game_id=message.game_id, user_id=me,
+        ).first() is not None
+    if message.tournament_id is not None:
+        tournament = db.session.get(Tournament, message.tournament_id)
+        return tournament is not None and (
+            me == tournament.organizer_id or me in tournament.participant_ids()
+        )
+    if message.club_id is not None:
+        from backend.models import ClubMember
+        return ClubMember.query.filter_by(
+            club_id=message.club_id, user_id=me,
+        ).first() is not None
+    if message.league_id is not None:
+        from backend.models import LeagueMember
+        return LeagueMember.query.filter_by(
+            league_id=message.league_id, user_id=me,
+        ).first() is not None
+    return False

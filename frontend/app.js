@@ -3733,7 +3733,7 @@
         return `
         <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
@@ -4519,7 +4519,7 @@
         return `
         <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
@@ -5107,7 +5107,7 @@
         return `
         <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
@@ -5193,7 +5193,7 @@
         return `
         <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
@@ -5647,7 +5647,7 @@
         return `
         <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
@@ -7322,6 +7322,23 @@
       const badge = bubble.querySelector('.bubble-heart');
       if (res.hearted && !badge) bubble.insertAdjacentHTML('beforeend', '<span class="bubble-heart">❤️</span>');
       if (!res.hearted && badge) badge.remove();
+    } catch (err) { toast(err.message); }
+  });
+
+  // Room chats: tap anyone else's bubble to toggle your ❤️; badge shows count.
+  document.addEventListener('click', async (e) => {
+    const bubble = e.target.closest('.bubble.them[data-room-heart]');
+    if (!bubble) return;
+    try {
+      const res = await api(`/messages/${bubble.dataset.roomHeart}/heart`, { method: 'POST' });
+      let badge = bubble.querySelector('[data-heart-badge]');
+      if (res.heart_count) {
+        const label = `❤️${res.heart_count > 1 ? ' ' + res.heart_count : ''}`;
+        if (badge) badge.textContent = label;
+        else bubble.insertAdjacentHTML('afterbegin', `<span class="bubble-heart" data-heart-badge>${label}</span>`);
+      } else if (badge) {
+        badge.remove();
+      }
     } catch (err) { toast(err.message); }
   });
 
