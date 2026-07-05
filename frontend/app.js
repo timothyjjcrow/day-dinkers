@@ -3757,6 +3757,7 @@
       try {
         const fresh = await api(`/leagues/${lg.id}/chat?since_id=${lastId}`);
         if (fresh.items.length) renderMsgs(fresh.items, true);
+        applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
@@ -4543,6 +4544,7 @@
       try {
         const fresh = await api(`/tournaments/${t.id}/chat?since_id=${lastId}`);
         if (fresh.items.length) renderMsgs(fresh.items, true);
+        applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
@@ -5043,6 +5045,7 @@
       try {
         const fresh = await api(`/chat/${userId}?since_id=${lastId}`);
         if (fresh.items.length) renderMsgs(fresh.items, true);
+        applyRoomHearts(msgsEl, fresh.heart_counts);
         markSeen(fresh.partner_read_up_to);
         applyHearts(fresh.hearted_ids);
       } catch { /* offline */ }
@@ -5131,6 +5134,7 @@
       try {
         const fresh = await api(`/courts/${court.id}/chat?since_id=${lastId}`);
         if (fresh.items.length) renderMsgs(fresh.items, true);
+        applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
@@ -5217,6 +5221,7 @@
       try {
         const fresh = await api(`/clubs/${club.id}/chat?since_id=${lastId}`);
         if (fresh.items.length) renderMsgs(fresh.items, true);
+        applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
@@ -5671,6 +5676,7 @@
       try {
         const fresh = await api(`/games/${game.id}/chat?since_id=${lastId}`);
         if (fresh.items.length) renderMsgs(fresh.items, true);
+        applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
@@ -7324,6 +7330,25 @@
       if (!res.hearted && badge) badge.remove();
     } catch (err) { toast(err.message); }
   });
+
+  // Repaint ❤️ badges from a {message_id: count} map — polls carry it so
+  // counts on already-rendered bubbles stay live without reopening the room.
+  // No-ops for DM threads (their payloads don't include heart_counts).
+  function applyRoomHearts(root, counts) {
+    if (!counts || !root) return;
+    root.querySelectorAll('.bubble[data-room-heart], .bubble.me[data-del-msg]').forEach((b) => {
+      const id = b.dataset.roomHeart || b.dataset.delMsg;
+      const n = counts[id] || 0;
+      let badge = b.querySelector('[data-heart-badge]');
+      if (n) {
+        const label = `❤️${n > 1 ? ' ' + n : ''}`;
+        if (badge) badge.textContent = label;
+        else b.insertAdjacentHTML('afterbegin', `<span class="bubble-heart" data-heart-badge>${label}</span>`);
+      } else if (badge) {
+        badge.remove();
+      }
+    });
+  }
 
   // Room chats: tap anyone else's bubble to toggle your ❤️; badge shows count.
   document.addEventListener('click', async (e) => {

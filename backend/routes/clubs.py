@@ -510,9 +510,11 @@ def club_chat(club_id):
         marker.last_read_message_id = latest_id
         db.session.commit()
 
+    from backend.routes.chat import room_heart_counts
     return jsonify({
         'club': {'id': club.id, 'name': club.name},
         'items': [m.to_dict() for m in messages],
+        'heart_counts': room_heart_counts('club_id', club_id),
     })
 
 

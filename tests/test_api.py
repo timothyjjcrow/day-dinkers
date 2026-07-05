@@ -5807,6 +5807,8 @@ def test_room_chat_hearts(client):
     mine = next(m for m in room['items'] if m['id'] == msg['id'])
     assert mine['heart_count'] == 2
     assert set(mine['heart_user_ids']) == {b['user']['id'], c['user']['id']}
+    # Every room GET (and poll) carries the live count map.
+    assert room['heart_counts'] == {str(msg['id']): 2}
 
     # Toggling off removes only that user's row.
     res = client.post(f"/api/messages/{msg['id']}/heart", headers=bh)

@@ -26,6 +26,20 @@ def message_image_from(payload):
     return image, None
 
 
+def room_heart_counts(column_name, value):
+    """{message_id: heart_count} for a whole room — rides every poll so
+    counts on already-rendered bubbles stay live between reopens."""
+    from backend.models import MessageHeart
+    rows = (
+        db.session.query(MessageHeart.message_id, db.func.count(MessageHeart.id))
+        .join(Message, Message.id == MessageHeart.message_id)
+        .filter(getattr(Message, column_name) == value)
+        .group_by(MessageHeart.message_id)
+        .all()
+    )
+    return {str(mid): n for mid, n in rows}
+
+
 @chat_bp.get('/courts/<int:court_id>/chat')
 @login_required
 def court_chat(court_id):
@@ -59,6 +73,7 @@ def court_chat(court_id):
     return jsonify({
         'court': {'id': court.id, 'name': court.name},
         'items': [m.to_dict() for m in messages],
+        'heart_counts': room_heart_counts('court_id', court_id),
     })
 
 
@@ -128,6 +143,7 @@ def game_chat(game_id):
     return jsonify({
         'game': {'id': game.id, 'court_name': game.court.name if game.court else 'Court'},
         'items': [m.to_dict() for m in messages],
+        'heart_counts': room_heart_counts('game_id', game_id),
     })
 
 
@@ -218,6 +234,7 @@ def tournament_chat(tournament_id):
     return jsonify({
         'tournament': {'id': tournament.id, 'name': tournament.name},
         'items': [m.to_dict() for m in messages],
+        'heart_counts': room_heart_counts('tournament_id', tournament_id),
     })
 
 
