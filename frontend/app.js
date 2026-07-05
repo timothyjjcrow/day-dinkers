@@ -6761,7 +6761,11 @@
           ${last ? '' : '<button class="btn-link btn-block" id="tour-skip">Skip</button>'}
         </div>`;
       box.querySelector('#tour-next').onclick = () => {
-        if (last) closeModal(modal); else { i += 1; render(); }
+        if (last) {
+          closeModal(modal);
+          // "Let's play" should land where the games are, not back on the map.
+          document.querySelector('[data-tab="play"]')?.click();
+        } else { i += 1; render(); }
       };
       box.querySelector('#tour-skip')?.addEventListener('click', () => closeModal(modal));
     };
