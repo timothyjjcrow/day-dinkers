@@ -44,10 +44,15 @@
       <section id="tab-courts" class="tab-panel">
         <div id="map"></div>
         <div class="map-topbar">
-          <input type="search" id="court-search" placeholder="Search courts or cities…" />
+          <div class="search-wrap">
+            <input type="search" id="court-search" placeholder="Search courts or cities…" autocomplete="off" />
+            <span id="search-spin" class="search-spin hidden"></span>
+            <button id="search-clear" class="search-clear hidden" aria-label="Clear search">✕</button>
+          </div>
           <button id="locate-btn" class="icon-btn" title="My location" aria-label="Center on my location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/></svg></button>
           <button id="bell-btn" class="icon-btn" title="Activity" aria-label="Activity and notifications" style="position:relative"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg><span id="bell-badge" class="badge hidden" style="top:4px;right:4px"></span></button>
         </div>
+        <div id="search-suggest" class="search-suggest hidden"></div>
         <div class="map-filters" id="map-filters">
           <button data-filter="all" class="active">All</button>
           <button data-filter="saved">⭐ Saved</button>

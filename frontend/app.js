@@ -500,7 +500,22 @@
       if (!btn) return;
       state.mapFilter = btn.dataset.filter;
       document.querySelectorAll('#map-filters button').forEach((b) => b.classList.toggle('active', b === btn));
+      // A filter tap takes over from any active search — otherwise the fetch
+      // below would silently no-op while search results own the map.
+      if (state.searchQ) {
+        state.searchQ = '';
+        const si = $('#court-search');
+        if (si) si.value = '';
+        hideSearchSuggest();
+        syncSearchClear();
+      }
       await fetchCourtsInView();
+      // An empty filter result deserves an explanation, not a silently blank map.
+      if (state.mapFilter !== 'all' && !state.searchQ && !(state.courtsInView || []).length) {
+        toast(state.mapFilter === 'saved'
+          ? 'No saved courts yet — tap ☆ on any court to save it'
+          : `No “${btn.textContent.trim()}” courts in view — try zooming out`);
+      }
       // Saved courts can be anywhere — zoom out to fit them all.
       if (state.mapFilter === 'saved' && state.courtsInView.length) {
         const pts = state.courtsInView.filter((c) => c.latitude != null).map((c) => [c.latitude, c.longitude]);
@@ -514,7 +529,8 @@
       fetchCourtsInView();
     });
 
-    $('#locate-btn').addEventListener('click', locateMe);
+    // NB: don't pass the click event through — locateMe's arg is the `silent` flag.
+    $('#locate-btn').addEventListener('click', () => locateMe(false));
     $('#bell-btn').addEventListener('click', openActivity);
     $('#looking-banner').addEventListener('click', () => {
       state.chatSeg = 'nearby';
@@ -525,7 +541,8 @@
     const ICON_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;vertical-align:-2px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
     const syncListToggle = () => {
       const open = !$('#court-list').classList.contains('hidden');
-      $('#list-toggle').innerHTML = open ? `${ICON_X} Close` : `${ICON_LIST} List`;
+      const n = (state.courtsInView || []).length;
+      $('#list-toggle').innerHTML = open ? `${ICON_X} Close` : `${ICON_LIST} List${n ? ` · ${n}` : ''}`;
     };
     $('#list-toggle').addEventListener('click', () => {
       $('#court-list').classList.toggle('hidden');
@@ -548,14 +565,43 @@
     });
 
     let searchTimer;
-    $('#court-search').addEventListener('input', (e) => {
+    const searchInput = $('#court-search');
+    searchInput.addEventListener('input', (e) => {
       clearTimeout(searchTimer);
       const q = e.target.value.trim();
       // While a search is active, map moves must not clobber its results
       // (fitBounds below fires moveend → fetchCourtsInView).
       state.searchQ = q;
+      syncSearchClear();
+      if (!q) hideSearchSuggest();
       searchTimer = setTimeout(() => q ? searchCourts(q) : fetchCourtsInView(), 350);
     });
+    // Enter (mobile "search"/"go") dismisses the keyboard and shows the full list.
+    searchInput.addEventListener('keydown', async (e) => {
+      if (e.key !== 'Enter') return;
+      clearTimeout(searchTimer);
+      searchInput.blur();
+      if (!state.searchQ) return;
+      await searchCourts(state.searchQ); // don't fit to stale, pre-debounce results
+      hideSearchSuggest();
+      fitSearchResults();
+      openCourtListPanel();
+    });
+    // Refocusing a non-empty search brings its suggestions back.
+    searchInput.addEventListener('focus', () => {
+      if (state.searchQ) searchCourts(state.searchQ);
+    });
+    $('#search-clear').addEventListener('click', () => {
+      clearTimeout(searchTimer);
+      searchInput.value = '';
+      state.searchQ = '';
+      hideSearchSuggest();
+      syncSearchClear();
+      searchInput.focus();
+      fetchCourtsInView();
+    });
+    // Touching the map puts it back in charge: drop the suggestion overlay.
+    state.map.getContainer().addEventListener('pointerdown', hideSearchSuggest);
 
     // Only auto-locate when we have neither a saved view nor a saved home area.
     if (!saved && !(state.me && state.me.home_lat != null)) locateMe(true);
@@ -589,20 +635,36 @@
   });
 
   function locateMe(silent) {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      if (!silent) toast('Location is not available on this device');
+      return;
+    }
+    const btn = $('#locate-btn');
+    if (!silent && btn) btn.classList.add('locating');
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        if (btn) btn.classList.remove('locating');
         state.userLoc = [pos.coords.latitude, pos.coords.longitude];
         state.areaLoc = null; // "my location" takes precedence again
         state.searchQ = '';
         const search = $('#court-search');
         if (search) search.value = '';
+        hideSearchSuggest();
+        syncSearchClear();
         state.map.setView(state.userLoc, 13);
         updateUserDot();
         startLocationWatch();
         fetchCourtsInView();
+        if (!silent) toast('📍 Centered on your location');
       },
-      () => { if (!silent) toast('Could not get your location'); },
+      (err) => {
+        if (btn) btn.classList.remove('locating');
+        if (!silent) {
+          toast(err && err.code === 1
+            ? 'Location is blocked — allow it in your browser settings'
+            : 'Could not get your location right now');
+        }
+      },
       { timeout: 8000 },
     );
   }
@@ -622,8 +684,10 @@
     $('#court-list').classList.add('hidden');
     if (state.syncListToggle) state.syncListToggle();
     const search = $('#court-search');
-    if (search) search.value = '';
+    if (search) { search.value = ''; search.blur(); }
     state.searchQ = '';
+    hideSearchSuggest();
+    syncSearchClear();
     if (label) toast(`📍 ${label}`);
     fetchCourtsInView();
   }
@@ -687,22 +751,114 @@
     } catch { el.classList.add('hidden'); }
   }
 
+  // ---------- Search suggestions (typeahead under the search bar) ----------
+  function hideSearchSuggest() {
+    const el = $('#search-suggest');
+    if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
+  }
+
+  // Clear (✕) shows whenever there's text and no request in flight.
+  function syncSearchClear() {
+    const input = $('#court-search');
+    const clear = $('#search-clear');
+    const spin = $('#search-spin');
+    if (!input || !clear || !spin) return;
+    const busy = !spin.classList.contains('hidden');
+    clear.classList.toggle('hidden', busy || !input.value.trim());
+  }
+
+  function openCourtListPanel() {
+    $('#court-list').classList.remove('hidden');
+    if (state.syncListToggle) state.syncListToggle();
+  }
+
+  function fitSearchResults() {
+    const pts = (state.courtsInView || []).filter((c) => c.latitude != null);
+    if (pts.length) {
+      state.map.fitBounds(pts.map((c) => [c.latitude, c.longitude]), { maxZoom: 13, padding: [40, 40] });
+    }
+  }
+
+  function renderSearchSuggest(courts, places, q) {
+    const el = $('#search-suggest');
+    if (!el) return;
+    // Only surface suggestions while this query is still what's typed.
+    if (!q || state.searchQ !== q) { hideSearchSuggest(); return; }
+    let html = '';
+    if (places.length) {
+      html += '<div class="sug-label">📍 Jump to area</div>';
+      html += places.slice(0, 4).map((p, i) => `
+        <button class="sug-row" data-sug-place="${i}">
+          <span class="sug-ico">📍</span>
+          <span class="sug-main">
+            <span class="sug-title" style="display:block">${esc(p.label)}</span>
+            <span class="sug-sub" style="display:block">${esc((p.detail || '').split(',').slice(1, 4).join(',').trim())}</span>
+          </span>
+          <span class="chev">›</span>
+        </button>`).join('');
+    }
+    if (courts.length) {
+      html += '<div class="sug-label">🏓 Courts</div>';
+      html += courts.slice(0, 5).map((c) => `
+        <button class="sug-row" data-sug-court="${c.id}">
+          <span class="sug-ico">🏓</span>
+          <span class="sug-main">
+            <span class="sug-title" style="display:block">${esc(c.name)}</span>
+            <span class="sug-sub" style="display:block">${[
+              esc(c.city || ''),
+              c.distance_miles != null ? `${c.distance_miles} mi` : '',
+              `${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`,
+              c.rating_avg ? `⭐ ${c.rating_avg}` : '',
+            ].filter(Boolean).join(' · ')}</span>
+          </span>
+          <span class="chev">›</span>
+        </button>`).join('');
+      if (courts.length > 5) {
+        html += `<button class="sug-row sug-all" data-sug-all>See all ${courts.length} courts</button>`;
+      }
+    }
+    if (!html) {
+      html = `<div class="sug-empty">🔎 Nothing matches “${esc(q)}”.<br>Try a court name or a city.</div>`;
+    }
+    el.innerHTML = html;
+    el.classList.remove('hidden');
+    el.querySelectorAll('[data-sug-place]').forEach((row) => {
+      const p = places[Number(row.dataset.sugPlace)];
+      if (p) row.addEventListener('click', () => { hideSearchSuggest(); jumpToPlace(p.lat, p.lng, p.label); });
+    });
+    el.querySelectorAll('[data-sug-court]').forEach((row) => {
+      row.addEventListener('click', () => { hideSearchSuggest(); openCourtDetail(Number(row.dataset.sugCourt)); });
+    });
+    el.querySelector('[data-sug-all]')?.addEventListener('click', () => {
+      hideSearchSuggest();
+      $('#court-search').blur();
+      fitSearchResults();
+      openCourtListPanel();
+    });
+  }
+
+  let searchSeq = 0;
   async function searchCourts(q) {
+    const seq = ++searchSeq;
+    const spin = $('#search-spin');
+    if (spin) spin.classList.remove('hidden');
+    syncSearchClear();
     try {
       const [courtData, placeData] = await Promise.all([
         api(`/courts?q=${encodeURIComponent(q)}&limit=50`),
         api(`/geocode?q=${encodeURIComponent(q)}`).catch(() => ({ items: [] })),
       ]);
+      // A newer keystroke owns the UI now — drop this stale response.
+      if (seq !== searchSeq || state.searchQ !== q) return;
       state.courtsInView = courtData.items;
       drawMarkers(courtData.items);
       renderCourtList(courtData.items, placeData.items || []);
-      $('#court-list').classList.remove('hidden');
-      if (state.syncListToggle) state.syncListToggle();
-      if (courtData.items.length) {
-        const pts = courtData.items.filter((c) => c.latitude != null);
-        if (pts.length) state.map.fitBounds(pts.map((c) => [c.latitude, c.longitude]), { maxZoom: 13, padding: [40, 40] });
-      }
-    } catch { /* ignore */ }
+      renderSearchSuggest(courtData.items, placeData.items || [], q);
+      // The map stays put while you type — it only jumps once you commit
+      // (Enter / "See all"), via fitSearchResults().
+    } catch { /* ignore */ } finally {
+      if (seq === searchSeq && spin) { spin.classList.add('hidden'); syncSearchClear(); }
+    }
   }
 
   function drawMarkers(courts) {
@@ -852,7 +1008,13 @@
     // Search results own the panel: no saved-courts insert, honest empty state.
     const searching = !!state.searchQ && !savedOnly;
     const titleEl = document.querySelector('#court-list .sheet-title');
-    if (titleEl) titleEl.textContent = searching ? 'Search results' : 'Courts in view';
+    if (titleEl) {
+      const count = courts.length ? ` · ${courts.length}` : '';
+      titleEl.textContent = savedOnly ? `Saved courts${count}`
+        : searching ? `Search results${count}`
+        : `Courts in view${count}`;
+    }
+    if (state.syncListToggle) state.syncListToggle();
 
     // The Saved map filter already IS the favorites list — render it directly,
     // no "saved vs in view" split, with a filter-specific empty state.
@@ -1474,6 +1636,31 @@
     if (court.website) linkParts.push(`<a href="${esc(court.website)}" target="_blank" rel="noopener">🌐 Website</a>`);
     if (court.phone) linkParts.push(`<a href="tel:${esc(court.phone)}">📞 ${esc(court.phone)}</a>`);
 
+    // At-a-glance strip: each cell jumps to its section further down the sheet.
+    const distMi = state.userLoc && court.latitude != null
+      ? milesBetween(state.userLoc, [court.latitude, court.longitude]) : null;
+    const nGames = court.games.length;
+    const nHere = court.players_here.length;
+    const statCells = [
+      {
+        v: court.rating_avg ? `⭐ ${court.rating_avg}` : '☆ —',
+        l: court.rating_avg ? `${court.rating_count} rating${court.rating_count === 1 ? '' : 's'}` : 'rate it first',
+        to: 'cd-sec-reviews',
+      },
+      { v: String(nHere), l: 'playing now', to: 'cd-sec-players', hot: nHere > 0 },
+      { v: String(nGames), l: `game${nGames === 1 ? '' : 's'} coming up`, to: 'cd-sec-games', hot: nGames > 0 },
+    ];
+    if (distMi != null) {
+      statCells.push({ v: distMi < 10 ? distMi.toFixed(1) : String(Math.round(distMi)), l: 'miles away' });
+    }
+    const statsHtml = `
+      <div class="cd-stats" style="grid-template-columns:repeat(${statCells.length},1fr)">
+        ${statCells.map((s) => `
+          <button class="cd-stat${s.hot ? ' hot' : ''}"${s.to ? ` data-scroll-to="${s.to}"` : ' disabled style="cursor:default"'}>
+            <span class="cd-stat-v">${s.v}</span><span class="cd-stat-l">${s.l}</span>
+          </button>`).join('')}
+      </div>`;
+
     const modal = openModal(`
       <div class="cd-hero">
         ${heroImg}
@@ -1496,6 +1683,7 @@
       </div>
       <div class="cd-scroll">
       ${court.closed ? '<div class="card" style="background:var(--red-50);color:var(--red-700);text-align:center;padding:10px 14px;margin-bottom:10px;font-weight:700">🚫 This court is reported permanently closed</div>' : ''}
+      ${statsHtml}
       <button class="btn ${checkedIn ? 'btn-danger' : 'btn-primary'} btn-block" id="cd-checkin" style="padding:15px;margin-bottom:10px">
         ${checkedIn ? 'Check out' : "📍 I'm here — check in"}
       </button>
@@ -1533,7 +1721,7 @@
           <p>${esc(court.open_play_schedule)}</p>
         </details>` : ''}
       ${linkParts.length ? `<div class="cd-links">${linkParts.join('')}</div>` : ''}
-      <div class="section-label">Playing now (${court.players_here.length})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
+      <div class="section-label" id="cd-sec-players">Playing now (${court.players_here.length})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
       ${playersHtml}
       ${(court.regulars || []).length ? `
         <div class="section-label">Court regulars</div>
@@ -1576,17 +1764,24 @@
           </div>`).join('')}` : ''}
       <div id="cd-clubs"></div>
       <div id="cd-leagues"></div>
-      <div class="section-label">Upcoming games</div>
+      <div class="section-label" id="cd-sec-games">Upcoming games</div>
       ${gamesHtml}
       ${(court.recent_results || []).length ? `
         <div class="section-label">Recent results here</div>
         ${court.recent_results.map(resultRowHtml).join('')}` : ''}
-      <div class="section-label">Reviews${court.rating_avg ? ` · ⭐ ${court.rating_avg} (${court.rating_count})` : ''}</div>
+      <div class="section-label" id="cd-sec-reviews">Reviews${court.rating_avg ? ` · ⭐ ${court.rating_avg} (${court.rating_count})` : ''}</div>
       <div id="cd-reviews"></div>
       </div>
     `, { court: true });
 
     renderReviewSection(modal.querySelector('#cd-reviews'), court);
+
+    // Stat cells scroll the sheet to their section.
+    modal.querySelectorAll('[data-scroll-to]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        modal.querySelector(`#${btn.dataset.scrollTo}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
 
     // Playability at a glance — loads after the sheet so it never blocks.
     api(`/courts/${court.id}/weather`).then((w) => {
