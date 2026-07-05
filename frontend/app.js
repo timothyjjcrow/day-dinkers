@@ -7086,6 +7086,49 @@
     if (onDismiss) modal.querySelector('.modal-close').addEventListener('click', onDismiss);
   }
 
+  // Onboarding step 2: seed the saved-courts list — saved courts power the
+  // Saved filter, court rooms, and new-game pings, so an empty list is a
+  // quieter app. Skips itself when there's nothing decent nearby.
+  async function maybeSuggestStarterCourts(next) {
+    let courts = [];
+    try {
+      if (state.me && state.me.home_lat != null) {
+        const data = await api(`/courts?lat=${state.me.home_lat}&lng=${state.me.home_lng}&radius=15&limit=30&sort=rating`);
+        courts = (data.items || [])
+          .sort((a, b) => (b.rating_avg ?? 0) - (a.rating_avg ?? 0) || (b.num_courts || 0) - (a.num_courts || 0))
+          .slice(0, 3);
+      }
+    } catch { /* offline — skip the nicety */ }
+    if (!courts.length) { next(); return; }
+
+    const modal = openModal(`
+      <div class="checkin-sheet">
+        <div class="celebrate-emoji" style="font-size:46px">⭐</div>
+        <h3 style="margin:6px 0 2px">Save your courts</h3>
+        <p class="row-sub" style="margin-bottom:14px">The best-known courts near you — saved courts get their own chat room and game alerts.</p>
+        ${courts.map((c) => `
+          <div class="card row" style="padding:11px;text-align:left">
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+              <div class="row-sub">${[esc(c.city || ''), `${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`, c.rating_avg ? `⭐ ${c.rating_avg}` : ''].filter(Boolean).join(' · ')}</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-star-court="${c.id}" style="font-size:16px;min-width:44px">☆</button>
+          </div>`).join('')}
+        <button class="btn btn-primary btn-block modal-close" style="margin-top:6px">Done</button>
+      </div>
+    `);
+    modal.querySelectorAll('[data-star-court]').forEach((btn) => btn.addEventListener('click', async () => {
+      try {
+        const res = await api(`/courts/${btn.dataset.starCourt}/favorite`, { method: 'POST' });
+        btn.textContent = res.favorited ? '★' : '☆';
+        btn.classList.toggle('btn-primary', res.favorited);
+        btn.classList.toggle('btn-secondary', !res.favorited);
+        state.favIds = null; // map markers re-learn favorites on next fetch
+      } catch (e) { toast(e.message); }
+    }));
+    modal.querySelector('.modal-close').addEventListener('click', () => { next(); fetchCourtsInView(); });
+  }
+
   function maybeOnboardHomeArea() {
     if (!state.me) return;
     // Returning / already-prompted users skip straight to the tour check.
@@ -7094,11 +7137,11 @@
       return;
     }
     localStorage.setItem('pp_onboarded_home', '1');
-    // Whichever way they leave the home-area step, follow with the quick tour.
+    // Home area → starter courts → quick tour; dismissing skips ahead.
     openHomeAreaSheet({
       intro: 'So Third Shot opens to courts, games, and players near you — anywhere in the US.',
       dismissLabel: 'Maybe later',
-      onSet: maybeShowTour,
+      onSet: () => maybeSuggestStarterCourts(maybeShowTour),
       onDismiss: maybeShowTour,
     });
   }
