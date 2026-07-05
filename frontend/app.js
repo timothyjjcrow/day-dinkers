@@ -6575,6 +6575,10 @@
           }
           if (game.spots_left > 0) {
             actions += `<button class="btn btn-secondary btn-block" id="gs-invite" style="margin-top:10px">＋ Invite a friend${game.spots_left ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}</button>`;
+            // Hosts can flag the game to the court room's regulars.
+            if (game.is_creator && game.visibility === 'open' && game.court) {
+              actions += '<button class="btn btn-secondary btn-block" id="gs-post-court" style="margin-top:10px">📣 Post to court chat</button>';
+            }
           }
           actions += '<button class="btn btn-secondary btn-block" id="gs-calendar" style="margin-top:10px">📅 Add to calendar</button>';
           if (game.is_creator && game.recurrence !== 'weekly') {
@@ -6666,6 +6670,21 @@
       box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
       box.querySelector('#gs-calendar')?.addEventListener('click', () => downloadIcs(game));
+      box.querySelector('#gs-post-court')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          const spots = game.spots_left;
+          await api(`/courts/${game.court.id}/chat`, {
+            method: 'POST',
+            body: JSON.stringify({
+              body: `Open game ${fmtDateTime(game.scheduled_at)} — ${spots} spot${spots === 1 ? '' : 's'} left! Join: ${location.origin}/g/${game.id}`,
+            }),
+          });
+          btn.textContent = '📣 Posted to court chat ✓';
+          toast(`Posted to the ${game.court.name} room 📣`);
+        } catch (err) { toast(err.message); btn.disabled = false; }
+      });
       box.querySelector('#gs-invite')?.addEventListener('click', async () => {
         let friends = [];
         try { friends = (await api('/friends')).friends || []; } catch { /* offline */ }
