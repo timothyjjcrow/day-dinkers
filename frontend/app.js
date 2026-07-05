@@ -1978,7 +1978,7 @@
     });
 
     modal.querySelector('#cd-share').addEventListener('click', async () => {
-      const url = `${location.origin}/#court/${court.id}`;
+      const url = `${location.origin}/c/${court.id}`; // short link → OG preview in chat apps
       const text = `${court.name} — pickleball at ${court.city || 'this court'}`;
       try {
         if (navigator.share) {
@@ -2346,7 +2346,7 @@
   }
 
   async function shareGame(game) {
-    const url = `${location.origin}/#game/${game.id}`;
+    const url = `${location.origin}/g/${game.id}`; // short link → OG preview in chat apps
     const text = gameShareText(game);
     try {
       if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
@@ -4287,7 +4287,7 @@
       content.querySelector('#td-share')?.addEventListener('click', async () => {
         const spots = t.max_entries - t.entry_count;
         const text = `🏆 ${t.name} — ${T_FORMAT_LABEL[t.format] || t.format} ${t.event_type} tournament at ${t.court ? t.court.name : 'the court'} on ${fmtDateTime(t.starts_at)}. ${spots} spot${spots === 1 ? '' : 's'} left — register in Third Shot!`;
-        const url = `${location.origin}/#tournament/${t.id}`;
+        const url = `${location.origin}/t/${t.id}`; // short link → OG preview in chat apps
         try {
           if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
           else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Copied to share 📋'); }

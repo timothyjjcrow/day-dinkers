@@ -3,7 +3,7 @@ import os
 import threading
 import time
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 
 from backend.config import get_config
@@ -373,6 +373,61 @@ def create_app(config_name=None):
     @app.get('/')
     def index():
         return send_from_directory(FRONTEND_DIR, 'index.html')
+
+    # Short share links with Open Graph tags: chat apps render a rich preview
+    # (crawlers can't read #hash routes), humans get bounced into the app.
+    def _share_page(title, description, target_hash):
+        from markupsafe import escape
+        icon = request.url_root.rstrip('/') + '/icon-512.png'
+        return (
+            '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            f'<title>{escape(title)}</title>'
+            f'<meta property="og:title" content="{escape(title)}">'
+            f'<meta property="og:description" content="{escape(description)}">'
+            f'<meta property="og:image" content="{escape(icon)}">'
+            '<meta property="og:site_name" content="Third Shot">'
+            '<meta name="twitter:card" content="summary">'
+            f'<meta http-equiv="refresh" content="0;url=/{escape(target_hash)}">'
+            f'<script>location.replace("/{escape(target_hash)}")</script>'
+            '</head><body>Opening Third Shot…</body></html>'
+        )
+
+    @app.get('/g/<int:game_id>')
+    def share_game(game_id):
+        from backend.models import Game
+        game = db.session.get(Game, game_id)
+        if not game:
+            return 'not found', 404
+        if game.visibility == 'private':
+            # Don't leak details of invite-only games to link crawlers.
+            return _share_page('A pickleball game on Third Shot',
+                               'Open the link to see the details.', f'#game/{game_id}')
+        court = game.court.name if game.court else 'the court'
+        when = game.scheduled_at.strftime('%a, %b %-d · %-I:%M %p UTC') if game.scheduled_at else ''
+        return _share_page(f'Pickleball at {court}',
+                           f'{when} — join on Third Shot'.strip(' —'), f'#game/{game_id}')
+
+    @app.get('/c/<int:court_id>')
+    def share_court(court_id):
+        from backend.models import Court
+        court = db.session.get(Court, court_id)
+        if not court:
+            return 'not found', 404
+        bits = [f'{court.num_courts} court{"" if court.num_courts == 1 else "s"}']
+        if court.city:
+            bits.insert(0, court.city)
+        return _share_page(court.name, ' · '.join(bits) + ' — on Third Shot', f'#court/{court_id}')
+
+    @app.get('/t/<int:tournament_id>')
+    def share_tournament(tournament_id):
+        from backend.models import Tournament
+        t = db.session.get(Tournament, tournament_id)
+        if not t:
+            return 'not found', 404
+        court = t.court.name if t.court else 'the court'
+        return _share_page(f'🏆 {t.name}',
+                           f'Pickleball tournament at {court} — register on Third Shot',
+                           f'#tournament/{tournament_id}')
 
     @app.get('/<path:filename>')
     def frontend_assets(filename):

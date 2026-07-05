@@ -5639,3 +5639,39 @@ def test_game_preferred_level(client):
     assert res.status_code == 201 and res.get_json()['preferred_level'] == 'any'
     res = client.post('/api/games', json={'court_id': court_id, 'scheduled_at': when}, headers=ah)
     assert res.get_json()['preferred_level'] == 'any'
+
+
+def test_share_preview_pages(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah = auth_headers(a['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    when = (utcnow() + timedelta(hours=4)).isoformat() + 'Z'
+
+    # Court page: name + city in the OG tags, redirect into the SPA.
+    page = client.get(f'/c/{court_id}')
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert 'og:title' in body and 'Larson Park' in body and f'#court/{court_id}' in body
+
+    # Open game: court + time are fine to preview.
+    game = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when,
+    }, headers=ah).get_json()
+    body = client.get(f'/g/{game["id"]}').get_data(as_text=True)
+    assert 'Larson Park' in body and f'#game/{game["id"]}' in body
+
+    # Private game: crawlers get a generic card, no court leak.
+    private = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when, 'visibility': 'private',
+        'invite_user_ids': [b['user']['id']],
+    }, headers=ah).get_json()
+    body = client.get(f'/g/{private["id"]}').get_data(as_text=True)
+    assert 'Larson Park' not in body and 'A pickleball game on Third Shot' in body
+
+    # Unknown ids 404 instead of redirect-spinning.
+    assert client.get('/g/999999').status_code == 404
+    assert client.get('/c/999999').status_code == 404
+    assert client.get('/t/999999').status_code == 404
