@@ -1609,8 +1609,11 @@
     }
 
     // Apple devices get Apple Maps; everyone else gets Google directions.
+    // Community-added courts often have no street address — navigate by
+    // coordinates then, never by a "null Austin" string.
+    const addrForMaps = [court.address, court.city].filter(Boolean).join(' ');
     const mapsUrl = /iPhone|iPad|Macintosh/.test(navigator.userAgent)
-      ? `https://maps.apple.com/?daddr=${encodeURIComponent(`${court.address} ${court.city}`)}&ll=${court.latitude},${court.longitude}`
+      ? `https://maps.apple.com/?daddr=${encodeURIComponent(addrForMaps || `${court.latitude},${court.longitude}`)}&ll=${court.latitude},${court.longitude}`
       : `https://www.google.com/maps/dir/?api=1&destination=${court.latitude},${court.longitude}`;
 
     const playersHtml = court.players_here.length
@@ -1709,7 +1712,8 @@
         <div class="cd-hero-title">
           <h2>${esc(court.name)}</h2>
           <div id="cd-address" role="button" title="Copy address" style="cursor:pointer">
-            ${esc([court.address, court.city].filter(Boolean).join(', '))}
+            ${esc([court.address, court.city].filter(Boolean).join(', ')
+              || (court.latitude != null ? `${court.latitude.toFixed(5)}, ${court.longitude.toFixed(5)}` : ''))}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;opacity:.85"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
           </div>
         </div>
@@ -1947,7 +1951,8 @@
 
     modal.querySelector('#cd-address').addEventListener('click', async () => {
       const addressText = [court.address, court.city, court.state, court.zip_code]
-        .filter(Boolean).join(', ');
+        .filter(Boolean).join(', ')
+        || (court.latitude != null ? `${court.latitude.toFixed(5)}, ${court.longitude.toFixed(5)}` : '');
       // writeText can reject even on secure contexts (unfocused document,
       // denied permission) — always fall back to the hidden-textarea trick.
       let copied = false;
