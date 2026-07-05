@@ -403,6 +403,13 @@ def create_app(config_name=None):
             return _share_page('A pickleball game on Third Shot',
                                'Open the link to see the details.', f'#game/{game_id}')
         court = game.court.name if game.court else 'the court'
+        # A shared RESULT should preview as a result, not a stale invitation.
+        if game.status == 'completed' and game.score_team1 is not None:
+            return _share_page(f'Final: {game.score_team1}–{game.score_team2} at {court}',
+                               'A pickleball match on Third Shot', f'#game/{game_id}')
+        if game.status == 'cancelled':
+            return _share_page('A pickleball game on Third Shot',
+                               'This game was cancelled.', f'#game/{game_id}')
         when = game.scheduled_at.strftime('%a, %b %-d · %-I:%M %p UTC') if game.scheduled_at else ''
         return _share_page(f'Pickleball at {court}',
                            f'{when} — join on Third Shot'.strip(' —'), f'#game/{game_id}')

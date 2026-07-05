@@ -5671,6 +5671,20 @@ def test_share_preview_pages(client):
     body = client.get(f'/g/{private["id"]}').get_data(as_text=True)
     assert 'Larson Park' not in body and 'A pickleball game on Third Shot' in body
 
+    # A finished game previews as a result, not a stale invitation.
+    played = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when,
+    }, headers=ah).get_json()
+    bh = auth_headers(b['token'])
+    client.post(f"/api/games/{played['id']}/join", headers=bh)
+    client.post(f"/api/games/{played['id']}/complete", json={
+        'team1': [a['user']['id']], 'team2': [b['user']['id']],
+        'score_team1': 11, 'score_team2': 6,
+    }, headers=ah)
+    client.post(f"/api/games/{played['id']}/confirm", headers=bh)
+    body = client.get(f'/g/{played["id"]}').get_data(as_text=True)
+    assert 'Final: 11–6 at Larson Park' in body and 'join on Third Shot' not in body
+
     # Invite link: name in the card, #invite target keeps the signup flow.
     body = client.get(f"/u/{a['user']['id']}").get_data(as_text=True)
     assert 'Ana' in body and f"#invite/{a['user']['id']}" in body
