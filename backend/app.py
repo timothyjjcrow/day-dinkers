@@ -277,6 +277,14 @@ def _upgrade_schema(app):
                     'ALTER TABLE league_member ADD COLUMN reminded_round INTEGER NOT NULL DEFAULT 0'
                 )
 
+        if 'club' in tables:
+            club_cols = {c['name'] for c in inspector.get_columns('club')}
+            if 'last_digest_at' not in club_cols:
+                statements.append(
+                    'ALTER TABLE club ADD COLUMN last_digest_at '
+                    + ('TIMESTAMP' if is_postgres else 'DATETIME')
+                )
+
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}
             if 'reminded_at' not in gp_cols:

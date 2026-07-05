@@ -1102,6 +1102,8 @@ class Club(TimestampMixin, db.Model):
     description = db.Column(db.String(500), nullable=False, default='')
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     home_court_id = db.Column(db.Integer, db.ForeignKey('court.id'), index=True)
+    # Watermark for the weekly activity digest (see clubs.send_club_digests).
+    last_digest_at = db.Column(db.DateTime)
 
     creator = db.relationship('User', foreign_keys=[creator_id])
     home_court = db.relationship('Court', foreign_keys=[home_court_id])

@@ -5543,3 +5543,59 @@ def test_dm_read_watermark_for_live_receipts(client):
     client.get(f"/api/chat/{a['user']['id']}", headers=bh)
     thread = client.get(f"/api/chat/{b['user']['id']}?since_id={m2['id']}", headers=ah).get_json()
     assert thread['partner_read_up_to'] == m2['id']
+
+
+def test_club_weekly_digest(client, app):
+    from datetime import timedelta
+    from backend.models import Club as ClubModel, ClubMember as ClubMemberModel
+    from backend.models import Game as GameModel, utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    ah, bh = auth_headers(a['token']), auth_headers(b['token'])
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+
+    def digests(headers):
+        return [n for n in client.get('/api/notifications', headers=headers).get_json()['items']
+                if n['kind'] == 'club_update' and 'this week' in n['title']]
+
+    # First sweep only baselines the watermark — no day-one digest.
+    client.get('/api/me', headers=ah)
+    assert digests(ah) == [] and digests(bh) == []
+
+    # Host a club game, then time-travel: game played an hour ago (inside the
+    # 4h stale-expiry grace), watermark a week stale.
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    when = (utcnow() + timedelta(hours=2)).isoformat() + 'Z'
+    game = client.post('/api/games', json={
+        'court_id': court_id, 'scheduled_at': when, 'club_id': cid,
+    }, headers=ah).get_json()
+    with app.app_context():
+        db.session.get(GameModel, game['id']).scheduled_at = utcnow() - timedelta(hours=1)
+        db.session.get(ClubModel, cid).last_digest_at = utcnow() - timedelta(days=8)
+        db.session.commit()
+
+    # Every member gets exactly one summary counting the game + new members.
+    client.get('/api/me', headers=ah)
+    for headers in (ah, bh):
+        rows = digests(headers)
+        assert len(rows) == 1, rows
+        assert rows[0]['related_club_id'] == cid
+        assert '1 club game' in rows[0]['title'] and '2 new members' in rows[0]['title']
+
+    # Watermark moved — an immediate re-sweep can't double-send.
+    client.get('/api/me', headers=ah)
+    assert len(digests(bh)) == 1
+
+    # A quiet week moves the watermark but stays silent.
+    with app.app_context():
+        db.session.get(ClubModel, cid).last_digest_at = utcnow() - timedelta(days=8)
+        db.session.get(GameModel, game['id']).scheduled_at = utcnow() - timedelta(days=10)
+        for m in ClubMemberModel.query.filter_by(club_id=cid).all():
+            m.created_at = utcnow() - timedelta(days=10)
+        db.session.commit()
+    client.get('/api/me', headers=ah)
+    assert len(digests(ah)) == 1 and len(digests(bh)) == 1
+    with app.app_context():
+        marker = db.session.get(ClubModel, cid).last_digest_at
+        assert marker and marker > utcnow() - timedelta(minutes=5)

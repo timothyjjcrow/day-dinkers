@@ -14,6 +14,61 @@ clubs_bp = Blueprint('clubs', __name__)
 from backend.routes.auth import login_required  # noqa: E402
 
 MAX_CLUBS_OWNED = 5
+DIGEST_EVERY_DAYS = 7
+
+
+def send_club_digests(limit=5):
+    """Weekly per-club activity digest, swept lazily from /me.
+
+    First sweep of a club just baselines its watermark (no day-one spam);
+    after that, once a week, members get one summary ping — but only when
+    the club actually had a week worth talking about. Quiet clubs stay
+    quiet and merely move their watermark forward.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import or_
+
+    from backend.models import Game, utcnow
+
+    now = utcnow()
+    cutoff = now - timedelta(days=DIGEST_EVERY_DAYS)
+    due = (
+        Club.query
+        .filter(or_(Club.last_digest_at.is_(None), Club.last_digest_at <= cutoff))
+        .order_by(Club.id)
+        .limit(limit)
+        .all()
+    )
+    for club in due:
+        window_start = club.last_digest_at
+        club.last_digest_at = now
+        if window_start is None:
+            continue  # baseline only — digests start a week from now
+
+        games = Game.query.filter(
+            Game.club_id == club.id,
+            Game.status != 'cancelled',
+            Game.scheduled_at >= window_start,
+            Game.scheduled_at <= now,
+        ).count()
+        new_members = sum(
+            1 for m in club.members
+            if m.created_at and m.created_at >= window_start
+        )
+        if not games and not new_members:
+            continue
+
+        parts = []
+        if games:
+            parts.append(f'{games} club game{"" if games == 1 else "s"}')
+        if new_members:
+            parts.append(f'{new_members} new member{"" if new_members == 1 else "s"}')
+        title = f'{club.name} this week: {" and ".join(parts)}'
+        for member in club.members:
+            notify(member.user_id, 'club_update', title, related_club_id=club.id)
+    if due:
+        db.session.commit()
 
 
 def _club_or_404(club_id):
