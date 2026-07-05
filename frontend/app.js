@@ -726,7 +726,12 @@
 
   async function fetchCourtsInView() {
     if (!state.map) return;
-    if (state.searchQ) return; // search results own the list and markers right now
+    if (state.searchQ) {
+      // Search results own the list and markers — but data changes (check-ins,
+      // favorites) still need to reach them, so re-run the search instead.
+      searchCourts(state.searchQ);
+      return;
+    }
 
     // Saved filter ignores the bbox — your courts show wherever they are.
     if (state.mapFilter === 'saved') {
@@ -877,7 +882,11 @@
       state.courtsInView = courtData.items;
       drawMarkers(courtData.items);
       renderCourtList(courtData.items, placeData.items || []);
-      renderSearchSuggest(courtData.items, placeData.items || [], q);
+      // Only surface the dropdown while the user is actually in the search box —
+      // background refreshes (map pans, check-ins) must not pop it open.
+      if (document.activeElement === $('#court-search')) {
+        renderSearchSuggest(courtData.items, placeData.items || [], q);
+      }
       // The map stays put while you type — it only jumps once you commit
       // (Enter / "See all"), via fitSearchResults().
     } catch { /* ignore */ } finally {
