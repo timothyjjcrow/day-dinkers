@@ -4910,3 +4910,52 @@ def test_club_abuse_guards(client):
     res = client.post('/api/clubs', json={'name': 'One Too Many'}, headers=ah)
     assert res.status_code == 400
     assert res.get_json()['error'] == 'too_many_clubs_owned'
+
+
+def test_club_games(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    when = (utcnow() + timedelta(days=1)).isoformat() + 'Z'
+
+    # Non-members can't host under the club banner; private club games are out.
+    base = {'court_id': court_id, 'scheduled_at': when}
+    assert client.post('/api/games', json={**base, 'club_id': cid},
+                       headers=ch).status_code == 403
+    assert client.post('/api/games', json={**base, 'club_id': 999},
+                       headers=ah).status_code == 404
+    assert client.post('/api/games', json={
+        **base, 'club_id': cid, 'visibility': 'private',
+        'invite_user_ids': [b['user']['id']],
+    }, headers=ah).status_code == 400
+
+    res = client.post('/api/games', json={**base, 'club_id': cid}, headers=ah)
+    assert res.status_code == 201, res.get_json()
+    game = res.get_json()
+    assert game['club_id'] == cid
+    assert game['club_name'] == 'Dink Dynasty'
+
+    # Fellow members get one club_game ping; outsiders get nothing.
+    ben_kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert ben_kinds.count('club_game') == 1
+    cam_kinds = [n['kind'] for n in client.get('/api/notifications', headers=ch).get_json()['items']]
+    assert 'club_game' not in cam_kinds
+
+    # A friends-visibility club game doesn't double-ping member-friends.
+    befriend(client, ah, bh, b['user']['id'])
+    client.post('/api/games', json={**base, 'club_id': cid, 'visibility': 'friends'},
+                headers=ah)
+    ben_after = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]
+    assert ben_after.count('club_game') == 2
+    assert 'game_invite' not in ben_after
+
+    # The club screen lists its upcoming games.
+    detail = client.get(f'/api/clubs/{cid}', headers=bh).get_json()
+    assert len(detail['upcoming_games']) == 2
+    assert detail['upcoming_games'][0]['club_name'] == 'Dink Dynasty'

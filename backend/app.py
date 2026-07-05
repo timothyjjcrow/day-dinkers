@@ -191,6 +191,8 @@ def _upgrade_schema(app):
                 statements.append(
                     "ALTER TABLE game ADD COLUMN recurrence VARCHAR(16) NOT NULL DEFAULT 'none'"
                 )
+            if 'club_id' not in game_cols:
+                statements.append('ALTER TABLE game ADD COLUMN club_id INTEGER')
 
         if 'court' in tables:
             court_cols = {c['name'] for c in inspector.get_columns('court')}

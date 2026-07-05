@@ -511,9 +511,25 @@ def create_game():
     if game_type == 'ranked':
         recurrence = 'none'
 
+    # Hosting on behalf of a club: members only, and never private (a club
+    # game's whole point is that the club can see and join it).
+    club = None
+    if payload.get('club_id'):
+        from backend.models import Club, ClubMember
+        club = db.session.get(Club, int(payload.get('club_id')))
+        if not club:
+            return jsonify({'error': 'club_not_found'}), 404
+        if not ClubMember.query.filter_by(
+            club_id=club.id, user_id=g.current_user.id,
+        ).first():
+            return jsonify({'error': 'members_only'}), 403
+        if visibility == 'private':
+            return jsonify({'error': 'club_game_cannot_be_private'}), 400
+
     game = Game(
         court_id=court.id,
         creator_id=g.current_user.id,
+        club=club,
         scheduled_at=scheduled_at,
         game_type=game_type,
         visibility=visibility,
@@ -527,6 +543,23 @@ def create_game():
 
     label = 'ranked game' if game_type == 'ranked' else 'game'
 
+    # Club members hear about their club's games first-class.
+    club_pinged = set()
+    if club:
+        for member in club.members:
+            if member.user_id == g.current_user.id:
+                continue
+            if is_blocked_between(g.current_user.id, member.user_id):
+                continue
+            notify(
+                member.user_id,
+                'club_game',
+                f'{club.name}: new {label} at {court.name}',
+                related_user_id=g.current_user.id,
+                related_game_id=game.id,
+            )
+            club_pinged.add(member.user_id)
+
     if visibility == 'private':
         for uid in invited_ids:
             db.session.add(GameInvite(game_id=game.id, user_id=uid))
@@ -539,6 +572,8 @@ def create_game():
             )
     elif visibility == 'friends':
         for friend_id in friend_ids(g.current_user.id):
+            if friend_id in club_pinged:
+                continue
             notify(
                 friend_id,
                 'game_invite',
@@ -564,7 +599,7 @@ def create_game():
         for fan in fans:
             if fan.user_id == g.current_user.id or fan.user_id in invited_ids:
                 continue
-            if fan.user_id in recently_pinged:
+            if fan.user_id in recently_pinged or fan.user_id in club_pinged:
                 continue
             if is_blocked_between(g.current_user.id, fan.user_id):
                 continue

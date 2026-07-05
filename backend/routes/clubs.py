@@ -141,6 +141,22 @@ def club_detail(club_id):
         {**m.user.to_public_dict(), 'role': m.role} for m in members
         if m.user and not m.user.deleted_at
     ]
+
+    # The club's next few games — hosted under the club banner.
+    from backend.models import Game, utcnow
+    upcoming = (
+        Game.query.filter(
+            Game.club_id == club.id,
+            Game.status == 'upcoming',
+            Game.scheduled_at >= utcnow(),
+        )
+        .order_by(Game.scheduled_at.asc())
+        .limit(5)
+        .all()
+    )
+    data['upcoming_games'] = [
+        game.to_dict(g.current_user.id) for game in upcoming
+    ]
     return jsonify(data)
 
 

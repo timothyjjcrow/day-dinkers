@@ -500,6 +500,9 @@ class Game(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # Set when the game is hosted on behalf of a club — members get pinged
+    # and the game carries the club's tag.
+    club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
     scheduled_at = db.Column(db.DateTime, nullable=False, index=True)
     game_type = db.Column(db.String(20), nullable=False, default='casual')
     visibility = db.Column(db.String(16), nullable=False, default='open', index=True)
@@ -516,6 +519,7 @@ class Game(TimestampMixin, db.Model):
 
     court = db.relationship('Court', back_populates='games')
     creator = db.relationship('User', foreign_keys=[creator_id])
+    club = db.relationship('Club', foreign_keys=[club_id])
     score_submitted_by = db.relationship('User', foreign_keys=[score_submitted_by_id])
     players = db.relationship(
         'GamePlayer', back_populates='game', lazy='selectin',
@@ -574,6 +578,8 @@ class Game(TimestampMixin, db.Model):
             'id': self.id,
             'court': self.court.to_summary_dict() if self.court else None,
             'creator_id': self.creator_id,
+            'club_id': self.club_id,
+            'club_name': self.club.name if self.club else None,
             'scheduled_at': iso(self.scheduled_at),
             'game_type': self.game_type,
             'visibility': self.visibility,
@@ -824,6 +830,7 @@ MUTEABLE_NOTIFICATIONS = {
     'game_message': 'Game chat messages',
     'tournament_message': 'Tournament chat messages',
     'club_message': 'Club chat messages',
+    'club_game': 'New games from your clubs',
     'session_rsvp': 'Weekly session re-RSVP reminders',
     'weekly_recap': 'Your weekly recap',
 }

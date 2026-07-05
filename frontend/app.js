@@ -1844,6 +1844,9 @@
     const recurTag = game.recurrence === 'weekly'
       ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>'
       : '';
+    const clubTag = game.club_name
+      ? `<span class="tag" style="margin:0 0 0 6px">🏛 ${esc(game.club_name)}</span>`
+      : '';
     const chatTag = game.is_joined && game.chat_unread
       ? `<span class="tag live" style="margin:0 0 0 6px">💬 ${game.chat_unread > 9 ? '9+' : game.chat_unread} new</span>`
       : '';
@@ -1922,7 +1925,7 @@
           <div class="row-main">
             <div class="row-title">${esc(game.recurrence === 'weekly' && game.status === 'upcoming'
               ? `${new Date(game.scheduled_at).toLocaleDateString([], { weekday: 'long' })}s · ${new Date(game.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-              : fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}${levelTag}${chatTag}</div>
+              : fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}${clubTag}${levelTag}${chatTag}</div>
             <div class="row-sub">${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</div>
           </div>
           <span class="chev">›</span>
@@ -2436,9 +2439,10 @@
   }
 
   async function openNewGameModal(court, defaultType = 'casual', startNow = false, preferredSlot = null) {
-    // Gather friends (for invites) and court suggestions in parallel
+    // Gather friends (for invites), clubs, and court suggestions in parallel
     let friends = [];
     let suggestions = [];
+    let myClubs = [];
     try {
       const reqs = [api('/friends').catch(() => ({ friends: [] }))];
       if (!court) {
@@ -2446,8 +2450,10 @@
         reqs.push(api('/courts/favorites').catch(() => ({ items: [] })));
         reqs.push(api(`/courts?lat=${c.lat}&lng=${c.lng}&radius=30&limit=6`).catch(() => ({ items: [] })));
       }
+      reqs.push(api('/clubs/mine').catch(() => ({ items: [] })));
       const res = await Promise.all(reqs);
       friends = res[0].friends || [];
+      myClubs = res[res.length - 1].items || [];
       if (!court) {
         const seen = new Set();
         if (state.presence && state.presence.checked_in) {
@@ -2586,6 +2592,16 @@
             : '<p class="row-sub">Add friends first to invite specific people.</p>'}
         </div>
       </div>
+
+      ${myClubs.length ? `
+      <div class="form-field">
+        <label>Host under a club banner?</label>
+        <div class="quick-times" id="ng-club">
+          <button type="button" data-club-id="" class="active">Just me</button>
+          ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}">🏛 ${esc(cl.name)}</button>`).join('')}
+        </div>
+        <div class="row-sub" id="ng-club-hint" style="margin-top:6px"></div>
+      </div>` : ''}
 
       <label class="row" id="ng-recurring-row" style="margin-bottom:14px;cursor:pointer;gap:10px">
         <input type="checkbox" id="ng-recurring" style="width:18px;height:18px;flex:0 0 auto" />
@@ -2737,6 +2753,22 @@
       syncRecurring();
     });
 
+    // --- Club banner ---
+    let clubId = null;
+    const clubHintEl = modal.querySelector('#ng-club-hint');
+    modal.querySelector('#ng-club')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      clubId = Number(btn.dataset.clubId) || null;
+      modal.querySelectorAll('#ng-club button').forEach((b) => b.classList.toggle('active', b === btn));
+      const picked = myClubs.find((cl) => cl.id === clubId);
+      clubHintEl.textContent = picked
+        ? (picked.member_count > 1
+            ? `📣 The other ${picked.member_count - 1} member${picked.member_count === 2 ? '' : 's'} of ${picked.name} will be pinged.`
+            : `📣 Hosted under the ${picked.name} banner.`)
+        : '';
+    });
+
     // --- Visibility / invites ---
     let visibility = 'open';
     const inviteIds = new Set();
@@ -2783,6 +2815,10 @@
         toast('Pick at least one person to invite');
         return;
       }
+      if (clubId && visibility === 'private') {
+        toast("Club games can't be invite-only — the club needs to see it");
+        return;
+      }
       const btn = e.currentTarget;
       if (btn.disabled) return;
       btn.disabled = true;
@@ -2798,6 +2834,7 @@
             max_players: Number(modal.querySelector('#ng-max').value),
             notes: modal.querySelector('#ng-notes').value.trim(),
             invite_user_ids: visibility === 'private' ? [...inviteIds] : [],
+            club_id: clubId,
           }),
         });
         closeModal(modal);
@@ -4306,6 +4343,17 @@
           </div>
           <span class="chev">›</span>
         </div>` : ''}
+      ${(club.upcoming_games || []).length ? `
+        <div class="section-label">🎾 Upcoming club games</div>
+        ${club.upcoming_games.map((gm) => `
+          <div class="card row" data-open-game="${gm.id}" style="cursor:pointer;padding:11px">
+            <span style="font-size:20px">${gm.game_type === 'ranked' ? '🏆' : '🎾'}</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc((gm.court && gm.court.name) || 'Court')}</div>
+              <div class="row-sub">${fmtDateTime(gm.scheduled_at)} · ${gm.players.length}/${gm.max_players} in${gm.spots_left ? ` · ${gm.spots_left} spot${gm.spots_left === 1 ? '' : 's'} left` : ' · full'}</div>
+            </div>
+            <span class="chev">›</span>
+          </div>`).join('')}` : ''}
       ${club.joined
         ? '<button class="btn btn-primary btn-block" id="club-chat-btn" style="margin-bottom:8px">💬 Open club chat</button>'
         : '<button class="btn btn-primary btn-block" id="club-join-btn" style="margin-bottom:8px">🙌 Join this club</button>'}
@@ -4331,6 +4379,10 @@
       closeModal(modal);
       openCourtDetail(club.home_court_id);
     });
+    modal.querySelectorAll('[data-open-game]').forEach((row) => row.addEventListener('click', () => {
+      closeModal(modal);
+      openGameScreen(Number(row.dataset.openGame));
+    }));
     modal.querySelector('#club-chat-btn')?.addEventListener('click', () => {
       closeModal(modal);
       openClubChat(club);
@@ -5554,7 +5606,7 @@
     return `
       <div class="modal-head">
         <div style="flex:1">
-          <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}</h3>
+          <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}${game.club_name ? `<span class="tag" style="margin:0 0 0 6px">🏛 ${esc(game.club_name)}</span>` : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
         ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="Game chat" aria-label="Game chat" style="box-shadow:none;font-size:17px;position:relative">💬${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
@@ -5846,7 +5898,7 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
       if (n.related_club_id) return { type: 'club', id: n.related_club_id };
