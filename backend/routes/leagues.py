@@ -134,7 +134,18 @@ def league_detail(league_id):
     league, err = _league_or_404(league_id)
     if err:
         return err
-    return jsonify(league.to_dict(g.current_user.id, detail=True))
+    data = league.to_dict(g.current_user.id, detail=True)
+    if league.member_for(g.current_user.id):
+        from backend.models import LeagueChatRead, Message
+        marker = LeagueChatRead.query.filter_by(
+            user_id=g.current_user.id, league_id=league.id,
+        ).first()
+        data['chat_unread'] = Message.query.filter(
+            Message.league_id == league.id,
+            Message.id > (marker.last_read_message_id if marker else 0),
+            Message.sender_id != g.current_user.id,
+        ).count()
+    return jsonify(data)
 
 
 @leagues_bp.post('/leagues/<int:league_id>/join')
@@ -314,15 +325,40 @@ def _do_advance(league, actor_id=None):
 def advance_due_league_rounds():
     """Lazy sweep (runs on /me reads, like tournament reminders): once a
     round's window has elapsed, close it exactly like the organizer button
-    would — one round per sweep so a dormant league doesn't fast-forward."""
+    would — one round per sweep so a dormant league doesn't fast-forward.
+    Also nags members who still have unplayed matches when the round enters
+    its final two days (once per round)."""
     from datetime import timedelta
     now = utcnow()
     for league in League.query.filter_by(status='active').all():
         if not league.round_started_at:
             league.round_started_at = now  # legacy rows from before this column
             continue
-        if now >= league.round_started_at + timedelta(days=league.round_days):
+        deadline = league.round_started_at + timedelta(days=league.round_days)
+        if now >= deadline:
             _do_advance(league, actor_id=None)
+            continue
+        if now >= deadline - timedelta(days=2):
+            days_left = max(1, (deadline - now).days + (1 if (deadline - now).seconds else 0))
+            unplayed_by_user = {}
+            for match in league.matches:
+                if match.round == league.current_round and match.winner_id is None:
+                    unplayed_by_user.setdefault(match.player1_id, 0)
+                    unplayed_by_user.setdefault(match.player2_id, 0)
+                    unplayed_by_user[match.player1_id] += 1
+                    unplayed_by_user[match.player2_id] += 1
+            for member in league.members:
+                pending = unplayed_by_user.get(member.user_id, 0)
+                if not pending or member.reminded_round >= league.current_round:
+                    continue
+                member.reminded_round = league.current_round
+                notify(
+                    member.user_id,
+                    'league_match',
+                    f'{league.name}: {days_left} day{"" if days_left == 1 else "s"} left '
+                    f'to play your {pending} box match{"" if pending == 1 else "es"}',
+                    related_league_id=league.id,
+                )
     db.session.commit()
 
 
@@ -403,3 +439,82 @@ def cancel_league(league_id):
             )
     db.session.commit()
     return jsonify({'cancelled': True})
+
+
+@leagues_bp.get('/leagues/<int:league_id>/chat')
+@login_required
+def league_chat(league_id):
+    from backend.models import LeagueChatRead, Message
+    league, err = _league_or_404(league_id)
+    if err:
+        return err
+    if not league.member_for(g.current_user.id):
+        return jsonify({'error': 'members_only'}), 403
+    since_id = request.args.get('since_id', type=int)
+    query = Message.query.filter(Message.league_id == league_id)
+    if since_id:
+        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
+    else:
+        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+
+    # Reading the room marks it read — powers the league-screen badge.
+    latest_id = db.session.query(db.func.max(Message.id)).filter(
+        Message.league_id == league_id,
+    ).scalar() or 0
+    marker = LeagueChatRead.query.filter_by(
+        user_id=g.current_user.id, league_id=league.id,
+    ).first()
+    if not marker:
+        db.session.add(LeagueChatRead(
+            user_id=g.current_user.id, league_id=league.id,
+            last_read_message_id=latest_id,
+        ))
+        db.session.commit()
+    elif latest_id > marker.last_read_message_id:
+        marker.last_read_message_id = latest_id
+        db.session.commit()
+
+    return jsonify({
+        'league': {'id': league.id, 'name': league.name},
+        'items': [m.to_dict() for m in messages],
+    })
+
+
+@leagues_bp.post('/leagues/<int:league_id>/chat')
+@rate_limit(60, 60)
+@login_required
+def send_league_message(league_id):
+    from backend.models import Message, Notification
+    league, err = _league_or_404(league_id)
+    if err:
+        return err
+    if not league.member_for(g.current_user.id):
+        return jsonify({'error': 'members_only'}), 403
+    payload = request.get_json(silent=True) or {}
+    body = str(payload.get('body') or '').strip()
+    if not body:
+        return jsonify({'error': 'message_body_required'}), 400
+    message = Message(sender_id=g.current_user.id, league_id=league.id, body=body[:2000])
+    db.session.add(message)
+
+    # One unread ping per league per member, mirroring the other room chats.
+    for member in league.members:
+        if member.user_id == g.current_user.id:
+            continue
+        already_pinged = Notification.query.filter_by(
+            user_id=member.user_id,
+            kind='league_message',
+            related_league_id=league.id,
+            read=False,
+        ).first()
+        if not already_pinged:
+            notify(
+                member.user_id,
+                'league_message',
+                f'{g.current_user.display_name} in {league.name}',
+                body[:140],
+                related_user_id=g.current_user.id,
+                related_league_id=league.id,
+            )
+    db.session.commit()
+    return jsonify(message.to_dict()), 201

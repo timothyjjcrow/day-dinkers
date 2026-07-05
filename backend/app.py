@@ -150,6 +150,8 @@ def _upgrade_schema(app):
                 statements.append('ALTER TABLE message ADD COLUMN tournament_id INTEGER')
             if 'club_id' not in columns:
                 statements.append('ALTER TABLE message ADD COLUMN club_id INTEGER')
+            if 'league_id' not in columns:
+                statements.append('ALTER TABLE message ADD COLUMN league_id INTEGER')
 
         if 'user' in tables:
             user_cols = {c['name'] for c in inspector.get_columns('user')}
@@ -263,6 +265,13 @@ def _upgrade_schema(app):
                 )
             if 'champion_user_id' not in league_cols:
                 statements.append('ALTER TABLE league ADD COLUMN champion_user_id INTEGER')
+
+        if 'league_member' in tables:
+            lm_cols = {c['name'] for c in inspector.get_columns('league_member')}
+            if 'reminded_round' not in lm_cols:
+                statements.append(
+                    'ALTER TABLE league_member ADD COLUMN reminded_round INTEGER NOT NULL DEFAULT 0'
+                )
 
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}

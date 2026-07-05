@@ -3139,7 +3139,8 @@
       ${modalHead(`📦 ${esc(lg.name)}`)}
       <div class="row-sub" style="margin:-6px 0 6px">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size} · new round every ${lg.round_days} days</div>
       <div style="margin-bottom:12px">${statusChip}</div>
-      ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}`;
+      ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}
+      ${lg.joined ? `<button class="btn btn-secondary btn-block" id="lg-chat" style="margin-bottom:10px;position:relative">💬 League chat${lg.chat_unread ? ` <span class="badge" style="position:static;margin-left:6px">${lg.chat_unread > 9 ? '9+' : lg.chat_unread}</span>` : ''}</button>` : ''}`;
 
     if (lg.status === 'completed' && lg.champion_name) {
       const champ = lg.members.find((m) => m.user && m.user.id === lg.champion_user_id);
@@ -3230,6 +3231,10 @@
       try { await api(`/leagues/${lg.id}/${path}`, { method: 'POST' }); reopen(); }
       catch (e) { toast(e.message); }
     };
+    modal.querySelector('#lg-chat')?.addEventListener('click', () => {
+      closeModal(modal);
+      openLeagueChat(lg);
+    });
     modal.querySelector('#lg-join')?.addEventListener('click', act('join'));
     modal.querySelector('#lg-leave')?.addEventListener('click', act('leave'));
     modal.querySelector('#lg-start')?.addEventListener('click', act('start'));
@@ -3239,6 +3244,73 @@
     modal.querySelectorAll('[data-report-match]').forEach((btn) => btn.addEventListener('click', () => {
       openLeagueScoreSheet(lg, Number(btn.dataset.reportMatch), btn.dataset.opp, Number(btn.dataset.first), reopen);
     }));
+  }
+
+  async function openLeagueChat(lg) {
+    let data;
+    try { data = await api(`/leagues/${lg.id}/chat`); } catch (e) { toast(e.message); return; }
+
+    const modal = openModal(`
+      <div class="thread">
+        <div class="thread-head">
+          <button class="modal-close" style="font-size:18px">‹</button>
+          <span style="font-size:22px">📦</span>
+          <div class="row-main">
+            <div class="row-title">${esc(lg.name)}</div>
+            <div class="row-sub">League chat — only players in this league can read it</div>
+          </div>
+        </div>
+        <div class="thread-msgs" id="lgc-msgs"></div>
+        <form class="thread-input" id="lgc-form">
+          <input type="text" id="lgc-text" placeholder="Message the league…" autocomplete="off" maxlength="500" />
+          <button type="submit" aria-label="Send">➤</button>
+        </form>
+      </div>
+    `, { chat: true });
+
+    const msgsEl = modal.querySelector('#lgc-msgs');
+    let lastId = 0;
+    const renderMsgs = (items, append) => {
+      const html = items.map((m) => {
+        const mine = m.sender_id === state.me.id;
+        return `
+        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+          ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : ''}>
+            ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
+            ${esc(m.body)}
+            <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
+          </div>
+        </div>`;
+      }).join('');
+      if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
+      else if (append) msgsEl.innerHTML = html;
+      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — talk some friendly trash 👋</div>';
+      if (items.length) lastId = items[items.length - 1].id;
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    };
+    renderMsgs(data.items, false);
+    attachChatViewport(modal, msgsEl, modal.querySelector('#lgc-text'));
+
+    const pollTimer = setInterval(async () => {
+      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      try {
+        const fresh = await api(`/leagues/${lg.id}/chat?since_id=${lastId}`);
+        if (fresh.items.length) renderMsgs(fresh.items, true);
+      } catch { /* offline */ }
+    }, 5000);
+
+    modal.querySelector('#lgc-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = modal.querySelector('#lgc-text');
+      const body = input.value.trim();
+      if (!body) return;
+      input.value = '';
+      try {
+        const msg = await api(`/leagues/${lg.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
+        renderMsgs([msg], true);
+      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+    });
   }
 
   function openLeagueScoreSheet(lg, matchId, oppName, myPosition, done) {
@@ -6214,7 +6286,7 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣', league_update: '📦', league_match: '🎯' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🎾', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🎾', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣', league_update: '📦', league_match: '🎯', league_message: '💬' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
       if (n.related_league_id) return { type: 'league', id: n.related_league_id };

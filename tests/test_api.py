@@ -5262,3 +5262,59 @@ def test_league_auto_advance_and_champion_titles(client):
     assert stats['league_titles']['recent'][0]['name'] == 'Monday Night Box League'
     profile = client.get(f"/api/users/{users[1]['user']['id']}", headers=heads[0]).get_json()
     assert profile['league_titles']['count'] == 1
+
+
+def test_league_chat_and_deadline_reminders(client):
+    from datetime import timedelta
+    from backend.app import db
+    from backend.models import League, utcnow
+    users = league_players(client, 4)
+    heads = [auth_headers(u['token']) for u in users]
+    lid = make_league(client, heads[0], box_size=4)['id']
+    for h in heads[1:3]:
+        client.post(f'/api/leagues/{lid}/join', headers=h)
+
+    # Chat is members-only.
+    assert client.get(f'/api/leagues/{lid}/chat', headers=heads[3]).status_code == 403
+    assert client.post(f'/api/leagues/{lid}/chat', json={'body': 'hi'},
+                       headers=heads[3]).status_code == 403
+
+    client.get(f'/api/leagues/{lid}/chat', headers=heads[1])  # P1 opens the room once
+    client.post(f'/api/leagues/{lid}/chat', json={'body': 'Box draw soon!'}, headers=heads[0])
+    client.post(f'/api/leagues/{lid}/chat', json={'body': 'Get your matches in'}, headers=heads[0])
+
+    detail = client.get(f'/api/leagues/{lid}', headers=heads[1]).get_json()
+    assert detail['chat_unread'] == 2
+    kinds = [n['kind'] for n in client.get('/api/notifications', headers=heads[1]).get_json()['items']]
+    assert kinds.count('league_message') == 1  # one ping no matter how chatty
+    thread = client.get(f'/api/leagues/{lid}/chat', headers=heads[1]).get_json()
+    assert [m['body'] for m in thread['items']] == ['Box draw soon!', 'Get your matches in']
+    assert client.get(f'/api/leagues/{lid}', headers=heads[1]).get_json()['chat_unread'] == 0
+
+    # Deadline reminders: start, play one match as P0-vs-P1, then move the
+    # round into its final 2 days — only players with unplayed matches get
+    # nagged, and only once.
+    started = client.post(f'/api/leagues/{lid}/start', headers=heads[0]).get_json()
+    match = next(m for m in started['matches']
+                 if {m['player1']['id'], m['player2']['id']} ==
+                 {users[0]['user']['id'], users[1]['user']['id']})
+    client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
+                json={'score1': 11, 'score2': 9}, headers=heads[0])
+
+    lg = db.session.get(League, lid)
+    lg.round_started_at = utcnow() - timedelta(days=6)  # 7-day round → 1 day left
+    db.session.commit()
+    client.get('/api/me', headers=heads[2])
+    client.get('/api/me', headers=heads[2])  # second sweep must not re-ping
+
+    def reminders(h):
+        return [n['title'] for n in client.get('/api/notifications', headers=h).get_json()['items']
+                if n['kind'] == 'league_match' and 'left to play' in n['title']]
+
+    # 3 players joined → box of 3 → 2 matches each. P0 played one.
+    assert len(reminders(heads[0])) == 1
+    assert '1 box match' in reminders(heads[0])[0]
+    assert len(reminders(heads[2])) == 1      # both of P2's still unplayed
+    assert '2 box matches' in reminders(heads[2])[0]
+    # Round didn't advance early.
+    assert client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()['current_round'] == 1

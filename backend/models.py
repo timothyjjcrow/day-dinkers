@@ -425,6 +425,7 @@ class Message(TimestampMixin, db.Model):
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), index=True)
     tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'), index=True)
     club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('league.id'), index=True)
     body = db.Column(db.Text, nullable=False, default='')
     read_at = db.Column(db.DateTime)
 
@@ -442,6 +443,7 @@ class Message(TimestampMixin, db.Model):
             'game_id': self.game_id,
             'tournament_id': self.tournament_id,
             'club_id': self.club_id,
+            'league_id': self.league_id,
             'body': self.body,
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),
@@ -850,6 +852,7 @@ MUTEABLE_NOTIFICATIONS = {
     'tournament_message': 'Tournament chat messages',
     'club_message': 'Club chat messages',
     'club_game': 'New games from your clubs',
+    'league_message': 'League chat messages',
     'session_rsvp': 'Weekly session re-RSVP reminders',
     'weekly_recap': 'Your weekly recap',
 }
@@ -1224,6 +1227,8 @@ class LeagueMember(TimestampMixin, db.Model):
     points = db.Column(db.Integer, nullable=False, default=0)
     wins = db.Column(db.Integer, nullable=False, default=0)
     losses = db.Column(db.Integer, nullable=False, default=0)
+    # Last round we nagged this member about unplayed matches (deadline pings).
+    reminded_round = db.Column(db.Integer, nullable=False, default=0)
 
     league = db.relationship('League', back_populates='members')
     user = db.relationship('User')
@@ -1269,3 +1274,16 @@ class LeagueMatch(TimestampMixin, db.Model):
             'score2': self.score2,
             'winner_id': self.winner_id,
         }
+
+
+class LeagueChatRead(TimestampMixin, db.Model):
+    """How far a member has read their league's chat — powers unread badges.
+    No row until they open that chat once."""
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'league_id', name='uq_league_chat_read'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('league.id'), nullable=False, index=True)
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
