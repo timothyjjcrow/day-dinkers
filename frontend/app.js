@@ -810,11 +810,14 @@
         <div class="row-main">
           <div class="row-title">${esc(c.name)}${cond ? ` <span class="tag ${c.condition === 'good' ? 'live' : 'warn'}" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">${cond[0]} ${esc(cond[1].split(' — ')[0].split(' /')[0])}</span>` : ''}</div>
           <div class="row-sub">
-            ${esc(c.city)}${c.distance_miles != null ? ` · ${c.distance_miles} mi` : ''}
-            · ${c.num_courts} court${c.num_courts === 1 ? '' : 's'}
-            ${c.rating_avg ? ` · ⭐ ${c.rating_avg} (${c.rating_count})` : ''}
-            ${c.players_here ? ` · <b style="color:var(--green-accent)">${c.players_here} playing now</b>` : ''}
-            ${c.upcoming_games ? ` · ${c.upcoming_games} game${c.upcoming_games === 1 ? '' : 's'} scheduled` : ''}
+            ${[
+              esc(c.city || ''),
+              c.distance_miles != null ? `${c.distance_miles} mi` : '',
+              `${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`,
+              c.rating_avg ? `⭐ ${c.rating_avg} (${c.rating_count})` : '',
+              c.players_here ? `<b style="color:var(--green-accent)">${c.players_here} playing now</b>` : '',
+              c.upcoming_games ? `${c.upcoming_games} game${c.upcoming_games === 1 ? '' : 's'} scheduled` : '',
+            ].filter(Boolean).join(' · ')}
           </div>
         </div>
         <span class="chev">›</span>
@@ -846,6 +849,10 @@
     const el = $('#court-list-items');
     courts = sortCourts(courts);
     let html = '';
+    // Search results own the panel: no saved-courts insert, honest empty state.
+    const searching = !!state.searchQ && !savedOnly;
+    const titleEl = document.querySelector('#court-list .sheet-title');
+    if (titleEl) titleEl.textContent = searching ? 'Search results' : 'Courts in view';
 
     // The Saved map filter already IS the favorites list — render it directly,
     // no "saved vs in view" split, with a filter-specific empty state.
@@ -876,7 +883,7 @@
       html += '<div class="section-label">Courts</div>';
     }
 
-    if (state.token) {
+    if (state.token && !searching) {
       try {
         const favs = await api('/courts/favorites');
         if (favs.items.length) {
@@ -889,7 +896,10 @@
 
     html += courts.length
       ? courts.slice(0, 60).map(courtRowHtml).join('')
-      : '<div class="empty-state">No courts here — try zooming out or searching.</div>';
+      : (searching && !places.length
+        ? `<div class="empty-state" style="padding:18px"><span class="big">🔎</span>Nothing matches “${esc(state.searchQ)}”.<br>Try a court name or a city.</div>`
+        : searching ? ''
+          : '<div class="empty-state">No courts here — try zooming out or searching.</div>');
     html += `<button class="btn btn-secondary btn-block" id="list-add-court" style="margin-top:10px">➕ Missing a court? Add it</button>`;
 
     el.innerHTML = html;
