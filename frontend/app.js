@@ -4600,9 +4600,11 @@
             <span style="font-size:22px">🏛</span>
             <div class="row-main">
               <div class="row-title" style="font-size:14.5px">${esc(cl.name)}${cl.my_role === 'owner' ? ' 👑' : ''}</div>
-              <div class="row-sub">${cl.last_message
-                ? `${cl.last_message.sender_id === state.me.id ? 'You' : esc((cl.last_message.sender_name || 'Player').split(' ')[0])}: ${esc(cl.last_message.body.slice(0, 50))}`
-                : `${cl.member_count} member${cl.member_count === 1 ? '' : 's'}${cl.home_court_name ? ` · ${esc(cl.home_court_name)}` : ''}`}</div>
+              <div class="row-sub">${cl.announcement
+                ? `📣 ${esc(cl.announcement.slice(0, 60))}`
+                : cl.last_message
+                  ? `${cl.last_message.sender_id === state.me.id ? 'You' : esc((cl.last_message.sender_name || 'Player').split(' ')[0])}: ${esc(cl.last_message.body.slice(0, 50))}`
+                  : `${cl.member_count} member${cl.member_count === 1 ? '' : 's'}${cl.home_court_name ? ` · ${esc(cl.home_court_name)}` : ''}`}</div>
             </div>
             ${cl.unread ? `<span class="badge" style="position:static">${cl.unread}</span>` : (cl.last_message ? `<span class="row-sub">${fmtTimeShort(cl.last_message.created_at)}</span>` : '')}
           </div>`).join('');
@@ -5216,6 +5218,11 @@
     const modal = openModal(`
       ${modalHead(`🏛 ${club.name}`)}
       ${club.description ? `<div class="row-sub" style="margin:-6px 0 12px">${esc(club.description)}</div>` : ''}
+      ${club.announcement ? `
+        <div class="card row" style="padding:10px 14px;background:var(--green-50)">
+          <span style="font-size:17px">📣</span>
+          <div class="row-sub" style="flex:1;color:var(--ink)">${esc(club.announcement)}</div>
+        </div>` : ''}
       ${club.home_court_id ? `
         <div class="card row" id="club-court" style="cursor:pointer">
           <span style="font-size:20px">📍</span>
