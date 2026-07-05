@@ -905,9 +905,13 @@
       const gameBadge = court.upcoming_games > 0
         ? `<span class="marker-game-badge">${court.upcoming_games}</span>` : '';
       const favBadge = fav ? '<span class="marker-fav-badge">★</span>' : '';
+      // A fresh problem report (wet, nets down, closed, busy) rides on the
+      // marker so players see it before driving out. "All good" stays quiet.
+      const condBadge = court.condition && court.condition !== 'good' && COURT_CONDITION_LABELS[court.condition]
+        ? `<span class="marker-cond-badge" title="${COURT_CONDITION_LABELS[court.condition][1]}">${COURT_CONDITION_LABELS[court.condition][0]}</span>` : '';
       const icon = L.divIcon({
         className: '',
-        html: `<div class="court-marker ${busy ? 'busy' : ''} ${fav ? 'fav' : ''}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}${gameBadge}${favBadge}</div>`,
+        html: `<div class="court-marker ${busy ? 'busy' : ''} ${fav ? 'fav' : ''}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}${gameBadge}${favBadge}${condBadge}</div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });
