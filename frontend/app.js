@@ -7102,6 +7102,12 @@
   }
 
   function openDeepLink() {
+    // PWA app-icon shortcuts land on /?tab=<name> — jump straight there.
+    const tabParam = new URLSearchParams(location.search).get('tab');
+    if (tabParam && ['courts', 'play', 'chat', 'profile'].includes(tabParam)) {
+      try { history.replaceState(null, '', location.pathname + location.hash); } catch { /* ignore */ }
+      switchTab(tabParam);
+    }
     const courtMatch = location.hash.match(/^#court\/(\d+)$/);
     if (courtMatch) { openCourtDetail(Number(courtMatch[1])); return; }
     const gameMatch = location.hash.match(/^#game\/(\d+)$/);

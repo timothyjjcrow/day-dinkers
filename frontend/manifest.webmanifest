@@ -10,5 +10,22 @@
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Find courts",
+      "url": "/?tab=courts",
+      "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+    },
+    {
+      "name": "My games",
+      "url": "/?tab=play",
+      "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+    },
+    {
+      "name": "Chat",
+      "url": "/?tab=chat",
+      "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+    }
   ]
 }
