@@ -228,6 +228,8 @@ def _upgrade_schema(app):
                     'ALTER TABLE tournament ADD COLUMN ranked BOOLEAN NOT NULL DEFAULT '
                     + ('FALSE' if is_postgres else '0')
                 )
+            if 'club_id' not in t_cols:
+                statements.append('ALTER TABLE tournament ADD COLUMN club_id INTEGER')
 
         if 'tournament_entry' in tables:
             te_cols = {c['name'] for c in inspector.get_columns('tournament_entry')}

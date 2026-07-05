@@ -179,6 +179,19 @@ def club_detail(club_id):
     data['upcoming_games'] = [
         game.to_dict(g.current_user.id) for game in upcoming
     ]
+
+    # Club tournaments still open or underway.
+    from backend.models import Tournament
+    tournaments = (
+        Tournament.query.filter(
+            Tournament.club_id == club.id,
+            Tournament.status.in_(['registration', 'active']),
+        )
+        .order_by(Tournament.starts_at.asc())
+        .limit(5)
+        .all()
+    )
+    data['tournaments'] = [t.to_dict(g.current_user.id) for t in tournaments]
     return jsonify(data)
 
 

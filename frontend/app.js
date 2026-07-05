@@ -3032,7 +3032,7 @@
             <div class="row-title">${esc(t.name)}</div>
             <div class="row-sub">${esc(meta)}</div>
             <div class="row-sub" style="margin-top:2px">${T_FORMAT_LABEL[t.format] || t.format} · ${t.event_type === 'doubles' ? 'Doubles' : 'Singles'}${t.ranked ? ' · ⚡ Ranked' : ''} · ${t.entry_count}/${t.max_entries} ${t.event_type === 'doubles' ? 'teams' : 'players'}</div>
-            <div style="margin-top:6px">${tournamentStatusChip(t)}${t.my_entry_id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-accent)">✓ You\'re in</span>' : ''}${t.is_organizer ? ' <span class="tag">Organizer</span>' : ''}</div>
+            <div style="margin-top:6px">${tournamentStatusChip(t)}${t.club_name ? ` <span class="tag">🏛 ${esc(t.club_name)}</span>` : ''}${t.my_entry_id ? ' <span class="tag" style="background:var(--green-50);color:var(--green-accent)">✓ You\'re in</span>' : ''}${t.is_organizer ? ' <span class="tag">Organizer</span>' : ''}</div>
           </div>
           <span class="chev">›</span>
         </div>
@@ -3080,12 +3080,15 @@
   async function openCreateTournamentSheet(presetCourt = null) {
     // Court suggestions: where you are, saved courts, then nearby.
     const suggestions = [];
+    let myClubs = [];
     try {
       const c = areaLatLng();
-      const [favs, near] = await Promise.all([
+      const [favs, near, clubsRes] = await Promise.all([
         api('/courts/favorites').catch(() => ({ items: [] })),
         api(`/courts?lat=${c.lat}&lng=${c.lng}&radius=30&limit=6`).catch(() => ({ items: [] })),
+        api('/clubs/mine').catch(() => ({ items: [] })),
       ]);
+      myClubs = clubsRes.items || [];
       const seen = new Set();
       if (state.presence && state.presence.checked_in) {
         suggestions.push({ id: state.presence.court_id, name: state.presence.court_name, city: '', tag: "📍 You're here" });
@@ -3171,6 +3174,15 @@
         </div>
         <div class="row-sub" style="margin-top:6px">Ranked: every match counts toward player ratings when the tournament finishes.</div>
       </div>
+      ${myClubs.length ? `
+      <div class="form-field">
+        <label>Host under a club banner?</label>
+        <div class="quick-times" id="tc-club">
+          <button type="button" data-club-id="" class="active">Just me</button>
+          ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}">🏛 ${esc(cl.name)}</button>`).join('')}
+        </div>
+        <div class="row-sub" id="tc-club-hint" style="margin-top:6px"></div>
+      </div>` : ''}
       <div class="form-field">
         <input type="text" id="tc-desc" maxlength="200" placeholder="Details (optional) — e.g. Games to 11, win by 2" />
       </div>
@@ -3229,6 +3241,18 @@
     segPick('#tc-event');
     segPick('#tc-ranked');
 
+    let tcClubId = null;
+    modal.querySelector('#tc-club')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      tcClubId = Number(btn.dataset.clubId) || null;
+      modal.querySelectorAll('#tc-club button').forEach((b) => b.classList.toggle('active', b === btn));
+      const picked = myClubs.find((cl) => cl.id === tcClubId);
+      modal.querySelector('#tc-club-hint').textContent = picked && picked.member_count > 1
+        ? `📣 The other ${picked.member_count - 1} member${picked.member_count === 2 ? '' : 's'} of ${picked.name} will be pinged.`
+        : '';
+    });
+
     modal.querySelector('#tc-submit').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       const name = modal.querySelector('#tc-name').value.trim();
@@ -3250,6 +3274,7 @@
             max_entries: Number(modal.querySelector('#tc-max').value),
             ranked: !!modal.querySelector('#tc-ranked button.active').dataset.val,
             description: modal.querySelector('#tc-desc').value.trim(),
+            club_id: tcClubId,
           }),
         });
         closeModal(modal);
@@ -3390,7 +3415,7 @@
       let body = `
         ${modalHead(t.name)}
         <div class="row-sub" style="margin:-6px 0 6px">${meta.map(esc).join(' · ')}</div>
-        <div style="margin-bottom:12px">${tournamentStatusChip(t)}</div>
+        <div style="margin-bottom:12px">${tournamentStatusChip(t)}${t.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(t.club_name)}</span>` : ''}</div>
         ${t.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(t.description)}</div>` : ''}`;
 
       if (t.status === 'completed' && t.champion) {
@@ -4352,6 +4377,17 @@
           </div>
           <span class="chev">›</span>
         </div>` : ''}
+      ${(club.tournaments || []).length ? `
+        <div class="section-label">🏆 Club tournaments</div>
+        ${club.tournaments.map((t) => `
+          <div class="card row" data-open-club-tournament="${t.id}" style="cursor:pointer;padding:11px">
+            <span style="font-size:20px">🏆</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(t.name)}</div>
+              <div class="row-sub">${fmtDateTime(t.starts_at)} · ${t.entry_count}/${t.max_entries} ${t.event_type === 'doubles' ? 'teams' : 'players'}${t.ranked ? ' · ⚡' : ''}</div>
+            </div>
+            <span class="chev">›</span>
+          </div>`).join('')}` : ''}
       ${(club.upcoming_games || []).length ? `
         <div class="section-label">🎾 Upcoming club games</div>
         ${club.upcoming_games.map((gm) => `
@@ -4393,6 +4429,10 @@
     modal.querySelectorAll('[data-open-game]').forEach((row) => row.addEventListener('click', () => {
       closeModal(modal);
       openGameScreen(Number(row.dataset.openGame));
+    }));
+    modal.querySelectorAll('[data-open-club-tournament]').forEach((row) => row.addEventListener('click', () => {
+      closeModal(modal);
+      openTournamentScreen(Number(row.dataset.openClubTournament));
     }));
     modal.querySelector('#club-chat-btn')?.addEventListener('click', () => {
       closeModal(modal);

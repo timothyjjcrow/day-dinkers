@@ -866,6 +866,8 @@ class Tournament(TimestampMixin, db.Model):
     description = db.Column(db.String(500), nullable=False, default='')
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
     organizer_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # Set when the tournament runs under a club's banner.
+    club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
     starts_at = db.Column(db.DateTime, nullable=False, index=True)
     format = db.Column(db.String(20), nullable=False, default='single_elim')
     event_type = db.Column(db.String(20), nullable=False, default='singles')
@@ -884,6 +886,7 @@ class Tournament(TimestampMixin, db.Model):
 
     court = db.relationship('Court')
     organizer = db.relationship('User', foreign_keys=[organizer_id])
+    club = db.relationship('Club', foreign_keys=[club_id])
     champion_entry = db.relationship(
         'TournamentEntry', foreign_keys=[champion_entry_id], post_update=True,
     )
@@ -931,6 +934,8 @@ class Tournament(TimestampMixin, db.Model):
             'court': self.court.to_summary_dict() if self.court else None,
             'organizer_id': self.organizer_id,
             'organizer_name': self.organizer.display_name if self.organizer else None,
+            'club_id': self.club_id,
+            'club_name': self.club.name if self.club else None,
             'entry_count': len(self.entries),
             'is_organizer': self.organizer_id == current_user_id,
             'my_entry_id': my_entry.id if my_entry else None,

@@ -4987,3 +4987,43 @@ def test_club_leaderboard_records(client):
     detail = client.get(f'/api/clubs/{cid}', headers=ah).get_json()
     records = {m['display_name']: (m['club_wins'], m['club_losses']) for m in detail['members']}
     assert records == {'Ana': (1, 0), 'Ben': (0, 1)}
+
+
+def test_club_tournaments(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
+    cid = make_club(client, ah)['id']
+    client.post(f'/api/clubs/{cid}/join', headers=bh)
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    base = {
+        'name': 'Club Clash', 'court_id': court_id,
+        'starts_at': (utcnow() + timedelta(days=2)).isoformat() + 'Z',
+    }
+
+    # Members only; unknown clubs 404.
+    assert client.post('/api/tournaments', json={**base, 'club_id': cid},
+                       headers=ch).status_code == 403
+    assert client.post('/api/tournaments', json={**base, 'club_id': 999},
+                       headers=ah).status_code == 404
+
+    res = client.post('/api/tournaments', json={**base, 'club_id': cid}, headers=ah)
+    assert res.status_code == 201, res.get_json()
+    t = res.get_json()
+    assert t['club_id'] == cid and t['club_name'] == 'Dink Dynasty'
+
+    # Fellow members pinged once; outsiders not.
+    ben_kinds = [n for n in client.get('/api/notifications', headers=bh).get_json()['items']
+                 if n['kind'] == 'club_game']
+    assert len(ben_kinds) == 1
+    assert ben_kinds[0]['related_tournament_id'] == t['id']
+    assert 'Club Clash' in ben_kinds[0]['title']
+    assert not [n for n in client.get('/api/notifications', headers=ch).get_json()['items']
+                if n['kind'] == 'club_game']
+
+    # The club screen lists it while open/underway.
+    detail = client.get(f'/api/clubs/{cid}', headers=bh).get_json()
+    assert [x['name'] for x in detail['tournaments']] == ['Club Clash']

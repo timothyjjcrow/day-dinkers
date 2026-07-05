@@ -203,11 +203,24 @@ def create_tournament():
         max_entries = 8
     max_entries = min(max(max_entries, MIN_ENTRIES), MAX_ENTRIES_CAP)
 
+    # Running under a club banner: members only.
+    club = None
+    if payload.get('club_id'):
+        from backend.models import Club, ClubMember
+        club = db.session.get(Club, int(payload.get('club_id')))
+        if not club:
+            return jsonify({'error': 'club_not_found'}), 404
+        if not ClubMember.query.filter_by(
+            club_id=club.id, user_id=g.current_user.id,
+        ).first():
+            return jsonify({'error': 'members_only'}), 403
+
     tournament = Tournament(
         name=name,
         description=str(payload.get('description') or '').strip()[:500],
         court_id=court.id,
         organizer_id=g.current_user.id,
+        club=club,
         starts_at=starts_at,
         format=fmt,
         event_type=event_type,
@@ -216,6 +229,23 @@ def create_tournament():
     )
     db.session.add(tournament)
     db.session.flush()
+
+    # Club members hear about their club's tournaments first-class.
+    club_pinged = set()
+    if club:
+        for member in club.members:
+            if member.user_id == g.current_user.id:
+                continue
+            if is_blocked_between(g.current_user.id, member.user_id):
+                continue
+            notify(
+                member.user_id,
+                'club_game',
+                f'{club.name}: new tournament — {name}',
+                related_user_id=g.current_user.id,
+                related_tournament_id=tournament.id,
+            )
+            club_pinged.add(member.user_id)
 
     # Ping players who saved this court — same opt-in, mute preference, and
     # 3h anti-churn window as new-game pings (shared court_game kind).
@@ -232,6 +262,8 @@ def create_tournament():
     } if fans else set()
     for fan in fans:
         if fan.user_id == g.current_user.id or fan.user_id in recently_pinged:
+            continue
+        if fan.user_id in club_pinged:
             continue
         if is_blocked_between(g.current_user.id, fan.user_id):
             continue
