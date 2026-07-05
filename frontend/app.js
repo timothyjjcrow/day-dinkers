@@ -6910,6 +6910,9 @@
       if (n.related_user_id && (n.kind === 'friend_request' || n.kind === 'friend_accept' || n.kind === 'friend_checkin' || n.kind === 'player_coming')) {
         return { type: 'user', id: n.related_user_id };
       }
+      // No related row? Some kinds still have an obvious destination.
+      if (n.kind === 'streak_nag' || n.kind === 'session_rsvp') return { type: 'tab', id: 'play' };
+      if (n.kind === 'weekly_recap' || n.kind === 'badge_earned') return { type: 'tab', id: 'profile' };
       return null;
     };
 
@@ -6959,6 +6962,7 @@
         else if (row.dataset.notifType === 'game') openGameScreen(Number(row.dataset.notifId));
         else if (row.dataset.notifType === 'club') openClubScreen(Number(row.dataset.notifId));
         else if (row.dataset.notifType === 'league') openLeagueScreen(Number(row.dataset.notifId));
+        else if (row.dataset.notifType === 'tab') switchTab(row.dataset.notifId);
         else openUserProfile(Number(row.dataset.notifId));
       });
     });
