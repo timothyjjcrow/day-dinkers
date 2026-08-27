@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 
 from werkzeug.security import check_password_hash, generate_password_hash
+from sqlalchemy.exc import IntegrityError
 
 from backend.app import db
 
@@ -187,6 +188,9 @@ class Court(TimestampMixin, db.Model):
             'longitude': self.longitude,
             'indoor': bool(self.indoor),
             'lighted': bool(self.lighted),
+            'has_restrooms': bool(self.has_restrooms),
+            'has_water': bool(self.has_water),
+            'nets_provided': bool(self.nets_provided),
             'num_courts': self.num_courts,
             'photo_url': self.photo_url,
         }
@@ -453,6 +457,15 @@ class Message(TimestampMixin, db.Model):
     """A direct message (recipient_id), court-room message (court_id),
     game-thread message (game_id), tournament-thread message
     (tournament_id), or club-room message (club_id)."""
+    __table_args__ = (
+        db.Index(
+            'uq_message_sender_attempt',
+            'sender_id',
+            'client_attempt_id',
+            unique=True,
+        ),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True)
@@ -468,6 +481,12 @@ class Message(TimestampMixin, db.Model):
     read_at = db.Column(db.DateTime)
     # DM-only ❤️ from the recipient (rooms would need a table; DMs don't).
     hearted = db.Column(db.Boolean, nullable=False, default=False)
+    # Stable per-send key generated on the device. Together these columns make
+    # a response-lost/offline retry safe without making legacy unkeyed sends
+    # globally unique. The fingerprint rejects accidental key reuse for a
+    # different recipient, room, body, or photo.
+    client_attempt_id = db.Column(db.String(64), nullable=True)
+    client_attempt_fingerprint = db.Column(db.String(64), nullable=True)
 
     sender = db.relationship('User', foreign_keys=[sender_id])
     recipient = db.relationship('User', foreign_keys=[recipient_id])
@@ -489,9 +508,43 @@ class Message(TimestampMixin, db.Model):
             'hearted': self.hearted,
             'heart_count': len(self.hearts),
             'heart_user_ids': [h.user_id for h in self.hearts],
+            'client_attempt_id': self.client_attempt_id,
             'created_at': iso(self.created_at),
             'read_at': iso(self.read_at),
         }
+
+
+class MessageSendAttempt(TimestampMixin, db.Model):
+    """Durable reservation and terminal state for one device send attempt.
+
+    The ledger exists from the first keyed send—not only after deletion—so a
+    retry racing a hard delete can never slip between two table reads and
+    recreate content the sender removed.
+    """
+    __table_args__ = (
+        db.UniqueConstraint(
+            'sender_id',
+            'client_attempt_id',
+            name='uq_message_send_attempt',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(
+        db.Integer,
+        db.ForeignKey('user.id'),
+        nullable=False,
+        index=True,
+    )
+    client_attempt_id = db.Column(db.String(64), nullable=False)
+    client_attempt_fingerprint = db.Column(db.String(64), nullable=True)
+    message_id = db.Column(
+        db.Integer,
+        db.ForeignKey('message.id', ondelete='SET NULL'),
+        nullable=True,
+        unique=True,
+    )
+    deleted_at = db.Column(db.DateTime)
 
 
 class MessageHeart(TimestampMixin, db.Model):
@@ -581,9 +634,25 @@ GAME_RECURRENCES = ['none', 'weekly']
 
 
 class Game(TimestampMixin, db.Model):
+    __table_args__ = (
+        db.Index(
+            'uq_game_creator_attempt',
+            'creator_id',
+            'client_attempt_id',
+            unique=True,
+        ),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # Stable per-submit key supplied by clients. The creator-scoped unique index
+    # makes POST /games safe to retry while allowing different hosts to reuse a
+    # UUID generated independently on their own devices.
+    client_attempt_id = db.Column(db.String(64), nullable=True)
+    # SHA-256 of the normalized immutable create request. It distinguishes a
+    # legitimate retry from accidental reuse of the key for a different game.
+    client_attempt_fingerprint = db.Column(db.String(64), nullable=True)
     # Set when the game is hosted on behalf of a club — members get pinged
     # and the game carries the club's tag.
     club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
@@ -883,6 +952,15 @@ class CourtEditSuggestion(TimestampMixin, db.Model):
 
 
 class Notification(TimestampMixin, db.Model):
+    __table_args__ = (
+        db.Index(
+            'uq_notification_user_unread_topic',
+            'user_id',
+            'unread_dedupe_key',
+            unique=True,
+        ),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     kind = db.Column(db.String(40), nullable=False, default='general')
@@ -894,6 +972,12 @@ class Notification(TimestampMixin, db.Model):
     related_tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'))
     related_club_id = db.Column(db.Integer, db.ForeignKey('club.id'))
     related_league_id = db.Column(db.Integer, db.ForeignKey('league.id'))
+    # Same-origin app destination. Result notifications use a match-level hash
+    # so both the activity feed and web push can open the exact action needed.
+    action_url = db.Column(db.String(500), nullable=False, default='')
+    # Present only while a collapsible notification is unread. NULL restores
+    # unlimited history after the prior ping is read or cleared.
+    unread_dedupe_key = db.Column(db.String(160), nullable=True)
 
     def to_dict(self):
         return {
@@ -907,6 +991,7 @@ class Notification(TimestampMixin, db.Model):
             'related_tournament_id': self.related_tournament_id,
             'related_club_id': self.related_club_id,
             'related_league_id': self.related_league_id,
+            'action_url': self.action_url or '',
             'created_at': iso(self.created_at),
         }
 
@@ -929,13 +1014,26 @@ MUTEABLE_NOTIFICATIONS = {
 
 
 def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=None,
-           related_tournament_id=None, related_club_id=None, related_league_id=None):
+           related_tournament_id=None, related_club_id=None, related_league_id=None,
+           action_url='', unread_dedupe_key=''):
     # Respect the recipient's mute preferences for optional kinds.
     if kind in MUTEABLE_NOTIFICATIONS:
         recipient = db.session.get(User, user_id)
         if recipient and kind in recipient.muted_kinds():
             return
-    db.session.add(Notification(
+    destination = str(action_url or '').strip()
+    # WHATWG URL parsing treats backslashes as slashes for HTTP(S), so a value
+    # such as ``/\attacker.example`` is cross-origin even though it begins with
+    # one forward slash. Persist only unambiguous same-origin paths.
+    if (
+        not destination.startswith('/')
+        or destination.startswith('//')
+        or '\\' in destination
+        or any(ord(char) < 32 or ord(char) == 127 for char in destination)
+    ):
+        destination = ''
+    dedupe_key = str(unread_dedupe_key or '').strip()[:160] or None
+    notification = Notification(
         user_id=user_id,
         kind=kind,
         title=title,
@@ -945,13 +1043,130 @@ def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=
         related_tournament_id=related_tournament_id,
         related_club_id=related_club_id,
         related_league_id=related_league_id,
-    ))
-    # Mirror to the user's devices (no-op unless VAPID keys are configured).
+        action_url=destination[:500],
+        unread_dedupe_key=dedupe_key,
+    )
+    if dedupe_key:
+        # The savepoint keeps a simultaneous second message from rolling its
+        # own Message transaction back when another request wins this unread
+        # topic. Only the winner schedules a push.
+        try:
+            with db.session.begin_nested():
+                db.session.add(notification)
+                db.session.flush()
+        except IntegrityError:
+            return None
+    else:
+        db.session.add(notification)
+    # Mirror to the user's devices only after this transaction commits. This
+    # keeps a rolled-back notification from escaping through the push worker.
     try:
-        from backend.services.push import send_to_user
-        send_to_user(user_id, title, body)
+        from backend.services.push import defer_to_user_after_commit
+        defer_to_user_after_commit(user_id, title, body, action_url=destination)
     except Exception:
         pass  # push is best-effort; never break the transaction
+    return notification
+
+
+COMPETITION_RESULT_STATES = (
+    'unreported', 'awaiting_confirmation', 'disputed', 'confirmed', 'bye', 'void',
+)
+COMPETITION_TYPES = ('tournament', 'league')
+COMPETITION_RESULT_ACTIONS = (
+    'reported', 'confirmed', 'disputed', 'resolved', 'corrected', 'voided',
+    'legacy_imported',
+)
+
+
+class CompetitionResultEvent(db.Model):
+    """Immutable-by-convention audit entry for a competition result.
+
+    Tournament and league match ids live in separate tables, so the
+    competition type is part of the durable identity. Result writers append a
+    new, monotonically-versioned row for every report, confirmation, dispute,
+    resolution, or correction; existing rows are never rewritten.
+    """
+    __table_args__ = (
+        db.UniqueConstraint(
+            'competition_type', 'match_id', 'version',
+            name='uq_competition_result_event_version',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    competition_type = db.Column(db.String(20), nullable=False, index=True)
+    match_id = db.Column(db.Integer, nullable=False, index=True)
+    actor_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True)
+    action = db.Column(db.String(32), nullable=False)
+    version = db.Column(db.Integer, nullable=False)
+    score1 = db.Column(db.Integer)
+    score2 = db.Column(db.Integer)
+    reason = db.Column(db.String(500), nullable=False, default='')
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    actor = db.relationship('User', foreign_keys=[actor_id], lazy='joined')
+
+    def to_dict(self, include_reason=True):
+        return {
+            'id': self.id,
+            'competition_type': self.competition_type,
+            'match_id': self.match_id,
+            'actor_id': self.actor_id,
+            'actor_name': self.actor.display_name if self.actor else None,
+            'action': self.action,
+            'version': self.version,
+            'score1': self.score1,
+            'score2': self.score2,
+            'reason': self.reason if include_reason else None,
+            'created_at': iso(self.created_at),
+        }
+
+    @classmethod
+    def record(cls, competition_type, match_id, action, version, actor_id=None,
+               score1=None, score2=None, reason='', created_at=None):
+        """Append an event to the current transaction; the caller commits.
+
+        The unique match/version constraint detects duplicate lifecycle writes;
+        route writers should pair it with a conditional version update.
+        """
+        if competition_type not in COMPETITION_TYPES:
+            raise ValueError('invalid_competition_type')
+        if action not in COMPETITION_RESULT_ACTIONS:
+            raise ValueError('invalid_result_action')
+        if not match_id or int(version) < 1:
+            raise ValueError('invalid_result_event_identity')
+        event = cls(
+            competition_type=competition_type,
+            match_id=match_id,
+            actor_id=actor_id,
+            action=action,
+            version=int(version),
+            score1=score1,
+            score2=score2,
+            reason=str(reason or '')[:500],
+            created_at=created_at or utcnow(),
+        )
+        db.session.add(event)
+        return event
+
+    @classmethod
+    def grouped_for_matches(cls, competition_type, match_ids):
+        ids = [match_id for match_id in match_ids if match_id is not None]
+        if not ids:
+            return {}
+        grouped = {match_id: [] for match_id in ids}
+        events = (
+            cls.query
+            .filter(
+                cls.competition_type == competition_type,
+                cls.match_id.in_(ids),
+            )
+            .order_by(cls.match_id.asc(), cls.version.asc(), cls.id.asc())
+            .all()
+        )
+        for event in events:
+            grouped.setdefault(event.match_id, []).append(event)
+        return grouped
 
 
 TOURNAMENT_FORMATS = ['single_elim', 'round_robin']
@@ -1043,7 +1258,16 @@ class Tournament(TimestampMixin, db.Model):
         }
         if detail:
             data['entries'] = [e.to_dict() for e in self.entries]
-            data['matches'] = [m.to_dict() for m in self.matches]
+            event_groups = CompetitionResultEvent.grouped_for_matches(
+                'tournament', [m.id for m in self.matches],
+            )
+            data['matches'] = [
+                m.to_dict(
+                    current_user_id,
+                    result_events=event_groups.get(m.id, []),
+                )
+                for m in self.matches
+            ]
             data['total_rounds'] = self.total_rounds()
         return data
 
@@ -1107,13 +1331,46 @@ class TournamentMatch(TimestampMixin, db.Model):
     score1 = db.Column(db.Integer)
     score2 = db.Column(db.Integer)
     winner_entry_id = db.Column(db.Integer, db.ForeignKey('tournament_entry.id'))
+    result_state = db.Column(
+        db.String(32), nullable=False, default='unreported', index=True,
+    )
+    result_version = db.Column(db.Integer, nullable=False, default=0)
+    reported_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    reported_at = db.Column(db.DateTime)
+    confirmed_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    confirmed_at = db.Column(db.DateTime)
+    disputed_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    disputed_at = db.Column(db.DateTime)
+    dispute_reason = db.Column(db.String(500), nullable=False, default='')
+    resolution_kind = db.Column(db.String(32), nullable=False, default='')
 
     tournament = db.relationship('Tournament', back_populates='matches')
     entry1 = db.relationship('TournamentEntry', foreign_keys=[entry1_id])
     entry2 = db.relationship('TournamentEntry', foreign_keys=[entry2_id])
     winner_entry = db.relationship('TournamentEntry', foreign_keys=[winner_entry_id])
+    reported_by = db.relationship('User', foreign_keys=[reported_by_id])
+    confirmed_by = db.relationship('User', foreign_keys=[confirmed_by_id])
+    disputed_by = db.relationship('User', foreign_keys=[disputed_by_id])
+
+    def effective_result_state(self):
+        """Compatibility view while legacy score routes still write winners.
+
+        The durable field is authoritative for provisional states. A persisted
+        winner remains terminal even when an older route did not yet maintain
+        the new lifecycle columns.
+        """
+        if self.winner_entry_id is not None:
+            if self.score1 is None and self.score2 is None and (
+                self.entry1_id is None or self.entry2_id is None
+            ):
+                return 'bye'
+            return 'confirmed'
+        return self.result_state or 'unreported'
 
     def status(self):
+        result_state = self.effective_result_state()
+        if result_state in ('awaiting_confirmation', 'disputed', 'void'):
+            return result_state
         if self.winner_entry_id is not None:
             # A bye never had two entries or a score.
             return 'bye' if self.score1 is None and (
@@ -1122,7 +1379,49 @@ class TournamentMatch(TimestampMixin, db.Model):
             return 'ready'
         return 'pending'
 
-    def to_dict(self):
+    def to_dict(self, current_user_id=None, result_events=None):
+        tournament = self.tournament
+        active = bool(tournament and tournament.status == 'active')
+        organizer = bool(
+            current_user_id and tournament
+            and tournament.organizer_id == current_user_id
+        )
+        viewer_entry_id = next(
+            (
+                entry.id for entry in (self.entry1, self.entry2)
+                if entry and current_user_id is not None
+                and current_user_id in (entry.player1_id, entry.player2_id)
+            ),
+            None,
+        )
+        reporter_entry_id = next(
+            (
+                entry.id for entry in (self.entry1, self.entry2)
+                if entry and self.reported_by_id is not None
+                and self.reported_by_id in (entry.player1_id, entry.player2_id)
+            ),
+            None,
+        )
+        is_participant = viewer_entry_id is not None
+        state = self.effective_result_state()
+        awaiting_mine = bool(
+            active and state == 'awaiting_confirmation' and is_participant
+            and current_user_id != self.reported_by_id
+            and (
+                reporter_entry_id is None
+                or viewer_entry_id != reporter_entry_id
+            )
+        )
+        can_audit = bool(organizer or is_participant)
+        if result_events is None and can_audit and self.id is not None:
+            result_events = CompetitionResultEvent.grouped_for_matches(
+                'tournament', [self.id],
+            ).get(self.id, [])
+        history = [
+            event.to_dict(include_reason=True)
+            for event in (result_events or [])
+        ] if can_audit else []
+
         return {
             'id': self.id,
             'round': self.round,
@@ -1133,6 +1432,35 @@ class TournamentMatch(TimestampMixin, db.Model):
             'score2': self.score2,
             'winner_entry_id': self.winner_entry_id,
             'status': self.status(),
+            'result_state': state,
+            'result_version': self.result_version or 0,
+            'reported_by_id': self.reported_by_id,
+            'reported_by_name': self.reported_by.display_name if self.reported_by else None,
+            'reported_at': iso(self.reported_at),
+            'confirmed_by_id': self.confirmed_by_id,
+            'confirmed_by_name': self.confirmed_by.display_name if self.confirmed_by else None,
+            'confirmed_at': iso(self.confirmed_at),
+            'disputed_by_id': self.disputed_by_id,
+            'disputed_by_name': self.disputed_by.display_name if self.disputed_by else None,
+            'disputed_at': iso(self.disputed_at),
+            'dispute_reason': self.dispute_reason if can_audit else None,
+            'resolution_kind': self.resolution_kind,
+            'awaiting_your_confirmation': awaiting_mine,
+            'can_report_result': bool(
+                active and state in ('unreported', 'disputed')
+                and (organizer or is_participant)
+                and self.entry1_id is not None and self.entry2_id is not None
+            ),
+            'can_confirm_result': awaiting_mine,
+            'can_dispute_result': awaiting_mine,
+            'can_resolve_result': bool(
+                active and organizer
+                and state in ('awaiting_confirmation', 'disputed')
+            ),
+            'can_correct_result': bool(
+                active and organizer and state == 'confirmed'
+            ),
+            'result_history': history,
         }
 
 
@@ -1261,7 +1589,7 @@ class League(TimestampMixin, db.Model):
     def member_for(self, user_id):
         return next((m for m in self.members if m.user_id == user_id), None)
 
-    def to_dict(self, current_user_id=None, detail=False):
+    def to_dict(self, current_user_id=None, detail=False, detail_match_id=None):
         mine = self.member_for(current_user_id) if current_user_id else None
         data = {
             'id': self.id,
@@ -1289,8 +1617,24 @@ class League(TimestampMixin, db.Model):
         }
         if detail:
             data['members'] = [m.to_dict() for m in self.members]
+            current_matches = [
+                m for m in self.matches if m.round == self.current_round
+            ]
+            if detail_match_id:
+                requested = next(
+                    (m for m in self.matches if m.id == detail_match_id), None,
+                )
+                if requested is not None and requested not in current_matches:
+                    current_matches.append(requested)
+            event_groups = CompetitionResultEvent.grouped_for_matches(
+                'league', [m.id for m in current_matches],
+            )
             data['matches'] = [
-                m.to_dict() for m in self.matches if m.round == self.current_round
+                m.to_dict(
+                    current_user_id,
+                    result_events=event_groups.get(m.id, []),
+                )
+                for m in current_matches
             ]
         return data
 
@@ -1334,16 +1678,62 @@ class LeagueMatch(TimestampMixin, db.Model):
     score2 = db.Column(db.Integer)
     winner_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     reported_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    result_state = db.Column(
+        db.String(32), nullable=False, default='unreported', index=True,
+    )
+    result_version = db.Column(db.Integer, nullable=False, default=0)
+    reported_at = db.Column(db.DateTime)
+    confirmed_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    confirmed_at = db.Column(db.DateTime)
+    disputed_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    disputed_at = db.Column(db.DateTime)
+    dispute_reason = db.Column(db.String(500), nullable=False, default='')
+    resolution_kind = db.Column(db.String(32), nullable=False, default='')
 
     league = db.relationship('League', back_populates='matches')
     player1 = db.relationship('User', foreign_keys=[player1_id])
     player2 = db.relationship('User', foreign_keys=[player2_id])
+    reported_by = db.relationship('User', foreign_keys=[reported_by_id])
+    confirmed_by = db.relationship('User', foreign_keys=[confirmed_by_id])
+    disputed_by = db.relationship('User', foreign_keys=[disputed_by_id])
 
-    def to_dict(self):
+    def effective_result_state(self):
+        # Until the score route adopts the lifecycle writer, its persisted
+        # winner remains a backward-compatible confirmed result.
+        if self.winner_id is not None:
+            return 'confirmed'
+        return self.result_state or 'unreported'
+
+    def to_dict(self, current_user_id=None, result_events=None):
         def player(u):
             return {'id': u.id, 'display_name': u.display_name,
                     'avatar_color': u.avatar_color, 'avatar_url': u.avatar_url or '',
                     'rating': u.rating} if u else None
+
+        league = self.league
+        active = bool(
+            league and league.status == 'active'
+            and self.round == league.current_round
+        )
+        organizer = bool(
+            current_user_id and league and league.organizer_id == current_user_id
+        )
+        is_participant = current_user_id in (self.player1_id, self.player2_id)
+        state = self.effective_result_state()
+        awaiting_mine = bool(
+            active and state == 'awaiting_confirmation' and is_participant
+            and current_user_id != self.reported_by_id
+        )
+        can_audit = bool(organizer or is_participant)
+        if result_events is None and can_audit and self.id is not None:
+            result_events = CompetitionResultEvent.grouped_for_matches(
+                'league', [self.id],
+            ).get(self.id, [])
+        history = [
+            event.to_dict(include_reason=True)
+            for event in (result_events or [])
+        ] if can_audit else []
+
         return {
             'id': self.id,
             'round': self.round,
@@ -1353,6 +1743,35 @@ class LeagueMatch(TimestampMixin, db.Model):
             'score1': self.score1,
             'score2': self.score2,
             'winner_id': self.winner_id,
+            'status': state,
+            'result_state': state,
+            'result_version': self.result_version or 0,
+            'reported_by_id': self.reported_by_id,
+            'reported_by_name': self.reported_by.display_name if self.reported_by else None,
+            'reported_at': iso(self.reported_at),
+            'confirmed_by_id': self.confirmed_by_id,
+            'confirmed_by_name': self.confirmed_by.display_name if self.confirmed_by else None,
+            'confirmed_at': iso(self.confirmed_at),
+            'disputed_by_id': self.disputed_by_id,
+            'disputed_by_name': self.disputed_by.display_name if self.disputed_by else None,
+            'disputed_at': iso(self.disputed_at),
+            'dispute_reason': self.dispute_reason if can_audit else None,
+            'resolution_kind': self.resolution_kind,
+            'awaiting_your_confirmation': awaiting_mine,
+            'can_report_result': bool(
+                active and is_participant
+                and state in ('unreported', 'disputed')
+            ),
+            'can_confirm_result': awaiting_mine,
+            'can_dispute_result': awaiting_mine,
+            'can_resolve_result': bool(
+                active and organizer
+                and state in ('awaiting_confirmation', 'disputed')
+            ),
+            'can_correct_result': bool(
+                active and organizer and state == 'confirmed'
+            ),
+            'result_history': history,
         }
 
 

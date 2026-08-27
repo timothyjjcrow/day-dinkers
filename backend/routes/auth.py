@@ -247,6 +247,9 @@ def _active_tournament_payload(user):
 
 
 def _me_payload(user):
+    # Lazy import avoids the auth/chat blueprint import cycle at startup.
+    from backend.routes.chat import community_room_unread_count
+
     unread_messages = Message.query.filter_by(recipient_id=user.id, read_at=None).count()
     pending_requests = Friendship.query.filter_by(
         addressee_id=user.id, status='pending',
@@ -263,6 +266,7 @@ def _me_payload(user):
         'user': user.to_dict(),
         'presence': presence_payload(user.id),
         'unread_messages': unread_messages,
+        'community_room_unread': community_room_unread_count(user.id),
         'pending_friend_requests': pending_requests,
         'unread_notifications': unread_notifications,
         'games_to_confirm': _games_to_confirm_count(user.id),
@@ -588,6 +592,10 @@ def delete_me():
     BlockedUser.query.filter(or_(
         BlockedUser.blocker_id == user.id, BlockedUser.blocked_id == user.id,
     )).delete(synchronize_session=False)
+    from backend.models import MessageSendAttempt
+    MessageSendAttempt.query.filter_by(
+        sender_id=user.id,
+    ).delete(synchronize_session=False)
     Message.query.filter(or_(
         Message.sender_id == user.id, Message.recipient_id == user.id,
     )).delete(synchronize_session=False)
@@ -654,13 +662,10 @@ def delete_me():
     return jsonify({'deleted': True})
 
 
-@auth_bp.get('/me/stats')
-@login_required
-def my_stats():
+def profile_stats_payload(user):
     """Personal play stats: totals, this month, weekly streak, top court."""
     from datetime import timedelta
 
-    user = g.current_user
     now = utcnow()
     completed = (
         Game.query.join(GamePlayer)
@@ -800,7 +805,7 @@ def my_stats():
         user.notified_badges = _json.dumps([b['id'] for b in badges])
         db.session.commit()
 
-    return jsonify({
+    return {
         'games_total': len(completed),
         'games_this_month': games_this_month,
         'week_streak': streak,
@@ -815,6 +820,29 @@ def my_stats():
         'mvp_awards': mvp_awards,
         'insights': insights,
         'rating_history': rating_history,
+    }
+
+
+@auth_bp.get('/me/stats')
+@login_required
+def my_stats():
+    return jsonify(profile_stats_payload(g.current_user))
+
+
+@auth_bp.get('/me/dashboard')
+@login_required
+def profile_dashboard():
+    """All independently rendered Profile sections in one authenticated read."""
+    # Lazy imports avoid the route-module cycle: games/courts both import auth.
+    from backend.routes.courts import favorite_courts_payload
+    from backend.routes.games import game_history_payload, my_games_payload
+
+    user = g.current_user
+    return jsonify({
+        'games': my_games_payload(user),
+        'stats': profile_stats_payload(user),
+        'favorites': favorite_courts_payload(user),
+        'history': game_history_payload(user),
     })
 
 

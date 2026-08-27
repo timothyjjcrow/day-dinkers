@@ -527,17 +527,14 @@ def send_club_message(club_id):
         return err
     if not _membership(club):
         return jsonify({'error': 'members_only'}), 403
-    from backend.routes.chat import message_image_from
-    payload = request.get_json(silent=True) or {}
-    body = str(payload.get('body') or '').strip()
-    image, err = message_image_from(payload)
+    from backend.routes.chat import prepare_chat_message
+    message, replayed, body, err = prepare_chat_message(
+        request.get_json(silent=True), g.current_user.id, club_id=club.id,
+    )
     if err:
         return err
-    if not body and not image:
-        return jsonify({'error': 'message_body_required'}), 400
-    message = Message(sender_id=g.current_user.id, club_id=club.id,
-                      body=body[:2000], image_data=image)
-    db.session.add(message)
+    if replayed:
+        return jsonify(message.to_dict()), 200
 
     # Ping the other members — at most one unread ping per club per member,
     # mirroring game/tournament chat, so busy rooms don't flood the feed.
@@ -558,6 +555,7 @@ def send_club_message(club_id):
                 body[:140],
                 related_user_id=g.current_user.id,
                 related_club_id=club.id,
+                unread_dedupe_key=f'club_message:{club.id}',
             )
     db.session.commit()
     return jsonify(message.to_dict()), 201

@@ -287,17 +287,7 @@ def list_courts():
         ))
     items = items[:limit]
 
-    ids = [c['id'] for c in items]
-    players, games = _active_counts_for(ids)
-    ratings = _rating_summary_for(ids)
-    conditions = _conditions_for(ids)
-    for item in items:
-        item['players_here'] = players.get(item['id'], 0)
-        item['upcoming_games'] = games.get(item['id'], 0)
-        item['condition'] = conditions.get(item['id'])
-        summary = ratings.get(item['id'])
-        item['rating_avg'] = summary['rating_avg'] if summary else None
-        item['rating_count'] = summary['rating_count'] if summary else 0
+    _enrich_court_summaries(items)
 
     return jsonify({'items': items, 'count': len(items)})
 
@@ -766,6 +756,23 @@ def _conditions_for(court_ids):
     return {r.court_id: r.condition for r in rows}  # later (newer) rows win
 
 
+def _enrich_court_summaries(items):
+    """Add the same live discovery signals to every court summary payload."""
+    ids = [item['id'] for item in items]
+    players, games = _active_counts_for(ids)
+    ratings = _rating_summary_for(ids)
+    conditions = _conditions_for(ids)
+    for item in items:
+        court_id = item['id']
+        item['players_here'] = players.get(court_id, 0)
+        item['upcoming_games'] = games.get(court_id, 0)
+        item['condition'] = conditions.get(court_id)
+        rating = ratings.get(court_id)
+        item['rating_avg'] = rating['rating_avg'] if rating else None
+        item['rating_count'] = rating['rating_count'] if rating else 0
+    return items
+
+
 def _latest_condition_for(court_id):
     row = (
         CourtCondition.query.filter(
@@ -939,18 +946,23 @@ def toggle_favorite(court_id):
 @courts_bp.get('/courts/favorites')
 @login_required
 def list_favorites():
+    return jsonify(favorite_courts_payload(g.current_user))
+
+
+def favorite_courts_payload(user):
+    """Endpoint-shaped saved courts, including the normal live enrichment."""
     cleanup_stale_presence()
     favorites = (
-        FavoriteCourt.query.filter_by(user_id=g.current_user.id)
+        FavoriteCourt.query.filter_by(user_id=user.id)
         .order_by(FavoriteCourt.id.desc())
         .all()
     )
-    items = [f.court.to_summary_dict() for f in favorites if f.court]
-    players, games = _active_counts_for([c['id'] for c in items])
-    for item in items:
-        item['players_here'] = players.get(item['id'], 0)
-        item['upcoming_games'] = games.get(item['id'], 0)
-    return jsonify({'items': items})
+    items = _enrich_court_summaries([
+        favorite.court.to_summary_dict()
+        for favorite in favorites
+        if favorite.court
+    ])
+    return {'items': items}
 
 
 def _court_leaders(court):

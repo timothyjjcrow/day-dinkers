@@ -1,11 +1,12 @@
 """Box leagues: rating-seeded boxes, round robin within each box, promotion/
 relegation between rounds, champion crowned from box 1 at completion."""
 from flask import Blueprint, g, jsonify, request
+from sqlalchemy.exc import IntegrityError
 
 from backend.app import db
 from backend.models import (
-    Court, League, LeagueMatch, LeagueMember, is_blocked_between, notify,
-    utcnow,
+    CompetitionResultEvent, Court, League, LeagueMatch, LeagueMember,
+    is_blocked_between, notify, utcnow,
 )
 from backend.security import rate_limit
 
@@ -163,7 +164,12 @@ def league_detail(league_id):
     league, err = _league_or_404(league_id)
     if err:
         return err
-    data = league.to_dict(g.current_user.id, detail=True)
+    requested_match_id = request.args.get('match_id', type=int)
+    data = league.to_dict(
+        g.current_user.id,
+        detail=True,
+        detail_match_id=requested_match_id if requested_match_id and requested_match_id > 0 else None,
+    )
     if league.member_for(g.current_user.id):
         from backend.models import LeagueChatRead, Message
         marker = LeagueChatRead.query.filter_by(
@@ -269,47 +275,228 @@ def start_league(league_id):
     return jsonify(league.to_dict(g.current_user.id, detail=True))
 
 
+UNRESOLVED_RESULT_STATES = frozenset({'awaiting_confirmation', 'disputed'})
+
+
+def _locked_league(league_id):
+    """Reload and row-lock a league before a result or round transition."""
+    return (
+        League.query.filter_by(id=league_id)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+
+
+def _locked_league_match(league_id, match_id):
+    return (
+        LeagueMatch.query.filter_by(id=match_id, league_id=league_id)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+
+
+def _result_request_payload():
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _expected_result_version(payload):
+    """Parse an optional optimistic-lock version from either supported key."""
+    supplied = [
+        payload[key]
+        for key in ('expected_result_version', 'result_version')
+        if key in payload
+    ]
+    if not supplied:
+        return None, None
+    if any(isinstance(value, bool) for value in supplied):
+        return None, (jsonify({'error': 'invalid_result_version'}), 400)
+    if any(
+        isinstance(value, float) and not value.is_integer()
+        for value in supplied
+    ):
+        return None, (jsonify({'error': 'invalid_result_version'}), 400)
+    try:
+        versions = [int(value) for value in supplied]
+    except (TypeError, ValueError):
+        return None, (jsonify({'error': 'invalid_result_version'}), 400)
+    if any(version < 0 for version in versions) or len(set(versions)) != 1:
+        return None, (jsonify({'error': 'invalid_result_version'}), 400)
+    return versions[0], None
+
+
+def _check_result_version(match, payload):
+    expected, err = _expected_result_version(payload)
+    if err:
+        return err
+    current = int(match.result_version or 0)
+    if expected is not None and expected != current:
+        return jsonify({
+            'error': 'stale_result',
+            'result_version': current,
+        }), 409
+    return None
+
+
+def _commit_result_change(league_id, match_id):
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # SQLite does not enforce FOR UPDATE. The audit event's unique
+        # (competition, match, version) key is the fallback race detector; roll
+        # back every standings/notification mutation and return a normal stale
+        # result response instead of leaking an IntegrityError as a 500.
+        db.session.rollback()
+        match = db.session.get(LeagueMatch, match_id)
+        if match and match.league_id == league_id:
+            return jsonify({
+                'error': 'stale_result',
+                'result_version': int(match.result_version or 0),
+            }), 409
+        return jsonify({'error': 'stale_result'}), 409
+    match = db.session.get(LeagueMatch, match_id)
+    return jsonify(match.to_dict(g.current_user.id))
+
+
+def _parse_match_scores(payload):
+    raw_score1 = payload.get('score1')
+    raw_score2 = payload.get('score2')
+    if raw_score1 is None or raw_score2 is None:
+        return None, (jsonify({'error': 'scores_required'}), 400)
+    if isinstance(raw_score1, bool) or isinstance(raw_score2, bool):
+        return None, (jsonify({'error': 'invalid_scores'}), 400)
+    if isinstance(raw_score1, float) and not raw_score1.is_integer():
+        return None, (jsonify({'error': 'invalid_scores'}), 400)
+    if isinstance(raw_score2, float) and not raw_score2.is_integer():
+        return None, (jsonify({'error': 'invalid_scores'}), 400)
+    try:
+        score1 = int(raw_score1)
+        score2 = int(raw_score2)
+    except (TypeError, ValueError):
+        return None, (jsonify({'error': 'scores_required'}), 400)
+    if score1 == score2 or score1 < 0 or score2 < 0 or max(score1, score2) > 99:
+        return None, (jsonify({'error': 'invalid_scores'}), 400)
+    return (score1, score2), None
+
+
+def _bump_result_version(match):
+    match.result_version = int(match.result_version or 0) + 1
+    return match.result_version
+
+
+def _locked_match_members(match):
+    members = (
+        LeagueMember.query.filter(
+            LeagueMember.league_id == match.league_id,
+            LeagueMember.user_id.in_([match.player1_id, match.player2_id]),
+        )
+        .populate_existing()
+        .with_for_update()
+        .all()
+    )
+    return {member.user_id: member for member in members}
+
+
+def _adjust_standings(match, winner_id, direction, members):
+    """Apply (+1) or reverse (-1) one finalized league result."""
+    if winner_id not in (match.player1_id, match.player2_id):
+        return
+    loser_id = match.player2_id if winner_id == match.player1_id else match.player1_id
+    winner = members.get(winner_id)
+    loser = members.get(loser_id)
+    if winner:
+        winner.points += 3 * direction
+        winner.wins += direction
+    if loser:
+        loser.points += direction
+        loser.losses += direction
+
+
+def _finalize_match_score(match, score1, score2):
+    """Replace any finalized result and apply its standings exactly once."""
+    members = _locked_match_members(match)
+    if match.winner_id is not None:
+        _adjust_standings(match, match.winner_id, -1, members)
+    match.score1 = score1
+    match.score2 = score2
+    match.winner_id = match.player1_id if score1 > score2 else match.player2_id
+    _adjust_standings(match, match.winner_id, 1, members)
+
+
+def _void_match_result(match):
+    """Remove a finalized result from standings while retaining its evidence."""
+    if match.winner_id is not None:
+        members = _locked_match_members(match)
+        _adjust_standings(match, match.winner_id, -1, members)
+    match.winner_id = None
+
+
+def _result_action_url(league, match):
+    return f'/#league/{league.id}/match/{match.id}'
+
+
+def _current_unresolved_matches(league, lock=False):
+    query = LeagueMatch.query.filter_by(
+        league_id=league.id, round=league.current_round,
+    ).populate_existing()
+    if lock:
+        query = query.with_for_update()
+    return [
+        match for match in query.all()
+        if match.effective_result_state() in UNRESOLVED_RESULT_STATES
+    ]
+
+
 @leagues_bp.post('/leagues/<int:league_id>/matches/<int:match_id>/score')
 @rate_limit(30, 60)
 @login_required
 def report_match(league_id, match_id):
-    """Either player reports; win = 3 points, loss = 1 (played > sat out)."""
-    league, err = _league_or_404(league_id)
-    if err:
-        return err
-    match = db.session.get(LeagueMatch, match_id)
-    if not match or match.league_id != league.id:
+    """Submit a score for the opposing player's confirmation."""
+    payload = _result_request_payload()
+    league = _locked_league(league_id)
+    if not league:
+        return jsonify({'error': 'league_not_found'}), 404
+    match = _locked_league_match(league.id, match_id)
+    if not match:
         return jsonify({'error': 'match_not_found'}), 404
     if league.status != 'active' or match.round != league.current_round:
         return jsonify({'error': 'round_closed'}), 400
     if g.current_user.id not in (match.player1_id, match.player2_id):
         return jsonify({'error': 'players_only'}), 403
-    if match.winner_id is not None:
-        return jsonify({'error': 'already_reported'}), 400
 
-    payload = request.get_json(silent=True) or {}
-    try:
-        score1 = int(payload.get('score1'))
-        score2 = int(payload.get('score2'))
-    except (TypeError, ValueError):
-        return jsonify({'error': 'scores_required'}), 400
-    if score1 == score2 or score1 < 0 or score2 < 0 or max(score1, score2) > 99:
-        return jsonify({'error': 'invalid_scores'}), 400
+    version_err = _check_result_version(match, payload)
+    if version_err:
+        return version_err
+    if match.effective_result_state() not in ('unreported', 'disputed'):
+        return jsonify({'error': 'result_not_reportable'}), 409
+    scores, score_err = _parse_match_scores(payload)
+    if score_err:
+        return score_err
+    score1, score2 = scores
 
+    now = utcnow()
     match.score1 = score1
     match.score2 = score2
-    match.winner_id = match.player1_id if score1 > score2 else match.player2_id
+    match.winner_id = None
     match.reported_by_id = g.current_user.id
-
-    loser_id = match.player2_id if match.winner_id == match.player1_id else match.player1_id
-    winner = league.member_for(match.winner_id)
-    loser = league.member_for(loser_id)
-    if winner:
-        winner.points += 3
-        winner.wins += 1
-    if loser:
-        loser.points += 1
-        loser.losses += 1
+    match.reported_at = now
+    match.confirmed_by_id = None
+    match.confirmed_at = None
+    match.disputed_by_id = None
+    match.disputed_at = None
+    match.dispute_reason = ''
+    match.resolution_kind = ''
+    match.result_state = 'awaiting_confirmation'
+    version = _bump_result_version(match)
+    CompetitionResultEvent.record(
+        'league', match.id, 'reported', version,
+        actor_id=g.current_user.id,
+        score1=score1,
+        score2=score2,
+        reason=str(payload.get('reason') or '').strip()[:500],
+    )
 
     opponent_id = (
         match.player2_id if g.current_user.id == match.player1_id else match.player1_id
@@ -317,17 +504,220 @@ def report_match(league_id, match_id):
     notify(
         opponent_id,
         'league_match',
-        f'{g.current_user.display_name} recorded your {league.name} match: {score1}–{score2}',
+        f'{g.current_user.display_name} reported {score1}–{score2} in {league.name}',
+        'Confirm or dispute the result before standings update.',
         related_user_id=g.current_user.id,
         related_league_id=league.id,
+        action_url=_result_action_url(league, match),
     )
-    db.session.commit()
-    return jsonify(match.to_dict())
+    return _commit_result_change(league.id, match.id)
+
+
+@leagues_bp.post('/leagues/<int:league_id>/matches/<int:match_id>/confirm')
+@rate_limit(30, 60)
+@login_required
+def confirm_match_result(league_id, match_id):
+    payload = _result_request_payload()
+    league = _locked_league(league_id)
+    if not league:
+        return jsonify({'error': 'league_not_found'}), 404
+    match = _locked_league_match(league.id, match_id)
+    if not match:
+        return jsonify({'error': 'match_not_found'}), 404
+    if league.status != 'active' or match.round != league.current_round:
+        return jsonify({'error': 'round_closed'}), 400
+    if g.current_user.id not in (match.player1_id, match.player2_id):
+        return jsonify({'error': 'players_only'}), 403
+
+    version_err = _check_result_version(match, payload)
+    if version_err:
+        return version_err
+    if match.effective_result_state() != 'awaiting_confirmation':
+        return jsonify({'error': 'nothing_to_confirm'}), 409
+    if (
+        match.reported_by_id not in (match.player1_id, match.player2_id)
+        or g.current_user.id == match.reported_by_id
+    ):
+        return jsonify({'error': 'opponent_confirmation_required'}), 403
+    if match.score1 is None or match.score2 is None:
+        return jsonify({'error': 'scores_required'}), 409
+
+    _finalize_match_score(match, match.score1, match.score2)
+    match.result_state = 'confirmed'
+    match.confirmed_by_id = g.current_user.id
+    match.confirmed_at = utcnow()
+    match.resolution_kind = 'opponent_confirmation'
+    version = _bump_result_version(match)
+    CompetitionResultEvent.record(
+        'league', match.id, 'confirmed', version,
+        actor_id=g.current_user.id,
+        score1=match.score1,
+        score2=match.score2,
+    )
+
+    if match.reported_by_id != g.current_user.id:
+        notify(
+            match.reported_by_id,
+            'league_match',
+            f'{g.current_user.display_name} confirmed your {league.name} result',
+            f'Final score: {match.score1}–{match.score2}. Standings are updated.',
+            related_user_id=g.current_user.id,
+            related_league_id=league.id,
+            action_url=_result_action_url(league, match),
+        )
+    return _commit_result_change(league.id, match.id)
+
+
+@leagues_bp.post('/leagues/<int:league_id>/matches/<int:match_id>/dispute')
+@rate_limit(30, 60)
+@login_required
+def dispute_match_result(league_id, match_id):
+    payload = _result_request_payload()
+    league = _locked_league(league_id)
+    if not league:
+        return jsonify({'error': 'league_not_found'}), 404
+    match = _locked_league_match(league.id, match_id)
+    if not match:
+        return jsonify({'error': 'match_not_found'}), 404
+    if league.status != 'active' or match.round != league.current_round:
+        return jsonify({'error': 'round_closed'}), 400
+    if g.current_user.id not in (match.player1_id, match.player2_id):
+        return jsonify({'error': 'players_only'}), 403
+
+    version_err = _check_result_version(match, payload)
+    if version_err:
+        return version_err
+    if match.effective_result_state() != 'awaiting_confirmation':
+        return jsonify({'error': 'nothing_to_dispute'}), 409
+    if (
+        match.reported_by_id not in (match.player1_id, match.player2_id)
+        or g.current_user.id == match.reported_by_id
+    ):
+        return jsonify({'error': 'opponent_dispute_required'}), 403
+
+    reason = str(payload.get('reason') or '').strip()[:500]
+    match.result_state = 'disputed'
+    match.disputed_by_id = g.current_user.id
+    match.disputed_at = utcnow()
+    match.dispute_reason = reason
+    match.resolution_kind = ''
+    version = _bump_result_version(match)
+    CompetitionResultEvent.record(
+        'league', match.id, 'disputed', version,
+        actor_id=g.current_user.id,
+        score1=match.score1,
+        score2=match.score2,
+        reason=reason,
+    )
+
+    recipients = {match.reported_by_id, league.organizer_id} - {g.current_user.id, None}
+    for recipient_id in recipients:
+        notify(
+            recipient_id,
+            'league_match',
+            f'{g.current_user.display_name} disputed a {league.name} result',
+            reason or f'The reported score was {match.score1}–{match.score2}.',
+            related_user_id=g.current_user.id,
+            related_league_id=league.id,
+            action_url=_result_action_url(league, match),
+        )
+    return _commit_result_change(league.id, match.id)
+
+
+@leagues_bp.post('/leagues/<int:league_id>/matches/<int:match_id>/resolve')
+@rate_limit(30, 60)
+@login_required
+def resolve_match_result(league_id, match_id):
+    """Organizer finalizes/corrects a score, or voids it, with an audit reason."""
+    payload = _result_request_payload()
+    league = _locked_league(league_id)
+    if not league:
+        return jsonify({'error': 'league_not_found'}), 404
+    match = _locked_league_match(league.id, match_id)
+    if not match:
+        return jsonify({'error': 'match_not_found'}), 404
+    if league.organizer_id != g.current_user.id:
+        return jsonify({'error': 'organizer_only'}), 403
+    if league.status != 'active' or match.round != league.current_round:
+        return jsonify({'error': 'round_closed'}), 400
+
+    version_err = _check_result_version(match, payload)
+    if version_err:
+        return version_err
+    state = match.effective_result_state()
+    if state not in ('awaiting_confirmation', 'disputed', 'confirmed'):
+        return jsonify({'error': 'nothing_to_resolve'}), 409
+    reason = str(payload.get('reason') or '').strip()[:500]
+    if not reason:
+        return jsonify({'error': 'reason_required'}), 400
+
+    resolution = str(
+        payload.get('resolution') or payload.get('action')
+        or payload.get('result_state') or payload.get('resolution_kind') or ''
+    ).strip().lower()
+    void_value = payload.get('void')
+    voided = (
+        void_value is True or void_value == 1
+        or str(void_value or '').strip().lower() in ('1', 'true', 'yes')
+        or resolution in ('void', 'voided')
+    )
+    was_confirmed = state == 'confirmed' and match.winner_id is not None
+    now = utcnow()
+
+    if voided:
+        _void_match_result(match)
+        match.result_state = 'void'
+        match.resolution_kind = 'organizer_void'
+        action = 'voided'
+    else:
+        scores, score_err = _parse_match_scores(payload)
+        if score_err:
+            return score_err
+        score1, score2 = scores
+        _finalize_match_score(match, score1, score2)
+        match.result_state = 'confirmed'
+        match.resolution_kind = (
+            'organizer_correction' if was_confirmed else 'organizer_resolution'
+        )
+        action = 'corrected' if was_confirmed else 'resolved'
+
+    match.confirmed_by_id = g.current_user.id
+    match.confirmed_at = now
+    match.disputed_by_id = None
+    match.disputed_at = None
+    match.dispute_reason = ''
+    version = _bump_result_version(match)
+    CompetitionResultEvent.record(
+        'league', match.id, action, version,
+        actor_id=g.current_user.id,
+        score1=match.score1,
+        score2=match.score2,
+        reason=reason,
+    )
+
+    title = (
+        f'{league.name}: the organizer voided your match result'
+        if voided else
+        f'{league.name}: the organizer finalized your match {match.score1}–{match.score2}'
+    )
+    for recipient_id in {match.player1_id, match.player2_id} - {g.current_user.id}:
+        notify(
+            recipient_id,
+            'league_match',
+            title,
+            reason,
+            related_user_id=g.current_user.id,
+            related_league_id=league.id,
+            action_url=_result_action_url(league, match),
+        )
+    return _commit_result_change(league.id, match.id)
 
 
 def _do_advance(league, actor_id=None):
     """Close the round: box winners move up, last place moves down, next
     round's matches are generated. Unplayed matches simply score no points."""
+    if _current_unresolved_matches(league, lock=True):
+        return False
     boxes = _boxes_of(league)
     box_numbers = sorted(boxes)
     for box_number in box_numbers:
@@ -349,6 +739,7 @@ def _do_advance(league, actor_id=None):
                 related_user_id=actor_id,
                 related_league_id=league.id,
             )
+    return True
 
 
 def advance_due_league_rounds():
@@ -365,13 +756,24 @@ def advance_due_league_rounds():
             continue
         deadline = league.round_started_at + timedelta(days=league.round_days)
         if now >= deadline:
+            # Re-lock and refresh before closing so a concurrent report cannot
+            # slip into the old round after the unresolved-result check.
+            league = _locked_league(league.id)
+            if not league or league.status != 'active' or not league.round_started_at:
+                continue
+            deadline = league.round_started_at + timedelta(days=league.round_days)
+            if now < deadline:
+                continue
             _do_advance(league, actor_id=None)
             continue
         if now >= deadline - timedelta(days=2):
             days_left = max(1, (deadline - now).days + (1 if (deadline - now).seconds else 0))
             unplayed_by_user = {}
             for match in league.matches:
-                if match.round == league.current_round and match.winner_id is None:
+                if (
+                    match.round == league.current_round
+                    and match.effective_result_state() == 'unreported'
+                ):
                     unplayed_by_user.setdefault(match.player1_id, 0)
                     unplayed_by_user.setdefault(match.player2_id, 0)
                     unplayed_by_user[match.player1_id] += 1
@@ -395,14 +797,15 @@ def advance_due_league_rounds():
 @rate_limit(10, 3600)
 @login_required
 def advance_round(league_id):
-    league, err = _league_or_404(league_id)
-    if err:
-        return err
+    league = _locked_league(league_id)
+    if not league:
+        return jsonify({'error': 'league_not_found'}), 404
     if league.organizer_id != g.current_user.id:
         return jsonify({'error': 'organizer_only'}), 403
     if league.status != 'active':
         return jsonify({'error': 'not_active'}), 400
-    _do_advance(league, actor_id=g.current_user.id)
+    if not _do_advance(league, actor_id=g.current_user.id):
+        return jsonify({'error': 'unresolved_results'}), 409
     db.session.commit()
     return jsonify(league.to_dict(g.current_user.id, detail=True))
 
@@ -412,13 +815,15 @@ def advance_round(league_id):
 @login_required
 def complete_league(league_id):
     """End the season: whoever tops box 1 is champion."""
-    league, err = _league_or_404(league_id)
-    if err:
-        return err
+    league = _locked_league(league_id)
+    if not league:
+        return jsonify({'error': 'league_not_found'}), 404
     if league.organizer_id != g.current_user.id:
         return jsonify({'error': 'organizer_only'}), 403
     if league.status != 'active':
         return jsonify({'error': 'not_active'}), 400
+    if _current_unresolved_matches(league, lock=True):
+        return jsonify({'error': 'unresolved_results'}), 409
 
     league.status = 'completed'
     league.completed_at = utcnow()
@@ -515,23 +920,20 @@ def league_chat(league_id):
 @rate_limit(60, 60)
 @login_required
 def send_league_message(league_id):
-    from backend.models import Message, Notification
+    from backend.models import Notification
     league, err = _league_or_404(league_id)
     if err:
         return err
     if not league.member_for(g.current_user.id):
         return jsonify({'error': 'members_only'}), 403
-    from backend.routes.chat import message_image_from
-    payload = request.get_json(silent=True) or {}
-    body = str(payload.get('body') or '').strip()
-    image, err = message_image_from(payload)
+    from backend.routes.chat import prepare_chat_message
+    message, replayed, body, err = prepare_chat_message(
+        request.get_json(silent=True), g.current_user.id, league_id=league.id,
+    )
     if err:
         return err
-    if not body and not image:
-        return jsonify({'error': 'message_body_required'}), 400
-    message = Message(sender_id=g.current_user.id, league_id=league.id,
-                      body=body[:2000], image_data=image)
-    db.session.add(message)
+    if replayed:
+        return jsonify(message.to_dict()), 200
 
     # One unread ping per league per member, mirroring the other room chats.
     for member in league.members:
@@ -551,6 +953,7 @@ def send_league_message(league_id):
                 body[:140],
                 related_user_id=g.current_user.id,
                 related_league_id=league.id,
+                unread_dedupe_key=f'league_message:{league.id}',
             )
     db.session.commit()
     return jsonify(message.to_dict()), 201

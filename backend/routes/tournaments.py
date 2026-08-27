@@ -2,9 +2,11 @@
 from datetime import timedelta
 
 from flask import Blueprint, g, jsonify, request
+from sqlalchemy.exc import IntegrityError
 
 from backend.app import db
 from backend.models import (
+    CompetitionResultEvent,
     Court,
     TOURNAMENT_EVENT_TYPES,
     TOURNAMENT_FORMATS,
@@ -56,12 +58,187 @@ def _round_robin_rounds(entry_ids):
     return rounds
 
 
-def _notify_entry(entry, kind, title, body='', related_user_id=None):
+def _notify_entry(entry, kind, title, body='', related_user_id=None,
+                  action_url=''):
     for player in entry.players():
         notify(
             player.id, kind, title, body,
             related_user_id=related_user_id,
             related_tournament_id=entry.tournament_id,
+            action_url=action_url,
+        )
+
+
+def _match_action_url(tournament, match):
+    return f'/#tournament/{tournament.id}/match/{match.id}'
+
+
+def _match_entries(tournament, match):
+    entries = {entry.id: entry for entry in tournament.entries}
+    return entries.get(match.entry1_id), entries.get(match.entry2_id)
+
+
+def _entry_has_user(entry, user_id):
+    return bool(
+        entry and user_id is not None
+        and user_id in (entry.player1_id, entry.player2_id)
+    )
+
+
+def _match_participant_ids(tournament, match):
+    entry1, entry2 = _match_entries(tournament, match)
+    return {
+        player.id
+        for entry in (entry1, entry2) if entry
+        for player in entry.players()
+    }
+
+
+def _reporter_entry_id(tournament, match):
+    entry1, entry2 = _match_entries(tournament, match)
+    for entry in (entry1, entry2):
+        if _entry_has_user(entry, match.reported_by_id):
+            return entry.id
+    return None
+
+
+def _eligible_result_confirmer(tournament, match, user_id):
+    """Only a match participant independent of the reporter may review.
+
+    A participant reporter's teammates cannot confirm their own entry. When a
+    neutral organizer reports, either competing entry can independently review.
+    """
+    if not user_id or user_id == match.reported_by_id:
+        return False
+    entry1, entry2 = _match_entries(tournament, match)
+    viewer_entry = next(
+        (entry for entry in (entry1, entry2) if _entry_has_user(entry, user_id)),
+        None,
+    )
+    if not viewer_entry:
+        return False
+    reporter_entry_id = _reporter_entry_id(tournament, match)
+    return reporter_entry_id is None or viewer_entry.id != reporter_entry_id
+
+
+def _result_json_payload():
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _parse_expected_result_version(payload):
+    supplied = [
+        payload[key] for key in (
+            'expected_result_version', 'result_version', 'expected_version',
+        ) if key in payload
+    ]
+    if not supplied:
+        return None, None
+    if any(isinstance(value, bool) for value in supplied):
+        return None, 'invalid_result_version'
+    if any(isinstance(value, float) and not value.is_integer() for value in supplied):
+        return None, 'invalid_result_version'
+    try:
+        versions = [int(value) for value in supplied]
+    except (TypeError, ValueError):
+        return None, 'invalid_result_version'
+    if any(version < 0 for version in versions) or len(set(versions)) != 1:
+        return None, 'invalid_result_version'
+    return versions[0], None
+
+
+def _parse_score_pair(payload, stored_match=None):
+    has_score1, has_score2 = 'score1' in payload, 'score2' in payload
+    if not has_score1 and not has_score2 and stored_match is not None:
+        raw1, raw2 = stored_match.score1, stored_match.score2
+    elif has_score1 and has_score2:
+        raw1, raw2 = payload.get('score1'), payload.get('score2')
+    else:
+        return None
+    if isinstance(raw1, bool) or isinstance(raw2, bool):
+        return None
+    if isinstance(raw1, float) and not raw1.is_integer():
+        return None
+    if isinstance(raw2, float) and not raw2.is_integer():
+        return None
+    try:
+        score1, score2 = int(raw1), int(raw2)
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= score1 <= 99 and 0 <= score2 <= 99) or score1 == score2:
+        return None
+    return score1, score2
+
+
+def _record_result_action(match, action, actor_id=None, reason=''):
+    match.result_version = int(match.result_version or 0) + 1
+    CompetitionResultEvent.record(
+        'tournament', match.id, action, match.result_version,
+        actor_id=actor_id,
+        score1=match.score1,
+        score2=match.score2,
+        reason=reason,
+    )
+
+
+def _locked_tournament_match(tournament_id, match_id):
+    # Lock the tournament first so finalization/ELO remains serialized even when
+    # two different matches are acted on at the same time. The per-match lock is
+    # the narrower evidence/version guard on databases that support FOR UPDATE.
+    tournament = (
+        Tournament.query
+        .filter(Tournament.id == tournament_id)
+        .with_for_update()
+        .first()
+    )
+    if not tournament:
+        return None, None
+    match = (
+        TournamentMatch.query
+        .filter(
+            TournamentMatch.id == match_id,
+            TournamentMatch.tournament_id == tournament_id,
+        )
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+    return tournament, match
+
+
+def _stale_result_response(tournament, match):
+    data = _detail_payload(tournament, g.current_user.id)
+    data['error'] = 'stale_result'
+    data['current_result_version'] = int(match.result_version or 0)
+    return jsonify(data), 409
+
+
+def _commit_result_change(tournament_id, match_id):
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # The immutable event's unique (type, match, version) key is the SQLite
+        # fallback when row-level locks are unavailable.
+        db.session.rollback()
+        tournament = db.session.get(Tournament, tournament_id)
+        match = db.session.get(TournamentMatch, match_id)
+        if tournament and match and match.tournament_id == tournament.id:
+            return _stale_result_response(tournament, match)
+        return jsonify({'error': 'stale_result'}), 409
+    tournament = db.session.get(Tournament, tournament_id)
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
+def _notify_result_users(tournament, match, user_ids, title, body='', actor_id=None):
+    for user_id in set(user_ids) - ({actor_id} if actor_id else set()):
+        notify(
+            user_id,
+            'tournament_score',
+            title,
+            body,
+            related_user_id=actor_id,
+            related_tournament_id=tournament.id,
+            action_url=_match_action_url(tournament, match),
         )
 
 
@@ -103,6 +280,27 @@ def _standings(tournament):
 
 def _detail_payload(tournament, user_id):
     data = tournament.to_dict(user_id, detail=True)
+    matches = {match.id: match for match in tournament.matches}
+    for item in data.get('matches', []):
+        match = matches.get(item.get('id'))
+        if not match:
+            continue
+        active = tournament.status == 'active'
+        eligible = active and match.effective_result_state() == 'awaiting_confirmation' \
+            and _eligible_result_confirmer(tournament, match, user_id)
+        organizer = bool(user_id and user_id == tournament.organizer_id)
+        item['awaiting_your_confirmation'] = bool(eligible)
+        item['can_confirm_result'] = bool(eligible)
+        item['can_dispute_result'] = bool(eligible)
+        item['can_resolve_result'] = bool(
+            active and organizer
+            and match.effective_result_state() in ('awaiting_confirmation', 'disputed')
+        )
+        item['can_correct_result'] = bool(
+            active and organizer
+            and match.effective_result_state() == 'confirmed'
+            and _confirmed_correction_is_safe(tournament, match)
+        )
     if tournament.format == 'round_robin':
         data['standings'] = _standings(tournament)
     # Chat unread badge for members (no marker yet = everything is unread).
@@ -544,7 +742,17 @@ def _propagate_bye_wins(tournament, notify_ready=False):
                 continue
             if not _feeders_settled(tournament, match):
                 continue
-            match.winner_entry_id = match.entry1_id if has1 else match.entry2_id
+            if match.id is None:
+                db.session.flush()
+            winner_id = match.entry1_id if has1 else match.entry2_id
+            winner = next((e for e in tournament.entries if e.id == winner_id), None)
+            match.winner_entry_id = winner_id
+            match.winner_entry = winner
+            match.result_state = 'bye'
+            match.resolution_kind = 'automatic_bye'
+            _record_result_action(
+                match, 'resolved', reason='Automatic bye advancement',
+            )
             _advance_winner(tournament, match, total, notify_ready=notify_ready)
             changed = True
 
@@ -554,6 +762,23 @@ def _feeders_settled(tournament, match):
     the slot never had a feeder, i.e. it's a round-1 bye)."""
     if match.round == 1:
         return True
+    # The last-round position-1 slot is the 3rd-place match. Both semifinals
+    # feed it their losers, so it must not be treated like an ordinary bracket
+    # slot (whose position would otherwise produce an empty feeder set and make
+    # ``all([])`` auto-advance the first loser as a bye).
+    if (
+        tournament.format == 'single_elim'
+        and match.round == tournament.total_rounds()
+        and match.position == 1
+    ):
+        feeders = [
+            candidate for candidate in tournament.matches
+            if candidate.round == match.round - 1
+            and candidate.position in (0, 1)
+        ]
+        return len(feeders) == 2 and all(
+            candidate.winner_entry_id is not None for candidate in feeders
+        )
     feeders = [
         m for m in tournament.matches
         if m.round == match.round - 1 and m.position // 2 == match.position
@@ -576,7 +801,40 @@ def _final_and_third(tournament):
     return final, third
 
 
-def _maybe_complete(tournament):
+def _result_downstream_matches(tournament, match):
+    if tournament.format != 'single_elim':
+        return []
+    total = tournament.total_rounds()
+    downstream = []
+    if match.round < total:
+        nxt = next(
+            (
+                candidate for candidate in tournament.matches
+                if candidate.round == match.round + 1
+                and candidate.position == match.position // 2
+            ),
+            None,
+        )
+        if nxt:
+            downstream.append(nxt)
+    if match.round == total - 1:
+        _, third = _final_and_third(tournament)
+        if third and third not in downstream:
+            downstream.append(third)
+    return downstream
+
+
+def _confirmed_correction_is_safe(tournament, match):
+    return all(
+        downstream.effective_result_state() == 'unreported'
+        and downstream.winner_entry_id is None
+        and downstream.score1 is None
+        and downstream.score2 is None
+        for downstream in _result_downstream_matches(tournament, match)
+    )
+
+
+def _maybe_complete(tournament, source_match=None):
     """Finish the tournament once the final — and the 3rd-place match, when
     the bracket has one — are both decided."""
     final, third = _final_and_third(tournament)
@@ -584,7 +842,9 @@ def _maybe_complete(tournament):
         return
     if third and third.winner_entry_id is None:
         return
-    _complete_tournament(tournament, final.winner_entry_id)
+    _complete_tournament(
+        tournament, final.winner_entry_id, source_match=source_match,
+    )
 
 
 def _notify_matchup(tournament, match, label):
@@ -594,10 +854,12 @@ def _notify_matchup(tournament, match, label):
         _notify_entry(
             e1, 'tournament_match',
             f'{tournament.name}: your {label} vs {e2.display_name()} is set',
+            action_url=_match_action_url(tournament, match),
         )
         _notify_entry(
             e2, 'tournament_match',
             f'{tournament.name}: your {label} vs {e1.display_name()} is set',
+            action_url=_match_action_url(tournament, match),
         )
 
 
@@ -606,7 +868,7 @@ def _advance_winner(tournament, match, total_rounds, notify_ready=True):
     semifinal loser into the 3rd-place match); crown the champion when the
     last round is decided."""
     if match.round >= total_rounds:
-        _maybe_complete(tournament)
+        _maybe_complete(tournament, source_match=match)
         return
     nxt = next(
         (m for m in tournament.matches
@@ -615,10 +877,16 @@ def _advance_winner(tournament, match, total_rounds, notify_ready=True):
     )
     if not nxt:
         return
+    winner = next(
+        (entry for entry in tournament.entries if entry.id == match.winner_entry_id),
+        None,
+    )
     if match.position % 2 == 0:
         nxt.entry1_id = match.winner_entry_id
+        nxt.entry1 = winner
     else:
         nxt.entry2_id = match.winner_entry_id
+        nxt.entry2 = winner
     if notify_ready and nxt.entry1_id and nxt.entry2_id:
         _notify_matchup(tournament, nxt, _round_label(nxt.round, tournament.total_rounds()))
 
@@ -628,10 +896,16 @@ def _advance_winner(tournament, match, total_rounds, notify_ready=True):
         if third:
             loser_id = match.entry2_id if match.winner_entry_id == match.entry1_id \
                 else match.entry1_id
+            loser = next(
+                (entry for entry in tournament.entries if entry.id == loser_id),
+                None,
+            )
             if match.position % 2 == 0:
                 third.entry1_id = loser_id
+                third.entry1 = loser
             else:
                 third.entry2_id = loser_id
+                third.entry2 = loser
             if notify_ready and third.entry1_id and third.entry2_id:
                 _notify_matchup(tournament, third, '3rd-place match')
 
@@ -647,7 +921,9 @@ def _round_label(round_num, total_rounds):
     return f'round {round_num} match'
 
 
-def _complete_tournament(tournament, champion_entry_id):
+def _complete_tournament(tournament, champion_entry_id, source_match=None):
+    if tournament.status == 'completed':
+        return False
     champion = next(
         (e for e in tournament.entries if e.id == champion_entry_id), None,
     )
@@ -656,6 +932,7 @@ def _complete_tournament(tournament, champion_entry_id):
     # same request without a stale lazy-load.
     tournament.champion_entry = champion
     tournament.completed_at = utcnow()
+    action_url = _match_action_url(tournament, source_match) if source_match else ''
 
     # Ranked tournaments settle ELO once, here, when results are final —
     # corrections during play never double-apply.
@@ -681,6 +958,7 @@ def _complete_tournament(tournament, champion_entry_id):
                 'ranked_result',
                 f'{tournament.name} rating: {"+" if total >= 0 else ""}{total}',
                 related_tournament_id=tournament.id,
+                action_url=action_url,
             )
 
     champ_name = champion.display_name() if champion else 'The winner'
@@ -690,7 +968,9 @@ def _complete_tournament(tournament, champion_entry_id):
             'tournament_result',
             f'{champ_name} won {tournament.name}',
             related_tournament_id=tournament.id,
+            action_url=action_url,
         )
+    return True
 
 
 @tournaments_bp.post('/tournaments/<int:tournament_id>/start')
@@ -744,6 +1024,9 @@ def start_tournament(tournament_id):
             db.session.add(TournamentMatch(
                 tournament=tournament, round=total_rounds, position=1,
             ))
+        # Audit events require durable match ids; flush the whole bracket before
+        # automatic byes are marked and propagated.
+        db.session.flush()
         _propagate_bye_wins(tournament)
 
     tournament.status = 'active'
@@ -757,82 +1040,278 @@ def start_tournament(tournament_id):
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
 
+def _score_summary(tournament, match):
+    entry1, entry2 = _match_entries(tournament, match)
+    left = entry1.display_name() if entry1 else 'Entry 1'
+    right = entry2.display_name() if entry2 else 'Entry 2'
+    return f'{left} {match.score1}–{match.score2} {right}'
+
+
+def _notify_score_submission(tournament, match, actor_id):
+    participants = _match_participant_ids(tournament, match)
+    eligible = {
+        user_id for user_id in participants
+        if _eligible_result_confirmer(tournament, match, user_id)
+    }
+    summary = _score_summary(tournament, match)
+    _notify_result_users(
+        tournament,
+        match,
+        eligible,
+        f'{tournament.name}: confirm the submitted score',
+        summary,
+        actor_id=actor_id,
+    )
+    observers = (participants | {tournament.organizer_id}) - eligible
+    _notify_result_users(
+        tournament,
+        match,
+        observers,
+        f'{tournament.name}: score submitted',
+        summary,
+        actor_id=actor_id,
+    )
+
+
+def _notify_score_action(tournament, match, actor_id, action, reason=''):
+    body = _score_summary(tournament, match)
+    if reason:
+        body = f'{body} · {reason}'
+    _notify_result_users(
+        tournament,
+        match,
+        _match_participant_ids(tournament, match) | {tournament.organizer_id},
+        f'{tournament.name}: score {action}',
+        body,
+        actor_id=actor_id,
+    )
+
+
+def _progress_confirmed_result(tournament, match, notify_ready=True):
+    winner_id = match.entry1_id if match.score1 > match.score2 else match.entry2_id
+    winner = next(
+        (entry for entry in tournament.entries if entry.id == winner_id),
+        None,
+    )
+    match.winner_entry_id = winner_id
+    match.winner_entry = winner
+    if tournament.format == 'single_elim':
+        _advance_winner(
+            tournament, match, tournament.total_rounds(),
+            notify_ready=notify_ready,
+        )
+        _propagate_bye_wins(tournament, notify_ready=notify_ready)
+    elif all(candidate.winner_entry_id is not None for candidate in tournament.matches):
+        _complete_tournament(
+            tournament, _top_of_standings(tournament), source_match=match,
+        )
+
+
+def _result_request_context(tournament_id, match_id):
+    tournament, match = _locked_tournament_match(tournament_id, match_id)
+    if not tournament:
+        return None, None, (jsonify({'error': 'tournament_not_found'}), 404)
+    if not match:
+        return tournament, None, (jsonify({'error': 'match_not_found'}), 404)
+    if tournament.status != 'active':
+        return tournament, match, (jsonify({'error': 'tournament_not_active'}), 409)
+    if match.entry1_id is None or match.entry2_id is None:
+        return tournament, match, (jsonify({'error': 'match_not_ready'}), 409)
+    return tournament, match, None
+
+
+def _check_result_version(payload, tournament, match):
+    expected, error = _parse_expected_result_version(payload)
+    if error:
+        return jsonify({'error': error}), 400
+    if expected is not None and expected != int(match.result_version or 0):
+        return _stale_result_response(tournament, match)
+    return None
+
+
 @tournaments_bp.post('/tournaments/<int:tournament_id>/matches/<int:match_id>/score')
 @rate_limit(120, 3600)
 @login_required
 def score_match(tournament_id, match_id):
-    tournament = db.session.get(Tournament, tournament_id)
-    if not tournament:
-        return jsonify({'error': 'tournament_not_found'}), 404
-    if tournament.status != 'active':
-        return jsonify({'error': 'tournament_not_active'}), 409
-    match = next((m for m in tournament.matches if m.id == match_id), None)
-    if not match:
-        return jsonify({'error': 'match_not_found'}), 404
-    if match.entry1_id is None or match.entry2_id is None:
-        return jsonify({'error': 'match_not_ready'}), 409
-
-    entries = {e.id: e for e in tournament.entries}
-    e1, e2 = entries.get(match.entry1_id), entries.get(match.entry2_id)
-    is_participant = any(
-        g.current_user.id in (p.id for p in e.players())
-        for e in (e1, e2) if e
-    )
-    if not is_participant and tournament.organizer_id != g.current_user.id:
+    tournament, match, error = _result_request_context(tournament_id, match_id)
+    if error:
+        return error
+    user_id = g.current_user.id
+    if user_id != tournament.organizer_id \
+            and user_id not in _match_participant_ids(tournament, match):
         return jsonify({'error': 'not_allowed'}), 403
 
-    payload = request.get_json(silent=True) or {}
-    try:
-        score1, score2 = int(payload.get('score1')), int(payload.get('score2'))
-    except (TypeError, ValueError):
+    payload = _result_json_payload()
+    version_error = _check_result_version(payload, tournament, match)
+    if version_error:
+        return version_error
+    score = _parse_score_pair(payload)
+    if not score:
         return jsonify({'error': 'invalid_score'}), 400
-    if not (0 <= score1 <= 99 and 0 <= score2 <= 99) or score1 == score2:
-        return jsonify({'error': 'invalid_score'}), 400
+    state = match.effective_result_state()
+    if state not in ('unreported', 'disputed'):
+        return jsonify({'error': 'result_not_reportable'}), 409
+    if state == 'unreported' and (
+            match.score1 is not None or match.score2 is not None
+            or match.reported_by_id is not None):
+        return jsonify({'error': 'result_not_reportable'}), 409
 
-    total = tournament.total_rounds()
-    previous_winner = match.winner_entry_id
-    new_winner = match.entry1_id if score1 > score2 else match.entry2_id
-    is_semifinal = tournament.format == 'single_elim' and match.round == total - 1
+    now = utcnow()
+    match.score1, match.score2 = score
+    match.winner_entry_id = None
+    match.winner_entry = None
+    match.result_state = 'awaiting_confirmation'
+    match.reported_by_id = user_id
+    match.reported_by = g.current_user
+    match.reported_at = now
+    match.confirmed_by_id = None
+    match.confirmed_by = None
+    match.confirmed_at = None
+    match.disputed_by_id = None
+    match.disputed_by = None
+    match.disputed_at = None
+    match.dispute_reason = ''
+    match.resolution_kind = ''
+    _record_result_action(match, 'reported', actor_id=user_id)
+    _notify_score_submission(tournament, match, user_id)
+    return _commit_result_change(tournament_id, match_id)
 
-    if previous_winner is not None and tournament.format == 'single_elim':
-        # A correction is only safe while the matches it feeds haven't been
-        # played — for a semifinal that's both the final and the 3rd-place match.
-        nxt = next(
-            (m for m in tournament.matches
-             if m.round == match.round + 1 and m.position == match.position // 2),
-            None,
-        )
-        if nxt and nxt.winner_entry_id is not None:
-            return jsonify({'error': 'next_match_played'}), 409
-        if is_semifinal:
-            _, third = _final_and_third(tournament)
-            if third and third.winner_entry_id is not None:
-                return jsonify({'error': 'next_match_played'}), 409
 
-    match.score1, match.score2 = score1, score2
-    match.winner_entry_id = new_winner
-    if tournament.format == 'single_elim':
-        if previous_winner is None or previous_winner != new_winner:
-            _advance_winner(tournament, match, total)
-    elif all(m.winner_entry_id is not None for m in tournament.matches):
-        _complete_tournament(tournament, _top_of_standings(tournament))
+@tournaments_bp.post('/tournaments/<int:tournament_id>/matches/<int:match_id>/confirm')
+@rate_limit(120, 3600)
+@login_required
+def confirm_match_result(tournament_id, match_id):
+    tournament, match, error = _result_request_context(tournament_id, match_id)
+    if error:
+        return error
+    user_id = g.current_user.id
+    if not _eligible_result_confirmer(tournament, match, user_id):
+        return jsonify({'error': 'not_allowed'}), 403
 
-    # Tell the losing side (and organizer) the result landed.
-    loser = e2 if new_winner == match.entry1_id else e1
-    winner = e1 if new_winner == match.entry1_id else e2
-    if loser and winner and tournament.status == 'active':
-        for player in loser.players() + winner.players():
-            if player.id != g.current_user.id:
-                notify(
-                    player.id,
-                    'tournament_score',
-                    f'{tournament.name}: {winner.display_name()} beat '
-                    f'{loser.display_name()} {max(score1, score2)}–{min(score1, score2)}',
-                    related_user_id=g.current_user.id,
-                    related_tournament_id=tournament.id,
-                )
-    db.session.commit()
-    return jsonify(_detail_payload(tournament, g.current_user.id))
+    payload = _result_json_payload()
+    version_error = _check_result_version(payload, tournament, match)
+    if version_error:
+        return version_error
+    if match.effective_result_state() != 'awaiting_confirmation':
+        return jsonify({'error': 'result_not_awaiting_confirmation'}), 409
+    if not _parse_score_pair({}, stored_match=match):
+        return jsonify({'error': 'score_missing'}), 409
+
+    now = utcnow()
+    match.result_state = 'confirmed'
+    match.confirmed_by_id = user_id
+    match.confirmed_by = g.current_user
+    match.confirmed_at = now
+    match.resolution_kind = 'participant_confirmation'
+    _record_result_action(match, 'confirmed', actor_id=user_id)
+    _progress_confirmed_result(tournament, match)
+    _notify_score_action(tournament, match, user_id, 'confirmed')
+    return _commit_result_change(tournament_id, match_id)
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/matches/<int:match_id>/dispute')
+@rate_limit(120, 3600)
+@login_required
+def dispute_match_result(tournament_id, match_id):
+    tournament, match, error = _result_request_context(tournament_id, match_id)
+    if error:
+        return error
+    user_id = g.current_user.id
+    if not _eligible_result_confirmer(tournament, match, user_id):
+        return jsonify({'error': 'not_allowed'}), 403
+
+    payload = _result_json_payload()
+    version_error = _check_result_version(payload, tournament, match)
+    if version_error:
+        return version_error
+    if match.effective_result_state() != 'awaiting_confirmation':
+        return jsonify({'error': 'result_not_awaiting_confirmation'}), 409
+    reason = str(payload.get('reason') or payload.get('dispute_reason') or '').strip()[:500]
+    if not reason:
+        return jsonify({'error': 'reason_required'}), 400
+
+    match.result_state = 'disputed'
+    match.winner_entry_id = None
+    match.winner_entry = None
+    match.disputed_by_id = user_id
+    match.disputed_by = g.current_user
+    match.disputed_at = utcnow()
+    match.dispute_reason = reason
+    match.resolution_kind = ''
+    _record_result_action(
+        match, 'disputed', actor_id=user_id, reason=reason,
+    )
+    _notify_score_action(tournament, match, user_id, 'disputed', reason)
+    return _commit_result_change(tournament_id, match_id)
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/matches/<int:match_id>/resolve')
+@rate_limit(120, 3600)
+@login_required
+def resolve_match_result(tournament_id, match_id):
+    tournament, match, error = _result_request_context(tournament_id, match_id)
+    if error:
+        return error
+    if tournament.organizer_id != g.current_user.id:
+        return jsonify({'error': 'not_organizer'}), 403
+
+    payload = _result_json_payload()
+    version_error = _check_result_version(payload, tournament, match)
+    if version_error:
+        return version_error
+    reason = str(payload.get('reason') or payload.get('resolution_reason') or '').strip()[:500]
+    if not reason:
+        return jsonify({'error': 'reason_required'}), 400
+    state = match.effective_result_state()
+    if state not in ('awaiting_confirmation', 'disputed', 'confirmed'):
+        return jsonify({'error': 'result_not_resolvable'}), 409
+    correction = state == 'confirmed'
+    if correction and not _confirmed_correction_is_safe(tournament, match):
+        return jsonify({'error': 'next_match_played'}), 409
+    downstream_before = {
+        downstream.id: (downstream.entry1_id, downstream.entry2_id)
+        for downstream in _result_downstream_matches(tournament, match)
+    } if correction else {}
+    score = _parse_score_pair(payload, stored_match=match)
+    if not score:
+        status = 400 if 'score1' in payload or 'score2' in payload else 409
+        return jsonify({'error': 'invalid_score' if status == 400 else 'score_missing'}), status
+
+    user_id = g.current_user.id
+    match.score1, match.score2 = score
+    match.result_state = 'confirmed'
+    match.confirmed_by_id = user_id
+    match.confirmed_by = g.current_user
+    match.confirmed_at = utcnow()
+    match.resolution_kind = 'organizer_correction' if correction else 'organizer_resolution'
+    _record_result_action(
+        match,
+        'corrected' if correction else 'resolved',
+        actor_id=user_id,
+        reason=reason,
+    )
+    _progress_confirmed_result(
+        tournament, match, notify_ready=not correction,
+    )
+    if correction:
+        for downstream in _result_downstream_matches(tournament, match):
+            before = downstream_before.get(downstream.id)
+            after = (downstream.entry1_id, downstream.entry2_id)
+            if before == after or not all(after):
+                continue
+            label = '3rd-place match' if (
+                downstream.round == tournament.total_rounds()
+                and downstream.position == 1
+            ) else _round_label(downstream.round, tournament.total_rounds())
+            _notify_matchup(tournament, downstream, label)
+    _notify_score_action(
+        tournament,
+        match,
+        user_id,
+        'corrected' if correction else 'resolved',
+        reason,
+    )
+    return _commit_result_change(tournament_id, match_id)
 
 
 def _top_of_standings(tournament):

@@ -729,7 +729,10 @@ def list_notifications():
 @rate_limit(60, 60)
 @login_required
 def mark_notifications_read():
-    Notification.query.filter_by(user_id=g.current_user.id, read=False).update({'read': True})
+    Notification.query.filter_by(user_id=g.current_user.id, read=False).update({
+        'read': True,
+        'unread_dedupe_key': None,
+    })
     db.session.commit()
     return jsonify({'ok': True})
 

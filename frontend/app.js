@@ -10,48 +10,171 @@
     presence: null,
     unreadMessages: 0,
     pendingRequests: 0,
+    communityRoomUnread: 0,
     gamesToConfirm: 0,
     lastNotifId: null,
-    tab: 'courts',
+    tab: 'play',
     playSeg: 'games',
     chatSeg: 'chats',
     nearbySkill: '',
     map: null,
     markers: null,
-    mapFilter: 'all',
+    courtFilters: {
+      saved: false,
+      players: false,
+      games: false,
+      indoor: false,
+      lighted: false,
+      nets: false,
+      restrooms: false,
+      water: false,
+    },
     listSort: 'distance',
+    courtSheetSnap: 'peek',
+    courtListLimit: 20,
+    courtListSignature: '',
+    courtListExpandedScrollTop: 0,
+    courtListPlaces: [],
+    courtListSavedOnly: false,
+    selectedCourtId: null,
+    courtMarkers: new Map(),
+    courtFetchSeq: 0,
+    suppressCourtMoveFetch: false,
+    courtMoveSuppressSeq: 0,
     favIds: null, // Set of favorited court ids, loaded lazily for map stars
     userDot: null,
     geoWatchId: null,
     lastAutoCheckAt: 0,
     userLoc: null,
     areaLoc: null,
+    areaLabel: null,
+    snapshotAreaProvisional: false,
     courtsInView: [],
     activeThreadUserId: null,
     threadPollTimer: null,
     mePollTimer: null,
+    playRenderSeq: 0,
+    chatRenderSeq: 0,
+    connectionState: navigator.onLine ? 'online' : 'offline',
+    playGamesCache: null,
+    chatFriendsCache: null,
   };
+  const pageNotifications = new Set();
 
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 
+  // Game plans are deliberately session-only: enough continuity for an
+  // accidental close/reload, without leaving social plans on a shared device.
+  const GAME_DRAFT_VERSION = 1;
+  const GAME_DRAFT_TTL = 24 * 60 * 60 * 1000;
+  const gameDraftKey = (userId = state.me && state.me.id) => userId ? `pp_game_draft_v1:${userId}` : null;
+  function newGameAttemptId() {
+    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    if (globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') globalThis.crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+  }
+  function readGameDraft() {
+    const key = gameDraftKey();
+    if (!key) return null;
+    try {
+      const raw = JSON.parse(sessionStorage.getItem(key) || 'null');
+      if (!raw || raw.v !== GAME_DRAFT_VERSION || !Number.isFinite(raw.updatedAt)
+          || raw.updatedAt > Date.now() + 60000 || Date.now() - raw.updatedAt > GAME_DRAFT_TTL) {
+        sessionStorage.removeItem(key);
+        return null;
+      }
+      const allowed = (value, values, fallback) => values.includes(value) ? value : fallback;
+      const id = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
+      return {
+        v: GAME_DRAFT_VERSION,
+        updatedAt: raw.updatedAt,
+        status: raw.status === 'submitting' ? 'submitting' : 'editing',
+        submitStartedAt: Number.isFinite(raw.submitStartedAt) ? raw.submitStartedAt : null,
+        clientAttemptId: typeof raw.clientAttemptId === 'string' && /^[a-zA-Z0-9_-]{16,80}$/.test(raw.clientAttemptId)
+          ? raw.clientAttemptId : null,
+        mode: allowed(raw.mode, ['now', 'later'], 'later'),
+        courtId: id(raw.courtId),
+        scheduledAt: typeof raw.scheduledAt === 'string' ? raw.scheduledAt : null,
+        timeKind: allowed(raw.timeKind, ['preset', 'custom'], 'preset'),
+        visibility: allowed(raw.visibility, ['open', 'friends', 'private'], 'open'),
+        inviteUserIds: [...new Set(Array.isArray(raw.inviteUserIds) ? raw.inviteUserIds.map(id).filter(Boolean) : [])].slice(0, 20),
+        gameType: allowed(raw.gameType, ['casual', 'ranked'], 'casual'),
+        maxPlayers: [2, 4, 6, 8].includes(Number(raw.maxPlayers)) ? Number(raw.maxPlayers) : 4,
+        preferredLevel: allowed(raw.preferredLevel, ['any', 'beginner', 'intermediate', 'advanced', 'pro'], 'any'),
+        clubId: id(raw.clubId),
+        recurrence: allowed(raw.recurrence, ['none', 'weekly'], 'none'),
+        notes: String(raw.notes || '').slice(0, 200),
+        advancedOpen: !!raw.advancedOpen,
+      };
+    } catch {
+      try { sessionStorage.removeItem(key); } catch { /* storage unavailable */ }
+      return null;
+    }
+  }
+  function writeGameDraft(draft) {
+    const key = gameDraftKey();
+    if (!key) return;
+    try { sessionStorage.setItem(key, JSON.stringify({ ...draft, v: GAME_DRAFT_VERSION, updatedAt: Date.now() })); } catch { /* planner still works */ }
+  }
+  function clearGameDraft(userId = state.me && state.me.id) {
+    const key = gameDraftKey(userId);
+    if (!key) return;
+    try { sessionStorage.removeItem(key); } catch { /* storage unavailable */ }
+  }
+
   // ---------- API ----------
   async function api(path, options = {}) {
-    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-    if (state.token) headers.Authorization = `Bearer ${state.token}`;
-    const res = await fetch(`/api${path}`, { ...options, headers });
+    const { timeoutMs = 15000, ...requestOptions } = options;
+    const headers = { 'Content-Type': 'application/json', ...(requestOptions.headers || {}) };
+    const requestToken = state.token;
+    if (requestToken) headers.Authorization = `Bearer ${requestToken}`;
+    const assertCurrentSession = () => {
+      if (!requestToken || state.token === requestToken) return;
+      const stale = new Error('Ignored a response from an earlier session');
+      stale.code = 'stale_session';
+      stale.isStaleSession = true;
+      throw stale;
+    };
+    const controller = requestOptions.signal ? null : new AbortController();
+    const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    let res;
+    try {
+      res = await fetch(`/api${path}`, { ...requestOptions, headers, signal: requestOptions.signal || controller.signal });
+      setConnectionState('online');
+    } catch (cause) {
+      assertCurrentSession();
+      const timedOut = cause && cause.name === 'AbortError';
+      if (!timedOut) setConnectionState('offline');
+      const err = new Error(timedOut ? 'That took too long — try again.' : navigator.onLine
+        ? 'The connection is taking a break — try again.'
+        : "You're offline — reconnect to continue.");
+      err.isNetworkError = true;
+      err.cause = cause;
+      throw err;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+    assertCurrentSession();
     let data = null;
     try { data = await res.json(); } catch { /* empty body */ }
-    if (res.status === 401 && state.token && !path.startsWith('/auth')) {
+    if (res.status === 401 && requestToken && state.token === requestToken && !path.startsWith('/auth')) {
       logout();
       throw new Error('Session expired — please log in again');
     }
     if (!res.ok) {
       const code = (data && data.error) || `error_${res.status}`;
-      throw new Error(humanError(code));
+      const err = new Error(humanError(code));
+      err.code = code;
+      err.status = res.status;
+      err.data = data;
+      throw err;
     }
+    assertCurrentSession();
     return data;
   }
 
@@ -67,6 +190,25 @@
     request_already_sent: 'Request already sent.',
     nothing_to_confirm: 'This score was already handled.',
     nothing_to_dispute: 'This score was already handled.',
+    stale_result: 'This result changed on another device. Review the latest version and try again.',
+    reason_required: 'Add a short reason so everyone understands the decision.',
+    invalid_result_version: 'This result needs a refresh before it can be changed.',
+    result_not_reportable: 'This result is already being reviewed or finalized.',
+    result_not_awaiting_confirmation: 'This score is no longer waiting for confirmation.',
+    unresolved_results: 'Confirm, resolve, or void the submitted results before continuing.',
+    next_match_played: 'This result cannot change because the next match has already been played.',
+    opponent_confirmation_required: 'Someone from the other side must confirm this score.',
+    not_allowed: 'You do not have permission to change this result.',
+    not_organizer: 'Only the organizer can make that decision.',
+    players_only: 'Only players in this match can report its score.',
+    round_closed: 'This round is already closed.',
+    tournament_not_active: 'This tournament is no longer accepting match results.',
+    nothing_to_resolve: 'This result no longer needs an organizer decision.',
+    invalid_score: 'Enter two different scores from 0 to 99.',
+    invalid_scores: 'Enter two different scores from 0 to 99.',
+    scores_required: 'Enter both scores.',
+    score_missing: 'The submitted score is missing. Refresh and try again.',
+    match_not_ready: 'This match is not ready for a score yet.',
     game_not_open: 'This game is no longer open.',
     game_already_started: 'Too late — the game already has players.',
     already_joined: "You're already in this game.",
@@ -80,6 +222,218 @@
     el.classList.remove('hidden');
     clearTimeout(toast._t);
     toast._t = setTimeout(() => el.classList.add('hidden'), 2600);
+  }
+
+  // Shared, persistent validation and pending state for modal forms. Errors stay
+  // beside the action until the invalid control is edited, and every async
+  // submission gets the same double-submit guard and screen-reader busy state.
+  let modalFormErrorSeq = 0;
+  function bindModalFormUX(modal, submitSelector, { draftKey = null } = {}) {
+    const submitButton = typeof submitSelector === 'string'
+      ? modal.querySelector(submitSelector) : submitSelector;
+    if (!submitButton) throw new Error('Modal form submit button not found');
+    const form = submitButton.closest('form');
+
+    // Long mobile forms keep a session-only, non-sensitive draft. Hidden
+    // selector IDs and passwords are intentionally excluded: after restoring,
+    // people review location/chip choices instead of submitting a stale value.
+    const draftStorageKey = draftKey && state.me
+      ? `pp_form_draft_v1:${state.me.id}:${draftKey}` : null;
+    const draftControls = () => form ? [...form.querySelectorAll('input[id], textarea[id], select[id]')]
+      .filter((control) => !['password', 'file', 'hidden', 'submit', 'button'].includes(control.type)) : [];
+    const collectDraftFields = () => Object.fromEntries(draftControls().map((control) => [
+      control.id,
+      control.type === 'checkbox' || control.type === 'radio' ? control.checked : control.value,
+    ]));
+    const applyDraftFields = (fields) => {
+      draftControls().forEach((control) => {
+        if (!Object.prototype.hasOwnProperty.call(fields, control.id)) return;
+        if (control.type === 'checkbox' || control.type === 'radio') control.checked = !!fields[control.id];
+        else control.value = String(fields[control.id] ?? '');
+      });
+    };
+    const initialDraftFields = collectDraftFields();
+    let draftRecovery = null;
+    let draftTimer = null;
+    let draftDisabled = false;
+    const clearDraft = ({ disable = false } = {}) => {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+      if (disable) draftDisabled = true;
+      if (draftStorageKey) {
+        try { sessionStorage.removeItem(draftStorageKey); } catch { /* storage unavailable */ }
+      }
+      draftRecovery?.remove();
+      draftRecovery = null;
+    };
+    const writeDraftNow = () => {
+      draftTimer = null;
+      if (draftDisabled || !draftStorageKey || !form) return;
+      const fields = collectDraftFields();
+      try {
+        if (JSON.stringify(fields) === JSON.stringify(initialDraftFields)) sessionStorage.removeItem(draftStorageKey);
+        else sessionStorage.setItem(draftStorageKey, JSON.stringify({ v: 1, updatedAt: Date.now(), fields }));
+      } catch { /* private mode/storage pressure must never block a form */ }
+    };
+    const persistDraft = () => {
+      if (draftDisabled || !draftStorageKey || !form) return;
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(writeDraftNow, 120);
+    };
+    if (draftStorageKey && form) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(draftStorageKey) || 'null');
+        if (saved && saved.v === 1 && saved.fields && typeof saved.fields === 'object'
+            && Number.isFinite(saved.updatedAt) && saved.updatedAt <= Date.now() + 60000
+            && Date.now() - saved.updatedAt < 24 * 60 * 60 * 1000) {
+          applyDraftFields(saved.fields);
+          draftRecovery = document.createElement('div');
+          draftRecovery.className = 'form-draft-recovery';
+          draftRecovery.setAttribute('role', 'status');
+          draftRecovery.innerHTML = '<span><b>Draft restored.</b> Review choices, then continue.</span><button type="button" class="btn btn-secondary btn-sm">Start over</button>';
+          form.prepend(draftRecovery);
+          draftRecovery.querySelector('button').addEventListener('click', () => {
+            applyDraftFields(initialDraftFields);
+            clearDraft();
+            draftControls().forEach((control) => {
+              control.dispatchEvent(new Event('input', { bubbles: true }));
+              control.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+          });
+          queueMicrotask(() => draftControls().forEach((control) => {
+            control.dispatchEvent(new Event('input', { bubbles: true }));
+            control.dispatchEvent(new Event('change', { bubbles: true }));
+          }));
+        } else if (saved) {
+          sessionStorage.removeItem(draftStorageKey);
+        }
+      } catch {
+        try { sessionStorage.removeItem(draftStorageKey); } catch { /* storage unavailable */ }
+      }
+      form.addEventListener('input', persistDraft);
+      form.addEventListener('change', persistDraft);
+      modal._cleanupFns?.push(() => {
+        if (draftTimer != null) {
+          clearTimeout(draftTimer);
+          writeDraftNow();
+        }
+      });
+    }
+
+    const error = document.createElement('p');
+    error.id = `modal-form-error-${++modalFormErrorSeq}`;
+    error.className = 'form-error modal-form-error hidden';
+    error.dataset.modalFormError = 'true';
+    error.setAttribute('role', 'alert');
+    error.setAttribute('aria-live', 'assertive');
+    error.tabIndex = -1;
+    submitButton.insertAdjacentElement('beforebegin', error);
+
+    const invalidTargets = new Set();
+    const clearTarget = (target) => {
+      if (!target || target.dataset.modalFormInvalid !== error.id) return;
+      target.removeAttribute('aria-invalid');
+      delete target.dataset.modalFormInvalid;
+      const describedBy = (target.getAttribute('aria-describedby') || '')
+        .split(/\s+/).filter((id) => id && id !== error.id);
+      if (describedBy.length) target.setAttribute('aria-describedby', describedBy.join(' '));
+      else target.removeAttribute('aria-describedby');
+      invalidTargets.delete(target);
+    };
+    const clearError = () => {
+      [...invalidTargets].forEach(clearTarget);
+      error.textContent = '';
+      error.classList.add('hidden');
+    };
+    const showError = (message, target = null) => {
+      clearError();
+      const field = target?.closest('.form-field');
+      if (field) field.appendChild(error);
+      else submitButton.insertAdjacentElement('beforebegin', error);
+      error.textContent = message;
+      error.classList.remove('hidden');
+      if (target) {
+        target.dataset.modalFormInvalid = error.id;
+        target.setAttribute('aria-invalid', 'true');
+        const describedBy = new Set((target.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean));
+        describedBy.add(error.id);
+        target.setAttribute('aria-describedby', [...describedBy].join(' '));
+        invalidTargets.add(target);
+        target.scrollIntoView({ block: 'center', behavior: 'auto' });
+        target.focus({ preventScroll: true });
+      } else {
+        error.scrollIntoView({ block: 'center', behavior: 'auto' });
+        error.focus({ preventScroll: true });
+      }
+    };
+    const clearEditedError = (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || target.dataset.modalFormInvalid !== error.id) return;
+      clearTarget(target);
+      error.textContent = '';
+      error.classList.add('hidden');
+    };
+    modal.addEventListener('input', clearEditedError);
+    modal.addEventListener('change', clearEditedError);
+
+    const startSubmitting = (pendingLabel, activeButton = submitButton) => {
+      const actionButton = activeButton || submitButton;
+      if (actionButton.disabled || actionButton.dataset.submitting === 'true') return null;
+      clearError();
+      const busyRegion = form || modal.querySelector('.modal');
+      const originalLabel = actionButton.textContent;
+      actionButton.dataset.submitting = 'true';
+      actionButton.disabled = true;
+      actionButton.setAttribute('aria-busy', 'true');
+      actionButton.textContent = pendingLabel;
+      busyRegion?.setAttribute('aria-busy', 'true');
+      let finished = false;
+      return () => {
+        if (finished) return;
+        finished = true;
+        delete actionButton.dataset.submitting;
+        actionButton.disabled = false;
+        actionButton.removeAttribute('aria-busy');
+        actionButton.textContent = originalLabel;
+        busyRegion?.removeAttribute('aria-busy');
+      };
+    };
+
+    return { clearDraft, clearError, showError, startSubmitting };
+  }
+
+  // Keep usable content on-screen during a refresh. First loads get an
+  // announced skeleton; later failures retain the last successful view with a
+  // persistent retry rather than replacing everything with an error card.
+  const VIEW_FRESH_MS = 20 * 1000;
+  function viewIsFresh(el, key) {
+    return el.dataset.viewKey === key
+      && Date.now() - Number(el.dataset.viewReadyAt || 0) < VIEW_FRESH_MS;
+  }
+  function beginViewRender(el, key, rows) {
+    const hasUsableContent = el.dataset.viewKey === key && el.childElementCount > 0;
+    el.setAttribute('aria-busy', 'true');
+    el.classList.toggle('view-refreshing', hasUsableContent);
+    if (!hasUsableContent) el.innerHTML = skeletonHtml(rows);
+    return hasUsableContent;
+  }
+  function commitViewRender(el, stage, key) {
+    el.replaceChildren(...stage.childNodes);
+    el.dataset.viewKey = key;
+    el.dataset.viewReadyAt = String(Date.now());
+    el.setAttribute('aria-busy', 'false');
+    el.classList.remove('view-refreshing');
+  }
+  function retainViewAfterError(el, message, retryFn) {
+    el.setAttribute('aria-busy', 'false');
+    el.classList.remove('view-refreshing');
+    el.querySelector('.view-refresh-note')?.remove();
+    const note = document.createElement('div');
+    note.className = 'view-refresh-note';
+    note.setAttribute('role', 'status');
+    note.innerHTML = `<span>${esc(message || "Couldn't refresh — showing the last update.")}</span><button type="button">Retry</button>`;
+    note.querySelector('button').addEventListener('click', retryFn);
+    el.prepend(note);
   }
 
   // ---------- Format helpers ----------
@@ -96,13 +450,16 @@
           <div class="sk-line sk-shimmer" style="width:80%"></div>
         </div>
       </div>`;
-    return card.repeat(rows);
+    return `<div class="loading-state" role="status" aria-live="polite">
+      <span class="sr-only">Loading…</span>
+      <div aria-hidden="true">${card.repeat(rows)}</div>
+    </div>`;
   }
 
   // Inline error with a Retry button wired to re-run the view.
   function renderError(el, message, retryFn) {
     el.innerHTML = `
-      <div class="empty-state">
+      <div class="empty-state" role="alert">
         <span class="big">⚠️</span>
         ${esc(message || 'Something went wrong.')}
         <br><button class="btn btn-secondary" data-retry>Try again</button>
@@ -115,16 +472,66 @@
     return `<div class="empty-state"><span class="big">${emoji}</span>${esc(title)}${sub ? `<br>${esc(sub)}` : ''}</div>`;
   }
 
-  function avatarHtml(user, cls = '') {
+  function avatarHtml(user, cls = '', tag = 'div') {
+    tag = tag === 'span' ? 'span' : 'div';
     const bg = esc(user.avatar_color || '#2f9e44');
     const label = esc(initials(user.display_name));
     if (user.avatar_url) {
       // Photo with graceful fallback to the colored-initials avatar on load error.
-      return `<div class="avatar ${cls}" style="background:${bg}">`
+      return `<${tag} class="avatar ${cls}" style="background:${bg}">`
         + `<img src="${esc(user.avatar_url)}" alt="" loading="lazy" `
-        + `onerror="this.remove()" />${label}</div>`;
+        + `onerror="this.remove()" />${label}</${tag}>`;
     }
-    return `<div class="avatar ${cls}" style="background:${bg}">${label}</div>`;
+    return `<${tag} class="avatar ${cls}" style="background:${bg}">${label}</${tag}>`;
+  }
+
+  // Make existing card-style rows work for keyboards and switch controls
+  // without changing their visual layout. Native controls remain untouched.
+  function makePressable(el, activate, label) {
+    if (!el) return;
+    if (['BUTTON', 'A'].includes(el.tagName)) {
+      el.addEventListener('click', activate);
+      return;
+    }
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    if (label) el.setAttribute('aria-label', label);
+    el.addEventListener('click', activate);
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target !== el) return;
+      e.preventDefault();
+      activate(e);
+    });
+  }
+
+  // Complete the keyboard half of every declared ARIA tablist. Existing click
+  // handlers continue to own the feature state; arrows/Home/End simply move
+  // and activate the roving tab.
+  function setupTablistKeyboard(root) {
+    if (!root || root.dataset.keyboardTabs === '1') return;
+    root.dataset.keyboardTabs = '1';
+    const tabs = () => [...root.querySelectorAll('[role="tab"]')].filter((tab) => !tab.disabled);
+    const sync = () => tabs().forEach((tab) => {
+      const selected = tab.getAttribute('aria-selected') === 'true';
+      tab.tabIndex = selected ? 0 : -1;
+      const panelId = tab.getAttribute('aria-controls');
+      if (selected && panelId && tab.id) document.getElementById(panelId)?.setAttribute('aria-labelledby', tab.id);
+    });
+    root.addEventListener('click', () => queueMicrotask(sync));
+    root.addEventListener('keydown', (e) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+      const items = tabs();
+      const current = items.indexOf(e.target.closest('[role="tab"]'));
+      if (current < 0 || !items.length) return;
+      e.preventDefault();
+      const backward = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
+        : (current + (backward ? -1 : 1) + items.length) % items.length;
+      items[next].focus();
+      items[next].click();
+    });
+    sync();
   }
   function fmtDateTime(isoStr) {
     if (!isoStr) return '';
@@ -206,6 +613,8 @@
     $('#auth-toggle').addEventListener('click', () => {
       authMode = authMode === 'login' ? 'register' : 'login';
       $('#auth-name').classList.toggle('hidden', authMode === 'login');
+      $('#auth-name').required = authMode === 'register';
+      $('#auth-password').autocomplete = authMode === 'register' ? 'new-password' : 'current-password';
       $('#auth-submit').textContent = authMode === 'login' ? 'Log in' : 'Create account';
       $('#auth-toggle').textContent = authMode === 'login'
         ? 'New here? Create an account' : 'Have an account? Log in';
@@ -230,35 +639,193 @@
         localStorage.setItem('pp_token', data.token);
         applyMe(data);
         showMain();
-        openDeepLink();
+        if (!rebuildReloadedMatchRouteIfNeeded() && !openDeepLink()) maybeOnboardHomeArea();
         handleInviteRef();
         syncPushSubscription();
       } catch (err) {
         errEl.textContent = err.message;
         errEl.classList.remove('hidden');
+        errEl.focus();
       } finally {
         submitBtn.disabled = false;
       }
     });
   }
 
+  function purgeAccountChatDrafts(accountId) {
+    if (!accountId) return;
+    try {
+      const marker = `:${accountId}:`;
+      const keys = [];
+      for (let index = 0; index < sessionStorage.length; index += 1) {
+        const key = sessionStorage.key(index);
+        if (key?.startsWith('pp_chat_draft_v') && key.includes(marker)) keys.push(key);
+      }
+      keys.forEach((key) => sessionStorage.removeItem(key));
+    } catch { /* storage unavailable */ }
+  }
+
+  function resetPrivateUiForLogout(accountId) {
+    purgeAccountChatDrafts(accountId);
+    purgeAccountChatOutbox(accountId);
+    state.playRenderSeq += 1;
+    state.chatRenderSeq += 1;
+    profileRenderGeneration += 1;
+    profileDashboardCache = { userId: null, promise: null, data: null, readyAt: 0 };
+    state.playGamesCache = null;
+    state.chatFriendsCache = null;
+    state.activeThreadUserId = null;
+    state.lastNotifId = null;
+    state.unreadMessages = 0;
+    state.pendingRequests = 0;
+    state.communityRoomUnread = 0;
+    state.gamesToConfirm = 0;
+    state.activeGame = null;
+    state.presence = null;
+    state.favIds = null;
+    state.lastAutoCheckAt = 0;
+    state.userLoc = null;
+    state.areaLoc = null;
+    state.areaLabel = null;
+    state.snapshotAreaProvisional = false;
+    state.courtsInView = [];
+    state.selectedCourtId = null;
+    state.courtMarkers.clear();
+    state.courtListSignature = '';
+    state.courtListExpandedScrollTop = 0;
+    state.courtListLimit = 20;
+    state.courtListPlaces = [];
+    state.courtListSavedOnly = false;
+    state.listSort = 'distance';
+    Object.keys(state.courtFilters).forEach((key) => { state.courtFilters[key] = false; });
+    state.courtFetchSeq += 1;
+    state.nearbySkill = '';
+    state.searchQ = '';
+    state.tab = 'play';
+    state.playSeg = 'games';
+    state.chatSeg = 'chats';
+
+    if (state.userDot && state.map) state.map.removeLayer(state.userDot);
+    state.userDot = null;
+    state.markers?.clearLayers?.();
+
+    clearTimeout(reusableOverlayTimer);
+    reusableOverlayTimer = null;
+    reusableOverlayEntry = null;
+    pendingReusableTraversal = null;
+    pendingDeepMatchRebuild = null;
+    suppressNativeHashRoute = null;
+    adoptOverlayEntry = null;
+    activeRoutedOverlayLoad = null;
+    routedOverlayLoadSeq += 1;
+    overlayHistoryRevision += 1;
+    dismissAllRequested = false;
+    dismissAllCallbacks = [];
+    while (overlayStack.length) {
+      const entry = overlayStack.pop();
+      destroyModal(entry.el, { restoreFocus: false });
+    }
+    syncModalStack();
+    try {
+      history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl());
+    } catch { /* history can be unavailable */ }
+
+    ['#play-content', '#chat-content', '#profile-content'].forEach((selector) => {
+      const panel = $(selector);
+      if (!panel) return;
+      panel.replaceChildren();
+      delete panel.dataset.viewKey;
+      delete panel.dataset.viewReadyAt;
+      panel.setAttribute('aria-busy', 'false');
+      panel.classList.remove('view-refreshing');
+    });
+    $('#court-preview')?.replaceChildren();
+    $('#court-preview')?.classList.add('hidden');
+    $('#court-list-items')?.replaceChildren();
+    const courtSearch = $('#court-search');
+    if (courtSearch) courtSearch.value = '';
+    hideSearchSuggest();
+    syncSearchClear();
+    syncCourtFilterControls();
+    const banner = $('#active-game-banner');
+    if (banner) { banner.replaceChildren(); banner.classList.add('hidden'); }
+    document.querySelectorAll('#play-segments button').forEach((button) => {
+      const active = button.dataset.seg === 'games';
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+    });
+    document.querySelectorAll('#chat-segments button').forEach((button) => {
+      const active = button.dataset.seg === 'chats';
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+    });
+  }
+
   function logout() {
+    const accountId = state.me && state.me.id;
+    revokePushSubscription(state.token);
+    clearGameDraft(accountId);
+    resetPrivateUiForLogout(accountId);
+    stopLocationWatch();
     state.token = null;
     state.me = null;
     localStorage.removeItem('pp_token');
+    localStorage.removeItem('pp_me_snapshot_v1');
     clearInterval(state.mePollTimer);
     clearInterval(state.threadPollTimer);
+    state.mePollTimer = null;
+    state.threadPollTimer = null;
     if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => { /* fine */ });
+    $('#boot-screen')?.classList.add('hidden');
     $('#main-screen').classList.add('hidden');
     $('#auth-screen').classList.remove('hidden');
+    $('#auth-email').value = '';
+    $('#auth-password').value = '';
+    $('#auth-name').value = '';
+    $('#auth-error').classList.add('hidden');
   }
 
-  function applyMe(data) {
+  function tokenHint() {
+    return state.token ? state.token.slice(-16) : '';
+  }
+
+  function saveMeSnapshot(data) {
+    if (!state.token || !data || !data.user) return;
+    try {
+      localStorage.setItem('pp_me_snapshot_v1', JSON.stringify({
+        v: 1,
+        tokenHint: tokenHint(),
+        savedAt: Date.now(),
+        data,
+      }));
+    } catch { /* private mode/storage pressure must never block the app */ }
+  }
+
+  function readMeSnapshot() {
+    try {
+      const snapshot = JSON.parse(localStorage.getItem('pp_me_snapshot_v1') || 'null');
+      if (!snapshot || snapshot.v !== 1 || snapshot.tokenHint !== tokenHint()
+          || !snapshot.data || !snapshot.data.user
+          || Date.now() - Number(snapshot.savedAt || 0) > 7 * 86400000) return null;
+      return snapshot;
+    } catch { return null; }
+  }
+
+  function applyMe(data, {
+    persist = true,
+    provisional = false,
+    reconcileSnapshot = false,
+  } = {}) {
+    const hadProvisionalArea = state.snapshotAreaProvisional;
+    const previousArea = state.areaLoc ? [...state.areaLoc] : null;
     state.me = data.user;
     // Catalog of muteable kinds rides alongside the user for the settings UI.
     if (data.muteable_notifications) state.me.muteable_notifications = data.muteable_notifications;
     state.presence = data.presence;
     state.unreadMessages = data.unread_messages || 0;
+    if (data.community_room_unread != null) {
+      state.communityRoomUnread = Number(data.community_room_unread) || 0;
+    }
     state.pendingRequests = data.pending_friend_requests || 0;
     state.gamesToConfirm = data.games_to_confirm || 0;
 
@@ -274,10 +841,15 @@
         if (!coveredByBanner) toast(`🔔 ${latest.title}`);
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
           try {
-            new Notification('Third Shot', { body: latest.title, icon: '/icon-512.png', tag: `pp-${latest.id}` });
+            const notification = new Notification('Third Shot', {
+              body: latest.title, icon: '/icon-512.png', tag: `pp-${latest.id}`,
+            });
+            pageNotifications.add(notification);
+            notification.addEventListener('close', () => pageNotifications.delete(notification), { once: true });
           } catch { /* not supported */ }
         }
-        if (state.tab === 'play') renderPlay();
+        // Snapshot-first boot already has a fresh initial feed in flight.
+        if (state.tab === 'play' && !reconcileSnapshot) renderPlay();
       }
       state.lastNotifId = latest.id;
     } else if (state.lastNotifId === null) {
@@ -287,6 +859,37 @@
     renderBadges();
     renderPresenceBanner();
     renderActiveGameBanner();
+    let areaChanged = false;
+    if (provisional && !state.userLoc) {
+      state.snapshotAreaProvisional = true;
+      state.areaLoc = state.me.home_lat != null
+        ? [state.me.home_lat, state.me.home_lng] : null;
+    } else if (reconcileSnapshot && hadProvisionalArea && !state.userLoc) {
+      const liveArea = state.me.home_lat != null
+        ? [state.me.home_lat, state.me.home_lng] : null;
+      areaChanged = JSON.stringify(previousArea) !== JSON.stringify(liveArea);
+      state.areaLoc = liveArea;
+      state.snapshotAreaProvisional = false;
+    } else if (state.me.home_lat != null && !state.areaLoc && !state.userLoc) {
+      state.areaLoc = [state.me.home_lat, state.me.home_lng];
+    }
+    updatePlayHeader();
+    if (reconcileSnapshot) {
+      if (areaChanged) {
+        state.playGamesCache = null;
+        state.chatFriendsCache = null;
+        if (state.map && state.areaLoc) {
+          moveCourtMapWithoutRefresh(() => state.map.setView(state.areaLoc, 12, { animate: false }));
+        }
+        if (state.tab === 'courts' && state.map) {
+          beginCourtContextRefresh('Updating courts for your current home area…');
+          fetchCourtsInView({ surfaceError: true });
+        } else if (state.tab === 'play') renderPlay();
+        else if (state.tab === 'chat') renderChat();
+      }
+      if (state.tab === 'profile') renderProfile({ reuseDashboard: true });
+    }
+    if (persist) saveMeSnapshot(data);
   }
 
   function dismissedInvites() {
@@ -348,12 +951,15 @@
 
     el.className = `active-game-banner state-${game.banner_state}`;
     el.innerHTML = `
-      ${stateCfg.icon.startsWith('<') ? stateCfg.icon : `<span style="font-size:17px">${stateCfg.icon}</span>`}
-      <div class="agb-main">
-        <div class="agb-title">${stateCfg.title}</div>
-        <div class="agb-sub">${stateCfg.sub}</div>
-      </div>
-      ${game.banner_state === 'invited' ? '<span class="agb-dismiss" id="agb-dismiss">✕</span>' : '<span class="agb-chev">›</span>'}`;
+      <button type="button" class="agb-open">
+        ${stateCfg.icon.startsWith('<') ? stateCfg.icon : `<span style="font-size:17px">${stateCfg.icon}</span>`}
+        <span class="agb-main">
+          <span class="agb-title">${stateCfg.title}</span>
+          <span class="agb-sub">${stateCfg.sub}</span>
+        </span>
+        ${game.banner_state === 'invited' ? '' : '<span class="agb-chev">›</span>'}
+      </button>
+      ${game.banner_state === 'invited' ? '<button type="button" class="agb-dismiss" id="agb-dismiss" aria-label="Decline game invite">✕</button>' : ''}`;
     const dismissBtn = el.querySelector('#agb-dismiss');
     if (dismissBtn) {
       dismissBtn.onclick = (e) => {
@@ -368,9 +974,15 @@
           .catch(() => toast('Invite dismissed'));
       };
     }
-    el.onclick = () => {
+    el.querySelector('.agb-open').onclick = () => {
       if (game.banner_state === 'live' && game.players.length >= 2) {
-        api(`/games/${game.id}`).then((fresh) => openScoreModal(fresh, () => refreshMe())).catch((e) => toast(e.message));
+        const modalLoad = beginRoutedOverlayLoad(null);
+        api(`/games/${game.id}`).then((fresh) => {
+          if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+          openScoreModal(fresh, () => refreshMe());
+        }).catch((e) => {
+          if (routedOverlayLoadIsCurrent(modalLoad)) toast(e.message);
+        });
       } else {
         openGameScreen(game.id);
       }
@@ -392,23 +1004,41 @@
         : `${esc((t.court || {}).name || '')} · tap for details`;
     el.className = `active-game-banner state-${live ? 'live' : 'upcoming'}`;
     el.innerHTML = `
-      ${live ? '<span class="agb-dot"></span>' : '<span style="font-size:17px">🏆</span>'}
-      <div class="agb-main">
-        <div class="agb-title">${live ? `LIVE: ${esc(t.name)}` : `🏆 ${esc(t.name)} · ${fmtDateTime(t.starts_at)}`}</div>
-        <div class="agb-sub">${sub}</div>
-      </div>
-      <span class="agb-chev">›</span>`;
-    el.onclick = () => openTournamentScreen(t.id);
+      <button type="button" class="agb-open">
+        ${live ? '<span class="agb-dot"></span>' : '<span style="font-size:17px">🏆</span>'}
+        <span class="agb-main">
+          <span class="agb-title">${live ? `LIVE: ${esc(t.name)}` : `🏆 ${esc(t.name)} · ${fmtDateTime(t.starts_at)}`}</span>
+          <span class="agb-sub">${sub}</span>
+        </span>
+        <span class="agb-chev">›</span>
+      </button>`;
+    el.querySelector('.agb-open').onclick = () => openTournamentScreen(t.id);
     el.classList.remove('hidden');
     $('#app').classList.add('has-banner');
     return true;
   }
 
   function renderBadges() {
-    const total = state.unreadMessages + state.pendingRequests;
+    const inboxTotal = state.unreadMessages + state.communityRoomUnread;
+    const total = inboxTotal + state.pendingRequests;
     const badge = $('#chat-badge');
     badge.textContent = total > 99 ? '99+' : String(total);
     badge.classList.toggle('hidden', total === 0);
+
+    const inboxBadge = $('#chat-inbox-badge');
+    if (inboxBadge) {
+      inboxBadge.textContent = inboxTotal > 99 ? '99+' : String(inboxTotal);
+      inboxBadge.classList.toggle('hidden', inboxTotal === 0);
+      $('#chat-tab-chats')?.setAttribute('aria-label', inboxTotal
+        ? `Inbox, ${inboxTotal} unread` : 'Inbox');
+    }
+    const friendsBadge = $('#chat-friends-badge');
+    if (friendsBadge) {
+      friendsBadge.textContent = state.pendingRequests > 99 ? '99+' : String(state.pendingRequests);
+      friendsBadge.classList.toggle('hidden', state.pendingRequests === 0);
+      $('#chat-tab-friends')?.setAttribute('aria-label', state.pendingRequests
+        ? `Friends, ${state.pendingRequests} pending request${state.pendingRequests === 1 ? '' : 's'}` : 'Friends');
+    }
 
     const playBadge = $('#play-badge');
     playBadge.textContent = String(state.gamesToConfirm);
@@ -416,8 +1046,10 @@
 
     const bellBadge = $('#bell-badge');
     const unread = state.unreadNotifications || 0;
-    bellBadge.textContent = unread > 99 ? '99+' : String(unread);
-    bellBadge.classList.toggle('hidden', unread === 0);
+    [bellBadge, $('#play-bell-badge')].filter(Boolean).forEach((el) => {
+      el.textContent = unread > 99 ? '99+' : String(unread);
+      el.classList.toggle('hidden', unread === 0);
+    });
 
     // Installed-app icon badge (iOS 16.4+/Chrome): everything that begs a look.
     if ('setAppBadge' in navigator) {
@@ -428,7 +1060,10 @@
   }
 
   async function refreshMe() {
-    try { applyMe(await api('/me')); } catch { /* logged out */ }
+    try {
+      const data = await api('/me');
+      applyMe(data, { reconcileSnapshot: state.snapshotAreaProvisional });
+    } catch { /* logged out */ }
   }
 
   // ---------- Tabs ----------
@@ -436,17 +1071,29 @@
     document.querySelectorAll('.nav-btn').forEach((btn) => {
       btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
+    setupTablistKeyboard($('#play-segments'));
+    setupTablistKeyboard($('#chat-segments'));
   }
 
-  function switchTab(tab) {
+  function switchTab(tab, { preserveOverlayIntent = false } = {}) {
+    if (!preserveOverlayIntent) cancelPendingOverlayLoadForNavigation();
     state.tab = tab;
-    document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+    document.querySelectorAll('.nav-btn').forEach((b) => {
+      const active = b.dataset.tab === tab;
+      b.classList.toggle('active', active);
+      if (active) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    });
     ['courts', 'play', 'chat', 'profile'].forEach((t) => {
       $(`#tab-${t}`).classList.toggle('hidden', t !== tab);
     });
-    if (tab === 'courts' && state.map) { setTimeout(() => state.map.invalidateSize(), 60); refreshLookingBanner(); }
-    if (tab === 'play') renderPlay();
-    if (tab === 'chat') renderChat();
+    renderActiveGameBanner();
+    if (tab === 'courts') {
+      if (state.map) { setTimeout(() => state.map.invalidateSize(), 60); refreshLookingBanner(); }
+      else ensureMapReady().catch(() => { /* inline retry owns the failure */ });
+    }
+    if (tab === 'play') { syncPlayFab(); renderPlay({ reuseFresh: true }); }
+    if (tab === 'chat') renderChat({ reuseFresh: true });
     if (tab === 'profile') renderProfile();
   }
 
@@ -516,35 +1163,220 @@
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-goto]');
       if (!btn) return;
-      document.querySelectorAll('.modal-backdrop').forEach((m) => closeModal(m));
       const target = btn.dataset.goto;
-      if (target === 'new-game') {
-        switchTab('play');
-        openNewGameModal();
-      } else if (target === 'courts-list') {
-        switchTab('courts');
-        $('#court-list').classList.remove('hidden');
-        if (state.syncListToggle) state.syncListToggle();
-      } else if (target === 'chat-friends') {
-        state.chatSeg = 'friends';
-        document.querySelectorAll('#chat-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === 'friends'));
-        switchTab('chat');
-      } else {
-        switchTab(target);
-      }
+      dismissAllModals(() => {
+        if (target === 'play-now') {
+          if (state.tab !== 'play') switchTab('play');
+          openNewGameModal(null, 'casual', true);
+        } else if (target === 'new-ranked-game') {
+          if (state.tab !== 'play') switchTab('play');
+          openNewGameModal(null, 'ranked');
+        } else if (target === 'new-game') {
+          if (state.tab !== 'play') switchTab('play');
+          openNewGameModal();
+        } else if (target === 'courts-list') {
+          switchTab('courts');
+          setCourtSheetSnap('half');
+        } else if (target === 'chat-friends') {
+          state.chatSeg = 'friends';
+          document.querySelectorAll('#chat-segments button').forEach((b) => {
+            const active = b.dataset.seg === 'friends';
+            b.classList.toggle('active', active);
+            b.setAttribute('aria-selected', String(active));
+          });
+          switchTab('chat');
+        } else if (target === 'chat-nearby') {
+          state.chatSeg = 'nearby';
+          document.querySelectorAll('#chat-segments button').forEach((b) => {
+            const active = b.dataset.seg === 'nearby';
+            b.classList.toggle('active', active);
+            b.setAttribute('aria-selected', String(active));
+          });
+          switchTab('chat');
+        } else {
+          switchTab(target);
+        }
+      });
     });
   }
 
   // ---------- Map / Courts ----------
+  const LEAFLET_ASSETS = {
+    css: [
+      ['https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='],
+      ['https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css', ''],
+    ],
+    js: [
+      ['https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='],
+      ['https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js', ''],
+    ],
+  };
+  let mapAssetsPromise = null;
+  let mapReadyPromise = null;
+
+  function loadStylesheet(src, integrity) {
+    if (document.querySelector(`link[href="${src}"]`)) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = src;
+      link.crossOrigin = '';
+      if (integrity) link.integrity = integrity;
+      link.onload = resolve;
+      link.onerror = () => reject(new Error('Could not load the court map'));
+      document.head.appendChild(link);
+    });
+  }
+
+  function loadScript(src, integrity) {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing && existing.dataset.loaded === '1') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const script = existing || document.createElement('script');
+      script.src = src;
+      script.crossOrigin = '';
+      if (integrity) script.integrity = integrity;
+      script.onload = () => { script.dataset.loaded = '1'; resolve(); };
+      script.onerror = () => reject(new Error('Could not load the court map'));
+      if (!existing) document.head.appendChild(script);
+    });
+  }
+
+  function ensureMapAssets() {
+    if (window.L) return Promise.resolve();
+    if (!mapAssetsPromise) {
+      mapAssetsPromise = Promise.all(LEAFLET_ASSETS.css.map(([src, integrity]) => loadStylesheet(src, integrity)))
+        .then(() => loadScript(...LEAFLET_ASSETS.js[0]))
+        .then(() => loadScript(...LEAFLET_ASSETS.js[1]))
+        .catch((err) => { mapAssetsPromise = null; throw err; });
+    }
+    return mapAssetsPromise;
+  }
+
+  async function ensureMapReady() {
+    if (state.map) return state.map;
+    if (mapReadyPromise) return mapReadyPromise;
+    const mapEl = $('#map');
+    mapEl.setAttribute('aria-busy', 'true');
+    mapEl.innerHTML = '<div class="map-load-state" role="status"><span class="map-load-spinner"></span><b>Opening the court finder…</b><small>Loading the map only when you need it saves battery and data.</small></div>';
+    mapReadyPromise = ensureMapAssets().then(() => {
+      mapEl.innerHTML = '';
+      setupMap();
+      mapEl.setAttribute('aria-busy', 'false');
+      setupTablistKeyboard($('#court-view-switch'));
+      return state.map;
+    }).catch((err) => {
+      mapEl.setAttribute('aria-busy', 'false');
+      mapEl.innerHTML = `<div class="map-load-state" role="alert"><b>${esc(err.message)}</b><small>Check your connection, then try again.</small><button type="button" class="btn btn-primary">Retry</button></div>`;
+      mapEl.querySelector('button').addEventListener('click', () => { mapReadyPromise = null; ensureMapReady(); });
+      throw err;
+    }).finally(() => {
+      if (!state.map) mapReadyPromise = null;
+    });
+    return mapReadyPromise;
+  }
+
+  function moveCourtMapWithoutRefresh(move) {
+    const seq = ++state.courtMoveSuppressSeq;
+    state.suppressCourtMoveFetch = true;
+    try { move(); } finally {
+      // Leaflet normally emits moveend synchronously when animation is off.
+      // The guard also expires so a no-op move cannot swallow the next drag.
+      setTimeout(() => {
+        if (seq === state.courtMoveSuppressSeq) state.suppressCourtMoveFetch = false;
+      }, 250);
+    }
+  }
+
+  function beginCourtContextRefresh(label = 'Updating courts in this area…') {
+    state.courtFetchSeq += 1; // cancel any response owned by the previous area
+    state.courtsInView = [];
+    state.courtListPlaces = [];
+    state.courtListSavedOnly = false;
+    state.courtListSignature = '';
+    state.courtListLimit = 20;
+    state.courtListExpandedScrollTop = 0;
+    state.selectedCourtId = null;
+    state.courtMarkers.clear();
+    state.markers?.clearLayers?.();
+    $('#court-preview')?.classList.add('hidden');
+    const title = document.querySelector('#court-list .sheet-title');
+    const context = $('#court-list-context');
+    const count = $('#court-result-count');
+    if (title) title.textContent = 'Finding the best courts';
+    if (context) context.textContent = label;
+    if (count) count.textContent = '…';
+    const list = $('#court-list-items');
+    if (list) list.innerHTML = `<div class="court-result-loading" role="status" aria-live="polite">
+      <span class="map-load-spinner" aria-hidden="true"></span><b>${esc(label)}</b>
+      <small>Refreshing distance, activity, and open games.</small>
+    </div>`;
+  }
+
+  function renderCourtContextError(error, retry) {
+    const title = document.querySelector('#court-list .sheet-title');
+    const context = $('#court-list-context');
+    const count = $('#court-result-count');
+    if (title) title.textContent = 'Courts need a refresh';
+    if (context) context.textContent = 'No old-area results are being shown';
+    if (count) count.textContent = '!';
+    const list = $('#court-list-items');
+    if (!list) return;
+    renderError(list, error?.message || 'Could not update this area yet.', retry);
+  }
+
+  function mapViewStorageKey(userId = state.me && state.me.id) {
+    return userId ? `pp_mapview:${userId}` : null;
+  }
+
+  function readSavedMapView() {
+    // The legacy key was origin-global and could expose another account's last
+    // precise center. Never import it into an account-scoped session.
+    try { localStorage.removeItem('pp_mapview'); } catch { /* storage unavailable */ }
+    const key = mapViewStorageKey();
+    if (!key) return null;
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) || 'null');
+      const center = saved && saved.center;
+      if (!Array.isArray(center) || center.length !== 2
+          || !center.every(Number.isFinite) || !Number.isFinite(saved.zoom)) return null;
+      return {
+        center: [Math.max(-90, Math.min(90, center[0])), Math.max(-180, Math.min(180, center[1]))],
+        zoom: Math.max(2, Math.min(19, saved.zoom)),
+      };
+    } catch { return null; }
+  }
+
+  function accountMapStart() {
+    const saved = readSavedMapView();
+    if (saved) return saved;
+    if (state.me && state.me.home_lat != null) {
+      return { center: [state.me.home_lat, state.me.home_lng], zoom: 12 };
+    }
+    return { center: DEFAULT_CENTER, zoom: 11 };
+  }
+
+  function restoreAccountMapView() {
+    if (!state.map || !state.me) return;
+    const { center, zoom } = accountMapStart();
+    state.searchQ = '';
+    const search = $('#court-search');
+    if (search) search.value = '';
+    hideSearchSuggest();
+    syncSearchClear();
+    beginCourtContextRefresh('Loading your court area…');
+    moveCourtMapWithoutRefresh(
+      () => state.map.setView(center, zoom, { animate: false }),
+    );
+    fetchCourtsInView({ surfaceError: true });
+  }
+
   function setupMap() {
-    const saved = JSON.parse(localStorage.getItem('pp_mapview') || 'null');
+    const saved = readSavedMapView();
+    const start = saved || accountMapStart();
+    const { center, zoom } = start;
     // Center on the user's saved home area when there's no last-viewed map.
-    let center = DEFAULT_CENTER;
-    let zoom = 11;
-    if (saved) {
-      center = saved.center; zoom = saved.zoom;
-    } else if (state.me && state.me.home_lat != null) {
-      center = [state.me.home_lat, state.me.home_lng]; zoom = 12;
+    if (!saved && state.me && state.me.home_lat != null) {
       state.areaLoc = [state.me.home_lat, state.me.home_lng];
     }
     state.map = L.map('map', { zoomControl: false }).setView(center, zoom);
@@ -562,7 +1394,7 @@
             const size = n >= 50 ? 44 : n >= 10 ? 38 : 32;
             return L.divIcon({
               className: '',
-              html: `<div class="cluster-icon" style="width:${size}px;height:${size}px">${n}</div>`,
+              html: `<div class="cluster-icon" role="img" aria-label="${n} courts in this area. Activate to zoom in" style="width:${size}px;height:${size}px">${n}</div>`,
               iconSize: [size, size],
             });
           },
@@ -571,37 +1403,60 @@
     state.markers.addTo(state.map);
 
     $('#map-filters').addEventListener('click', async (e) => {
-      const btn = e.target.closest('button');
+      const btn = e.target.closest('[data-court-filter]');
       if (!btn) return;
-      state.mapFilter = btn.dataset.filter;
-      document.querySelectorAll('#map-filters button').forEach((b) => b.classList.toggle('active', b === btn));
-      // A filter tap takes over from any active search — otherwise the fetch
-      // below would silently no-op while search results own the map.
-      if (state.searchQ) {
-        state.searchQ = '';
-        const si = $('#court-search');
-        if (si) si.value = '';
-        hideSearchSuggest();
-        syncSearchClear();
+      const key = btn.dataset.courtFilter;
+      state.courtFilters[key] = !state.courtFilters[key];
+      syncCourtFilterControls();
+      await refreshCourtResults();
+      if (!(state.courtsInView || []).length) {
+        toast(key === 'saved'
+          ? 'No saved courts match — save a court or clear a filter'
+          : 'No courts match yet — clear a filter or move the map');
       }
-      await fetchCourtsInView();
-      // An empty filter result deserves an explanation, not a silently blank map.
-      if (state.mapFilter !== 'all' && !state.searchQ && !(state.courtsInView || []).length) {
-        toast(state.mapFilter === 'saved'
-          ? 'No saved courts yet — tap ☆ on any court to save it'
-          : `No “${btn.textContent.trim()}” courts in view — try zooming out`);
-      }
-      // Saved courts can be anywhere — zoom out to fit them all.
-      if (state.mapFilter === 'saved' && state.courtsInView.length) {
+      // Saved courts can be outside the current map. Fit them once selected so
+      // the map and decision list tell the same story.
+      if (key === 'saved' && state.courtFilters.saved && state.courtsInView.length) {
         const pts = state.courtsInView.filter((c) => c.latitude != null).map((c) => [c.latitude, c.longitude]);
-        if (pts.length) state.map.fitBounds(pts, { maxZoom: 13, padding: [50, 50] });
+        if (pts.length) moveCourtMapWithoutRefresh(() => state.map.fitBounds(
+          pts, { maxZoom: 13, padding: [50, 50], animate: false },
+        ));
       }
     });
+    $('#court-more-filters').addEventListener('click', openCourtFilterSheet);
 
     state.map.on('moveend', () => {
       const c = state.map.getCenter();
-      localStorage.setItem('pp_mapview', JSON.stringify({ center: [c.lat, c.lng], zoom: state.map.getZoom() }));
-      fetchCourtsInView();
+      const key = mapViewStorageKey();
+      if (key) localStorage.setItem(key, JSON.stringify({
+        center: [c.lat, c.lng], zoom: state.map.getZoom(),
+      }));
+      if (state.suppressCourtMoveFetch) {
+        state.suppressCourtMoveFetch = false;
+        return;
+      }
+      beginCourtContextRefresh();
+      fetchCourtsInView({ surfaceError: true });
+    });
+    state.map.on('dragend', () => $('#use-map-area')?.classList.remove('hidden'));
+    $('#use-map-area')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const c = state.map.getCenter();
+      state.areaLoc = [c.lat, c.lng];
+      state.areaLabel = 'Selected map area';
+      state.snapshotAreaProvisional = false;
+      state.playGamesCache = null;
+      state.chatFriendsCache = null;
+      btn.classList.add('hidden');
+      updatePlayHeader();
+      toast('Games and players now follow this map area 📍');
+      try {
+        const geo = await api(`/geocode/reverse?lat=${c.lat}&lng=${c.lng}`);
+        if (geo.label && state.areaLoc && state.areaLoc[0] === c.lat && state.areaLoc[1] === c.lng) {
+          state.areaLabel = geo.label;
+          updatePlayHeader();
+        }
+      } catch { /* the committed coordinates still work */ }
     });
 
     // NB: don't pass the click event through — locateMe's arg is the `silent` flag.
@@ -612,32 +1467,26 @@
       document.querySelectorAll('#chat-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === 'nearby'));
       switchTab('chat');
     });
-    const ICON_LIST = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;vertical-align:-2px"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>';
-    const ICON_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;vertical-align:-2px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
-    const syncListToggle = () => {
-      const open = !$('#court-list').classList.contains('hidden');
-      const n = (state.courtsInView || []).length;
-      $('#list-toggle').innerHTML = open ? `${ICON_X} Close` : `${ICON_LIST} List${n ? ` · ${n}` : ''}`;
-    };
-    $('#list-toggle').addEventListener('click', () => {
-      $('#court-list').classList.toggle('hidden');
-      syncListToggle();
+    $('#court-view-switch').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-court-view]');
+      if (!btn) return;
+      setCourtSheetSnap(btn.dataset.courtView === 'map' ? 'peek' : 'half');
     });
-    $('#court-list').addEventListener('click', (e) => {
-      if (e.target.classList.contains('sheet-handle')) {
-        $('#court-list').classList.add('hidden');
-        syncListToggle();
-      }
+    $('#court-sheet-cycle').addEventListener('click', () => {
+      if (state.courtSheetJustDragged) { state.courtSheetJustDragged = false; return; }
+      setCourtSheetSnap(state.courtSheetSnap === 'peek' ? 'half'
+        : state.courtSheetSnap === 'half' ? 'full' : 'peek');
     });
-    state.syncListToggle = syncListToggle;
-
-    document.querySelectorAll('#list-sort button').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        state.listSort = btn.dataset.sort;
-        document.querySelectorAll('#list-sort button').forEach((b) => b.classList.toggle('active', b === btn));
-        fetchCourtsInView();
-      });
+    $('#court-sheet-expand').addEventListener('click', () => {
+      setCourtSheetSnap(state.courtSheetSnap === 'full' ? 'half' : 'full');
     });
+    $('#court-sort').addEventListener('change', (e) => {
+      state.listSort = e.target.value;
+      refreshCourtResults();
+    });
+    setupCourtSheetDrag();
+    syncCourtFilterControls();
+    setCourtSheetSnap('peek', { announce: false });
 
     let searchTimer;
     const searchInput = $('#court-search');
@@ -651,9 +1500,30 @@
       if (!q) hideSearchSuggest();
       searchTimer = setTimeout(() => q ? searchCourts(q) : fetchCourtsInView(), 350);
     });
-    // Enter (mobile "search"/"go") dismisses the keyboard and shows the full list.
+    // Keyboard combobox behavior keeps focus in the search field while the
+    // highlighted suggestion moves underneath it. Enter without a highlight
+    // keeps the useful mobile behavior of showing every match.
     searchInput.addEventListener('keydown', async (e) => {
+      const rows = [...$('#search-suggest').querySelectorAll('[role="option"]')];
+      if (e.key === 'Escape') { hideSearchSuggest(); return; }
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) && rows.length) {
+        e.preventDefault();
+        const current = rows.findIndex((row) => row.getAttribute('aria-selected') === 'true');
+        const next = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1
+          : e.key === 'ArrowDown' ? (current + 1) % rows.length
+            : (current <= 0 ? rows.length - 1 : current - 1);
+        rows.forEach((row, i) => row.setAttribute('aria-selected', String(i === next)));
+        searchInput.setAttribute('aria-activedescendant', rows[next].id);
+        rows[next].scrollIntoView({ block: 'nearest' });
+        return;
+      }
       if (e.key !== 'Enter') return;
+      const active = rows.find((row) => row.getAttribute('aria-selected') === 'true');
+      if (active) {
+        e.preventDefault();
+        active.click();
+        return;
+      }
       clearTimeout(searchTimer);
       searchInput.blur();
       if (!state.searchQ) return;
@@ -680,7 +1550,8 @@
 
     // Only auto-locate when we have neither a saved view nor a saved home area.
     if (!saved && !(state.me && state.me.home_lat != null)) locateMe(true);
-    fetchCourtsInView();
+    beginCourtContextRefresh();
+    fetchCourtsInView({ surfaceError: true });
   }
 
   // ---------- Theme ----------
@@ -721,15 +1592,20 @@
         if (btn) btn.classList.remove('locating');
         state.userLoc = [pos.coords.latitude, pos.coords.longitude];
         state.areaLoc = null; // "my location" takes precedence again
+        state.areaLabel = 'Near me';
+        state.snapshotAreaProvisional = false;
+        state.playGamesCache = null;
+        state.chatFriendsCache = null;
         state.searchQ = '';
         const search = $('#court-search');
         if (search) search.value = '';
         hideSearchSuggest();
         syncSearchClear();
-        state.map.setView(state.userLoc, 13);
+        beginCourtContextRefresh('Finding courts near your location…');
+        moveCourtMapWithoutRefresh(() => state.map.setView(state.userLoc, 13, { animate: false }));
         updateUserDot();
-        startLocationWatch();
-        fetchCourtsInView();
+        if (autoCheckInEnabled()) startLocationWatch();
+        fetchCourtsInView({ surfaceError: true });
         if (!silent) toast('📍 Centered on your location');
       },
       (err) => {
@@ -749,22 +1625,30 @@
   function areaLatLng() {
     if (state.areaLoc) return { lat: state.areaLoc[0], lng: state.areaLoc[1] };
     if (state.userLoc) return { lat: state.userLoc[0], lng: state.userLoc[1] };
+    if (state.me && state.me.home_lat != null) return { lat: state.me.home_lat, lng: state.me.home_lng };
     const c = state.map ? state.map.getCenter() : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
     return { lat: c.lat, lng: c.lng };
   }
 
   function jumpToPlace(lat, lng, label) {
     state.areaLoc = [lat, lng];
-    if (state.map) state.map.setView([lat, lng], 12);
-    $('#court-list').classList.add('hidden');
-    if (state.syncListToggle) state.syncListToggle();
+    state.areaLabel = label || 'Selected area';
+    state.snapshotAreaProvisional = false;
+    state.playGamesCache = null;
+    state.chatFriendsCache = null;
     const search = $('#court-search');
     if (search) { search.value = ''; search.blur(); }
     state.searchQ = '';
     hideSearchSuggest();
     syncSearchClear();
+    beginCourtContextRefresh(`Finding courts near ${label || 'this area'}…`);
+    if (state.map) moveCourtMapWithoutRefresh(
+      () => state.map.setView([lat, lng], 12, { animate: false }),
+    );
+    setCourtSheetSnap('peek', { announce: false });
+    updatePlayHeader();
     if (label) toast(`📍 ${label}`);
-    fetchCourtsInView();
+    fetchCourtsInView({ surfaceError: true });
   }
 
   async function loadFavIds() {
@@ -772,46 +1656,177 @@
     try {
       const favs = await api('/courts/favorites');
       state.favIds = new Set((favs.items || []).map((c) => c.id));
-    } catch { state.favIds = new Set(); }
+    } catch (err) {
+      if (!err.isStaleSession) state.favIds = new Set();
+    }
   }
 
-  async function fetchCourtsInView() {
+  const COURT_AMENITY_FILTERS = ['indoor', 'lighted', 'nets', 'restrooms', 'water'];
+
+  function activeCourtFilterCount() {
+    return Object.values(state.courtFilters).filter(Boolean).length;
+  }
+
+  function syncCourtFilterControls() {
+    document.querySelectorAll('[data-court-filter]').forEach((btn) => {
+      const active = !!state.courtFilters[btn.dataset.courtFilter];
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+    const amenityCount = COURT_AMENITY_FILTERS.filter((key) => state.courtFilters[key]).length;
+    const more = $('#court-more-filters');
+    const badge = $('#court-filter-count');
+    if (more) more.classList.toggle('active', amenityCount > 0);
+    if (badge) {
+      badge.textContent = String(amenityCount);
+      badge.classList.toggle('hidden', amenityCount === 0);
+    }
+  }
+
+  function courtAmenityQuery() {
+    return COURT_AMENITY_FILTERS
+      .filter((key) => state.courtFilters[key])
+      .map((key) => `&${key}=1`)
+      .join('');
+  }
+
+  function applyCourtFilters(items) {
+    return (items || []).filter((court) => {
+      if (state.courtFilters.saved && !(state.favIds && state.favIds.has(court.id))) return false;
+      if (state.courtFilters.players && !(court.players_here > 0)) return false;
+      if (state.courtFilters.games && !(court.upcoming_games > 0)) return false;
+      if (state.courtFilters.indoor && !court.indoor) return false;
+      if (state.courtFilters.lighted && !court.lighted) return false;
+      if (state.courtFilters.nets && !court.nets_provided) return false;
+      if (state.courtFilters.restrooms && !court.has_restrooms) return false;
+      if (state.courtFilters.water && !court.has_water) return false;
+      return true;
+    });
+  }
+
+  function addCourtDistances(items, reference) {
+    return (items || []).map((court) => {
+      if (court.distance_miles != null || court.latitude == null || !reference) return court;
+      return {
+        ...court,
+        distance_miles: Number(milesBetween([reference.lat, reference.lng], [court.latitude, court.longitude]).toFixed(1)),
+      };
+    });
+  }
+
+  function refreshCourtResults() {
+    return state.searchQ ? searchCourts(state.searchQ) : fetchCourtsInView();
+  }
+
+  function clearCourtFilters() {
+    Object.keys(state.courtFilters).forEach((key) => { state.courtFilters[key] = false; });
+    syncCourtFilterControls();
+    refreshCourtResults();
+  }
+
+  function openCourtFilterSheet() {
+    const draft = { ...state.courtFilters };
+    const options = [
+      ['indoor', '🏠', 'Indoor'],
+      ['lighted', '💡', 'Lighted'],
+      ['nets', '🥅', 'Nets provided'],
+      ['restrooms', '🚻', 'Restrooms'],
+      ['water', '🚰', 'Drinking water'],
+    ];
+    const modal = openModal(`
+      ${modalHead('Filter courts')}
+      <p class="row-sub" style="margin:-4px 0 14px">Choose everything you need. Filters work together, including while you search.</p>
+      <div class="section-label" style="margin-top:0">Amenities</div>
+      <div class="court-filter-grid">
+        ${options.map(([key, icon, label]) => `
+          <button type="button" class="court-filter-option ${draft[key] ? 'active' : ''}" data-filter-option="${key}" aria-pressed="${draft[key]}">
+            <span style="font-size:18px;margin-right:5px">${icon}</span>${label}
+          </button>`).join('')}
+      </div>
+      <div class="court-filter-actions">
+        <button type="button" class="btn btn-secondary" id="court-filter-clear">Clear all</button>
+        <button type="button" class="btn btn-primary" id="court-filter-apply">Show matches</button>
+      </div>
+    `, { label: 'Court filters' });
+    $('#court-more-filters').setAttribute('aria-expanded', 'true');
+    modal._cleanupFns.push(() => $('#court-more-filters')?.setAttribute('aria-expanded', 'false'));
+    const syncDraft = () => {
+      modal.querySelectorAll('[data-filter-option]').forEach((btn) => {
+        const active = !!draft[btn.dataset.filterOption];
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+    };
+    modal.querySelector('.court-filter-grid').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-filter-option]');
+      if (!btn) return;
+      draft[btn.dataset.filterOption] = !draft[btn.dataset.filterOption];
+      syncDraft();
+    });
+    modal.querySelector('#court-filter-clear').addEventListener('click', () => {
+      Object.keys(draft).forEach((key) => { draft[key] = false; });
+      syncDraft();
+    });
+    modal.querySelector('#court-filter-apply').addEventListener('click', () => {
+      state.courtFilters = draft;
+      syncCourtFilterControls();
+      closeModal(modal);
+      refreshCourtResults();
+    });
+  }
+
+  async function fetchCourtsInView({ surfaceError = false } = {}) {
     if (!state.map) return;
     if (state.searchQ) {
       // Search results own the list and markers — but data changes (check-ins,
       // favorites) still need to reach them, so re-run the search instead.
-      searchCourts(state.searchQ);
-      return;
+      return searchCourts(state.searchQ);
     }
 
-    // Saved filter ignores the bbox — your courts show wherever they are.
-    if (state.mapFilter === 'saved') {
+    const seq = ++state.courtFetchSeq;
+    if (state.favIds === null && !state.courtFilters.saved) await loadFavIds();
+    const reference = areaLatLng();
+
+    // Saved composes with activity and amenity filters, and ignores the bbox —
+    // a player's saved courts remain useful even when they are off-screen.
+    if (state.courtFilters.saved) {
       try {
-        const favs = await api('/courts/favorites');
-        state.courtsInView = favs.items;
-        drawMarkers(favs.items);
-        renderCourtList(favs.items, [], { savedOnly: true });
-      } catch { /* network hiccup */ }
+        const favs = await api(`/courts/favorites?lat=${reference.lat}&lng=${reference.lng}`);
+        if (seq !== state.courtFetchSeq || state.searchQ) return;
+        state.favIds = new Set((favs.items || []).map((court) => court.id));
+        const items = applyCourtFilters(addCourtDistances(favs.items, reference));
+        state.courtsInView = items;
+        drawMarkers(items);
+        renderCourtList(items, [], { savedOnly: true });
+      } catch (err) {
+        if (surfaceError && seq === state.courtFetchSeq && !state.searchQ) {
+          renderCourtContextError(err, () => {
+            beginCourtContextRefresh();
+            fetchCourtsInView({ surfaceError: true });
+          });
+        }
+      }
       return;
     }
-    if (state.favIds === null) await loadFavIds();
     const b = state.map.getBounds();
     const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(4)).join(',');
     let url = `/courts?bbox=${bbox}&limit=250&sort=${state.listSort}`;
-    if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
-    // Server-side amenity/attribute filters (single-select).
-    if (['lighted', 'indoor', 'restrooms', 'water', 'nets'].includes(state.mapFilter)) {
-      url += `&${state.mapFilter}=1`;
-    }
+    url += `&lat=${reference.lat}&lng=${reference.lng}${courtAmenityQuery()}`;
     try {
       const data = await api(url);
-      let items = data.items;
-      if (state.mapFilter === 'active') items = items.filter((c) => c.players_here > 0);
-      if (state.mapFilter === 'games') items = items.filter((c) => c.upcoming_games > 0);
+      if (seq !== state.courtFetchSeq || state.searchQ) return;
+      const items = applyCourtFilters(data.items);
       state.courtsInView = items;
       drawMarkers(items);
       renderCourtList(items);
-    } catch { /* network hiccup */ }
+    } catch (err) {
+      if (surfaceError && seq === state.courtFetchSeq && !state.searchQ) {
+        renderCourtContextError(err, () => {
+          beginCourtContextRefresh();
+          fetchCourtsInView({ surfaceError: true });
+        });
+      }
+    }
     refreshLookingBanner();
   }
 
@@ -835,6 +1850,9 @@
   function hideSearchSuggest() {
     const el = $('#search-suggest');
     if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
+    const input = $('#court-search');
+    input?.setAttribute('aria-expanded', 'false');
+    input?.removeAttribute('aria-activedescendant');
   }
 
   // Clear (✕) shows whenever there's text and no request in flight.
@@ -847,15 +1865,145 @@
     clear.classList.toggle('hidden', busy || !input.value.trim());
   }
 
+  function setCourtSheetSnap(snap, { announce = true } = {}) {
+    if (!['peek', 'half', 'full'].includes(snap)) return;
+    const sheet = $('#court-list');
+    if (!sheet) return;
+    const previousSnap = state.courtSheetSnap;
+    const listItems = $('#court-list-items');
+    if (previousSnap !== 'peek' && snap === 'peek' && listItems) {
+      state.courtListExpandedScrollTop = listItems.scrollTop;
+    }
+    state.courtSheetSnap = snap;
+    sheet.dataset.snap = snap;
+    sheet.style.removeProperty('transform');
+    sheet.classList.remove('is-dragging');
+    const listOpen = snap !== 'peek';
+    document.querySelectorAll('#court-view-switch [data-court-view]').forEach((btn) => {
+      const active = btn.dataset.courtView === (listOpen ? 'list' : 'map');
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
+    const cycle = $('#court-sheet-cycle');
+    if (cycle) {
+      cycle.setAttribute('aria-expanded', String(listOpen));
+      cycle.setAttribute('aria-label', snap === 'peek' ? 'Expand court results'
+        : snap === 'half' ? 'Show full court results' : 'Collapse court results to map');
+    }
+    const expand = $('#court-sheet-expand');
+    if (expand) expand.setAttribute('aria-label', snap === 'full' ? 'Collapse court list' : 'Show full court list');
+    if (listOpen) hideSearchSuggest();
+    const main = $('#main-screen');
+    if (main) {
+      main.scrollTop = 0;
+      requestAnimationFrame(() => { main.scrollTop = 0; });
+    }
+    if (announce) {
+      const title = sheet.querySelector('.sheet-title')?.textContent || 'Court results';
+      sheet.setAttribute('aria-label', `${title}, ${listOpen ? 'list view' : 'map view'}`);
+    }
+    if ((previousSnap === 'peek') !== (snap === 'peek') && state.courtsInView.length) {
+      renderCourtList(state.courtsInView, state.courtListPlaces, {
+        savedOnly: state.courtListSavedOnly,
+        preserveLimit: true,
+      });
+      if (previousSnap === 'peek' && snap !== 'peek') {
+        requestAnimationFrame(() => {
+          const currentList = $('#court-list-items');
+          if (currentList) currentList.scrollTop = state.courtListExpandedScrollTop;
+        });
+      }
+    }
+  }
+
+  function setupCourtSheetDrag() {
+    const handle = $('#court-sheet-cycle');
+    const sheet = $('#court-list');
+    if (!handle || !sheet || !window.PointerEvent) return;
+    let pointerId = null;
+    let startY = 0;
+    let startShift = 0;
+    let lastY = 0;
+    let lastAt = 0;
+    let velocity = 0;
+    let moved = false;
+    const shiftForSnap = (snap) => {
+      const h = sheet.getBoundingClientRect().height;
+      if (snap === 'full') return 0;
+      if (snap === 'half') {
+        const bannerOffset = $('#app')?.classList.contains('has-banner') ? 58 : 0;
+        return window.innerHeight < 500 ? 0 : Math.max(0, h * 0.42 - bannerOffset);
+      }
+      return Math.max(0, h - 146);
+    };
+    handle.addEventListener('pointerdown', (e) => {
+      if (pointerId != null) return;
+      pointerId = e.pointerId;
+      startY = lastY = e.clientY;
+      lastAt = performance.now();
+      startShift = shiftForSnap(state.courtSheetSnap);
+      velocity = 0;
+      moved = false;
+      handle.setPointerCapture(pointerId);
+      sheet.classList.add('is-dragging');
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== pointerId) return;
+      const now = performance.now();
+      const dt = Math.max(1, now - lastAt);
+      velocity = (e.clientY - lastY) / dt;
+      lastY = e.clientY;
+      lastAt = now;
+      const maxShift = shiftForSnap('peek');
+      const shift = Math.max(0, Math.min(maxShift, startShift + e.clientY - startY));
+      if (Math.abs(e.clientY - startY) > 5) moved = true;
+      sheet.style.transform = `translateY(${shift}px)`;
+    });
+    const finish = (e) => {
+      if (e.pointerId !== pointerId) return;
+      try { handle.releasePointerCapture(pointerId); } catch { /* already released */ }
+      pointerId = null;
+      const h = sheet.getBoundingClientRect().height;
+      const projected = Math.max(0, Math.min(h, startShift + e.clientY - startY + velocity * 160));
+      const ratio = projected / Math.max(1, h);
+      state.courtSheetJustDragged = moved;
+      setCourtSheetSnap(ratio < 0.22 ? 'full' : ratio < 0.72 ? 'half' : 'peek');
+    };
+    handle.addEventListener('pointerup', finish);
+    handle.addEventListener('pointercancel', finish);
+  }
+
+  function syncCourtSheetSummary(courts, { savedOnly = false, searching = false } = {}) {
+    const title = document.querySelector('#court-list .sheet-title');
+    const context = $('#court-list-context');
+    const count = $('#court-result-count');
+    const n = courts.length;
+    if (count) count.textContent = n ? String(n) : '0';
+    if (title) title.textContent = savedOnly ? 'Saved courts'
+      : searching ? 'Search results' : n ? `${n} court${n === 1 ? '' : 's'} nearby` : 'No matching courts';
+    if (context) {
+      const active = [];
+      if (state.courtFilters.saved) active.push('saved');
+      if (state.courtFilters.players) active.push('players here');
+      if (state.courtFilters.games) active.push('open games');
+      const amenities = COURT_AMENITY_FILTERS.filter((key) => state.courtFilters[key]).length;
+      if (amenities) active.push(`${amenities} ${amenities === 1 ? 'amenity' : 'amenities'}`);
+      context.textContent = active.length ? `${searching ? `For “${state.searchQ}” · ` : ''}Matching ${active.join(' · ')}`
+        : searching ? `For “${state.searchQ}”` : 'Tap a court to compare and act';
+    }
+  }
+
   function openCourtListPanel() {
-    $('#court-list').classList.remove('hidden');
-    if (state.syncListToggle) state.syncListToggle();
+    setCourtSheetSnap('half');
   }
 
   function fitSearchResults() {
     const pts = (state.courtsInView || []).filter((c) => c.latitude != null);
     if (pts.length) {
-      state.map.fitBounds(pts.map((c) => [c.latitude, c.longitude]), { maxZoom: 13, padding: [40, 40] });
+      moveCourtMapWithoutRefresh(() => state.map.fitBounds(
+        pts.map((c) => [c.latitude, c.longitude]),
+        { maxZoom: 13, padding: [40, 40], animate: false },
+      ));
     }
   }
 
@@ -868,7 +2016,7 @@
     if (places.length) {
       html += '<div class="sug-label">📍 Jump to area</div>';
       html += places.slice(0, 4).map((p, i) => `
-        <button class="sug-row" data-sug-place="${i}">
+        <button class="sug-row" role="option" aria-selected="false" data-sug-place="${i}">
           <span class="sug-ico">📍</span>
           <span class="sug-main">
             <span class="sug-title" style="display:block">${esc(p.label)}</span>
@@ -880,7 +2028,7 @@
     if (courts.length) {
       html += '<div class="sug-label">🏓 Courts</div>';
       html += courts.slice(0, 5).map((c) => `
-        <button class="sug-row" data-sug-court="${c.id}">
+        <button class="sug-row" role="option" aria-selected="false" data-sug-court="${c.id}">
           <span class="sug-ico">🏓</span>
           <span class="sug-main">
             <span class="sug-title" style="display:block">${esc(c.name)}</span>
@@ -894,7 +2042,7 @@
           <span class="chev">›</span>
         </button>`).join('');
       if (courts.length > 5) {
-        html += `<button class="sug-row sug-all" data-sug-all>See all ${courts.length} courts</button>`;
+        html += `<button class="sug-row sug-all" role="option" aria-selected="false" data-sug-all>See all ${courts.length} courts</button>`;
       }
     }
     if (!html) {
@@ -902,6 +2050,8 @@
     }
     el.innerHTML = html;
     el.classList.remove('hidden');
+    [...el.querySelectorAll('[role="option"]')].forEach((row, i) => { row.id = `court-suggestion-${i}`; });
+    $('#court-search')?.setAttribute('aria-expanded', String(!!el.querySelector('[role="option"]')));
     el.querySelectorAll('[data-sug-place]').forEach((row) => {
       const p = places[Number(row.dataset.sugPlace)];
       if (p) row.addEventListener('click', () => { hideSearchSuggest(); jumpToPlace(p.lat, p.lng, p.label); });
@@ -920,23 +2070,27 @@
   let searchSeq = 0;
   async function searchCourts(q) {
     const seq = ++searchSeq;
+    state.courtFetchSeq += 1; // invalidate any older map-bounds response
     const spin = $('#search-spin');
     if (spin) spin.classList.remove('hidden');
     syncSearchClear();
     try {
+      if (state.favIds === null) await loadFavIds();
+      const reference = areaLatLng();
       const [courtData, placeData] = await Promise.all([
-        api(`/courts?q=${encodeURIComponent(q)}&limit=50`),
+        api(`/courts?q=${encodeURIComponent(q)}&limit=50&lat=${reference.lat}&lng=${reference.lng}${courtAmenityQuery()}`),
         api(`/geocode?q=${encodeURIComponent(q)}`).catch(() => ({ items: [] })),
       ]);
       // A newer keystroke owns the UI now — drop this stale response.
       if (seq !== searchSeq || state.searchQ !== q) return;
-      state.courtsInView = courtData.items;
-      drawMarkers(courtData.items);
-      renderCourtList(courtData.items, placeData.items || []);
+      const items = applyCourtFilters(courtData.items);
+      state.courtsInView = items;
+      drawMarkers(items);
+      renderCourtList(items, placeData.items || []);
       // Only surface the dropdown while the user is actually in the search box —
       // background refreshes (map pans, check-ins) must not pop it open.
       if (document.activeElement === $('#court-search')) {
-        renderSearchSuggest(courtData.items, placeData.items || [], q);
+        renderSearchSuggest(items, placeData.items || [], q);
       }
       // The map stays put while you type — it only jumps once you commit
       // (Enter / "See all"), via fitSearchResults().
@@ -945,33 +2099,121 @@
     }
   }
 
-  function drawMarkers(courts) {
-    state.markers.clearLayers();
-    courts.forEach((court) => {
-      if (court.latitude == null) return;
-      const busy = court.players_here > 0;
-      const fav = state.favIds && state.favIds.has(court.id);
-      const size = busy ? 34 : 26;
-      const gameBadge = court.upcoming_games > 0
-        ? `<span class="marker-game-badge">${court.upcoming_games}</span>` : '';
-      const favBadge = fav ? '<span class="marker-fav-badge">★</span>' : '';
-      // A fresh problem report (wet, nets down, closed, busy) rides on the
-      // marker so players see it before driving out. "All good" stays quiet.
-      const condBadge = court.condition && court.condition !== 'good' && COURT_CONDITION_LABELS[court.condition]
-        ? `<span class="marker-cond-badge" title="${COURT_CONDITION_LABELS[court.condition][1]}">${COURT_CONDITION_LABELS[court.condition][0]}</span>` : '';
-      const icon = L.divIcon({
-        className: '',
-        html: `<div class="court-marker ${busy ? 'busy' : ''} ${fav ? 'fav' : ''}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}${gameBadge}${favBadge}${condBadge}</div>`,
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
-      });
-      L.marker([court.latitude, court.longitude], { icon })
-        .addTo(state.markers)
-        .on('click', () => openCourtDetail(court.id));
+  function courtMarkerIcon(court, selected = state.selectedCourtId === court.id) {
+    const busy = court.players_here > 0;
+    const fav = state.favIds && state.favIds.has(court.id);
+    const size = busy ? 34 : 26;
+    const gameBadge = court.upcoming_games > 0
+      ? `<span class="marker-game-badge">${court.upcoming_games}</span>` : '';
+    const favBadge = fav ? '<span class="marker-fav-badge">★</span>' : '';
+    // A fresh problem report (wet, nets down, closed, busy) rides on the
+    // marker so players see it before driving out. "All good" stays quiet.
+    const condBadge = court.condition && court.condition !== 'good' && COURT_CONDITION_LABELS[court.condition]
+      ? `<span class="marker-cond-badge" title="${COURT_CONDITION_LABELS[court.condition][1]}">${COURT_CONDITION_LABELS[court.condition][0]}</span>` : '';
+    const markerLabel = `${court.name}. ${busy ? `${court.players_here} playing now` : `${court.num_courts} court${court.num_courts === 1 ? '' : 's'}`}${court.upcoming_games ? `. ${court.upcoming_games} open game${court.upcoming_games === 1 ? '' : 's'}` : ''}`;
+    return L.divIcon({
+      className: '',
+      html: `<div class="court-marker ${busy ? 'busy' : ''} ${fav ? 'fav' : ''} ${selected ? 'selected' : ''}" role="img" aria-label="${esc(markerLabel)}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}${gameBadge}${favBadge}${condBadge}</div>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
     });
   }
 
+  function drawMarkers(courts) {
+    state.markers.clearLayers();
+    state.courtMarkers.clear();
+    courts.forEach((court) => {
+      if (court.latitude == null) return;
+      const marker = L.marker([court.latitude, court.longitude], {
+        icon: courtMarkerIcon(court),
+      }).addTo(state.markers).on('click', () => selectCourtOnMap(court));
+      state.courtMarkers.set(court.id, { marker, court });
+    });
+  }
+
+  function setCourtMarkerSelected(courtId, selected) {
+    const entry = state.courtMarkers.get(courtId);
+    if (entry) entry.marker.setIcon(courtMarkerIcon(entry.court, selected));
+  }
+
+  function courtDirectionsUrl(court) {
+    const address = [court.address, court.city].filter(Boolean).join(' ');
+    return /iPhone|iPad|Macintosh/.test(navigator.userAgent)
+      ? `https://maps.apple.com/?daddr=${encodeURIComponent(address || `${court.latitude},${court.longitude}`)}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${court.latitude},${court.longitude}`;
+  }
+
+  function selectCourtOnMap(court, { preserveList = false } = {}) {
+    if (!court) return;
+    const previousCourtId = state.selectedCourtId;
+    state.selectedCourtId = court.id;
+    if (previousCourtId !== court.id) {
+      setCourtMarkerSelected(previousCourtId, false);
+      setCourtMarkerSelected(court.id, true);
+    }
+    const preview = $('#court-preview');
+    if (preview) {
+      const live = court.players_here
+        ? `${court.players_here} playing now`
+        : court.upcoming_games ? `${court.upcoming_games} open game${court.upcoming_games === 1 ? '' : 's'}` : 'Quiet right now';
+      preview.innerHTML = `
+        <div class="row">
+          <div class="row-main">
+            <div class="row-title">${esc(court.name)}</div>
+            <div class="row-sub">${[court.distance_miles != null ? `${court.distance_miles} mi` : '', esc(court.city || ''), live].filter(Boolean).join(' · ')}</div>
+          </div>
+          ${court.rating_avg ? `<span class="tag" style="margin:0">⭐ ${court.rating_avg}</span>` : ''}
+        </div>
+        <div class="court-preview-actions">
+          <button type="button" class="btn btn-secondary" data-preview-detail>Details</button>
+          <button type="button" class="btn btn-primary" data-preview-play>Play here</button>
+          <a class="btn btn-secondary" data-preview-directions href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center">Directions</a>
+        </div>`;
+      preview.classList.remove('hidden');
+      preview.querySelector('[data-preview-detail]').addEventListener('click', () => openCourtDetail(court.id));
+      preview.querySelector('[data-preview-play]').addEventListener('click', () => {
+        openNewGameModal({ id: court.id, name: court.name }, 'casual', true);
+      });
+    }
+    document.querySelectorAll('#court-list-items [data-court]').forEach((row) => {
+      row.classList.toggle('selected', Number(row.dataset.court) === court.id);
+    });
+    if (!preserveList || state.courtSheetSnap === 'peek') setCourtSheetSnap('half');
+    if (state.map && court.latitude != null) {
+      try {
+        const bottomPadding = Math.min(330, window.innerHeight * 0.48);
+        const point = state.map.latLngToContainerPoint([court.latitude, court.longitude]);
+        const size = state.map.getSize();
+        const needsPan = point.x < 24 || point.x > size.x - 24
+          || point.y < 24 || point.y > size.y - bottomPadding;
+        if (needsPan) moveCourtMapWithoutRefresh(() => state.map.panInside(
+          [court.latitude, court.longitude], {
+            paddingTopLeft: [24, 24], paddingBottomRight: [24, bottomPadding], animate: false,
+          },
+        ));
+      } catch { /* Leaflet version fallback: selection still works */ }
+    }
+  }
+
   // ---------- Live location & auto check-in ----------
+  function autoCheckInStorageKey(userId = state.me && state.me.id) {
+    return userId ? `pp_auto_checkin:${userId}` : null;
+  }
+
+  function autoCheckInEnabled() {
+    // The old origin-global preference is intentionally not migrated: on a
+    // shared browser, a newly signed-in account must grant its own consent.
+    try { localStorage.removeItem('pp_auto_checkin'); } catch { /* unavailable */ }
+    const key = autoCheckInStorageKey();
+    return !!key && localStorage.getItem(key) === 'on';
+  }
+
+  function setAutoCheckInEnabled(enabled) {
+    const key = autoCheckInStorageKey();
+    if (!key) return;
+    localStorage.setItem(key, enabled ? 'on' : 'off');
+  }
+
   function updateUserDot() {
     if (!state.map || !state.userLoc) return;
     if (!state.userDot) {
@@ -984,7 +2226,7 @@
   }
 
   function startLocationWatch() {
-    if (!navigator.geolocation || state.geoWatchId != null) return;
+    if (!autoCheckInEnabled() || document.hidden || !navigator.geolocation || state.geoWatchId != null) return;
     state.geoWatchId = navigator.geolocation.watchPosition(
       (pos) => {
         state.userLoc = [pos.coords.latitude, pos.coords.longitude];
@@ -992,8 +2234,36 @@
         maybeAutoCheckIn();
       },
       () => { /* permission denied or unavailable */ },
-      { enableHighAccuracy: true, maximumAge: 30000, timeout: 20000 },
+      { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 },
     );
+  }
+
+  function stopLocationWatch() {
+    if (state.geoWatchId == null || !navigator.geolocation) return;
+    navigator.geolocation.clearWatch(state.geoWatchId);
+    state.geoWatchId = null;
+  }
+
+  function openAutoCheckInConsent(onChange) {
+    const modal = openModal(`
+      ${modalHead('Auto check-in')}
+      <div class="consent-hero" aria-hidden="true">📍</div>
+      <p style="font-weight:800;margin-bottom:6px">Arrive, play, and let the app handle check-in.</p>
+      <p class="row-sub" style="margin-bottom:12px">When Third Shot is open, it can use your location to check you in near a court and check you out after you leave.</p>
+      <div class="privacy-note">
+        <b>Who can see it?</b>
+        <span>Players viewing that court can see that you're there. Your precise live location is never shown.</span>
+      </div>
+      <button type="button" class="btn btn-primary btn-block" id="auto-checkin-enable" style="margin-top:14px">Allow while the app is open</button>
+      <button type="button" class="btn btn-secondary btn-block modal-close" style="margin-top:8px">Not now</button>
+    `);
+    modal.querySelector('#auto-checkin-enable').addEventListener('click', () => {
+      setAutoCheckInEnabled(true);
+      closeModal(modal);
+      startLocationWatch();
+      toast('Auto check-in on 📍');
+      if (onChange) onChange();
+    });
   }
 
   const AUTO_CHECKIN_MILES = 0.09;   // ~150 m: you're at the court
@@ -1010,7 +2280,7 @@
 
   async function maybeAutoCheckIn() {
     if (!state.me || !state.userLoc) return;
-    if (localStorage.getItem('pp_auto_checkin') === 'off') return;
+    if (!autoCheckInEnabled()) return;
     const now = Date.now();
     if (now - (state.lastAutoCheckAt || 0) < 45000) return;
     state.lastAutoCheckAt = now;
@@ -1049,23 +2319,38 @@
 
   function courtRowHtml(c) {
     const cond = c.condition && COURT_CONDITION_LABELS[c.condition];
+    const reason = state.listSort === 'active'
+      ? (c.players_here ? `${c.players_here} playing now`
+        : c.upcoming_games ? `${c.upcoming_games} game${c.upcoming_games === 1 ? '' : 's'} coming up` : 'Ready when you are')
+      : state.listSort === 'rating'
+        ? (c.rating_avg ? `Rated ${c.rating_avg} by ${c.rating_count} player${c.rating_count === 1 ? '' : 's'}` : 'Not rated yet')
+        : state.listSort === 'courts'
+          ? `${c.num_courts} court${c.num_courts === 1 ? '' : 's'} at this location`
+          : (c.distance_miles != null ? `${c.distance_miles} miles away` : esc(c.city || 'In this map area'));
+    const tags = [];
+    if (state.favIds && state.favIds.has(c.id)) tags.push('⭐ Saved');
+    tags.push(c.indoor ? '🏠 Indoor' : '☀️ Outdoor');
+    if (c.lighted) tags.push('💡 Lights');
+    if (c.nets_provided) tags.push('🥅 Nets');
+    if (c.has_restrooms) tags.push('🚻 Restrooms');
+    if (c.has_water) tags.push('🚰 Water');
     return `
-      <div class="card row" data-court="${c.id}" style="cursor:pointer">
-        <div class="row-main">
-          <div class="row-title">${esc(c.name)}${cond ? ` <span class="tag ${c.condition === 'good' ? 'live' : 'warn'}" style="margin:0 0 0 6px;font-size:10.5px;padding:2px 8px">${cond[0]} ${esc(cond[1].split(' — ')[0].split(' /')[0])}</span>` : ''}</div>
-          <div class="row-sub">
-            ${[
-              esc(c.city || ''),
-              c.distance_miles != null ? `${c.distance_miles} mi` : '',
-              `${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`,
-              c.rating_avg ? `⭐ ${c.rating_avg} (${c.rating_count})` : '',
-              c.players_here ? `<b style="color:var(--green-accent)">${c.players_here} playing now</b>` : '',
-              c.upcoming_games ? `${c.upcoming_games} game${c.upcoming_games === 1 ? '' : 's'} scheduled` : '',
-            ].filter(Boolean).join(' · ')}
-          </div>
-        </div>
-        <span class="chev">›</span>
-      </div>
+      <button type="button" class="court-decision-card ${state.selectedCourtId === c.id ? 'selected' : ''}" data-court="${c.id}" aria-label="Select ${esc(c.name)}">
+        <span class="court-card-head">
+          <span class="court-card-name">${esc(c.name)}${cond ? ` <span class="tag ${c.condition === 'good' ? 'live' : 'warn'}" style="margin:0 0 0 5px;font-size:10px;padding:2px 7px">${cond[0]} ${esc(cond[1].split(' — ')[0].split(' /')[0])}</span>` : ''}</span>
+          <span class="court-card-distance">${c.distance_miles != null ? `${c.distance_miles} mi` : esc(c.city || '')}</span>
+        </span>
+        <span class="court-card-reason">${reason}</span>
+        <span class="court-card-metrics">
+          <span class="court-card-metric"><b>${c.players_here || 0}</b><span>here now</span></span>
+          <span class="court-card-metric"><b>${c.upcoming_games || 0}</b><span>open games</span></span>
+          <span class="court-card-metric"><b>${c.rating_avg ? `⭐ ${c.rating_avg}` : '—'}</b><span>${c.rating_count || 0} ratings</span></span>
+        </span>
+        <span class="court-card-tags">
+          <span class="tag">${c.num_courts} court${c.num_courts === 1 ? '' : 's'}</span>
+          ${tags.slice(0, 4).map((tag) => `<span class="tag">${tag}</span>`).join('')}
+        </span>
+      </button>
     `;
   }
 
@@ -1080,8 +2365,13 @@
     } else if (state.listSort === 'courts') {
       sorted.sort((a, b) => (b.num_courts || 0) - (a.num_courts || 0));
     } else if (state.listSort === 'active') {
-      sorted.sort((a, b) => ((b.players_here || 0) + (b.upcoming_games || 0))
-        - ((a.players_here || 0) + (a.upcoming_games || 0))
+      const nowScore = (c) => (c.players_here || 0) * 6
+        + (c.upcoming_games || 0) * 3
+        + (c.rating_avg || 0) * 0.7
+        + Math.min(c.num_courts || 0, 12) * 0.15
+        + (c.condition === 'good' ? 1 : ['wet', 'closed', 'nets_down'].includes(c.condition) ? -4 : 0)
+        - Math.min(c.distance_miles || 0, 30) * 0.12;
+      sorted.sort((a, b) => nowScore(b) - nowScore(a)
         || (a.distance_miles ?? 1e9) - (b.distance_miles ?? 1e9));
     } else if (courts.some((c) => c.distance_miles != null)) {
       sorted.sort((a, b) => (a.distance_miles ?? 1e9) - (b.distance_miles ?? 1e9));
@@ -1089,78 +2379,106 @@
     return sorted;
   }
 
-  async function renderCourtList(courts, places = [], { savedOnly = false } = {}) {
+  function renderCourtList(courts, places = [], { savedOnly = false, preserveLimit = false } = {}) {
     const el = $('#court-list-items');
     courts = sortCourts(courts);
+    state.courtListPlaces = places;
+    state.courtListSavedOnly = savedOnly;
+    const resultSignature = JSON.stringify({
+      query: state.searchQ || '',
+      sort: state.listSort,
+      savedOnly,
+      filters: state.courtFilters,
+      courts: courts.map((court) => court.id),
+      places: places.map((place) => [place.lat, place.lng]),
+    });
+    if (!preserveLimit && resultSignature !== state.courtListSignature) {
+      state.courtListLimit = 20;
+      state.courtListExpandedScrollTop = 0;
+    }
+    state.courtListSignature = resultSignature;
     let html = '';
-    // Search results own the panel: no saved-courts insert, honest empty state.
     const searching = !!state.searchQ && !savedOnly;
-    const titleEl = document.querySelector('#court-list .sheet-title');
-    if (titleEl) {
-      const count = courts.length ? ` · ${courts.length}` : '';
-      titleEl.textContent = savedOnly ? `Saved courts${count}`
-        : searching ? `Search results${count}`
-        : `Courts in view${count}`;
-    }
-    if (state.syncListToggle) state.syncListToggle();
+    const hasFilters = activeCourtFilterCount() > 0;
+    const hasNarrowingFilters = Object.entries(state.courtFilters)
+      .some(([key, active]) => key !== 'saved' && active);
+    const emptyResultHtml = () => {
+      const icon = savedOnly ? '⭐' : searching ? '🔎' : hasFilters ? '⚙️' : '🗺️';
+      const message = savedOnly
+        ? (hasNarrowingFilters ? 'No saved courts match all of these filters.' : 'No saved courts yet. Tap ☆ on a court to keep it handy.')
+        : searching && places.length && hasFilters ? 'No courts in this area match all of your filters.'
+          : searching ? `Nothing matches “${esc(state.searchQ)}”. Try a court name or city.`
+          : hasFilters ? 'No courts match all of these filters in this area.'
+            : 'No courts here yet. Move the map, zoom out, or search another area.';
+      return `<div class="court-result-empty"><span class="big">${icon}</span>${message}
+        ${hasFilters ? '<button type="button" class="btn btn-secondary" id="court-clear-results">Clear filters</button>' : ''}</div>`;
+    };
+    const recoveryBeforePlaces = !courts.length && places.length && hasFilters;
+    syncCourtSheetSummary(courts, { savedOnly, searching });
 
-    // The Saved map filter already IS the favorites list — render it directly,
-    // no "saved vs in view" split, with a filter-specific empty state.
-    if (savedOnly) {
-      html += courts.length
-        ? '<div class="section-label" style="margin-top:4px">⭐ Saved courts</div>'
-          + courts.slice(0, 60).map(courtRowHtml).join('')
-        : '<div class="empty-state" style="padding:18px"><span class="big">⭐</span>No saved courts yet.<br>Tap ☆ on any court to pin it here.</div>';
-      html += '<button class="btn btn-secondary btn-block" id="list-add-court" style="margin-top:10px">➕ Missing a court? Add it</button>';
-      el.innerHTML = html;
-      el.querySelector('#list-add-court').addEventListener('click', openAddCourtSheet);
-      el.querySelectorAll('[data-court]').forEach((row) =>
-        row.addEventListener('click', () => openCourtDetail(Number(row.dataset.court))));
-      return;
-    }
-
+    // Filter recovery is the primary answer; related place jumps remain just
+    // below it instead of pushing the action behind the active-game banner.
+    if (recoveryBeforePlaces) html += emptyResultHtml();
     if (places.length) {
       html += '<div class="section-label" style="margin-top:4px">📍 Jump to area</div>';
       html += places.map((p, i) => `
-        <div class="card row" data-place="${i}" style="cursor:pointer">
+        <button type="button" class="card row" data-place="${i}" style="cursor:pointer;width:100%;text-align:left;color:var(--ink)">
           <span style="font-size:18px">📍</span>
           <div class="row-main">
             <div class="row-title">${esc(p.label)}</div>
             <div class="row-sub">${esc((p.detail || '').split(',').slice(1, 4).join(',').trim())}</div>
           </div>
           <span class="chev">›</span>
-        </div>`).join('');
+        </button>`).join('');
       html += '<div class="section-label">Courts</div>';
     }
 
-    if (state.token && !searching) {
-      try {
-        const favs = await api('/courts/favorites');
-        if (favs.items.length) {
-          html += '<div class="section-label" style="margin-top:4px">⭐ Saved courts</div>';
-          html += favs.items.map(courtRowHtml).join('');
-          html += '<div class="section-label">In view</div>';
-        }
-      } catch { /* ignore */ }
-    }
-
-    html += courts.length
-      ? courts.slice(0, 60).map(courtRowHtml).join('')
-      : (searching && !places.length
-        ? `<div class="empty-state" style="padding:18px"><span class="big">🔎</span>Nothing matches “${esc(state.searchQ)}”.<br>Try a court name or a city.</div>`
-        : searching ? ''
-          : '<div class="empty-state">No courts here — try zooming out or searching.</div>');
+    if (courts.length) {
+      const visibleLimit = state.courtSheetSnap === 'peek' ? 8 : state.courtListLimit;
+      const visibleCourts = courts.slice(0, visibleLimit);
+      html += visibleCourts.map(courtRowHtml).join('');
+      if (visibleCourts.length < courts.length) {
+        const remaining = courts.length - visibleCourts.length;
+        const label = state.courtSheetSnap === 'peek'
+          ? `Browse all ${courts.length} courts`
+          : `Show ${Math.min(20, remaining)} more · ${remaining} remaining`;
+        html += `<button type="button" class="btn btn-primary btn-block" id="court-show-more" style="margin:2px 0 10px">${label}</button>`;
+      }
+    } else if (!recoveryBeforePlaces) html += emptyResultHtml();
     html += `<button class="btn btn-secondary btn-block" id="list-add-court" style="margin-top:10px">➕ Missing a court? Add it</button>`;
 
     el.innerHTML = html;
     el.querySelector('#list-add-court').addEventListener('click', openAddCourtSheet);
+    el.querySelector('#court-clear-results')?.addEventListener('click', clearCourtFilters);
+    el.querySelector('#court-show-more')?.addEventListener('click', () => {
+      if (state.courtSheetSnap === 'peek') {
+        const firstNewIndex = 8;
+        setCourtSheetSnap('half');
+        el.querySelectorAll('[data-court]')[firstNewIndex]?.focus({ preventScroll: true });
+        return;
+      }
+      const scrollTop = el.scrollTop;
+      const firstNewIndex = state.courtListLimit;
+      state.courtListLimit += 20;
+      renderCourtList(courts, places, { savedOnly, preserveLimit: true });
+      el.scrollTop = scrollTop;
+      el.querySelectorAll('[data-court]')[firstNewIndex]?.focus({ preventScroll: true });
+    });
+    const byId = new Map(courts.map((court) => [court.id, court]));
     el.querySelectorAll('[data-court]').forEach((row) => {
-      row.addEventListener('click', () => openCourtDetail(Number(row.dataset.court)));
+      row.addEventListener('click', () => selectCourtOnMap(
+        byId.get(Number(row.dataset.court)),
+        { preserveList: state.courtSheetSnap !== 'peek' },
+      ));
     });
     el.querySelectorAll('[data-place]').forEach((row) => {
       const p = places[Number(row.dataset.place)];
       if (p) row.addEventListener('click', () => jumpToPlace(p.lat, p.lng, p.label));
     });
+    if (state.selectedCourtId && !byId.has(state.selectedCourtId)) {
+      state.selectedCourtId = null;
+      $('#court-preview')?.classList.add('hidden');
+    }
   }
 
   function openSuggestEditSheet(court, onApplied) {
@@ -1229,16 +2547,297 @@
   }
 
   // ---------- Modal helpers ----------
+  const OVERLAY_NAV_KEY = 'ppOverlayV1';
+  const OVERLAY_ROUTE_KINDS = new Set(['court', 'game', 'tournament', 'club', 'league']);
+  const previousOverlayNav = history.state && history.state[OVERLAY_NAV_KEY];
+  const overlaySession = previousOverlayNav && previousOverlayNav.v === 1 && previousOverlayNav.session
+    ? previousOverlayNav.session
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  const overlayStack = [];
+  let reusableOverlayEntry = null;
+  let reusableOverlayTimer = null;
+  let dismissAllCallbacks = [];
+  let dismissAllRequested = false;
+  let overlayHistoryRevision = 0;
+  let routedOverlayLoadSeq = 0;
+  let activeRoutedOverlayLoad = null;
+  let pendingReusableTraversal = null;
+  let suppressNativeHashRoute = null;
+  let pendingDeepMatchRebuild = null;
+  const baseAppUrl = () => `${location.pathname}${location.search}`;
+  const normalizeOverlayRoute = (route) => {
+    if (!route) return null;
+    if (typeof route === 'string') {
+      const match = route.match(/^#(court|game|tournament|club|league)\/(\d+)(?:\/match\/(\d+))?$/);
+      if (!match) return null;
+      const normalized = { kind: match[1], id: Number(match[2]) };
+      if (match[3] && (normalized.kind === 'league' || normalized.kind === 'tournament')) {
+        normalized.matchId = Number(match[3]);
+      }
+      return normalized;
+    }
+    const id = Number(route.id);
+    if (!OVERLAY_ROUTE_KINDS.has(route.kind) || !Number.isSafeInteger(id) || id <= 0) return null;
+    const normalized = { kind: route.kind, id };
+    const matchId = Number(route.matchId);
+    if ((route.kind === 'league' || route.kind === 'tournament')
+        && Number.isSafeInteger(matchId) && matchId > 0) normalized.matchId = matchId;
+    return normalized;
+  };
+  const overlayRouteHash = (route) => route
+    ? `#${route.kind}/${route.id}${route.matchId ? `/match/${route.matchId}` : ''}` : '';
+  const sameOverlayRoute = (left, right) => !!left && !!right
+    && left.kind === right.kind && left.id === right.id
+    && (left.matchId || null) === (right.matchId || null);
+  const overlayUrl = (route) => `${baseAppUrl()}${overlayRouteHash(route)}`;
+  const overlayHistoryState = (id, depth, route) => ({
+    ...(history.state || {}),
+    [OVERLAY_NAV_KEY]: { v: 1, session: overlaySession, id, depth, route: route || null },
+  });
+  const previousRoute = normalizeOverlayRoute(previousOverlayNav && previousOverlayNav.route);
+  let adoptOverlayEntry = previousOverlayNav && previousOverlayNav.v === 1
+    && previousOverlayNav.session === overlaySession && previousOverlayNav.id && previousRoute
+    && location.hash === overlayRouteHash(previousRoute)
+    ? { ...previousOverlayNav, route: previousRoute } : null;
+  if (!adoptOverlayEntry) {
+    try { history.replaceState(overlayHistoryState(null, 0, null), '', location.href); } catch { /* history can be unavailable */ }
+  }
+
+  function currentOverlayEntry() { return overlayStack[overlayStack.length - 1] || null; }
+  function liveOverlayHistoryDepth() {
+    return overlayStack.reduce((depth, entry) => depth + (entry.historyPops || 1), 0);
+  }
+
+  // Shared routes can take a network round-trip to render. Remember whether a
+  // load is adopting the current history entry so Back during that wait cannot
+  // resurrect the sheet after the user has already left it. For ordinary UI
+  // taps, a newer routed tap wins without disrupting intentional close→open
+  // transitions that finish after their old history slot unwinds.
+  function beginRoutedOverlayLoad(route) {
+    const normalized = normalizeOverlayRoute(route);
+    const pendingAdoption = normalized && adoptOverlayEntry
+      && adoptOverlayEntry.route.kind === normalized.kind
+      && adoptOverlayEntry.route.id === normalized.id
+      && (adoptOverlayEntry.route.matchId || null) === (normalized.matchId || null)
+      ? adoptOverlayEntry : null;
+    const load = {
+      seq: ++routedOverlayLoadSeq,
+      route: normalized,
+      adoptionId: pendingAdoption ? pendingAdoption.id : null,
+      historyRevision: overlayHistoryRevision,
+      originOverlayId: currentOverlayEntry()?.id || null,
+      expectedReusableId: reusableOverlayEntry?.id || null,
+    };
+    activeRoutedOverlayLoad = load;
+    return load;
+  }
+
+  function routedOverlayLoadIsCurrent(load) {
+    if (!load) return true;
+    if (load.seq !== routedOverlayLoadSeq || load.historyRevision !== overlayHistoryRevision) return false;
+    if ((currentOverlayEntry()?.id || null) !== load.originOverlayId) return false;
+    if (!load.adoptionId) return true;
+    const nav = history.state && history.state[OVERLAY_NAV_KEY];
+    return overlayHistoryRevision === load.historyRevision
+      && adoptOverlayEntry && adoptOverlayEntry.id === load.adoptionId
+      && nav && nav.session === overlaySession && nav.id === load.adoptionId
+      && load.route && location.hash === overlayRouteHash(load.route);
+  }
+
+  function cancelPendingOverlayLoadForNavigation() {
+    routedOverlayLoadSeq += 1;
+    activeRoutedOverlayLoad = null;
+    if (adoptOverlayEntry && !overlayStack.length) {
+      adoptOverlayEntry = null;
+      try { history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl()); } catch { /* ignore */ }
+    }
+  }
+
+  function syncModalStack() {
+    const top = currentOverlayEntry();
+    overlayStack.forEach((entry) => {
+      const active = entry === top;
+      entry.el.toggleAttribute('inert', !active);
+      entry.el.setAttribute('aria-hidden', String(!active));
+      const dialog = entry.el.querySelector('.modal');
+      if (dialog) dialog.setAttribute('aria-modal', String(active));
+    });
+    const main = $('#main-screen');
+    if (top) {
+      document.documentElement.classList.add('modal-open');
+      if (main) { main.setAttribute('inert', ''); main.setAttribute('aria-hidden', 'true'); }
+    } else {
+      document.documentElement.classList.remove('modal-open');
+      if (main) { main.removeAttribute('inert'); main.removeAttribute('aria-hidden'); }
+    }
+  }
+
+  function focusAfterModalChange(removed, restoreFocus = true) {
+    if (!restoreFocus) return;
+    const top = currentOverlayEntry();
+    if (top) {
+      const candidate = removed && removed._returnFocus;
+      const target = candidate && candidate.isConnected && top.el.contains(candidate)
+        ? candidate : top.el.querySelector('.modal');
+      requestAnimationFrame(() => target?.focus({ preventScroll: true }));
+      return;
+    }
+    const target = removed && removed._returnFocus;
+    if (target && target.isConnected && !target.closest('[inert]')) {
+      requestAnimationFrame(() => target.focus({ preventScroll: true }));
+    }
+  }
+
+  function destroyModal(el, { restoreFocus = true } = {}) {
+    if (!el || el._destroyed) return;
+    el._destroyed = true;
+    (el._cleanupFns || []).forEach((fn) => { try { fn(); } catch { /* cleanup must not block close */ } });
+    if (el._cleanup) { try { el._cleanup(); } catch { /* backwards compatibility */ } }
+    el.remove();
+    syncModalStack();
+    focusAfterModalChange(el, restoreFocus);
+  }
+
+  function normalizeHistoryToLiveOverlay() {
+    const top = currentOverlayEntry();
+    const route = top ? top.route : null;
+    try {
+      history.replaceState(
+        overlayHistoryState(top ? top.id : null, liveOverlayHistoryDepth(), route),
+        '',
+        top ? overlayUrl(route) : baseAppUrl(),
+      );
+    } catch { /* history can be unavailable */ }
+  }
+
+  function dismissModal(el, afterClose) {
+    const top = currentOverlayEntry();
+    if (!top || top.el !== el || top.closing) return;
+    if (afterClose) top.afterClose.push(afterClose);
+    top.closing = true;
+    const nav = history.state && history.state[OVERLAY_NAV_KEY];
+    if (nav && nav.session === overlaySession && nav.id === top.id) {
+      try { history.go(-(top.historyPops || 1)); return; } catch { /* fall through */ }
+    }
+    overlayStack.pop();
+    destroyModal(el);
+    normalizeHistoryToLiveOverlay();
+    top.afterClose.splice(0).forEach((fn) => { try { fn(); } catch { /* callback isolation */ } });
+  }
+
+  function dismissAllModals(afterClose) {
+    if (afterClose) dismissAllCallbacks.push(afterClose);
+    const nav = history.state && history.state[OVERLAY_NAV_KEY];
+    const reusable = reusableOverlayEntry;
+    const reusableOwnsCurrent = reusable && nav && nav.session === overlaySession && nav.id === reusable.id;
+    const reusablePops = reusableOwnsCurrent ? Math.max(1, reusable.pops || 1) : 0;
+    if (reusable) {
+      clearTimeout(reusableOverlayTimer);
+      reusableOverlayTimer = null;
+      reusableOverlayEntry = null;
+      pendingReusableTraversal = null;
+    }
+    if (!overlayStack.length) {
+      if (reusableOwnsCurrent) {
+        dismissAllRequested = true;
+        try { history.go(-reusablePops); return; } catch { normalizeHistoryToLiveOverlay(); }
+      } else if (reusable) {
+        normalizeHistoryToLiveOverlay();
+      }
+      dismissAllRequested = false;
+      dismissAllCallbacks.splice(0).forEach((fn) => { try { fn(); } catch { /* callback isolation */ } });
+      return;
+    }
+    dismissAllRequested = true;
+    const top = currentOverlayEntry();
+    if (top.closing && !reusableOwnsCurrent) return;
+    const currentOwnsStack = nav && nav.session === overlaySession && nav.id === top.id;
+    if (!currentOwnsStack && !reusableOwnsCurrent) {
+      while (overlayStack.length) destroyModal(overlayStack.pop().el, { restoreFocus: false });
+      normalizeHistoryToLiveOverlay();
+      dismissAllRequested = false;
+      dismissAllCallbacks.splice(0).forEach((fn) => { try { fn(); } catch { /* callback isolation */ } });
+      return;
+    }
+    top.closing = true;
+    try { history.go(-(liveOverlayHistoryDepth() + reusablePops)); }
+    catch {
+      while (overlayStack.length) destroyModal(overlayStack.pop().el, { restoreFocus: false });
+      normalizeHistoryToLiveOverlay();
+      dismissAllRequested = false;
+      dismissAllCallbacks.splice(0).forEach((fn) => { try { fn(); } catch { /* callback isolation */ } });
+    }
+  }
+
+  function setDialogLabel(modalBox, fallback = 'Dialog') {
+    if (!modalBox) return;
+    const candidates = [...modalBox.querySelectorAll('.modal-head h3, .thread-head .row-title, h2, h3')];
+    const title = candidates.find((node) => node.textContent.trim());
+    modalBox.removeAttribute('aria-labelledby');
+    modalBox.removeAttribute('aria-label');
+    if (title) {
+      if (!title.id) title.id = `modal-title-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      modalBox.setAttribute('aria-labelledby', title.id);
+    } else {
+      modalBox.setAttribute('aria-label', fallback);
+    }
+    modalBox.querySelectorAll('.modal-close:not([aria-label])').forEach((btn) => {
+      btn.setAttribute('aria-label', btn.textContent.includes('‹') ? 'Back' : 'Close');
+    });
+  }
+
   function openModal(html, opts = {}) {
     const root = $('#overlay-root');
+    const previousFocus = document.activeElement;
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop'
       + (opts.chat ? ' chat-modal' : '')
       + (opts.court ? ' court-modal' : '');
     backdrop.innerHTML = `<div class="modal">${html}</div>`;
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(backdrop); });
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop || (e.target.closest('.modal-close') && e.target.closest('.modal-backdrop') === backdrop)) {
+        dismissModal(backdrop);
+      }
+    });
     root.appendChild(backdrop);
-    backdrop.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => closeModal(backdrop)));
+
+    // Every sheet is a real modal dialog: announce it, keep keyboard focus
+    // inside it, close the top sheet with Escape, then restore the trigger.
+    const modalBox = backdrop.querySelector('.modal');
+    modalBox.setAttribute('role', 'dialog');
+    modalBox.setAttribute('aria-modal', 'true');
+    modalBox.tabIndex = -1;
+    setDialogLabel(modalBox, opts.label || 'Dialog');
+    backdrop._returnFocus = previousFocus;
+    backdrop._cleanupFns = [];
+    const focusable = () => [...modalBox.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+    )].filter((el) => !el.closest('.hidden') && el.getClientRects().length);
+    const onKeyDown = (e) => {
+      if (!document.body.contains(backdrop)) return;
+      const open = [...root.querySelectorAll('.modal-backdrop')];
+      if (open[open.length - 1] !== backdrop) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        dismissModal(backdrop);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = focusable();
+      if (!items.length) { e.preventDefault(); modalBox.focus(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === modalBox)) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    backdrop._cleanupFns.push(() => document.removeEventListener('keydown', onKeyDown));
+    requestAnimationFrame(() => {
+      if (currentOverlayEntry()?.el === backdrop) modalBox.focus({ preventScroll: true });
+    });
 
     // Mark the element that's actually allowed to scroll so we can block the
     // page/map behind from scrolling when you drag anywhere else on the sheet.
@@ -1249,30 +2848,855 @@
     }, { passive: false });
 
     // Show a divider under the sticky header once the generic modal scrolls.
-    const modalBox = backdrop.querySelector('.modal');
     const head = modalBox && modalBox.querySelector(':scope > .modal-head');
     if (head && !opts.chat && !opts.court) {
       modalBox.addEventListener('scroll', () => {
-        head.classList.toggle('scrolled', modalBox.scrollTop > 4);
+        const currentHead = modalBox.querySelector(':scope > .modal-head');
+        currentHead?.classList.toggle('scrolled', modalBox.scrollTop > 4);
       });
     }
 
-    document.documentElement.classList.add('modal-open');
+    const explicitRoute = normalizeOverlayRoute(opts.route);
+    const route = explicitRoute || (currentOverlayEntry() && currentOverlayEntry().route) || null;
+    let id = `${overlaySession}:${newGameAttemptId()}`;
+    let historyPops = 1;
+    const currentNav = history.state && history.state[OVERLAY_NAV_KEY];
+    const canAdopt = adoptOverlayEntry && route
+      && currentNav && currentNav.session === overlaySession && currentNav.id === adoptOverlayEntry.id
+      && location.hash === overlayRouteHash(route)
+      && adoptOverlayEntry.route.kind === route.kind && adoptOverlayEntry.route.id === route.id
+      && (adoptOverlayEntry.route.matchId || null) === (route.matchId || null)
+      && !overlayStack.some((entry) => entry.id === adoptOverlayEntry.id);
+    if (canAdopt) {
+      id = adoptOverlayEntry.id;
+      historyPops = Math.max(
+        1,
+        Number(adoptOverlayEntry.historyPops ?? adoptOverlayEntry.depth) || 1,
+      );
+      adoptOverlayEntry = null;
+    } else if (reusableOverlayEntry) {
+      clearTimeout(reusableOverlayTimer);
+      reusableOverlayTimer = null;
+      historyPops = Math.max(1, reusableOverlayEntry.pops || 1);
+      try { history.replaceState(overlayHistoryState(id, liveOverlayHistoryDepth() + historyPops, route), '', overlayUrl(route)); } catch { /* ignore */ }
+      reusableOverlayEntry = null;
+    } else {
+      try { history.pushState(overlayHistoryState(id, liveOverlayHistoryDepth() + 1, route), '', overlayUrl(route)); } catch { /* dismiss falls back safely */ }
+    }
+    backdrop._overlayId = id;
+    overlayStack.push({
+      id, el: backdrop, route, ownsRoute: !!explicitRoute,
+      historyPops, closing: false, afterClose: [],
+    });
+    syncModalStack();
     return backdrop;
   }
+
+  // Programmatic transitions in the existing UI are synchronous close→open.
+  // Keep the current history slot briefly reusable so those transitions still
+  // cost one Back press; if no replacement opens, unwind the stale slot.
+  function armReusableOverlayUnwind() {
+    clearTimeout(reusableOverlayTimer);
+    reusableOverlayTimer = setTimeout(() => {
+      const reusable = reusableOverlayEntry;
+      if (!reusable) return;
+      const pops = reusable.pops || 1;
+      const target = currentOverlayEntry();
+      const preservingLoad = activeRoutedOverlayLoad
+        && activeRoutedOverlayLoad.seq === routedOverlayLoadSeq
+        && activeRoutedOverlayLoad.expectedReusableId === reusable.id
+        ? activeRoutedOverlayLoad.seq : null;
+      pendingReusableTraversal = {
+        id: reusable.id,
+        routeLoadSeq: preservingLoad,
+        targetId: target ? target.id : null,
+        targetDepth: liveOverlayHistoryDepth(),
+      };
+      reusableOverlayEntry = null;
+      reusableOverlayTimer = null;
+      try { history.go(-pops); }
+      catch {
+        pendingReusableTraversal = null;
+        normalizeHistoryToLiveOverlay();
+      }
+    }, 0);
+  }
+
   function closeModal(el) {
-    if (el && el._cleanup) el._cleanup();
-    el?.remove();
-    if (!$('#overlay-root').querySelector('.modal-backdrop')) {
-      document.documentElement.classList.remove('modal-open');
+    if (!el) return false;
+    const index = overlayStack.findIndex((entry) => entry.el === el);
+    if (index < 0) { destroyModal(el); return false; }
+    // dismissModal has already committed this sheet to the browser Back
+    // traversal. An async success landing in that short window must not splice
+    // it again, open a replacement, or schedule a second history.go().
+    if (overlayStack[index].closing) return false;
+    if (index !== overlayStack.length - 1) {
+      // Preserve a newer child (and any typed draft) when an older async
+      // parent action resolves. The parent closes only after that child is
+      // intentionally dismissed.
+      if (!el._deferredCloseQueued) {
+        el._deferredCloseQueued = true;
+        currentOverlayEntry().afterClose.push(() => {
+          if (!el._deferredCloseQueued) return;
+          el._deferredCloseQueued = false;
+          closeModal(el);
+        });
+      }
+      return false;
+    }
+
+    const [entry] = overlayStack.splice(index, 1);
+    destroyModal(el);
+
+    const nav = history.state && history.state[OVERLAY_NAV_KEY];
+    if (nav && nav.session === overlaySession && nav.id === entry.id) {
+      reusableOverlayEntry = { ...entry, pops: entry.historyPops || 1 };
+      armReusableOverlayUnwind();
+    } else if (reusableOverlayEntry && nav && nav.session === overlaySession
+        && nav.id === reusableOverlayEntry.id) {
+      // A child was closed and its callback immediately closed the parent too.
+      // Traverse both history entries together instead of leaving a ghost Back.
+      reusableOverlayEntry.pops = (reusableOverlayEntry.pops || 1) + (entry.historyPops || 1);
+      armReusableOverlayUnwind();
+    } else {
+      normalizeHistoryToLiveOverlay();
+    }
+    entry.afterClose.splice(0).forEach((fn) => { try { fn(); } catch { /* callback isolation */ } });
+    return true;
+  }
+
+  function transitionModal(el, openNext) {
+    const index = overlayStack.findIndex((entry) => entry.el === el);
+    if (index < 0 || typeof openNext !== 'function') return false;
+    if (index !== overlayStack.length - 1) {
+      // Replace only after the user's newer child is done. Repeated refreshes
+      // coalesce to the latest result instead of stacking duplicate screens.
+      el._deferredCloseQueued = false;
+      el._deferredTransition = openNext;
+      if (!el._deferredTransitionQueued) {
+        el._deferredTransitionQueued = true;
+        currentOverlayEntry().afterClose.push(() => {
+          el._deferredTransitionQueued = false;
+          const next = el._deferredTransition;
+          el._deferredTransition = null;
+          if (next) transitionModal(el, next);
+        });
+      }
+      return true;
+    }
+    el._deferredCloseQueued = false;
+    if (!closeModal(el)) return false;
+    openNext();
+    return true;
+  }
+
+  // A successful modal action can need a second, optional prompt after a
+  // refresh. Only carry that intent forward when the action still owns the
+  // visible sheet; closing it first lets the history-aware load token follow
+  // the app back to its parent/base screen without reviving over newer UI.
+  function beginFollowupAfterClosingModal(el) {
+    const entry = overlayStack.find((candidate) => candidate.el === el);
+    if (!entry || entry.closing) return null;
+    const top = currentOverlayEntry();
+    if (top !== entry) {
+      // A newer child owns the screen. Preserve it, but still queue the stale
+      // source sheet to close once that child is intentionally dismissed.
+      closeModal(el);
+      return null;
+    }
+    if (!closeModal(el)) return null;
+    return beginRoutedOverlayLoad(null);
+  }
+
+  window.addEventListener('popstate', (e) => {
+    const nav = e.state && e.state[OVERLAY_NAV_KEY];
+    const nativeRoute = normalizeOverlayRoute(location.hash);
+    const stateRoute = normalizeOverlayRoute(nav && nav.route);
+    const ownsNativeDestination = nav && nav.session === overlaySession && nav.id
+      && sameOverlayRoute(stateRoute, nativeRoute);
+    // A browser/client fragment navigation creates its own history entry and
+    // fires popstate before hashchange. Adopt that entry in place so opening a
+    // shared link cannot create a ghost base stop. Installed-app pushes use a
+    // service-worker message (below); this is the defensive link/navigation
+    // fallback for already-open tabs.
+    if (state.token && nativeRoute && !ownsNativeDestination) {
+      clearTimeout(reusableOverlayTimer);
+      reusableOverlayTimer = null;
+      reusableOverlayEntry = null;
+      pendingReusableTraversal = null;
+      overlayHistoryRevision += 1;
+      routedOverlayLoadSeq += 1;
+      activeRoutedOverlayLoad = null;
+      suppressNativeHashRoute = location.hash;
+      const suppressedHash = suppressNativeHashRoute;
+      setTimeout(() => {
+        if (suppressNativeHashRoute === suppressedHash) suppressNativeHashRoute = null;
+      }, 250);
+
+      const existingOwner = [...overlayStack].reverse().find(
+        (entry) => entry.ownsRoute && sameOverlayRoute(entry.route, nativeRoute),
+      );
+      if (existingOwner) {
+        // Identical native navigation has already added a duplicate browser
+        // entry. Keep the live screen intact; push notifications never take
+        // this path, so ordinary Back semantics remain unaffected.
+        try {
+          history.replaceState(
+            overlayHistoryState(existingOwner.id, liveOverlayHistoryDepth(), existingOwner.route),
+            '', overlayUrl(existingOwner.route),
+          );
+        } catch { /* history can be unavailable */ }
+        return;
+      }
+
+      const parentRoute = nativeRoute.matchId
+        ? { kind: nativeRoute.kind, id: nativeRoute.id } : nativeRoute;
+      const adoptionId = `${overlaySession}:${newGameAttemptId()}`;
+      adoptOverlayEntry = {
+        v: 1,
+        session: overlaySession,
+        id: adoptionId,
+        depth: liveOverlayHistoryDepth() + 1,
+        historyPops: 1,
+        route: parentRoute,
+      };
+      try {
+        history.replaceState(
+          overlayHistoryState(adoptionId, adoptOverlayEntry.depth, parentRoute),
+          '', overlayUrl(parentRoute),
+        );
+      } catch { /* openModal still has a safe push fallback */ }
+      queueMicrotask(() => navigateOverlayRoute(nativeRoute));
+      return;
+    }
+    const expectedRouteTraversal = pendingReusableTraversal
+      && pendingReusableTraversal.routeLoadSeq != null
+      && activeRoutedOverlayLoad
+      && activeRoutedOverlayLoad.seq === pendingReusableTraversal.routeLoadSeq
+      && nav && nav.session === overlaySession
+      && nav.id === pendingReusableTraversal.targetId
+      && Number(nav.depth) === pendingReusableTraversal.targetDepth;
+    pendingReusableTraversal = null;
+    clearTimeout(reusableOverlayTimer);
+    reusableOverlayTimer = null;
+    reusableOverlayEntry = null;
+    overlayHistoryRevision += 1;
+    adoptOverlayEntry = null;
+    if (expectedRouteTraversal) {
+      activeRoutedOverlayLoad.historyRevision = overlayHistoryRevision;
+      activeRoutedOverlayLoad.expectedReusableId = null;
+    } else {
+      routedOverlayLoadSeq += 1;
+      activeRoutedOverlayLoad = null;
+    }
+    const targetId = nav && nav.session === overlaySession ? nav.id : null;
+    const targetIndex = targetId ? overlayStack.findIndex((entry) => entry.id === targetId) : -1;
+    const staleTarget = !!targetId && targetIndex < 0;
+    if (staleTarget) {
+      const top = currentOverlayEntry();
+      const liveDepth = liveOverlayHistoryDepth();
+      const targetDepth = nav && Number.isFinite(Number(nav.depth)) ? Number(nav.depth) : null;
+      const priorLiveDepth = top ? liveDepth - (top.historyPops || 1) : liveDepth;
+      // After reloading a nested route, Back can first land on an orphaned
+      // parent entry. Skip the remainder to the last actually-live screen, so
+      // the route closes in one gesture and no duplicate base stop remains.
+      if (top && targetDepth != null && targetDepth > priorLiveDepth && targetDepth < liveDepth) {
+        try { history.go(-(targetDepth - priorLiveDepth)); return; } catch { /* repair below */ }
+      }
+      // Forward into an already-destroyed overlay must return to the actual
+      // live history slot. Replacing the stale slot would create a duplicate
+      // entry, swallow the next Back gesture, and could lock a closing sheet.
+      const bounceDistance = targetDepth != null && targetDepth > liveDepth
+        ? Math.max(1, targetDepth - liveDepth) : 1;
+      try { history.go(-bounceDistance); } catch { normalizeHistoryToLiveOverlay(); }
+      return;
+    }
+    const callbackQueue = [];
+    let removed = null;
+    const unwindTo = targetIndex;
+    while (overlayStack.length - 1 > unwindTo) {
+      const entry = overlayStack.pop();
+      removed = entry.el;
+      destroyModal(entry.el, { restoreFocus: false });
+      callbackQueue.push(...entry.afterClose.splice(0));
+    }
+    syncModalStack();
+    focusAfterModalChange(removed, true);
+    const survivingTop = currentOverlayEntry();
+    if (survivingTop) survivingTop.closing = false;
+    // Callbacks may open the next onboarding sheet, so wait until the old stack
+    // is fully reconciled before running any of them.
+    callbackQueue.forEach((fn) => { try { fn(); } catch { /* callback isolation */ } });
+    if (overlayStack.length && dismissAllRequested) {
+      dismissAllModals();
+      return;
+    }
+    if (!overlayStack.length && dismissAllRequested) {
+      dismissAllRequested = false;
+      dismissAllCallbacks.splice(0).forEach((fn) => { try { fn(); } catch { /* callback isolation */ } });
+    } else if (!overlayStack.length) {
+      dismissAllRequested = false;
+    }
+    if (!overlayStack.length && pendingDeepMatchRebuild) {
+      const route = pendingDeepMatchRebuild;
+      pendingDeepMatchRebuild = null;
+      adoptOverlayEntry = null;
+      try {
+        history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl());
+      } catch { /* openModal still has a safe push fallback */ }
+      queueMicrotask(() => navigateOverlayRoute(route));
+    }
+  });
+
+  // Durable, account-scoped chat outbox. A message is stored before its
+  // composer is cleared, then replayed with the same idempotency key until the
+  // server acknowledges it. IndexedDB keeps photos out of localStorage's small
+  // quota; localStorage is only used when IndexedDB cannot be opened at all.
+  const CHAT_OUTBOX_DB_NAME = 'thirdshot-chat-outbox';
+  const CHAT_OUTBOX_STORE_NAME = 'messages';
+  const CHAT_OUTBOX_FALLBACK_KEY = 'pp_chat_outbox_v1';
+  const CHAT_OUTBOX_ATTEMPT_RE = /^[a-zA-Z0-9_-]{16,64}$/;
+  const CHAT_OUTBOX_MAX_PER_ACCOUNT = 50;
+  let chatOutboxDbPromise = null;
+  const chatOutboxBindings = new Map();
+  const chatOutboxSends = new Map();
+  const chatOutboxFlushes = new Map();
+  const chatOutboxRetryTimers = new Map();
+  const chatOutboxAcknowledgedAttempts = new Set();
+  const chatOutboxCancelledAttempts = new Set();
+  let chatOutboxSessionRevision = 0;
+
+  function chatOutboxAccountId(value) {
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  }
+
+  function chatEndpointForChannel(channelKey) {
+    const match = String(channelKey || '').match(/^(dm|court|game|tournament|club|league):([1-9]\d*)$/);
+    if (!match) return null;
+    const [, kind, id] = match;
+    if (kind === 'dm') return `/chat/${id}`;
+    const collections = {
+      court: 'courts', game: 'games', tournament: 'tournaments', club: 'clubs', league: 'leagues',
+    };
+    return `/${collections[kind]}/${id}/chat`;
+  }
+
+  function chatOutboxRecordId(accountId, attemptId) {
+    return `${accountId}:${attemptId}`;
+  }
+
+  function normalizeChatOutboxRecord(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const accountId = chatOutboxAccountId(raw.accountId);
+    const attemptId = typeof raw.attemptId === 'string' && CHAT_OUTBOX_ATTEMPT_RE.test(raw.attemptId)
+      ? raw.attemptId : null;
+    const channelKey = typeof raw.channelKey === 'string' && chatEndpointForChannel(raw.channelKey)
+      ? raw.channelKey : null;
+    const body = typeof raw.body === 'string' ? raw.body.slice(0, 2000) : '';
+    const image = typeof raw.image === 'string'
+      && raw.image.length <= 700000
+      && /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(raw.image) ? raw.image : null;
+    if (!accountId || !attemptId || !channelKey || (!body.trim() && !image)) return null;
+    const createdAt = Number(raw.createdAt);
+    const status = ['queued', 'sending', 'failed'].includes(raw.status) ? raw.status : 'queued';
+    return {
+      id: chatOutboxRecordId(accountId, attemptId),
+      accountId,
+      channelKey,
+      attemptId,
+      body,
+      image,
+      createdAt: Number.isFinite(createdAt) && createdAt > 0 && createdAt <= Date.now() + 60000
+        ? createdAt : Date.now(),
+      status,
+      retryCount: Math.max(0, Math.min(20, Number(raw.retryCount) || 0)),
+      error: typeof raw.error === 'string' ? raw.error.slice(0, 180) : '',
+      nextRetryAt: Number.isFinite(Number(raw.nextRetryAt)) ? Number(raw.nextRetryAt) : null,
+    };
+  }
+
+  function openChatOutboxDb() {
+    if (chatOutboxDbPromise) return chatOutboxDbPromise;
+    chatOutboxDbPromise = new Promise((resolve) => {
+      if (!('indexedDB' in window)) { resolve(null); return; }
+      let settled = false;
+      const finish = (value) => {
+        if (settled) {
+          if (value) value.close();
+          return;
+        }
+        settled = true;
+        resolve(value);
+      };
+      let request;
+      try { request = indexedDB.open(CHAT_OUTBOX_DB_NAME, 1); }
+      catch { finish(null); return; }
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(CHAT_OUTBOX_STORE_NAME)) {
+          const store = db.createObjectStore(CHAT_OUTBOX_STORE_NAME, { keyPath: 'id' });
+          store.createIndex('accountId', 'accountId', { unique: false });
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => db.close();
+        const fallback = readChatOutboxFallback();
+        if (!fallback.length) { finish(db); return; }
+        try {
+          const transaction = db.transaction(CHAT_OUTBOX_STORE_NAME, 'readwrite');
+          const store = transaction.objectStore(CHAT_OUTBOX_STORE_NAME);
+          fallback.map(normalizeChatOutboxRecord).filter(Boolean).forEach((item) => store.put(item));
+          transaction.oncomplete = () => {
+            try { localStorage.removeItem(CHAT_OUTBOX_FALLBACK_KEY); } catch { /* harmless duplicate fallback */ }
+            finish(db);
+          };
+          const fallBackToLocal = () => { db.close(); finish(null); };
+          transaction.onerror = fallBackToLocal;
+          transaction.onabort = fallBackToLocal;
+        } catch { db.close(); finish(null); }
+      };
+      request.onerror = () => finish(null);
+      request.onblocked = () => finish(null);
+    });
+    return chatOutboxDbPromise;
+  }
+
+  function readChatOutboxFallback() {
+    try {
+      const items = JSON.parse(localStorage.getItem(CHAT_OUTBOX_FALLBACK_KEY) || '[]');
+      return Array.isArray(items) ? items : [];
+    } catch { return []; }
+  }
+
+  function writeChatOutboxFallback(items) {
+    localStorage.setItem(CHAT_OUTBOX_FALLBACK_KEY, JSON.stringify(items));
+  }
+
+  const chatOutboxStore = {
+    async all() {
+      const db = await openChatOutboxDb();
+      if (!db) return readChatOutboxFallback();
+      return new Promise((resolve, reject) => {
+        const request = db.transaction(CHAT_OUTBOX_STORE_NAME, 'readonly')
+          .objectStore(CHAT_OUTBOX_STORE_NAME).getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error || new Error('outbox_read_failed'));
+      });
+    },
+    async get(id) {
+      const db = await openChatOutboxDb();
+      if (!db) return readChatOutboxFallback().find((item) => item && item.id === id) || null;
+      return new Promise((resolve, reject) => {
+        const request = db.transaction(CHAT_OUTBOX_STORE_NAME, 'readonly')
+          .objectStore(CHAT_OUTBOX_STORE_NAME).get(id);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error || new Error('outbox_read_failed'));
+      });
+    },
+    async put(item) {
+      const db = await openChatOutboxDb();
+      if (!db) {
+        const items = readChatOutboxFallback().filter((entry) => entry && entry.id !== item.id);
+        items.push(item);
+        writeChatOutboxFallback(items);
+        return;
+      }
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(CHAT_OUTBOX_STORE_NAME, 'readwrite');
+        transaction.objectStore(CHAT_OUTBOX_STORE_NAME).put(item);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error || new Error('outbox_write_failed'));
+        transaction.onabort = () => reject(transaction.error || new Error('outbox_write_failed'));
+      });
+    },
+    async remove(id) {
+      const db = await openChatOutboxDb();
+      if (!db) {
+        writeChatOutboxFallback(readChatOutboxFallback().filter((item) => item && item.id !== id));
+        return;
+      }
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(CHAT_OUTBOX_STORE_NAME, 'readwrite');
+        transaction.objectStore(CHAT_OUTBOX_STORE_NAME).delete(id);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error || new Error('outbox_delete_failed'));
+        transaction.onabort = () => reject(transaction.error || new Error('outbox_delete_failed'));
+      });
+    },
+    async purge(accountId, cutoff = Date.now()) {
+      const db = await openChatOutboxDb();
+      if (!db) {
+        writeChatOutboxFallback(readChatOutboxFallback()
+          .filter((raw) => {
+            if (chatOutboxAccountId(raw && raw.accountId) !== accountId) return true;
+            const createdAt = Number(raw && raw.createdAt);
+            return !!normalizeChatOutboxRecord(raw)
+              && Number.isFinite(createdAt) && createdAt > cutoff
+              && createdAt <= Date.now() + 60000;
+          }));
+        return;
+      }
+      const items = await this.all();
+      const ids = items.filter((raw) => {
+        if (chatOutboxAccountId(raw && raw.accountId) !== accountId) return false;
+        const createdAt = Number(raw && raw.createdAt);
+        const createdAfterLogout = !!normalizeChatOutboxRecord(raw)
+          && Number.isFinite(createdAt) && createdAt > cutoff
+          && createdAt <= Date.now() + 60000;
+        return !createdAfterLogout;
+      }).map((item) => item.id).filter(Boolean);
+      if (!ids.length) return;
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(CHAT_OUTBOX_STORE_NAME, 'readwrite');
+        const store = transaction.objectStore(CHAT_OUTBOX_STORE_NAME);
+        ids.forEach((id) => store.delete(id));
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error || new Error('outbox_purge_failed'));
+        transaction.onabort = () => reject(transaction.error || new Error('outbox_purge_failed'));
+      });
+    },
+  };
+
+  async function listChatOutbox(accountId, channelKey = null) {
+    accountId = chatOutboxAccountId(accountId);
+    if (!accountId) return [];
+    const raw = await chatOutboxStore.all();
+    return raw.map(normalizeChatOutboxRecord).filter((item) => item
+      && item.accountId === accountId
+      && !chatOutboxAcknowledgedAttempts.has(item.id)
+      && (!channelKey || item.channelKey === channelKey))
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  function chatOutboxBindingKey(accountId, channelKey) {
+    return `${accountId}:${channelKey}`;
+  }
+
+  function notifyChatOutboxBindings(accountId, channelKey, { delivered = null, announcement = '' } = {}) {
+    const bindings = chatOutboxBindings.get(chatOutboxBindingKey(accountId, channelKey));
+    if (!bindings) return;
+    bindings.forEach((binding) => {
+      if (delivered) binding.onDelivered?.(delivered);
+      binding.refresh();
+      if (announcement) binding.announce(announcement);
+    });
+  }
+
+  function clearChatOutboxRetry(recordId) {
+    const timer = chatOutboxRetryTimers.get(recordId);
+    if (timer) clearTimeout(timer);
+    chatOutboxRetryTimers.delete(recordId);
+  }
+
+  function scheduleChatOutboxRetry(item) {
+    clearChatOutboxRetry(item.id);
+    if (item.status !== 'queued' || !navigator.onLine) return;
+    const delay = Math.max(2500, Math.min(30000, (item.nextRetryAt || Date.now()) - Date.now()));
+    const sessionRevision = chatOutboxSessionRevision;
+    chatOutboxRetryTimers.set(item.id, setTimeout(async () => {
+      chatOutboxRetryTimers.delete(item.id);
+      if (sessionRevision !== chatOutboxSessionRevision
+          || !state.token || state.me?.id !== item.accountId || !navigator.onLine) return;
+      const latest = normalizeChatOutboxRecord(await chatOutboxStore.get(item.id).catch(() => null));
+      if (sessionRevision === chatOutboxSessionRevision
+          && latest && latest.status === 'queued') sendChatOutboxItem(latest);
+    }, delay));
+  }
+
+  function transientChatSendError(error) {
+    const status = Number(error && error.status) || 0;
+    return !!(error && error.isNetworkError) || status === 408 || status === 425
+      || status === 429 || status >= 500;
+  }
+
+  async function sendChatOutboxItem(rawItem, { manual = false } = {}) {
+    const item = normalizeChatOutboxRecord(rawItem);
+    if (!item || !state.token || state.me?.id !== item.accountId) return null;
+    if (chatOutboxCancelledAttempts.has(item.id)) return null;
+    if (!manual && item.status === 'failed') return null;
+    const existingSend = chatOutboxSends.get(item.id);
+    if (existingSend) return existingSend;
+    const sessionRevision = chatOutboxSessionRevision;
+    const task = (async () => {
+      clearChatOutboxRetry(item.id);
+      if (!navigator.onLine) {
+        const queued = { ...item, status: 'queued', error: "You're offline. This will send when you reconnect." };
+        await chatOutboxStore.put(queued);
+        if (sessionRevision !== chatOutboxSessionRevision
+            || !state.token || state.me?.id !== item.accountId) {
+          await chatOutboxStore.remove(item.id).catch(() => {});
+          return null;
+        }
+        notifyChatOutboxBindings(item.accountId, item.channelKey, {
+          announcement: 'Message saved. It will send when you reconnect.',
+        });
+        return null;
+      }
+      const sending = {
+        ...item,
+        status: 'sending',
+        retryCount: manual ? 0 : item.retryCount,
+        error: '',
+        nextRetryAt: null,
+      };
+      await chatOutboxStore.put(sending);
+      if (sessionRevision !== chatOutboxSessionRevision
+          || !state.token || state.me?.id !== item.accountId
+          || chatOutboxCancelledAttempts.has(item.id)) {
+        await chatOutboxStore.remove(item.id).catch(() => {});
+        return null;
+      }
+      notifyChatOutboxBindings(item.accountId, item.channelKey, { announcement: 'Sending message.' });
+      try {
+        let delivered = await api(chatEndpointForChannel(item.channelKey), {
+          method: 'POST',
+          body: JSON.stringify({
+            body: item.body,
+            image: item.image,
+            client_attempt_id: item.attemptId,
+          }),
+        });
+        const terminalDeleted = delivered && delivered.deleted === true;
+        delivered = { ...delivered, client_attempt_id: delivered.client_attempt_id || item.attemptId };
+        if (sessionRevision !== chatOutboxSessionRevision) {
+          await chatOutboxStore.remove(item.id).catch(() => {});
+          return null;
+        }
+        chatOutboxAcknowledgedAttempts.add(item.id);
+        // Delivery is authoritative even if local cleanup is briefly blocked;
+        // rendering the acknowledged attempt below also reconciles the record.
+        await chatOutboxStore.remove(item.id).catch(() => {});
+        clearChatOutboxRetry(item.id);
+        notifyChatOutboxBindings(item.accountId, item.channelKey, {
+          delivered: terminalDeleted ? null : delivered,
+          announcement: terminalDeleted ? 'Removed message cleared from the outbox.' : 'Message sent.',
+        });
+        return terminalDeleted ? null : delivered;
+      } catch (error) {
+        // logout() purges this account while an in-flight request unwinds; never
+        // recreate private data after that purge.
+        if (sessionRevision !== chatOutboxSessionRevision
+            || !state.token || state.me?.id !== item.accountId) {
+          await chatOutboxStore.remove(item.id).catch(() => {});
+          return null;
+        }
+        const retryCount = sending.retryCount + 1;
+        const transient = transientChatSendError(error);
+        const exhausted = transient && navigator.onLine && retryCount >= 4;
+        const failed = !transient || exhausted;
+        const delay = Number(error && error.status) === 429
+          ? 30000 : Math.min(30000, 2500 * (2 ** Math.max(0, retryCount - 1)));
+        const next = {
+          ...sending,
+          status: failed ? 'failed' : 'queued',
+          retryCount,
+          error: failed
+            ? `${error.message || 'Could not send'}. Tap Retry to try again.`
+            : (navigator.onLine ? 'Connection interrupted. Retrying soon…' : 'Waiting for connection…'),
+          nextRetryAt: failed ? null : Date.now() + delay,
+        };
+        await chatOutboxStore.put(next);
+        if (sessionRevision !== chatOutboxSessionRevision
+            || !state.token || state.me?.id !== item.accountId) {
+          await chatOutboxStore.remove(item.id).catch(() => {});
+          return null;
+        }
+        notifyChatOutboxBindings(item.accountId, item.channelKey, {
+          announcement: failed
+            ? 'Message not sent. Use Retry to try again.'
+            : 'Message queued. It will retry automatically.',
+        });
+        if (!failed) scheduleChatOutboxRetry(next);
+        return null;
+      }
+    })();
+    chatOutboxSends.set(item.id, task);
+    try { return await task; }
+    finally {
+      if (chatOutboxSends.get(item.id) === task) chatOutboxSends.delete(item.id);
     }
   }
 
-  // Keep a chat sheet pinned to the visible viewport so the mobile keyboard
-  // never covers the input — without hijacking the user's scrolling.
-  function attachChatViewport(backdrop, msgsEl, inputEl) {
+  async function flushChatOutboxForAccount(rawAccountId, channelKey = null) {
+    const accountId = chatOutboxAccountId(rawAccountId);
+    if (!accountId || !state.token || state.me?.id !== accountId
+        || !navigator.onLine) return;
+    const flushKey = `${accountId}:${channelKey || '*'}`;
+    if (chatOutboxFlushes.has(flushKey)) return chatOutboxFlushes.get(flushKey);
+    const sessionRevision = chatOutboxSessionRevision;
+    const task = (async () => {
+      const attempted = new Set();
+      while (sessionRevision === chatOutboxSessionRevision
+          && state.token && state.me?.id === accountId && navigator.onLine) {
+        const items = await listChatOutbox(accountId, channelKey);
+        if (sessionRevision !== chatOutboxSessionRevision
+            || !state.token || state.me?.id !== accountId) break;
+        const item = items.find(
+          (candidate) => candidate.status !== 'failed' && !attempted.has(candidate.id),
+        );
+        if (!item) break;
+        attempted.add(item.id);
+        await sendChatOutboxItem(item);
+      }
+    })();
+    chatOutboxFlushes.set(flushKey, task);
+    try { await task; }
+    catch { /* each item remains durably queued */ }
+    finally {
+      if (chatOutboxFlushes.get(flushKey) === task) chatOutboxFlushes.delete(flushKey);
+    }
+  }
+
+  async function enqueueChatOutboxMessage(accountId, channelKey, body, image = null) {
+    accountId = chatOutboxAccountId(accountId);
+    if (!accountId || accountId !== state.me?.id || !chatEndpointForChannel(channelKey)) {
+      throw new Error('This conversation is no longer available.');
+    }
+    const sessionRevision = chatOutboxSessionRevision;
+    const existing = await listChatOutbox(accountId);
+    if (sessionRevision !== chatOutboxSessionRevision || state.me?.id !== accountId) {
+      throw new Error('This conversation is no longer available.');
+    }
+    if (existing.length >= CHAT_OUTBOX_MAX_PER_ACCOUNT) {
+      throw new Error('Your outbox is full. Retry or remove an unsent message first.');
+    }
+    const item = normalizeChatOutboxRecord({
+      accountId,
+      channelKey,
+      attemptId: newGameAttemptId(),
+      body,
+      image,
+      createdAt: Date.now(),
+      status: 'queued',
+      retryCount: 0,
+    });
+    if (!item) throw new Error('Add a message or photo before sending.');
+    try { await chatOutboxStore.put(item); }
+    catch {
+      throw new Error('Could not save this message yet. Your draft is still here—try again.');
+    }
+    if (sessionRevision !== chatOutboxSessionRevision || state.me?.id !== accountId) {
+      await chatOutboxStore.remove(item.id).catch(() => {});
+      throw new Error('This conversation is no longer available.');
+    }
+    notifyChatOutboxBindings(accountId, channelKey, {
+      announcement: navigator.onLine ? 'Message saved and ready to send.' : 'Message saved for when you reconnect.',
+    });
+    flushChatOutboxForAccount(accountId, channelKey);
+    return item;
+  }
+
+  async function retryChatOutboxMessage(accountId, attemptId) {
+    const sessionRevision = chatOutboxSessionRevision;
+    const id = chatOutboxRecordId(accountId, attemptId);
+    const item = normalizeChatOutboxRecord(await chatOutboxStore.get(id));
+    if (sessionRevision !== chatOutboxSessionRevision
+        || !item || item.accountId !== state.me?.id) return;
+    await sendChatOutboxItem({ ...item, status: 'queued', retryCount: 0 }, { manual: true });
+  }
+
+  async function removeChatOutboxMessage(accountId, channelKey, attemptId) {
+    const id = chatOutboxRecordId(accountId, attemptId);
+    if (chatOutboxSends.has(id)) throw new Error('message_is_sending');
+    chatOutboxCancelledAttempts.add(id);
+    clearChatOutboxRetry(id);
+    try { await chatOutboxStore.remove(id); }
+    catch (error) {
+      chatOutboxCancelledAttempts.delete(id);
+      throw error;
+    }
+    if (state.me?.id === accountId) notifyChatOutboxBindings(accountId, channelKey, {
+      announcement: 'Unsent message removed.',
+    });
+  }
+
+  function purgeAccountChatOutbox(rawAccountId) {
+    const accountId = chatOutboxAccountId(rawAccountId);
+    if (!accountId) return;
+    const cutoff = Date.now();
+    chatOutboxSessionRevision += 1;
+    [...chatOutboxFlushes.keys()].forEach((key) => {
+      if (key.startsWith(`${accountId}:`)) chatOutboxFlushes.delete(key);
+    });
+    [...chatOutboxSends.keys()].forEach((id) => {
+      if (id.startsWith(`${accountId}:`)) chatOutboxSends.delete(id);
+    });
+    [...chatOutboxAcknowledgedAttempts].forEach((id) => {
+      if (id.startsWith(`${accountId}:`)) chatOutboxAcknowledgedAttempts.delete(id);
+    });
+    [...chatOutboxCancelledAttempts].forEach((id) => {
+      if (id.startsWith(`${accountId}:`)) chatOutboxCancelledAttempts.delete(id);
+    });
+    [...chatOutboxRetryTimers.keys()].forEach((id) => {
+      if (id.startsWith(`${accountId}:`)) clearChatOutboxRetry(id);
+    });
+    chatOutboxStore.purge(accountId, cutoff).catch(() => { /* logout UI must not block on storage */ });
+  }
+
+  function reconcileChatOutboxMessages(msgsEl, items) {
+    const accountId = state.me && state.me.id;
+    if (!accountId) return;
+    items.forEach((message) => {
+      const attemptId = message && message.client_attempt_id;
+      if (!CHAT_OUTBOX_ATTEMPT_RE.test(String(attemptId || ''))) return;
+      msgsEl.querySelectorAll(`[data-client-attempt-id="${attemptId}"]`).forEach((node) => node.remove());
+      const recordId = chatOutboxRecordId(accountId, attemptId);
+      chatOutboxAcknowledgedAttempts.add(recordId);
+      chatOutboxStore.get(recordId).then((raw) => {
+        const item = normalizeChatOutboxRecord(raw);
+        if (!item) return;
+        return chatOutboxStore.remove(recordId).then(() => {
+          clearChatOutboxRetry(recordId);
+          notifyChatOutboxBindings(item.accountId, item.channelKey, { announcement: 'Message sent.' });
+        });
+      }).catch(() => { /* a later idempotent replay can reconcile it */ });
+    });
+  }
+
+  // Chat continuity is deliberately session-only and scoped to both the signed-
+  // in account and exact room. An accidental close/reload restores the composer,
+  // while another account or channel can never inherit that text.
+  const CHAT_DRAFT_VERSION = 1;
+  const CHAT_DRAFT_TTL = 24 * 60 * 60 * 1000;
+  const CHAT_NEAR_BOTTOM_PX = 96;
+  function prepareChatRenderBatch(msgsEl, rawItems, append) {
+    const items = Array.isArray(rawItems) ? rawItems : [];
+    reconcileChatOutboxMessages(msgsEl, items);
+    const newestId = items.reduce(
+      (latest, message) => Math.max(latest, Number(message?.id) || 0), 0,
+    );
+    const seen = append
+      ? new Set([...msgsEl.querySelectorAll('[data-message-id]')]
+        .map((node) => Number(node.dataset.messageId)).filter(Boolean))
+      : new Set();
+    const unique = [];
+    items.forEach((message) => {
+      const id = Number(message?.id) || 0;
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      unique.push(message);
+    });
+    return { items: unique, newestId };
+  }
+  function chatIsNearBottom(msgsEl) {
+    return msgsEl.scrollHeight - msgsEl.clientHeight - msgsEl.scrollTop <= CHAT_NEAR_BOTTOM_PX;
+  }
+
+  function chatScrollSnapshot(msgsEl) {
+    const bounds = msgsEl.getBoundingClientRect();
+    const anchor = [...msgsEl.children].find((child) => child.getBoundingClientRect().bottom > bounds.top + 1) || null;
+    return {
+      nearBottom: chatIsNearBottom(msgsEl),
+      scrollTop: msgsEl.scrollTop,
+      anchor,
+      anchorTop: anchor ? anchor.getBoundingClientRect().top : null,
+    };
+  }
+
+  function attachChatViewport(backdrop, msgsEl, inputEl, isFollowing) {
     const stick = () => { msgsEl.scrollTop = msgsEl.scrollHeight; };
-    stick();
     const vv = window.visualViewport;
     if (!vv) return;
     // Only reposition the sheet to the visible viewport — never force-scroll.
@@ -1285,8 +3709,9 @@
     let lastH = vv.height;
     const onResize = () => {
       place();
-      // Keyboard opening (viewport shrank) → keep the latest messages in view.
-      if (vv.height < lastH - 80) stick();
+      // Keyboard opening (viewport shrank) follows the latest message only when
+      // the person was already following it. Reading history never gets yanked.
+      if (vv.height < lastH - 80 && isFollowing()) stick();
       lastH = vv.height;
     };
     function detach() {
@@ -1296,8 +3721,287 @@
     place();
     vv.addEventListener('resize', onResize);
     vv.addEventListener('scroll', place);
-    if (inputEl) inputEl.addEventListener('focus', () => setTimeout(() => { place(); stick(); }, 300));
-    backdrop._cleanup = detach;
+    const onInputFocus = () => {
+      const follow = isFollowing();
+      setTimeout(() => { place(); if (follow) stick(); }, 300);
+    };
+    if (inputEl) inputEl.addEventListener('focus', onInputFocus);
+    if (!backdrop._cleanupFns) backdrop._cleanupFns = [];
+    backdrop._cleanupFns.push(() => {
+      detach();
+      inputEl?.removeEventListener('focus', onInputFocus);
+    });
+  }
+
+  function bindChatContinuity(modal, msgsEl, inputEl, channelKey) {
+    const accountId = state.me && state.me.id;
+    const outboxSessionRevision = chatOutboxSessionRevision;
+    const storageKey = accountId
+      ? `pp_chat_draft_v${CHAT_DRAFT_VERSION}:${accountId}:${encodeURIComponent(channelKey)}` : null;
+    const thread = msgsEl.closest('.thread');
+    const form = inputEl.closest('form');
+    const newMessages = document.createElement('button');
+    newMessages.type = 'button';
+    newMessages.className = 'chat-new-messages hidden';
+    newMessages.textContent = 'New messages';
+    newMessages.setAttribute('aria-label', 'New messages. Scroll to the latest message.');
+    const newMessageStatus = document.createElement('span');
+    newMessageStatus.className = 'sr-only';
+    newMessageStatus.setAttribute('role', 'status');
+    newMessageStatus.setAttribute('aria-live', 'polite');
+    newMessageStatus.setAttribute('aria-atomic', 'true');
+    const draftStatus = document.createElement('span');
+    draftStatus.className = 'sr-only';
+    draftStatus.setAttribute('role', 'status');
+    draftStatus.setAttribute('aria-live', 'polite');
+    draftStatus.setAttribute('aria-atomic', 'true');
+    const outboxStatus = document.createElement('span');
+    outboxStatus.className = 'sr-only';
+    outboxStatus.setAttribute('role', 'status');
+    outboxStatus.setAttribute('aria-live', 'polite');
+    outboxStatus.setAttribute('aria-atomic', 'true');
+    if (thread && form) {
+      thread.insertBefore(newMessages, form);
+      thread.insertBefore(newMessageStatus, form);
+      thread.insertBefore(draftStatus, form);
+      thread.insertBefore(outboxStatus, form);
+    }
+
+    let following = true;
+    let pendingNew = 0;
+    let draftTimer = null;
+    let draftRevision = newGameAttemptId();
+    const clearNewMessages = () => {
+      pendingNew = 0;
+      newMessageStatus.textContent = '';
+      if (document.activeElement === newMessages) {
+        newMessages.textContent = 'Latest messages';
+        newMessages.setAttribute('aria-label', 'Latest messages shown.');
+        newMessages.dataset.hideOnBlur = 'true';
+      } else {
+        newMessages.classList.add('hidden');
+      }
+    };
+    const showNewMessages = (count) => {
+      pendingNew += count;
+      newMessages.textContent = 'New messages';
+      newMessages.setAttribute(
+        'aria-label',
+        `${pendingNew} new message${pendingNew === 1 ? '' : 's'}. Scroll to the latest message.`,
+      );
+      delete newMessages.dataset.hideOnBlur;
+      newMessages.classList.remove('hidden');
+      newMessageStatus.textContent = `${pendingNew} new message${pendingNew === 1 ? '' : 's'} available.`;
+    };
+    const scrollToLatest = ({ smooth = false } = {}) => {
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      msgsEl.scrollTo({
+        top: msgsEl.scrollHeight,
+        behavior: smooth && !reduceMotion ? 'smooth' : 'auto',
+      });
+      following = true;
+      clearNewMessages();
+    };
+    const syncFollowing = () => {
+      following = chatIsNearBottom(msgsEl);
+      if (following && pendingNew) clearNewMessages();
+    };
+    msgsEl.addEventListener('scroll', syncFollowing, { passive: true });
+    newMessages.addEventListener('click', () => scrollToLatest({ smooth: true }));
+    newMessages.addEventListener('blur', () => {
+      if (!newMessages.dataset.hideOnBlur) return;
+      delete newMessages.dataset.hideOnBlur;
+      newMessages.classList.add('hidden');
+    });
+
+    const persistDraftNow = () => {
+      draftTimer = null;
+      if (!storageKey) return;
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify({
+          v: CHAT_DRAFT_VERSION,
+          body: inputEl.value,
+          revision: draftRevision,
+          updatedAt: Date.now(),
+        }));
+      } catch { /* chat remains usable when storage is unavailable */ }
+    };
+    const persistDraft = () => {
+      draftStatus.textContent = '';
+      draftRevision = newGameAttemptId();
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(persistDraftNow, 100);
+    };
+    if (storageKey) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+        if (saved && saved.v === CHAT_DRAFT_VERSION && typeof saved.body === 'string'
+            && Number.isFinite(saved.updatedAt) && saved.updatedAt <= Date.now() + 60000
+            && Date.now() - saved.updatedAt <= CHAT_DRAFT_TTL) {
+          if (typeof saved.revision === 'string' && saved.revision) draftRevision = saved.revision;
+          inputEl.value = saved.body.slice(0, Number(inputEl.maxLength) > 0 ? inputEl.maxLength : 2000);
+          if (inputEl.value) requestAnimationFrame(() => { draftStatus.textContent = 'Message draft restored.'; });
+        } else if (saved) {
+          sessionStorage.removeItem(storageKey);
+        }
+      } catch {
+        try { sessionStorage.removeItem(storageKey); } catch { /* storage unavailable */ }
+      }
+    }
+    inputEl.addEventListener('input', persistDraft);
+
+    const completeSend = (submittedBody, submittedRevision) => {
+      // If more was typed while the request was in flight, that is a new draft
+      // and must survive this successful send.
+      if (draftRevision === submittedRevision && inputEl.value.trim() === submittedBody) {
+        inputEl.value = '';
+        draftStatus.textContent = '';
+        clearTimeout(draftTimer);
+        draftTimer = null;
+        if (storageKey) {
+          try {
+            const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+            if (!saved || saved.revision === submittedRevision) sessionStorage.removeItem(storageKey);
+          } catch { /* storage unavailable */ }
+        }
+      } else {
+        persistDraftNow();
+      }
+    };
+    let sending = false;
+    const send = async (submittedBody, { image = null } = {}) => {
+      if (outboxSessionRevision !== chatOutboxSessionRevision || state.me?.id !== accountId) {
+        throw new Error('This conversation is no longer available.');
+      }
+      if (sending) return null;
+      sending = true;
+      clearTimeout(draftTimer);
+      persistDraftNow();
+      const submittedRevision = draftRevision;
+      const buttons = form ? [...form.querySelectorAll('button')] : [];
+      const priorDisabled = buttons.map((button) => button.disabled);
+      buttons.forEach((button) => { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
+      form?.setAttribute('aria-busy', 'true');
+      try {
+        const result = await enqueueChatOutboxMessage(accountId, channelKey, submittedBody, image);
+        completeSend(submittedBody, submittedRevision);
+        return result;
+      } finally {
+        sending = false;
+        buttons.forEach((button, index) => {
+          button.disabled = priorDisabled[index];
+          button.removeAttribute('aria-busy');
+        });
+        form?.removeAttribute('aria-busy');
+      }
+    };
+    const restoreScroll = (snapshot, { forceBottom = false, newMessageCount = 0 } = {}) => {
+      if (!snapshot || forceBottom || snapshot.nearBottom) {
+        scrollToLatest();
+        return;
+      }
+      if (snapshot.anchor && snapshot.anchor.isConnected && snapshot.anchorTop != null) {
+        msgsEl.scrollTop = snapshot.scrollTop + (snapshot.anchor.getBoundingClientRect().top - snapshot.anchorTop);
+      } else {
+        msgsEl.scrollTop = snapshot.scrollTop;
+      }
+      following = false;
+      if (newMessageCount > 0) showNewMessages(newMessageCount);
+    };
+
+    let outboxBinding = null;
+    let outboxRenderRevision = 0;
+    const renderOutbox = async () => {
+      const revision = ++outboxRenderRevision;
+      let items;
+      try { items = await listChatOutbox(accountId, channelKey); }
+      catch {
+        if (revision === outboxRenderRevision) {
+          outboxStatus.textContent = 'The outbox is temporarily unavailable. Your composer draft is unchanged.';
+        }
+        return;
+      }
+      if (revision !== outboxRenderRevision || !document.body.contains(msgsEl)) return;
+      const snapshot = chatScrollSnapshot(msgsEl);
+      msgsEl.querySelectorAll('[data-client-attempt-id]').forEach((node) => node.remove());
+      if (items.length) msgsEl.querySelector('.empty-state')?.remove();
+      const html = items.map((item) => {
+        const sendingNow = item.status === 'sending';
+        const stateText = sendingNow ? 'Sending…'
+          : item.status === 'failed' ? (item.error || 'Not sent')
+            : (item.error || (navigator.onLine ? 'Waiting to send…' : 'Saved · sends when online'));
+        return `
+          <div class="chat-outbox-item is-${item.status}" data-client-attempt-id="${item.attemptId}" role="group" aria-label="Unsent message">
+            <div class="bubble me chat-outbox-bubble">
+              ${item.image ? `<img class="chat-outbox-image" src="${esc(item.image)}" alt="Photo awaiting send" />` : ''}
+              ${item.body ? `<div>${esc(item.body)}</div>` : ''}
+              <div class="bubble-time chat-outbox-state">${esc(stateText)}</div>
+            </div>
+            ${sendingNow ? '' : `<div class="chat-outbox-actions">
+              <button type="button" data-outbox-retry="${item.attemptId}">Retry</button>
+              <button type="button" data-outbox-remove="${item.attemptId}">Remove</button>
+            </div>`}
+          </div>`;
+      }).join('');
+      if (html) msgsEl.insertAdjacentHTML('beforeend', html);
+      else if (!msgsEl.querySelector('[data-message-id], .empty-state')) {
+        msgsEl.innerHTML = '<div class="empty-state" style="padding:20px">No messages yet.</div>';
+      }
+      restoreScroll(snapshot, { forceBottom: snapshot.nearBottom });
+    };
+
+    const onOutboxAction = async (event) => {
+      const retry = event.target.closest('[data-outbox-retry]');
+      const remove = event.target.closest('[data-outbox-remove]');
+      if ((!retry && !remove) || state.me?.id !== accountId) return;
+      const button = retry || remove;
+      const attemptId = button.dataset.outboxRetry || button.dataset.outboxRemove;
+      if (!CHAT_OUTBOX_ATTEMPT_RE.test(attemptId || '')) return;
+      button.disabled = true;
+      try {
+        if (retry) await retryChatOutboxMessage(accountId, attemptId);
+        else await removeChatOutboxMessage(accountId, channelKey, attemptId);
+      } catch {
+        button.disabled = false;
+        outboxStatus.textContent = 'That action did not finish. Try again.';
+      }
+    };
+    msgsEl.addEventListener('click', onOutboxAction);
+
+    const activateOutbox = (onDelivered) => {
+      if (outboxBinding || outboxSessionRevision !== chatOutboxSessionRevision
+          || state.me?.id !== accountId) return;
+      const key = chatOutboxBindingKey(accountId, channelKey);
+      outboxBinding = {
+        refresh: renderOutbox,
+        onDelivered,
+        announce: (message) => { outboxStatus.textContent = message; },
+      };
+      if (!chatOutboxBindings.has(key)) chatOutboxBindings.set(key, new Set());
+      chatOutboxBindings.get(key).add(outboxBinding);
+      renderOutbox();
+      if (navigator.onLine) flushChatOutboxForAccount(accountId, channelKey);
+    };
+
+    attachChatViewport(modal, msgsEl, inputEl, () => following);
+    modal._cleanupFns?.push(() => {
+      msgsEl.removeEventListener('scroll', syncFollowing);
+      msgsEl.removeEventListener('click', onOutboxAction);
+      if (outboxBinding) {
+        const key = chatOutboxBindingKey(accountId, channelKey);
+        const bindings = chatOutboxBindings.get(key);
+        bindings?.delete(outboxBinding);
+        if (bindings && !bindings.size) chatOutboxBindings.delete(key);
+        outboxBinding = null;
+      }
+      if (draftTimer != null) persistDraftNow();
+    });
+    return {
+      captureScroll: () => chatScrollSnapshot(msgsEl),
+      restoreScroll,
+      send,
+      activateOutbox,
+    };
   }
   const modalHead = (title) => `<div class="modal-head"><h3>${esc(title)}</h3><button class="modal-close" aria-label="Close">✕</button></div>`;
 
@@ -1494,27 +4198,34 @@
     const center = state.map ? state.map.getCenter() : { lat: null, lng: null };
     const modal = openModal(`
       ${modalHead('➕ Add a missing court')}
+      <form id="ac-form" novalidate>
       <p class="row-sub" style="margin-bottom:12px">Center the map on the court first — we'll pin it right where the map is looking now.</p>
       <div class="form-field">
-        <label>Court name</label>
+        <label for="ac-name">Court name</label>
         <input type="text" id="ac-name" maxlength="255" placeholder="e.g. Riverside Park Courts" />
       </div>
       <div class="form-field">
-        <label>Number of courts</label>
+        <label for="ac-courts">Number of courts</label>
         <input type="number" id="ac-courts" min="1" max="100" value="2" inputmode="numeric" />
       </div>
       <div class="form-field">
         <label class="row" style="gap:8px;padding:6px 0;cursor:pointer"><input type="checkbox" id="ac-indoor" style="width:18px;height:18px" /> 🏠 Indoor</label>
         <label class="row" style="gap:8px;padding:6px 0;cursor:pointer"><input type="checkbox" id="ac-lighted" style="width:18px;height:18px" /> 💡 Lighted</label>
       </div>
-      <button class="btn btn-primary btn-block" id="ac-submit" style="padding:15px">Add court</button>
+      <button type="submit" class="btn btn-primary btn-block" id="ac-submit" style="padding:15px">Add court</button>
+      </form>
     `);
-    modal.querySelector('#ac-submit').addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      if (btn.disabled) return;
+    const formUX = bindModalFormUX(modal, '#ac-submit', { draftKey: 'add-court' });
+    modal.querySelector('#ac-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      formUX.clearError();
       const name = modal.querySelector('#ac-name').value.trim();
-      if (name.length < 3) { toast('Give the court a name'); return; }
-      btn.disabled = true;
+      if (name.length < 3) {
+        formUX.showError('Give the court a name (3+ characters).', modal.querySelector('#ac-name'));
+        return;
+      }
+      const finishSubmitting = formUX.startSubmitting('Adding court…');
+      if (!finishSubmitting) return;
       try {
         const court = await api('/courts', {
           method: 'POST',
@@ -1527,12 +4238,15 @@
             lighted: modal.querySelector('#ac-lighted').checked,
           }),
         });
-        closeModal(modal);
+        formUX.clearDraft({ disable: true });
         toast('Court added — thanks for growing the map! 🏓');
         if (state.favIds) state.favIds.add(court.id);
         fetchCourtsInView();
-        openCourtDetail(court.id);
-      } catch (err) { toast(err.message); btn.disabled = false; }
+        transitionModal(modal, () => openCourtDetail(court.id));
+      } catch (err) {
+        finishSubmitting();
+        formUX.showError(err.message);
+      }
     });
   }
 
@@ -1589,19 +4303,36 @@
 
   // Lazy-load photo attachments into any chat thread (payloads only carry
   // has_image; the image endpoint enforces per-thread permissions).
-  function hydrateChatImages(msgsEl) {
+  function hydrateChatImages(msgsEl, chatUX) {
     msgsEl.querySelectorAll('[data-img-id]:not([data-loaded])').forEach(async (slot) => {
       slot.dataset.loaded = '1';
       try {
         const { image } = await api(`/messages/${slot.dataset.imgId}/image`);
-        slot.innerHTML = `<img src="${image}" alt="Photo" style="max-width:100%;border-radius:10px;display:block" />`;
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-      } catch { slot.remove(); }
+        const img = new Image();
+        img.alt = 'Photo';
+        img.style.cssText = 'max-width:100%;border-radius:10px;display:block';
+        img.src = image;
+        if (typeof img.decode === 'function') await img.decode();
+        else if (!img.complete) {
+          await new Promise((resolve, reject) => {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', reject, { once: true });
+          });
+        }
+        const snapshot = chatUX?.captureScroll();
+        slot.replaceChildren(img);
+        if (chatUX) chatUX.restoreScroll(snapshot);
+        else msgsEl.scrollTop = msgsEl.scrollHeight;
+      } catch {
+        const snapshot = chatUX?.captureScroll();
+        slot.remove();
+        if (chatUX) chatUX.restoreScroll(snapshot);
+      }
     });
   }
 
   // Add a 📷 button + hidden file input to a chat composer form.
-  function addPhotoToComposer(modal, formSel, textSel, endpoint, renderMsgs) {
+  function addPhotoToComposer(modal, formSel, textSel, chatUX) {
     const form = modal.querySelector(formSel);
     if (!form) return;
     const file = document.createElement('input');
@@ -1615,19 +4346,21 @@
     btn.style.cssText = 'background:transparent;font-size:19px;padding:0 2px';
     form.prepend(file);
     form.prepend(btn);
-    btn.addEventListener('click', () => file.click());
+    btn.addEventListener('click', () => {
+      if (file.value) file.value = '';
+      file.click();
+    });
     file.addEventListener('change', async (e) => {
       const picked = e.target.files[0];
-      e.target.value = '';
       if (!picked) return;
       try {
         const image = await imageFileToDataUrl(picked, 1024);
         const textEl = modal.querySelector(textSel);
         const body = textEl.value.trim();
-        textEl.value = '';
-        const msg = await api(endpoint, { method: 'POST', body: JSON.stringify({ body, image }) });
-        renderMsgs([msg], true);
+        await chatUX.send(body, { image });
+        e.target.value = '';
       } catch (err) {
+        if (err.message === 'image_too_large' || err.message === 'bad_image') e.target.value = '';
         toast(err.message === 'image_too_large' ? 'That photo is too large — try a smaller one' : err.message);
       }
     });
@@ -1636,16 +4369,24 @@
   // A dead shared link shouldn't re-toast its error on every reload.
   function clearDeadDeepLink(hash) {
     if (location.hash !== hash) return;
-    try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+    routedOverlayLoadSeq += 1;
+    overlayHistoryRevision += 1;
+    activeRoutedOverlayLoad = null;
+    pendingReusableTraversal = null;
+    adoptOverlayEntry = null;
+    try { history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl()); } catch { /* ignore */ }
   }
 
   async function openCourtDetail(courtId) {
+    const routeLoad = beginRoutedOverlayLoad({ kind: 'court', id: courtId });
     let court;
     try { court = await api(`/courts/${courtId}`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
       toast(e.message);
       clearDeadDeepLink(`#court/${courtId}`);
       return;
     }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
 
     const tags = [];
     if (court.indoor) tags.push('🏠 Indoor'); else tags.push('☀️ Outdoor');
@@ -1717,7 +4458,6 @@
 
     const checkedIn = court.is_checked_in;
     let isFavorite = court.is_favorite;
-    try { history.replaceState(null, '', `#court/${court.id}`); } catch { /* ignore */ }
     const heroImg = court.photo_url
       ? `<img class="cd-hero-img" src="${esc(court.photo_url)}" alt="" onerror="this.outerHTML='<div class=\\'cd-hero-img placeholder\\'>🏓</div>'">`
       : '<div class="cd-hero-img placeholder">🏓</div>';
@@ -1751,6 +4491,7 @@
           </button>`).join('')}
       </div>`;
 
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
     const modal = openModal(`
       <div class="cd-hero">
         ${heroImg}
@@ -1863,7 +4604,7 @@
       <div class="section-label" id="cd-sec-reviews">Reviews${court.rating_avg ? ` · ⭐ ${court.rating_avg} (${court.rating_count})` : ''}</div>
       <div id="cd-reviews"></div>
       </div>
-    `, { court: true });
+    `, { court: true, route: { kind: 'court', id: court.id } });
 
     renderReviewSection(modal.querySelector('#cd-reviews'), court);
 
@@ -1899,8 +4640,7 @@
             ${cl.joined ? '<span class="tag" style="margin:0">Member ✓</span>' : '<span class="chev">›</span>'}
           </div>`).join('')}`;
       clubsEl.querySelectorAll('[data-open-club]').forEach((row) => row.addEventListener('click', () => {
-        closeModal(modal);
-        openClubScreen(Number(row.dataset.openClub));
+        transitionModal(modal, () => openClubScreen(Number(row.dataset.openClub)));
       }));
     }).catch(() => { /* clubs section is a nicety */ });
 
@@ -1920,8 +4660,7 @@
             <span class="chev">›</span>
           </div>`).join('')}`;
       leaguesEl.querySelectorAll('[data-open-league]').forEach((row) => row.addEventListener('click', () => {
-        closeModal(modal);
-        openLeagueScreen(Number(row.dataset.openLeague));
+        transitionModal(modal, () => openLeagueScreen(Number(row.dataset.openLeague)));
       }));
     }).catch(() => { /* leagues section is a nicety */ });
 
@@ -1930,37 +4669,32 @@
         const prev = state.presence;
         try {
           await api('/checkout', { method: 'POST' });
+          const followupLoad = beginFollowupAfterClosingModal(modal);
           toast('Checked out 👋');
-          closeModal(modal);
           await refreshMe();
           fetchCourtsInView();
-          maybeAskConditions(prev);
+          if (followupLoad && routedOverlayLoadIsCurrent(followupLoad)) {
+            maybeAskConditions(prev);
+          }
         } catch (e) { toast(e.message); }
         return;
       }
-      closeModal(modal);
-      openCheckInSheet(court);
+      transitionModal(modal, () => openCheckInSheet(court));
     });
 
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
-      }
-    });
     modal.querySelector('#cd-sethome')?.addEventListener('click', async (e) => {
       e.target.disabled = true;
       try {
         applyMe(await api('/me', { method: 'PATCH', body: JSON.stringify({ home_court_id: court.id }) }));
         toast(`🏠 ${court.name} is now your home court`);
-        closeModal(modal);
-        openCourtDetail(court.id);
+        transitionModal(modal, () => openCourtDetail(court.id));
       } catch (err) { toast(err.message); e.target.disabled = false; }
     });
     modal.querySelector('#cd-suggest').addEventListener('click', () => {
-      openSuggestEditSheet(court, () => { closeModal(modal); openCourtDetail(court.id); });
+      openSuggestEditSheet(court, () => transitionModal(modal, () => openCourtDetail(court.id)));
     });
     modal.querySelector('#cd-condition').addEventListener('click', () => {
-      openConditionSheet(court, () => { closeModal(modal); openCourtDetail(court.id); });
+      openConditionSheet(court, () => transitionModal(modal, () => openCourtDetail(court.id)));
     });
 
     const uploadCourtPhoto = (onDone) => {
@@ -1970,9 +4704,14 @@
       input.addEventListener('change', async () => {
         const file = input.files && input.files[0];
         if (!file) return;
+        const modalLoad = beginRoutedOverlayLoad(null);
         let photo;
         try { photo = await imageFileToDataUrl(file); }
-        catch { toast('Could not read that image'); return; }
+        catch {
+          if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+          toast('Could not read that image'); return;
+        }
+        if (!routedOverlayLoadIsCurrent(modalLoad)) return;
         // Optional caption before it goes up.
         const sheet = openModal(`
           ${modalHead('Add a caption?')}
@@ -1997,7 +4736,7 @@
       input.click();
     };
     modal.querySelector('#cd-add-photo')?.addEventListener('click', () => {
-      uploadCourtPhoto(() => { closeModal(modal); openCourtDetail(court.id); });
+      uploadCourtPhoto(() => transitionModal(modal, () => openCourtDetail(court.id)));
     });
     modal.querySelector('#cd-gallery')?.addEventListener('click', () => {
       openCourtGallery(court, uploadCourtPhoto);
@@ -2041,16 +4780,13 @@
     });
 
     modal.querySelector('#cd-play-now').addEventListener('click', () => {
-      closeModal(modal);
-      openNewGameModal(court, 'casual', true);
+      transitionModal(modal, () => openNewGameModal(court, 'casual', true));
     });
     modal.querySelector('#cd-schedule').addEventListener('click', () => {
-      closeModal(modal);
-      openNewGameModal(court, 'casual');
+      transitionModal(modal, () => openNewGameModal(court, 'casual'));
     });
     modal.querySelector('#cd-schedule-empty')?.addEventListener('click', () => {
-      closeModal(modal);
-      openNewGameModal(court, 'casual');
+      transitionModal(modal, () => openNewGameModal(court, 'casual'));
     });
 
     modal.querySelector('#cd-favorite').addEventListener('click', async (e) => {
@@ -2075,8 +4811,7 @@
     }));
 
     modal.querySelectorAll('[data-msg-user]').forEach((b) => b.addEventListener('click', () => {
-      closeModal(modal);
-      openThread(Number(b.dataset.msgUser));
+      transitionModal(modal, () => openThread(Number(b.dataset.msgUser)));
     }));
     modal.querySelectorAll('[data-add-friend-inline]').forEach((b) => b.addEventListener('click', async () => {
       try {
@@ -2086,7 +4821,7 @@
       } catch (e) { toast(e.message); }
     }));
 
-    bindGameButtons(modal, () => { closeModal(modal); openCourtDetail(courtId); });
+    bindGameButtons(modal, () => transitionModal(modal, () => openCourtDetail(courtId)));
     bindUserButtons(modal);
 
     // Upcoming-games day filter: one chip narrows the list to that day,
@@ -2102,7 +4837,7 @@
         ${d.games.map((g) => gameCardHtml(g, { compact: true })).join('')}`).join('');
       modal.querySelectorAll('#cd-day-chips [data-cd-day]').forEach((b) =>
         b.classList.toggle('active', Number(b.dataset.cdDay) === cdDayFilter));
-      bindGameButtons(listEl, () => { closeModal(modal); openCourtDetail(courtId); });
+      bindGameButtons(listEl, () => transitionModal(modal, () => openCourtDetail(courtId)));
       bindUserButtons(listEl);
     };
     renderCdGames();
@@ -2141,10 +4876,9 @@
           method: 'POST',
           body: JSON.stringify({ court_id: court.id }),
         });
-        closeModal(modal);
         toast(`⚔️ Challenge sent to ${player.display_name}!`);
         refreshMe();
-        openGameScreen(game.id);
+        transitionModal(modal, () => openGameScreen(game.id));
       } catch (err) { toast(err.message); btn.disabled = false; }
     });
   }
@@ -2197,11 +4931,13 @@
           method: 'POST',
           body: JSON.stringify({ looking_for_game: looking }),
         });
-        closeModal(modal);
+        const followupLoad = beginFollowupAfterClosingModal(modal);
         toast(looking ? `You're in — players can find you 🏓` : `Checked in at ${court.name}`);
         await refreshMe();
         fetchCourtsInView();
-        maybeAskHours(court);
+        if (followupLoad && routedOverlayLoadIsCurrent(followupLoad)) {
+          maybeAskHours(court);
+        }
       } catch (e) { toast(e.message); }
     };
     modal.querySelector('#ci-lfg').addEventListener('click', () => doCheckIn(true));
@@ -2337,7 +5073,7 @@
 
   function bindGameButtons(rootEl, refresh) {
     // Tap anywhere on a card to open the game screen; inline buttons stop propagation.
-    rootEl.querySelectorAll('[data-open-game]').forEach((card) => card.addEventListener('click', (e) => {
+    rootEl.querySelectorAll('[data-open-game]').forEach((card) => makePressable(card, (e) => {
       if (e.target.closest('button')) return;
       openGameScreen(Number(card.dataset.openGame));
     }));
@@ -2353,12 +5089,15 @@
     }));
     rootEl.querySelectorAll('[data-game-confirm]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
+      const modalLoad = beginRoutedOverlayLoad(null);
       try {
         const game = await api(`/games/${b.dataset.gameConfirm}/confirm`, { method: 'POST' });
-        showCelebration(game);
+        if (routedOverlayLoadIsCurrent(modalLoad)) showCelebration(game);
         refreshMe();
         refresh();
-      } catch (err) { toast(err.message); }
+      } catch (err) {
+        if (routedOverlayLoadIsCurrent(modalLoad)) toast(err.message);
+      }
     }));
     rootEl.querySelectorAll('[data-game-dismiss]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -2435,7 +5174,7 @@
   }
 
   function bindUserButtons(rootEl) {
-    rootEl.querySelectorAll('[data-view-user]').forEach((b) => b.addEventListener('click', () => {
+    rootEl.querySelectorAll('[data-view-user]').forEach((b) => makePressable(b, () => {
       openUserProfile(Number(b.dataset.viewUser));
     }));
   }
@@ -2517,12 +5256,45 @@
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
-  async function renderPlay() {
+  function rallyLauncherHtml() {
+    const here = state.presence && state.presence.checked_in;
+    const title = here ? `Ready at ${esc(state.presence.court_name)}` : 'How do you want to play?';
+    const sub = here
+      ? 'Start a pickup game in seconds, or make a plan for later.'
+      : 'Jump into play now or build a plan around your court, time, and people.';
+    return `
+      <section class="rally-launch" aria-labelledby="rally-title">
+        <div class="rally-kicker">Get on court</div>
+        <h3 id="rally-title">${title}</h3>
+        <p>${sub}</p>
+        <div class="rally-actions">
+          <button type="button" class="rally-action primary" data-goto="play-now">
+            <span class="rally-action-icon">⚡</span>
+            <span><b>Play now</b><small>Start a live game</small></span>
+          </button>
+          <button type="button" class="rally-action" data-goto="new-game">
+            <span class="rally-action-icon">📅</span>
+            <span><b>Plan ahead</b><small>Pick a time & crew</small></span>
+          </button>
+        </div>
+      </section>`;
+  }
+
+  async function renderPlay({ reuseFresh = false, useCachedData = false } = {}) {
     const seg = state.playSeg;
-    const el = $('#play-content');
-    el.innerHTML = skeletonHtml(5);
+    const liveEl = $('#play-content');
+    const viewKey = `${state.me?.id || 'signed-out'}:play:${seg}`;
+    if (reuseFresh && viewIsFresh(liveEl, viewKey)) return;
+    const renderSeq = ++state.playRenderSeq;
+    const hadUsableContent = beginViewRender(liveEl, viewKey, 5);
+    const el = document.createElement('div');
+    const commit = () => {
+      if (renderSeq !== state.playRenderSeq || state.playSeg !== seg) return false;
+      commitViewRender(liveEl, el, viewKey);
+      return true;
+    };
     const loc = areaLatLng();
-    if (seg === 'brackets') { await renderTournaments(el); return; }
+    if (seg === 'brackets') { await renderTournaments(el, () => renderPlay()); commit(); return; }
     try {
       if (seg === 'scores') {
         const scope = state.boardScope || 'near';
@@ -2580,13 +5352,14 @@
                 <div class="row-title" style="font-size:14px">You</div>
                 <div class="row-sub">Win a ranked game to enter the leaderboard</div>
               </div>
+              <button type="button" class="btn btn-primary btn-sm" data-goto="new-ranked-game">Play ranked</button>
               <div class="stat-value" style="font-size:16px">${me.rating}</div>
             </div>`;
           }
         } else {
           html += scope === 'near'
-            ? '<div class="empty-state"><span class="big">🏆</span>No ranked players in your area yet.<br>Win a ranked game and claim the local crown!</div>'
-            : '<div class="empty-state"><span class="big">🏆</span>No ranked games yet.<br>Win one and claim the podium!</div>';
+            ? '<div class="empty-state"><span class="big">🏆</span><b>Claim the local crown.</b><br>No ranked players are on the board here yet.<br><button class="btn btn-primary" data-goto="new-ranked-game">⚔️ Start a ranked game</button></div>'
+            : '<div class="empty-state"><span class="big">🏆</span><b>Be first on the podium.</b><br>No ranked games have been recorded yet.<br><button class="btn btn-primary" data-goto="new-ranked-game">⚔️ Start a ranked game</button></div>';
         }
 
         if (results.items.length) {
@@ -2612,17 +5385,23 @@
         });
         bindGameButtons(el, renderPlay);
         bindUserButtons(el);
+        commit();
         return;
       }
 
       // --- Games: everything actionable + yours + friends + nearby, one scroll ---
-      const [mine, friends, nearby, tMine, tNear] = await Promise.all([
-        api('/games?mine=1'),
-        api('/games?friends=1').catch(() => ({ items: [] })),
-        api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60`),
-        api('/tournaments?mine=1').catch(() => ({ items: [] })),
-        api(`/tournaments?lat=${loc.lat}&lng=${loc.lng}&radius=60`).catch(() => ({ items: [] })),
-      ]);
+      let gameBundle = useCachedData && state.playGamesCache;
+      if (!gameBundle) {
+        gameBundle = await Promise.all([
+          api('/games?mine=1'),
+          api('/games?friends=1').catch(() => ({ items: [] })),
+          api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60`),
+          api('/tournaments?mine=1').catch(() => ({ items: [] })),
+          api(`/tournaments?lat=${loc.lat}&lng=${loc.lng}&radius=60`).catch(() => ({ items: [] })),
+        ]);
+        state.playGamesCache = gameBundle;
+      }
+      const [mine, friends, nearby, tMine, tNear] = gameBundle;
       const nowMs = Date.now();
       const toScore = mine.items.filter((g) =>
         g.status === 'upcoming' && new Date(g.scheduled_at).getTime() <= nowMs && g.players.length >= 2);
@@ -2662,14 +5441,14 @@
       const sel = state.weekDayFilter;
       const dayLabelShort = (d, i) => (i === 0 ? 'Today' : i === 1 ? 'Tmrw' : d.toLocaleDateString([], { weekday: 'short' }));
 
-      let html = `<div class="quick-times" id="week-strip" style="margin:2px 0 10px">${week.map((d, i) => `
+      let html = rallyLauncherHtml() + `<div class="quick-times" id="week-strip" style="margin:2px 0 10px">${week.map((d, i) => `
         <button type="button" data-day-i="${i}" class="${sel === i ? 'active' : ''}">${dayLabelShort(d, i)}${countsByDay[i] ? ` · ${countsByDay[i]}` : ''}</button>`).join('')}</div>`;
       const bindWeekStrip = () => el.querySelector('#week-strip')?.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-day-i]');
         if (!btn) return;
         const i = Number(btn.dataset.dayI);
         state.weekDayFilter = state.weekDayFilter === i ? null : i;
-        renderPlay();
+        renderPlay({ useCachedData: true });
       });
 
       if (sel != null) {
@@ -2688,6 +5467,7 @@
         el.querySelectorAll('[data-open-tournament]').forEach((card) => {
           card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
         });
+        commit();
         return;
       }
 
@@ -2747,30 +5527,97 @@
       bindWeekStrip();
       el.querySelector('#pl-log-game')?.addEventListener('click', openLogGameSheet);
       bindGameButtons(el, renderPlay);
+      commit();
     } catch (e) {
-      renderError(el, e.message, renderPlay);
+      if (renderSeq !== state.playRenderSeq || state.playSeg !== seg) return;
+      if (hadUsableContent) {
+        retainViewAfterError(liveEl, `${e.message} Showing your last update.`, () => renderPlay());
+      } else {
+        renderError(el, e.message, () => renderPlay());
+        commit();
+      }
     }
+  }
+
+  function updatePlayHeader() {
+    const me = state.me;
+    if (!me) return;
+    const hour = new Date().getHours();
+    const hello = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const first = String(me.display_name || '').split(/\s+/)[0] || 'player';
+    const greeting = $('#play-greeting');
+    const context = $('#play-context');
+    const avatar = $('#play-avatar-button');
+    if (greeting) greeting.textContent = `${hello}, ${first}`;
+    if (context) context.textContent = state.areaLabel || me.home_area || me.home_court_name || 'Your game plan';
+    if (avatar) avatar.innerHTML = avatarHtml(me, 'sm');
   }
 
   function setupPlay() {
     $('#play-segments').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
+      const changed = state.playSeg !== btn.dataset.seg;
       state.playSeg = btn.dataset.seg;
-      document.querySelectorAll('#play-segments button').forEach((b) => b.classList.toggle('active', b === btn));
-      renderPlay();
+      document.querySelectorAll('#play-segments button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
+      syncPlayFab();
+      renderPlay({ reuseFresh: !changed });
     });
-    $('#new-game-fab').addEventListener('click', () => openNewGameModal());
+    $('#new-game-fab').addEventListener('click', () => {
+      if (state.playSeg === 'scores') openNewGameModal(null, 'ranked');
+      else if (state.playSeg === 'brackets') openCompetitionCreateSheet();
+      else openNewGameModal();
+    });
+    syncPlayFab();
+    $('#play-activity').addEventListener('click', openActivity);
+    $('#play-avatar-button').addEventListener('click', () => switchTab('profile'));
+  }
+
+  function syncPlayFab() {
+    const fab = $('#new-game-fab');
+    if (!fab) return;
+    const label = state.playSeg === 'scores' ? 'Start a ranked game'
+      : state.playSeg === 'brackets' ? 'Create a competition' : 'Start a new game';
+    fab.setAttribute('aria-label', label);
+    fab.title = label;
+  }
+
+  function openCompetitionCreateSheet() {
+    const modal = openModal(`
+      ${modalHead('Create a competition')}
+      <p class="row-sub" style="margin:-4px 0 14px">Choose the format that fits your crew.</p>
+      <button type="button" class="card row inbox-row" id="create-tournament-choice">
+        <span class="inbox-room-icon">🏆</span>
+        <span class="row-main"><span class="row-title" style="display:block">Tournament</span><span class="row-sub">Bracket or round robin · singles or doubles</span></span><span class="chev">›</span>
+      </button>
+      <button type="button" class="card row inbox-row" id="create-league-choice">
+        <span class="inbox-room-icon">📦</span>
+        <span class="row-main"><span class="row-title" style="display:block">Box league</span><span class="row-sub">A recurring season with promotion and relegation</span></span><span class="chev">›</span>
+      </button>
+    `, { label: 'Create a competition' });
+    modal.querySelector('#create-tournament-choice').addEventListener('click', () => {
+      transitionModal(modal, openCreateTournamentSheet);
+    });
+    modal.querySelector('#create-league-choice').addEventListener('click', () => {
+      transitionModal(modal, openCreateLeagueSheet);
+    });
   }
 
   // Log a spontaneous singles game already played, against a friend.
   async function openLogGameSheet() {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let friends = [];
     try { friends = (await api('/friends')).friends || []; } catch { /* offline */ }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
     if (!friends.length) { toast('Add a friend first to log a game with them'); return; }
     const loc = areaLatLng();
     let nearby = [];
     try { nearby = ((await api(`/courts?lat=${loc.lat}&lng=${loc.lng}&radius=40&limit=8`)).items) || []; } catch { /* ignore */ }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
     const courtOptions = [];
     const seen = new Set();
     if (state.presence && state.presence.checked_in) { courtOptions.push({ id: state.presence.court_id, name: state.presence.court_name }); seen.add(state.presence.court_id); }
@@ -2892,7 +5739,26 @@
     });
   }
 
-  async function openNewGameModal(court, defaultType = 'casual', startNow = false, preferredSlot = null) {
+  async function openNewGameModal(court, defaultType = 'casual', startNow = false, preferredSlot = null, presetFriendId = null) {
+    const plannerTitle = startNow ? 'Play now' : 'Plan a game';
+    const plannerShell = openModal(`
+      ${modalHead(plannerTitle)}
+      <div class="planner-loading">
+        <p class="row-sub" style="margin-bottom:12px">Getting your courts and crew ready…</p>
+        ${skeletonHtml(3)}
+      </div>
+    `, { label: plannerTitle });
+    const modalLoad = beginRoutedOverlayLoad(null);
+    const explicitPlannerIntent = !!court || defaultType !== 'casual' || startNow || !!preferredSlot || presetFriendId != null;
+    const savedDraft = readGameDraft();
+    const restoredDraft = !explicitPlannerIntent ? savedDraft : null;
+    let restoredCourt = null;
+    let restoredCourtMissing = false;
+    const restoredCourtRequest = restoredDraft && restoredDraft.courtId
+      ? api(`/courts/${restoredDraft.courtId}`)
+        .then((item) => { restoredCourt = item; })
+        .catch(() => { restoredCourtMissing = true; })
+      : Promise.resolve();
     // Gather friends (for invites), clubs, and court suggestions in parallel
     let friends = [];
     let suggestions = [];
@@ -2925,10 +5791,22 @@
         });
       }
     } catch { /* suggestions are optional */ }
+    await restoredCourtRequest;
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+
+    // Smart default: a player already at a court should not have to pick it
+    // again. Otherwise use their home court, while keeping Change available.
+    if (!court && restoredCourt) {
+      court = { id: restoredCourt.id, name: restoredCourt.name, busy_times: restoredCourt.busy_times };
+    } else if (!court && !(restoredDraft && restoredDraft.courtId) && state.presence && state.presence.checked_in) {
+      court = { id: state.presence.court_id, name: state.presence.court_name };
+    } else if (!court && !(restoredDraft && restoredDraft.courtId) && state.me && state.me.home_court_id) {
+      court = { id: state.me.home_court_id, name: state.me.home_court_name || 'Home court' };
+    }
 
     // Day & time presets
     const days = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
       const d = new Date(); d.setDate(d.getDate() + i); d.setHours(0, 0, 0, 0);
       days.push(d);
     }
@@ -2957,12 +5835,12 @@
     }
 
     const dayChips = days.map((d, i) =>
-      `<button type="button" data-day="${i}" class="${i === selDayIdx ? 'active' : ''}">${dayLabel(d, i)}</button>`).join('');
+      `<button type="button" data-day="${i}" aria-pressed="${i === selDayIdx}" class="${i === selDayIdx ? 'active' : ''}">${dayLabel(d, i)}</button>`).join('');
     const timeChips = timePresets.map((h) =>
-      `<button type="button" data-hour="${h}" class="${h === selHour ? 'active' : ''}">${timeLabel(h)}</button>`).join('');
+      `<button type="button" data-hour="${h}" aria-pressed="${h === selHour}" class="${h === selHour ? 'active' : ''}">${timeLabel(h)}</button>`).join('');
 
     const friendChips = friends.map((f) => `
-      <button type="button" class="invite-chip" data-fid="${f.id}">
+      <button type="button" class="invite-chip ${Number(presetFriendId) === f.id ? 'active' : ''}" data-fid="${f.id}" aria-pressed="${Number(presetFriendId) === f.id}">
         ${avatarHtml(f, 'sm')} ${esc(f.display_name.split(' ')[0])}
       </button>`).join('');
 
@@ -2975,11 +5853,36 @@
         <span class="tag" style="margin:0">${esc(c.tag)}</span>
       </button>`).join('');
 
-    const modal = openModal(`
-      ${modalHead(startNow ? 'Start a game' : 'Schedule a game')}
+    const pickedFriend = friends.find((f) => f.id === Number(presetFriendId));
+    const plannerRecoveryHtml = restoredDraft
+      ? `<div class="planner-recovery ${restoredDraft.status === 'submitting' ? 'warn' : ''}" role="status">
+          <div class="row-main">
+            <b>${restoredDraft.status === 'submitting' ? 'Was this game created?' : 'Continuing your saved plan'}</b>
+            <div class="row-sub">${restoredDraft.status === 'submitting'
+              ? 'We lost the confirmation. Check My games before you try again.'
+              : 'Review the time and people, then schedule when ready.'}</div>
+          </div>
+          ${restoredDraft.status === 'submitting'
+            ? '<button type="button" class="btn btn-secondary btn-sm" id="ng-check-games">Check</button><button type="button" class="btn btn-primary btn-sm" id="ng-review-retry">Retry</button>'
+            : '<button type="button" class="btn btn-secondary btn-sm" id="ng-start-over">Start over</button>'}
+        </div>`
+      : (savedDraft && explicitPlannerIntent
+        ? `<div class="planner-recovery" role="status">
+            <div class="row-main"><b>You have a saved plan</b><div class="row-sub">This new plan will stay separate until you edit it.</div></div>
+            <button type="button" class="btn btn-secondary btn-sm" id="ng-resume-draft">Resume</button>
+          </div>` : '');
+    const modal = plannerShell;
+    const plannerBox = modal.querySelector('.modal');
+    plannerBox.innerHTML = `
+      ${modalHead(plannerTitle)}
+      ${plannerRecoveryHtml}
 
-      <div class="form-field">
-        <label>Court</label>
+      <section class="planner-step" aria-labelledby="planner-where-title">
+        <div class="planner-step-head">
+          <span class="planner-step-num">1</span>
+          <div><div class="planner-step-title" id="planner-where-title">Where are you playing?</div><div class="planner-step-sub">Current, saved, and nearby courts come first.</div></div>
+        </div>
+        ${restoredCourtMissing ? '<div class="planner-inline-warning" id="ng-court-warning">Your saved court is not available right now. Pick another court before scheduling.</div>' : ''}
         <div id="ng-court-selected" class="${court ? '' : 'hidden'} court-selected">
           <div class="row-main">
             <div class="row-title" style="font-size:14.5px" id="ng-court-name">${court ? esc(court.name) : ''}</div>
@@ -2987,100 +5890,182 @@
           <button type="button" class="btn btn-secondary btn-sm" id="ng-court-change">Change</button>
         </div>
         <div id="ng-court-picker" class="${court ? 'hidden' : ''}">
-          <input type="search" id="ng-court-search" placeholder="Search courts…" />
+          <input type="search" id="ng-court-search" aria-label="Search courts" placeholder="Search courts…" />
           <div id="ng-court-results" style="margin-top:8px">${suggestionRows}</div>
         </div>
         <input type="hidden" id="ng-court-id" value="${court ? court.id : ''}" />
-      </div>
+      </section>
 
-      <div class="form-field">
-        <label>When</label>
-        <div class="segmented" id="ng-mode">
-          <button type="button" data-mode="now" ${startNow ? 'class="active"' : ''}>▶️ Right now</button>
-          <button type="button" data-mode="later" ${startNow ? '' : 'class="active"'}>📅 Schedule</button>
+      <section class="planner-step" aria-labelledby="planner-when-title">
+        <div class="planner-step-head">
+          <span class="planner-step-num">2</span>
+          <div><div class="planner-step-title" id="planner-when-title">When?</div><div class="planner-step-sub">Start a live pickup game or choose a time this week.</div></div>
         </div>
-      </div>
-      <div id="ng-later-fields" class="${startNow ? 'hidden' : ''}">
-        <div class="quick-times" id="ng-days" style="margin-bottom:8px">${dayChips}</div>
-        <div class="quick-times" id="ng-hours" style="margin-bottom:8px">${timeChips}
-          <button type="button" data-hour="custom">Custom…</button>
+        <div class="segmented" id="ng-mode" role="group" aria-label="Game timing">
+          <button type="button" data-mode="now" aria-pressed="${startNow}" ${startNow ? 'class="active"' : ''}>⚡ Right now</button>
+          <button type="button" data-mode="later" aria-pressed="${!startNow}" ${startNow ? '' : 'class="active"'}>📅 Plan ahead</button>
         </div>
-        <input type="datetime-local" id="ng-when" class="hidden" style="margin-bottom:12px" />
-        <div id="ng-busy-hint" class="row-sub" style="margin-bottom:12px"></div>
-      </div>
-
-      <div class="form-grid">
-        <div class="form-field">
-          <label>Type</label>
-          <div class="type-cards" id="ng-type">
-            <button type="button" data-val="casual" class="${defaultType === 'casual' ? 'active' : ''}">
-              <span style="font-size:20px"><svg class="pb-ic"><use href="#pb"/></svg></span><b>Casual</b><small>Just for fun</small>
-            </button>
-            <button type="button" data-val="ranked" class="${defaultType === 'ranked' ? 'active' : ''}">
-              <span style="font-size:20px">🏆</span><b>Ranked</b><small>Counts for rating</small>
-            </button>
+        <div id="ng-later-fields" class="${startNow ? 'hidden' : ''}">
+          <div class="quick-times" id="ng-days" style="margin-bottom:8px">${dayChips}</div>
+          <div class="quick-times" id="ng-hours" style="margin-bottom:8px">${timeChips}
+            <button type="button" data-hour="custom">Custom…</button>
           </div>
+          <input type="datetime-local" id="ng-when" aria-label="Custom game date and time" class="hidden" style="margin-bottom:12px" />
+          <div id="ng-busy-hint" class="row-sub" style="margin-bottom:4px"></div>
         </div>
-        <div class="form-field">
-          <label>Players needed</label>
-          <select id="ng-max">
-            <option value="2">2 (singles)</option>
-            <option value="4" selected>4 (doubles)</option>
-            <option value="6">6</option>
-            <option value="8">8</option>
-          </select>
-        </div>
-      </div>
+      </section>
 
-      <div class="form-field">
-        <label>Level (a hint, not a gate)</label>
-        <div class="quick-times" id="ng-level" style="margin-top:2px">
-          <button type="button" data-level="any" class="active">Anyone</button>
-          <button type="button" data-level="beginner">Beginner</button>
-          <button type="button" data-level="intermediate">Intermediate</button>
-          <button type="button" data-level="advanced">Advanced</button>
-          <button type="button" data-level="pro">Pro</button>
+      <section class="planner-step" aria-labelledby="planner-who-title">
+        <div class="planner-step-head">
+          <span class="planner-step-num">3</span>
+          <div><div class="planner-step-title" id="planner-who-title">Who should see it?</div><div class="planner-step-sub">Keep it open, share with friends, or invite your crew.</div></div>
         </div>
-      </div>
-
-      <div class="form-field">
-        <label>Who can join?</label>
-        <div class="type-cards vis-cards" id="ng-vis">
-          <button type="button" data-vis="open" class="active"><span style="font-size:19px">🌍</span><b>Anyone</b><small>Nearby players</small></button>
-          <button type="button" data-vis="friends"><span style="font-size:19px">🤝</span><b>Friends</b><small>All your friends</small></button>
-          <button type="button" data-vis="private"><span style="font-size:19px">🔒</span><b>Specific</b><small>Only who you pick</small></button>
+        <div class="type-cards vis-cards" id="ng-vis" role="group" aria-label="Who can join">
+          <button type="button" data-vis="open" aria-pressed="${!pickedFriend}" class="${pickedFriend ? '' : 'active'}"><span style="font-size:19px">🌍</span><b>Anyone</b><small>Nearby players</small></button>
+          <button type="button" data-vis="friends" aria-pressed="false"><span style="font-size:19px">🤝</span><b>Friends</b><small>All your friends</small></button>
+          <button type="button" data-vis="private" aria-pressed="${!!pickedFriend}" class="${pickedFriend ? 'active' : ''}"><span style="font-size:19px">🔒</span><b>Specific</b><small>Only who you pick</small></button>
         </div>
-        <div id="ng-friends-wrap" class="hidden" style="margin-top:10px">
+        <div id="ng-friends-wrap" class="${pickedFriend ? '' : 'hidden'}" style="margin-top:10px">
           ${friends.length
             ? `<div class="invite-chips" id="ng-invites">${friendChips}</div>
-               <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">Pick who to invite — only they will see this game.</p>`
+               <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">${pickedFriend ? `${esc(pickedFriend.display_name.split(' ')[0])} is invited — only selected players will see this game.` : 'Pick who to invite — only they will see this game.'}</p>`
             : '<p class="row-sub">Add friends first to invite specific people.</p>'}
         </div>
-      </div>
+      </section>
 
-      ${myClubs.length ? `
-      <div class="form-field">
-        <label>Host under a club banner?</label>
-        <div class="quick-times" id="ng-club">
-          <button type="button" data-club-id="" class="active">Just me</button>
-          ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}">🏛 ${esc(cl.name)}</button>`).join('')}
+      <details class="planner-advanced" id="ng-advanced">
+        <summary><span>Game options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · Doubles · Any level</span></summary>
+        <div class="planner-advanced-body">
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Type</label>
+              <div class="type-cards" id="ng-type">
+                <button type="button" data-val="casual" aria-pressed="${defaultType === 'casual'}" class="${defaultType === 'casual' ? 'active' : ''}">
+                  <span style="font-size:20px"><svg class="pb-ic"><use href="#pb"/></svg></span><b>Casual</b><small>Just for fun</small>
+                </button>
+                <button type="button" data-val="ranked" aria-pressed="${defaultType === 'ranked'}" class="${defaultType === 'ranked' ? 'active' : ''}">
+                  <span style="font-size:20px">🏆</span><b>Ranked</b><small>Counts for rating</small>
+                </button>
+              </div>
+            </div>
+            <div class="form-field">
+              <label for="ng-max">Players needed</label>
+              <select id="ng-max">
+                <option value="2">2 (singles)</option>
+                <option value="4" selected>4 (doubles)</option>
+                <option value="6">6</option>
+                <option value="8">8</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-field">
+            <label>Level <span class="row-sub">(a hint, not a gate)</span></label>
+            <div class="quick-times" id="ng-level" style="margin-top:2px">
+              <button type="button" data-level="any" class="active" aria-pressed="true">Anyone</button>
+              <button type="button" data-level="beginner" aria-pressed="false">Beginner</button>
+              <button type="button" data-level="intermediate" aria-pressed="false">Intermediate</button>
+              <button type="button" data-level="advanced" aria-pressed="false">Advanced</button>
+              <button type="button" data-level="pro" aria-pressed="false">Pro</button>
+            </div>
+          </div>
+
+          ${myClubs.length ? `
+          <div class="form-field">
+            <label>Host under a club banner?</label>
+            <div class="quick-times" id="ng-club">
+              <button type="button" data-club-id="" class="active">Just me</button>
+              ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}">🏛 ${esc(cl.name)}</button>`).join('')}
+            </div>
+            <div class="row-sub" id="ng-club-hint" style="margin-top:6px"></div>
+          </div>` : ''}
+
+          <label class="row" id="ng-recurring-row" style="margin-bottom:14px;cursor:pointer;gap:10px">
+            <input type="checkbox" id="ng-recurring" style="width:22px;height:22px;flex:0 0 auto" />
+            <span><span style="font-weight:700">🔁 Repeats weekly</span><br><span class="row-sub">Open-play session — players re-RSVP each week</span></span>
+          </label>
+
+          <div class="form-field">
+            <label for="ng-notes">Note <span class="row-sub">(optional)</span></label>
+            <input type="text" id="ng-notes" maxlength="200" placeholder="e.g. All levels welcome!" />
+          </div>
         </div>
-        <div class="row-sub" id="ng-club-hint" style="margin-top:6px"></div>
-      </div>` : ''}
+      </details>
 
-      <label class="row" id="ng-recurring-row" style="margin-bottom:14px;cursor:pointer;gap:10px">
-        <input type="checkbox" id="ng-recurring" style="width:18px;height:18px;flex:0 0 auto" />
-        <span><span style="font-weight:700">🔁 Repeats weekly</span><br><span class="row-sub">Open-play session — players re-RSVP each week</span></span>
-      </label>
-
-      <div class="form-field">
-        <input type="text" id="ng-notes" maxlength="200" placeholder="Note (optional) — e.g. All levels welcome!" />
+      <div class="planner-submit-bar">
+        <div class="form-error hidden" id="ng-submit-error" role="alert" tabindex="-1"></div>
+        <div class="planner-summary" id="ng-summary">${court ? esc(court.name) : 'Choose a court'} · ${startNow ? 'Right now' : `${dayLabel(days[selDayIdx], selDayIdx)} at ${timeLabel(selHour)}`}</div>
+        <button class="btn btn-primary btn-block" id="ng-submit" style="padding:15px">
+          ${startNow ? 'Start game now' : 'Schedule game'}
+        </button>
       </div>
+    `;
+    setDialogLabel(plannerBox, plannerTitle);
 
-      <button class="btn btn-primary btn-block" id="ng-submit" style="padding:15px">
-        ${startNow ? 'Start game now' : 'Schedule game'}
-      </button>
-    `);
+    let plannerDirty = false;
+    let plannerSubmitted = false;
+    let plannerSubmitting = !!(restoredDraft && restoredDraft.status === 'submitting');
+    let plannerSubmitStartedAt = plannerSubmitting ? restoredDraft.submitStartedAt : null;
+    const plannerAttemptId = (restoredDraft && restoredDraft.clientAttemptId) || newGameAttemptId();
+    let plannerSaveTimer = null;
+    let ambiguousDraftAccepted = !(restoredDraft && restoredDraft.status === 'submitting');
+    const plannerScheduledIso = () => {
+      if (nowMode) return null;
+      let value;
+      if (customMode) {
+        const raw = modal.querySelector('#ng-when').value;
+        value = raw ? new Date(raw) : null;
+      } else {
+        value = new Date(days[selDayIdx]);
+        value.setHours(selHour ?? 18, 0, 0, 0);
+      }
+      return value && Number.isFinite(value.getTime()) ? value.toISOString() : null;
+    };
+    const plannerSnapshot = (status = 'editing') => ({
+      status,
+      submitStartedAt: status === 'submitting' ? (plannerSubmitStartedAt || Date.now()) : null,
+      clientAttemptId: plannerAttemptId,
+      mode: nowMode ? 'now' : 'later',
+      courtId: Number(modal.querySelector('#ng-court-id').value) || null,
+      scheduledAt: plannerScheduledIso(),
+      timeKind: customMode ? 'custom' : 'preset',
+      visibility,
+      inviteUserIds: [...inviteIds],
+      gameType,
+      maxPlayers: Number(modal.querySelector('#ng-max').value),
+      preferredLevel,
+      clubId,
+      recurrence: recurringBox.checked ? 'weekly' : 'none',
+      notes: modal.querySelector('#ng-notes').value.trim(),
+      advancedOpen: modal.querySelector('#ng-advanced').open,
+    });
+    const flushPlannerDraft = (status = 'editing') => {
+      clearTimeout(plannerSaveTimer);
+      plannerSaveTimer = null;
+      writeGameDraft(plannerSnapshot(status));
+    };
+    const markPlannerDirty = () => {
+      modal.querySelector('#ng-resume-draft')?.closest('.planner-recovery')?.remove();
+      plannerDirty = true;
+      clearTimeout(plannerSaveTimer);
+      plannerSaveTimer = setTimeout(() => flushPlannerDraft(plannerSubmitting ? 'submitting' : 'editing'), 320);
+    };
+    const onPlannerPageHide = () => {
+      if ((plannerDirty || plannerSubmitting) && !plannerSubmitted) {
+        flushPlannerDraft(plannerSubmitting ? 'submitting' : 'editing');
+      }
+    };
+    window.addEventListener('pagehide', onPlannerPageHide);
+    modal._cleanupFns.push(() => {
+      clearTimeout(plannerSaveTimer);
+      window.removeEventListener('pagehide', onPlannerPageHide);
+      if ((plannerDirty || plannerSubmitting) && !plannerSubmitted) {
+        flushPlannerDraft(plannerSubmitting ? 'submitting' : 'editing');
+        toast(plannerSubmitting
+          ? 'Couldn’t confirm the game — check My games before retrying'
+          : 'Plan saved — finish it anytime');
+      }
+    });
 
     // --- Busy-time hint: nudge scheduling toward when players actually show up ---
     let busyTimes = null; // for the currently selected court
@@ -3114,13 +6099,33 @@
       } catch { /* hint is optional */ }
     };
 
+    const updatePlannerSummary = () => {
+      const summary = modal.querySelector('#ng-summary');
+      if (!summary) return;
+      const courtName = modal.querySelector('#ng-court-name').textContent || 'Choose a court';
+      let whenText = 'Right now';
+      if (!nowMode) {
+        if (customMode) {
+          const raw = modal.querySelector('#ng-when').value;
+          const parsed = raw ? new Date(raw) : null;
+          whenText = parsed && Number.isFinite(parsed.getTime()) ? fmtDateTime(parsed.toISOString()) : 'Choose a time';
+        } else {
+          whenText = `${dayLabel(days[selDayIdx], selDayIdx)} at ${timeLabel(selHour)}`;
+        }
+      }
+      summary.textContent = `${courtName} · ${whenText}`;
+    };
+
     // --- Court picking ---
-    const setCourt = (id, name) => {
+    const setCourt = (id, name, { dirty = true } = {}) => {
       modal.querySelector('#ng-court-id').value = id || '';
       modal.querySelector('#ng-court-name').textContent = name || '';
       modal.querySelector('#ng-court-selected').classList.toggle('hidden', !id);
       modal.querySelector('#ng-court-picker').classList.toggle('hidden', !!id);
+      modal.querySelector('#ng-court-warning')?.remove();
       loadBusyHint(id);
+      updatePlannerSummary();
+      if (dirty) markPlannerDirty();
     };
     modal.querySelector('#ng-court-change').addEventListener('click', () => setCourt(null, null));
     const bindCourtPicks = () => {
@@ -3156,26 +6161,45 @@
     // --- When ---
     let nowMode = startNow;
     let customMode = false;
+    updatePlannerSummary();
     modal.querySelector('#ng-mode').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       nowMode = btn.dataset.mode === 'now';
-      modal.querySelectorAll('#ng-mode button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelectorAll('#ng-mode button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
       modal.querySelector('#ng-later-fields').classList.toggle('hidden', nowMode);
       modal.querySelector('#ng-submit').textContent = nowMode ? 'Start game now' : 'Schedule game';
+      if (nowMode) modal.querySelector('#ng-time-warning')?.remove();
       updateBusyHint();
+      updatePlannerSummary();
+      markPlannerDirty();
     });
     modal.querySelector('#ng-days').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       selDayIdx = Number(btn.dataset.day);
-      modal.querySelectorAll('#ng-days button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelectorAll('#ng-days button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
+      modal.querySelector('#ng-time-warning')?.remove();
       updateBusyHint();
+      updatePlannerSummary();
+      markPlannerDirty();
     });
     modal.querySelector('#ng-hours').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
-      modal.querySelectorAll('#ng-hours button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelectorAll('#ng-hours button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
       if (btn.dataset.hour === 'custom') {
         customMode = true;
         const whenEl = modal.querySelector('#ng-when');
@@ -3190,9 +6214,16 @@
         selHour = Number(btn.dataset.hour);
         modal.querySelector('#ng-when').classList.add('hidden');
       }
+      modal.querySelector('#ng-time-warning')?.remove();
       updateBusyHint();
+      updatePlannerSummary();
+      markPlannerDirty();
     });
-    modal.querySelector('#ng-when').addEventListener('input', updateBusyHint);
+    modal.querySelector('#ng-when').addEventListener('input', () => {
+      const value = new Date(modal.querySelector('#ng-when').value);
+      if (Number.isFinite(value.getTime()) && value.getTime() > Date.now()) modal.querySelector('#ng-time-warning')?.remove();
+      updateBusyHint(); updatePlannerSummary(); markPlannerDirty();
+    });
     // Initial hint for a preselected court (after nowMode/customMode exist).
     if (court) {
       if (court.busy_times) { busyTimes = court.busy_times; updateBusyHint(); }
@@ -3214,8 +6245,14 @@
       const btn = e.target.closest('button');
       if (!btn) return;
       gameType = btn.dataset.val;
-      modal.querySelectorAll('#ng-type button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelectorAll('#ng-type button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
       syncRecurring();
+      updateOptionsSummary();
+      markPlannerDirty();
     });
 
     // --- Preferred level ---
@@ -3224,8 +6261,22 @@
       const btn = e.target.closest('button');
       if (!btn) return;
       preferredLevel = btn.dataset.level;
-      modal.querySelectorAll('#ng-level button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelectorAll('#ng-level button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
+      updateOptionsSummary();
+      markPlannerDirty();
     });
+    const updateOptionsSummary = () => {
+      const players = Number(modal.querySelector('#ng-max').value);
+      const size = players === 2 ? 'Singles' : players === 4 ? 'Doubles' : `${players} players`;
+      const level = preferredLevel === 'any' ? 'Any level' : skillLabel(preferredLevel);
+      modal.querySelector('#ng-options-summary').textContent = `${gameType === 'ranked' ? 'Ranked' : 'Casual'} · ${size} · ${level}`;
+    };
+    modal.querySelector('#ng-max').addEventListener('change', () => { updateOptionsSummary(); markPlannerDirty(); });
+    updateOptionsSummary();
 
     // --- Club banner ---
     let clubId = null;
@@ -3241,18 +6292,24 @@
             ? `📣 The other ${picked.member_count - 1} member${picked.member_count === 2 ? '' : 's'} of ${picked.name} will be pinged.`
             : `📣 Hosted under the ${picked.name} banner.`)
         : '';
+      markPlannerDirty();
     });
 
     // --- Visibility / invites ---
-    let visibility = 'open';
-    const inviteIds = new Set();
+    let visibility = pickedFriend ? 'private' : 'open';
+    const inviteIds = new Set(pickedFriend ? [pickedFriend.id] : []);
     const friendsWrap = modal.querySelector('#ng-friends-wrap');
     modal.querySelector('#ng-vis').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       visibility = btn.dataset.vis;
-      modal.querySelectorAll('#ng-vis button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelectorAll('#ng-vis button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
       friendsWrap.classList.toggle('hidden', visibility !== 'private');
+      markPlannerDirty();
     });
     const invitesEl = modal.querySelector('#ng-invites');
     if (invitesEl) {
@@ -3262,40 +6319,228 @@
         const fid = Number(btn.dataset.fid);
         if (inviteIds.has(fid)) inviteIds.delete(fid); else inviteIds.add(fid);
         btn.classList.toggle('active', inviteIds.has(fid));
+        btn.setAttribute('aria-pressed', String(inviteIds.has(fid)));
         modal.querySelector('#ng-invite-hint').textContent = inviteIds.size
           ? `${inviteIds.size} invited — only they will see this game.`
           : 'Pick who to invite — only they will see this game.';
+        markPlannerDirty();
       });
     }
 
+    modal.querySelector('#ng-recurring').addEventListener('change', markPlannerDirty);
+    modal.querySelector('#ng-notes').addEventListener('input', markPlannerDirty);
+
+    const setPlannerWarning = (id, message, anchor) => {
+      modal.querySelector(`#${id}`)?.remove();
+      const warning = document.createElement('div');
+      warning.id = id;
+      warning.className = 'planner-inline-warning';
+      warning.textContent = message;
+      (anchor || modal.querySelector('#ng-later-fields')).appendChild(warning);
+    };
+
+    // Restore only after every closure variable and event handler exists, so
+    // the UI and the eventual POST payload are guaranteed to agree.
+    if (restoredDraft) {
+      if (restoredCourt) setCourt(restoredCourt.id, restoredCourt.name, { dirty: false });
+      nowMode = restoredDraft.mode === 'now';
+      modal.querySelectorAll('#ng-mode button').forEach((btn) => {
+        const active = btn.dataset.mode === (nowMode ? 'now' : 'later');
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+      modal.querySelector('#ng-later-fields').classList.toggle('hidden', nowMode);
+      modal.querySelector('#ng-submit').textContent = nowMode ? 'Start game now' : 'Schedule game';
+
+      if (!nowMode) {
+        const restoredTime = restoredDraft.scheduledAt ? new Date(restoredDraft.scheduledAt) : null;
+        const validTime = restoredTime && Number.isFinite(restoredTime.getTime()) && restoredTime.getTime() > Date.now();
+        if (validTime) {
+          const matchingDay = days.findIndex((day) => day.toDateString() === restoredTime.toDateString());
+          const isPreset = restoredDraft.timeKind === 'preset' && matchingDay >= 0
+            && restoredTime.getMinutes() === 0 && timePresets.includes(restoredTime.getHours());
+          if (isPreset) {
+            customMode = false;
+            selDayIdx = matchingDay;
+            selHour = restoredTime.getHours();
+          } else {
+            customMode = true;
+            const pad2 = (n) => String(n).padStart(2, '0');
+            modal.querySelector('#ng-when').value = `${restoredTime.getFullYear()}-${pad2(restoredTime.getMonth() + 1)}-${pad2(restoredTime.getDate())}T${pad2(restoredTime.getHours())}:${pad2(restoredTime.getMinutes())}`;
+          }
+        } else {
+          customMode = true;
+          selHour = null;
+          setPlannerWarning('ng-time-warning', 'Your saved time has passed. Choose a new time.');
+        }
+        modal.querySelector('#ng-when').classList.toggle('hidden', !customMode);
+        modal.querySelectorAll('#ng-days button').forEach((btn) => {
+          const active = !customMode && Number(btn.dataset.day) === selDayIdx;
+          btn.classList.toggle('active', active);
+          btn.setAttribute('aria-pressed', String(active));
+        });
+        modal.querySelectorAll('#ng-hours button').forEach((btn) => {
+          const active = customMode ? btn.dataset.hour === 'custom' : Number(btn.dataset.hour) === selHour;
+          btn.classList.toggle('active', active);
+          btn.setAttribute('aria-pressed', String(active));
+        });
+      }
+
+      gameType = restoredDraft.gameType;
+      modal.querySelectorAll('#ng-type button').forEach((btn) => {
+        const active = btn.dataset.val === gameType;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+      preferredLevel = restoredDraft.preferredLevel;
+      modal.querySelectorAll('#ng-level button').forEach((btn) => {
+        const active = btn.dataset.level === preferredLevel;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+      const restoredMax = gameType === 'ranked' && ![2, 4].includes(restoredDraft.maxPlayers)
+        ? 4 : restoredDraft.maxPlayers;
+      modal.querySelector('#ng-max').value = String(restoredMax);
+
+      visibility = restoredDraft.visibility;
+      modal.querySelectorAll('#ng-vis button').forEach((btn) => {
+        const active = btn.dataset.vis === visibility;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+      friendsWrap.classList.toggle('hidden', visibility !== 'private');
+      const currentFriendIds = new Set(friends.map((friend) => friend.id));
+      inviteIds.clear();
+      restoredDraft.inviteUserIds.filter((id) => currentFriendIds.has(id)).forEach((id) => inviteIds.add(id));
+      invitesEl?.querySelectorAll('[data-fid]').forEach((btn) => {
+        const active = inviteIds.has(Number(btn.dataset.fid));
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+      if (visibility === 'private' && restoredDraft.inviteUserIds.length !== inviteIds.size) {
+        setPlannerWarning('ng-invite-warning', 'Some saved invitees are no longer available. Review who can see this game.', friendsWrap);
+      }
+      if (modal.querySelector('#ng-invite-hint')) {
+        modal.querySelector('#ng-invite-hint').textContent = inviteIds.size
+          ? `${inviteIds.size} invited — only they will see this game.`
+          : 'Pick who to invite — only they will see this game.';
+      }
+
+      const restoredClub = myClubs.find((item) => item.id === restoredDraft.clubId);
+      clubId = restoredClub && visibility !== 'private' ? restoredClub.id : null;
+      modal.querySelectorAll('#ng-club button').forEach((btn) => {
+        btn.classList.toggle('active', (Number(btn.dataset.clubId) || null) === clubId);
+      });
+      if (restoredDraft.clubId && !clubId) {
+        setPlannerWarning('ng-club-warning', visibility === 'private'
+          ? 'This private game will be hosted by you, not a club.'
+          : 'That club is no longer available, so this game will be hosted by you.', modal.querySelector('#ng-club')?.parentElement);
+      }
+      recurringBox.checked = gameType !== 'ranked' && restoredDraft.recurrence === 'weekly';
+      modal.querySelector('#ng-notes').value = restoredDraft.notes;
+      modal.querySelector('#ng-advanced').open = restoredDraft.advancedOpen;
+      syncRecurring();
+      updateOptionsSummary();
+      updateBusyHint();
+      updatePlannerSummary();
+    }
+
+    let ignoreRestoredAdvancedToggle = !!(restoredDraft && restoredDraft.advancedOpen);
+    modal.querySelector('#ng-advanced').addEventListener('toggle', () => {
+      if (ignoreRestoredAdvancedToggle) { ignoreRestoredAdvancedToggle = false; return; }
+      markPlannerDirty();
+    });
+
+    modal.querySelector('#ng-start-over')?.addEventListener('click', () => {
+      clearGameDraft();
+      plannerSubmitting = false;
+      plannerSubmitted = true;
+      transitionModal(modal, () => openNewGameModal());
+      toast('Saved plan cleared');
+    });
+    modal.querySelector('#ng-resume-draft')?.addEventListener('click', () => {
+      transitionModal(modal, () => openNewGameModal());
+    });
+    modal.querySelector('#ng-check-games')?.addEventListener('click', () => {
+      closeModal(modal);
+      state.playSeg = 'games';
+      switchTab('play');
+    });
+    modal.querySelector('#ng-review-retry')?.addEventListener('click', () => {
+      ambiguousDraftAccepted = true;
+      plannerSubmitting = false;
+      plannerSubmitStartedAt = null;
+      modal.querySelector('#ng-submit').disabled = false;
+      modal.querySelector('#ng-review-retry')?.closest('.planner-recovery')?.remove();
+      writeGameDraft(plannerSnapshot('editing'));
+      toast('Review the details, then schedule when ready');
+    });
+    if (!ambiguousDraftAccepted) modal.querySelector('#ng-submit').disabled = true;
+
+    const showPlannerSubmitError = (message, target) => {
+      const error = modal.querySelector('#ng-submit-error');
+      error.textContent = message;
+      error.classList.remove('hidden');
+      modal.querySelectorAll('[aria-invalid="true"]').forEach((node) => node.removeAttribute('aria-invalid'));
+      if (target) {
+        target.setAttribute('aria-invalid', 'true');
+        target.scrollIntoView({ block: 'center', behavior: 'auto' });
+        target.focus({ preventScroll: true });
+      } else {
+        error.focus();
+      }
+    };
+    const clearPlannerSubmitError = () => {
+      modal.querySelector('#ng-submit-error').classList.add('hidden');
+      modal.querySelectorAll('[aria-invalid="true"]').forEach((node) => node.removeAttribute('aria-invalid'));
+    };
+
     // --- Submit ---
     modal.querySelector('#ng-submit').addEventListener('click', async (e) => {
+      clearPlannerSubmitError();
+      if (!ambiguousDraftAccepted) {
+        showPlannerSubmitError('Check My games before retrying this plan.');
+        return;
+      }
       const courtId = modal.querySelector('#ng-court-id').value;
-      if (!courtId) { toast('Pick a court first'); return; }
+      if (!courtId) { showPlannerSubmitError('Pick a court first.', modal.querySelector('#ng-court-search')); return; }
       let scheduledAt;
       if (nowMode) {
         scheduledAt = new Date();
       } else if (customMode) {
         const v = modal.querySelector('#ng-when').value;
-        if (!v) { toast('Pick a date and time'); return; }
+        if (!v) { showPlannerSubmitError('Pick a date and time.', modal.querySelector('#ng-when')); return; }
         scheduledAt = new Date(v);
+        if (!Number.isFinite(scheduledAt.getTime())) { showPlannerSubmitError('Choose a valid date and time.', modal.querySelector('#ng-when')); return; }
       } else {
-        if (selHour == null) { toast('Pick a time'); return; }
+        if (selHour == null) { showPlannerSubmitError('Pick a time.', modal.querySelector('#ng-hours button')); return; }
         scheduledAt = new Date(days[selDayIdx]);
         scheduledAt.setHours(selHour, 0, 0, 0);
-        if (scheduledAt.getTime() < Date.now() - 10 * 60000) { toast('That time already passed today'); return; }
+      }
+      if (!nowMode && scheduledAt.getTime() <= Date.now()) {
+        setPlannerWarning('ng-time-warning', 'That time has passed. Choose a future time.');
+        showPlannerSubmitError('Choose a future time.', customMode ? modal.querySelector('#ng-when') : modal.querySelector('#ng-hours button.active'));
+        return;
       }
       if (visibility === 'private' && inviteIds.size === 0) {
-        toast('Pick at least one person to invite');
+        showPlannerSubmitError('Pick at least one person to invite.', modal.querySelector('#ng-invites button'));
         return;
       }
       if (clubId && visibility === 'private') {
-        toast("Club games can't be invite-only — the club needs to see it");
+        showPlannerSubmitError("Club games can't be invite-only — the club needs to see it.", modal.querySelector('#ng-vis button[data-vis="friends"]'));
         return;
       }
       const btn = e.currentTarget;
       if (btn.disabled) return;
       btn.disabled = true;
+      btn.textContent = nowMode ? 'Starting game…' : 'Scheduling…';
+      plannerSubmitting = true;
+      plannerSubmitStartedAt = Date.now();
+      modal.classList.add('planner-submitting');
+      modal.querySelector('.modal')?.setAttribute('aria-busy', 'true');
+      modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+        .forEach((section) => section.setAttribute('inert', ''));
+      flushPlannerDraft('submitting');
       try {
         await api('/games', {
           method: 'POST',
@@ -3310,14 +6555,33 @@
             notes: modal.querySelector('#ng-notes').value.trim(),
             invite_user_ids: visibility === 'private' ? [...inviteIds] : [],
             club_id: clubId,
+            client_attempt_id: plannerAttemptId,
           }),
         });
+        plannerSubmitting = false;
+        plannerSubmitted = true;
+        clearGameDraft();
         closeModal(modal);
         toast(nowMode ? "Game on! It's live in My games 🏓" : 'Game scheduled! 🏓');
-        if (state.tab === 'play') { state.playSeg = 'games'; renderPlay(); }
-        document.querySelectorAll('#play-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === state.playSeg));
+        if (state.tab === 'play') {
+          state.playSeg = 'games';
+          syncPlayFab();
+          renderPlay();
+        }
+        document.querySelectorAll('#play-segments button').forEach((b) => {
+          const active = b.dataset.seg === state.playSeg;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-selected', String(active));
+        });
         refreshMe();
-      } catch (err) { toast(err.message); btn.disabled = false; }
+      } catch (err) {
+        plannerDirty = true;
+        // A timeout or interrupted response may still have created the game.
+        // Preserve the guard instead of enabling a duplicate one-tap retry.
+        flushPlannerDraft('submitting');
+        closeModal(modal);
+        toast('Couldn’t confirm the game — check My games before retrying');
+      }
     });
   }
 
@@ -3433,16 +6697,16 @@
     const originalStatus = game.status;
     const scorePoll = setInterval(async () => {
       if (!document.body.contains(modal)) { clearInterval(scorePoll); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       try {
         const fresh = await api(`/games/${game.id}`);
         const someoneElseReported = fresh.score_submitted_by && fresh.score_submitted_by !== state.me.id
           && fresh.status === 'awaiting_confirmation' && originalStatus !== 'awaiting_confirmation';
         if (fresh.status !== originalStatus || someoneElseReported) {
           clearInterval(scorePoll);
-          closeModal(modal);
           toast(`⚡ ${fresh.score_submitted_by_name || 'Your opponent'} already reported a score`);
           refreshMe();
-          openGameScreen(game.id);
+          transitionModal(modal, () => openGameScreen(game.id));
         }
       } catch { /* offline */ }
     }, 5000);
@@ -3469,11 +6733,11 @@
           method: 'POST',
           body: JSON.stringify({ team1, team2, score_team1: s1, score_team2: s2 }),
         });
-        closeModal(modal);
         if (updated.status === 'awaiting_confirmation') {
+          closeModal(modal);
           toast('Score sent — waiting for your opponent to confirm ✅');
         } else {
-          showCelebration(updated);
+          transitionModal(modal, () => showCelebration(updated));
         }
         refreshMe();
         refresh();
@@ -3518,7 +6782,7 @@
       </div>`;
   }
 
-  async function renderTournaments(el) {
+  async function renderTournaments(el, retryFn) {
     const loc = areaLatLng();
     try {
       const [mine, nearby, leagues] = await Promise.all([
@@ -3572,140 +6836,566 @@
         card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
       });
     } catch (e) {
-      renderError(el, e.message, () => renderTournaments(el));
+      renderError(el, e.message, retryFn || (() => renderTournaments(el)));
     }
+  }
+
+  // ---------- Shared competition results ----------
+  const COMPETITION_RESULT_STATES = {
+    unreported: { label: 'Score needed', tone: 'neutral' },
+    awaiting_confirmation: { label: 'Awaiting confirmation', tone: 'pending' },
+    disputed: { label: 'Disputed', tone: 'danger' },
+    confirmed: { label: 'Final', tone: 'success' },
+    bye: { label: 'Bye', tone: 'neutral' },
+    void: { label: 'Void', tone: 'neutral' },
+  };
+
+  function normalizeCompetitionResult(match = {}) {
+    const aliases = {
+      pending: 'awaiting_confirmation',
+      final: 'confirmed',
+      done: 'confirmed',
+    };
+    let stateName = String(match.result_state || match.status || 'unreported').toLowerCase();
+    stateName = aliases[stateName] || stateName;
+    if (!COMPETITION_RESULT_STATES[stateName]) stateName = 'unreported';
+    const meta = COMPETITION_RESULT_STATES[stateName];
+    const waitingForSides = Object.prototype.hasOwnProperty.call(match, 'entry1_id')
+      && (match.entry1_id == null || match.entry2_id == null);
+    return {
+      state: stateName,
+      label: waitingForSides ? 'Not ready' : meta.label,
+      tone: waitingForSides ? 'neutral' : meta.tone,
+      confirmed: stateName === 'confirmed',
+      terminal: ['confirmed', 'bye', 'void'].includes(stateName),
+      blocksProgression: ['awaiting_confirmation', 'disputed'].includes(stateName),
+    };
+  }
+
+  function competitionMatchContext(kind, parent, match) {
+    if (kind === 'league') {
+      return {
+        side1: match.player1 || { display_name: 'Player 1' },
+        side2: match.player2 || { display_name: 'Player 2' },
+        context: `Round ${match.round} · Box ${match.box}`,
+      };
+    }
+    const entries = Object.fromEntries((parent.entries || []).map((entry) => [entry.id, entry]));
+    const thirdPlace = match.round === parent.total_rounds && match.position === 1;
+    return {
+      side1: entries[match.entry1_id] || { name: 'TBD' },
+      side2: entries[match.entry2_id] || { name: 'TBD' },
+      context: parent.format === 'round_robin'
+        ? `Round ${match.round}`
+        : thirdPlace ? '3rd-place match' : tournamentRoundLabel(match.round, parent.total_rounds || 1),
+    };
+  }
+
+  const competitionSideName = (side) => side.display_name || side.name || 'TBD';
+
+  function competitionResultStatusHtml(match, { compact = false } = {}) {
+    const result = normalizeCompetitionResult(match);
+    const note = result.state === 'awaiting_confirmation' && match.reported_by_name
+      ? ` · by ${esc(match.reported_by_name)}`
+      : result.state === 'disputed' && match.disputed_by_name
+        ? ` · by ${esc(match.disputed_by_name)}` : '';
+    return `<span class="competition-result-status is-${result.tone}" aria-label="Result status: ${esc(result.label)}${note}">${esc(result.label)}${compact ? '' : note}</span>`;
+  }
+
+  function competitionResultProvenanceHtml(match) {
+    const rows = [];
+    if (match.reported_by_name) rows.push(`Reported by <b>${esc(match.reported_by_name)}</b>${match.reported_at ? ` · ${esc(fmtDateTime(match.reported_at))}` : ''}`);
+    if (match.confirmed_by_name) rows.push(`Confirmed by <b>${esc(match.confirmed_by_name)}</b>${match.confirmed_at ? ` · ${esc(fmtDateTime(match.confirmed_at))}` : ''}`);
+    if (match.disputed_by_name) rows.push(`Disputed by <b>${esc(match.disputed_by_name)}</b>${match.disputed_at ? ` · ${esc(fmtDateTime(match.disputed_at))}` : ''}`);
+    if (match.dispute_reason) rows.push(`<b>Reason:</b> ${esc(match.dispute_reason)}`);
+    if (match.resolution_kind) rows.push(`Resolution: ${esc(String(match.resolution_kind).replace(/_/g, ' '))}`);
+    return rows.length ? `<div class="competition-provenance">${rows.map((row) => `<div>${row}</div>`).join('')}</div>` : '';
+  }
+
+  function competitionResultHistoryHtml(match) {
+    const history = Array.isArray(match.result_history) ? match.result_history : [];
+    if (!history.length) return '';
+    return `
+      <details class="competition-audit">
+        <summary>Result activity (${history.length})</summary>
+        <ol>
+          ${history.slice().reverse().map((event) => {
+            const score = event.score1 != null && event.score2 != null ? ` · ${event.score1}–${event.score2}` : '';
+            const version = event.version != null ? ` · v${event.version}` : '';
+            const reason = event.reason ? `<div>${esc(event.reason)}</div>` : '';
+            return `<li><b>${esc(String(event.action || 'updated').replace(/_/g, ' '))}</b>${version}${score}${event.actor_name ? ` · ${esc(event.actor_name)}` : ''}${event.created_at ? ` · ${esc(fmtDateTime(event.created_at))}` : ''}${reason}</li>`;
+          }).join('')}
+        </ol>
+      </details>`;
+  }
+
+  function competitionActionNeeded(parent) {
+    return (parent.matches || []).map((match) => {
+      const result = normalizeCompetitionResult(match);
+      if (match.can_confirm_result || match.awaiting_your_confirmation) {
+        return { match, priority: 0, title: 'Review reported score', detail: 'Confirm it or flag a problem.' };
+      }
+      if (result.state === 'disputed' && match.can_resolve_result) {
+        return { match, priority: 1, title: 'Resolve disputed result', detail: match.dispute_reason || 'Review the score and record a decision.' };
+      }
+      if (match.can_report_result) {
+        return {
+          match,
+          priority: result.state === 'disputed' ? 2 : 3,
+          title: result.state === 'disputed' ? 'Submit corrected score' : 'Enter match score',
+          detail: result.state === 'disputed' ? (match.dispute_reason || 'The previous report was disputed.') : 'The result is still unreported.',
+        };
+      }
+      return null;
+    }).filter(Boolean).sort((a, b) => a.priority - b.priority || a.match.id - b.match.id);
+  }
+
+  function competitionActionNeededHtml(kind, parent) {
+    const items = competitionActionNeeded(parent);
+    if (!items.length) return '';
+    return `
+      <section class="competition-actions" aria-labelledby="${kind}-actions-title">
+        <div class="section-label" id="${kind}-actions-title">Action needed · ${items.length}</div>
+        ${items.map(({ match, title, detail }) => {
+          const context = competitionMatchContext(kind, parent, match);
+          return `
+            <div class="card competition-action-card" data-result-match="${match.id}" data-match-key="${match.id}">
+              <div class="row-main">
+                <div class="row-title">${esc(title)}</div>
+                <div class="row-sub">${esc(competitionSideName(context.side1))} vs ${esc(competitionSideName(context.side2))} · ${esc(detail)}</div>
+              </div>
+              <span class="chev" aria-hidden="true">›</span>
+            </div>`;
+        }).join('')}
+      </section>`;
+  }
+
+  function captureCompetitionViewState(box) {
+    const modal = box.querySelector('.modal');
+    const bracket = modal?.querySelector('.bracket');
+    const active = document.activeElement;
+    const focusedMatch = active && box.contains(active) ? active.closest('[data-match-key]') : null;
+    const focusKey = focusedMatch?.dataset.matchKey || (active && box.contains(active) ? active.id || null : null);
+    const focusMatchIndex = focusedMatch
+      ? [...modal.querySelectorAll(`[data-match-key="${CSS.escape(String(focusKey))}"]`)].indexOf(focusedMatch)
+      : -1;
+    return {
+      scrollTop: modal?.scrollTop || 0,
+      bracketScrollLeft: bracket?.scrollLeft || 0,
+      focusKey,
+      focusMatchIndex,
+    };
+  }
+
+  function restoreCompetitionViewState(box, snapshot) {
+    if (!snapshot) return;
+    const modal = box.querySelector('.modal');
+    if (modal) modal.scrollTop = snapshot.scrollTop;
+    const bracket = modal?.querySelector('.bracket');
+    if (bracket) bracket.scrollLeft = snapshot.bracketScrollLeft;
+    if (snapshot.focusKey) {
+      const matchTargets = [...(modal?.querySelectorAll(`[data-match-key="${CSS.escape(String(snapshot.focusKey))}"]`) || [])];
+      const target = matchTargets[snapshot.focusMatchIndex] || matchTargets[0]
+        || modal?.querySelector(`#${CSS.escape(String(snapshot.focusKey))}`);
+      target?.focus({ preventScroll: true });
+    }
+  }
+
+  function competitionOverlayCanRefresh(box) {
+    if (currentOverlayEntry()?.el !== box || box.dataset.competitionMutation === 'true') return false;
+    const active = document.activeElement;
+    return !(active && box.contains(active) && active.matches('input, textarea, select, [contenteditable="true"]'));
+  }
+
+  function openCompetitionResultSheet(kind, parent, sourceMatch, hooks = {}) {
+    let liveParent = parent;
+    let match = sourceMatch;
+    const plural = kind === 'league' ? 'leagues' : 'tournaments';
+    const context = competitionMatchContext(kind, liveParent, match);
+    const side1Name = competitionSideName(context.side1);
+    const side2Name = competitionSideName(context.side2);
+    const result = normalizeCompetitionResult(match);
+    const canEditScores = !!(match.can_report_result || match.can_resolve_result || match.can_correct_result);
+    const needsReason = !!(match.can_dispute_result || match.can_resolve_result || match.can_correct_result);
+    const progressionNote = kind === 'league' && result.state === 'unreported'
+      ? 'Submit a score only if this match was played. Once submitted, standings wait for confirmation; an unreported match can close as a sat-out.'
+      : result.terminal
+        ? 'This result is final, so standings or bracket progression can continue.'
+        : 'Standings and bracket progression wait until the score is confirmed or resolved.';
+    const actionButtons = [
+      match.can_report_result ? '<button type="button" class="btn btn-primary btn-block" data-result-action="score">Submit score for confirmation</button>' : '',
+      match.can_confirm_result ? '<button type="button" class="btn btn-primary btn-block" data-result-action="confirm">Confirm score</button>' : '',
+      match.can_dispute_result ? '<button type="button" class="btn btn-secondary btn-block" data-result-action="dispute">Dispute score</button>' : '',
+      match.can_resolve_result ? '<button type="button" class="btn btn-primary btn-block" data-result-action="resolve">Resolve & finalize</button>' : '',
+      match.can_correct_result ? '<button type="button" class="btn btn-secondary btn-block" data-result-action="resolve">Correct final result</button>' : '',
+      kind === 'league' && (match.can_resolve_result || match.can_correct_result)
+        ? '<button type="button" class="btn btn-secondary btn-block competition-void" data-result-action="void">Void this result</button>' : '',
+    ].filter(Boolean).join('');
+    const route = { kind, id: Number(liveParent.id), matchId: Number(match.id) };
+    const modal = openModal(`
+      ${modalHead('Match result')}
+      <form id="competition-result-form" class="competition-result-form" novalidate>
+        <div class="row-sub" style="margin:-4px 0 4px">${esc(liveParent.name)} · ${esc(context.context)}</div>
+        <div class="competition-result-summary" id="competition-result-summary" role="status">
+          ${competitionResultStatusHtml(match)}
+          ${competitionResultProvenanceHtml(match)}
+        </div>
+        <div class="form-grid competition-score-grid">
+          <div class="form-field">
+            <label for="competition-score-1">${esc(side1Name)}</label>
+            <input type="number" id="competition-score-1" min="0" max="99" inputmode="numeric" value="${match.score1 ?? ''}" ${canEditScores ? '' : 'readonly'} />
+          </div>
+          <div class="form-field">
+            <label for="competition-score-2">${esc(side2Name)}</label>
+            <input type="number" id="competition-score-2" min="0" max="99" inputmode="numeric" value="${match.score2 ?? ''}" ${canEditScores ? '' : 'readonly'} />
+          </div>
+        </div>
+        ${needsReason ? `
+          <div class="form-field competition-reason-field">
+            <label for="competition-result-reason">Reason <span class="row-sub">(required for disputes and organizer decisions)</span></label>
+            <textarea id="competition-result-reason" maxlength="500" rows="3" placeholder="What needs to be corrected?"></textarea>
+          </div>` : ''}
+        <p class="competition-progression-note">${esc(progressionNote)}</p>
+        ${competitionResultHistoryHtml(match)}
+        <div class="competition-result-actions">${actionButtons || `<p class="row-sub">${result.state === 'awaiting_confirmation' ? 'Waiting for the other side to review this score.' : 'No action is available for this result.'}</p>`}</div>
+      </form>
+    `, { route, label: 'Match result' });
+    const form = modal.querySelector('#competition-result-form');
+    const score1 = modal.querySelector('#competition-score-1');
+    const score2 = modal.querySelector('#competition-score-2');
+    const reason = modal.querySelector('#competition-result-reason');
+    const primaryAction = modal.querySelector('[data-result-action]');
+    const formUX = primaryAction ? bindModalFormUX(modal, primaryAction) : null;
+    let staleParentNeedsRender = false;
+    modal._cleanupFns?.push(() => {
+      if (staleParentNeedsRender) hooks.adoptFresh?.(liveParent, { render: true });
+    });
+
+    const setMutationBusy = (busy, activeButton = null) => {
+      modal.dataset.competitionMutation = String(busy);
+      hooks.setMutating?.(busy);
+      modal.querySelectorAll('[data-result-action]').forEach((button) => {
+        if (busy) {
+          if (button !== activeButton) button.disabled = true;
+        } else {
+          button.disabled = button.dataset.resultUnavailable === 'true';
+        }
+      });
+    };
+    const readScores = () => {
+      const raw1 = score1.value.trim();
+      const raw2 = score2.value.trim();
+      if (!raw1) { formUX.showError(`Enter ${side1Name}'s score.`, score1); return null; }
+      if (!raw2) { formUX.showError(`Enter ${side2Name}'s score.`, score2); return null; }
+      const value1 = Number(raw1);
+      const value2 = Number(raw2);
+      if (!Number.isInteger(value1) || value1 < 0 || value1 > 99) { formUX.showError('Use a whole-number score from 0 to 99.', score1); return null; }
+      if (!Number.isInteger(value2) || value2 < 0 || value2 > 99) { formUX.showError('Use a whole-number score from 0 to 99.', score2); return null; }
+      if (value1 === value2) { formUX.showError('Pickleball matches cannot end in a tie.', score2); return null; }
+      return { score1: value1, score2: value2 };
+    };
+    const refreshStaleResult = async (attemptedAction, stalePayload = null) => {
+      let canRetry = true;
+      let refreshed = false;
+      try {
+        const fresh = stalePayload?.matches
+          ? Object.fromEntries(Object.entries(stalePayload).filter(([key]) => key !== 'error'))
+          : hooks.fetchFresh ? await hooks.fetchFresh() : await api(`/${plural}/${liveParent.id}`);
+        liveParent = fresh;
+        const freshMatch = (fresh.matches || []).find((item) => item.id === match.id);
+        if (freshMatch) match = freshMatch;
+        staleParentNeedsRender = true;
+        hooks.adoptFresh?.(fresh, { render: false });
+        const summary = modal.querySelector('#competition-result-summary');
+        if (summary) summary.innerHTML = `${competitionResultStatusHtml(match)}${competitionResultProvenanceHtml(match)}`;
+        const allowed = {
+          score: !!match.can_report_result,
+          confirm: !!match.can_confirm_result,
+          dispute: !!match.can_dispute_result,
+          resolve: !!(match.can_resolve_result || match.can_correct_result),
+          void: kind === 'league' && !!(match.can_resolve_result || match.can_correct_result),
+        };
+        modal.querySelectorAll('[data-result-action]').forEach((button) => {
+          button.dataset.resultUnavailable = String(!allowed[button.dataset.resultAction]);
+          button.disabled = !allowed[button.dataset.resultAction];
+        });
+        canRetry = !!allowed[attemptedAction];
+        refreshed = true;
+      } catch { /* keep the user's inputs and the original stale message */ }
+      formUX.showError(!refreshed
+        ? 'This result changed on another device, but we could not refresh it. Your entries are preserved—reconnect and try again.'
+        : canRetry
+        ? 'This result changed on another device. We refreshed it—review your entries and try again.'
+        : 'This result changed on another device, so that action is no longer available. Your entries are preserved; close to see the latest match.');
+    };
+
+    modal.querySelectorAll('[data-result-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const action = button.dataset.resultAction;
+        let payload = { result_version: Number(match.result_version || 0) };
+        if (action === 'score' || action === 'resolve') {
+          const scores = readScores();
+          if (!scores) return;
+          payload = { ...payload, ...scores };
+        }
+        if (action === 'dispute' || action === 'resolve' || action === 'void') {
+          const why = reason?.value.trim() || '';
+          if (!why) { formUX.showError('Add a short reason so everyone understands the change.', reason); return; }
+          payload.reason = why;
+        }
+        if (action === 'void') payload.void = true;
+        const finishSubmitting = formUX.startSubmitting({
+          score: 'Submitting…', confirm: 'Confirming…', dispute: 'Sending…', resolve: 'Finalizing…', void: 'Voiding…',
+        }[action] || 'Saving…', button);
+        if (!finishSubmitting) return;
+        setMutationBusy(true, button);
+        try {
+          const mutationResult = await api(`/${plural}/${liveParent.id}/matches/${match.id}/${action === 'void' ? 'resolve' : action}`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+          staleParentNeedsRender = false;
+          closeModal(modal);
+          toast(action === 'confirm' ? 'Score confirmed ✅' : action === 'dispute' ? 'Dispute sent' : action === 'void' ? 'Result voided' : action === 'resolve' ? 'Result finalized ✅' : 'Score sent for confirmation');
+          await hooks.refresh?.({ force: true, data: mutationResult?.matches ? mutationResult : null });
+        } catch (err) {
+          finishSubmitting();
+          if (err.code === 'stale_result' || err.status === 409 && err.data?.error === 'stale_result') {
+            await refreshStaleResult(action, err.data);
+          } else {
+            formUX.showError(err.message);
+          }
+        } finally {
+          setMutationBusy(false);
+        }
+      });
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      modal.querySelector('[data-result-action]:not([disabled])')?.click();
+    });
+    return modal;
   }
 
   // ---------- Box leagues ----------
 
-  async function openLeagueScreen(leagueId) {
+  function leagueMatchCardHtml(match, { mine = false } = {}) {
+    const result = normalizeCompetitionResult(match);
+    const score = match.score1 != null && match.score2 != null ? `${match.score1}–${match.score2}` : '—';
+    const player1Won = result.confirmed && match.winner_id === match.player1?.id;
+    const player2Won = result.confirmed && match.winner_id === match.player2?.id;
+    return `
+      <div class="card competition-match-card${mine ? ' is-mine' : ''}" data-result-match="${match.id}" data-match-key="${match.id}">
+        <div class="competition-match-main">
+          <div class="competition-match-names">
+            <span class="${player1Won ? 'competition-winner' : ''}">${esc(match.player1?.display_name || 'Player 1')}</span>
+            <span class="competition-versus">vs</span>
+            <span class="${player2Won ? 'competition-winner' : ''}">${esc(match.player2?.display_name || 'Player 2')}</span>
+          </div>
+          <div class="row-sub">Round ${match.round} · Box ${match.box}</div>
+        </div>
+        <div class="competition-match-result">
+          <b>${score}</b>
+          ${competitionResultStatusHtml(match, { compact: true })}
+        </div>
+      </div>`;
+  }
+
+  async function openLeagueScreen(leagueId, requestedMatchId = null) {
+    // The league owns its parent route; only the result sheet owns /match/:id.
+    // Back from an exact shared result therefore lands on a stable league URL.
+    const route = { kind: 'league', id: leagueId };
+    const routeLoad = beginRoutedOverlayLoad(route);
+    const detailPath = `/leagues/${leagueId}${requestedMatchId ? `?match_id=${Number(requestedMatchId)}` : ''}`;
     let lg;
-    try { lg = await api(`/leagues/${leagueId}`); }
-    catch (e) { toast(e.message); clearDeadDeepLink(`#league/${leagueId}`); return; }
-    try { history.replaceState(null, '', `#league/${lg.id}`); } catch { /* ignore */ }
-
-    const statusChip = {
-      registration: '<span class="tag live" style="margin:0">Signups open</span>',
-      active: `<span class="tag ranked" style="margin:0">Round ${lg.current_round}</span>`,
-      completed: '<span class="tag" style="margin:0">Season complete</span>',
-      cancelled: '<span class="tag warn" style="margin:0">Cancelled</span>',
-    }[lg.status] || '';
-
-    const rankMember = (a, b) => (b.points - a.points) || (b.wins - a.wins) || ((b.user?.rating || 0) - (a.user?.rating || 0));
-    let body = `
-      ${modalHead(`📦 ${lg.name}`)}
-      <div class="row-sub" style="margin:-6px 0 6px">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size} · new round every ${lg.round_days} days</div>
-      <div style="margin-bottom:12px">${statusChip}${lg.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(lg.club_name)}</span>` : ''}</div>
-      ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}
-      ${lg.joined ? `<button class="btn btn-secondary btn-block" id="lg-chat" style="margin-bottom:10px;position:relative">💬 League chat${lg.chat_unread ? ` <span class="badge" style="position:static;margin-left:6px">${lg.chat_unread > 9 ? '9+' : lg.chat_unread}</span>` : ''}</button>` : ''}`;
-
-    if (lg.status === 'completed' && lg.champion_name) {
-      const champ = lg.members.find((m) => m.user && m.user.id === lg.champion_user_id);
-      body += `
-        <div class="card" style="text-align:center;padding:18px;background:var(--violet-50);border:1px solid var(--violet-200)">
-          <div style="font-size:34px">👑</div>
-          <div style="font-weight:800;font-size:17px;color:var(--violet-700)">${esc(lg.champion_name)}</div>
-          <div class="row-sub">Season champion${champ ? ` · ${champ.points} pts` : ''}</div>
-        </div>`;
+    try { lg = await api(detailPath); }
+    catch (e) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+      toast(e.message); clearDeadDeepLink(overlayRouteHash(route)); return;
     }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+    const box = openModal(modalHead('League'), { route, label: 'League' });
+    const content = box.querySelector('.modal');
+    let deepLinkOpened = false;
 
-    if (lg.status === 'registration') {
-      body += `<div class="row-sub" style="margin-bottom:10px">Starts ${fmtDateTime(lg.starts_at)}. Players are seeded into boxes by rating; play everyone in your box each round — winners move up, last place drops down.</div>`;
-      body += '<div class="section-label">Signed up</div>';
-      body += lg.members.map((m) => `
-        <div class="card row" data-view-user="${m.user.id}" style="cursor:pointer;padding:10px 14px">
-          ${avatarHtml(m.user, 'sm')}
-          <div class="row-main">
-            <div class="row-title" style="font-size:14px">${esc(m.user.display_name)}${m.user.id === lg.organizer_id ? ' <span class="tag" style="margin:0 0 0 4px">Organizer</span>' : ''}</div>
-            <div class="row-sub">${skillLabel(m.user.skill_level)} · ${m.user.rating}</div>
-          </div>
-        </div>`).join('');
-      if (!lg.joined) body += '<button class="btn btn-primary btn-block" id="lg-join" style="margin-top:10px;padding:15px">🙌 Sign me up</button>';
-      else if (!lg.is_organizer) body += '<button class="btn btn-secondary btn-block" id="lg-leave" style="margin-top:10px">Withdraw</button>';
-      if (lg.is_organizer) {
-        body += `<button class="btn btn-primary btn-block" id="lg-start" style="margin-top:10px;padding:15px" ${lg.member_count < 3 ? 'disabled' : ''}>🏁 Seed boxes & start${lg.member_count < 3 ? ' (need 3+)' : ''}</button>`;
-        body += '<button class="btn btn-secondary btn-block" id="lg-cancel" style="margin-top:8px;color:#c92a2a">🗑 Cancel league</button>';
-      }
-    }
-
-    if (lg.status === 'active' || lg.status === 'completed') {
-      // My unplayed matches this round, front and center.
-      const myId = state.me.id;
-      const mine = (lg.matches || []).filter((m) => !m.winner_id && (m.player1.id === myId || m.player2.id === myId));
-      if (lg.status === 'active' && mine.length) {
-        body += '<div class="section-label">🎯 Your matches this round</div>';
-        body += mine.map((m) => {
-          const opp = m.player1.id === myId ? m.player2 : m.player1;
-          return `
-          <div class="card row" style="padding:11px">
-            ${avatarHtml(opp, 'sm')}
-            <div class="row-main">
-              <div class="row-title" style="font-size:14px">vs ${esc(opp.display_name)}</div>
-              <div class="row-sub">Box ${m.box} · ${opp.rating}</div>
-            </div>
-            <button class="btn btn-primary btn-sm" data-report-match="${m.id}" data-opp="${esc(opp.display_name)}" data-first="${m.player1.id === myId ? 1 : 2}">Enter score</button>
-          </div>`;
-        }).join('');
-      }
-
-      const boxes = {};
-      lg.members.forEach((m) => { if (m.box) (boxes[m.box] = boxes[m.box] || []).push(m); });
-      Object.keys(boxes).sort((a, b) => a - b).forEach((bn) => {
-        body += `<div class="section-label">📦 Box ${bn}${Number(bn) === 1 ? ' · top box' : ''}</div>`;
-        body += boxes[bn].sort(rankMember).map((m, i) => `
-          <div class="card row" data-view-user="${m.user.id}" style="cursor:pointer;padding:9px 14px">
-            <span style="font-size:14px;width:20px;text-align:center;font-weight:700">${i + 1}</span>
-            ${avatarHtml(m.user, 'sm')}
-            <div class="row-main">
-              <div class="row-title" style="font-size:14px">${esc(m.user.display_name)}${m.user.id === myId ? ' <span class="tag" style="margin:0 0 0 4px">You</span>' : ''}</div>
-              <div class="row-sub">${m.wins}–${m.losses} this season</div>
-            </div>
-            <b style="font-size:14px">${m.points} pt${m.points === 1 ? '' : 's'}</b>
-          </div>`).join('');
-        // Round results within this box.
-        const decided = (lg.matches || []).filter((m) => m.box === Number(bn) && m.winner_id);
-        if (decided.length) {
-          body += decided.map((m) => `
-            <div class="row-sub" style="margin:0 0 4px 8px">${esc(m.player1.display_name.split(' ')[0])} ${m.score1}–${m.score2} ${esc(m.player2.display_name.split(' ')[0])}</div>`).join('');
+    const refresh = async ({ force = false, data = null } = {}) => {
+      if (!force && !competitionOverlayCanRefresh(box)) return null;
+      try {
+        const previous = JSON.stringify(lg);
+        const fresh = data || await api(detailPath);
+        lg = fresh;
+        if (currentOverlayEntry()?.el === box && (force || JSON.stringify(fresh) !== previous)) {
+          render(fresh, { preserve: true });
         }
-      });
-
-      if (lg.status === 'active' && lg.is_organizer) {
-        body += `
-          <div style="display:flex;gap:8px;margin-top:14px">
-            <button class="btn btn-primary" id="lg-advance" style="flex:1">⏭ Close round ${lg.current_round}</button>
-            <button class="btn btn-secondary" id="lg-complete" style="flex:1">👑 Finish season</button>
-          </div>
-          <button class="btn btn-secondary btn-block" id="lg-cancel" style="margin-top:8px;color:#c92a2a">🗑 Cancel league</button>`;
-      }
-    }
-
-    const modal = openModal(body);
-    bindUserButtons(modal);
-    const reopen = () => { closeModal(modal); openLeagueScreen(lg.id); };
-    const act = (path, confirmMsg) => async () => {
-      if (confirmMsg && !window.confirm(confirmMsg)) return;
-      try { await api(`/leagues/${lg.id}/${path}`, { method: 'POST' }); reopen(); }
-      catch (e) { toast(e.message); }
+        return fresh;
+      } catch { return null; }
     };
-    modal.querySelector('#lg-chat')?.addEventListener('click', () => {
-      closeModal(modal);
-      openLeagueChat(lg);
+    const openMatch = (match) => openCompetitionResultSheet('league', lg, match, {
+      setMutating: (busy) => { box.dataset.competitionMutation = String(busy); },
+      fetchFresh: () => api(detailPath),
+      adoptFresh: (fresh, { render: shouldRender = true } = {}) => {
+        lg = fresh;
+        if (shouldRender && currentOverlayEntry()?.el === box) render(fresh, { preserve: true });
+      },
+      refresh,
     });
-    modal.querySelector('#lg-join')?.addEventListener('click', act('join'));
-    modal.querySelector('#lg-leave')?.addEventListener('click', act('leave'));
-    modal.querySelector('#lg-start')?.addEventListener('click', act('start'));
-    modal.querySelector('#lg-advance')?.addEventListener('click', act('advance', `Close round ${lg.current_round}? Box winners move up, last place drops.`));
-    modal.querySelector('#lg-complete')?.addEventListener('click', act('complete', 'Finish the season and crown the champion?'));
-    modal.querySelector('#lg-cancel')?.addEventListener('click', act('cancel', 'Cancel this league for everyone?'));
-    modal.querySelectorAll('[data-report-match]').forEach((btn) => btn.addEventListener('click', () => {
-      openLeagueScoreSheet(lg, Number(btn.dataset.reportMatch), btn.dataset.opp, Number(btn.dataset.first), reopen);
-    }));
+    const render = (data, { preserve = false } = {}) => {
+      lg = data;
+      const snapshot = preserve ? captureCompetitionViewState(box) : null;
+      const statusChip = {
+        registration: '<span class="tag live" style="margin:0">Signups open</span>',
+        active: `<span class="tag ranked" style="margin:0">Round ${lg.current_round}</span>`,
+        completed: '<span class="tag" style="margin:0">Season complete</span>',
+        cancelled: '<span class="tag warn" style="margin:0">Cancelled</span>',
+      }[lg.status] || '';
+      const rankMember = (a, b) => (b.points - a.points) || (b.wins - a.wins) || ((b.user?.rating || 0) - (a.user?.rating || 0));
+      let body = `
+        ${modalHead(`📦 ${lg.name}`)}
+        <div class="row-sub" style="margin:-6px 0 6px">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size} · new round every ${lg.round_days} days</div>
+        <div style="margin-bottom:12px">${statusChip}${lg.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(lg.club_name)}</span>` : ''}</div>
+        ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}
+        ${lg.joined ? `<button class="btn btn-secondary btn-block" id="lg-chat" style="margin-bottom:10px;position:relative">💬 League chat${lg.chat_unread ? ` <span class="badge" style="position:static;margin-left:6px">${lg.chat_unread > 9 ? '9+' : lg.chat_unread}</span>` : ''}</button>` : ''}`;
+
+      if (lg.status === 'completed' && lg.champion_name) {
+        const champ = lg.members.find((member) => member.user && member.user.id === lg.champion_user_id);
+        body += `
+          <div class="card" style="text-align:center;padding:18px;background:var(--violet-50);border:1px solid var(--violet-200)">
+            <div style="font-size:34px">👑</div>
+            <div style="font-weight:800;font-size:17px;color:var(--violet-700)">${esc(lg.champion_name)}</div>
+            <div class="row-sub">Season champion${champ ? ` · ${champ.points} pts` : ''}</div>
+          </div>`;
+      }
+
+      if (lg.status === 'registration') {
+        body += `<div class="row-sub" style="margin-bottom:10px">Starts ${fmtDateTime(lg.starts_at)}. Players are seeded into boxes by rating; play everyone in your box each round — winners move up, last place drops down.</div>`;
+        body += '<div class="section-label">Signed up</div>';
+        body += lg.members.map((member) => `
+          <div class="card row" data-view-user="${member.user.id}" style="cursor:pointer;padding:10px 14px">
+            ${avatarHtml(member.user, 'sm')}
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${esc(member.user.display_name)}${member.user.id === lg.organizer_id ? ' <span class="tag" style="margin:0 0 0 4px">Organizer</span>' : ''}</div>
+              <div class="row-sub">${skillLabel(member.user.skill_level)} · ${member.user.rating}</div>
+            </div>
+          </div>`).join('');
+        if (!lg.joined) body += '<button class="btn btn-primary btn-block" id="lg-join" style="margin-top:10px;padding:15px">🙌 Sign me up</button>';
+        else if (!lg.is_organizer) body += '<button class="btn btn-secondary btn-block" id="lg-leave" style="margin-top:10px">Withdraw</button>';
+        if (lg.is_organizer) {
+          body += `<button class="btn btn-primary btn-block" id="lg-start" style="margin-top:10px;padding:15px" ${lg.member_count < 3 ? 'disabled' : ''}>🏁 Seed boxes & start${lg.member_count < 3 ? ' (need 3+)' : ''}</button>`;
+          body += '<button class="btn btn-secondary btn-block" id="lg-cancel" style="margin-top:8px;color:#c92a2a">🗑 Cancel league</button>';
+        }
+      }
+
+      if (lg.status === 'active' || lg.status === 'completed') {
+        const myId = state.me.id;
+        const roundMatches = (lg.matches || []).filter((match) => match.round === lg.current_round);
+        body += competitionActionNeededHtml('league', { ...lg, matches: roundMatches });
+        const mine = roundMatches.filter((match) => match.player1?.id === myId || match.player2?.id === myId);
+        if (mine.length) {
+          body += '<div class="section-label">🎯 Your matches this round</div>';
+          body += mine.map((match) => leagueMatchCardHtml(match, { mine: true })).join('');
+        }
+
+        const boxes = {};
+        lg.members.forEach((member) => { if (member.box) (boxes[member.box] = boxes[member.box] || []).push(member); });
+        Object.keys(boxes).sort((a, b) => a - b).forEach((boxNumber) => {
+          body += `<div class="section-label">📦 Box ${boxNumber}${Number(boxNumber) === 1 ? ' · top box' : ''}</div>`;
+          body += boxes[boxNumber].sort(rankMember).map((member, index) => `
+            <div class="card row" data-view-user="${member.user.id}" style="cursor:pointer;padding:9px 14px">
+              <span style="font-size:14px;width:20px;text-align:center;font-weight:700">${index + 1}</span>
+              ${avatarHtml(member.user, 'sm')}
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">${esc(member.user.display_name)}${member.user.id === myId ? ' <span class="tag" style="margin:0 0 0 4px">You</span>' : ''}</div>
+                <div class="row-sub">${member.wins}–${member.losses} this season</div>
+              </div>
+              <b style="font-size:14px">${member.points} pt${member.points === 1 ? '' : 's'}</b>
+            </div>`).join('');
+          const matches = roundMatches.filter((match) => match.box === Number(boxNumber));
+          if (matches.length) {
+            body += '<div class="competition-box-matches" aria-label="Box match results">';
+            body += matches.map((match) => leagueMatchCardHtml(match)).join('');
+            body += '</div>';
+          }
+        });
+
+        if (lg.status === 'active' && lg.is_organizer) {
+          const unresolved = roundMatches.filter((match) => normalizeCompetitionResult(match).blocksProgression);
+          const disabled = unresolved.length ? 'disabled aria-describedby="lg-unresolved-note"' : '';
+          body += `
+            ${unresolved.length ? `<p class="competition-progression-note" id="lg-unresolved-note">${unresolved.length} result${unresolved.length === 1 ? '' : 's'} must be confirmed, resolved, or voided before the round can close.</p>` : ''}
+            <div class="competition-organizer-actions">
+              <button class="btn btn-primary" id="lg-advance" ${disabled}>⏭ Close round ${lg.current_round}</button>
+              <button class="btn btn-secondary" id="lg-complete" ${disabled}>👑 Finish season</button>
+            </div>
+            <button class="btn btn-secondary btn-block" id="lg-cancel" style="margin-top:8px;color:#c92a2a">🗑 Cancel league</button>`;
+        }
+      }
+
+      content.innerHTML = body;
+      setDialogLabel(content, 'League');
+      bindUserButtons(box);
+      content.querySelector('#lg-chat')?.addEventListener('click', () => transitionModal(box, () => openLeagueChat(lg)));
+      const act = (path, confirmMsg) => async (event) => {
+        if (confirmMsg && !window.confirm(confirmMsg)) return;
+        if (box.dataset.competitionMutation === 'true') return;
+        const button = event?.currentTarget;
+        if (button) button.disabled = true;
+        box.dataset.competitionMutation = 'true';
+        try { await api(`/leagues/${lg.id}/${path}`, { method: 'POST' }); await refresh({ force: true }); }
+        catch (error) { toast(error.message); }
+        finally {
+          box.dataset.competitionMutation = 'false';
+          if (button?.isConnected) button.disabled = false;
+        }
+      };
+      content.querySelector('#lg-join')?.addEventListener('click', act('join'));
+      content.querySelector('#lg-leave')?.addEventListener('click', act('leave'));
+      content.querySelector('#lg-start')?.addEventListener('click', act('start'));
+      content.querySelector('#lg-advance')?.addEventListener('click', act('advance', `Close round ${lg.current_round}? Box winners move up, last place drops.`));
+      content.querySelector('#lg-complete')?.addEventListener('click', act('complete', 'Finish the season and crown the champion?'));
+      content.querySelector('#lg-cancel')?.addEventListener('click', act('cancel', 'Cancel this league for everyone?'));
+      content.querySelectorAll('[data-result-match]').forEach((card) => {
+        makePressable(card, () => {
+          const match = (lg.matches || []).find((item) => item.id === Number(card.dataset.resultMatch));
+          if (match) openMatch(match);
+        });
+      });
+      if (snapshot) restoreCompetitionViewState(box, snapshot);
+
+      if (requestedMatchId && !deepLinkOpened) {
+        deepLinkOpened = true;
+        const match = (lg.matches || []).find((item) => item.id === Number(requestedMatchId));
+        const card = content.querySelector(`[data-result-match="${Number(requestedMatchId)}"]`);
+        if (match) {
+          if (card) {
+            card.classList.add('competition-match-highlight');
+            const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+            card.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+          }
+          queueMicrotask(() => openMatch(match));
+        } else {
+          toast('That league match is no longer available.');
+        }
+      }
+    };
+
+    render(lg);
+    const poll = setInterval(async () => {
+      if (!document.body.contains(box)) { clearInterval(poll); return; }
+      if (document.hidden || state.connectionState === 'offline' || !competitionOverlayCanRefresh(box)) return;
+      await refresh();
+    }, 8000);
+    box._cleanupFns?.push(() => clearInterval(poll));
   }
 
   async function openLeagueChat(lg) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let data;
-    try { data = await api(`/leagues/${lg.id}/chat`); } catch (e) { toast(e.message); return; }
+    try { data = await api(`/leagues/${lg.id}/chat`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+    refreshMe(); // the room GET is the authoritative read marker
 
     const modal = openModal(`
       <div class="thread">
@@ -3717,21 +7407,28 @@
             <div class="row-sub">League chat — only players in this league can read it</div>
           </div>
         </div>
-        <div class="thread-msgs" id="lgc-msgs"></div>
+        <div class="thread-msgs" id="lgc-msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="League conversation"></div>
         <form class="thread-input" id="lgc-form">
-          <input type="text" id="lgc-text" placeholder="Message the league…" autocomplete="off" maxlength="500" />
+          <input type="text" id="lgc-text" placeholder="Message the league…" autocomplete="off" maxlength="2000" />
           <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
     `, { chat: true });
 
     const msgsEl = modal.querySelector('#lgc-msgs');
+    const input = modal.querySelector('#lgc-text');
+    const chatUX = bindChatContinuity(modal, msgsEl, input, `league:${lg.id}`);
     let lastId = 0;
-    const renderMsgs = (items, append) => {
+    const renderMsgs = (items, append, { forceBottom = false, newMessages = false } = {}) => {
+      const batch = prepareChatRenderBatch(msgsEl, items, append);
+      if (batch.newestId) lastId = Math.max(lastId, batch.newestId);
+      items = batch.items;
+      if (append && !items.length) return;
+      const snapshot = chatUX.captureScroll();
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
@@ -3744,60 +7441,35 @@
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — talk some friendly trash 👋</div>';
-      if (items.length) lastId = items[items.length - 1].id;
-      msgsEl.scrollTop = msgsEl.scrollHeight;
-      hydrateChatImages(msgsEl);
+      chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0 });
+      hydrateChatImages(msgsEl, chatUX);
     };
-    renderMsgs(data.items, false);
-    attachChatViewport(modal, msgsEl, modal.querySelector('#lgc-text'));
-    addPhotoToComposer(modal, '#lgc-form', '#lgc-text', `/leagues/${lg.id}/chat`, renderMsgs);
+    renderMsgs(data.items, false, { forceBottom: true });
+    chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
+    addPhotoToComposer(modal, '#lgc-form', '#lgc-text', chatUX);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       try {
         const fresh = await api(`/leagues/${lg.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true);
+        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
         applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
     modal.querySelector('#lgc-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = modal.querySelector('#lgc-text');
       const body = input.value.trim();
       if (!body) return;
-      input.value = '';
       try {
-        const msg = await api(`/leagues/${lg.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
-        renderMsgs([msg], true);
-      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
-    });
-  }
-
-  function openLeagueScoreSheet(lg, matchId, oppName, myPosition, done) {
-    const modal = openModal(`
-      ${modalHead(`🎯 Score vs ${oppName}`)}
-      <div class="form-grid">
-        <div class="form-field"><label>Your score</label><input type="number" id="ls-me" min="0" max="99" inputmode="numeric" /></div>
-        <div class="form-field"><label>${esc(oppName.split(' ')[0])}'s score</label><input type="number" id="ls-opp" min="0" max="99" inputmode="numeric" /></div>
-      </div>
-      <button class="btn btn-primary btn-block" id="ls-save" style="padding:15px">Save result</button>
-    `);
-    modal.querySelector('#ls-save').addEventListener('click', async () => {
-      const me = Number(modal.querySelector('#ls-me').value);
-      const opp = Number(modal.querySelector('#ls-opp').value);
-      if (Number.isNaN(me) || Number.isNaN(opp) || me === opp) { toast('Enter two different scores'); return; }
-      const body = myPosition === 1 ? { score1: me, score2: opp } : { score1: opp, score2: me };
-      try {
-        await api(`/leagues/${lg.id}/matches/${matchId}/score`, { method: 'POST', body: JSON.stringify(body) });
-        toast(me > opp ? 'W in the books 💪' : 'Result saved');
-        closeModal(modal);
-        done();
-      } catch (e) { toast(e.message); }
+        await chatUX.send(body);
+      } catch (err) { toast(err.message); }
     });
   }
 
   async function openCreateLeagueSheet() {
+    const modalLoad = beginRoutedOverlayLoad(null);
     const start = new Date();
     start.setDate(start.getDate() + 3);
     start.setHours(18, 0, 0, 0);
@@ -3805,82 +7477,111 @@
     const defaultWhen = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T${pad(start.getHours())}:${pad(start.getMinutes())}`;
     let myClubs = [];
     try { myClubs = (await api('/clubs/mine')).items || []; } catch { /* clubs optional */ }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
 
     const modal = openModal(`
       ${modalHead('Start a box league')}
+      <form id="lc-form" novalidate>
       <p class="row-sub" style="margin:-6px 0 12px">A season-long ladder: players are seeded into boxes by rating and play everyone in their box each round. Winners move up a box, last place drops.</p>
       <div class="form-field">
-        <label>Name</label>
+        <label for="lc-name">Name</label>
         <input type="text" id="lc-name" maxlength="120" placeholder="e.g. Riverside Winter Ladder" />
       </div>
       <div class="form-field">
-        <label>Home court</label>
+        <label for="lc-court-search">Home court</label>
         <input type="search" id="lc-court-search" placeholder="Search courts…" autocomplete="off" />
         <input type="hidden" id="lc-court-id" value="" />
         <div id="lc-court-results" style="margin-top:8px"></div>
       </div>
       <div class="form-grid">
         <div class="form-field">
-          <label>First round starts</label>
+          <label for="lc-when">First round starts</label>
           <input type="datetime-local" id="lc-when" value="${defaultWhen}" />
         </div>
         <div class="form-field">
-          <label>Box size</label>
+          <label for="lc-box">Box size</label>
           <select id="lc-box"><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
         </div>
       </div>
       ${myClubs.length ? `
       <div class="form-field">
-        <label>Host under a club banner?</label>
-        <div class="quick-times" id="lc-club">
-          <button type="button" data-club-id="" class="active">Just me</button>
-          ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}">🏛 ${esc(cl.name)}</button>`).join('')}
+        <label id="lc-club-label">Host under a club banner?</label>
+        <div class="quick-times" id="lc-club" role="group" aria-labelledby="lc-club-label" aria-describedby="lc-club-hint">
+          <button type="button" data-club-id="" class="active" aria-pressed="true">Just me</button>
+          ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}" aria-pressed="false">🏛 ${esc(cl.name)}</button>`).join('')}
         </div>
         <div class="row-sub" id="lc-club-hint" style="margin-top:6px"></div>
       </div>` : ''}
       <div class="form-field">
+        <label class="sr-only" for="lc-desc">League details</label>
         <input type="text" id="lc-desc" maxlength="200" placeholder="Details (optional) — e.g. Play your box by Sunday each week" />
       </div>
-      <button class="btn btn-primary btn-block" id="lc-submit" style="padding:15px">Create league</button>
+      <button type="submit" class="btn btn-primary btn-block" id="lc-submit" style="padding:15px">Create league</button>
+      </form>
     `);
     clubCourtPicker(modal, 'lc');
+    const formUX = bindModalFormUX(modal, '#lc-submit', { draftKey: 'create-league' });
     let lcClubId = null;
     modal.querySelector('#lc-club')?.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       lcClubId = Number(btn.dataset.clubId) || null;
-      modal.querySelectorAll('#lc-club button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelectorAll('#lc-club button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
       const picked = myClubs.find((cl) => cl.id === lcClubId);
       modal.querySelector('#lc-club-hint').textContent = picked && picked.member_count > 1
         ? `📣 The other ${picked.member_count - 1} member${picked.member_count === 2 ? '' : 's'} of ${picked.name} will be invited to sign up.`
         : '';
     });
-    modal.querySelector('#lc-submit').addEventListener('click', async (e) => {
+    modal.querySelector('#lc-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      formUX.clearError();
       const name = modal.querySelector('#lc-name').value.trim();
       const courtId = Number(modal.querySelector('#lc-court-id').value);
       const whenRaw = modal.querySelector('#lc-when').value;
-      if (name.length < 3) { toast('Give your league a name (3+ characters)'); return; }
-      if (!courtId) { toast('Pick a home court'); return; }
-      if (!whenRaw) { toast('Pick a start time'); return; }
-      const btn = e.currentTarget;
-      btn.disabled = true;
+      if (name.length < 3) {
+        formUX.showError('Give your league a name (3+ characters).', modal.querySelector('#lc-name'));
+        return;
+      }
+      if (!courtId) {
+        formUX.showError('Pick a home court.', modal.querySelector('#lc-court-search'));
+        return;
+      }
+      if (!whenRaw) {
+        formUX.showError('Pick a start time.', modal.querySelector('#lc-when'));
+        return;
+      }
+      const startsAt = new Date(whenRaw);
+      if (!Number.isFinite(startsAt.getTime())) {
+        formUX.showError('Choose a valid start date and time.', modal.querySelector('#lc-when'));
+        return;
+      }
+      const finishSubmitting = formUX.startSubmitting('Creating league…');
+      if (!finishSubmitting) return;
       try {
         const lg = await api('/leagues', { method: 'POST', body: JSON.stringify({
           name,
           court_id: courtId,
-          starts_at: new Date(whenRaw).toISOString(),
+          starts_at: startsAt.toISOString(),
           box_size: Number(modal.querySelector('#lc-box').value),
           description: modal.querySelector('#lc-desc').value.trim(),
           club_id: lcClubId,
         }) });
-        closeModal(modal);
+        formUX.clearDraft({ disable: true });
         toast('League created 📦 Share it so players can sign up!');
-        openLeagueScreen(lg.id);
-      } catch (err) { toast(err.message); btn.disabled = false; }
+        transitionModal(modal, () => openLeagueScreen(lg.id));
+      } catch (err) {
+        finishSubmitting();
+        formUX.showError(err.message);
+      }
     });
   }
 
   async function openCreateTournamentSheet(presetCourt = null) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     // Court suggestions: where you are, saved courts, then nearby.
     const suggestions = [];
     let myClubs = [];
@@ -3907,6 +7608,7 @@
         }
       });
     } catch { /* suggestions are optional */ }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
 
     const suggestionRows = suggestions.map((c) => `
       <button type="button" class="court-suggestion" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}">
@@ -3926,71 +7628,76 @@
 
     const modal = openModal(`
       ${modalHead('Create a tournament')}
+      <form id="tc-form" novalidate>
       <div class="form-field">
-        <label>Name</label>
+        <label for="tc-name">Name</label>
         <input type="text" id="tc-name" maxlength="120" placeholder="e.g. Saturday Slam" />
       </div>
-      <div class="form-field">
-        <label>Court</label>
+      <div class="form-field" role="group" aria-labelledby="tc-court-label">
+        <label id="tc-court-label">Court</label>
         <div id="tc-court-selected" class="${presetCourt ? '' : 'hidden'} court-selected">
           <div class="row-main"><div class="row-title" style="font-size:14.5px" id="tc-court-name">${presetCourt ? esc(presetCourt.name) : ''}</div></div>
           <button type="button" class="btn btn-secondary btn-sm" id="tc-court-change">Change</button>
         </div>
         <div id="tc-court-picker" class="${presetCourt ? 'hidden' : ''}">
-          <input type="search" id="tc-court-search" placeholder="Search courts…" />
+          <input type="search" id="tc-court-search" aria-label="Search courts" placeholder="Search courts…" autocomplete="off" />
           <div id="tc-court-results" style="margin-top:8px">${suggestionRows}</div>
         </div>
         <input type="hidden" id="tc-court-id" value="${presetCourt ? presetCourt.id : ''}" />
       </div>
       <div class="form-field">
-        <label>Starts</label>
+        <label for="tc-when">Starts</label>
         <input type="datetime-local" id="tc-when" value="${defaultWhen}" />
       </div>
       <div class="form-field">
-        <label>Format</label>
-        <div class="segmented" id="tc-format">
-          <button type="button" data-val="single_elim" class="active">🗂 Bracket</button>
-          <button type="button" data-val="round_robin">🔁 Round robin</button>
+        <label id="tc-format-label">Format</label>
+        <div class="segmented" id="tc-format" role="group" aria-labelledby="tc-format-label">
+          <button type="button" data-val="single_elim" class="active" aria-pressed="true">🗂 Bracket</button>
+          <button type="button" data-val="round_robin" aria-pressed="false">🔁 Round robin</button>
         </div>
         <div class="row-sub" id="tc-format-hint" style="margin-top:6px">Single elimination — lose and you're out, seeded by rating.</div>
       </div>
       <div class="form-grid">
         <div class="form-field">
-          <label>Event</label>
-          <div class="segmented" id="tc-event">
-            <button type="button" data-val="singles" class="active">Singles</button>
-            <button type="button" data-val="doubles">Doubles</button>
+          <label id="tc-event-label">Event</label>
+          <div class="segmented" id="tc-event" role="group" aria-labelledby="tc-event-label">
+            <button type="button" data-val="singles" class="active" aria-pressed="true">Singles</button>
+            <button type="button" data-val="doubles" aria-pressed="false">Doubles</button>
           </div>
         </div>
         <div class="form-field">
-          <label>Max entries</label>
+          <label for="tc-max">Max entries</label>
           <select id="tc-max">
             <option>4</option><option selected>8</option><option>16</option><option>32</option>
           </select>
         </div>
       </div>
       <div class="form-field">
-        <label>Play</label>
-        <div class="segmented" id="tc-ranked">
-          <button type="button" data-val="" class="active">Casual</button>
-          <button type="button" data-val="1">⚡ Ranked</button>
+        <label id="tc-ranked-label">Play</label>
+        <div class="segmented" id="tc-ranked" role="group" aria-labelledby="tc-ranked-label">
+          <button type="button" data-val="" class="active" aria-pressed="true">Casual</button>
+          <button type="button" data-val="1" aria-pressed="false">⚡ Ranked</button>
         </div>
         <div class="row-sub" style="margin-top:6px">Ranked: every match counts toward player ratings when the tournament finishes.</div>
       </div>
       ${myClubs.length ? `
       <div class="form-field">
-        <label>Host under a club banner?</label>
-        <div class="quick-times" id="tc-club">
-          <button type="button" data-club-id="" class="active">Just me</button>
-          ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}">🏛 ${esc(cl.name)}</button>`).join('')}
+        <label id="tc-club-label">Host under a club banner?</label>
+        <div class="quick-times" id="tc-club" role="group" aria-labelledby="tc-club-label" aria-describedby="tc-club-hint">
+          <button type="button" data-club-id="" class="active" aria-pressed="true">Just me</button>
+          ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}" aria-pressed="false">🏛 ${esc(cl.name)}</button>`).join('')}
         </div>
         <div class="row-sub" id="tc-club-hint" style="margin-top:6px"></div>
       </div>` : ''}
       <div class="form-field">
+        <label class="sr-only" for="tc-desc">Tournament details</label>
         <input type="text" id="tc-desc" maxlength="200" placeholder="Details (optional) — e.g. Games to 11, win by 2" />
       </div>
-      <button class="btn btn-primary btn-block" id="tc-submit" style="padding:15px">Create tournament</button>
+      <button type="submit" class="btn btn-primary btn-block" id="tc-submit" style="padding:15px">Create tournament</button>
+      </form>
     `);
+
+    const formUX = bindModalFormUX(modal, '#tc-submit', { draftKey: 'create-tournament' });
 
     const setCourt = (id, name) => {
       modal.querySelector('#tc-court-id').value = id || '';
@@ -4032,7 +7739,11 @@
       modal.querySelector(selId).addEventListener('click', (e) => {
         const btn = e.target.closest('button');
         if (!btn) return;
-        modal.querySelectorAll(`${selId} button`).forEach((b) => b.classList.toggle('active', b === btn));
+        modal.querySelectorAll(`${selId} button`).forEach((b) => {
+          const active = b === btn;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-pressed', String(active));
+        });
         if (hintFn) hintFn(btn.dataset.val);
       });
     };
@@ -4049,29 +7760,49 @@
       const btn = e.target.closest('button');
       if (!btn) return;
       tcClubId = Number(btn.dataset.clubId) || null;
-      modal.querySelectorAll('#tc-club button').forEach((b) => b.classList.toggle('active', b === btn));
+      modal.querySelectorAll('#tc-club button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
       const picked = myClubs.find((cl) => cl.id === tcClubId);
       modal.querySelector('#tc-club-hint').textContent = picked && picked.member_count > 1
         ? `📣 The other ${picked.member_count - 1} member${picked.member_count === 2 ? '' : 's'} of ${picked.name} will be pinged.`
         : '';
     });
 
-    modal.querySelector('#tc-submit').addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
+    modal.querySelector('#tc-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      formUX.clearError();
       const name = modal.querySelector('#tc-name').value.trim();
       const courtId = Number(modal.querySelector('#tc-court-id').value);
       const whenRaw = modal.querySelector('#tc-when').value;
-      if (name.length < 3) { toast('Give your tournament a name (3+ characters)'); return; }
-      if (!courtId) { toast('Pick a court'); return; }
-      if (!whenRaw) { toast('Pick a start time'); return; }
-      btn.disabled = true;
+      if (name.length < 3) {
+        formUX.showError('Give your tournament a name (3+ characters).', modal.querySelector('#tc-name'));
+        return;
+      }
+      if (!courtId) {
+        formUX.showError('Pick a court.', modal.querySelector('#tc-court-search'));
+        return;
+      }
+      if (!whenRaw) {
+        formUX.showError('Pick a start time.', modal.querySelector('#tc-when'));
+        return;
+      }
+      const startsAt = new Date(whenRaw);
+      if (!Number.isFinite(startsAt.getTime())) {
+        formUX.showError('Choose a valid start date and time.', modal.querySelector('#tc-when'));
+        return;
+      }
+      const finishSubmitting = formUX.startSubmitting('Creating tournament…');
+      if (!finishSubmitting) return;
       try {
         const t = await api('/tournaments', {
           method: 'POST',
           body: JSON.stringify({
             name,
             court_id: courtId,
-            starts_at: new Date(whenRaw).toISOString(),
+            starts_at: startsAt.toISOString(),
             format: modal.querySelector('#tc-format button.active').dataset.val,
             event_type: modal.querySelector('#tc-event button.active').dataset.val,
             max_entries: Number(modal.querySelector('#tc-max').value),
@@ -4080,11 +7811,14 @@
             club_id: tcClubId,
           }),
         });
-        closeModal(modal);
+        formUX.clearDraft({ disable: true });
         toast('Tournament created 🏆 Share it so players can register!');
         if (state.tab === 'play' && state.playSeg === 'brackets') renderPlay();
-        openTournamentScreen(t.id);
-      } catch (err) { toast(err.message); btn.disabled = false; }
+        transitionModal(modal, () => openTournamentScreen(t.id));
+      } catch (err) {
+        finishSubmitting();
+        formUX.showError(err.message);
+      }
     });
   }
 
@@ -4129,7 +7863,9 @@
     t.entries.forEach((en) => { entries[en.id] = en; });
     const sideHtml = (m, entryId, score) => {
       const en = entryId ? entries[entryId] : null;
-      const isWinner = m.winner_entry_id && m.winner_entry_id === entryId;
+      const result = normalizeCompetitionResult(m);
+      const isWinner = (result.confirmed || result.state === 'bye')
+        && m.winner_entry_id && m.winner_entry_id === entryId;
       const mineCls = t.my_entry_id && entryId === t.my_entry_id ? 'bm-mine' : '';
       return `
         <div class="bm-side ${isWinner ? 'bm-win' : ''} ${mineCls}">
@@ -4138,11 +7874,16 @@
           <span class="bm-score">${score != null ? score : (m.status === 'bye' && isWinner ? 'bye' : '')}</span>
         </div>`;
     };
-    const matchHtml = (m) => `
-      <div class="bm ${m.status === 'ready' && t.status === 'active' ? 'bm-ready' : ''}" data-tmatch="${m.id}">
-        ${sideHtml(m, m.entry1_id, m.score1)}
-        ${sideHtml(m, m.entry2_id, m.score2)}
-      </div>`;
+    const matchHtml = (m) => {
+      const result = normalizeCompetitionResult(m);
+      const ready = m.entry1_id != null && m.entry2_id != null && t.status === 'active' && result.state === 'unreported';
+      return `
+        <div class="bm competition-bracket-match ${ready ? 'bm-ready' : ''}" data-tmatch="${m.id}" data-result-match="${m.id}" data-match-key="${m.id}">
+          ${sideHtml(m, m.entry1_id, m.score1)}
+          ${sideHtml(m, m.entry2_id, m.score2)}
+          ${competitionResultStatusHtml(m, { compact: true })}
+        </div>`;
+    };
     // The bronze match shares the last round but gets its own caption.
     const isThirdPlace = (m) => m.round === t.total_rounds && m.position === 1;
     const rounds = [];
@@ -4185,40 +7926,72 @@
       if (roundsSeen.length > 1) html += `<div class="row-sub" style="margin:4px 2px">Round ${r}</div>`;
       ms.forEach((m) => {
         const e1 = entries[m.entry1_id], e2 = entries[m.entry2_id];
-        const done = m.status === 'done';
+        const result = normalizeCompetitionResult(m);
+        const done = result.confirmed || result.state === 'bye';
+        const ready = m.entry1_id != null && m.entry2_id != null && t.status === 'active' && result.state === 'unreported';
         html += `
-          <div class="card row ${m.status === 'ready' && t.status === 'active' ? 'bm-ready' : ''}" data-tmatch="${m.id}" style="padding:10px 14px">
+          <div class="card row competition-match-card ${ready ? 'bm-ready' : ''}" data-tmatch="${m.id}" data-result-match="${m.id}" data-match-key="${m.id}" style="padding:10px 14px">
             <div class="row-main">
               <div class="row-title" style="font-size:14px">
                 <span class="${done && m.winner_entry_id === m.entry1_id ? 'rr-win' : ''}">${e1 ? esc(e1.name) : '—'}</span>
                 <span style="opacity:.55;font-weight:400"> vs </span>
                 <span class="${done && m.winner_entry_id === m.entry2_id ? 'rr-win' : ''}">${e2 ? esc(e2.name) : '—'}</span>
               </div>
+              ${competitionResultStatusHtml(m)}
             </div>
-            <div class="stat-value" style="font-size:15px">${done ? `${m.score1}–${m.score2}` : ''}</div>
+            <div class="stat-value" style="font-size:15px">${m.score1 != null && m.score2 != null ? `${m.score1}–${m.score2}` : ''}</div>
           </div>`;
       });
     });
     return html;
   }
 
-  async function openTournamentScreen(tournamentId) {
+  async function openTournamentScreen(tournamentId, requestedMatchId = null) {
+    const route = { kind: 'tournament', id: tournamentId };
+    const routeLoad = beginRoutedOverlayLoad(route);
     let t;
     try { t = await api(`/tournaments/${tournamentId}`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
       toast(e.message);
-      clearDeadDeepLink(`#tournament/${tournamentId}`);
+      clearDeadDeepLink(overlayRouteHash(route));
       return;
     }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
 
-    const box = openModal(modalHead('Tournament'));
+    const box = openModal(modalHead('Tournament'), { route, label: 'Tournament' });
     const content = box.querySelector('.modal');
-
-    const refresh = async () => {
-      try { render(await api(`/tournaments/${tournamentId}`)); } catch { /* offline */ }
+    let deepLinkOpened = false;
+    const runMutation = async (request) => {
+      if (box.dataset.competitionMutation === 'true') throw new Error('Another update is already in progress.');
+      box.dataset.competitionMutation = 'true';
+      try { return await request(); }
+      finally { box.dataset.competitionMutation = 'false'; }
     };
 
-    const render = (data) => {
+    const refresh = async ({ force = false, data = null } = {}) => {
+      if (!force && !competitionOverlayCanRefresh(box)) return null;
+      try {
+        const previous = JSON.stringify(t);
+        const fresh = data || await api(`/tournaments/${tournamentId}`);
+        t = fresh;
+        if (currentOverlayEntry()?.el === box && (force || JSON.stringify(fresh) !== previous)) {
+          render(fresh, { preserve: true });
+        }
+        return fresh;
+      } catch { return null; }
+    };
+    const openMatch = (match) => openCompetitionResultSheet('tournament', t, match, {
+      setMutating: (busy) => { box.dataset.competitionMutation = String(busy); },
+      adoptFresh: (fresh, { render: shouldRender = true } = {}) => {
+        t = fresh;
+        if (shouldRender && currentOverlayEntry()?.el === box) render(fresh, { preserve: true });
+      },
+      refresh,
+    });
+
+    const render = (data, { preserve = false } = {}) => {
       t = data;
+      const snapshot = preserve ? captureCompetitionViewState(box) : null;
       const isDoubles = t.event_type === 'doubles';
       const unitLabel = isDoubles ? 'team' : 'player';
       const meta = [
@@ -4297,9 +8070,10 @@
             <button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:8px">Cancel tournament</button>`;
         }
       } else if (t.status !== 'cancelled') {
+        body += competitionActionNeededHtml('tournament', t);
         body += t.format === 'round_robin' ? roundRobinHtml(t) : bracketHtml(t);
         if (t.status === 'active') {
-          body += `<div class="row-sub" style="margin-top:10px">${t.is_organizer ? 'Tap a match to enter its score.' : 'Tap one of your matches to report the score.'}</div>`;
+          body += '<div class="competition-progression-note">Open any match for its result status and activity. Bracket progression waits for confirmation.</div>';
         }
         if (t.my_entry_id || t.is_organizer) {
           body += `<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:12px">💬 Tournament chat${t.chat_unread ? ` <span class="tag live" style="margin:0 0 0 6px">${t.chat_unread > 9 ? '9+' : t.chat_unread} new</span>` : ''}</button>`;
@@ -4321,7 +8095,7 @@
       }
 
       content.innerHTML = body;
-      content.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => closeModal(box)));
+      setDialogLabel(content, 'Tournament');
 
       // --- actions ---
       content.querySelector('#td-chat')?.addEventListener('click', () => openTournamentChat(t));
@@ -4331,7 +8105,7 @@
         const btn = e.currentTarget;
         btn.disabled = true;
         try {
-          render(await api(`/tournaments/${t.id}/checkin`, { method: 'POST' }));
+          render(await runMutation(() => api(`/tournaments/${t.id}/checkin`, { method: 'POST' })));
           toast("Checked in — see you on court! 🙋");
         } catch (err) { toast(err.message); btn.disabled = false; }
       });
@@ -4354,7 +8128,7 @@
         }
         btn.disabled = true;
         try {
-          render(await api(`/tournaments/${t.id}/register`, { method: 'POST', body: JSON.stringify(payload) }));
+          render(await runMutation(() => api(`/tournaments/${t.id}/register`, { method: 'POST', body: JSON.stringify(payload) })));
           toast("You're in! 🏆");
         } catch (err) { toast(err.message); btn.disabled = false; }
       });
@@ -4364,45 +8138,42 @@
         if (!pid) { toast('Pick the friend to swap in'); return; }
         btn.disabled = true;
         try {
-          render(await api(`/tournaments/${t.id}/register`, { method: 'PATCH', body: JSON.stringify({ partner_id: pid }) }));
+          render(await runMutation(() => api(`/tournaments/${t.id}/register`, { method: 'PATCH', body: JSON.stringify({ partner_id: pid }) })));
           toast('Partner updated 🔁');
         } catch (err) { toast(err.message); btn.disabled = false; }
       });
       content.querySelector('#td-withdraw')?.addEventListener('click', async () => {
         if (!confirm('Withdraw from this tournament?')) return;
-        try { render(await api(`/tournaments/${t.id}/register`, { method: 'DELETE' })); toast('Withdrawn'); }
+        try { render(await runMutation(() => api(`/tournaments/${t.id}/register`, { method: 'DELETE' }))); toast('Withdrawn'); }
         catch (err) { toast(err.message); }
       });
       content.querySelectorAll('[data-remove-entry]').forEach((btn) => btn.addEventListener('click', async () => {
         if (!confirm('Remove this entry?')) return;
-        try { render(await api(`/tournaments/${t.id}/entries/${btn.dataset.removeEntry}`, { method: 'DELETE' })); }
+        try { render(await runMutation(() => api(`/tournaments/${t.id}/entries/${btn.dataset.removeEntry}`, { method: 'DELETE' }))); }
         catch (err) { toast(err.message); }
       }));
       content.querySelector('#td-start')?.addEventListener('click', async (e) => {
         const btn = e.currentTarget;
         if (!confirm(`Start the tournament with ${t.entry_count} entries? Registration closes and the bracket is generated.`)) return;
         btn.disabled = true;
-        try { render(await api(`/tournaments/${t.id}/start`, { method: 'POST' })); toast('Bracket is live! 🏁'); }
+        try { render(await runMutation(() => api(`/tournaments/${t.id}/start`, { method: 'POST' }))); toast('Bracket is live! 🏁'); }
         catch (err) { toast(err.message); btn.disabled = false; }
       });
       content.querySelector('#td-cancel')?.addEventListener('click', async () => {
         if (!confirm('Cancel this tournament? Everyone registered will be notified.')) return;
         try {
-          await api(`/tournaments/${t.id}/cancel`, { method: 'POST' });
+          await runMutation(() => api(`/tournaments/${t.id}/cancel`, { method: 'POST' }));
           toast('Tournament cancelled');
           closeModal(box);
           if (state.tab === 'play' && state.playSeg === 'brackets') renderPlay();
         } catch (err) { toast(err.message); }
       });
-      content.querySelectorAll('[data-tmatch]').forEach((card) => card.addEventListener('click', () => {
-        const m = t.matches.find((mm) => mm.id === Number(card.dataset.tmatch));
-        if (!m || t.status !== 'active') return;
-        if (m.entry1_id == null || m.entry2_id == null) return;
-        const involved = t.my_entry_id && (m.entry1_id === t.my_entry_id || m.entry2_id === t.my_entry_id);
-        if (!t.is_organizer && !involved) { toast('Only the players in this match (or the organizer) can enter its score'); return; }
-        if (m.status === 'done' && !t.is_organizer) { toast('Score is in — ask the organizer to correct it'); return; }
-        openTournamentScoreModal(t, m, refresh);
-      }));
+      content.querySelectorAll('[data-result-match]').forEach((card) => {
+        makePressable(card, () => {
+          const match = t.matches.find((item) => item.id === Number(card.dataset.resultMatch));
+          if (match) openMatch(match);
+        });
+      });
 
       // Populate the doubles partner pickers (register + swap) with friends
       // not already entered.
@@ -4425,6 +8196,20 @@
           });
         }).catch(() => {});
       }
+      if (snapshot) restoreCompetitionViewState(box, snapshot);
+      if (requestedMatchId && !deepLinkOpened) {
+        deepLinkOpened = true;
+        const match = (t.matches || []).find((item) => item.id === Number(requestedMatchId));
+        const card = content.querySelector(`[data-result-match="${Number(requestedMatchId)}"]`);
+        if (match && card) {
+          card.classList.add('competition-match-highlight');
+          const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+          card.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+          queueMicrotask(() => openMatch(match));
+        } else {
+          toast('That tournament match is no longer available.');
+        }
+      }
     };
 
     render(t);
@@ -4432,12 +8217,12 @@
     // Live sync while open — registrations and scores land from other phones.
     const poll = setInterval(async () => {
       if (!document.body.contains(box)) { clearInterval(poll); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       if (t.status !== 'active' && t.status !== 'registration') return;
-      try {
-        const fresh = await api(`/tournaments/${tournamentId}`);
-        if (JSON.stringify(fresh) !== JSON.stringify(t)) render(fresh);
-      } catch { /* offline */ }
+      if (!competitionOverlayCanRefresh(box)) return;
+      await refresh();
     }, 8000);
+    box._cleanupFns?.push(() => clearInterval(poll));
   }
 
   function openEditTournamentSheet(t, onSaved) {
@@ -4491,8 +8276,14 @@
   }
 
   async function openTournamentChat(t) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let data;
-    try { data = await api(`/tournaments/${t.id}/chat`); } catch (e) { toast(e.message); return; }
+    try { data = await api(`/tournaments/${t.id}/chat`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+    refreshMe(); // keep the global Community badge exact outside Inbox
 
     const modal = openModal(`
       <div class="thread">
@@ -4504,21 +8295,28 @@
             <div class="row-sub">${esc(data.tournament.name)} — players & organizer only</div>
           </div>
         </div>
-        <div class="thread-msgs" id="tch-msgs"></div>
+        <div class="thread-msgs" id="tch-msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Tournament conversation"></div>
         <form class="thread-input" id="tch-form">
-          <input type="text" id="tch-text" placeholder="Message the tournament…" autocomplete="off" maxlength="500" />
+          <input type="text" id="tch-text" placeholder="Message the tournament…" autocomplete="off" maxlength="2000" />
           <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
     `, { chat: true });
 
     const msgsEl = modal.querySelector('#tch-msgs');
+    const input = modal.querySelector('#tch-text');
+    const chatUX = bindChatContinuity(modal, msgsEl, input, `tournament:${t.id}`);
     let lastId = 0;
-    const renderMsgs = (items, append) => {
+    const renderMsgs = (items, append, { forceBottom = false, newMessages = false } = {}) => {
+      const batch = prepareChatRenderBatch(msgsEl, items, append);
+      if (batch.newestId) lastId = Math.max(lastId, batch.newestId);
+      items = batch.items;
+      if (append && !items.length) return;
+      const snapshot = chatUX.captureScroll();
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
@@ -4531,78 +8329,30 @@
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Coordinate the day — “what time are check-ins?”, “courts 3 & 4” 🏆</div>';
-      if (items.length) lastId = items[items.length - 1].id;
-      msgsEl.scrollTop = msgsEl.scrollHeight;
-      hydrateChatImages(msgsEl);
+      chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0 });
+      hydrateChatImages(msgsEl, chatUX);
     };
-    renderMsgs(data.items, false);
-    attachChatViewport(modal, msgsEl, modal.querySelector('#tch-text'));
-    addPhotoToComposer(modal, '#tch-form', '#tch-text', `/tournaments/${t.id}/chat`, renderMsgs);
+    renderMsgs(data.items, false, { forceBottom: true });
+    chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
+    addPhotoToComposer(modal, '#tch-form', '#tch-text', chatUX);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       try {
         const fresh = await api(`/tournaments/${t.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true);
+        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
         applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
     modal.querySelector('#tch-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = modal.querySelector('#tch-text');
       const body = input.value.trim();
       if (!body) return;
-      input.value = '';
       try {
-        const msg = await api(`/tournaments/${t.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
-        renderMsgs([msg], true);
-      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
-    });
-  }
-
-  function openTournamentScoreModal(t, match, refresh) {
-    const entries = {};
-    t.entries.forEach((en) => { entries[en.id] = en; });
-    const e1 = entries[match.entry1_id];
-    const e2 = entries[match.entry2_id];
-    const roundLabel = t.format === 'round_robin'
-      ? `Round ${match.round}`
-      : (match.round === t.total_rounds && match.position === 1)
-        ? '3rd-place match' : tournamentRoundLabel(match.round, t.total_rounds || 1);
-    const modal = openModal(`
-      ${modalHead('Match score')}
-      <div class="row-sub" style="margin:-4px 0 12px">${esc(t.name)} · ${roundLabel}</div>
-      <div class="form-grid">
-        <div class="form-field">
-          <label>${esc(e1 ? e1.name : '—')}</label>
-          <input type="number" id="ts-1" min="0" max="99" inputmode="numeric" placeholder="0" value="${match.score1 ?? ''}" />
-        </div>
-        <div class="form-field">
-          <label>${esc(e2 ? e2.name : '—')}</label>
-          <input type="number" id="ts-2" min="0" max="99" inputmode="numeric" placeholder="0" value="${match.score2 ?? ''}" />
-        </div>
-      </div>
-      <button class="btn btn-primary btn-block" id="ts-save" style="margin-top:14px">Save score</button>
-    `);
-    modal.querySelector('#ts-save').addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      const raw1 = modal.querySelector('#ts-1').value;
-      const raw2 = modal.querySelector('#ts-2').value;
-      const s1 = Number(raw1);
-      const s2 = Number(raw2);
-      if (raw1 === '' || raw2 === '' || Number.isNaN(s1) || Number.isNaN(s2)) { toast('Enter both scores'); return; }
-      if (s1 === s2) { toast('No ties in pickleball — someone won!'); return; }
-      btn.disabled = true;
-      try {
-        await api(`/tournaments/${t.id}/matches/${match.id}/score`, {
-          method: 'POST',
-          body: JSON.stringify({ score1: s1, score2: s2 }),
-        });
-        closeModal(modal);
-        toast('Score saved ✅');
-        refresh();
-      } catch (err) { toast(err.message); btn.disabled = false; }
+        await chatUX.send(body);
+      } catch (err) { toast(err.message); }
     });
   }
 
@@ -4611,78 +8361,183 @@
     $('#chat-segments').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
+      const changed = state.chatSeg !== btn.dataset.seg;
       state.chatSeg = btn.dataset.seg;
-      document.querySelectorAll('#chat-segments button').forEach((b) => b.classList.toggle('active', b === btn));
-      renderChat();
+      document.querySelectorAll('#chat-segments button').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
+      renderChat({ reuseFresh: !changed });
     });
   }
 
-  async function renderChat() {
-    const el = $('#chat-content');
-    el.innerHTML = skeletonHtml(5);
+  function inboxMessagePreview(item) {
+    const message = item.lastMessage;
+    if (!message) return item.emptyText || 'Start the conversation';
+    const body = message.body ? esc(message.body.slice(0, 72))
+      : message.has_image ? '📷 Photo' : 'New message';
+    if (message.sender_id === state.me.id) return `You: ${body}`;
+    if (item.kind === 'dm') return body;
+    const sender = esc((message.sender_name || 'Player').split(' ')[0]);
+    return `${sender}: ${body}`;
+  }
+
+  function competitionInboxContext(room) {
+    const label = {
+      registration: 'Signups open', active: 'In progress', upcoming: 'Upcoming',
+      awaiting_confirmation: 'Score awaiting confirmation', completed: 'Completed',
+    }[room.status] || 'Competition chat';
+    const details = [label];
+    if (room.event_at) details.push(fmtDateTime(room.event_at));
+    if (room.court_name && !room.title.includes(room.court_name)) details.push(esc(room.court_name));
+    return details.join(' · ');
+  }
+
+  function universalInboxHtml(data, rooms, clubs, competitions) {
+    const items = [];
+    (data.items || []).forEach((chat) => items.push({
+      kind: 'dm', id: chat.user.id, title: chat.user.display_name,
+      iconHtml: avatarHtml(chat.user, '', 'span'), lastMessage: chat.last_message,
+      unread: chat.unread || 0, emptyText: 'Send a message',
+    }));
+    (clubs.items || []).forEach((club) => items.push({
+      kind: 'club', id: club.id, title: club.name,
+      iconHtml: '<span class="inbox-room-icon">🏛</span>', lastMessage: club.last_message,
+      unread: club.unread || 0,
+      emptyText: club.announcement ? `📣 ${esc(club.announcement.slice(0, 72))}`
+        : `${club.member_count} member${club.member_count === 1 ? '' : 's'}${club.home_court_name ? ` · ${esc(club.home_court_name)}` : ''}`,
+    }));
+    (rooms.items || []).forEach((room) => items.push({
+      kind: 'court', id: room.court.id, title: room.court.name,
+      iconHtml: '<span class="inbox-room-icon">🏓</span>', lastMessage: room.last_message,
+      unread: room.unread || 0, emptyText: 'Court room',
+    }));
+    (competitions.items || []).forEach((room) => items.push({
+      kind: room.kind, id: room.id, title: room.title,
+      iconHtml: `<span class="inbox-room-icon">${room.kind === 'game' ? '🏓' : room.kind === 'tournament' ? '🏆' : '📦'}</span>`,
+      lastMessage: room.last_message, unread: room.unread || 0,
+      emptyText: competitionInboxContext(room), eventAt: room.event_at,
+    }));
+
+    const recent = items.filter((item) => item.lastMessage)
+      .sort((a, b) => b.lastMessage.id - a.lastMessage.id);
+    const ready = items.filter((item) => !item.lastMessage)
+      .sort((a, b) => {
+        if (a.eventAt && b.eventAt) return new Date(a.eventAt) - new Date(b.eventAt);
+        return a.eventAt ? -1 : b.eventAt ? 1 : a.title.localeCompare(b.title);
+      });
+    const kindLabel = { dm: 'Direct', club: 'Club', court: 'Court', game: 'Game', tournament: 'Tournament', league: 'League' };
+    const rowHtml = (item, extraClass = '') => {
+      const attention = item.unread
+        ? `, ${item.unread} unread message${item.unread === 1 ? '' : 's'}` : '';
+      return `
+      <button type="button" class="card row inbox-row ${extraClass}" data-inbox-kind="${item.kind}" data-inbox-id="${item.id}" data-inbox-title="${esc(item.title)}" data-unread="${item.unread}" aria-label="${esc(item.title)}, ${kindLabel[item.kind]} chat${attention}">
+        ${item.iconHtml}
+        <span class="row-main">
+          <span class="row-title" style="display:block">${esc(item.title)}<span class="inbox-kind">${kindLabel[item.kind]}</span></span>
+          <span class="row-sub" style="display:block">${inboxMessagePreview(item)}</span>
+        </span>
+        ${item.unread ? `<span class="badge" style="position:static">${item.unread > 99 ? '99+' : item.unread}</span>`
+          : item.lastMessage ? `<span class="row-sub inbox-time">${fmtTimeShort(item.lastMessage.created_at)}</span>` : '<span class="chev">›</span>'}
+      </button>`;
+    };
+
+    let html = '';
+    if (recent.length) {
+      html += '<div class="section-label" style="margin-top:4px">Recent conversations</div>';
+      html += recent.map((item) => rowHtml(item)).join('');
+    }
+    if (ready.length) {
+      html += `<div class="section-label" style="margin-top:${recent.length ? '18px' : '4px'}">Ready to coordinate</div>`;
+      html += ready.map((item, index) => rowHtml(item, index >= 8 ? 'inbox-ready-extra hidden' : '')).join('');
+      if (ready.length > 8) {
+        html += `<button type="button" class="btn btn-secondary btn-block" id="inbox-show-ready">Show ${ready.length - 8} more active chats</button>`;
+      }
+    }
+    if (!items.length) {
+      html = `<div class="empty-state"><span class="big">💬</span><b>Your conversations will live here.</b><br>Find your crew or start a game to open a shared chat.
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
+          <button class="btn btn-secondary" data-goto="chat-friends">🤝 Find friends</button>
+          <button class="btn btn-primary" data-goto="new-game">🏓 Start a game</button>
+        </div></div>`;
+    }
+    html += `<div class="section-label">Build your community</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="btn btn-secondary" id="club-find">🔎 Find clubs</button>
+        <button class="btn btn-secondary" id="club-new">＋ Start a club</button>
+      </div>`;
+    return html;
+  }
+
+  async function renderChat({ reuseFresh = false, useCachedData = false } = {}) {
+    const seg = state.chatSeg;
+    const liveEl = $('#chat-content');
+    const viewKey = `${state.me?.id || 'signed-out'}:chat:${seg}`;
+    if (reuseFresh && viewIsFresh(liveEl, viewKey)) return;
+    const renderSeq = ++state.chatRenderSeq;
+    const hadUsableContent = beginViewRender(liveEl, viewKey, 5);
+    const el = document.createElement('div');
+    const commit = () => {
+      if (renderSeq !== state.chatRenderSeq || state.chatSeg !== seg) return false;
+      commitViewRender(liveEl, el, viewKey);
+      return true;
+    };
     try {
-      if (state.chatSeg === 'chats') {
-        const [data, rooms, clubs] = await Promise.all([
+      if (seg === 'chats') {
+        const [data, rooms, clubs, competitions] = await Promise.all([
           api('/chat'),
-          api('/chat/courts').catch(() => ({ items: [] })),
-          api('/clubs/mine').catch(() => ({ items: [] })),
+          api('/chat/courts'),
+          api('/clubs/mine'),
+          api('/chat/competitions'),
         ]);
-        let html = data.items.length
-          ? data.items.map((c) => `
-              <div class="card row" data-thread="${c.user.id}" style="cursor:pointer">
-                ${avatarHtml(c.user)}
-                <div class="row-main">
-                  <div class="row-title">${esc(c.user.display_name)}</div>
-                  <div class="row-sub">${c.last_message.sender_id === state.me.id ? 'You: ' : ''}${c.last_message.body ? esc(c.last_message.body.slice(0, 60)) : (c.last_message.has_image ? '📷 Photo' : '')}</div>
-                </div>
-                ${c.unread ? `<span class="badge" style="position:static">${c.unread}</span>` : `<span class="row-sub">${fmtTimeShort(c.last_message.created_at)}</span>`}
-              </div>`).join('')
-          : '<div class="empty-state"><span class="big">💬</span>No chats yet.<br>Add some friends and say hi!<br><button class="btn btn-primary" data-goto="chat-friends" style="margin-top:10px">🤝 Find friends</button></div>';
-        html += '<div class="section-label">🏛 Clubs</div>';
-        html += (clubs.items || []).map((cl) => `
-          <div class="card row" data-club="${cl.id}" style="cursor:pointer">
-            <span style="font-size:22px">🏛</span>
-            <div class="row-main">
-              <div class="row-title" style="font-size:14.5px">${esc(cl.name)}${cl.my_role === 'owner' ? ' 👑' : ''}</div>
-              <div class="row-sub">${cl.announcement
-                ? `📣 ${esc(cl.announcement.slice(0, 60))}`
-                : cl.last_message
-                  ? `${cl.last_message.sender_id === state.me.id ? 'You' : esc((cl.last_message.sender_name || 'Player').split(' ')[0])}: ${esc(cl.last_message.body.slice(0, 50))}`
-                  : `${cl.member_count} member${cl.member_count === 1 ? '' : 's'}${cl.home_court_name ? ` · ${esc(cl.home_court_name)}` : ''}`}</div>
-            </div>
-            ${cl.unread ? `<span class="badge" style="position:static">${cl.unread}</span>` : (cl.last_message ? `<span class="row-sub">${fmtTimeShort(cl.last_message.created_at)}</span>` : '')}
-          </div>`).join('');
-        html += `<div style="display:flex;gap:8px;margin-top:2px">
-          <button class="btn btn-secondary" id="club-find" style="flex:1">🔎 Find clubs</button>
-          <button class="btn btn-secondary" id="club-new" style="flex:1">＋ Start a club</button>
-        </div>`;
-        if ((rooms.items || []).length) {
-          html += '<div class="section-label">🏓 Court rooms</div>';
-          html += rooms.items.map((r) => `
-            <div class="card row" data-court-room="${r.court.id}" data-court-name="${esc(r.court.name)}" style="cursor:pointer">
-              <span style="font-size:22px">🏓</span>
-              <div class="row-main">
-                <div class="row-title" style="font-size:14.5px">${esc(r.court.name)}</div>
-                <div class="row-sub">${r.last_message.sender_id === state.me.id ? 'You: ' : `${esc((r.last_message.sender_name || 'Player').split(' ')[0])}: `}${esc(r.last_message.body.slice(0, 55))}</div>
-              </div>
-              ${r.unread ? `<span class="badge" style="position:static">${r.unread}</span>` : `<span class="row-sub">${fmtTimeShort(r.last_message.created_at)}</span>`}
-            </div>`).join('');
-        }
-        el.innerHTML = html;
-        el.querySelectorAll('[data-thread]').forEach((row) => row.addEventListener('click', () => openThread(Number(row.dataset.thread))));
-        el.querySelectorAll('[data-court-room]').forEach((row) => row.addEventListener('click', () => {
-          openCourtChat({ id: Number(row.dataset.courtRoom), name: row.dataset.courtName });
+        if (renderSeq !== state.chatRenderSeq || state.chatSeg !== seg) return;
+        state.communityRoomUnread = [rooms, clubs, competitions]
+          .flatMap((group) => group.items || [])
+          .reduce((total, item) => total + Number(item.unread || 0), 0);
+        renderBadges();
+        el.innerHTML = universalInboxHtml(data, rooms, clubs, competitions);
+        el.querySelectorAll('[data-inbox-kind]').forEach((row) => row.addEventListener('click', async () => {
+          if (row.disabled) return;
+          row.disabled = true;
+          const kind = row.dataset.inboxKind;
+          const id = Number(row.dataset.inboxId);
+          try {
+            if (kind === 'dm') await openThread(id);
+            else if (kind === 'court') await openCourtChat({ id, name: row.dataset.inboxTitle });
+            else if (kind === 'club') await openClubScreen(id);
+            else if (kind === 'game') await openGameChat({ id });
+            else if (kind === 'tournament') await openTournamentChat({ id });
+            else if (kind === 'league') await openLeagueChat({ id, name: row.dataset.inboxTitle });
+          } finally {
+            row.disabled = false;
+            // The room GET is the authoritative read action. Re-fetching the
+            // inbox keeps counts exact on success and unchanged on failure.
+            if (state.tab === 'chat' && state.chatSeg === 'chats') renderChat();
+          }
         }));
-        el.querySelectorAll('[data-club]').forEach((row) => row.addEventListener('click', () => openClubScreen(Number(row.dataset.club))));
+        el.querySelector('#inbox-show-ready')?.addEventListener('click', (event) => {
+          const firstRevealed = el.querySelector('.inbox-ready-extra');
+          el.querySelectorAll('.inbox-ready-extra').forEach((row) => row.classList.remove('hidden'));
+          event.currentTarget.remove();
+          firstRevealed?.focus({ preventScroll: true });
+        });
         el.querySelector('#club-find')?.addEventListener('click', openFindClubsSheet);
         el.querySelector('#club-new')?.addEventListener('click', openCreateClubSheet);
-      } else if (state.chatSeg === 'nearby') {
+      } else if (seg === 'nearby') {
         await renderNearbyPlayers(el);
       } else {
-        await renderFriends(el);
+        await renderFriends(el, { useCachedData });
       }
+      commit();
     } catch (e) {
-      renderError(el, e.message, renderChat);
+      if (renderSeq !== state.chatRenderSeq || state.chatSeg !== seg) return;
+      if (hadUsableContent) {
+        retainViewAfterError(liveEl, `${e.message} Showing your last update.`, () => renderChat());
+      } else {
+        renderError(el, e.message, () => renderChat());
+        commit();
+      }
     }
   }
 
@@ -4749,14 +8604,19 @@
     bindUserButtons(el);
   }
 
-  async function renderFriends(el) {
+  async function renderFriends(el, { useCachedData = false } = {}) {
     const loc = areaLatLng();
-    const [data, results, digest, suggestions] = await Promise.all([
-      api('/friends'),
-      api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`).catch(() => ({ items: [] })),
-      api('/friends/digest').catch(() => null),
-      api('/friends/suggestions').catch(() => ({ items: [] })),
-    ]);
+    let friendBundle = useCachedData && state.chatFriendsCache;
+    if (!friendBundle) {
+      friendBundle = await Promise.all([
+        api('/friends'),
+        api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`).catch(() => ({ items: [] })),
+        api('/friends/digest').catch(() => null),
+        api('/friends/suggestions').catch(() => ({ items: [] })),
+      ]);
+      state.chatFriendsCache = friendBundle;
+    }
+    const [data, results, digest, suggestions] = friendBundle;
     let html = `
       <div class="form-field" style="margin-top:4px">
         <input type="search" id="friend-search" placeholder="Find players by name or email…" />
@@ -4883,15 +8743,14 @@
       const btn = e.target.closest('button');
       if (!btn) return;
       state.friendSlotFilter = btn.dataset.slots;
-      renderChat();
+      renderChat({ useCachedData: true });
     });
     el.querySelectorAll('[data-msg]').forEach((b) => b.addEventListener('click', () => openThread(Number(b.dataset.msg))));
     el.querySelectorAll('[data-invite]').forEach((b) => b.addEventListener('click', () => {
       const court = b.dataset.inviteCourt
         ? { id: Number(b.dataset.inviteCourt), name: b.dataset.inviteCourtName }
         : null;
-      openNewGameModal(court, 'casual');
-      toast('Schedule it — your friends get notified 🔔');
+      openNewGameModal(court, 'casual', false, null, Number(b.dataset.invite));
     }));
     el.querySelectorAll('[data-coming]').forEach((b) => b.addEventListener('click', async () => {
       b.disabled = true;
@@ -4960,9 +8819,14 @@
   }
 
   async function openThread(userId) {
-    state.activeThreadUserId = userId;
+    const modalLoad = beginRoutedOverlayLoad(null);
     let data;
-    try { data = await api(`/chat/${userId}`); } catch (e) { toast(e.message); return; }
+    try { data = await api(`/chat/${userId}`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+    state.activeThreadUserId = userId;
 
     const modal = openModal(`
       <div class="thread">
@@ -4974,32 +8838,28 @@
             <div class="row-sub">${data.user.active_now ? '<b style="color:var(--green-accent)">🟢 active now</b> · ' : ''}${skillLabel(data.user.skill_level)} · ${data.user.rating}</div>
           </div>
         </div>
-        <div class="thread-msgs" id="thread-msgs"></div>
+        <div class="thread-msgs" id="thread-msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation with ${esc(data.user.display_name)}"></div>
         <form class="thread-input" id="thread-form">
           <button type="button" id="thread-photo" aria-label="Send a photo" style="background:transparent;font-size:19px;padding:0 2px">📷</button>
           <input type="file" id="thread-file" accept="image/*" class="hidden" />
-          <input type="text" id="thread-text" placeholder="Message…" autocomplete="off" />
+          <input type="text" id="thread-text" placeholder="Message…" autocomplete="off" maxlength="2000" />
           <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
     `, { chat: true });
 
     const msgsEl = modal.querySelector('#thread-msgs');
+    const input = modal.querySelector('#thread-text');
+    const chatUX = bindChatContinuity(modal, msgsEl, input, `dm:${userId}`);
     let lastId = 0;
-    // Photos load lazily per bubble — thread payloads only carry has_image.
-    const hydrateImages = () => {
-      msgsEl.querySelectorAll('[data-img-id]:not([data-loaded])').forEach(async (slot) => {
-        slot.dataset.loaded = '1';
-        try {
-          const { image } = await api(`/messages/${slot.dataset.imgId}/image`);
-          slot.innerHTML = `<img src="${image}" alt="Photo" style="max-width:100%;border-radius:10px;display:block" />`;
-          msgsEl.scrollTop = msgsEl.scrollHeight;
-        } catch { slot.remove(); }
-      });
-    };
-    const renderMsgs = (items, append) => {
+    const renderMsgs = (items, append, { forceBottom = false, newMessages = false } = {}) => {
+      const batch = prepareChatRenderBatch(msgsEl, items, append);
+      if (batch.newestId) lastId = Math.max(lastId, batch.newestId);
+      items = batch.items;
+      if (append && !items.length) return;
+      const snapshot = chatUX.captureScroll();
       const html = items.map((m) => `
-        <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}" ${m.sender_id === state.me.id ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-heart-msg="${m.id}" title="Tap to ❤️"`}>
+        <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}" data-message-id="${m.id}" ${m.sender_id === state.me.id ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-heart-msg="${m.id}" title="Tap to ❤️"`}>
           ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
           ${esc(m.body)}
           <div class="bubble-time">${fmtTimeShort(m.created_at)}${m.sender_id === state.me.id && m.read_at ? ' · <span title="Seen">✓✓</span>' : ''}</div>
@@ -5008,9 +8868,8 @@
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Say hi! 👋</div>';
-      if (items.length) lastId = items[items.length - 1].id;
-      msgsEl.scrollTop = msgsEl.scrollHeight;
-      hydrateImages();
+      chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0 });
+      hydrateChatImages(msgsEl, chatUX);
     };
     // Live ✓✓: flip 'Seen' onto already-rendered bubbles as the partner reads.
     const markSeen = (upTo) => {
@@ -5033,18 +8892,19 @@
         if (!want && has) has.remove();
       });
     };
-    renderMsgs(data.items, false);
+    renderMsgs(data.items, false, { forceBottom: true });
+    chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
     markSeen(data.partner_read_up_to);
     applyHearts(data.hearted_ids);
-    attachChatViewport(modal, msgsEl, modal.querySelector('#thread-text'));
     refreshMe();
 
     clearInterval(state.threadPollTimer);
     state.threadPollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(state.threadPollTimer); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       try {
         const fresh = await api(`/chat/${userId}?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true);
+        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
         applyRoomHearts(msgsEl, fresh.heart_counts);
         markSeen(fresh.partner_read_up_to);
         applyHearts(fresh.hearted_ids);
@@ -5053,36 +8913,42 @@
 
     modal.querySelector('#thread-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = modal.querySelector('#thread-text');
       const body = input.value.trim();
       if (!body) return;
-      input.value = '';
       try {
-        const msg = await api(`/chat/${userId}`, { method: 'POST', body: JSON.stringify({ body }) });
-        renderMsgs([msg], true);
-      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+        await chatUX.send(body);
+      } catch (err) { toast(err.message); }
     });
-    modal.querySelector('#thread-photo').addEventListener('click', () => modal.querySelector('#thread-file').click());
+    modal.querySelector('#thread-photo').addEventListener('click', () => {
+      const picker = modal.querySelector('#thread-file');
+      if (picker.value) picker.value = '';
+      picker.click();
+    });
     modal.querySelector('#thread-file').addEventListener('change', async (e) => {
       const file = e.target.files[0];
-      e.target.value = '';
       if (!file) return;
       try {
         const image = await imageFileToDataUrl(file, 1024);
         const textEl = modal.querySelector('#thread-text');
         const body = textEl.value.trim();
-        textEl.value = '';
-        const msg = await api(`/chat/${userId}`, { method: 'POST', body: JSON.stringify({ body, image }) });
-        renderMsgs([msg], true);
+        await chatUX.send(body, { image });
+        e.target.value = '';
       } catch (err) {
+        if (err.message === 'image_too_large' || err.message === 'bad_image') e.target.value = '';
         toast(err.message === 'image_too_large' ? 'That photo is too large — try a smaller one' : err.message);
       }
     });
   }
 
   async function openCourtChat(court) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let data;
-    try { data = await api(`/courts/${court.id}/chat`); } catch (e) { toast(e.message); return; }
+    try { data = await api(`/courts/${court.id}/chat`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+    refreshMe(); // keep the global Community badge exact outside Inbox
 
     const modal = openModal(`
       <div class="thread">
@@ -5094,21 +8960,28 @@
             <div class="row-sub">Court chat — everyone at this court can read it</div>
           </div>
         </div>
-        <div class="thread-msgs" id="cc-msgs"></div>
+        <div class="thread-msgs" id="cc-msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="${esc(court.name)} court conversation"></div>
         <form class="thread-input" id="cc-form">
-          <input type="text" id="cc-text" placeholder="Message the court…" autocomplete="off" maxlength="500" />
+          <input type="text" id="cc-text" placeholder="Message the court…" autocomplete="off" maxlength="2000" />
           <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
     `, { chat: true });
 
     const msgsEl = modal.querySelector('#cc-msgs');
+    const input = modal.querySelector('#cc-text');
+    const chatUX = bindChatContinuity(modal, msgsEl, input, `court:${court.id}`);
     let lastId = 0;
-    const renderMsgs = (items, append) => {
+    const renderMsgs = (items, append, { forceBottom = false, newMessages = false } = {}) => {
+      const batch = prepareChatRenderBatch(msgsEl, items, append);
+      if (batch.newestId) lastId = Math.max(lastId, batch.newestId);
+      items = batch.items;
+      if (append && !items.length) return;
+      const snapshot = chatUX.captureScroll();
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
@@ -5121,50 +8994,57 @@
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — say hi to the court! 👋</div>';
-      if (items.length) lastId = items[items.length - 1].id;
-      msgsEl.scrollTop = msgsEl.scrollHeight;
-      hydrateChatImages(msgsEl);
+      chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0 });
+      hydrateChatImages(msgsEl, chatUX);
     };
-    renderMsgs(data.items, false);
-    attachChatViewport(modal, msgsEl, modal.querySelector('#cc-text'));
-    addPhotoToComposer(modal, '#cc-form', '#cc-text', `/courts/${court.id}/chat`, renderMsgs);
+    renderMsgs(data.items, false, { forceBottom: true });
+    chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
+    addPhotoToComposer(modal, '#cc-form', '#cc-text', chatUX);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       try {
         const fresh = await api(`/courts/${court.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true);
+        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
         applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
     modal.querySelector('#cc-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = modal.querySelector('#cc-text');
       const body = input.value.trim();
       if (!body) return;
-      input.value = '';
       try {
-        const msg = await api(`/courts/${court.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
-        renderMsgs([msg], true);
-      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+        await chatUX.send(body);
+      } catch (err) { toast(err.message); }
     });
   }
 
   // ---------- Clubs ----------
 
   async function openClubScreen(clubId) {
+    const routeLoad = beginRoutedOverlayLoad({ kind: 'club', id: clubId });
     let club;
     try { club = await api(`/clubs/${clubId}`); }
-    catch (e) { toast(e.message); clearDeadDeepLink(`#club/${clubId}`); return; }
-    try { history.replaceState(null, '', `#club/${club.id}`); } catch { /* ignore */ }
-    if (club.joined) openClubChat(club);
-    else openClubInfo(club);
+    catch (e) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+      toast(e.message); clearDeadDeepLink(`#club/${clubId}`); return;
+    }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+    if (club.joined) return openClubChat(club, routeLoad);
+    return openClubInfo(club, routeLoad);
   }
 
-  async function openClubChat(club) {
+  async function openClubChat(club, routeLoad = null) {
+    routeLoad ||= beginRoutedOverlayLoad({ kind: 'club', id: club.id });
     let data;
-    try { data = await api(`/clubs/${club.id}/chat`); } catch (e) { toast(e.message); return; }
+    try { data = await api(`/clubs/${club.id}/chat`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+    refreshMe(); // keep the global Community badge exact outside Inbox
 
     const modal = openModal(`
       <div class="thread">
@@ -5181,21 +9061,28 @@
           <span style="font-size:17px">📣</span>
           <div class="row-sub" style="flex:1;color:var(--ink)">${esc(club.announcement)}</div>
         </div>` : ''}
-        <div class="thread-msgs" id="clb-msgs"></div>
+        <div class="thread-msgs" id="clb-msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="${esc(club.name)} club conversation"></div>
         <form class="thread-input" id="clb-form">
-          <input type="text" id="clb-text" placeholder="Message the club…" autocomplete="off" maxlength="500" />
+          <input type="text" id="clb-text" placeholder="Message the club…" autocomplete="off" maxlength="2000" />
           <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
-    `, { chat: true });
+    `, { chat: true, route: { kind: 'club', id: club.id } });
 
     const msgsEl = modal.querySelector('#clb-msgs');
+    const input = modal.querySelector('#clb-text');
+    const chatUX = bindChatContinuity(modal, msgsEl, input, `club:${club.id}`);
     let lastId = 0;
-    const renderMsgs = (items, append) => {
+    const renderMsgs = (items, append, { forceBottom = false, newMessages = false } = {}) => {
+      const batch = prepareChatRenderBatch(msgsEl, items, append);
+      if (batch.newestId) lastId = Math.max(lastId, batch.newestId);
+      items = batch.items;
+      if (append && !items.length) return;
+      const snapshot = chatUX.captureScroll();
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
@@ -5208,41 +9095,41 @@
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — rally the club! 👋</div>';
-      if (items.length) lastId = items[items.length - 1].id;
-      msgsEl.scrollTop = msgsEl.scrollHeight;
-      hydrateChatImages(msgsEl);
+      chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0 });
+      hydrateChatImages(msgsEl, chatUX);
     };
-    renderMsgs(data.items, false);
-    attachChatViewport(modal, msgsEl, modal.querySelector('#clb-text'));
-    addPhotoToComposer(modal, '#clb-form', '#clb-text', `/clubs/${club.id}/chat`, renderMsgs);
+    renderMsgs(data.items, false, { forceBottom: true });
+    chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
+    addPhotoToComposer(modal, '#clb-form', '#clb-text', chatUX);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       try {
         const fresh = await api(`/clubs/${club.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true);
+        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
         applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
     modal.querySelector('#club-head').addEventListener('click', async () => {
-      closeModal(modal);
-      try { openClubInfo(await api(`/clubs/${club.id}`)); } catch (e) { toast(e.message); }
+      try {
+        const fresh = await api(`/clubs/${club.id}`);
+        transitionModal(modal, () => openClubInfo(fresh));
+      } catch (e) { toast(e.message); }
     });
     modal.querySelector('#clb-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = modal.querySelector('#clb-text');
       const body = input.value.trim();
       if (!body) return;
-      input.value = '';
       try {
-        const msg = await api(`/clubs/${club.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
-        renderMsgs([msg], true);
-      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+        await chatUX.send(body);
+      } catch (err) { toast(err.message); }
     });
   }
 
-  function openClubInfo(club) {
+  function openClubInfo(club, routeLoad = null) {
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
     const isOwner = club.my_role === 'owner';
     // Members double as the club leaderboard — ranked by rating, with club-game
     // records once the club has played under its banner.
@@ -5263,6 +9150,7 @@
       </div>`;
     }).join('');
 
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
     const modal = openModal(`
       ${modalHead(`🏛 ${club.name}`)}
       ${club.description ? `<div class="row-sub" style="margin:-6px 0 12px">${esc(club.description)}</div>` : ''}
@@ -5328,46 +9216,41 @@
           <button class="btn btn-secondary" id="club-delete" style="flex:1;color:#c92a2a">🗑 Disband</button>
         </div>`
         : (club.joined ? '<button class="btn btn-secondary btn-block" id="club-leave" style="margin-top:12px">🚪 Leave club</button>' : '')}
-    `);
+    `, { route: { kind: 'club', id: club.id } });
     bindUserButtons(modal);
 
     const reopenInfo = async () => {
-      closeModal(modal);
-      try { openClubInfo(await api(`/clubs/${club.id}`)); } catch (e) { toast(e.message); }
+      try {
+        const fresh = await api(`/clubs/${club.id}`);
+        transitionModal(modal, () => openClubInfo(fresh));
+      } catch (e) { toast(e.message); }
     };
 
     modal.querySelector('#club-court')?.addEventListener('click', () => {
-      closeModal(modal);
-      openCourtDetail(club.home_court_id);
+      transitionModal(modal, () => openCourtDetail(club.home_court_id));
     });
     modal.querySelectorAll('[data-open-game]').forEach((row) => row.addEventListener('click', () => {
-      closeModal(modal);
-      openGameScreen(Number(row.dataset.openGame));
+      transitionModal(modal, () => openGameScreen(Number(row.dataset.openGame)));
     }));
     modal.querySelectorAll('[data-open-club-tournament]').forEach((row) => row.addEventListener('click', () => {
-      closeModal(modal);
-      openTournamentScreen(Number(row.dataset.openClubTournament));
+      transitionModal(modal, () => openTournamentScreen(Number(row.dataset.openClubTournament)));
     }));
     modal.querySelectorAll('[data-open-club-league]').forEach((row) => row.addEventListener('click', () => {
-      closeModal(modal);
-      openLeagueScreen(Number(row.dataset.openClubLeague));
+      transitionModal(modal, () => openLeagueScreen(Number(row.dataset.openClubLeague)));
     }));
     modal.querySelector('#club-chat-btn')?.addEventListener('click', () => {
-      closeModal(modal);
-      openClubChat(club);
+      transitionModal(modal, () => openClubChat(club));
     });
     modal.querySelector('#club-join-btn')?.addEventListener('click', async () => {
       try {
         const joined = await api(`/clubs/${club.id}/join`, { method: 'POST' });
         toast('Welcome to the club! 🎉');
-        closeModal(modal);
-        openClubChat(joined);
+        transitionModal(modal, () => openClubChat(joined));
         renderChat();
       } catch (e) { toast(e.message); }
     });
     modal.querySelector('#club-invite')?.addEventListener('click', () => {
-      closeModal(modal);
-      openClubInviteSheet(club);
+      transitionModal(modal, () => openClubInviteSheet(club));
     });
     modal.querySelector('#club-share').addEventListener('click', async () => {
       const url = `${location.origin}/cl/${club.id}`; // short link → OG preview in chat apps
@@ -5399,8 +9282,7 @@
       } catch (e) { toast(e.message); }
     });
     modal.querySelector('#club-edit')?.addEventListener('click', () => {
-      closeModal(modal);
-      openEditClubSheet(club);
+      transitionModal(modal, () => openEditClubSheet(club));
     });
     modal.querySelectorAll('[data-boot]').forEach((btn) => btn.addEventListener('click', async () => {
       if (!window.confirm('Remove this player from the club?')) return;
@@ -5413,8 +9295,13 @@
   }
 
   async function openClubInviteSheet(club) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let data;
-    try { data = await api('/friends'); } catch (e) { toast(e.message); return; }
+    try { data = await api('/friends'); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
     const memberIds = new Set((club.members || []).map((m) => m.id));
     const candidates = (data.friends || []).filter((f) => !memberIds.has(f.id));
 
@@ -5475,69 +9362,90 @@
   function openCreateClubSheet() {
     const modal = openModal(`
       ${modalHead('Start a club')}
+      <form id="cb-form" novalidate>
       <p class="row-sub" style="margin:-6px 0 12px">A club is your crew — a private chat room, a roster, and a home base other players can find and join.</p>
       <div class="form-field">
-        <label>Club name</label>
+        <label for="cb-name">Club name</label>
         <input type="text" id="cb-name" maxlength="80" placeholder="e.g. Sunrise Dinkers" />
       </div>
       <div class="form-field">
-        <label>What's the club about? (optional)</label>
+        <label for="cb-desc">What's the club about? (optional)</label>
         <input type="text" id="cb-desc" maxlength="200" placeholder="e.g. Early birds, all levels welcome" />
       </div>
       <div class="form-field">
-        <label>Home court (optional)</label>
+        <label for="cb-court-search">Home court (optional)</label>
         <input type="search" id="cb-court-search" placeholder="Search courts…" autocomplete="off" />
         <input type="hidden" id="cb-court-id" value="" />
         <div id="cb-court-results" style="margin-top:8px"></div>
       </div>
-      <button class="btn btn-primary btn-block" id="cb-submit" style="padding:15px">Create club</button>
+      <button type="submit" class="btn btn-primary btn-block" id="cb-submit" style="padding:15px">Create club</button>
+      </form>
     `);
     clubCourtPicker(modal, 'cb');
-    modal.querySelector('#cb-submit').addEventListener('click', async () => {
+    const formUX = bindModalFormUX(modal, '#cb-submit', { draftKey: 'create-club' });
+    modal.querySelector('#cb-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      formUX.clearError();
       const name = modal.querySelector('#cb-name').value.trim();
-      if (name.length < 3) { toast('Give your club a name (3+ characters)'); return; }
+      if (name.length < 3) {
+        formUX.showError('Give your club a name (3+ characters).', modal.querySelector('#cb-name'));
+        return;
+      }
       const courtId = Number(modal.querySelector('#cb-court-id').value) || null;
+      const finishSubmitting = formUX.startSubmitting('Creating club…');
+      if (!finishSubmitting) return;
       try {
         const club = await api('/clubs', { method: 'POST', body: JSON.stringify({
           name,
           description: modal.querySelector('#cb-desc').value.trim(),
           home_court_id: courtId,
         }) });
+        formUX.clearDraft({ disable: true });
         toast('Club created! 🏛');
-        closeModal(modal);
-        openClubChat(club);
+        transitionModal(modal, () => openClubChat(club));
         renderChat();
-      } catch (e) { toast(e.message); }
+      } catch (err) {
+        finishSubmitting();
+        formUX.showError(err.message);
+      }
     });
   }
 
   function openEditClubSheet(club) {
     const modal = openModal(`
       ${modalHead('Edit club')}
+      <form id="ce-form" novalidate>
       <div class="form-field">
-        <label>Club name</label>
+        <label for="ce-name">Club name</label>
         <input type="text" id="ce-name" maxlength="80" value="${esc(club.name)}" />
       </div>
       <div class="form-field">
-        <label>Description</label>
+        <label for="ce-desc">Description</label>
         <input type="text" id="ce-desc" maxlength="200" value="${esc(club.description || '')}" />
       </div>
       <div class="form-field">
-        <label>📣 Announcement (pinned in the club chat — members get pinged)</label>
+        <label for="ce-announce">📣 Announcement (pinned in the club chat — members get pinged)</label>
         <input type="text" id="ce-announce" maxlength="500" placeholder="e.g. Saturday session moved to 9 AM!" value="${esc(club.announcement || '')}" />
       </div>
       <div class="form-field">
-        <label>Home court</label>
+        <label for="ce-court-search">Home court</label>
         <input type="search" id="ce-court-search" placeholder="Search courts…" value="${esc(club.home_court_name || '')}" autocomplete="off" />
         <input type="hidden" id="ce-court-id" value="${club.home_court_id || ''}" />
         <div id="ce-court-results" style="margin-top:8px"></div>
       </div>
-      <button class="btn btn-primary btn-block" id="ce-save">Save changes</button>
+      <button type="submit" class="btn btn-primary btn-block" id="ce-save">Save changes</button>
+      </form>
     `);
     clubCourtPicker(modal, 'ce');
-    modal.querySelector('#ce-save').addEventListener('click', async () => {
+    const formUX = bindModalFormUX(modal, '#ce-save', { draftKey: `edit-club-${club.id}` });
+    modal.querySelector('#ce-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      formUX.clearError();
       const name = modal.querySelector('#ce-name').value.trim();
-      if (name.length < 3) { toast('Club name needs 3+ characters'); return; }
+      if (name.length < 3) {
+        formUX.showError('Club name needs 3+ characters.', modal.querySelector('#ce-name'));
+        return;
+      }
       const searchVal = modal.querySelector('#ce-court-search').value.trim();
       const body = {
         name,
@@ -5545,13 +9453,18 @@
         announcement: modal.querySelector('#ce-announce').value.trim(),
         home_court_id: searchVal ? (Number(modal.querySelector('#ce-court-id').value) || null) : null,
       };
+      const finishSubmitting = formUX.startSubmitting('Saving changes…');
+      if (!finishSubmitting) return;
       try {
         await api(`/clubs/${club.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        formUX.clearDraft({ disable: true });
         toast('Club updated');
-        closeModal(modal);
-        openClubScreen(club.id);
+        transitionModal(modal, () => openClubScreen(club.id));
         renderChat();
-      } catch (e) { toast(e.message); }
+      } catch (err) {
+        finishSubmitting();
+        formUX.showError(err.message);
+      }
     });
   }
 
@@ -5576,8 +9489,7 @@
         </div>`).join('')
         : '<div class="empty-state"><span class="big">🏛</span>No clubs found.<br>Start one and invite your crew!</div>';
       resultsEl.querySelectorAll('[data-open-club]').forEach((row) => row.addEventListener('click', () => {
-        closeModal(modal);
-        openClubScreen(Number(row.dataset.openClub));
+        transitionModal(modal, () => openClubScreen(Number(row.dataset.openClub)));
       }));
     };
     const load = async (q) => {
@@ -5595,8 +9507,13 @@
   }
 
   async function openCourtGallery(court, uploadFn) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let data;
-    try { data = await api(`/courts/${court.id}/photos`); } catch (e) { toast(e.message); return; }
+    try { data = await api(`/courts/${court.id}/photos`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
     const modal = openModal(`
       ${modalHead(`📷 ${court.name}`)}
       <div class="gallery-scroll">
@@ -5612,7 +9529,7 @@
       <button class="btn btn-secondary btn-block" id="gal-add" style="margin-top:12px">📷 Add your photo</button>
     `);
     modal.querySelector('#gal-add').addEventListener('click', () => {
-      if (uploadFn) uploadFn(() => { closeModal(modal); openCourtGallery(court, uploadFn); });
+      if (uploadFn) uploadFn(() => transitionModal(modal, () => openCourtGallery(court, uploadFn)));
     });
     modal.querySelectorAll('[data-like-photo]').forEach((btn) => btn.addEventListener('click', async () => {
       try {
@@ -5623,8 +9540,14 @@
   }
 
   async function openGameChat(game) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let data;
-    try { data = await api(`/games/${game.id}/chat`); } catch (e) { toast(e.message); return; }
+    try { data = await api(`/games/${game.id}/chat`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+    refreshMe(); // keep the global Community badge exact outside Inbox
 
     const modal = openModal(`
       <div class="thread">
@@ -5636,21 +9559,28 @@
             <div class="row-sub">${esc(data.game.court_name)} — only players in this game can read it</div>
           </div>
         </div>
-        <div class="thread-msgs" id="gc-msgs"></div>
+        <div class="thread-msgs" id="gc-msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Game conversation"></div>
         <form class="thread-input" id="gc-form">
-          <input type="text" id="gc-text" placeholder="Message your game…" autocomplete="off" maxlength="500" />
+          <input type="text" id="gc-text" placeholder="Message your game…" autocomplete="off" maxlength="2000" />
           <button type="submit" aria-label="Send">➤</button>
         </form>
       </div>
     `, { chat: true });
 
     const msgsEl = modal.querySelector('#gc-msgs');
+    const input = modal.querySelector('#gc-text');
+    const chatUX = bindChatContinuity(modal, msgsEl, input, `game:${game.id}`);
     let lastId = 0;
-    const renderMsgs = (items, append) => {
+    const renderMsgs = (items, append, { forceBottom = false, newMessages = false } = {}) => {
+      const batch = prepareChatRenderBatch(msgsEl, items, append);
+      if (batch.newestId) lastId = Math.max(lastId, batch.newestId);
+      items = batch.items;
+      if (append && !items.length) return;
+      const snapshot = chatUX.captureScroll();
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
           <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
@@ -5663,33 +9593,30 @@
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Coordinate with your game — “running late”, “bringing balls” <svg class="pb-ic"><use href="#pb"/></svg></div>';
-      if (items.length) lastId = items[items.length - 1].id;
-      msgsEl.scrollTop = msgsEl.scrollHeight;
-      hydrateChatImages(msgsEl);
+      chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0 });
+      hydrateChatImages(msgsEl, chatUX);
     };
-    renderMsgs(data.items, false);
-    attachChatViewport(modal, msgsEl, modal.querySelector('#gc-text'));
-    addPhotoToComposer(modal, '#gc-form', '#gc-text', `/games/${game.id}/chat`, renderMsgs);
+    renderMsgs(data.items, false, { forceBottom: true });
+    chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
+    addPhotoToComposer(modal, '#gc-form', '#gc-text', chatUX);
 
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       try {
         const fresh = await api(`/games/${game.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true);
+        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
         applyRoomHearts(msgsEl, fresh.heart_counts);
       } catch { /* offline */ }
     }, 5000);
 
     modal.querySelector('#gc-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = modal.querySelector('#gc-text');
       const body = input.value.trim();
       if (!body) return;
-      input.value = '';
       try {
-        const msg = await api(`/games/${game.id}/chat`, { method: 'POST', body: JSON.stringify({ body }) });
-        renderMsgs([msg], true);
-      } catch (err) { toast(err.message); input.value = body; } // don't lose the draft
+        await chatUX.send(body);
+      } catch (err) { toast(err.message); }
     });
   }
 
@@ -5705,8 +9632,13 @@
   }
 
   async function openUserProfile(userId) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let user;
-    try { user = await api(`/users/${userId}`); } catch (e) { toast(e.message); return; }
+    try { user = await api(`/users/${userId}`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
 
     let friendAction = '';
     if (userId !== state.me.id) {
@@ -5802,9 +9734,9 @@
             ⚑ Report
           </button>
         </div>` : ''}
-    `);
+    `, { label: `${user.display_name} profile` });
 
-    bindGameButtons(modal, () => { closeModal(modal); openUserProfile(userId); });
+    bindGameButtons(modal, () => transitionModal(modal, () => openUserProfile(userId)));
     modal.querySelectorAll('[data-open-tournament]').forEach((row) => row.addEventListener('click', () => {
       openTournamentScreen(Number(row.dataset.openTournament));
     }));
@@ -5812,8 +9744,7 @@
       openLeagueScreen(Number(row.dataset.openLeague));
     }));
     modal.querySelectorAll('[data-pcourt]').forEach((row) => row.addEventListener('click', () => {
-      closeModal(modal);
-      openCourtDetail(Number(row.dataset.pcourt));
+      transitionModal(modal, () => openCourtDetail(Number(row.dataset.pcourt)));
     }));
 
     modal.querySelector('#up-report')?.addEventListener('click', () => {
@@ -5836,8 +9767,7 @@
         try {
           await api(`/users/${userId}/unblock`, { method: 'POST' });
           toast('User unblocked');
-          closeModal(modal);
-          openUserProfile(userId);
+          transitionModal(modal, () => openUserProfile(userId));
         } catch (e) { toast(e.message); }
         return;
       }
@@ -5873,8 +9803,7 @@
       } catch (e) { toast(e.message); }
     });
     modal.querySelector('#up-msg')?.addEventListener('click', () => {
-      closeModal(modal);
-      openThread(userId);
+      transitionModal(modal, () => openThread(userId));
     });
     modal.querySelector('#up-challenge')?.addEventListener('click', () => {
       // Ranked singles, right now. Default to a court that makes sense:
@@ -5884,8 +9813,7 @@
       else if (state.me.home_court_id) court = { id: state.me.home_court_id, name: state.me.home_court_name };
       else if (user.home_court_id) court = { id: user.home_court_id, name: user.home_court_name };
       if (!court) { toast('Set a home court first (Profile → Edit) to challenge'); return; }
-      closeModal(modal);
-      openChallengeSheet(user, court);
+      transitionModal(modal, () => openChallengeSheet(user, court));
     });
     modal.querySelector('#up-schedule-shared')?.addEventListener('click', () => {
       // Open the scheduler pre-set to the shared slot whose next occurrence
@@ -5895,17 +9823,50 @@
       const today = new Date().getDay();
       const daysUntil = (s) => ((dow[s.split('-')[0]] - today) + 7) % 7;
       const slot = shared.sort((x, y) => daysUntil(x) - daysUntil(y))[0];
-      closeModal(modal);
-      openNewGameModal(null, 'casual', false, slot);
-      toast(`Pick a court — invite ${esc(user.display_name.split(' ')[0])} below 🏓`);
+      transitionModal(modal, () => openNewGameModal(null, 'casual', false, slot, userId));
     });
   }
 
   // ---------- My profile tab ----------
-  async function renderProfile() {
+  let profileRenderGeneration = 0;
+  let profileDashboardCache = { userId: null, promise: null, data: null, readyAt: 0 };
+
+  function profileDashboardRequest(userId, { reuse = false } = {}) {
+    const sameUser = profileDashboardCache.userId === userId;
+    if (reuse && sameUser && profileDashboardCache.promise) {
+      return profileDashboardCache.promise;
+    }
+    if (reuse && sameUser && profileDashboardCache.data
+        && Date.now() - profileDashboardCache.readyAt < VIEW_FRESH_MS) {
+      return Promise.resolve(profileDashboardCache.data);
+    }
+    const promise = api('/me/dashboard');
+    profileDashboardCache = { userId, promise, data: null, readyAt: 0 };
+    promise.then((data) => {
+      if (profileDashboardCache.userId !== userId
+          || profileDashboardCache.promise !== promise) return;
+      profileDashboardCache = {
+        userId, promise: null, data, readyAt: Date.now(),
+      };
+    }, () => {
+      if (profileDashboardCache.userId === userId
+          && profileDashboardCache.promise === promise) {
+        profileDashboardCache = { userId, promise: null, data: null, readyAt: 0 };
+      }
+    });
+    return promise;
+  }
+
+  async function renderProfile({ reuseDashboard = false } = {}) {
+    const generation = ++profileRenderGeneration;
     const el = $('#profile-content');
     const me = state.me;
     if (!me) return;
+    el.dataset.profileRender = String(generation);
+    const renderIsCurrent = () => generation === profileRenderGeneration
+      && el.dataset.profileRender === String(generation)
+      && state.tab === 'profile'
+      && state.me && state.me.id === me.id;
     const total = me.ranked_wins + me.ranked_losses;
     const winPct = total ? Math.round((me.ranked_wins / total) * 100) : 0;
 
@@ -5921,7 +9882,9 @@
         <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">${(me.ranked_wins + me.ranked_losses) ? `Ranked record · ${winPct}%` : 'Ranked record'}</div></div>
         <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? '🔥' : ''}${me.current_streak}</div><div class="stat-label">Streak · best ${me.best_streak}</div></div>
       </div>
-      <div id="pf-play-stats"></div>
+      <div id="pf-play-stats" aria-busy="true" style="min-height:146px">
+        <div class="section-label">Your play stats</div>${skeletonHtml(1)}
+      </div>
       ${state.presence && state.presence.checked_in ? `
         <div class="card row">
           <span style="font-size:22px">📍</span>
@@ -5931,9 +9894,15 @@
           </div>
           <button class="btn btn-secondary btn-sm" id="pf-checkout">Check out</button>
         </div>` : ''}
-      <div id="pf-upcoming"></div>
-      <div id="pf-courts"></div>
-      <div id="pf-history"></div>
+      <div id="pf-upcoming" aria-busy="true" style="min-height:108px">
+        <div class="section-label">My upcoming games</div>${skeletonHtml(1)}
+      </div>
+      <div id="pf-courts" aria-busy="true" style="min-height:108px">
+        <div class="section-label">Saved courts</div>${skeletonHtml(1)}
+      </div>
+      <div id="pf-history" aria-busy="true" style="min-height:166px">
+        <div class="section-label">Match history</div>${skeletonHtml(2)}
+      </div>
       <div class="section-label">Settings</div>
       <div class="card row" style="margin-bottom:10px">
         <span style="font-size:20px">🏠</span>
@@ -5949,8 +9918,8 @@
           <div class="row-title" style="font-size:14px">Auto check-in</div>
           <div class="row-sub">Checks you in when you arrive at a court (while the app is open)</div>
         </div>
-        <button class="btn btn-sm ${localStorage.getItem('pp_auto_checkin') === 'off' ? 'btn-secondary' : 'btn-primary'}" id="pf-auto">
-          ${localStorage.getItem('pp_auto_checkin') === 'off' ? 'Off' : 'On'}
+        <button class="btn btn-sm ${autoCheckInEnabled() ? 'btn-primary' : 'btn-secondary'}" id="pf-auto" aria-pressed="${autoCheckInEnabled()}">
+          ${autoCheckInEnabled() ? 'On' : 'Off'}
         </button>
       </div>
       <div class="card row" style="margin-bottom:10px">
@@ -6002,6 +9971,22 @@
       <button class="btn btn-danger btn-block" id="pf-logout">Log out</button>
     `;
 
+    // One dashboard response keeps Profile to a single mobile round trip while
+    // preserving the endpoint-parity section shapes consumed below.
+    const profileDataPromise = profileDashboardRequest(me.id, {
+      reuse: reuseDashboard,
+    }).then((dashboard) => [
+      { status: 'fulfilled', value: dashboard.games },
+      { status: 'fulfilled', value: dashboard.stats },
+      { status: 'fulfilled', value: dashboard.favorites },
+      { status: 'fulfilled', value: dashboard.history },
+    ], (reason) => [
+      { status: 'rejected', reason },
+      { status: 'rejected', reason },
+      { status: 'rejected', reason },
+      { status: 'rejected', reason },
+    ]);
+
     el.querySelector('#pf-feedback')?.addEventListener('click', () => {
       const sheet = openModal(`
         ${modalHead('💡 Send feedback')}
@@ -6038,16 +10023,19 @@
       applyTheme();
       renderProfile();
     }));
-    el.querySelector('#pf-auto').addEventListener('click', (e) => {
-      const off = localStorage.getItem('pp_auto_checkin') === 'off';
-      localStorage.setItem('pp_auto_checkin', off ? 'on' : 'off');
-      e.target.textContent = off ? 'On' : 'Off';
-      e.target.classList.toggle('btn-primary', off);
-      e.target.classList.toggle('btn-secondary', !off);
-      toast(off ? 'Auto check-in on 📍' : 'Auto check-in off');
+    el.querySelector('#pf-auto').addEventListener('click', () => {
+      if (!autoCheckInEnabled()) {
+        openAutoCheckInConsent(renderProfile);
+        return;
+      }
+      setAutoCheckInEnabled(false);
+      stopLocationWatch();
+      toast('Auto check-in off');
+      renderProfile();
     });
 
     el.querySelector('#pf-calendar').addEventListener('click', async () => {
+      const modalLoad = beginRoutedOverlayLoad(null);
       let webcal;
       let feed;
       try {
@@ -6055,7 +10043,11 @@
         // webcal:// prompts a subscribe (auto-updating), unlike a one-off .ics.
         feed = `${location.host}/api/calendar/${token}.ics`;
         webcal = `webcal://${feed}`;
-      } catch (e) { toast(e.message); return; }
+      } catch (e) {
+        if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+        toast(e.message); return;
+      }
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
       try {
         if (navigator.share) {
           await navigator.share({ title: 'My Third Shot games', url: `${location.protocol}//${feed}` });
@@ -6064,6 +10056,7 @@
           toast('Calendar link copied — add it in your calendar app 📅');
         }
       } catch {
+        if (!routedOverlayLoadIsCurrent(modalLoad)) return;
         // Share cancelled or clipboard blocked — show the link so the user
         // can copy it themselves instead of a raw browser error.
         openModal(`
@@ -6079,33 +10072,61 @@
     el.querySelector('#pf-logout').addEventListener('click', logout);
     el.querySelector('#pf-edit').addEventListener('click', openEditProfile);
     el.querySelector('#pf-activity').addEventListener('click', openActivity);
-    el.querySelector('#pf-checkout')?.addEventListener('click', async () => {
+    el.querySelector('#pf-checkout')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = 'Checking out…';
       const prev = state.presence;
-      await api('/checkout', { method: 'POST' });
-      await refreshMe();
-      renderProfile();
-      maybeAskConditions(prev);
+      const followupLoad = beginRoutedOverlayLoad(null);
+      try {
+        await api('/checkout', { method: 'POST' });
+        await refreshMe();
+        renderProfile();
+        if (routedOverlayLoadIsCurrent(followupLoad)) maybeAskConditions(prev);
+      } catch (err) {
+        toast(err.message);
+        btn.disabled = false;
+        btn.textContent = 'Check out';
+      }
+    });
+
+    const [mineResult, statsResult, favoritesResult, historyResult] = await profileDataPromise;
+    if (!renderIsCurrent()) return;
+
+    // Remove all reserved loading space in one paint, then hydrate the same
+    // fixed section nodes. A newer Profile render (or another active tab) owns
+    // the DOM as soon as the generation/current-view guard above stops matching.
+    const statsEl = el.querySelector('#pf-play-stats');
+    const upcomingEl = el.querySelector('#pf-upcoming');
+    const courtsEl = el.querySelector('#pf-courts');
+    const historyEl = el.querySelector('#pf-history');
+    [statsEl, upcomingEl, courtsEl, historyEl].forEach((section) => {
+      section.innerHTML = '';
+      section.removeAttribute('aria-busy');
+      section.style.removeProperty('min-height');
     });
 
     // My upcoming games (parity with public profiles), tappable into the game screen.
     try {
-      const mine = await api('/games?mine=1');
+      const mine = mineResult.status === 'fulfilled' ? mineResult.value : null;
+      if (!mine) throw mineResult.reason;
       const nowMs = Date.now();
       const up = (mine.items || []).filter((game) =>
         game.status === 'upcoming' && new Date(game.scheduled_at).getTime() > nowMs);
       if (up.length) {
-        const upEl = el.querySelector('#pf-upcoming');
-        upEl.innerHTML = '<div class="section-label">My upcoming games</div>'
+        upcomingEl.innerHTML = '<div class="section-label">My upcoming games</div>'
           + up.map((game) => gameCardHtml(game)).join('');
-        bindGameButtons(upEl, renderProfile);
+        bindGameButtons(upcomingEl, renderProfile);
       }
     } catch { /* ignore */ }
 
     // Personal play stats — quietly skipped for brand-new players.
     try {
-      const stats = await api('/me/stats');
+      const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+      if (!stats) throw statsResult.reason;
       if (stats.games_total > 0) {
-        el.querySelector('#pf-play-stats').innerHTML = `
+        statsEl.innerHTML = `
           <div class="stat-grid" style="margin-top:10px">
             <div class="stat-card"><div class="stat-value">${stats.games_this_month}</div><div class="stat-label">Games this month</div></div>
             <div class="stat-card"><div class="stat-value">${stats.week_streak >= 2 ? '🔥' : ''}${stats.week_streak}</div><div class="stat-label">Week streak</div></div>
@@ -6122,28 +10143,28 @@
           extras.push(`🥊 Most faced: <b data-view-user="${stats.top_rival.user_id}" style="cursor:pointer">${esc(stats.top_rival.display_name)}</b> · you're ${stats.top_rival.your_wins}–${stats.top_rival.games - stats.top_rival.your_wins}`);
         }
         if (extras.length) {
-          el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
+          statsEl.insertAdjacentHTML('beforeend',
             `<div class="row-sub" style="text-align:center;margin-top:8px">${extras.join('<br>')}</div>`);
         }
-        el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', formStripHtml(stats.form));
-        el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', ratingSparklineHtml(stats.rating_history));
+        statsEl.insertAdjacentHTML('beforeend', formStripHtml(stats.form));
+        statsEl.insertAdjacentHTML('beforeend', ratingSparklineHtml(stats.rating_history));
         if ((stats.badges || []).length || (stats.badge_progress || []).length) {
           const earned = (stats.badges || []).map((b) =>
             `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}${b.id === 'mvp' && stats.mvp_awards > 1 ? ` ×${stats.mvp_awards}` : ''}</span>`);
           // Locked badges show dimmed with progress toward the next milestone.
           const locked = (stats.badge_progress || []).map((b) =>
             `<span class="tag" style="margin:0;opacity:.5;filter:grayscale(1)" title="${esc(b.label)} (${b.current}/${b.target})">${b.emoji} ${esc(b.label)} ${b.current}/${b.target}</span>`);
-          el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', `
+          statsEl.insertAdjacentHTML('beforeend', `
             <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
               ${[...earned, ...locked].join('')}
             </div>`);
         }
-        el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
+        statsEl.insertAdjacentHTML('beforeend',
           tournamentTitlesHtml(stats.tournament_titles, stats.league_titles));
-        el.querySelectorAll('[data-open-tournament]').forEach((row) => {
+        statsEl.querySelectorAll('[data-open-tournament]').forEach((row) => {
           row.addEventListener('click', () => openTournamentScreen(Number(row.dataset.openTournament)));
         });
-        el.querySelectorAll('[data-open-league]').forEach((row) => {
+        statsEl.querySelectorAll('[data-open-league]').forEach((row) => {
           row.addEventListener('click', () => openLeagueScreen(Number(row.dataset.openLeague)));
         });
         if (stats.insights) {
@@ -6158,7 +10179,7 @@
             lines.push(`${ins.avg_margin >= 0 ? '📈' : '📉'} Average margin: ${ins.avg_margin > 0 ? '+' : ''}${ins.avg_margin} points`);
           }
           if (lines.length) {
-            el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', `
+            statsEl.insertAdjacentHTML('beforeend', `
               <div class="card" style="margin-top:12px;padding:12px 14px">
                 <div style="font-weight:800;font-size:14px;text-align:center;margin-bottom:6px">📊 Your patterns</div>
                 ${lines.map((l) => `<div class="row-sub" style="padding:2px 0">${l}</div>`).join('')}
@@ -6174,7 +10195,7 @@
         if (me.ranked_wins + me.ranked_losses >= 5
             && LEVEL_ORDER.indexOf(suggested) > LEVEL_ORDER.indexOf(me.skill_level)
             && localStorage.getItem(`pp_skill_nudge_${suggested}`) !== '1') {
-          el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend', `
+          statsEl.insertAdjacentHTML('beforeend', `
             <div class="card" id="pf-skill-nudge" style="margin-top:12px;padding:12px 14px;text-align:center">
               <div style="font-weight:700;font-size:14px">📈 Your rating plays like ${skillLabel(suggested)}</div>
               <div class="row-sub" style="margin:4px 0 10px">You're listed as ${skillLabel(me.skill_level)} — level up your label?</div>
@@ -6197,7 +10218,7 @@
         }
 
         // Brag line built from real numbers, carrying the invite deep link.
-        el.querySelector('#pf-play-stats').insertAdjacentHTML('beforeend',
+        statsEl.insertAdjacentHTML('beforeend',
           '<button class="btn btn-secondary btn-sm btn-block" id="pf-share-season" style="margin-top:12px">📤 Share my season</button>');
         el.querySelector('#pf-share-season').addEventListener('click', async () => {
           const bits = [];
@@ -6213,14 +10234,14 @@
           } catch { /* user cancelled */ }
         });
         el.querySelector('[data-pfcourt-top]')?.addEventListener('click', (e) => openCourtDetail(Number(e.currentTarget.dataset.pfcourtTop)));
-        bindUserButtons(el.querySelector('#pf-play-stats'));
+        bindUserButtons(statsEl);
       }
     } catch { /* ignore */ }
 
     // Saved courts (home court first), tappable into court detail.
     try {
-      const favs = await api('/courts/favorites');
-      const courtsEl = el.querySelector('#pf-courts');
+      const favs = favoritesResult.status === 'fulfilled' ? favoritesResult.value : null;
+      if (!favs) throw favoritesResult.reason;
       const rows = [];
       const seen = new Set();
       if (me.home_court_id) {
@@ -6244,9 +10265,9 @@
     } catch { /* ignore */ }
 
     try {
-      const history = await api('/games/history');
+      const history = historyResult.status === 'fulfilled' ? historyResult.value : null;
+      if (!history) throw historyResult.reason;
       if (history.items.length) {
-        const historyEl = el.querySelector('#pf-history');
         const filters = [
           ['all', 'All', () => true],
           ['wins', '🏆 Wins', (g) => g.you_won === true],
@@ -6278,48 +10299,55 @@
 
   function openEditProfile() {
     const me = state.me;
-    const colors = ['#2f9e44', '#1971c2', '#e8590c', '#9c36b5', '#0c8599', '#e03131', '#f08c00', '#5f3dc4'];
+    const colors = [
+      ['#2f9e44', 'Green'], ['#1971c2', 'Blue'], ['#e8590c', 'Orange'], ['#9c36b5', 'Purple'],
+      ['#0c8599', 'Teal'], ['#e03131', 'Red'], ['#f08c00', 'Amber'], ['#5f3dc4', 'Indigo'],
+    ];
     const modal = openModal(`
       ${modalHead('Edit profile')}
-      <div class="form-field"><label>Display name</label><input type="text" id="ep-name" value="${esc(me.display_name)}" maxlength="60" /></div>
-      <div class="form-field"><label>Bio</label><textarea id="ep-bio" rows="2" maxlength="300">${esc(me.bio || '')}</textarea></div>
+      <form id="ep-form" novalidate>
+      <div class="form-field"><label for="ep-name">Display name</label><input type="text" id="ep-name" value="${esc(me.display_name)}" maxlength="60" autocomplete="name" /></div>
+      <div class="form-field"><label for="ep-bio">Bio</label><textarea id="ep-bio" rows="2" maxlength="300">${esc(me.bio || '')}</textarea></div>
       <div class="form-field">
-        <label>Skill level</label>
+        <label for="ep-skill">Skill level</label>
         <select id="ep-skill">
           ${['beginner', 'intermediate', 'advanced', 'pro'].map((s) => `<option value="${s}" ${me.skill_level === s ? 'selected' : ''}>${skillLabel(s)}</option>`).join('')}
         </select>
       </div>
       <div class="form-field">
-        <label>Profile photo (optional)</label>
+        <label for="ep-avatar-url">Profile photo (optional)</label>
         <div class="row" style="gap:10px">
           <div id="ep-avatar-preview">${avatarHtml(me)}</div>
-          <input type="url" id="ep-avatar-url" placeholder="Paste an image URL…" value="${esc(me.avatar_url || '')}" style="flex:1" />
+          <input type="url" id="ep-avatar-url" placeholder="Paste an image URL…" value="${esc(me.avatar_url || '')}" autocomplete="url" style="flex:1" />
         </div>
         <p class="row-sub" style="margin-top:4px">Leave blank to use your colored initials.</p>
       </div>
       <div class="form-field">
-        <label>Avatar color</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          ${colors.map((c) => `<button type="button" class="avatar" data-color="${c}" style="background:${c};outline:${me.avatar_color === c ? '3px solid var(--ink)' : 'none'}">${esc(initials(me.display_name))}</button>`).join('')}
+        <label id="ep-avatar-color-label">Avatar color</label>
+        <div role="group" aria-labelledby="ep-avatar-color-label" style="display:flex;gap:8px;flex-wrap:wrap">
+          ${colors.map(([value, label]) => `<button type="button" class="avatar" data-color="${value}" aria-label="${label}" aria-pressed="${me.avatar_color === value}" style="background:${value};outline:${me.avatar_color === value ? '3px solid var(--ink)' : 'none'}">${esc(initials(me.display_name))}</button>`).join('')}
         </div>
       </div>
       <div class="form-field">
-        <label>Usually plays</label>
-        <p class="row-sub" style="margin-bottom:6px">Tap when you typically play — helps players find partners on their schedule.</p>
+        <label id="ep-availability-label">Usually plays</label>
+        <p class="row-sub" id="ep-availability-hint" style="margin-bottom:6px">Tap when you typically play — helps players find partners on their schedule.</p>
+        <div role="group" aria-labelledby="ep-availability-label" aria-describedby="ep-availability-hint">
         ${AVAIL_PARTS.map(([part, emoji, partLabel]) => `
           <div class="av-row">
             <span class="av-emoji" title="${partLabel}" style="display:inline-flex;flex-direction:column;align-items:center;min-width:56px">${emoji}<span style="font-size:8px;font-weight:700;color:var(--ink-soft);letter-spacing:.02em">${partLabel.slice(0, -1).toUpperCase()}</span></span>
             ${AVAIL_DAYS.map((d) => `
-              <button type="button" class="av-chip ${(me.availability || []).includes(`${d}-${part}`) ? 'active' : ''}" data-av="${d}-${part}" aria-label="${partLabel} ${d}">${d[0].toUpperCase()}</button>`).join('')}
+              <button type="button" class="av-chip ${(me.availability || []).includes(`${d}-${part}`) ? 'active' : ''}" data-av="${d}-${part}" aria-label="${partLabel} ${d}" aria-pressed="${(me.availability || []).includes(`${d}-${part}`)}">${d[0].toUpperCase()}</button>`).join('')}
           </div>`).join('')}
+        </div>
       </div>
       <div class="form-field">
-        <label>Home court</label>
-        <input type="text" id="ep-court-search" placeholder="${me.home_court_name ? esc(me.home_court_name) : 'Search courts…'}" />
+        <label for="ep-court-search">Home court</label>
+        <input type="search" id="ep-court-search" placeholder="${me.home_court_name ? esc(me.home_court_name) : 'Search courts…'}" autocomplete="off" />
         <input type="hidden" id="ep-court-id" value="${me.home_court_id || ''}" />
         <div id="ep-court-results"></div>
       </div>
-      <button class="btn btn-primary btn-block" id="ep-save">Save</button>
+      <button type="submit" class="btn btn-primary btn-block" id="ep-save">Save</button>
+      </form>
       <details style="margin-top:22px">
         <summary style="font-size:13px;font-weight:600;cursor:pointer">🔔 Notifications</summary>
         <div style="margin-top:10px">
@@ -6338,24 +10366,30 @@
       <details style="margin-top:22px">
         <summary style="font-size:13px;font-weight:600;cursor:pointer">Change password</summary>
         <div class="form-field" style="margin-top:10px">
+          <label class="sr-only" for="ep-pw-current">Current password</label>
           <input type="password" id="ep-pw-current" placeholder="Current password" autocomplete="current-password" />
+          <label class="sr-only" for="ep-pw-new">New password</label>
           <input type="password" id="ep-pw-new" placeholder="New password (6+ characters)" autocomplete="new-password" style="margin-top:8px" />
-          <button class="btn btn-secondary btn-block" id="ep-pw-save" style="margin-top:8px">Update password</button>
+          <button type="button" class="btn btn-secondary btn-block" id="ep-pw-save" style="margin-top:8px">Update password</button>
         </div>
       </details>
       <details style="margin-top:22px">
         <summary style="color:#e03131;font-size:13px;font-weight:600;cursor:pointer">Danger zone</summary>
         <div class="form-field" style="margin-top:10px">
-          <label>Delete account</label>
+          <label for="ep-delete-password">Delete account</label>
           <p class="row-sub" style="margin-bottom:8px">Permanently removes your profile, friends, messages, and check-ins. Completed match results stay for your opponents, shown as “Deleted player”. This cannot be undone.</p>
           <input type="password" id="ep-delete-password" placeholder="Confirm your password" autocomplete="current-password" />
-          <button class="btn btn-danger btn-block" id="ep-delete" style="margin-top:8px">Delete my account</button>
+          <button type="button" class="btn btn-danger btn-block" id="ep-delete" style="margin-top:8px">Delete my account</button>
         </div>
       </details>
     `);
 
+    const formUX = bindModalFormUX(modal, '#ep-save', { draftKey: 'edit-profile' });
     modal.querySelectorAll('[data-av]').forEach((chip) =>
-      chip.addEventListener('click', () => chip.classList.toggle('active')));
+      chip.addEventListener('click', () => {
+        const active = chip.classList.toggle('active');
+        chip.setAttribute('aria-pressed', String(active));
+      }));
 
     let color = me.avatar_color;
     const avatarUrlInput = modal.querySelector('#ep-avatar-url');
@@ -6368,7 +10402,11 @@
     avatarUrlInput.addEventListener('input', refreshAvatarPreview);
     modal.querySelectorAll('[data-color]').forEach((b) => b.addEventListener('click', () => {
       color = b.dataset.color;
-      modal.querySelectorAll('[data-color]').forEach((x) => { x.style.outline = x === b ? '3px solid var(--ink)' : 'none'; });
+      modal.querySelectorAll('[data-color]').forEach((x) => {
+        const active = x === b;
+        x.style.outline = active ? '3px solid var(--ink)' : 'none';
+        x.setAttribute('aria-pressed', String(active));
+      });
       refreshAvatarPreview();
     }));
 
@@ -6383,10 +10421,12 @@
         if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
         const data = await api(url);
         modal.querySelector('#ep-court-results').innerHTML = data.items.map((c) => `
-          <div class="card" data-pick="${c.id}" data-name="${esc(c.name)}" style="cursor:pointer;margin:6px 0;padding:10px">
-            <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
-            <div class="row-sub">${esc(c.city)}</div>
-          </div>`).join('');
+          <button type="button" class="court-suggestion" data-pick="${c.id}" data-name="${esc(c.name)}" style="margin:6px 0">
+            <span class="row-main" style="display:block">
+              <span class="row-title" style="display:block;font-size:14px">${esc(c.name)}</span>
+              <span class="row-sub" style="display:block">${esc(c.city)}</span>
+            </span>
+          </button>`).join('');
         modal.querySelectorAll('[data-pick]').forEach((row) => row.addEventListener('click', () => {
           modal.querySelector('#ep-court-id').value = row.dataset.pick;
           courtSearch.value = row.dataset.name;
@@ -6454,10 +10494,19 @@
       } catch (err) { toast(err.message); btn.disabled = false; }
     });
 
-    modal.querySelector('#ep-save').addEventListener('click', async () => {
+    modal.querySelector('#ep-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      formUX.clearError();
+      const nameInput = modal.querySelector('#ep-name');
+      if (!nameInput.value.trim()) {
+        formUX.showError('Please enter a display name.', nameInput);
+        return;
+      }
+      const finishSubmitting = formUX.startSubmitting('Saving profile…');
+      if (!finishSubmitting) return;
       try {
         const body = {
-          display_name: modal.querySelector('#ep-name').value.trim(),
+          display_name: nameInput.value.trim(),
           bio: modal.querySelector('#ep-bio').value.trim(),
           skill_level: modal.querySelector('#ep-skill').value,
           avatar_color: color,
@@ -6470,11 +10519,16 @@
         const courtId = modal.querySelector('#ep-court-id').value;
         if (courtId) body.home_court_id = Number(courtId);
         const data = await api('/me', { method: 'PATCH', body: JSON.stringify(body) });
+        formUX.clearDraft({ disable: true });
         applyMe(data);
         closeModal(modal);
         toast('Profile updated');
         renderProfile();
-      } catch (e) { toast(e.message); }
+      } catch (err) {
+        finishSubmitting();
+        const target = /display name/i.test(err.message) ? nameInput : null;
+        formUX.showError(err.message, target);
+      }
     });
 
     // Notification switches live below the Save button — apply them the
@@ -6563,10 +10617,10 @@
              <button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button>`
           : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">⏳ Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
       } else if (game.is_joined) {
-        if (game.players.length >= 2) {
+        const startsAhead = new Date(game.scheduled_at).getTime() > Date.now();
+        if (!startsAhead && game.players.length >= 2) {
           actions = `<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">📝 Enter the score</button>`;
         }
-        const startsAhead = new Date(game.scheduled_at).getTime() > Date.now();
         if (startsAhead) {
           const mine = game.players.find((p) => p.user_id === (state.me && state.me.id));
           if (mine && !mine.attending) {
@@ -6636,20 +10690,21 @@
   }
 
   async function openGameScreen(gameId) {
+    const routeLoad = beginRoutedOverlayLoad({ kind: 'game', id: gameId });
     let game;
     try { game = await api(`/games/${gameId}`); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
       toast(e.message);
       clearDeadDeepLink(`#game/${gameId}`);
       return;
     }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
 
-    const modal = openModal('');
+    const modal = openModal('', { route: { kind: 'game', id: gameId }, label: 'Game details' });
     const box = modal.querySelector('.modal');
     let fingerprint = '';
-    try { history.replaceState(null, '', `#game/${gameId}`); } catch { /* ignore */ }
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) { try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ } }
-    });
+    let rematchAttemptId = null;
+    let rematchScheduledAt = null;
 
     const render = (fresh) => {
       game = fresh;
@@ -6665,9 +10720,7 @@
     function bind() {
       const court = game.court || {};
       const isChallenge = game.notes.startsWith('⚔️');
-      const clearHash = () => { try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ } };
-      box.querySelectorAll('.modal-close').forEach((b) => { b.onclick = () => { clearHash(); closeModal(modal); }; });
-      box.querySelector('#gs-court')?.addEventListener('click', () => { clearHash(); closeModal(modal); openCourtDetail(court.id); });
+      box.querySelector('#gs-court')?.addEventListener('click', () => transitionModal(modal, () => openCourtDetail(court.id)));
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
       box.querySelector('#gs-calendar')?.addEventListener('click', () => downloadIcs(game));
       box.querySelector('#gs-post-court')?.addEventListener('click', async (e) => {
@@ -6686,8 +10739,10 @@
         } catch (err) { toast(err.message); btn.disabled = false; }
       });
       box.querySelector('#gs-invite')?.addEventListener('click', async () => {
+        const modalLoad = beginRoutedOverlayLoad(null);
         let friends = [];
         try { friends = (await api('/friends')).friends || []; } catch { /* offline */ }
+        if (!routedOverlayLoadIsCurrent(modalLoad)) return;
         const inGame = new Set(game.players.map((p) => p.user_id));
         const invitable = friends.filter((f) => !inGame.has(f.id));
         const sheet = openModal(`
@@ -6802,14 +10857,12 @@
       });
       box.querySelector('#gs-score')?.addEventListener('click', async () => {
         const fresh = await api(`/games/${gameId}`);
-        closeModal(modal);
-        openScoreModal(fresh, () => refreshMe());
+        transitionModal(modal, () => openScoreModal(fresh, () => refreshMe()));
       });
       box.querySelector('#gs-confirm')?.addEventListener('click', async () => {
         try {
           const updated = await api(`/games/${gameId}/confirm`, { method: 'POST' });
-          closeModal(modal);
-          showCelebration(updated);
+          transitionModal(modal, () => showCelebration(updated));
           refreshMe();
           if (state.tab === 'play') renderPlay();
         } catch (e) { toast(e.message); reopenFresh(); }
@@ -6825,37 +10878,45 @@
         const btn = e.currentTarget;
         if (btn.disabled) return;
         btn.disabled = true;
+        rematchAttemptId ||= newGameAttemptId();
+        rematchScheduledAt ||= new Date().toISOString();
         const others = game.players.map((p) => p.user_id).filter((id) => id !== state.me.id);
         try {
           const rematch = await api('/games', {
             method: 'POST',
             body: JSON.stringify({
               court_id: court.id,
-              scheduled_at: new Date().toISOString(),
+              scheduled_at: rematchScheduledAt,
               game_type: game.game_type,
               max_players: game.max_players,
               visibility: others.length ? 'private' : 'open',
               invite_user_ids: others,
               notes: '↺ Rematch!',
+              client_attempt_id: rematchAttemptId,
             }),
           });
-          clearHash();
-          closeModal(modal);
           toast(others.length ? 'Rematch is on — invites sent ⚔️' : 'Rematch is on ⚔️');
           refreshMe();
-          openGameScreen(rematch.id);
+          transitionModal(modal, () => openGameScreen(rematch.id));
         } catch (err) { toast(err.message); btn.disabled = false; }
       });
-      box.querySelector('#gs-leave')?.addEventListener('click', async () => {
+      box.querySelector('#gs-leave')?.addEventListener('click', async (e) => {
+        if (!confirm("Leave this game? The host and other players will see that your spot opened.")) return;
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = 'Leaving…';
         try {
           await api(`/games/${gameId}/leave`, { method: 'POST' });
           toast('Left the game');
           closeModal(modal); refreshMe();
           if (state.tab === 'play') renderPlay();
-        } catch (e) { toast(e.message); reopenFresh(); }
+        } catch (err) { toast(err.message); reopenFresh(); }
       });
-      box.querySelector('#gs-cancel')?.addEventListener('click', async () => {
+      box.querySelector('#gs-cancel')?.addEventListener('click', async (e) => {
         if (!confirm('Cancel this game for everyone?')) return;
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = 'Cancelling…';
         try {
           await api(`/games/${gameId}/cancel`, { method: 'POST' });
           toast('Game cancelled');
@@ -6903,6 +10964,7 @@
     // Live sync: while this screen is open, pick up joins, scores, confirmations…
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(box)) { clearInterval(pollTimer); return; }
+      if (document.hidden || state.connectionState === 'offline') return;
       try {
         const fresh = await api(`/games/${gameId}`);
         if (gameFingerprint(fresh) !== fingerprint) {
@@ -6913,18 +10975,35 @@
     }, 5000);
   }
 
+  function safeNotificationOverlayRoute(actionUrl) {
+    if (!actionUrl || typeof actionUrl !== 'string') return null;
+    try {
+      const url = new URL(actionUrl, location.origin);
+      if (url.origin !== location.origin) return null;
+      return normalizeOverlayRoute(url.hash);
+    } catch { return null; }
+  }
+
   async function openActivity() {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let data;
-    try { data = await api('/notifications'); } catch (e) { toast(e.message); return; }
+    try { data = await api('/notifications'); } catch (e) {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      toast(e.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
     const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🏓', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🏓', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣', league_update: '📦', league_match: '🎯', league_message: '💬', nearby_games: '🗓', streak_nag: '🔥' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
-      if (n.related_league_id) return { type: 'league', id: n.related_league_id };
+      const actionRoute = safeNotificationOverlayRoute(n.action_url);
+      if (actionRoute) return { type: 'route', ...actionRoute };
+      const relatedMatchId = Number(n.related_match_id || n.match_id || 0) || null;
+      if (n.related_league_id) return { type: 'league', id: n.related_league_id, matchId: relatedMatchId };
       if (n.related_club_id) return { type: 'club', id: n.related_club_id };
-      if (n.related_tournament_id) return { type: 'tournament', id: n.related_tournament_id };
+      if (n.related_tournament_id) return { type: 'tournament', id: n.related_tournament_id, matchId: relatedMatchId };
       if (n.related_game_id) return { type: 'game', id: n.related_game_id };
       if (n.related_user_id && (n.kind === 'friend_request' || n.kind === 'friend_accept' || n.kind === 'friend_checkin' || n.kind === 'player_coming')) {
         return { type: 'user', id: n.related_user_id };
@@ -6943,11 +11022,12 @@
       const t = targetFor(n);
       const time = new Date(n.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       listHtml += `
-        <div class="card row" ${t ? `data-notif-type="${t.type}" data-notif-id="${t.id}" style="cursor:pointer"` : ''}>
+        <div class="card row" ${t ? `data-notif-type="${t.type}" data-notif-kind="${t.kind || ''}" data-notif-id="${t.id}" data-notif-match="${t.matchId || ''}" style="cursor:pointer"` : ''}>
           ${n.read ? '' : '<span class="notif-dot"></span>'}
           <span style="font-size:20px">${icons[n.kind] || '🔔'}</span>
           <div class="row-main">
             <div class="row-title notif-title" style="font-size:14px;${n.read ? '' : 'font-weight:800'}">${esc(n.title)}</div>
+            ${n.body ? `<div class="row-sub notif-body">${esc(n.body)}</div>` : ''}
             <div class="row-sub">${time}</div>
           </div>
           ${t ? '<span class="chev">›</span>' : ''}
@@ -6975,12 +11055,15 @@
       if (result === 'granted') syncPushSubscription();
     });
     modal.querySelectorAll('[data-notif-type]').forEach((row) => {
-      row.addEventListener('click', () => {
+      makePressable(row, () => {
         closeModal(modal);
-        if (row.dataset.notifType === 'tournament') openTournamentScreen(Number(row.dataset.notifId));
-        else if (row.dataset.notifType === 'game') openGameScreen(Number(row.dataset.notifId));
-        else if (row.dataset.notifType === 'club') openClubScreen(Number(row.dataset.notifId));
-        else if (row.dataset.notifType === 'league') openLeagueScreen(Number(row.dataset.notifId));
+        const kind = row.dataset.notifType === 'route' ? row.dataset.notifKind : row.dataset.notifType;
+        const matchId = Number(row.dataset.notifMatch || 0) || null;
+        if (kind === 'tournament') openTournamentScreen(Number(row.dataset.notifId), matchId);
+        else if (kind === 'game') openGameScreen(Number(row.dataset.notifId));
+        else if (kind === 'club') openClubScreen(Number(row.dataset.notifId));
+        else if (kind === 'league') openLeagueScreen(Number(row.dataset.notifId), matchId);
+        else if (kind === 'court') openCourtDetail(Number(row.dataset.notifId));
         else if (row.dataset.notifType === 'tab') switchTab(row.dataset.notifId);
         else openUserProfile(Number(row.dataset.notifId));
       });
@@ -7003,12 +11086,23 @@
       };
       $('#banner-checkout').addEventListener('click', async (e) => {
         e.stopPropagation();
+        const btn = e.currentTarget;
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = 'Checking out…';
         const prev = state.presence;
-        await api('/checkout', { method: 'POST' });
-        toast('Checked out 👋');
-        await refreshMe();
-        fetchCourtsInView();
-        maybeAskConditions(prev);
+        const followupLoad = beginRoutedOverlayLoad(null);
+        try {
+          await api('/checkout', { method: 'POST' });
+          toast('Checked out 👋');
+          await refreshMe();
+          if (state.map) fetchCourtsInView();
+          if (routedOverlayLoadIsCurrent(followupLoad)) maybeAskConditions(prev);
+        } catch (err) {
+          toast(err.message);
+          btn.disabled = false;
+          btn.textContent = 'Check out';
+        }
       });
     } else {
       el.classList.add('hidden');
@@ -7026,7 +11120,17 @@
       });
       applyMe(data);
       state.areaLoc = [lat, lng];
-      if (state.map) state.map.setView([lat, lng], 12);
+      state.areaLabel = label || 'Home area';
+      state.snapshotAreaProvisional = false;
+      state.playGamesCache = null;
+      state.chatFriendsCache = null;
+      if (state.map) {
+        beginCourtContextRefresh(`Finding courts near ${label || 'your home area'}…`);
+        moveCourtMapWithoutRefresh(
+          () => state.map.setView([lat, lng], 12, { animate: false }),
+        );
+        fetchCourtsInView({ surfaceError: true });
+      }
       toast(label ? `Home area set to ${label} 📍` : 'Home area set 📍');
       return true;
     } catch (e) { if (!silent) toast(e.message); return false; }
@@ -7102,8 +11206,9 @@
     `);
     const done = (ok) => {
       if (!ok) return;
-      closeModal(modal);
       fetchCourtsInView();
+      const top = currentOverlayEntry();
+      if (!top || top.el !== modal || top.closing || !closeModal(modal)) return;
       if (onSet) onSet();
     };
     modal.querySelector('#ha-loc').addEventListener('click', async () => {
@@ -7112,13 +11217,17 @@
     bindCitySearch(modal.querySelector('#ha-city'), modal.querySelector('#ha-results'), async (p) => {
       done(await saveHomeArea(p.lat, p.lng, p.label));
     });
-    if (onDismiss) modal.querySelector('.modal-close').addEventListener('click', onDismiss);
+    if (onDismiss) modal.querySelector('.modal-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissModal(modal, onDismiss);
+    });
   }
 
   // Onboarding step 2: seed the saved-courts list — saved courts power the
   // Saved filter, court rooms, and new-game pings, so an empty list is a
   // quieter app. Skips itself when there's nothing decent nearby.
   async function maybeSuggestStarterCourts(next) {
+    const modalLoad = beginRoutedOverlayLoad(null);
     let courts = [];
     try {
       if (state.me && state.me.home_lat != null) {
@@ -7128,6 +11237,7 @@
           .slice(0, 3);
       }
     } catch { /* offline — skip the nicety */ }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
     if (!courts.length) { next(); return; }
 
     const modal = openModal(`
@@ -7155,7 +11265,10 @@
         state.favIds = null; // map markers re-learn favorites on next fetch
       } catch (e) { toast(e.message); }
     }));
-    modal.querySelector('.modal-close').addEventListener('click', () => { next(); fetchCourtsInView(); });
+    modal.querySelector('.modal-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissModal(modal, () => { next(); fetchCourtsInView(); });
+    });
   }
 
   function maybeOnboardHomeArea() {
@@ -7212,16 +11325,22 @@
   }
 
   async function showMain() {
+    $('#boot-screen')?.classList.add('hidden');
+    // A shared browser can switch accounts without a page reload. Recenter the
+    // existing Leaflet instance before revealing it so no prior map/search
+    // context flashes for the new account.
+    if (state.map) restoreAccountMapView();
     $('#auth-screen').classList.add('hidden');
     $('#main-screen').classList.remove('hidden');
-    if (!state.map) setupMap();
-    else setTimeout(() => state.map.invalidateSize(), 60);
-    startLocationWatch();
-    maybeOnboardHomeArea();
+    updatePlayHeader();
+    switchTab(state.tab || 'play', { preserveOverlayIntent: true });
+    if (state.connectionState !== 'offline') flushChatOutboxForAccount(state.me && state.me.id);
+    if (autoCheckInEnabled()) startLocationWatch();
     setTimeout(maybeShowUsualTimeNudge, 1200); // after the map/feeds settle
     clearInterval(state.mePollTimer);
     let tick = 0;
     state.mePollTimer = setInterval(() => {
+      if (document.hidden || state.connectionState === 'offline') return;
       refreshMe();
       tick += 1;
       if (tick % 3 === 0 && state.presence && state.presence.checked_in) {
@@ -7269,40 +11388,220 @@
   }
 
   function setupConnectivity() {
-    const banner = $('#offline-banner');
-    const sync = () => banner.classList.toggle('hidden', navigator.onLine);
-    window.addEventListener('offline', sync);
+    window.addEventListener('offline', () => setConnectionState('offline'));
     window.addEventListener('online', () => {
-      sync();
+      setConnectionState('online');
       toast('Back online 🏓');
-      if (state.token) refreshMe();
+      if (state.token) {
+        flushChatOutboxForAccount(state.me && state.me.id);
+        refreshMe();
+        refreshActiveView();
+      }
     });
-    sync();
+    $('#connection-retry')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Checking…';
+      try {
+        if (state.token) await refreshMe();
+        refreshActiveView();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Retry';
+      }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopLocationWatch();
+      else if (autoCheckInEnabled()) startLocationWatch();
+    });
+    setConnectionState(navigator.onLine ? 'online' : 'offline');
+  }
+
+  function setupServiceWorkerRouteMessages() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type !== 'open-overlay-route') return;
+      const route = safeNotificationOverlayRoute(event.data.url);
+      if (!route) return;
+      if (state.token) {
+        navigateOverlayRoute(route);
+        return;
+      }
+      // Preserve the exact destination through login without triggering a
+      // same-document fragment traversal on the signed-out screen.
+      try {
+        history.replaceState(
+          overlayHistoryState(null, 0, null), '',
+          `${baseAppUrl()}${overlayRouteHash(route)}`,
+        );
+      } catch { /* boot/login still remains usable */ }
+    });
+  }
+
+  function setConnectionState(next) {
+    const restored = state.connectionState === 'offline' && next === 'online';
+    state.connectionState = next;
+    const offline = next === 'offline';
+    $('#offline-banner')?.classList.toggle('hidden', !offline);
+    $('#main-screen')?.classList.toggle('is-offline', offline);
+    if (restored && state.token && state.me) {
+      queueMicrotask(() => flushChatOutboxForAccount(state.me && state.me.id));
+    }
+  }
+
+  function refreshActiveView() {
+    if (!state.token) return;
+    if (state.tab === 'play') renderPlay();
+    else if (state.tab === 'chat') renderChat();
+    else if (state.tab === 'profile') renderProfile();
+    else if (state.tab === 'courts' && state.map) refreshCourtResults();
+  }
+
+  function navigateOverlayRoute(candidate) {
+    const route = normalizeOverlayRoute(candidate);
+    if (!route || !state.token) return false;
+    const ownerIndex = overlayStack.findLastIndex
+      ? overlayStack.findLastIndex(
+        (entry) => entry.ownsRoute && sameOverlayRoute(entry.route, route),
+      )
+      : (() => {
+        for (let index = overlayStack.length - 1; index >= 0; index -= 1) {
+          if (overlayStack[index].ownsRoute
+              && sameOverlayRoute(overlayStack[index].route, route)) return index;
+        }
+        return -1;
+      })();
+    if (ownerIndex >= 0) {
+      if (ownerIndex === overlayStack.length - 1) {
+        overlayStack[ownerIndex].el.querySelector('.modal')?.focus({ preventScroll: true });
+        return true;
+      }
+      const pops = overlayStack.slice(ownerIndex + 1)
+        .reduce((count, entry) => count + Math.max(1, entry.historyPops || 1), 0);
+      try { history.go(-pops); }
+      catch { normalizeHistoryToLiveOverlay(); }
+      return true;
+    }
+    if (route.kind === 'court') openCourtDetail(route.id);
+    else if (route.kind === 'game') openGameScreen(route.id);
+    else if (route.kind === 'tournament') openTournamentScreen(route.id, route.matchId || null);
+    else if (route.kind === 'club') openClubScreen(route.id);
+    else if (route.kind === 'league') openLeagueScreen(route.id, route.matchId || null);
+    else return false;
+    return true;
+  }
+
+  function rebuildReloadedMatchRouteIfNeeded() {
+    const route = normalizeOverlayRoute(adoptOverlayEntry && adoptOverlayEntry.route);
+    if (!route?.matchId || location.hash !== overlayRouteHash(route)) return false;
+    const distance = Math.max(1, Number(adoptOverlayEntry.depth) || 1);
+    pendingDeepMatchRebuild = route;
+    adoptOverlayEntry = null;
+    const finishWithoutTraversal = () => {
+      if (!pendingDeepMatchRebuild) return;
+      const fallbackRoute = pendingDeepMatchRebuild;
+      pendingDeepMatchRebuild = null;
+      try {
+        history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl());
+      } catch { /* openModal still has a safe push fallback */ }
+      navigateOverlayRoute(fallbackRoute);
+    };
+    if (history.length <= 1) {
+      finishWithoutTraversal();
+      return true;
+    }
+    try {
+      history.go(-distance);
+      setTimeout(finishWithoutTraversal, 800);
+    } catch {
+      finishWithoutTraversal();
+    }
+    return true;
+  }
+
+  function initialTabFromLocation() {
+    const shortcut = new URLSearchParams(location.search).get('tab');
+    if (['courts', 'play', 'chat', 'profile'].includes(shortcut)) return shortcut;
+    if (/^#court\//.test(location.hash)) return 'courts';
+    if (/^#(?:club|invite)\//.test(location.hash)) return 'chat';
+    return state.tab || 'play';
   }
 
   function openDeepLink() {
     // PWA app-icon shortcuts land on /?tab=<name> — jump straight there.
     const tabParam = new URLSearchParams(location.search).get('tab');
     if (tabParam && ['courts', 'play', 'chat', 'profile'].includes(tabParam)) {
-      try { history.replaceState(null, '', location.pathname + location.hash); } catch { /* ignore */ }
-      switchTab(tabParam);
+      const params = new URLSearchParams(location.search);
+      params.delete('tab');
+      const clean = `${location.pathname}${params.toString() ? `?${params}` : ''}${location.hash}`;
+      try { history.replaceState(overlayHistoryState(null, 0, null), '', clean); } catch { /* ignore */ }
+      if (state.tab !== tabParam || $(`#tab-${tabParam}`).classList.contains('hidden')) {
+        switchTab(tabParam, { preserveOverlayIntent: true });
+      }
     }
+    const prepareRoute = (kind, id, matchId = null) => {
+      const adopting = adoptOverlayEntry && adoptOverlayEntry.route.kind === kind
+        && adoptOverlayEntry.route.id === id
+        && (adoptOverlayEntry.route.matchId || null) === (matchId || null);
+      if (!adopting) {
+        try { history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl()); } catch { /* ignore */ }
+      }
+    };
     const courtMatch = location.hash.match(/^#court\/(\d+)$/);
-    if (courtMatch) { openCourtDetail(Number(courtMatch[1])); return; }
+    if (courtMatch) { const id = Number(courtMatch[1]); prepareRoute('court', id); openCourtDetail(id); return true; }
     const gameMatch = location.hash.match(/^#game\/(\d+)$/);
-    if (gameMatch) { openGameScreen(Number(gameMatch[1])); return; }
+    if (gameMatch) { const id = Number(gameMatch[1]); prepareRoute('game', id); openGameScreen(id); return true; }
+    const tournamentMatchRoute = location.hash.match(/^#tournament\/(\d+)\/match\/(\d+)$/);
+    if (tournamentMatchRoute) {
+      const id = Number(tournamentMatchRoute[1]);
+      const matchId = Number(tournamentMatchRoute[2]);
+      prepareRoute('tournament', id, matchId);
+      openTournamentScreen(id, matchId);
+      return true;
+    }
     const tournamentMatch = location.hash.match(/^#tournament\/(\d+)$/);
-    if (tournamentMatch) { openTournamentScreen(Number(tournamentMatch[1])); return; }
+    if (tournamentMatch) { const id = Number(tournamentMatch[1]); prepareRoute('tournament', id); openTournamentScreen(id); return true; }
     const clubMatch = location.hash.match(/^#club\/(\d+)$/);
-    if (clubMatch) { openClubScreen(Number(clubMatch[1])); return; }
+    if (clubMatch) { const id = Number(clubMatch[1]); prepareRoute('club', id); openClubScreen(id); return true; }
+    const leagueMatchRoute = location.hash.match(/^#league\/(\d+)\/match\/(\d+)$/);
+    if (leagueMatchRoute) {
+      const id = Number(leagueMatchRoute[1]);
+      const matchId = Number(leagueMatchRoute[2]);
+      prepareRoute('league', id, matchId);
+      openLeagueScreen(id, matchId);
+      return true;
+    }
     const leagueMatch = location.hash.match(/^#league\/(\d+)$/);
-    if (leagueMatch) { openLeagueScreen(Number(leagueMatch[1])); return; }
+    if (leagueMatch) { const id = Number(leagueMatch[1]); prepareRoute('league', id); openLeagueScreen(id); return true; }
     const inviteMatch = location.hash.match(/^#invite\/(\d+)$/);
     if (inviteMatch) {
-      try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+      try { history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl()); } catch { /* ignore */ }
       openUserProfile(Number(inviteMatch[1]));
+      return true;
     }
+    return false;
   }
+
+  // A focused installed app stays on the same document when a push notification
+  // (or another in-app surface) navigates to a hash route. Boot-time routing is
+  // not enough in that case, so honor the new destination without requiring a
+  // reload. pushState/replaceState do not emit hashchange, which keeps ordinary
+  // modal navigation from re-opening its own route.
+  window.addEventListener('hashchange', () => {
+    if (suppressNativeHashRoute) {
+      suppressNativeHashRoute = null;
+      return;
+    }
+    if (!state.token || !location.hash) return;
+    const requested = normalizeOverlayRoute(location.hash);
+    const current = currentOverlayEntry()?.route;
+    if (requested && current
+        && requested.kind === current.kind
+        && requested.id === current.id
+        && (requested.matchId || null) === (current.matchId || null)) return;
+    if (requested) navigateOverlayRoute(requested);
+    else openDeepLink();
+  });
 
   // A friend's invite link, remembered through the signup flow.
   async function handleInviteRef() {
@@ -7413,8 +11712,52 @@
     const raw = atob((base64 + padding).replace(/-/g, '+').replace(/_/g, '/'));
     return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
   }
+
+  let pushResetPromise = Promise.resolve();
+  function revokePushSubscription(authToken) {
+    pageNotifications.forEach((notification) => {
+      try { notification.close(); } catch { /* already closed */ }
+    });
+    pageNotifications.clear();
+    navigator.serviceWorker?.controller?.postMessage({
+      type: 'push-auth-state', enabled: false,
+    });
+    pushResetPromise = (async () => {
+      try {
+        if (!('serviceWorker' in navigator)) return;
+        const reg = await navigator.serviceWorker.ready;
+        reg.active?.postMessage({ type: 'push-auth-state', enabled: false });
+        if (typeof reg.getNotifications === 'function') {
+          try {
+            const visibleNotifications = await reg.getNotifications();
+            visibleNotifications.forEach((notification) => notification.close());
+          } catch { /* tray cleanup support varies; continue revoking push */ }
+        }
+        if (!('PushManager' in window)) return;
+        const sub = await reg.pushManager.getSubscription();
+        if (!sub) return;
+        const requests = [sub.unsubscribe()];
+        if (authToken) {
+          requests.push(fetch('/api/push/unsubscribe', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+            keepalive: true,
+          }));
+        }
+        await Promise.allSettled(requests);
+      } catch { /* local unsubscribe is best effort and must not block logout */ }
+    })();
+    return pushResetPromise;
+  }
+
   async function syncPushSubscription() {
     try {
+      await pushResetPromise;
+      if (!state.token) return;
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
       if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
       const conf = await api('/push/public-key');
@@ -7428,20 +11771,25 @@
         });
       }
       await api('/push/subscribe', { method: 'POST', body: JSON.stringify(sub.toJSON()) });
+      navigator.serviceWorker.controller?.postMessage({
+        type: 'push-auth-state', enabled: true,
+      });
     } catch { /* push is a bonus, never block the app */ }
   }
 
   async function boot() {
     applyTheme();
-    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    if ('serviceWorker' in navigator
+        && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
+    if (!state.token) revokePushSubscription(null);
     // Remember a friend's invite link across the signup flow, and greet the
     // newcomer with who invited them.
     const inviteRef = location.hash.match(/^#invite\/(\d+)$/);
     if (inviteRef && !state.token) {
       localStorage.setItem('pp_invite_ref', inviteRef[1]);
-      try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+      try { history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl()); } catch { /* ignore */ }
       api(`/invite/${inviteRef[1]}`).then((card) => {
         const tagline = document.querySelector('.auth-tagline');
         if (!tagline || document.querySelector('.invite-hello')) return;
@@ -7458,15 +11806,42 @@
     setupEmptyStateCtas();
     setupPullToRefresh();
     setupConnectivity();
+    setupServiceWorkerRouteMessages();
+    state.tab = initialTabFromLocation();
     if (state.token) {
+      const snapshot = readMeSnapshot();
+      let initialRouteHandled = false;
+      if (snapshot) {
+        // Returning players get useful, token-scoped UI immediately. The live
+        // response below quietly refreshes it instead of holding the screen blank.
+        applyMe(snapshot.data, { persist: false, provisional: true });
+        await showMain();
+        initialRouteHandled = rebuildReloadedMatchRouteIfNeeded() || openDeepLink();
+      }
       try {
-        applyMe(await api('/me'));
-        showMain();
-        openDeepLink();
+        const freshMe = await api('/me', { timeoutMs: snapshot ? 5000 : 8000 });
+        applyMe(freshMe, { reconcileSnapshot: !!snapshot });
+        if (!snapshot) {
+          await showMain();
+          initialRouteHandled = rebuildReloadedMatchRouteIfNeeded() || openDeepLink();
+        }
+        if (!initialRouteHandled) maybeOnboardHomeArea();
         syncPushSubscription();
         return;
-      } catch { /* fall through to auth */ }
+      } catch (err) {
+        if (err.isStaleSession) return;
+        // 401 already called logout() inside api() and cleared the token. Any
+        // other refresh failure keeps the authenticated snapshot visible
+        // instead of stacking the login screen over a stale main screen.
+        if (snapshot && state.token) {
+          if (err.isNetworkError) setConnectionState('offline');
+          else toast("Couldn't refresh yet — showing your last update");
+          return;
+        }
+        // Authentication failures still fall through to the login screen.
+      }
     }
+    $('#boot-screen')?.classList.add('hidden');
     $('#auth-screen').classList.remove('hidden');
   }
 

@@ -1,9 +1,13 @@
 """Game scheduling, joining, and ranked match results."""
+import hashlib
+import json
 import math
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 
 from flask import Blueprint, Response, g, jsonify, request
+from sqlalchemy.exc import IntegrityError
 
 from backend.app import db
 from backend.models import (
@@ -29,6 +33,23 @@ from backend.routes.social import friend_ids
 from backend.security import rate_limit
 
 games_bp = Blueprint('games', __name__)
+
+CLIENT_ATTEMPT_ID_MAX_LENGTH = 64
+CLIENT_ATTEMPT_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$')
+
+
+def _client_attempt_id(payload):
+    """Return (value, valid) for an optional, UUID-friendly retry key."""
+    if 'client_attempt_id' not in payload or payload.get('client_attempt_id') is None:
+        return None, True
+    raw = payload.get('client_attempt_id')
+    if not isinstance(raw, str):
+        return None, False
+    if not raw or len(raw) > CLIENT_ATTEMPT_ID_MAX_LENGTH:
+        return None, False
+    if not CLIENT_ATTEMPT_ID_RE.fullmatch(raw):
+        return None, False
+    return raw, True
 
 
 def _ics_escape(s):
@@ -182,6 +203,106 @@ def _parse_scheduled_at(raw):
     return parsed
 
 
+def _normalized_game_attempt(payload, creator_id):
+    """Canonical immutable inputs for one game-creation attempt.
+
+    Normalization makes harmless representation changes (numeric strings,
+    timezone spelling, invite order) compare equal while excluding unrelated
+    or future request fields from the idempotency contract.
+    """
+    try:
+        court_id = int(payload.get('court_id') or 0)
+    except (TypeError, ValueError):
+        court_id = 0
+
+    scheduled_at = _parse_scheduled_at(payload.get('scheduled_at'))
+    game_type = str(payload.get('game_type') or 'casual').strip().lower()
+
+    try:
+        max_players = int(payload.get('max_players') or 4)
+    except (TypeError, ValueError):
+        max_players = 4
+    max_players = min(max(max_players, 2), 12)
+    if game_type == 'ranked':
+        max_players = 4 if max_players > 2 else 2
+
+    raw_invites = payload.get('invite_user_ids') or []
+    if not isinstance(raw_invites, (list, tuple)):
+        raw_invites = []
+    invite_user_ids = []
+    for raw_id in raw_invites[:20]:
+        try:
+            invitee_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if invitee_id == creator_id or invitee_id in invite_user_ids:
+            continue
+        invite_user_ids.append(invitee_id)
+    invite_user_ids.sort()
+
+    visibility = str(payload.get('visibility') or '').strip().lower()
+    if visibility not in GAME_VISIBILITIES:
+        visibility = 'private' if invite_user_ids else 'open'
+
+    recurrence = str(payload.get('recurrence') or 'none').strip().lower()
+    if recurrence not in GAME_RECURRENCES:
+        recurrence = 'none'
+    if game_type == 'ranked':
+        recurrence = 'none'
+
+    preferred_level = str(payload.get('preferred_level') or 'any').strip().lower()
+    if preferred_level not in SKILL_LEVELS:
+        preferred_level = 'any'
+
+    raw_club_id = payload.get('club_id')
+    if raw_club_id:
+        try:
+            club_id = int(raw_club_id)
+        except (TypeError, ValueError):
+            club_id = 0
+    else:
+        club_id = None
+
+    return {
+        'court_id': court_id,
+        'scheduled_at': scheduled_at,
+        'game_type': game_type,
+        'max_players': max_players,
+        'invite_user_ids': invite_user_ids,
+        'visibility': visibility,
+        'recurrence': recurrence,
+        'preferred_level': preferred_level,
+        'club_id': club_id,
+        'notes': str(payload.get('notes') or '').strip()[:500],
+    }
+
+
+def _game_attempt_fingerprint(normalized):
+    canonical = {
+        **normalized,
+        'scheduled_at': (
+            normalized['scheduled_at'].isoformat()
+            if normalized['scheduled_at'] is not None else None
+        ),
+    }
+    encoded = json.dumps(
+        canonical, ensure_ascii=False, sort_keys=True, separators=(',', ':'),
+    ).encode('utf-8')
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _game_attempt_replay(game, fingerprint, current_user_id):
+    # The interim idempotency rollout created a small number of keyed rows
+    # without request fingerprints. Their original immutable snapshot cannot
+    # be reconstructed safely from game state that may since have changed, so
+    # preserve creator-scoped replay compatibility for those legacy rows.
+    if game.client_attempt_fingerprint is None:
+        return jsonify(game.to_dict(current_user_id)), 200
+    if game.client_attempt_fingerprint != fingerprint:
+        return jsonify({'error': 'client_attempt_id_conflict'}), 409
+    return jsonify(game.to_dict(current_user_id)), 200
+
+
 def auto_confirm_stale_scores():
     """Finalize ranked scores that opponents never confirmed within the window."""
     cutoff = utcnow() - timedelta(hours=SCORE_AUTO_CONFIRM_HOURS)
@@ -304,13 +425,44 @@ def roll_forward_recurring():
         db.session.commit()
 
 
-@games_bp.get('/games')
-def list_games():
-    """Upcoming games feed, optionally sorted by distance from lat/lng."""
+def _prepare_game_feeds():
+    """Run the lazy maintenance shared by every upcoming-games payload."""
     auto_confirm_stale_scores()
     roll_forward_recurring()
     expire_stale_unscored()
     send_game_reminders()
+
+
+def my_games_payload(user, lat=None, lng=None):
+    """Endpoint-shaped upcoming/awaiting games for one player's Profile."""
+    _prepare_game_feeds()
+    games = (
+        Game.query.filter(Game.status.in_(['upcoming', 'awaiting_confirmation']))
+        .join(GamePlayer)
+        .filter(GamePlayer.user_id == user.id)
+        .order_by(Game.scheduled_at.asc())
+        .limit(150)
+        .all()
+    )
+    items = []
+    for game in games:
+        item = game.to_dict(user.id)
+        court = game.court
+        if lat is not None and lng is not None and court and court.latitude is not None:
+            item['distance_miles'] = round(
+                haversine_miles(lat, lng, court.latitude, court.longitude), 1,
+            )
+        items.append(item)
+    items = items[:100]
+    unread = _chat_unread_for(user.id, [item['id'] for item in items])
+    for item in items:
+        item['chat_unread'] = unread.get(item['id'], 0)
+    return {'items': items}
+
+
+@games_bp.get('/games')
+def list_games():
+    """Upcoming games feed, optionally sorted by distance from lat/lng."""
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
     truthy = {'1', 'true', 'yes'}
@@ -323,11 +475,10 @@ def list_games():
     if mine:
         if not current_user:
             return jsonify({'error': 'authentication_required'}), 401
-        # My games: everything still in play, including scores awaiting confirmation.
-        query = Game.query.filter(
-            Game.status.in_(['upcoming', 'awaiting_confirmation']),
-        ).join(GamePlayer).filter(GamePlayer.user_id == current_user.id)
-    elif friends_only:
+        return jsonify(my_games_payload(current_user, lat, lng))
+
+    _prepare_game_feeds()
+    if friends_only:
         if not current_user:
             return jsonify({'error': 'authentication_required'}), 401
         if not viewer_friends:
@@ -347,7 +498,7 @@ def list_games():
             Game.scheduled_at >= utcnow() - timedelta(hours=2),
             Game.status == 'upcoming',
         )
-    if not mine and not friends_only and lat is not None and lng is not None:
+    if not friends_only and lat is not None and lng is not None:
         radius = min(max(request.args.get('radius', default=50.0, type=float), 1.0), 200.0)
         lat_delta = radius / 69.0
         lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
@@ -361,7 +512,7 @@ def list_games():
     items = []
     for game in games:
         # In the public/nearby and friends feeds, only show games the viewer may see.
-        if not mine and not game.visible_to(viewer_id, viewer_friends):
+        if not game.visible_to(viewer_id, viewer_friends):
             continue
         item = game.to_dict(viewer_id)
         # The Friends feed is about discovering games you're not already in.
@@ -373,27 +524,28 @@ def list_games():
                 haversine_miles(lat, lng, court.latitude, court.longitude), 1,
             )
         items.append(item)
-    if lat is not None and lng is not None and not mine and not friends_only:
+    if lat is not None and lng is not None and not friends_only:
         items.sort(key=lambda i: (i.get('distance_miles', 1e9), i['scheduled_at']))
     items = items[:100]
-    if mine:
-        unread = _chat_unread_for(current_user.id, [i['id'] for i in items])
-        for item in items:
-            item['chat_unread'] = unread.get(item['id'], 0)
     return jsonify({'items': items})
 
 
 @games_bp.get('/games/history')
 @login_required
 def my_game_history():
+    return jsonify(game_history_payload(g.current_user))
+
+
+def game_history_payload(user):
+    """Endpoint-shaped completed-game history for one player."""
     games = (
         Game.query.join(GamePlayer)
-        .filter(GamePlayer.user_id == g.current_user.id, Game.status == 'completed')
+        .filter(GamePlayer.user_id == user.id, Game.status == 'completed')
         .order_by(Game.completed_at.desc())
         .limit(50)
         .all()
     )
-    return jsonify({'items': [game.to_dict(g.current_user.id) for game in games]})
+    return {'items': [game.to_dict(user.id) for game in games]}
 
 
 @games_bp.post('/games/log')
@@ -491,38 +643,49 @@ def log_past_game():
 @rate_limit(20, 60)
 @login_required
 def create_game():
-    payload = request.get_json(silent=True) or {}
-    court = db.session.get(Court, int(payload.get('court_id') or 0))
+    payload = request.get_json(silent=True)
+    if payload is None:
+        # Distinguish an omitted/empty body from JSON `null` or malformed JSON.
+        if request.get_data(cache=True).strip():
+            return jsonify({'error': 'invalid_payload'}), 400
+        payload = {}
+    elif not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+
+    client_attempt_id, valid_attempt_id = _client_attempt_id(payload)
+    if not valid_attempt_id:
+        return jsonify({'error': 'invalid_client_attempt_id'}), 400
+    normalized_attempt = _normalized_game_attempt(payload, g.current_user.id)
+    attempt_fingerprint = _game_attempt_fingerprint(normalized_attempt)
+    if client_attempt_id:
+        existing = Game.query.filter_by(
+            creator_id=g.current_user.id,
+            client_attempt_id=client_attempt_id,
+        ).first()
+        if existing:
+            return _game_attempt_replay(
+                existing, attempt_fingerprint, g.current_user.id,
+            )
+
+    court = db.session.get(Court, normalized_attempt['court_id'])
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
 
-    scheduled_at = _parse_scheduled_at(payload.get('scheduled_at'))
+    scheduled_at = normalized_attempt['scheduled_at']
     if not scheduled_at:
         return jsonify({'error': 'invalid_scheduled_at'}), 400
     if scheduled_at < utcnow() - timedelta(minutes=15):
         return jsonify({'error': 'scheduled_in_past'}), 400
 
-    game_type = str(payload.get('game_type') or 'casual').strip().lower()
+    game_type = normalized_attempt['game_type']
     if game_type not in GAME_TYPES:
         return jsonify({'error': 'invalid_game_type'}), 400
 
-    try:
-        max_players = int(payload.get('max_players') or 4)
-    except (TypeError, ValueError):
-        max_players = 4
-    max_players = min(max(max_players, 2), 12)
-    if game_type == 'ranked':
-        max_players = 4 if max_players > 2 else 2
+    max_players = normalized_attempt['max_players']
 
     # Collect any specifically-invited players (valid, real, not self)
     invited_ids = []
-    for raw_id in (payload.get('invite_user_ids') or [])[:20]:
-        try:
-            invitee_id = int(raw_id)
-        except (TypeError, ValueError):
-            continue
-        if invitee_id == g.current_user.id or invitee_id in invited_ids:
-            continue
+    for invitee_id in normalized_attempt['invite_user_ids']:
         if not db.session.get(User, invitee_id):
             continue
         invited_ids.append(invitee_id)
@@ -535,23 +698,17 @@ def create_game():
         return jsonify({'error': 'no_invitees'}), 400
 
     # Recurrence: weekly open-play sessions (casual only — they don't score).
-    recurrence = str(payload.get('recurrence') or 'none').strip().lower()
-    if recurrence not in GAME_RECURRENCES:
-        recurrence = 'none'
-    if game_type == 'ranked':
-        recurrence = 'none'
+    recurrence = normalized_attempt['recurrence']
 
     # Preferred level is a hint for joiners, never a hard gate.
-    preferred_level = str(payload.get('preferred_level') or 'any').strip().lower()
-    if preferred_level not in SKILL_LEVELS:
-        preferred_level = 'any'
+    preferred_level = normalized_attempt['preferred_level']
 
     # Hosting on behalf of a club: members only, and never private (a club
     # game's whole point is that the club can see and join it).
     club = None
-    if payload.get('club_id'):
+    if normalized_attempt['club_id'] is not None:
         from backend.models import Club, ClubMember
-        club = db.session.get(Club, int(payload.get('club_id')))
+        club = db.session.get(Club, normalized_attempt['club_id'])
         if not club:
             return jsonify({'error': 'club_not_found'}), 404
         if not ClubMember.query.filter_by(
@@ -564,6 +721,10 @@ def create_game():
     game = Game(
         court_id=court.id,
         creator_id=g.current_user.id,
+        client_attempt_id=client_attempt_id,
+        client_attempt_fingerprint=(
+            attempt_fingerprint if client_attempt_id else None
+        ),
         club=club,
         scheduled_at=scheduled_at,
         game_type=game_type,
@@ -571,10 +732,27 @@ def create_game():
         recurrence=recurrence,
         max_players=max_players,
         preferred_level=preferred_level,
-        notes=str(payload.get('notes') or '').strip()[:500],
+        notes=normalized_attempt['notes'],
     )
     db.session.add(game)
-    db.session.flush()
+    try:
+        # Flush the unique creator/attempt pair before adding players, invites,
+        # or notifications. A concurrent retry therefore loses here without
+        # repeating any downstream side effects.
+        db.session.flush()
+    except IntegrityError:
+        if not client_attempt_id:
+            raise
+        db.session.rollback()
+        existing = Game.query.filter_by(
+            creator_id=g.current_user.id,
+            client_attempt_id=client_attempt_id,
+        ).first()
+        if existing:
+            return _game_attempt_replay(
+                existing, attempt_fingerprint, g.current_user.id,
+            )
+        raise
     db.session.add(GamePlayer(game_id=game.id, user_id=g.current_user.id))
 
     label = 'ranked game' if game_type == 'ranked' else 'game'

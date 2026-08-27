@@ -60,6 +60,17 @@ def auth_headers(token):
 
 # ---------- Auth ----------
 
+def test_versioned_executable_shell_assets_are_served(client):
+    script = client.get('/app-v13.js')
+    styles = client.get('/styles-v13.css')
+    assert script.status_code == 200
+    assert script.mimetype in {'application/javascript', 'text/javascript'}
+    assert b'function applyMe' in script.data
+    assert styles.status_code == 200
+    assert styles.mimetype == 'text/css'
+    assert b'.boot-screen' in styles.data
+
+
 def test_register_login_me(client):
     data = register(client, 'a@example.com', 'Ana')
     assert data['user']['display_name'] == 'Ana'
@@ -104,6 +115,58 @@ def test_update_profile(client):
     assert res.status_code == 400
 
 
+def test_profile_dashboard_requires_authentication(client):
+    res = client.get('/api/me/dashboard')
+    assert res.status_code == 401
+    assert res.get_json() == {'error': 'authentication_required'}
+
+
+def test_profile_dashboard_matches_existing_profile_endpoints(client):
+    ana = register(client, 'ana@example.com', 'Ana')
+    ben = register(client, 'ben@example.com', 'Ben')
+    headers = auth_headers(ana['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    assert client.post(
+        f'/api/courts/{court_id}/favorite', headers=headers,
+    ).get_json()['favorited'] is True
+
+    completed = make_game(client, ana['token'], court_id, hours_ahead=1)
+    client.post(
+        f"/api/games/{completed['id']}/join",
+        headers=auth_headers(ben['token']),
+    )
+    result = client.post(
+        f"/api/games/{completed['id']}/complete",
+        json={
+            'team1': [ana['user']['id']],
+            'team2': [ben['user']['id']],
+            'score_team1': 11,
+            'score_team2': 6,
+        },
+        headers=headers,
+    )
+    assert result.status_code == 200
+    assert result.get_json()['status'] == 'completed'
+
+    upcoming = make_game(client, ana['token'], court_id, hours_ahead=24)
+    legacy = {
+        'games': client.get('/api/games?mine=1', headers=headers).get_json(),
+        'stats': client.get('/api/me/stats', headers=headers).get_json(),
+        'favorites': client.get('/api/courts/favorites', headers=headers).get_json(),
+        'history': client.get('/api/games/history', headers=headers).get_json(),
+    }
+
+    res = client.get('/api/me/dashboard', headers=headers)
+    assert res.status_code == 200
+    payload = res.get_json()
+    assert payload == legacy
+    assert [game['id'] for game in payload['games']['items']] == [upcoming['id']]
+    assert [game['id'] for game in payload['history']['items']] == [completed['id']]
+    assert [court['id'] for court in payload['favorites']['items']] == [court_id]
+    assert payload['stats']['games_total'] == 1
+
+
 # ---------- Courts ----------
 
 def test_courts_bbox_and_search(client):
@@ -129,7 +192,26 @@ def test_courts_amenity_filters(client):
     assert [c['name'] for c in water] == ['Larson Park']
     nets = client.get('/api/courts?nets=1').get_json()['items']
     assert [c['name'] for c in nets] == ['Adorni Center']
-    # Filters compose: restrooms AND nets → neither court has both.
+    # Positive compositions use AND semantics and return enough amenity data
+    # for clients to explain why each court matched.
+    facilities = client.get(
+        '/api/courts?lighted=true&restrooms=1&water=true'
+    ).get_json()['items']
+    assert [c['name'] for c in facilities] == ['Larson Park']
+    assert {
+        key: facilities[0][key]
+        for key in ('indoor', 'lighted', 'has_restrooms', 'has_water', 'nets_provided')
+    } == {
+        'indoor': False,
+        'lighted': True,
+        'has_restrooms': True,
+        'has_water': True,
+        'nets_provided': False,
+    }
+    indoor_with_nets = client.get('/api/courts?indoor=1&nets=1').get_json()['items']
+    assert [c['name'] for c in indoor_with_nets] == ['Adorni Center']
+
+    # A composition with no court satisfying every requirement stays empty.
     both = client.get('/api/courts?restrooms=1&nets=1').get_json()['items']
     assert both == []
 
@@ -1906,20 +1988,46 @@ def test_court_chat_unread_badge(client):
 
 def test_favorite_courts(client):
     a = register(client, 'a@example.com')
+    headers = auth_headers(a['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
 
-    res = client.post(f'/api/courts/{court_id}/favorite', headers=auth_headers(a['token']))
+    # Build every volatile discovery signal before saving the court. Favorites
+    # should expose the same decision data as the regular court list.
+    client.post(f'/api/courts/{court_id}/reviews', json={'rating': 4}, headers=headers)
+    client.post(
+        f'/api/courts/{court_id}/condition',
+        json={'condition': 'wet'},
+        headers=headers,
+    )
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
+    make_game(client, a['token'], court_id)
+    listed = client.get('/api/courts?q=larson').get_json()['items'][0]
+
+    res = client.post(f'/api/courts/{court_id}/favorite', headers=headers)
     assert res.get_json()['favorited'] is True
 
-    detail = client.get(f'/api/courts/{court_id}', headers=auth_headers(a['token'])).get_json()
+    detail = client.get(f'/api/courts/{court_id}', headers=headers).get_json()
     assert detail['is_favorite'] is True
 
-    favs = client.get('/api/courts/favorites', headers=auth_headers(a['token'])).get_json()
+    favs = client.get('/api/courts/favorites', headers=headers).get_json()
     assert [c['name'] for c in favs['items']] == ['Larson Park']
+    favorite = favs['items'][0]
+    parity_fields = (
+        'indoor', 'lighted', 'has_restrooms', 'has_water', 'nets_provided',
+        'players_here', 'upcoming_games', 'condition', 'rating_avg', 'rating_count',
+    )
+    assert {key: favorite[key] for key in parity_fields} == {
+        key: listed[key] for key in parity_fields
+    }
+    assert favorite['players_here'] == 1
+    assert favorite['upcoming_games'] == 1
+    assert favorite['condition'] == 'wet'
+    assert favorite['rating_avg'] == 4.0
+    assert favorite['rating_count'] == 1
 
-    res = client.post(f'/api/courts/{court_id}/favorite', headers=auth_headers(a['token']))
+    res = client.post(f'/api/courts/{court_id}/favorite', headers=headers)
     assert res.get_json()['favorited'] is False
-    favs = client.get('/api/courts/favorites', headers=auth_headers(a['token'])).get_json()
+    favs = client.get('/api/courts/favorites', headers=headers).get_json()
     assert favs['items'] == []
 
 
@@ -2377,6 +2485,11 @@ def test_delete_account(client, app):
     # Gone from search and friends; hosted upcoming game cancelled with Ben notified.
     assert client.get('/api/users/search?q=ana', headers=bh).get_json()['items'] == []
     assert client.get('/api/friends', headers=bh).get_json()['friends'] == []
+    assert client.get(f"/api/chat/{a['user']['id']}", headers=bh).status_code == 404
+    assert client.post(f"/api/chat/{a['user']['id']}", json={
+        'body': 'Are you still there?',
+        'client_attempt_id': 'deleted-dm-550e8400-e29b-41d4-a716',
+    }, headers=bh).status_code == 404
     detail = client.get(f"/api/games/{upcoming['id']}", headers=bh).get_json()
     assert detail['status'] == 'cancelled'
     notifs = client.get('/api/notifications', headers=bh).get_json()
@@ -2627,6 +2740,207 @@ def test_chat_flow(client):
     assert [m['body'] for m in fresh['items']] == ['You in?']
 
 
+def test_every_chat_send_is_safe_to_retry_without_duplicates(client, app):
+    """A lost response can replay any channel with one sender-scoped key."""
+    from backend.models import Message, MessageSendAttempt
+
+    ana = register(client, 'retry-ana@example.com', 'Ana')
+    ben = register(client, 'retry-ben@example.com', 'Ben')
+    ah, bh = auth_headers(ana['token']), auth_headers(ben['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, ana['token'], court_id)
+    tournament = make_tournament(client, ana['token'], court_id)
+    club = make_club(client, ah, name='Reliable Dinkers')
+    league = make_league(client, ah, name='Reliable Box League')
+
+    endpoints = {
+        'dm': f"/api/chat/{ben['user']['id']}",
+        'court': f'/api/courts/{court_id}/chat',
+        'game': f"/api/games/{game['id']}/chat",
+        'tournament': f"/api/tournaments/{tournament['id']}/chat",
+        'club': f"/api/clubs/{club['id']}/chat",
+        'league': f"/api/leagues/{league['id']}/chat",
+    }
+
+    created_ids = []
+    for channel, endpoint in endpoints.items():
+        attempt_id = f'message-{channel}-550e8400-e29b-41d4-a716'
+        payload = {
+            'body': f'Queued safely in {channel}',
+            'client_attempt_id': attempt_id,
+        }
+        first = client.post(endpoint, json=payload, headers=ah)
+        replay = client.post(endpoint, json=payload, headers=ah)
+        assert first.status_code == 201, (channel, first.get_json())
+        assert replay.status_code == 200, (channel, replay.get_json())
+        assert replay.get_json()['id'] == first.get_json()['id']
+        assert replay.get_json()['client_attempt_id'] == attempt_id
+        created_ids.append(first.get_json()['id'])
+
+    assert len(set(created_ids)) == len(endpoints)
+    with app.app_context():
+        assert Message.query.filter(Message.id.in_(created_ids)).count() == len(endpoints)
+
+    # Reusing a key for different immutable content or a different room is a
+    # conflict, while another sender may independently generate the same key.
+    dm_key = 'message-dm-550e8400-e29b-41d4-a716'
+    changed = client.post(endpoints['dm'], json={
+        'body': 'Different content', 'client_attempt_id': dm_key,
+    }, headers=ah)
+    assert changed.status_code == 409
+    assert changed.get_json() == {'error': 'client_attempt_id_conflict'}
+    wrong_room = client.post(endpoints['court'], json={
+        'body': 'Queued safely in dm', 'client_attempt_id': dm_key,
+    }, headers=ah)
+    assert wrong_room.status_code == 409
+
+    # Photo retries retain the same immutable attempt, while accidentally
+    # reusing its key for different bytes is rejected instead of silently
+    # replacing or duplicating an attachment.
+    photo_key = 'message-photo-550e8400-e29b-41d4-a716'
+    photo_payload = {
+        'body': 'Court map',
+        'image': 'data:image/png;base64,YQ==',
+        'client_attempt_id': photo_key,
+    }
+    photo_first = client.post(endpoints['dm'], json=photo_payload, headers=ah)
+    photo_replay = client.post(endpoints['dm'], json=photo_payload, headers=ah)
+    assert photo_first.status_code == 201
+    assert photo_replay.status_code == 200
+    assert photo_replay.get_json()['id'] == photo_first.get_json()['id']
+    photo_conflict = client.post(endpoints['dm'], json={
+        **photo_payload, 'image': 'data:image/png;base64,Yg==',
+    }, headers=ah)
+    assert photo_conflict.status_code == 409
+
+    # Deleting a keyed message keeps an opaque retry reservation. A stale
+    # durable outbox therefore resolves without resurrecting removed content.
+    delete_key = 'message-delete-550e8400-e29b-41d4-a716'
+    delete_payload = {
+        'body': 'Remove this after delivery',
+        'client_attempt_id': delete_key,
+    }
+    delete_created = client.post(endpoints['dm'], json=delete_payload, headers=ah)
+    assert delete_created.status_code == 201
+    deleted_id = delete_created.get_json()['id']
+    assert client.delete(
+        f'/api/messages/{deleted_id}', headers=ah,
+    ).status_code == 200
+    deleted_replay = client.post(endpoints['dm'], json=delete_payload, headers=ah)
+    assert deleted_replay.status_code == 200
+    assert deleted_replay.get_json() == {
+        'deleted': True, 'client_attempt_id': delete_key,
+    }
+    with app.app_context():
+        assert db.session.get(Message, deleted_id) is None
+        deleted_attempt = MessageSendAttempt.query.filter_by(
+            sender_id=ana['user']['id'], client_attempt_id=delete_key,
+        ).one()
+        assert deleted_attempt.message_id is None
+        assert deleted_attempt.deleted_at is not None
+    assert client.post(endpoints['dm'], json={
+        **delete_payload, 'body': 'Do not reuse deleted keys',
+    }, headers=ah).status_code == 409
+
+    # A keyed row created during an early additive migration may lack its
+    # fingerprint. Reconstruct it from stored content and scope: exact retries
+    # still work, while changed content or a different room conflicts.
+    legacy_key = 'message-legacy-fingerprint-550e8400-e29b'
+    legacy_payload = {
+        'body': 'Migrated keyed row',
+        'client_attempt_id': legacy_key,
+    }
+    legacy_created = client.post(endpoints['dm'], json=legacy_payload, headers=ah)
+    assert legacy_created.status_code == 201
+    legacy_id = legacy_created.get_json()['id']
+    with app.app_context():
+        legacy_row = db.session.get(Message, legacy_id)
+        legacy_row.client_attempt_fingerprint = None
+        legacy_attempt = MessageSendAttempt.query.filter_by(
+            sender_id=ana['user']['id'], client_attempt_id=legacy_key,
+        ).one()
+        legacy_attempt.client_attempt_fingerprint = None
+        db.session.commit()
+    legacy_replay = client.post(endpoints['dm'], json=legacy_payload, headers=ah)
+    assert legacy_replay.status_code == 200
+    assert legacy_replay.get_json()['id'] == legacy_id
+    assert client.post(endpoints['dm'], json={
+        **legacy_payload, 'body': 'Changed after migration',
+    }, headers=ah).status_code == 409
+    assert client.post(endpoints['court'], json=legacy_payload, headers=ah).status_code == 409
+
+    other_sender = client.post(f"/api/chat/{ana['user']['id']}", json={
+        'body': 'My independently generated key', 'client_attempt_id': dm_key,
+    }, headers=bh)
+    assert other_sender.status_code == 201
+    assert other_sender.get_json()['id'] not in created_ids
+
+    # Omission remains backwards compatible and intentionally non-idempotent.
+    legacy_one = client.post(endpoints['dm'], json={'body': 'legacy'}, headers=ah)
+    legacy_two = client.post(endpoints['dm'], json={'body': 'legacy'}, headers=ah)
+    assert legacy_one.status_code == legacy_two.status_code == 201
+    assert legacy_one.get_json()['id'] != legacy_two.get_json()['id']
+
+
+def test_chat_client_attempt_id_validation(client):
+    ana = register(client, 'attempt-ana@example.com', 'Ana')
+    ben = register(client, 'attempt-ben@example.com', 'Ben')
+    endpoint = f"/api/chat/{ben['user']['id']}"
+    headers = auth_headers(ana['token'])
+
+    for malformed in ('', 'contains space', 'x' * 65, False, 123, []):
+        response = client.post(endpoint, json={
+            'body': 'hello', 'client_attempt_id': malformed,
+        }, headers=headers)
+        assert response.status_code == 400, malformed
+        assert response.get_json() == {'error': 'invalid_client_attempt_id'}
+
+    assert client.post(endpoint, json=['not', 'an', 'object'], headers=headers).status_code == 400
+
+
+def test_chat_notification_topics_collapse_atomically_until_read(client, app):
+    from backend.models import Notification, notify
+
+    register(client, 'notify-sender@example.com', 'Sender')
+    recipient = register(client, 'notify-recipient@example.com', 'Recipient')
+    recipient_id = recipient['user']['id']
+    topic = 'game_message:4242'
+
+    # Two callers can both reach notify() without observing the other's unread
+    # row. The unique topic + savepoint keeps one notification and lets both
+    # surrounding message transactions continue.
+    with app.app_context():
+        first = notify(
+            recipient_id, 'game_message', 'First message',
+            unread_dedupe_key=topic,
+        )
+        second = notify(
+            recipient_id, 'game_message', 'Concurrent message',
+            unread_dedupe_key=topic,
+        )
+        db.session.commit()
+        assert first is not None
+        assert second is None
+        assert Notification.query.filter_by(
+            user_id=recipient_id, unread_dedupe_key=topic,
+        ).count() == 1
+
+    # Reading releases the topic key, so the next chat burst can surface one
+    # fresh unread ping while preserving notification history.
+    assert client.post(
+        '/api/notifications/read', headers=auth_headers(recipient['token']),
+    ).status_code == 200
+    with app.app_context():
+        assert notify(
+            recipient_id, 'game_message', 'After reading',
+            unread_dedupe_key=topic,
+        ) is not None
+        db.session.commit()
+        rows = Notification.query.filter_by(user_id=recipient_id).all()
+        assert len(rows) == 2
+        assert sum(not row.read for row in rows) == 1
+
+
 def test_game_chat(client):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
@@ -2661,6 +2975,107 @@ def test_game_chat(client):
     # Game messages never leak into the DM conversation list.
     convos = client.get('/api/chat', headers=auth_headers(a['token'])).get_json()
     assert convos['items'] == []
+
+
+def test_competition_chat_inbox_is_complete_private_and_recency_sorted(client):
+    ana = register(client, 'inbox-ana@example.com', 'Ana')
+    ben = register(client, 'inbox-ben@example.com', 'Ben')
+    outsider = register(client, 'inbox-outsider@example.com', 'Xan')
+    ah, bh = auth_headers(ana['token']), auth_headers(ben['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    game = make_game(client, ana['token'], court_id)
+    assert client.post(f"/api/games/{game['id']}/join", headers=bh).status_code == 200
+    tournament = make_tournament(client, ana['token'], court_id)
+    _register_entry(client, tournament['id'], ana['token'])
+    _register_entry(client, tournament['id'], ben['token'])
+    league = make_league(client, ah)
+    assert client.post(f"/api/leagues/{league['id']}/join", headers=bh).status_code == 200
+
+    # Active rooms are reachable before anybody sends the first message.
+    initial = client.get('/api/chat/competitions', headers=bh)
+    assert initial.status_code == 200
+    assert {row['kind'] for row in initial.get_json()['items']} == {
+        'game', 'tournament', 'league',
+    }
+    assert all(row['last_message'] is None for row in initial.get_json()['items'])
+    assert initial.get_json()['unread'] == 0
+
+    # Membership, not public visibility, controls what the inbox reveals.
+    hidden = client.get(
+        '/api/chat/competitions', headers=auth_headers(outsider['token']),
+    ).get_json()
+    assert hidden == {'items': [], 'unread': 0}
+
+    assert client.post(
+        f"/api/games/{game['id']}/chat", json={'body': 'Game update'}, headers=ah,
+    ).status_code == 201
+    assert client.post(
+        f"/api/tournaments/{tournament['id']}/chat",
+        json={'body': 'Tournament update'}, headers=ah,
+    ).status_code == 201
+    assert client.post(
+        f"/api/leagues/{league['id']}/chat",
+        json={'body': 'League update'}, headers=ah,
+    ).status_code == 201
+    assert client.get('/api/chat', headers=ah).get_json()['items'] == []
+
+    inbox = client.get('/api/chat/competitions', headers=bh).get_json()
+    assert [row['kind'] for row in inbox['items']] == [
+        'league', 'tournament', 'game',
+    ]
+    assert [row['last_message']['body'] for row in inbox['items']] == [
+        'League update', 'Tournament update', 'Game update',
+    ]
+    assert [row['unread'] for row in inbox['items']] == [1, 1, 1]
+    assert inbox['unread'] == 3
+    assert client.get('/api/me', headers=bh).get_json()['community_room_unread'] == 3
+    sender_inbox = client.get('/api/chat/competitions', headers=ah).get_json()
+    assert sender_inbox['unread'] == 0
+    assert all(row['unread'] == 0 for row in sender_inbox['items'])
+
+    # Reading one underlying room immediately clears that room in the unified view.
+    client.get(f"/api/tournaments/{tournament['id']}/chat", headers=bh)
+    refreshed = client.get('/api/chat/competitions', headers=bh).get_json()
+    tournament_row = next(
+        row for row in refreshed['items'] if row['kind'] == 'tournament'
+    )
+    assert tournament_row['unread'] == 0
+    assert refreshed['unread'] == 2
+    assert client.get('/api/me', headers=bh).get_json()['community_room_unread'] == 2
+
+
+def test_competition_inbox_cap_never_hides_active_or_unread_rooms():
+    from backend.routes.chat import _select_competition_rooms
+
+    recent_read = [{
+        'kind': 'game', 'id': index, 'last_message': {'id': 1000 + index},
+        'event_at': f'2026-09-{(index % 28) + 1:02d}T18:00:00Z',
+        'unread': 0, '_active': False,
+    } for index in range(45)]
+    unread_old = {
+        'kind': 'league', 'id': 900, 'last_message': {'id': 1},
+        'event_at': '2026-01-01T18:00:00Z', 'unread': 3, '_active': False,
+    }
+    silent_far = {
+        'kind': 'tournament', 'id': 901, 'last_message': None,
+        'event_at': '2026-12-01T18:00:00Z', 'unread': 0, '_active': True,
+    }
+    silent_near = {
+        'kind': 'game', 'id': 902, 'last_message': None,
+        'event_at': '2026-09-01T18:00:00Z', 'unread': 0, '_active': True,
+    }
+
+    selected = _select_competition_rooms(
+        recent_read + [silent_far, unread_old, silent_near], limit=40,
+    )
+    selected_ids = {(room['kind'], room['id']) for room in selected}
+    assert len(selected) == 40
+    assert ('league', 900) in selected_ids
+    assert ('tournament', 901) in selected_ids
+    assert ('game', 902) in selected_ids
+    assert [room['id'] for room in selected if room['last_message'] is None] == [902, 901]
+    assert all('_active' not in room for room in selected)
 
 
 def test_game_chat_notifications(client):
@@ -2754,6 +3169,290 @@ def make_game(client, token, court_id, game_type='casual', hours_ahead=24, visib
     res = client.post('/api/games', json=body, headers=auth_headers(token))
     assert res.status_code == 201, res.get_json()
     return res.get_json()
+
+
+def test_game_create_idempotent_per_creator(client, app, monkeypatch):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, GameInvite, GamePlayer, utcnow
+
+    ana = register(client, 'ana@example.com', 'Ana')
+    ben = register(client, 'ben@example.com', 'Ben')
+    ah, bh = auth_headers(ana['token']), auth_headers(ben['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    attempt_id = 'game-create-550e8400-e29b-41d4-a716-446655440000'
+    payload = {
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(hours=2)).isoformat() + 'Z',
+        'game_type': 'casual',
+        'max_players': 4,
+        'visibility': 'private',
+        'invite_user_ids': [ben['user']['id']],
+        'client_attempt_id': attempt_id,
+    }
+
+    first = client.post('/api/games', json=payload, headers=ah)
+    assert first.status_code == 201
+    first_game = first.get_json()
+    direct_invites = [
+        item for item in client.get('/api/notifications', headers=bh).get_json()['items']
+        if item['kind'] == 'game_invite_direct'
+    ]
+    assert len(direct_invites) == 1
+    assert direct_invites[0]['related_game_id'] == first_game['id']
+
+    # A replay returns the already-created resource and skips every create-side
+    # effect: no second game, creator membership, invite, or notification.
+    replay = client.post('/api/games', json=payload, headers=ah)
+    assert replay.status_code == 200
+    assert replay.get_json() == first_game
+
+    # Canonically equivalent representations are the same attempt: timezone
+    # spelling, numeric JSON type, invite ordering/type, and unrelated fields
+    # do not manufacture a conflict.
+    equivalent_payload = {
+        **payload,
+        'court_id': str(court_id),
+        'scheduled_at': payload['scheduled_at'][:-1] + '+00:00',
+        'max_players': '4',
+        'invite_user_ids': [str(ben['user']['id'])],
+        'client_telemetry': {'submit_count': 2},
+    }
+    equivalent = client.post('/api/games', json=equivalent_payload, headers=ah)
+    assert equivalent.status_code == 200
+    assert equivalent.get_json() == first_game
+
+    # A valid retry remains valid after its scheduled time passes because the
+    # immutable fingerprint is checked before any time-sensitive validation.
+    import backend.routes.games as games_routes
+    with monkeypatch.context() as context:
+        context.setattr(
+            games_routes,
+            'utcnow',
+            lambda: utcnow() + timedelta(days=2),
+        )
+        late_retry = client.post('/api/games', json=payload, headers=ah)
+    assert late_retry.status_code == 200
+    assert late_retry.get_json() == first_game
+
+    # Reusing the same creator-scoped key for a different immutable request is
+    # a conflict and cannot repeat or alter any create-side effects.
+    conflict = client.post(
+        '/api/games',
+        json={**payload, 'notes': 'This is a different game request'},
+        headers=ah,
+    )
+    assert conflict.status_code == 409
+    assert conflict.get_json() == {'error': 'client_attempt_id_conflict'}
+
+    # Migrated rows from the interim idempotency rollout had no fingerprint.
+    # Their original request is unknowable (and game state may have changed),
+    # so they retain unconditional creator-scoped replay compatibility.
+    migrated_game = GameModel.query.filter_by(
+        creator_id=ana['user']['id'], client_attempt_id=attempt_id,
+    ).one()
+    migrated_game.client_attempt_fingerprint = None
+    from backend.app import db
+    db.session.commit()
+    migrated_retry = client.post('/api/games', json=payload, headers=ah)
+    assert migrated_retry.status_code == 200
+    migrated_conflict = client.post(
+        '/api/games', json={**payload, 'max_players': 8}, headers=ah,
+    )
+    assert migrated_conflict.status_code == 200
+    assert migrated_conflict.get_json() == first_game
+
+    direct_invites = [
+        item for item in client.get('/api/notifications', headers=bh).get_json()['items']
+        if item['kind'] == 'game_invite_direct'
+    ]
+    assert len(direct_invites) == 1
+    assert GameModel.query.filter_by(
+        creator_id=ana['user']['id'], client_attempt_id=attempt_id,
+    ).count() == 1
+    assert GamePlayer.query.filter_by(game_id=first_game['id']).count() == 1
+    assert GameInvite.query.filter_by(game_id=first_game['id']).count() == 1
+
+    # The same client-generated value is independent in another host's scope.
+    ben_payload = {
+        **payload,
+        'visibility': 'open',
+        'invite_user_ids': [],
+    }
+    ben_create = client.post('/api/games', json=ben_payload, headers=bh)
+    assert ben_create.status_code == 201
+    assert ben_create.get_json()['id'] != first_game['id']
+    keyed_games = GameModel.query.filter_by(client_attempt_id=attempt_id).all()
+    assert {game.creator_id for game in keyed_games} == {
+        ana['user']['id'], ben['user']['id'],
+    }
+
+
+def test_game_client_attempt_id_validation_and_omission(client):
+    from datetime import timedelta
+    from backend.models import Game as GameModel, utcnow
+
+    ana = register(client, 'ana@example.com', 'Ana')
+    headers = auth_headers(ana['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    payload = {
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(hours=2)).isoformat() + 'Z',
+        'visibility': 'open',
+    }
+
+    for malformed in ('', 'contains whitespace', 'x' * 65, 123, ['attempt']):
+        res = client.post(
+            '/api/games',
+            json={**payload, 'client_attempt_id': malformed},
+            headers=headers,
+        )
+        assert res.status_code == 400
+        assert res.get_json() == {'error': 'invalid_client_attempt_id'}
+    assert GameModel.query.count() == 0
+
+    # Omitting the key preserves the original non-idempotent create behavior.
+    first = client.post('/api/games', json=payload, headers=headers)
+    second = client.post('/api/games', json=payload, headers=headers)
+    assert first.status_code == second.status_code == 201
+    assert first.get_json()['id'] != second.get_json()['id']
+
+
+def test_game_create_rejects_non_object_json(client):
+    from backend.models import Game as GameModel
+
+    ana = register(client, 'ana@example.com', 'Ana')
+    headers = auth_headers(ana['token'])
+    for payload in ([], ['court_id', 1], 'not-an-object', 42):
+        res = client.post('/api/games', json=payload, headers=headers)
+        assert res.status_code == 400
+        assert res.get_json() == {'error': 'invalid_payload'}
+
+    # Flask's json=None omits the body, so send the JSON null literal directly.
+    null_res = client.post(
+        '/api/games', data='null', content_type='application/json', headers=headers,
+    )
+    assert null_res.status_code == 400
+    assert null_res.get_json() == {'error': 'invalid_payload'}
+    assert GameModel.query.count() == 0
+
+
+def test_game_attempt_unique_index_repair_is_exact(app):
+    from sqlalchemy import inspect, text
+    from backend.app import _ensure_game_attempt_index, _game_attempt_index_is_exact
+
+    assert not _game_attempt_index_is_exact({
+        'unique': True,
+        'column_names': ['creator_id', 'client_attempt_id'],
+        'dialect_options': {'postgresql_nulls_not_distinct': True},
+    })
+
+    # Simulate the dangerous legacy state: the canonical name exists, but the
+    # index is non-unique and its columns are reversed.
+    with db.engine.begin() as conn:
+        conn.execute(text('DROP INDEX "uq_game_creator_attempt"'))
+        conn.execute(text(
+            'CREATE INDEX "uq_game_creator_attempt" '
+            'ON game (client_attempt_id, creator_id)'
+        ))
+
+    _ensure_game_attempt_index(app)
+
+    repaired = next(
+        index for index in inspect(db.engine).get_indexes('game')
+        if index['name'] == 'uq_game_creator_attempt'
+    )
+    assert bool(repaired['unique']) is True
+    assert repaired['column_names'] == ['creator_id', 'client_attempt_id']
+    options = repaired.get('dialect_options') or {}
+    assert options.get('sqlite_where') is None
+    assert options.get('postgresql_where') is None
+
+
+def test_message_attempt_unique_index_repair_is_exact(app):
+    from sqlalchemy import inspect, text
+    from backend.app import (
+        _ensure_message_attempt_index,
+        _message_attempt_index_is_exact,
+    )
+
+    assert not _message_attempt_index_is_exact({
+        'unique': True,
+        'column_names': ['sender_id', 'client_attempt_id'],
+        'dialect_options': {'postgresql_nulls_not_distinct': True},
+    })
+
+    # A legacy deployment may have reused the canonical name for an index that
+    # cannot enforce retry safety. Boot repairs that shape before accepting
+    # queued sends.
+    with db.engine.begin() as conn:
+        conn.execute(text('DROP INDEX "uq_message_sender_attempt"'))
+        conn.execute(text(
+            'CREATE INDEX "uq_message_sender_attempt" '
+            'ON message (client_attempt_id, sender_id)'
+        ))
+
+    _ensure_message_attempt_index(app)
+
+    repaired = next(
+        index for index in inspect(db.engine).get_indexes('message')
+        if index['name'] == 'uq_message_sender_attempt'
+    )
+    assert bool(repaired['unique']) is True
+    assert repaired['column_names'] == ['sender_id', 'client_attempt_id']
+    options = repaired.get('dialect_options') or {}
+    assert options.get('sqlite_where') is None
+    assert options.get('postgresql_where') is None
+
+
+def test_message_attempt_index_rejects_sender_global_legacy_uniqueness(app):
+    from sqlalchemy import text
+    from backend.app import _ensure_message_attempt_index
+
+    with db.engine.begin() as conn:
+        conn.execute(text(
+            'CREATE UNIQUE INDEX "uq_message_attempt_global_legacy" '
+            'ON message (client_attempt_id)'
+        ))
+
+    with pytest.raises(RuntimeError, match='sender-global'):
+        _ensure_message_attempt_index(app)
+
+
+def test_message_send_attempt_ledger_verification_fails_closed(app):
+    from sqlalchemy import text
+    from backend.app import _ensure_message_send_attempt_schema
+
+    _ensure_message_send_attempt_schema(app)
+    with db.engine.begin() as conn:
+        conn.execute(text(
+            'CREATE UNIQUE INDEX "uq_attempt_sender_global_legacy" '
+            'ON message_send_attempt (client_attempt_id)'
+        ))
+    with pytest.raises(RuntimeError, match='sender-global'):
+        _ensure_message_send_attempt_schema(app)
+
+    with db.engine.begin() as conn:
+        conn.execute(text('DROP TABLE message_send_attempt'))
+        conn.execute(text(
+            'CREATE TABLE message_send_attempt ('
+            'id INTEGER PRIMARY KEY, '
+            'sender_id INTEGER NOT NULL, '
+            'client_attempt_id VARCHAR(64) NOT NULL, '
+            'client_attempt_fingerprint VARCHAR(64), '
+            'message_id INTEGER, '
+            'deleted_at DATETIME, '
+            'created_at DATETIME NOT NULL, '
+            'updated_at DATETIME NOT NULL'
+            ')'
+        ))
+        conn.execute(text(
+            'CREATE UNIQUE INDEX "uq_attempt_partial_legacy" '
+            'ON message_send_attempt (sender_id, client_attempt_id) '
+            'WHERE sender_id > 1000'
+        ))
+
+    with pytest.raises(RuntimeError, match='expected unique'):
+        _ensure_message_send_attempt_schema(app)
 
 
 def test_game_create_join_leave(client):
@@ -3345,6 +4044,64 @@ def _register_entry(client, tid, token, partner_id=None, expect=201):
     return res.get_json()
 
 
+def _tournament_match(data, match_id):
+    return next(match for match in data['matches'] if match['id'] == match_id)
+
+
+def _resolve_tournament_score(client, tournament_id, match, organizer_token,
+                              score1, score2, reporter_token=None,
+                              reason='Organizer verified the scorecard'):
+    """Submit evidence, then explicitly finalize it as the organizer.
+
+    Older flow tests care about the resulting bracket rather than who confirms,
+    so they use this durable two-step path. The assertions here protect the
+    central lifecycle guarantee: submission alone cannot progress results.
+    """
+    organizer_headers = auth_headers(organizer_token)
+    before = client.get(
+        f'/api/tournaments/{tournament_id}', headers=organizer_headers,
+    ).get_json()
+    rating_before = client.get('/api/me', headers=organizer_headers).get_json()[
+        'user'
+    ]['rating']
+    submitted_res = client.post(
+        f"/api/tournaments/{tournament_id}/matches/{match['id']}/score",
+        json={
+            'score1': score1,
+            'score2': score2,
+            'result_version': match.get('result_version', 0),
+        },
+        headers=auth_headers(reporter_token or organizer_token),
+    )
+    assert submitted_res.status_code == 200, submitted_res.get_json()
+    submitted = submitted_res.get_json()
+    submitted_match = _tournament_match(submitted, match['id'])
+    assert submitted_match['result_state'] == 'awaiting_confirmation'
+    assert submitted_match['winner_entry_id'] is None
+    assert {
+        item['id']: item['winner_entry_id'] for item in submitted['matches']
+    } == {
+        item['id']: item['winner_entry_id'] for item in before['matches']
+    }
+    if 'standings' in before:
+        assert submitted['standings'] == before['standings']
+    rating_after_submission = client.get(
+        '/api/me', headers=organizer_headers,
+    ).get_json()['user']['rating']
+    assert rating_after_submission == rating_before
+
+    resolved_res = client.post(
+        f"/api/tournaments/{tournament_id}/matches/{match['id']}/resolve",
+        json={
+            'reason': reason,
+            'result_version': submitted_match['result_version'],
+        },
+        headers=organizer_headers,
+    )
+    assert resolved_res.status_code == 200, resolved_res.get_json()
+    return resolved_res.get_json()
+
+
 def test_tournament_create_and_validation(client):
     a = register(client, 'a@example.com', 'Ana')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
@@ -3438,6 +4195,236 @@ def test_tournament_doubles_partner_rules(client):
     _register_entry(client, t['id'], c['token'], partner_id=b['user']['id'], expect=409)
 
 
+def test_tournament_result_confirmation_dispute_and_versions(client):
+    organizer = register(client, 'organizer@example.com', 'Organizer')
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    oh = auth_headers(organizer['token'])
+    ah = auth_headers(a['token'])
+    bh = auth_headers(b['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # A participant submission may only be reviewed by the opposing entry.
+    t = make_tournament(client, organizer['token'], court_id, max_entries=2)
+    _register_entry(client, t['id'], a['token'])
+    _register_entry(client, t['id'], b['token'])
+    started = client.post(f"/api/tournaments/{t['id']}/start", headers=oh).get_json()
+    match = started['matches'][0]
+    submitted_res = client.post(
+        f"/api/tournaments/{t['id']}/matches/{match['id']}/score",
+        json={'score1': 11, 'score2': 7, 'result_version': 0},
+        headers=ah,
+    )
+    assert submitted_res.status_code == 200
+    submitted = submitted_res.get_json()
+    submitted_match = _tournament_match(submitted, match['id'])
+    assert submitted['status'] == 'active'
+    assert submitted['champion'] is None
+    assert submitted_match['winner_entry_id'] is None
+    assert submitted_match['result_state'] == 'awaiting_confirmation'
+    assert submitted_match['awaiting_your_confirmation'] is False
+    assert submitted_match['can_confirm_result'] is False
+
+    opponent_view = client.get(
+        f"/api/tournaments/{t['id']}", headers=bh,
+    ).get_json()
+    opponent_match = _tournament_match(opponent_view, match['id'])
+    assert opponent_match['awaiting_your_confirmation'] is True
+    assert opponent_match['can_confirm_result'] is True
+    assert opponent_match['can_dispute_result'] is True
+    pings = [
+        notification
+        for notification in client.get(
+            '/api/notifications', headers=bh,
+        ).get_json()['items']
+        if notification['kind'] == 'tournament_score'
+        and notification['related_tournament_id'] == t['id']
+    ]
+    assert pings[0]['action_url'] == f'/#tournament/{t["id"]}/match/{match["id"]}'
+
+    for action in ('confirm', 'dispute'):
+        blocked = client.post(
+            f"/api/tournaments/{t['id']}/matches/{match['id']}/{action}",
+            json={'result_version': 1, 'reason': 'self review'},
+            headers=ah,
+        )
+        assert blocked.status_code == 403
+        assert blocked.get_json() == {'error': 'not_allowed'}
+
+    stale = client.post(
+        f"/api/tournaments/{t['id']}/matches/{match['id']}/confirm",
+        json={'result_version': 0}, headers=bh,
+    )
+    assert stale.status_code == 409
+    stale_data = stale.get_json()
+    assert stale_data['error'] == 'stale_result'
+    assert stale_data['current_result_version'] == 1
+    assert _tournament_match(stale_data, match['id'])['winner_entry_id'] is None
+
+    confirmed_res = client.post(
+        f"/api/tournaments/{t['id']}/matches/{match['id']}/confirm",
+        json={'result_version': 1}, headers=bh,
+    )
+    assert confirmed_res.status_code == 200
+    confirmed = confirmed_res.get_json()
+    confirmed_match = _tournament_match(confirmed, match['id'])
+    assert confirmed['status'] == 'completed'
+    assert confirmed_match['result_state'] == 'confirmed'
+    assert confirmed_match['resolution_kind'] == 'participant_confirmation'
+    assert [event['action'] for event in confirmed_match['result_history']] == [
+        'reported', 'confirmed',
+    ]
+
+    # Completion is idempotent: retrying the same review cannot emit a second
+    # result or run completion side effects again.
+    result_notes_before = [
+        item for item in client.get(
+            '/api/notifications', headers=ah,
+        ).get_json()['items']
+        if item['kind'] == 'tournament_result'
+        and item['related_tournament_id'] == t['id']
+    ]
+    retry = client.post(
+        f"/api/tournaments/{t['id']}/matches/{match['id']}/confirm",
+        json={'result_version': confirmed_match['result_version']}, headers=bh,
+    )
+    assert retry.status_code == 409
+    result_notes_after = [
+        item for item in client.get(
+            '/api/notifications', headers=ah,
+        ).get_json()['items']
+        if item['kind'] == 'tournament_result'
+        and item['related_tournament_id'] == t['id']
+    ]
+    assert len(result_notes_after) == len(result_notes_before) == 1
+
+    # When a neutral organizer reports, either entry may review. A dispute
+    # requires a reason and retains both the score and immutable event history.
+    t2 = make_tournament(client, organizer['token'], court_id, max_entries=2)
+    _register_entry(client, t2['id'], a['token'])
+    _register_entry(client, t2['id'], b['token'])
+    started2 = client.post(f"/api/tournaments/{t2['id']}/start", headers=oh).get_json()
+    match2 = started2['matches'][0]
+    neutral_submit = client.post(
+        f"/api/tournaments/{t2['id']}/matches/{match2['id']}/score",
+        json={'score1': 9, 'score2': 11, 'result_version': 0}, headers=oh,
+    ).get_json()
+    for participant_headers in (ah, bh):
+        view = client.get(
+            f"/api/tournaments/{t2['id']}", headers=participant_headers,
+        ).get_json()
+        assert _tournament_match(view, match2['id'])['can_confirm_result'] is True
+
+    missing_dispute_reason = client.post(
+        f"/api/tournaments/{t2['id']}/matches/{match2['id']}/dispute",
+        json={'result_version': 1}, headers=ah,
+    )
+    assert missing_dispute_reason.status_code == 400
+    assert missing_dispute_reason.get_json() == {'error': 'reason_required'}
+    disputed_res = client.post(
+        f"/api/tournaments/{t2['id']}/matches/{match2['id']}/dispute",
+        json={'reason': '  Score was entered backwards  ', 'result_version': 1},
+        headers=ah,
+    )
+    assert disputed_res.status_code == 200
+    disputed = disputed_res.get_json()
+    disputed_match = _tournament_match(disputed, match2['id'])
+    assert disputed_match['result_state'] == 'disputed'
+    assert (disputed_match['score1'], disputed_match['score2']) == (9, 11)
+    assert disputed_match['dispute_reason'] == 'Score was entered backwards'
+    assert [event['action'] for event in disputed_match['result_history']] == [
+        'reported', 'disputed',
+    ]
+    assert disputed_match['result_history'][-1]['reason'] == 'Score was entered backwards'
+
+    missing_resolution_reason = client.post(
+        f"/api/tournaments/{t2['id']}/matches/{match2['id']}/resolve",
+        json={'result_version': disputed_match['result_version']}, headers=oh,
+    )
+    assert missing_resolution_reason.status_code == 400
+    assert missing_resolution_reason.get_json() == {'error': 'reason_required'}
+    resolved_res = client.post(
+        f"/api/tournaments/{t2['id']}/matches/{match2['id']}/resolve",
+        json={
+            'reason': 'Organizer reviewed the signed scorecard',
+            'result_version': disputed_match['result_version'],
+        },
+        headers=oh,
+    )
+    assert resolved_res.status_code == 200
+    resolved_match = _tournament_match(resolved_res.get_json(), match2['id'])
+    assert resolved_match['result_state'] == 'confirmed'
+    assert resolved_match['resolution_kind'] == 'organizer_resolution'
+    assert resolved_match['result_history'][-1]['action'] == 'resolved'
+
+
+def test_tournament_doubles_teammate_cannot_confirm_result(client):
+    organizer = register(client, 'organizer@example.com', 'Organizer')
+    a = register(client, 'a@example.com', 'Ana')
+    b = register(client, 'b@example.com', 'Ben')
+    c = register(client, 'c@example.com', 'Cam')
+    d = register(client, 'd@example.com', 'Dee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    def befriend(first, second):
+        client.post(
+            '/api/friends/request',
+            json={'user_id': second['user']['id']},
+            headers=auth_headers(first['token']),
+        )
+        friendship_id = client.get(
+            '/api/friends', headers=auth_headers(second['token']),
+        ).get_json()['incoming'][0]['friendship_id']
+        client.post(
+            f'/api/friends/{friendship_id}/respond',
+            json={'accept': True}, headers=auth_headers(second['token']),
+        )
+
+    befriend(a, b)
+    befriend(c, d)
+    tournament = make_tournament(
+        client, organizer['token'], court_id,
+        event_type='doubles', max_entries=2,
+    )
+    _register_entry(
+        client, tournament['id'], a['token'], partner_id=b['user']['id'],
+    )
+    _register_entry(
+        client, tournament['id'], c['token'], partner_id=d['user']['id'],
+    )
+    started = client.post(
+        f"/api/tournaments/{tournament['id']}/start",
+        headers=auth_headers(organizer['token']),
+    ).get_json()
+    match = started['matches'][0]
+    submitted = client.post(
+        f"/api/tournaments/{tournament['id']}/matches/{match['id']}/score",
+        json={'score1': 11, 'score2': 6, 'result_version': 0},
+        headers=auth_headers(a['token']),
+    ).get_json()
+    version = _tournament_match(submitted, match['id'])['result_version']
+
+    # A reporter's teammate belongs to the same entry and cannot independently
+    # validate it. Either player from the opposing entry can.
+    for action in ('confirm', 'dispute'):
+        blocked = client.post(
+            f"/api/tournaments/{tournament['id']}/matches/{match['id']}/{action}",
+            json={'result_version': version, 'reason': 'teammate review'},
+            headers=auth_headers(b['token']),
+        )
+        assert blocked.status_code == 403
+    opponent_view = client.get(
+        f"/api/tournaments/{tournament['id']}", headers=auth_headers(d['token']),
+    ).get_json()
+    assert _tournament_match(opponent_view, match['id'])['can_confirm_result'] is True
+    confirmed = client.post(
+        f"/api/tournaments/{tournament['id']}/matches/{match['id']}/confirm",
+        json={'result_version': version}, headers=auth_headers(c['token']),
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.get_json()['status'] == 'completed'
+
+
 def test_tournament_single_elim_flow(client):
     """4 players -> 2 semis + final; scores advance; champion crowned."""
     a = register(client, 'a@example.com', 'Ana')
@@ -3488,14 +4475,34 @@ def test_tournament_single_elim_flow(client):
                       json={'score1': 11, 'score2': 11}, headers=auth_headers(a['token']))
     assert res.status_code == 400
 
-    # Ana beats Dee; Cam upsets Ben (scored by organizer)
+    # Ana submits the semifinal score. The final stays untouched until the
+    # organizer resolves it, then Cam's upset follows the legacy helper path.
     res = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
-                      json={'score1': 11, 'score2': 5}, headers=auth_headers(a['token']))
+                      json={'score1': 11, 'score2': 5, 'result_version': 0},
+                      headers=auth_headers(a['token']))
     assert res.status_code == 200
-    m1 = next(m for m in res.get_json()['matches'] if m['round'] == 1 and m['position'] == 1)
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{m1['id']}/score",
-                      json={'score1': 9, 'score2': 11}, headers=auth_headers(a['token']))
-    data = res.get_json()
+    provisional = res.get_json()
+    provisional_m0 = _tournament_match(provisional, m0['id'])
+    assert provisional_m0['winner_entry_id'] is None
+    assert provisional_m0['result_state'] == 'awaiting_confirmation'
+    assert next(
+        match for match in provisional['matches']
+        if match['round'] == 2 and match['position'] == 0
+    )['status'] == 'pending'
+    resolved = client.post(
+        f"/api/tournaments/{t['id']}/matches/{m0['id']}/resolve",
+        json={
+            'reason': 'Organizer verified semifinal scorecard',
+            'result_version': provisional_m0['result_version'],
+        },
+        headers=auth_headers(a['token']),
+    )
+    assert resolved.status_code == 200
+    data = resolved.get_json()
+    m1 = next(m for m in data['matches'] if m['round'] == 1 and m['position'] == 1)
+    data = _resolve_tournament_score(
+        client, t['id'], m1, a['token'], 9, 11,
+    )
     final = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 0)
     assert final['status'] == 'ready'
     assert {final['entry1_id'], final['entry2_id']} == {entries['Ana']['id'], entries['Cam']['id']}
@@ -3509,14 +4516,16 @@ def test_tournament_single_elim_flow(client):
     assert any(n['kind'] == 'tournament_match' for n in notifs)
 
     # Final alone doesn't finish it — the bronze match is still pending
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
-                      json={'score1': 11, 'score2': 7}, headers=auth_headers(c['token']))
-    data = res.get_json()
+    data = _resolve_tournament_score(
+        client, t['id'], final, a['token'], 11, 7,
+        reporter_token=c['token'],
+    )
     assert data['status'] == 'active'
     # Bronze: Ben beats Dee -> tournament completes, champion = Ana, Ben 3rd
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{third['id']}/score",
-                      json={'score1': 5, 'score2': 11}, headers=auth_headers(d['token']))
-    data = res.get_json()
+    data = _resolve_tournament_score(
+        client, t['id'], third, a['token'], 5, 11,
+        reporter_token=d['token'],
+    )
     assert data['status'] == 'completed'
     assert data['champion']['name'] == 'Ana'
     third = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 1)
@@ -3553,19 +4562,27 @@ def test_tournament_byes_with_three_entries(client):
     playable = next(m for m in r1 if m['status'] == 'ready')
     entries = {e['name']: e for e in data['entries']}
     assert bye['winner_entry_id'] == entries['Ana']['id']
+    assert bye['result_state'] == 'bye'
+    assert bye['result_version'] == 1
+    assert bye['resolution_kind'] == 'automatic_bye'
+    assert [event['action'] for event in bye['result_history']] == ['resolved']
+    assert bye['result_history'][0]['reason'] == 'Automatic bye advancement'
     final = next(m for m in data['matches'] if m['round'] == 2)
     assert final['entry1_id'] == entries['Ana']['id']  # bye winner already advanced
     # 3 entries -> a bye semifinal produces no loser, so no bronze match
     assert not any(m for m in data['matches'] if m['round'] == 2 and m['position'] == 1)
 
     # Ben vs Cam, then the final
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{playable['id']}/score",
-                      json={'score1': 11, 'score2': 8}, headers=auth_headers(b['token']))
-    final = next(m for m in res.get_json()['matches'] if m['round'] == 2)
+    data = _resolve_tournament_score(
+        client, t['id'], playable, a['token'], 11, 8,
+        reporter_token=b['token'],
+    )
+    final = next(m for m in data['matches'] if m['round'] == 2)
     assert final['status'] == 'ready'
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
-                      json={'score1': 11, 'score2': 9}, headers=auth_headers(a['token']))
-    assert res.get_json()['champion']['name'] == 'Ana'
+    data = _resolve_tournament_score(
+        client, t['id'], final, a['token'], 11, 9,
+    )
+    assert data['champion']['name'] == 'Ana'
 
 
 def test_tournament_round_robin_standings(client):
@@ -3584,10 +4601,9 @@ def test_tournament_round_robin_standings(client):
     entries = {e['name']: e for e in data['entries']}
 
     def score(match, s1, s2):
-        res = client.post(f"/api/tournaments/{t['id']}/matches/{match['id']}/score",
-                          json={'score1': s1, 'score2': s2}, headers=auth_headers(a['token']))
-        assert res.status_code == 200, res.get_json()
-        return res.get_json()
+        return _resolve_tournament_score(
+            client, t['id'], match, a['token'], s1, s2,
+        )
 
     def match_between(data, x, y):
         return next(m for m in data['matches']
@@ -3648,8 +4664,9 @@ def test_tournament_champion_badge(client):
     _register_entry(client, t['id'], b['token'])
     client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
     final = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()['matches'][0]
-    data = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
-                       json={'score1': 11, 'score2': 2}, headers=auth_headers(a['token'])).get_json()
+    data = _resolve_tournament_score(
+        client, t['id'], final, a['token'], 11, 2,
+    )
     assert data['status'] == 'completed'
 
     winner_id = data['champion']['players'][0]['id']
@@ -3734,30 +4751,57 @@ def test_tournament_score_correction(client):
     the_final = lambda d: next(m for m in d['matches'] if m['round'] == 2 and m['position'] == 0)
     the_third = lambda d: next(m for m in d['matches'] if m['round'] == 2 and m['position'] == 1)
     # Enter m0 with the wrong winner, then correct it — final AND bronze
-    # slots must both follow the swap
-    data = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
-                       json={'score1': 5, 'score2': 11}, headers=auth_headers(a['token'])).get_json()
+    # slots must both follow the swap while they remain wholly unreported.
+    data = _resolve_tournament_score(
+        client, t['id'], m0, a['token'], 5, 11,
+    )
     assert the_final(data)['entry1_id'] == m0['entry2_id']
     assert the_third(data)['entry1_id'] == m0['entry1_id']
-    data = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
-                       json={'score1': 11, 'score2': 5}, headers=auth_headers(a['token'])).get_json()
+    confirmed_m0 = _tournament_match(data, m0['id'])
+    corrected_res = client.post(
+        f"/api/tournaments/{t['id']}/matches/{m0['id']}/resolve",
+        json={
+            'score1': 11,
+            'score2': 5,
+            'reason': 'Corrected from the signed scorecard',
+            'result_version': confirmed_m0['result_version'],
+        },
+        headers=auth_headers(a['token']),
+    )
+    assert corrected_res.status_code == 200
+    data = corrected_res.get_json()
+    corrected_m0 = _tournament_match(data, m0['id'])
+    assert corrected_m0['resolution_kind'] == 'organizer_correction'
+    assert corrected_m0['result_history'][-1]['action'] == 'corrected'
     assert the_final(data)['entry1_id'] == m0['entry1_id']
     assert the_third(data)['entry1_id'] == m0['entry2_id']
 
     # Play out m1, the final, and the bronze match
-    data = client.post(f"/api/tournaments/{t['id']}/matches/{m1['id']}/score",
-                       json={'score1': 11, 'score2': 9}, headers=auth_headers(a['token'])).get_json()
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{the_final(data)['id']}/score",
-                      json={'score1': 11, 'score2': 8}, headers=auth_headers(a['token']))
-    data = res.get_json()
+    data = _resolve_tournament_score(
+        client, t['id'], m1, a['token'], 11, 9,
+    )
+    data = _resolve_tournament_score(
+        client, t['id'], the_final(data), a['token'], 11, 8,
+    )
     assert data['status'] == 'active'  # bronze still pending
     # A semi correction is now locked by the played final
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
-                      json={'score1': 3, 'score2': 11}, headers=auth_headers(a['token']))
+    current_m0 = _tournament_match(data, m0['id'])
+    res = client.post(
+        f"/api/tournaments/{t['id']}/matches/{m0['id']}/resolve",
+        json={
+            'score1': 3,
+            'score2': 11,
+            'reason': 'Late correction attempt',
+            'result_version': current_m0['result_version'],
+        },
+        headers=auth_headers(a['token']),
+    )
     assert res.status_code == 409
-    res = client.post(f"/api/tournaments/{t['id']}/matches/{the_third(data)['id']}/score",
-                      json={'score1': 11, 'score2': 6}, headers=auth_headers(a['token']))
-    assert res.get_json()['status'] == 'completed'
+    assert res.get_json()['error'] == 'next_match_played'
+    data = _resolve_tournament_score(
+        client, t['id'], the_third(data), a['token'], 11, 6,
+    )
+    assert data['status'] == 'completed'
     # (completed tournaments refuse all edits — covered elsewhere; the lock
     # below matters mid-tournament, so test it on a fresh 8-player bracket)
 
@@ -3771,16 +4815,28 @@ def test_tournament_score_correction(client):
     data = client.post(f"/api/tournaments/{t2['id']}/start", headers=auth_headers(a['token'])).get_json()
     quarters = [m for m in data['matches'] if m['round'] == 1]
     q0, q1 = quarters[0], quarters[1]
-    client.post(f"/api/tournaments/{t2['id']}/matches/{q0['id']}/score",
-                json={'score1': 11, 'score2': 1}, headers=auth_headers(a['token']))
-    data = client.post(f"/api/tournaments/{t2['id']}/matches/{q1['id']}/score",
-                       json={'score1': 11, 'score2': 2}, headers=auth_headers(a['token'])).get_json()
+    data = _resolve_tournament_score(
+        client, t2['id'], q0, a['token'], 11, 1,
+    )
+    data = _resolve_tournament_score(
+        client, t2['id'], q1, a['token'], 11, 2,
+    )
     semi0 = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 0)
-    client.post(f"/api/tournaments/{t2['id']}/matches/{semi0['id']}/score",
-                json={'score1': 11, 'score2': 3}, headers=auth_headers(a['token']))
+    data = _resolve_tournament_score(
+        client, t2['id'], semi0, a['token'], 11, 3,
+    )
     # Now q0 feeds a played semi — correcting it must 409
-    res = client.post(f"/api/tournaments/{t2['id']}/matches/{q0['id']}/score",
-                      json={'score1': 1, 'score2': 11}, headers=auth_headers(a['token']))
+    current_q0 = _tournament_match(data, q0['id'])
+    res = client.post(
+        f"/api/tournaments/{t2['id']}/matches/{q0['id']}/resolve",
+        json={
+            'score1': 1,
+            'score2': 11,
+            'reason': 'Quarterfinal correction after semifinal',
+            'result_version': current_q0['result_version'],
+        },
+        headers=auth_headers(a['token']),
+    )
     assert res.status_code == 409
     assert res.get_json()['error'] == 'next_match_played'
 
@@ -3882,8 +4938,9 @@ def test_tournament_day_of_checkin(client):
 
     # Refused once finished
     final = next(m for m in data['matches'] if m['round'] == 1)
-    client.post(f"/api/tournaments/{t2['id']}/matches/{final['id']}/score",
-                json={'score1': 11, 'score2': 6}, headers=auth_headers(a['token']))
+    _resolve_tournament_score(
+        client, t2['id'], final, a['token'], 11, 6,
+    )
     detail = client.get(f"/api/tournaments/{t2['id']}", headers=auth_headers(a['token'])).get_json()
     assert detail['status'] == 'completed'
     assert client.post(f"/api/tournaments/{t2['id']}/checkin",
@@ -3906,8 +4963,9 @@ def test_tournament_titles_on_profiles(client):
         winner_entry = next(e for e in detail['entries']
                             if e['players'][0]['id'] == winner['user']['id'])
         s = {'score1': 11, 'score2': 4} if m['entry1_id'] == winner_entry['id'] else {'score1': 4, 'score2': 11}
-        client.post(f"/api/tournaments/{t['id']}/matches/{m['id']}/score",
-                    json=s, headers=auth_headers(winner['token']))
+        _resolve_tournament_score(
+            client, t['id'], m, winner['token'], s['score1'], s['score2'],
+        )
         return t
 
     t1 = play_and_win(a, b)
@@ -4107,8 +5165,9 @@ def test_active_tournament_banner_payload(client):
     # Completed -> gone (finish the 2-entry bracket)
     detail = client.get(f"/api/tournaments/{soon['id']}", headers=auth_headers(a['token'])).get_json()
     m = detail['matches'][0]
-    client.post(f"/api/tournaments/{soon['id']}/matches/{m['id']}/score",
-                json={'score1': 11, 'score2': 6}, headers=auth_headers(a['token']))
+    _resolve_tournament_score(
+        client, soon['id'], m, a['token'], 11, 6,
+    )
     me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
     assert me['active_tournament'] is None
 
@@ -4154,8 +5213,9 @@ def test_weekly_recap_mentions_tournament_titles(client):
     _register_entry(client, t['id'], b['token'])
     client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
     final = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()['matches'][0]
-    data = client.post(f"/api/tournaments/{t['id']}/matches/{final['id']}/score",
-                       json={'score1': 11, 'score2': 3}, headers=auth_headers(a['token'])).get_json()
+    data = _resolve_tournament_score(
+        client, t['id'], final, a['token'], 11, 3,
+    )
     winner_id = data['champion']['players'][0]['id']
 
     # Time-travel the win into last week and force a fresh recap (in-context
@@ -4213,6 +5273,9 @@ def test_tournament_endpoints_require_auth(client):
         ('delete', '/api/tournaments/1/register'), ('delete', '/api/tournaments/1/entries/1'),
         ('post', '/api/tournaments/1/start'), ('post', '/api/tournaments/1/cancel'),
         ('post', '/api/tournaments/1/checkin'), ('post', '/api/tournaments/1/matches/1/score'),
+        ('post', '/api/tournaments/1/matches/1/confirm'),
+        ('post', '/api/tournaments/1/matches/1/dispute'),
+        ('post', '/api/tournaments/1/matches/1/resolve'),
         ('get', '/api/tournaments/1/chat'), ('post', '/api/tournaments/1/chat'),
     ]
     for method, path in calls:
@@ -4296,26 +5359,25 @@ def test_ranked_tournament_applies_elo(client):
         _register_entry(client, t['id'], p['token'])
     data = client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token'])).get_json()
 
-    def score(mid, s1, s2):
-        return client.post(f"/api/tournaments/{t['id']}/matches/{mid}/score",
-                           json={'score1': s1, 'score2': s2},
-                           headers=auth_headers(a['token'])).get_json()
+    def score(match, s1, s2):
+        return _resolve_tournament_score(
+            client, t['id'], match, a['token'], s1, s2,
+        )
 
     semis = [m for m in data['matches'] if m['round'] == 1]
-    data = score(semis[0]['id'], 11, 5)
-    data = score(semis[1]['id'], 11, 7)
+    data = score(semis[0], 11, 5)
+    data = score(semis[1], 11, 7)
     # No ratings move until completion (corrections stay safe)
     me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
     assert me['user']['rating'] == 1200
     final = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 0)
     third = next(m for m in data['matches'] if m['round'] == 2 and m['position'] == 1)
-    data = score(final['id'], 11, 9)
-    data = score(third['id'], 11, 2)
+    data = score(final, 11, 9)
+    data = score(third, 11, 2)
     assert data['status'] == 'completed'
 
     # Everyone played 2 rated matches; champion strictly gained, 4th lost
     champ_id = data['champion']['players'][0]['id']
-    users = {p['user']['id']: p for p in ()}
     ratings = {}
     for p in (a, b, c, d):
         u = client.get('/api/me', headers=auth_headers(p['token'])).get_json()['user']
@@ -4339,8 +5401,9 @@ def test_casual_tournament_leaves_ratings_alone(client):
     _register_entry(client, t['id'], b['token'])
     client.post(f"/api/tournaments/{t['id']}/start", headers=auth_headers(a['token']))
     m = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()['matches'][0]
-    data = client.post(f"/api/tournaments/{t['id']}/matches/{m['id']}/score",
-                       json={'score1': 11, 'score2': 1}, headers=auth_headers(a['token'])).get_json()
+    data = _resolve_tournament_score(
+        client, t['id'], m, a['token'], 11, 1,
+    )
     assert data['status'] == 'completed'
     for p in (a, b):
         u = client.get('/api/me', headers=auth_headers(p['token'])).get_json()['user']
@@ -4371,8 +5434,9 @@ def test_leaderboard_shows_title_counts(client):
     detail = client.get(f"/api/tournaments/{t['id']}", headers=auth_headers(a['token'])).get_json()
     ana_entry = next(e for e in detail['entries'] if e['name'] == 'Ana')
     s = {'score1': 11, 'score2': 2} if m['entry1_id'] == ana_entry['id'] else {'score1': 2, 'score2': 11}
-    client.post(f"/api/tournaments/{t['id']}/matches/{m['id']}/score",
-                json=s, headers=auth_headers(a['token']))
+    _resolve_tournament_score(
+        client, t['id'], m, a['token'], s['score1'], s['score2'],
+    )
 
     board = client.get('/api/leaderboard', headers=auth_headers(b['token'])).get_json()['items']
     by_name = {u['display_name']: u for u in board}
@@ -4407,15 +5471,17 @@ def test_banner_shows_next_opponent(client):
     # Ana beats Dee -> her next match (the final) isn't set yet
     semis = [m for m in data['matches'] if m['round'] == 1]
     m0 = next(m for m in semis if m['position'] == 0)
-    client.post(f"/api/tournaments/{t['id']}/matches/{m0['id']}/score",
-                json={'score1': 11, 'score2': 5}, headers=auth_headers(a['token']))
+    _resolve_tournament_score(
+        client, t['id'], m0, a['token'], 11, 5,
+    )
     me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
     assert me['active_tournament']['my_next_opponent'] is None
 
     # Ben beats Cam -> Ana's final opponent is Ben; Dee now plays Cam for bronze
     m1 = next(m for m in semis if m['position'] == 1)
-    client.post(f"/api/tournaments/{t['id']}/matches/{m1['id']}/score",
-                json={'score1': 11, 'score2': 8}, headers=auth_headers(a['token']))
+    _resolve_tournament_score(
+        client, t['id'], m1, a['token'], 11, 8,
+    )
     me = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
     assert me['active_tournament']['my_next_opponent'] == 'Ben'
     me_d = client.get('/api/me', headers=auth_headers(d['token'])).get_json()
@@ -4436,8 +5502,9 @@ def test_court_past_champions(client):
     m = detail['matches'][0]
     ana = next(e for e in detail['entries'] if e['name'] == 'Ana')
     s = {'score1': 11, 'score2': 3} if m['entry1_id'] == ana['id'] else {'score1': 3, 'score2': 11}
-    client.post(f"/api/tournaments/{t['id']}/matches/{m['id']}/score",
-                json=s, headers=auth_headers(a['token']))
+    _resolve_tournament_score(
+        client, t['id'], m, a['token'], s['score1'], s['score2'],
+    )
 
     # An active tournament at the same court must NOT appear as past champion
     make_tournament(client, a['token'], court_id)
@@ -5048,6 +6115,166 @@ def test_club_tournaments(client):
 
 # ---------- Web push ----------
 
+def test_push_dispatch_waits_for_commit_and_drops_failed_transaction(
+        client, app, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+    from backend.models import FavoriteCourt, Notification, notify
+    import backend.services.push as push_service
+
+    user = register(client, 'push-rollback@example.com', 'Rollback Receiver')
+    user_id = user['user']['id']
+    headers = auth_headers(user['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    app.config['VAPID_PRIVATE_KEY'] = 'test-private'
+    app.config['VAPID_PUBLIC_KEY'] = 'test-public'
+    subscription = {
+        'endpoint': 'https://push.example/rollback',
+        'keys': {'p256dh': 'key', 'auth': 'auth'},
+    }
+    assert client.post(
+        '/api/push/subscribe', json=subscription, headers=headers,
+    ).status_code == 201
+
+    enqueued = []
+    monkeypatch.setattr(
+        push_service,
+        '_enqueue_user_push',
+        lambda app_obj, uid, title, body='': enqueued.append(
+            (app_obj, uid, title, body)
+        ),
+    )
+
+    notify(user_id, 'game_invite_direct', 'Must not escape rollback')
+    assert enqueued == []
+    # Force the surrounding transaction to fail after notify() has recorded a
+    # push intent. Neither the Notification nor its push may survive.
+    db.session.add_all([
+        FavoriteCourt(user_id=user_id, court_id=court_id),
+        FavoriteCourt(user_id=user_id, court_id=court_id),
+    ])
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    assert enqueued == []
+    db.session.rollback()
+    assert Notification.query.filter_by(title='Must not escape rollback').count() == 0
+
+    notify(user_id, 'game_invite_direct', 'Committed push', 'After commit only')
+    assert enqueued == []
+    db.session.commit()
+    assert [(uid, title, body) for _, uid, title, body in enqueued] == [
+        (user_id, 'Committed push', 'After commit only'),
+    ]
+    assert Notification.query.filter_by(title='Committed push').count() == 1
+
+
+def test_notification_action_url_is_safe_persisted_and_pushed(
+        client, app, monkeypatch):
+    from backend.models import Notification, notify
+    import backend.services.push as push_service
+
+    user = register(client, 'push-route@example.com', 'Route Receiver')
+    user_id = user['user']['id']
+    app.config['VAPID_PRIVATE_KEY'] = 'test-private'
+    app.config['VAPID_PUBLIC_KEY'] = 'test-public'
+    enqueued = []
+
+    def capture(app_obj, uid, title, body='', action_url=''):
+        enqueued.append((uid, title, body, action_url))
+
+    monkeypatch.setattr(push_service, '_enqueue_user_push', capture)
+    destination = '/#league/12/match/34'
+    notify(
+        user_id, 'league_match', 'Confirm this score',
+        action_url=destination,
+    )
+    db.session.commit()
+
+    row = Notification.query.filter_by(title='Confirm this score').one()
+    assert row.to_dict()['action_url'] == destination
+    assert enqueued == [(user_id, 'Confirm this score', '', destination)]
+
+    notify(
+        user_id, 'league_match', 'Unsafe destination is ignored',
+        action_url='https://attacker.example/phish',
+    )
+    db.session.commit()
+    unsafe = Notification.query.filter_by(
+        title='Unsafe destination is ignored',
+    ).one()
+    assert unsafe.action_url == ''
+    assert enqueued[-1] == (user_id, 'Unsafe destination is ignored', '', '')
+
+
+def test_push_outbox_tracks_nested_savepoint_outcomes(client, app, monkeypatch):
+    from sqlalchemy import text
+    from backend.models import Notification, notify
+    import backend.services.push as push_service
+
+    user = register(client, 'push-savepoint@example.com', 'Savepoint Receiver')
+    user_id = user['user']['id']
+    app.config['VAPID_PRIVATE_KEY'] = 'test-private'
+    app.config['VAPID_PUBLIC_KEY'] = 'test-public'
+    enqueued = []
+    monkeypatch.setattr(
+        push_service,
+        '_enqueue_user_push',
+        lambda app_obj, uid, title, body='': enqueued.append((uid, title, body)),
+    )
+
+    # Releasing a SAVEPOINT must not enqueue; the outer rollback still owns the
+    # durability decision and drops the promoted nested intent.
+    db.session.rollback()
+    outer = db.session.begin()
+    # SQLite defers BEGIN until the first write; force the physical outer
+    # transaction to exist before SAVEPOINT so its rollback mirrors Postgres.
+    db.session.execute(
+        text('UPDATE "user" SET display_name = display_name WHERE id = :user_id'),
+        {'user_id': user_id},
+    )
+    nested = db.session.begin_nested()
+    notify(user_id, 'game_invite_direct', 'Nested then outer rollback')
+    nested.commit()
+    assert enqueued == []
+    outer.rollback()
+    assert enqueued == []
+    assert Notification.query.filter_by(
+        title='Nested then outer rollback',
+    ).count() == 0
+
+    # Rolling back one SAVEPOINT drops only its own intent; an outer intent can
+    # still commit and dispatch exactly once.
+    db.session.rollback()
+    outer = db.session.begin()
+    notify(user_id, 'game_invite_direct', 'Outer survives nested rollback')
+    nested = db.session.begin_nested()
+    notify(user_id, 'game_invite_direct', 'Nested is rolled back')
+    nested.rollback()
+    assert enqueued == []
+    outer.commit()
+    assert enqueued == [
+        (user_id, 'Outer survives nested rollback', ''),
+    ]
+    assert Notification.query.filter_by(title='Nested is rolled back').count() == 0
+
+    # A nested commit promotes its intent, and the root commit dispatches it
+    # once rather than once per transaction boundary.
+    db.session.rollback()
+    outer = db.session.begin()
+    db.session.execute(
+        text('UPDATE "user" SET display_name = display_name WHERE id = :user_id'),
+        {'user_id': user_id},
+    )
+    nested = db.session.begin_nested()
+    notify(user_id, 'game_invite_direct', 'Nested then outer commit')
+    nested.commit()
+    assert len(enqueued) == 1
+    outer.commit()
+    assert enqueued == [
+        (user_id, 'Outer survives nested rollback', ''),
+        (user_id, 'Nested then outer commit', ''),
+    ]
+
+
 def test_push_subscription_lifecycle(client, app):
     a = register(client, 'a@example.com', 'Ana')
     b = register(client, 'b@example.com', 'Ben')
@@ -5105,6 +6332,39 @@ def make_league(client, headers, **extra):
     return res.get_json()
 
 
+def test_league_detail_can_resolve_a_shared_match_from_an_older_round(client):
+    users = league_players(client, 3)
+    headers = [auth_headers(user['token']) for user in users]
+    league = make_league(client, headers[0], name='Durable Match Links')
+    for member_headers in headers[1:]:
+        assert client.post(
+            f"/api/leagues/{league['id']}/join", headers=member_headers,
+        ).status_code == 200
+    started = client.post(
+        f"/api/leagues/{league['id']}/start", headers=headers[0],
+    ).get_json()
+    old_match = started['matches'][0]
+
+    advanced = client.post(
+        f"/api/leagues/{league['id']}/advance", headers=headers[0],
+    )
+    assert advanced.status_code == 200
+    assert advanced.get_json()['current_round'] == 2
+    assert old_match['id'] not in {match['id'] for match in advanced.get_json()['matches']}
+
+    linked = client.get(
+        f"/api/leagues/{league['id']}?match_id={old_match['id']}",
+        headers=headers[1],
+    )
+    assert linked.status_code == 200
+    restored = next(
+        match for match in linked.get_json()['matches']
+        if match['id'] == old_match['id']
+    )
+    assert restored['round'] == 1
+    assert restored['result_state'] == 'unreported'
+
+
 def league_players(client, n):
     """Register n players with strictly descending ratings (via direct set)."""
     from backend.app import db
@@ -5116,6 +6376,44 @@ def league_players(client, n):
         users.append(u)
     db.session.commit()
     return users
+
+
+def league_headers_by_user(users, headers):
+    return {
+        user['user']['id']: user_headers
+        for user, user_headers in zip(users, headers)
+    }
+
+
+def confirm_league_score(client, league_id, match, headers_by_user,
+                         score1, score2, reporter_id=None):
+    """Submit a result and have the other player confirm it."""
+    reporter_id = reporter_id or match['player1']['id']
+    opponent_id = (
+        match['player2']['id']
+        if reporter_id == match['player1']['id']
+        else match['player1']['id']
+    )
+    submitted = client.post(
+        f"/api/leagues/{league_id}/matches/{match['id']}/score",
+        json={
+            'score1': score1,
+            'score2': score2,
+            'result_version': match.get('result_version', 0),
+        },
+        headers=headers_by_user[reporter_id],
+    )
+    assert submitted.status_code == 200, submitted.get_json()
+    submitted_match = submitted.get_json()
+    assert submitted_match['result_state'] == 'awaiting_confirmation'
+    confirmed = client.post(
+        f"/api/leagues/{league_id}/matches/{match['id']}/confirm",
+        json={'result_version': submitted_match['result_version']},
+        headers=headers_by_user[opponent_id],
+    )
+    assert confirmed.status_code == 200, confirmed.get_json()
+    assert confirmed.get_json()['result_state'] == 'confirmed'
+    return confirmed.get_json()
 
 
 def test_league_lifecycle_boxes_and_standings(client):
@@ -5140,7 +6438,7 @@ def test_league_lifecycle_boxes_and_standings(client):
     assert len(started['matches']) == 6
     assert client.post(f'/api/leagues/{lid}/join', headers=heads[0]).status_code == 400
 
-    # Report a match: only its players, only once, scores validated.
+    # Reporting is provisional: only a player may submit a valid score.
     match = next(m for m in started['matches']
                  if {m['player1']['id'], m['player2']['id']} ==
                  {users[0]['user']['id'], users[1]['user']['id']})
@@ -5149,25 +6447,212 @@ def test_league_lifecycle_boxes_and_standings(client):
     assert client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
                        json={'score1': 11, 'score2': 7}, headers=heads[5]).status_code == 403
     res = client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
-                      json={'score1': 11, 'score2': 7}, headers=heads[1])
+                      json={'score1': 11, 'score2': 7, 'result_version': 0},
+                      headers=heads[1])
     assert res.status_code == 200
-    assert res.get_json()['winner_id'] == users[0]['user']['id']
-    assert client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
-                       json={'score1': 5, 'score2': 11}, headers=heads[0]).status_code == 400
+    submitted = res.get_json()
+    assert submitted['result_state'] == 'awaiting_confirmation'
+    assert submitted['result_version'] == 1
+    assert submitted['winner_id'] is None
+    assert submitted['awaiting_your_confirmation'] is False
+    assert submitted['can_confirm_result'] is False
+    assert submitted['can_dispute_result'] is False
 
-    # Standings: win = 3 points, loss = 1. Opponent got a league_match ping.
+    # No points move until the opponent confirms. Viewer flags make the next
+    # action explicit, and the notification lands directly on this match.
+    detail = client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()
+    standings = {m['user']['display_name']: (m['points'], m['wins'], m['losses'])
+                 for m in detail['members']}
+    assert standings['Player0'] == (0, 0, 0)
+    assert standings['Player1'] == (0, 0, 0)
+    opponent_match = next(m for m in detail['matches'] if m['id'] == match['id'])
+    assert opponent_match['awaiting_your_confirmation'] is True
+    assert opponent_match['can_confirm_result'] is True
+    assert opponent_match['can_dispute_result'] is True
+    assert opponent_match['can_report_result'] is False
+    pings = [
+        n for n in client.get('/api/notifications', headers=heads[0]).get_json()['items']
+        if n['kind'] == 'league_match'
+    ]
+    assert pings[0]['action_url'] == f'/#league/{lid}/match/{match["id"]}'
+
+    # The reporter cannot approve or dispute their own evidence. A stale
+    # opponent action is rejected before any standings mutation.
+    for action in ('confirm', 'dispute'):
+        blocked = client.post(
+            f"/api/leagues/{lid}/matches/{match['id']}/{action}",
+            json={'result_version': 1, 'reason': 'self action'},
+            headers=heads[1],
+        )
+        assert blocked.status_code == 403
+    stale = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/confirm",
+        json={'result_version': 0}, headers=heads[0],
+    )
+    assert stale.status_code == 409
+    assert stale.get_json() == {'error': 'stale_result', 'result_version': 1}
+
+    confirmed = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/confirm",
+        json={'result_version': 1}, headers=heads[0],
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.get_json()['winner_id'] == users[0]['user']['id']
+    assert confirmed.get_json()['result_version'] == 2
+    assert [event['action'] for event in confirmed.get_json()['result_history']] == [
+        'reported', 'confirmed',
+    ]
+
+    # Win = 3, loss = 1, applied exactly once even if confirm is retried.
+    duplicate = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/confirm",
+        json={'result_version': 2}, headers=heads[0],
+    )
+    assert duplicate.status_code == 409
     detail = client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()
     standings = {m['user']['display_name']: (m['points'], m['wins'], m['losses'])
                  for m in detail['members']}
     assert standings['Player0'] == (3, 1, 0)
     assert standings['Player1'] == (1, 0, 1)
-    zero_kinds = [n['kind'] for n in client.get('/api/notifications', headers=heads[0]).get_json()['items']]
-    assert 'league_match' in zero_kinds
+
+
+def test_league_dispute_resubmit_correction_and_void(client):
+    users = league_players(client, 3)
+    heads = [auth_headers(u['token']) for u in users]
+    by_user = league_headers_by_user(users, heads)
+    lid = make_league(client, heads[0], box_size=3)['id']
+    for header in heads[1:]:
+        client.post(f'/api/leagues/{lid}/join', headers=header)
+    started = client.post(f'/api/leagues/{lid}/start', headers=heads[0]).get_json()
+
+    # Use the non-organizer pairing so resolution authority is independent of
+    # the two players' submit/confirm permissions.
+    player1_id = users[1]['user']['id']
+    player2_id = users[2]['user']['id']
+    match = next(
+        item for item in started['matches']
+        if {item['player1']['id'], item['player2']['id']} == {player1_id, player2_id}
+    )
+    reporter_id = match['player1']['id']
+    opponent_id = match['player2']['id']
+    submitted = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/score",
+        json={'score1': 11, 'score2': 8, 'result_version': 0},
+        headers=by_user[reporter_id],
+    ).get_json()
+    disputed_res = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/dispute",
+        json={
+            'reason': '   Score entered backwards   ',
+            'result_version': submitted['result_version'],
+        },
+        headers=by_user[opponent_id],
+    )
+    assert disputed_res.status_code == 200
+    disputed = disputed_res.get_json()
+    assert disputed['result_state'] == 'disputed'
+    assert (disputed['score1'], disputed['score2']) == (11, 8)
+    assert disputed['winner_id'] is None
+    assert disputed['dispute_reason'] == 'Score entered backwards'
+    assert [event['action'] for event in disputed['result_history']] == [
+        'reported', 'disputed',
+    ]
+    assert disputed['result_history'][-1]['reason'] == 'Score entered backwards'
+
+    # Neither manual transition may consume unresolved evidence.
+    for endpoint in ('advance', 'complete'):
+        blocked = client.post(f'/api/leagues/{lid}/{endpoint}', headers=heads[0])
+        assert blocked.status_code == 409
+        assert blocked.get_json() == {'error': 'unresolved_results'}
+
+    # A player may replace a disputed submission; the opposing player still
+    # must confirm that new version before it affects standings.
+    resubmitted_res = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/score",
+        json={'score1': 7, 'score2': 11, 'result_version': disputed['result_version']},
+        headers=by_user[reporter_id],
+    )
+    assert resubmitted_res.status_code == 200
+    resubmitted = resubmitted_res.get_json()
+    assert resubmitted['result_version'] == 3
+    confirmed_res = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/confirm",
+        json={'result_version': resubmitted['result_version']},
+        headers=by_user[opponent_id],
+    )
+    assert confirmed_res.status_code == 200
+    confirmed = confirmed_res.get_json()
+    assert confirmed['winner_id'] == opponent_id
+    assert [event['action'] for event in confirmed['result_history']] == [
+        'reported', 'disputed', 'reported', 'confirmed',
+    ]
+
+    def standings():
+        detail = client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()
+        return {
+            row['user']['id']: (row['points'], row['wins'], row['losses'])
+            for row in detail['members']
+        }
+
+    assert standings()[reporter_id] == (1, 0, 1)
+    assert standings()[opponent_id] == (3, 1, 0)
+
+    # Organizer corrections require an audit reason, reverse the old 3/1,
+    # then apply the corrected winner exactly once.
+    missing_reason = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/resolve",
+        json={'score1': 11, 'score2': 6, 'result_version': confirmed['result_version']},
+        headers=heads[0],
+    )
+    assert missing_reason.status_code == 400
+    assert missing_reason.get_json() == {'error': 'reason_required'}
+    corrected_res = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/resolve",
+        json={
+            'score1': 11,
+            'score2': 6,
+            'reason': 'Reviewed the signed scorecard',
+            'result_version': confirmed['result_version'],
+        },
+        headers=heads[0],
+    )
+    assert corrected_res.status_code == 200
+    corrected = corrected_res.get_json()
+    assert corrected['winner_id'] == reporter_id
+    assert corrected['resolution_kind'] == 'organizer_correction'
+    assert corrected['result_history'][-1]['action'] == 'corrected'
+    assert standings()[reporter_id] == (3, 1, 0)
+    assert standings()[opponent_id] == (1, 0, 1)
+
+    # Voiding a finalized result reverses its standings but retains the score
+    # and audit trail. A void is terminal enough for round advancement.
+    voided_res = client.post(
+        f"/api/leagues/{lid}/matches/{match['id']}/resolve",
+        json={
+            'void': True,
+            'reason': 'Match was played with an ineligible substitute',
+            'result_version': corrected['result_version'],
+        },
+        headers=heads[0],
+    )
+    assert voided_res.status_code == 200
+    voided = voided_res.get_json()
+    assert voided['result_state'] == 'void'
+    assert voided['winner_id'] is None
+    assert (voided['score1'], voided['score2']) == (11, 6)
+    assert voided['resolution_kind'] == 'organizer_void'
+    assert voided['result_history'][-1]['action'] == 'voided'
+    assert standings()[reporter_id] == (0, 0, 0)
+    assert standings()[opponent_id] == (0, 0, 0)
+    advanced = client.post(f'/api/leagues/{lid}/advance', headers=heads[0])
+    assert advanced.status_code == 200
+    assert advanced.get_json()['current_round'] == 2
 
 
 def test_league_advance_promotion_and_completion(client):
     users = league_players(client, 6)
     heads = [auth_headers(u['token']) for u in users]
+    by_user = league_headers_by_user(users, heads)
     lid = make_league(client, heads[0], box_size=3)['id']
     for h in heads[1:]:
         client.post(f'/api/leagues/{lid}/join', headers=h)
@@ -5179,15 +6664,18 @@ def test_league_advance_promotion_and_completion(client):
         ids = {match['player1']['id'], match['player2']['id']}
         if p5 in ids and match['box'] == 2:
             s1 = 11 if match['player1']['id'] == p5 else 3
-            client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
-                        json={'score1': s1, 'score2': 14 - s1}, headers=heads[5])
+            confirm_league_score(
+                client, lid, match, by_user, s1, 14 - s1, reporter_id=p5,
+            )
     # Box 1: Player2 (lowest in box 1) loses to Player0.
     m01 = next(m for m in started['matches'] if m['box'] == 1 and
                {m['player1']['id'], m['player2']['id']} ==
                {users[0]['user']['id'], users[2]['user']['id']})
     s1 = 11 if m01['player1']['id'] == users[0]['user']['id'] else 4
-    client.post(f"/api/leagues/{lid}/matches/{m01['id']}/score",
-                json={'score1': s1, 'score2': 15 - s1}, headers=heads[0])
+    confirm_league_score(
+        client, lid, m01, by_user, s1, 15 - s1,
+        reporter_id=users[0]['user']['id'],
+    )
 
     advanced = client.post(f'/api/leagues/{lid}/advance', headers=heads[0]).get_json()
     assert advanced['current_round'] == 2
@@ -5238,19 +6726,57 @@ def test_league_auto_advance_and_champion_titles(client):
     from backend.models import League, utcnow
     users = league_players(client, 3)
     heads = [auth_headers(u['token']) for u in users]
+    by_user = league_headers_by_user(users, heads)
     lid = make_league(client, heads[0], box_size=3)['id']
     for h in heads[1:]:
         client.post(f'/api/leagues/{lid}/join', headers=h)
-    client.post(f'/api/leagues/{lid}/start', headers=heads[0])
+    started = client.post(f'/api/leagues/{lid}/start', headers=heads[0]).get_json()
 
     # A fresh round doesn't advance on /me sweeps…
     client.get('/api/me', headers=heads[1])
     assert client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()['current_round'] == 1
 
-    # …but once round_days elapse, any /me read closes it automatically.
+    # A provisional result pauses automatic advancement even after the round
+    # deadline. Once the opponent confirms, the next sweep can close it.
+    round_one_match = next(
+        match for match in started['matches']
+        if {match['player1']['id'], match['player2']['id']} == {
+            users[1]['user']['id'], users[2]['user']['id'],
+        }
+    )
+    p1_winning_score1 = (
+        11 if round_one_match['player1']['id'] == users[1]['user']['id'] else 4
+    )
+    pending_res = client.post(
+        f"/api/leagues/{lid}/matches/{round_one_match['id']}/score",
+        json={
+            'score1': p1_winning_score1,
+            'score2': 15 - p1_winning_score1,
+            'result_version': 0,
+        },
+        headers=heads[1],
+    )
+    assert pending_res.status_code == 200
+    pending = pending_res.get_json()
     lg = db.session.get(League, lid)
     lg.round_started_at = utcnow() - timedelta(days=8)
     db.session.commit()
+    client.get('/api/me', headers=heads[1])
+    assert client.get(
+        f'/api/leagues/{lid}', headers=heads[0],
+    ).get_json()['current_round'] == 1
+
+    opponent_id = (
+        round_one_match['player2']['id']
+        if users[1]['user']['id'] == round_one_match['player1']['id']
+        else round_one_match['player1']['id']
+    )
+    confirmed = client.post(
+        f"/api/leagues/{lid}/matches/{round_one_match['id']}/confirm",
+        json={'result_version': pending['result_version']},
+        headers=by_user[opponent_id],
+    )
+    assert confirmed.status_code == 200
     client.get('/api/me', headers=heads[1])
     detail = client.get(f'/api/leagues/{lid}', headers=heads[0]).get_json()
     assert detail['current_round'] == 2
@@ -5267,8 +6793,10 @@ def test_league_auto_advance_and_champion_titles(client):
                  if {m['player1']['id'], m['player2']['id']} ==
                  {users[0]['user']['id'], users[1]['user']['id']})
     s1 = 11 if match['player1']['id'] == users[1]['user']['id'] else 2
-    client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
-                json={'score1': s1, 'score2': 13 - s1}, headers=heads[1])
+    confirm_league_score(
+        client, lid, match, by_user, s1, 13 - s1,
+        reporter_id=users[1]['user']['id'],
+    )
     done = client.post(f'/api/leagues/{lid}/complete', headers=heads[0]).get_json()
     assert done['champion_user_id'] == users[1]['user']['id']
     assert done['champion_name'] == 'Player1'
@@ -5411,6 +6939,7 @@ def test_league_champion_badge_and_mvp_awards(client):
     from backend.models import Game, GameMvpVote, GamePlayer, utcnow
     users = league_players(client, 3)
     heads = [auth_headers(u['token']) for u in users]
+    by_user = league_headers_by_user(users, heads)
 
     # Fresh players: new badge stays out of the closest-three progress list.
     stats = client.get('/api/me/stats', headers=heads[0]).get_json()
@@ -5426,8 +6955,10 @@ def test_league_champion_badge_and_mvp_awards(client):
                  if {m['player1']['id'], m['player2']['id']} ==
                  {users[0]['user']['id'], users[1]['user']['id']})
     s1 = 11 if match['player1']['id'] == users[0]['user']['id'] else 4
-    client.post(f"/api/leagues/{lid}/matches/{match['id']}/score",
-                json={'score1': s1, 'score2': 15 - s1}, headers=heads[0])
+    confirm_league_score(
+        client, lid, match, by_user, s1, 15 - s1,
+        reporter_id=users[0]['user']['id'],
+    )
     client.post(f'/api/leagues/{lid}/complete', headers=heads[0])
 
     badges = [b['id'] for b in client.get('/api/me/stats', headers=heads[0]).get_json()['badges']]
@@ -5922,3 +7453,239 @@ def test_streak_nag(client, app):
         db.session.commit()
         _maybe_streak_nag(ben, now=saturday)
     assert nags(bh) == []
+
+
+# ---------- Shared competition result foundation ----------
+
+def test_competition_result_serialization_permissions_and_history(client, app):
+    from backend.models import (
+        COMPETITION_RESULT_STATES,
+        CompetitionResultEvent,
+        League,
+        LeagueMatch,
+        TournamentMatch,
+        utcnow,
+    )
+    assert 'void' in COMPETITION_RESULT_STATES
+
+    organizer = register(client, 'result-organizer@example.com', 'Organizer')
+    reporter = register(client, 'result-reporter@example.com', 'Reporter')
+    opponent = register(client, 'result-opponent@example.com', 'Opponent')
+    outsider = register(client, 'result-outsider@example.com', 'Outsider')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    tournament = make_tournament(
+        client, organizer['token'], court_id, max_entries=2,
+    )
+    _register_entry(client, tournament['id'], reporter['token'])
+    _register_entry(client, tournament['id'], opponent['token'])
+    client.post(
+        f"/api/tournaments/{tournament['id']}/start",
+        headers=auth_headers(organizer['token']),
+    )
+
+    with app.app_context():
+        tournament_match = TournamentMatch.query.filter_by(
+            tournament_id=tournament['id'],
+        ).one()
+        tournament_match.score1 = 11
+        tournament_match.score2 = 7
+        tournament_match.result_state = 'awaiting_confirmation'
+        tournament_match.result_version = 1
+        tournament_match.reported_by_id = reporter['user']['id']
+        tournament_match.reported_at = utcnow()
+        CompetitionResultEvent.record(
+            'tournament', tournament_match.id, 'reported', 1,
+            actor_id=reporter['user']['id'], score1=11, score2=7,
+            reason='Reported courtside',
+        )
+
+        league = League(
+            name='Result Foundation League',
+            court_id=court_id,
+            organizer_id=organizer['user']['id'],
+            starts_at=utcnow(),
+            status='active',
+            current_round=1,
+        )
+        db.session.add(league)
+        db.session.flush()
+        league_match = LeagueMatch(
+            league=league,
+            round=1,
+            box=1,
+            player1_id=reporter['user']['id'],
+            player2_id=opponent['user']['id'],
+            score1=9,
+            score2=11,
+            result_state='disputed',
+            result_version=2,
+            reported_by_id=reporter['user']['id'],
+            reported_at=utcnow(),
+            disputed_by_id=opponent['user']['id'],
+            disputed_at=utcnow(),
+            dispute_reason='Score entered backwards',
+        )
+        db.session.add(league_match)
+        db.session.flush()
+        CompetitionResultEvent.record(
+            'league', league_match.id, 'reported', 1,
+            actor_id=reporter['user']['id'], score1=11, score2=9,
+        )
+        CompetitionResultEvent.record(
+            'league', league_match.id, 'disputed', 2,
+            actor_id=opponent['user']['id'], score1=9, score2=11,
+            reason='Score entered backwards',
+        )
+        league_id = league.id
+        db.session.commit()
+
+    # The fixture keeps an outer app context alive; expire objects loaded by
+    # the start response so subsequent API reads see the nested-context writes.
+    db.session.expire_all()
+
+    opponent_view = client.get(
+        f"/api/tournaments/{tournament['id']}",
+        headers=auth_headers(opponent['token']),
+    ).get_json()['matches'][0]
+    assert opponent_view['status'] == 'awaiting_confirmation'
+    assert opponent_view['result_state'] == 'awaiting_confirmation'
+    assert opponent_view['result_version'] == 1
+    assert opponent_view['awaiting_your_confirmation'] is True
+    assert opponent_view['can_confirm_result'] is True
+    assert opponent_view['can_dispute_result'] is True
+    assert opponent_view['can_resolve_result'] is False
+    assert opponent_view['result_history'][0]['action'] == 'reported'
+    assert opponent_view['result_history'][0]['actor_name'] == 'Reporter'
+
+    reporter_view = client.get(
+        f"/api/tournaments/{tournament['id']}",
+        headers=auth_headers(reporter['token']),
+    ).get_json()['matches'][0]
+    assert reporter_view['awaiting_your_confirmation'] is False
+    assert reporter_view['can_confirm_result'] is False
+
+    organizer_view = client.get(
+        f"/api/tournaments/{tournament['id']}",
+        headers=auth_headers(organizer['token']),
+    ).get_json()['matches'][0]
+    assert organizer_view['can_resolve_result'] is True
+    assert organizer_view['result_history'][0]['reason'] == 'Reported courtside'
+
+    outsider_view = client.get(
+        f"/api/tournaments/{tournament['id']}",
+        headers=auth_headers(outsider['token']),
+    ).get_json()['matches'][0]
+    assert outsider_view['can_confirm_result'] is False
+    assert outsider_view['can_dispute_result'] is False
+    assert outsider_view['can_resolve_result'] is False
+    assert outsider_view['dispute_reason'] is None
+    assert outsider_view['result_history'] == []
+
+    league_view = client.get(
+        f'/api/leagues/{league_id}',
+        headers=auth_headers(opponent['token']),
+    ).get_json()['matches'][0]
+    assert league_view['status'] == 'disputed'
+    assert league_view['result_state'] == 'disputed'
+    assert league_view['can_report_result'] is True
+    assert league_view['can_confirm_result'] is False
+    assert [event['action'] for event in league_view['result_history']] == [
+        'reported', 'disputed',
+    ]
+    assert league_view['dispute_reason'] == 'Score entered backwards'
+
+
+def test_competition_result_schema_upgrade_backfills_legacy_matches(app):
+    from sqlalchemy import inspect, text
+
+    from backend.app import _upgrade_schema
+
+    with app.app_context():
+        db.session.remove()
+        db.drop_all()
+        with db.engine.begin() as connection:
+            connection.execute(text('''
+                CREATE TABLE tournament_match (
+                    id INTEGER PRIMARY KEY,
+                    entry1_id INTEGER,
+                    entry2_id INTEGER,
+                    score1 INTEGER,
+                    score2 INTEGER,
+                    winner_entry_id INTEGER,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+            '''))
+            connection.execute(text('''
+                INSERT INTO tournament_match
+                    (id, entry1_id, entry2_id, score1, score2,
+                     winner_entry_id, created_at, updated_at)
+                VALUES
+                    (1, 10, 11, 11, 7, 10, '2026-01-01', '2026-01-02'),
+                    (2, 12, NULL, NULL, NULL, 12, '2026-01-01', '2026-01-02'),
+                    (3, 13, 14, NULL, NULL, NULL, '2026-01-01', '2026-01-02')
+            '''))
+            connection.execute(text('''
+                CREATE TABLE league_match (
+                    id INTEGER PRIMARY KEY,
+                    player1_id INTEGER NOT NULL,
+                    player2_id INTEGER NOT NULL,
+                    score1 INTEGER,
+                    score2 INTEGER,
+                    winner_id INTEGER,
+                    reported_by_id INTEGER,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+            '''))
+            connection.execute(text('''
+                INSERT INTO league_match
+                    (id, player1_id, player2_id, score1, score2, winner_id,
+                     reported_by_id, created_at, updated_at)
+                VALUES
+                    (1, 20, 21, 11, 8, 20, 21, '2026-01-01', '2026-01-02'),
+                    (2, 22, 23, NULL, NULL, NULL, NULL, '2026-01-01', '2026-01-02')
+            '''))
+
+        _upgrade_schema(app)
+
+        inspector = inspect(db.engine)
+        lifecycle_columns = {
+            'result_state', 'result_version', 'reported_at',
+            'confirmed_by_id', 'confirmed_at', 'disputed_by_id',
+            'disputed_at', 'dispute_reason', 'resolution_kind',
+        }
+        assert lifecycle_columns <= {
+            column['name']
+            for column in inspector.get_columns('tournament_match')
+        }
+        assert lifecycle_columns <= {
+            column['name']
+            for column in inspector.get_columns('league_match')
+        }
+
+        tournament_rows = db.session.execute(text('''
+            SELECT id, result_state, result_version, resolution_kind,
+                   confirmed_at
+            FROM tournament_match ORDER BY id
+        ''')).all()
+        assert [tuple(row[:4]) for row in tournament_rows] == [
+            (1, 'confirmed', 1, 'legacy'),
+            (2, 'bye', 1, 'legacy'),
+            (3, 'unreported', 0, ''),
+        ]
+        assert tournament_rows[0].confirmed_at is not None
+        assert tournament_rows[1].confirmed_at is None
+
+        league_rows = db.session.execute(text('''
+            SELECT id, result_state, result_version, resolution_kind,
+                   reported_at, confirmed_at
+            FROM league_match ORDER BY id
+        ''')).all()
+        assert [tuple(row[:4]) for row in league_rows] == [
+            (1, 'confirmed', 1, 'legacy'),
+            (2, 'unreported', 0, ''),
+        ]
+        assert league_rows[0].reported_at is not None
+        assert league_rows[0].confirmed_at is not None

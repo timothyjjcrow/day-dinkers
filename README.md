@@ -36,24 +36,44 @@ Demo accounts: `dana@example.com`, `marcus@example.com`, `priya@example.com`,
   counts, amenity filters (lighted/indoor/playing-now), text search, and
   **geocoding area search** ("jump to Austin, TX"). Court detail has a pinned
   hero (photos, amenities, fees, open-play hours), one-tap check-in, court chat,
-  and share links. Auto check-in by proximity when the app is open.
+  and share links. Mobile results render progressively (8 on the map, then
+  20-at-a-time in List), and selecting a court no longer collapses the browsing
+  context while exposing Details, Play here, and Directions. Auto check-in by
+  proximity when the app is open.
 - **Location** — first-run onboarding sets a **home area**; the map and feeds
   open there. **Players Near You** discovery (by last check-in / home court)
   with skill filter and add-friend / message / challenge actions.
-- **Play** — nearby games feed, schedule at any court (casual or ranked),
+- **Play** — action-first mobile home with **Play now / Plan ahead**, a guided
+  Where → When → Who rally planner with smart court/time/friend defaults, nearby
+  games feed, and scheduling at any court (casual or ranked),
   **recurring weekly open-play sessions**, join/leave, and an active-game banner.
   Casual scores finalize instantly; ranked scores need an opposing player's
   one-tap confirmation (auto-confirm after 24h; disputes clear for re-entry)
   before ELO moves (K=32, team-average for doubles). Results feed, win streaks,
   and a podium leaderboard. **Game visibility**: open (anyone nearby) /
   friends / private (specific invitees). Challenges create private 1v1s.
+- **Compete** — mobile-first box leagues and single-elimination tournaments,
+  with registration, seeding, round/bracket progression, role-aware action
+  queues, and one shared score → confirm → dispute → resolve result workflow.
+  Exact match links reopen the right result (including older league rounds),
+  while live refresh preserves scroll and form context.
 - **People** — player search, friend requests, friends list with live presence,
-  1:1 chat and court chat (mobile-keyboard-aware), unread badges.
+  per-section attention badges, and a single recency-sorted Community inbox for
+  DMs plus court, club, game, league, and tournament rooms—including active
+  competition rooms before the first message. Chat is mobile-keyboard-aware
+  across every room. Every text/photo send enters a durable, account-scoped
+  outbox first, retries safely after offline/reload failures, and remains
+  visibly retryable or removable without duplicate delivery.
 - **Profile** — rating / record / streak, match history with rating deltas,
   editable profile (photo, skill level, bio, avatar color, home court/area),
   activity feed, install-to-home-screen hint.
-- **Realtime feel** — ~12s polling surfaces confirmations, invites, joins, and
-  challenges as toasts/badges plus optional system notifications.
+- **Realtime + offline resilience** — polling surfaces confirmations, invites,
+  joins, chat, and challenges as toasts/badges plus optional system
+  notifications. Returning players see their token-scoped private snapshot
+  immediately while `/me` revalidates in the background, so a weak connection
+  never creates a blank launch. The installable app shell remains useful
+  offline; routed notifications and queued messages reconcile cleanly when
+  connectivity returns.
 
 ## Production / deployment (Render)
 

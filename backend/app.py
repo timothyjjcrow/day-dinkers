@@ -159,6 +159,14 @@ def _upgrade_schema(app):
                     'ALTER TABLE message ADD COLUMN hearted BOOLEAN NOT NULL DEFAULT '
                     + ('FALSE' if is_postgres else '0')
                 )
+            if 'client_attempt_id' not in columns:
+                statements.append(
+                    'ALTER TABLE message ADD COLUMN client_attempt_id VARCHAR(64)'
+                )
+            if 'client_attempt_fingerprint' not in columns:
+                statements.append(
+                    'ALTER TABLE message ADD COLUMN client_attempt_fingerprint VARCHAR(64)'
+                )
 
         if 'user' in tables:
             user_cols = {c['name'] for c in inspector.get_columns('user')}
@@ -209,6 +217,14 @@ def _upgrade_schema(app):
                 statements.append(
                     "ALTER TABLE game ADD COLUMN preferred_level VARCHAR(16) NOT NULL DEFAULT 'any'"
                 )
+            if 'client_attempt_id' not in game_cols:
+                statements.append(
+                    'ALTER TABLE game ADD COLUMN client_attempt_id VARCHAR(64)'
+                )
+            if 'client_attempt_fingerprint' not in game_cols:
+                statements.append(
+                    'ALTER TABLE game ADD COLUMN client_attempt_fingerprint VARCHAR(64)'
+                )
 
         if 'court' in tables:
             court_cols = {c['name'] for c in inspector.get_columns('court')}
@@ -255,6 +271,48 @@ def _upgrade_schema(app):
                     + ('TIMESTAMP' if is_postgres else 'DATETIME')
                 )
 
+        if 'tournament_match' in tables:
+            tm_cols = {c['name'] for c in inspector.get_columns('tournament_match')}
+            datetime_type = 'TIMESTAMP' if is_postgres else 'DATETIME'
+            tournament_match_columns = (
+                ('result_state', "VARCHAR(32) NOT NULL DEFAULT 'unreported'"),
+                ('result_version', 'INTEGER NOT NULL DEFAULT 0'),
+                ('reported_by_id', 'INTEGER'),
+                ('reported_at', datetime_type),
+                ('confirmed_by_id', 'INTEGER'),
+                ('confirmed_at', datetime_type),
+                ('disputed_by_id', 'INTEGER'),
+                ('disputed_at', datetime_type),
+                ('dispute_reason', "VARCHAR(500) NOT NULL DEFAULT ''"),
+                ('resolution_kind', "VARCHAR(32) NOT NULL DEFAULT ''"),
+            )
+            for column, ddl in tournament_match_columns:
+                if column not in tm_cols:
+                    statements.append(
+                        f'ALTER TABLE tournament_match ADD COLUMN {column} {ddl}'
+                    )
+            # Label legacy results without replaying bracket advancement,
+            # standings, ratings, titles, or notifications.
+            statements.extend((
+                "UPDATE tournament_match SET result_state = 'unreported' "
+                "WHERE result_state IS NULL OR result_state = ''",
+                "UPDATE tournament_match SET "
+                "result_state = CASE "
+                "WHEN score1 IS NULL AND score2 IS NULL "
+                "AND (entry1_id IS NULL OR entry2_id IS NULL) THEN 'bye' "
+                "ELSE 'confirmed' END, "
+                "result_version = CASE WHEN result_version < 1 THEN 1 ELSE result_version END, "
+                "resolution_kind = CASE WHEN resolution_kind = '' THEN 'legacy' ELSE resolution_kind END, "
+                "reported_at = CASE WHEN reported_by_id IS NOT NULL "
+                "THEN COALESCE(reported_at, updated_at) ELSE reported_at END, "
+                "confirmed_at = CASE WHEN score1 IS NOT NULL OR score2 IS NOT NULL "
+                "THEN COALESCE(confirmed_at, updated_at) ELSE confirmed_at END "
+                "WHERE winner_entry_id IS NOT NULL "
+                "AND result_state = 'unreported'",
+                'CREATE INDEX IF NOT EXISTS ix_tournament_match_result_state '
+                'ON tournament_match (result_state)',
+            ))
+
         if 'notification' in tables:
             notif_cols = {c['name'] for c in inspector.get_columns('notification')}
             if 'related_tournament_id' not in notif_cols:
@@ -269,6 +327,21 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE notification ADD COLUMN related_league_id INTEGER'
                 )
+            if 'action_url' not in notif_cols:
+                statements.append(
+                    "ALTER TABLE notification ADD COLUMN action_url "
+                    "VARCHAR(500) NOT NULL DEFAULT ''"
+                )
+            if 'unread_dedupe_key' not in notif_cols:
+                statements.append(
+                    'ALTER TABLE notification ADD COLUMN '
+                    'unread_dedupe_key VARCHAR(160)'
+                )
+            statements.append(
+                'CREATE UNIQUE INDEX IF NOT EXISTS '
+                'uq_notification_user_unread_topic '
+                'ON notification (user_id, unread_dedupe_key)'
+            )
 
         if 'league' in tables:
             league_cols = {c['name'] for c in inspector.get_columns('league')}
@@ -288,6 +361,43 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE league_member ADD COLUMN reminded_round INTEGER NOT NULL DEFAULT 0'
                 )
+
+        if 'league_match' in tables:
+            league_match_cols = {
+                c['name'] for c in inspector.get_columns('league_match')
+            }
+            datetime_type = 'TIMESTAMP' if is_postgres else 'DATETIME'
+            league_match_columns = (
+                ('result_state', "VARCHAR(32) NOT NULL DEFAULT 'unreported'"),
+                ('result_version', 'INTEGER NOT NULL DEFAULT 0'),
+                # Reuse the existing reporter column when present.
+                ('reported_by_id', 'INTEGER'),
+                ('reported_at', datetime_type),
+                ('confirmed_by_id', 'INTEGER'),
+                ('confirmed_at', datetime_type),
+                ('disputed_by_id', 'INTEGER'),
+                ('disputed_at', datetime_type),
+                ('dispute_reason', "VARCHAR(500) NOT NULL DEFAULT ''"),
+                ('resolution_kind', "VARCHAR(32) NOT NULL DEFAULT ''"),
+            )
+            for column, ddl in league_match_columns:
+                if column not in league_match_cols:
+                    statements.append(
+                        f'ALTER TABLE league_match ADD COLUMN {column} {ddl}'
+                    )
+            statements.extend((
+                "UPDATE league_match SET result_state = 'unreported' "
+                "WHERE result_state IS NULL OR result_state = ''",
+                "UPDATE league_match SET result_state = 'confirmed', "
+                "result_version = CASE WHEN result_version < 1 THEN 1 ELSE result_version END, "
+                "resolution_kind = CASE WHEN resolution_kind = '' THEN 'legacy' ELSE resolution_kind END, "
+                "reported_at = CASE WHEN reported_by_id IS NOT NULL "
+                "THEN COALESCE(reported_at, updated_at) ELSE reported_at END, "
+                "confirmed_at = COALESCE(confirmed_at, updated_at) "
+                "WHERE winner_id IS NOT NULL AND result_state = 'unreported'",
+                'CREATE INDEX IF NOT EXISTS ix_league_match_result_state '
+                'ON league_match (result_state)',
+            ))
 
         if 'club' in tables:
             club_cols = {c['name'] for c in inspector.get_columns('club')}
@@ -324,8 +434,363 @@ def _upgrade_schema(app):
             with db.engine.begin() as conn:
                 for statement in statements:
                     conn.execute(text(statement))
+        # New installations get this table from create_all below. Existing
+        # installations may intentionally disable AUTO_CREATE_DB, so create the
+        # additive audit table explicitly once its referenced user table exists.
+        if 'user' in tables and 'competition_result_event' not in tables:
+            from backend.models import CompetitionResultEvent
+            CompetitionResultEvent.__table__.create(db.engine, checkfirst=True)
+        if 'message' in tables:
+            from backend.models import Message, MessageSendAttempt
+            if 'message_send_attempt' not in tables:
+                MessageSendAttempt.__table__.create(db.engine, checkfirst=True)
+
+            # Backfill any keyed rows written by the additive Message columns
+            # before the durable ledger shipped. This closes the delete/retry
+            # race immediately on the first upgraded boot.
+            from backend.routes.chat import _message_attempt_fingerprint
+            missing_attempts = (
+                Message.query
+                .outerjoin(
+                    MessageSendAttempt,
+                    db.and_(
+                        MessageSendAttempt.sender_id == Message.sender_id,
+                        MessageSendAttempt.client_attempt_id
+                        == Message.client_attempt_id,
+                    ),
+                )
+                .filter(
+                    Message.client_attempt_id.isnot(None),
+                    MessageSendAttempt.id.is_(None),
+                )
+                .yield_per(200)
+            )
+            for message in missing_attempts:
+                scope = {
+                    column: getattr(message, column)
+                    for column in (
+                        'recipient_id', 'court_id', 'game_id', 'tournament_id',
+                        'club_id', 'league_id',
+                    )
+                    if getattr(message, column) is not None
+                }
+                fingerprint = message.client_attempt_fingerprint or (
+                    _message_attempt_fingerprint(
+                        scope,
+                        str(message.body or '').strip()[:2000],
+                        message.image_data,
+                    )
+                )
+                db.session.add(MessageSendAttempt(
+                    sender_id=message.sender_id,
+                    client_attempt_id=message.client_attempt_id,
+                    client_attempt_fingerprint=fingerprint,
+                    message_id=message.id,
+                ))
+            db.session.commit()
     except Exception:
+        db.session.rollback()
         app.logger.exception('Schema upgrade failed')
+
+
+GAME_ATTEMPT_INDEX_NAME = 'uq_game_creator_attempt'
+GAME_ATTEMPT_INDEX_COLUMNS = ('creator_id', 'client_attempt_id')
+MESSAGE_ATTEMPT_INDEX_NAME = 'uq_message_sender_attempt'
+MESSAGE_ATTEMPT_INDEX_COLUMNS = ('sender_id', 'client_attempt_id')
+MESSAGE_SEND_ATTEMPT_COLUMNS = {
+    'id', 'created_at', 'updated_at',
+    'sender_id', 'client_attempt_id', 'client_attempt_fingerprint',
+    'message_id', 'deleted_at',
+}
+MESSAGE_SEND_ATTEMPT_UNIQUE_COLUMNS = ('sender_id', 'client_attempt_id')
+NOTIFICATION_DEDUPE_INDEX_NAME = 'uq_notification_user_unread_topic'
+NOTIFICATION_DEDUPE_INDEX_COLUMNS = ('user_id', 'unread_dedupe_key')
+
+
+def _game_attempt_index_is_exact(index):
+    """Whether an inspected index enforces precisely the creator/key scope."""
+    if not index or not index.get('unique'):
+        return False
+    if tuple(index.get('column_names') or ()) != GAME_ATTEMPT_INDEX_COLUMNS:
+        return False
+    # A partial unique index could leave some creator/key pairs unprotected.
+    options = index.get('dialect_options') or {}
+    if not all(
+        options.get(option) is None
+        for option in ('postgresql_where', 'sqlite_where')
+    ):
+        return False
+    # Omitted client_attempt_id values must remain independently insertable.
+    # PostgreSQL NULLS NOT DISTINCT would allow only one NULL key per creator.
+    return not bool(options.get('postgresql_nulls_not_distinct'))
+
+
+def _ensure_game_attempt_index(app):
+    """Repair and then verify the exact game-create idempotency index.
+
+    ``CREATE INDEX IF NOT EXISTS`` is intentionally avoided: an old index with
+    the right name but the wrong shape must be replaced, not silently accepted.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+
+    inspector = sa_inspect(db.engine)
+    if 'game' not in inspector.get_table_names():
+        return
+    columns = {column['name'] for column in inspector.get_columns('game')}
+    required_columns = {
+        'creator_id', 'client_attempt_id', 'client_attempt_fingerprint',
+    }
+    missing = required_columns - columns
+    if missing:
+        raise RuntimeError(
+            'Game idempotency schema is incomplete; missing columns: '
+            + ', '.join(sorted(missing))
+        )
+
+    named_index = next(
+        (
+            index for index in inspector.get_indexes('game')
+            if index.get('name') == GAME_ATTEMPT_INDEX_NAME
+        ),
+        None,
+    )
+    if not _game_attempt_index_is_exact(named_index):
+        app.logger.warning(
+            'Repairing game idempotency index %s', GAME_ATTEMPT_INDEX_NAME,
+        )
+        try:
+            with db.engine.begin() as conn:
+                if named_index is not None:
+                    conn.execute(text(f'DROP INDEX "{GAME_ATTEMPT_INDEX_NAME}"'))
+                conn.execute(text(
+                    f'CREATE UNIQUE INDEX "{GAME_ATTEMPT_INDEX_NAME}" '
+                    'ON game (creator_id, client_attempt_id)'
+                ))
+        except Exception:
+            # Concurrent app boots can both observe a missing index. Accept the
+            # DDL race only when a fresh inspection proves the other boot
+            # installed exactly the invariant we require; otherwise fail boot.
+            raced_index = next(
+                (
+                    index for index in sa_inspect(db.engine).get_indexes('game')
+                    if index.get('name') == GAME_ATTEMPT_INDEX_NAME
+                ),
+                None,
+            )
+            if not _game_attempt_index_is_exact(raced_index):
+                raise
+
+    # Re-inspect rather than trusting successful DDL: this catches dialect or
+    # legacy-schema surprises before the app accepts idempotent writes.
+    verified = next(
+        (
+            index for index in sa_inspect(db.engine).get_indexes('game')
+            if index.get('name') == GAME_ATTEMPT_INDEX_NAME
+        ),
+        None,
+    )
+    if not _game_attempt_index_is_exact(verified):
+        raise RuntimeError(
+            'Game idempotency index verification failed: expected unique '
+            '(creator_id, client_attempt_id)'
+        )
+
+
+def _message_attempt_index_is_exact(index):
+    """Whether the message retry index protects precisely one sender/key pair."""
+    if not index or not index.get('unique'):
+        return False
+    if tuple(index.get('column_names') or ()) != MESSAGE_ATTEMPT_INDEX_COLUMNS:
+        return False
+    options = index.get('dialect_options') or {}
+    if not all(
+        options.get(option) is None
+        for option in ('postgresql_where', 'sqlite_where')
+    ):
+        return False
+    return not bool(options.get('postgresql_nulls_not_distinct'))
+
+
+def _message_attempt_conflicting_uniques(inspector, table_name='message'):
+    """Legacy uniqueness that would reject two senders using the same key."""
+    candidates = [
+        index for index in inspector.get_indexes(table_name)
+        if index.get('unique')
+    ]
+    candidates.extend(inspector.get_unique_constraints(table_name))
+    conflicts = []
+    for candidate in candidates:
+        columns = set(candidate.get('column_names') or ())
+        if 'client_attempt_id' in columns and 'sender_id' not in columns:
+            conflicts.append(candidate.get('name') or '<unnamed>')
+    return sorted(set(conflicts))
+
+
+def _ensure_message_attempt_index(app):
+    """Install and verify durable message-send idempotency on every database."""
+    from sqlalchemy import inspect as sa_inspect, text
+
+    inspector = sa_inspect(db.engine)
+    if 'message' not in inspector.get_table_names():
+        return
+    columns = {column['name'] for column in inspector.get_columns('message')}
+    required_columns = {
+        'sender_id', 'client_attempt_id', 'client_attempt_fingerprint',
+    }
+    missing = required_columns - columns
+    if missing:
+        raise RuntimeError(
+            'Message idempotency schema is incomplete; missing columns: '
+            + ', '.join(sorted(missing))
+        )
+    conflicts = _message_attempt_conflicting_uniques(inspector)
+    if conflicts:
+        raise RuntimeError(
+            'Message idempotency schema has sender-global unique indexes or '
+            'constraints on client_attempt_id: ' + ', '.join(conflicts)
+        )
+
+    named_index = next(
+        (
+            index for index in inspector.get_indexes('message')
+            if index.get('name') == MESSAGE_ATTEMPT_INDEX_NAME
+        ),
+        None,
+    )
+    if not _message_attempt_index_is_exact(named_index):
+        app.logger.warning(
+            'Repairing message idempotency index %s', MESSAGE_ATTEMPT_INDEX_NAME,
+        )
+        try:
+            with db.engine.begin() as conn:
+                if named_index is not None:
+                    conn.execute(text(f'DROP INDEX "{MESSAGE_ATTEMPT_INDEX_NAME}"'))
+                conn.execute(text(
+                    f'CREATE UNIQUE INDEX "{MESSAGE_ATTEMPT_INDEX_NAME}" '
+                    'ON message (sender_id, client_attempt_id)'
+                ))
+        except Exception:
+            raced_index = next(
+                (
+                    index for index in sa_inspect(db.engine).get_indexes('message')
+                    if index.get('name') == MESSAGE_ATTEMPT_INDEX_NAME
+                ),
+                None,
+            )
+            if not _message_attempt_index_is_exact(raced_index):
+                raise
+
+    verified = next(
+        (
+            index for index in sa_inspect(db.engine).get_indexes('message')
+            if index.get('name') == MESSAGE_ATTEMPT_INDEX_NAME
+        ),
+        None,
+    )
+    if not _message_attempt_index_is_exact(verified):
+        raise RuntimeError(
+            'Message idempotency index verification failed: expected unique '
+            '(sender_id, client_attempt_id)'
+        )
+
+
+def _ensure_message_send_attempt_schema(app):
+    """Fail boot unless the durable message ledger can reserve every key."""
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(db.engine)
+    if 'message_send_attempt' not in inspector.get_table_names():
+        raise RuntimeError('Message send-attempt ledger table is missing')
+    columns = {
+        column['name']
+        for column in inspector.get_columns('message_send_attempt')
+    }
+    missing = MESSAGE_SEND_ATTEMPT_COLUMNS - columns
+    if missing:
+        raise RuntimeError(
+            'Message send-attempt ledger is incomplete; missing columns: '
+            + ', '.join(sorted(missing))
+        )
+    unique_shapes = {
+        tuple(item.get('column_names') or ())
+        for item in inspector.get_unique_constraints('message_send_attempt')
+    }
+    for index in inspector.get_indexes('message_send_attempt'):
+        if not index.get('unique'):
+            continue
+        options = index.get('dialect_options') or {}
+        if any(
+            options.get(option) is not None
+            for option in ('postgresql_where', 'sqlite_where')
+        ):
+            continue
+        unique_shapes.add(tuple(index.get('column_names') or ()))
+    if MESSAGE_SEND_ATTEMPT_UNIQUE_COLUMNS not in unique_shapes:
+        raise RuntimeError(
+            'Message send-attempt ledger verification failed: expected unique '
+            '(sender_id, client_attempt_id)'
+        )
+    conflicts = _message_attempt_conflicting_uniques(
+        inspector, 'message_send_attempt',
+    )
+    if conflicts:
+        raise RuntimeError(
+            'Message send-attempt ledger has sender-global unique indexes or '
+            'constraints on client_attempt_id: ' + ', '.join(conflicts)
+        )
+
+    # A partial or failed backfill would reopen the delete/retry race for those
+    # older keyed rows even though the table itself looks valid.
+    from backend.models import Message, MessageSendAttempt
+    unreserved = (
+        db.session.query(Message.id)
+        .outerjoin(
+            MessageSendAttempt,
+            db.and_(
+                MessageSendAttempt.sender_id == Message.sender_id,
+                MessageSendAttempt.client_attempt_id == Message.client_attempt_id,
+            ),
+        )
+        .filter(
+            Message.client_attempt_id.isnot(None),
+            MessageSendAttempt.id.is_(None),
+        )
+        .first()
+    )
+    if unreserved:
+        raise RuntimeError(
+            'Message send-attempt ledger backfill is incomplete for keyed '
+            f'message {unreserved[0]}'
+        )
+
+
+def _ensure_notification_unread_dedupe_index(app):
+    """Verify concurrent room messages collapse to one unread notification."""
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(db.engine)
+    if 'notification' not in inspector.get_table_names():
+        return
+    columns = {column['name'] for column in inspector.get_columns('notification')}
+    if 'unread_dedupe_key' not in columns:
+        raise RuntimeError('Notification unread dedupe column is missing')
+    index = next(
+        (
+            item for item in inspector.get_indexes('notification')
+            if item.get('name') == NOTIFICATION_DEDUPE_INDEX_NAME
+        ),
+        None,
+    )
+    if (
+        not index
+        or not index.get('unique')
+        or tuple(index.get('column_names') or ())
+        != NOTIFICATION_DEDUPE_INDEX_COLUMNS
+    ):
+        raise RuntimeError(
+            'Notification unread dedupe verification failed: expected unique '
+            '(user_id, unread_dedupe_key)'
+        )
 
 
 def create_app(config_name=None):
@@ -364,6 +829,10 @@ def create_app(config_name=None):
             db.create_all()
         elif app.config.get('AUTO_CREATE_DB'):
             db.create_all()
+        _ensure_game_attempt_index(app)
+        _ensure_message_attempt_index(app)
+        _ensure_message_send_attempt_schema(app)
+        _ensure_notification_unread_dedupe_index(app)
         _maybe_auto_seed(app)
 
     @app.get('/health')
@@ -469,6 +938,17 @@ def create_app(config_name=None):
         return _share_page(f'🏆 {t.name}',
                            f'Pickleball tournament at {court} — register on Third Shot',
                            f'#tournament/{tournament_id}')
+
+    # Executable shell assets use release-specific pathnames. The previous
+    # service worker ignored query strings during offline fallback, so a query
+    # alone could mix an old bundle with new HTML during deployment.
+    @app.get('/app-v13.js')
+    def frontend_app_v13():
+        return send_from_directory(FRONTEND_DIR, 'app.js')
+
+    @app.get('/styles-v13.css')
+    def frontend_styles_v13():
+        return send_from_directory(FRONTEND_DIR, 'styles.css')
 
     @app.get('/<path:filename>')
     def frontend_assets(filename):
