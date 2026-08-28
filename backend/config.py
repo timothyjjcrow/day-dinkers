@@ -31,7 +31,7 @@ DEV_FALLBACK_SECRET = 'change-me-dev-only-not-a-real-secret-key'
 
 
 def _database_url():
-    """Normalize DATABASE_URL for SQLAlchemy 2 + psycopg3 (Render gives postgres://)."""
+    """Normalize common hosted Postgres URLs for SQLAlchemy 2 + psycopg3."""
     url = os.getenv('DATABASE_URL', 'sqlite:///app.db')
     if url.startswith('postgres://'):
         url = 'postgresql+psycopg://' + url[len('postgres://'):]
@@ -40,13 +40,35 @@ def _database_url():
     return url
 
 
+def _is_pooled_database_url(url):
+    """Whether this is a Neon/PgBouncer pooled endpoint."""
+    return '-pooler.' in str(url or '').lower()
+
+
 def _engine_options():
-    if _database_url().startswith('postgresql'):
-        return {'connect_args': {'options': f'-csearch_path={PG_SCHEMA}'}}
-    return {}
+    url = _database_url()
+    if not url.startswith('postgresql'):
+        return {}
+    options = {
+        'pool_pre_ping': True,
+        # Neon Free suspends idle computes. Recycle warm-instance connections
+        # before they can outlive the compute that accepted them.
+        'pool_recycle': 300,
+        'pool_size': 2,
+        'max_overflow': 3,
+    }
+    if not _is_pooled_database_url(url):
+        # Direct/admin connections can set search_path at startup. Neon pooled
+        # URLs reject this option, so their role gets a persistent search_path
+        # during the one-time recovery migration instead.
+        options['connect_args'] = {'options': f'-csearch_path={PG_SCHEMA}'}
+    return options
 
 
 class BaseConfig:
+    SERVERLESS_RUNTIME = _get_bool(
+        'SERVERLESS_RUNTIME', default=os.getenv('VERCEL') == '1',
+    )
     APP_ENV = os.getenv('APP_ENV', 'development')
     SECRET_KEY = os.getenv('SECRET_KEY', DEV_FALLBACK_SECRET)
     SQLALCHEMY_DATABASE_URI = _database_url()
@@ -59,11 +81,20 @@ class BaseConfig:
     JSON_SORT_KEYS = False
     TESTING = False
     DEBUG = False
-    AUTO_CREATE_DB = _get_bool('AUTO_CREATE_DB', default=True)
+    SCHEMA_MANAGEMENT_ENABLED = _get_bool(
+        'SCHEMA_MANAGEMENT_ENABLED', default=not SERVERLESS_RUNTIME,
+    )
+    AUTO_CREATE_DB = _get_bool(
+        'AUTO_CREATE_DB', default=not SERVERLESS_RUNTIME,
+    )
     AUTO_SEED_COURTS = _get_bool('AUTO_SEED_COURTS', default=False)
     RESET_DB_ON_BOOT = _get_bool('RESET_DB_ON_BOOT', default=False)
     PRESENCE_STALE_AFTER_SECONDS = _get_int('PRESENCE_STALE_AFTER_SECONDS', 7200)
     RATE_LIMIT_ENABLED = _get_bool('RATE_LIMIT_ENABLED', default=True)
+    RATE_LIMIT_BACKEND = os.getenv(
+        'RATE_LIMIT_BACKEND',
+        'database' if SERVERLESS_RUNTIME else 'memory',
+    ).strip().lower()
     # Largest legitimate request is a court-photo upload (~500KB image → ~700KB
     # base64 JSON); cap everything at 2MB so oversized bodies get 413s.
     MAX_CONTENT_LENGTH = _get_int('MAX_CONTENT_LENGTH', 2 * 1024 * 1024)
@@ -71,6 +102,9 @@ class BaseConfig:
     VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
     VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
     VAPID_CLAIMS_EMAIL = os.getenv('VAPID_CLAIMS_EMAIL', 'mailto:timothyjjcrow@gmail.com')
+    PUSH_DELIVERY_ENABLED = _get_bool(
+        'PUSH_DELIVERY_ENABLED', default=not SERVERLESS_RUNTIME,
+    )
 
 
 class DevelopmentConfig(BaseConfig):
@@ -100,7 +134,11 @@ class TestingConfig(BaseConfig):
         'connect_args': {'check_same_thread': False},
     }
     AUTO_CREATE_DB = True
+    SCHEMA_MANAGEMENT_ENABLED = True
+    SERVERLESS_RUNTIME = False
     RATE_LIMIT_ENABLED = False
+    RATE_LIMIT_BACKEND = 'memory'
+    PUSH_DELIVERY_ENABLED = True
 
 
 CONFIG_BY_NAME = {

@@ -280,7 +280,7 @@ def _me_payload(user):
 @auth_bp.post('/client-errors')
 @rate_limit(10, 300)
 def report_client_error():
-    """Browser-side crash reports land in the server log (visible on Render)
+    """Browser-side crash reports land in the hosted service log
     — no storage, tight rate limit, hard truncation. Anonymous by design so
     login-screen breakage reports too."""
     payload = request.get_json(silent=True) or {}
@@ -300,7 +300,7 @@ def report_client_error():
 @login_required
 def send_feedback():
     """A direct line from players to the operator: feedback lands in the
-    server log (visible on Render) tagged with who sent it."""
+    hosted service log tagged with who sent it."""
     payload = request.get_json(silent=True) or {}
     message = str(payload.get('message') or '').strip()
     if len(message) < 3:

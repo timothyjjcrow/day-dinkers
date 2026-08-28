@@ -18,7 +18,11 @@ _PENDING_PUSHES_KEY = 'thirdshot_pending_web_pushes_by_transaction'
 
 
 def is_configured(app):
-    return bool(app.config.get('VAPID_PRIVATE_KEY') and app.config.get('VAPID_PUBLIC_KEY'))
+    return bool(
+        app.config.get('PUSH_DELIVERY_ENABLED', True)
+        and app.config.get('VAPID_PRIVATE_KEY')
+        and app.config.get('VAPID_PUBLIC_KEY')
+    )
 
 
 def _ensure_worker():

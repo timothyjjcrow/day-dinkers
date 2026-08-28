@@ -8,8 +8,9 @@ ranked (and recurring) games, and climb the rankings.
 
 - **Backend** — Flask + SQLAlchemy (SQLite for local dev, Postgres in production),
   JWT auth. All endpoints under `/api`.
-- **Frontend** — single-page mobile-first web app in `frontend/` (vanilla JS +
-  Leaflet, no build step), served directly by Flask at `/`. Installable PWA.
+- **Frontend** — single-page mobile-first web app in `public/` (vanilla JS +
+  Leaflet, no build step), served by Vercel's CDN and by Flask locally.
+  Installable PWA.
 
 ## Quick start
 
@@ -75,33 +76,132 @@ Demo accounts: `dana@example.com`, `marcus@example.com`, `priya@example.com`,
   offline; routed notifications and queued messages reconcile cleanly when
   connectivity returns.
 
-## Production / deployment (Render)
+## Free, no-card deployment (Vercel Hobby + Neon Free)
 
-Deployed as a single Python web service (`render.yaml`):
-`gunicorn --workers 1 --threads 8 --bind 0.0.0.0:$PORT backend.wsgi:app`.
-On first boot the app auto-creates the schema, runs additive migrations, and
-seeds the bundled courts in a background thread.
+The deployment uses a Vercel Hobby project and a Neon Free PostgreSQL database,
+both in `iad1` / AWS N. Virginia. Neon explicitly requires no credit card. The
+Vercel Hobby plan is free and a card is requested when upgrading to Pro; Vercel
+does not make an unconditional promise that it will never ask an account for
+verification. Hobby is restricted to personal, non-commercial use. It pauses
+instead of billing when a free usage limit is exceeded.
+
+The serverless runtime deliberately disables database DDL, court seeding, and
+the in-process web-push worker. Rate limits use an atomic PostgreSQL table shared
+by every function instance. Static PWA assets live in `public/` and are served
+from Vercel's CDN without invoking Flask.
+
+### Recover the preserved database first
+
+The primary deployment source is the preserved SQLite database at
+`instance/recovered-2026-07-07.db`. **Do not start the web service, import the
+bundled court seed, or otherwise connect the application to the new PostgreSQL
+database before this migration.** App startup performs schema writes and can
+start background seeding, while the recovery script requires exclusive access
+and intentionally refuses to copy into a target that already contains rows.
+The snapshot contains 19 accounts (15 non-demo), 18,510 courts, and 63 games;
+its newest recorded user activity is July 7, 2026, so it cannot recover later
+Render activity.
+
+1. Install the Python requirements locally, then validate the preserved database.
+   The command checks SQLite integrity and applies the current additive migrations
+   to a temporary copy; it never changes the preserved file or contacts Postgres.
+
+   ```bash
+   pip install -r requirements.txt
+   python3 scripts/migrate_sqlite_recovery.py \
+     --source instance/recovered-2026-07-07.db \
+     --check-only
+   ```
+
+   Continue only after it prints `Source recovery check passed` with table and
+   row totals.
+
+2. Create/link the Vercel project and provision Neon from Vercel Marketplace.
+   Select the `free_v3` plan, `iad1`, and disable Neon Auth because this app has
+   its own authentication. Connect the resource to production and development,
+   but not Preview (a preview must never mutate the recovered production data).
+
+   ```bash
+   npx vercel@59.9.1 link
+   npx vercel@59.9.1 integration add neon \
+     --plan free_v3 --metadata region=iad1 --metadata auth=false \
+     --environment production --environment development
+   npx vercel@59.9.1 env pull .env.local --environment=development --yes
+   ```
+
+3. Copy Neon's **direct/unpooled** connection URL from the pulled local
+   variables into the shell without printing it or placing it in command
+   history. Do not use the hostname containing `-pooler` for this one-time
+   migration. Never put the URL in a tracked file, chat message, or screenshot.
+
+   ```bash
+   read -rs TARGET_DATABASE_URL
+   export TARGET_DATABASE_URL
+   python3 scripts/migrate_sqlite_recovery.py \
+     --source instance/recovered-2026-07-07.db
+   unset TARGET_DATABASE_URL
+   ```
+
+   The script rejects a pooled target, creates the dedicated `picklepals`
+   schema, copies all tables while preserving primary keys and historical
+   timestamps, repairs sequences, verifies target row counts, exact primary-key
+   sets and foreign-key integrity, and persists the role's runtime
+   `search_path`. Success ends with `Migration completed and verified`.
+   If it reports that the target is not empty, do not bypass the safeguard;
+   delete/recreate the empty Neon resource rather than weakening the check.
+
+4. Confirm Vercel's production `DATABASE_URL` is Neon's pooled URL (its hostname
+   contains `-pooler`). Add the runtime variables below as production variables,
+   make `SECRET_KEY` sensitive, and leave `RESET_DB_ON_BOOT` completely unset.
+
+5. Deploy production with `npx vercel@59.9.1 --prod`, then verify `/health`
+   reports `status: ok`, `db: true`, and `env: production`. Sign in with a
+   recovered account and spot-check court search, profiles, friendships, games,
+   and messages. These checks supplement the migration's exact verification.
+
+### Explicit fallback: start over with a fresh database
+
+Use a fresh database only after deliberately deciding that
+`instance/recovered-2026-07-07.db` is unusable or its recovered data is not
+wanted. This fallback loses the recovered accounts, friendships, games, chat,
+and other history.
+
+1. Create a separate empty Neon database; do not reuse a partially populated
+   recovery target.
+2. Initialize it outside the Vercel runtime with the direct connection. Runtime
+   schema management remains disabled.
+3. Import the bundled courts deliberately, then verify account creation, court
+   search, and the map before allowing normal use.
 
 Required environment variables:
 
 | Var | Purpose |
 |-----|---------|
 | `APP_ENV` | `production` (enables prod config; the app refuses to boot if `SECRET_KEY` is unset/default) |
-| `SECRET_KEY` | strong random value for JWT signing (Render can generate it) |
-| `DATABASE_URL` | Postgres URL (`postgres://…` is normalized automatically); falls back to SQLite if unset |
-| `AUTO_SEED_COURTS` | `true` to seed bundled courts on first boot |
-| `AUTO_CREATE_DB` | `true` to create tables on boot (default true) |
+| `SECRET_KEY` | a new random value of at least 32 bytes for JWT signing |
+| `DATABASE_URL` | Neon pooled runtime URL; required in production and normalized to psycopg automatically |
+| `SERVERLESS_RUNTIME` | `true` |
+| `SCHEMA_MANAGEMENT_ENABLED` | `false`; all DDL belongs in the one-time migration |
+| `AUTO_CREATE_DB` | `false` |
+| `AUTO_SEED_COURTS` | `false` for the recovered database |
+| `RATE_LIMIT_BACKEND` | `database` |
+| `PUSH_DELIVERY_ENABLED` | `false`; in-app notifications remain available |
 
-Optional: `RATE_LIMIT_ENABLED` (default true), `RESET_DB_ON_BOOT` (one-time
-schema reset escape hatch — set, deploy once, then remove).
+Optional: `RATE_LIMIT_ENABLED` (default true). Never set `RESET_DB_ON_BOOT` on
+the recovered database. Web push stays off because a daemon queue cannot
+reliably finish inside a stateless function; re-enable it only after adding a
+durable outbox/worker.
 
-Hardening in place: production secret-key guard, per-IP rate limiting on auth and
-write endpoints, and security headers (nosniff, SAMEORIGIN, Referrer-Policy).
-The app keeps its tables in a dedicated `picklepals` Postgres schema so it never
-collides with other tables in the database.
+Neon Free currently includes 100 CU-hours per project each month, 0.5 GB of
+storage, 5 GB of egress, scale-to-zero after five idle minutes, and a six-hour
+restore window. Keep independent backups of production data; six hours is not a
+long-term backup policy.
 
-Not yet wired (optional follow-up): web push notifications require VAPID keys to
-be provisioned as env vars.
+Official references: [Vercel Flask](https://vercel.com/kb/guide/ship-a-flask-app-on-vercel),
+[Vercel Hobby](https://vercel.com/docs/plans/hobby),
+[Vercel Function limits](https://vercel.com/docs/functions/limitations),
+[Neon pricing](https://neon.com/pricing), and
+[Neon connection pooling](https://neon.com/docs/connect/connection-pooling).
 
 ## Tests
 
@@ -113,15 +213,19 @@ python3 -m pytest tests/
 
 ```
 backend/
-  app.py            Flask bootstrap, serves frontend + /api blueprints, migrations
+  app.py            Flask bootstrap, local frontend + /api blueprints
   config.py         env-driven config (dev / staging / production / testing)
   models.py         User, Court, CheckIn, Friendship, Message, Game, GamePlayer,
                     GameInvite, FavoriteCourt, Notification
-  security.py       in-memory per-IP rate limiter
+  security.py       shared PostgreSQL / local-memory fixed-window rate limiter
   routes/           auth, courts (+ geocode), games, social (+ players/nearby), chat
   seed.py           court data importer (dir or bundled .json.gz) + demo seed
   wsgi.py           gunicorn entrypoint (backend.wsgi:app)
 data/courts.json.gz bundled court dataset for first-boot seeding
-frontend/           index.html, styles.css, app.js, manifest, sw.js (no build step)
+public/             index.html, versioned CSS/JS, manifest, sw.js (no build step)
+app.py              root Vercel Flask entrypoint
+vercel.json         Flask framework and iad1 region configuration
 tests/test_api.py   end-to-end API tests
+scripts/migrate_sqlite_recovery.py
+                    validated SQLite-to-Postgres recovery migration
 ```

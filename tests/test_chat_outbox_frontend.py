@@ -2,8 +2,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = (ROOT / 'frontend' / 'app.js').read_text()
-CSS = (ROOT / 'frontend' / 'styles.css').read_text()
+APP = (ROOT / 'public' / 'app-v13.js').read_text()
+CSS = (ROOT / 'public' / 'styles-v13.css').read_text()
 
 
 def test_every_chat_surface_uses_the_durable_outbox():

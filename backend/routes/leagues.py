@@ -886,15 +886,15 @@ def league_chat(league_id):
         return jsonify({'error': 'members_only'}), 403
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(Message.league_id == league_id)
-    if since_id:
-        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
-    else:
-        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+    from backend.routes.chat import chat_messages_page
+    messages, has_more = chat_messages_page(query, since_id)
 
     # Reading the room marks it read — powers the league-screen badge.
-    latest_id = db.session.query(db.func.max(Message.id)).filter(
-        Message.league_id == league_id,
-    ).scalar() or 0
+    latest_id = messages[-1].id if since_id and has_more else (
+        db.session.query(db.func.max(Message.id)).filter(
+            Message.league_id == league_id,
+        ).scalar() or 0
+    )
     marker = LeagueChatRead.query.filter_by(
         user_id=g.current_user.id, league_id=league.id,
     ).first()
@@ -913,6 +913,7 @@ def league_chat(league_id):
         'league': {'id': league.id, 'name': league.name},
         'items': [m.to_dict() for m in messages],
         'heart_counts': room_heart_counts('league_id', league_id),
+        'has_more': has_more,
     })
 
 

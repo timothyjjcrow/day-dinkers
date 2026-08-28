@@ -21,6 +21,7 @@ chat_bp = Blueprint('chat', __name__)
 
 CLIENT_MESSAGE_ATTEMPT_ID_MAX_LENGTH = 64
 CLIENT_MESSAGE_ATTEMPT_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$')
+CHAT_DELTA_LIMIT = 200
 
 from backend.routes.auth import login_required  # noqa: E402
 
@@ -230,15 +231,36 @@ def prepare_chat_message(payload, sender_id, **scope):
     return message, False, body, None
 
 
+def chat_messages_page(query, since_id, initial_limit=60):
+    """Return one bounded room page and whether another delta page exists."""
+    if since_id:
+        rows = (
+            query.filter(Message.id > since_id)
+            .order_by(Message.id.asc())
+            .limit(CHAT_DELTA_LIMIT + 1)
+            .all()
+        )
+        return rows[:CHAT_DELTA_LIMIT], len(rows) > CHAT_DELTA_LIMIT
+    return list(reversed(
+        query.order_by(Message.id.desc()).limit(initial_limit).all()
+    )), False
+
+
 def room_heart_counts(column_name, value):
-    """{message_id: heart_count} for a whole room — rides every poll so
-    counts on already-rendered bubbles stay live between reopens."""
+    """Authoritative heart counts for the room's newest bounded window.
+
+    Include zeroes so an idle poll can remove a badge after the last heart is
+    toggled off.  Restricting the snapshot to the newest chat window keeps the
+    response bounded without erasing older, out-of-window badges in the UI.
+    """
     from backend.models import MessageHeart
     rows = (
-        db.session.query(MessageHeart.message_id, db.func.count(MessageHeart.id))
-        .join(Message, Message.id == MessageHeart.message_id)
+        db.session.query(Message.id, db.func.count(MessageHeart.id))
+        .outerjoin(MessageHeart, MessageHeart.message_id == Message.id)
         .filter(getattr(Message, column_name) == value)
-        .group_by(MessageHeart.message_id)
+        .group_by(Message.id)
+        .order_by(Message.id.desc())
+        .limit(CHAT_DELTA_LIMIT)
         .all()
     )
     return {str(mid): n for mid, n in rows}
@@ -252,15 +274,14 @@ def court_chat(court_id):
         return jsonify({'error': 'court_not_found'}), 404
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(Message.court_id == court_id)
-    if since_id:
-        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
-    else:
-        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+    messages, has_more = chat_messages_page(query, since_id)
 
     # Reading the room marks it read — powers the unread badge on court detail.
-    latest_id = db.session.query(db.func.max(Message.id)).filter(
-        Message.court_id == court_id,
-    ).scalar() or 0
+    latest_id = messages[-1].id if since_id and has_more else (
+        db.session.query(db.func.max(Message.id)).filter(
+            Message.court_id == court_id,
+        ).scalar() or 0
+    )
     marker = CourtChatRead.query.filter_by(
         user_id=g.current_user.id, court_id=court.id,
     ).first()
@@ -278,6 +299,7 @@ def court_chat(court_id):
         'court': {'id': court.id, 'name': court.name},
         'items': [m.to_dict() for m in messages],
         'heart_counts': room_heart_counts('court_id', court_id),
+        'has_more': has_more,
     })
 
 
@@ -319,15 +341,14 @@ def game_chat(game_id):
         return err
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(Message.game_id == game_id)
-    if since_id:
-        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
-    else:
-        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+    messages, has_more = chat_messages_page(query, since_id)
 
     # Reading the thread marks it read — powers unread badges on game cards.
-    latest_id = db.session.query(db.func.max(Message.id)).filter(
-        Message.game_id == game_id,
-    ).scalar() or 0
+    latest_id = messages[-1].id if since_id and has_more else (
+        db.session.query(db.func.max(Message.id)).filter(
+            Message.game_id == game_id,
+        ).scalar() or 0
+    )
     marker = GameChatRead.query.filter_by(
         user_id=g.current_user.id, game_id=game.id,
     ).first()
@@ -345,6 +366,7 @@ def game_chat(game_id):
         'game': {'id': game.id, 'court_name': game.court.name if game.court else 'Court'},
         'items': [m.to_dict() for m in messages],
         'heart_counts': room_heart_counts('game_id', game_id),
+        'has_more': has_more,
     })
 
 
@@ -407,16 +429,15 @@ def tournament_chat(tournament_id):
         return err
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(Message.tournament_id == tournament_id)
-    if since_id:
-        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
-    else:
-        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+    messages, has_more = chat_messages_page(query, since_id)
 
     # Reading the thread marks it read — powers the tournament-screen badge.
     from backend.models import TournamentChatRead
-    latest_id = db.session.query(db.func.max(Message.id)).filter(
-        Message.tournament_id == tournament_id,
-    ).scalar() or 0
+    latest_id = messages[-1].id if since_id and has_more else (
+        db.session.query(db.func.max(Message.id)).filter(
+            Message.tournament_id == tournament_id,
+        ).scalar() or 0
+    )
     marker = TournamentChatRead.query.filter_by(
         user_id=g.current_user.id, tournament_id=tournament.id,
     ).first()
@@ -434,6 +455,7 @@ def tournament_chat(tournament_id):
         'tournament': {'id': tournament.id, 'name': tournament.name},
         'items': [m.to_dict() for m in messages],
         'heart_counts': room_heart_counts('tournament_id', tournament_id),
+        'has_more': has_more,
     })
 
 
@@ -901,11 +923,7 @@ def thread(user_id):
             (Message.sender_id == user_id) & (Message.recipient_id == me),
         ),
     )
-    if since_id:
-        query = query.filter(Message.id > since_id)
-        messages = query.order_by(Message.id.asc()).all()
-    else:
-        messages = list(reversed(query.order_by(Message.id.desc()).limit(100).all()))
+    messages, has_more = chat_messages_page(query, since_id, initial_limit=100)
 
     now = utcnow()
     changed = False
@@ -936,6 +954,7 @@ def thread(user_id):
         'items': [m.to_dict() for m in messages],
         'partner_read_up_to': read_up_to,
         'hearted_ids': hearted_ids,
+        'has_more': has_more,
     })
 
 

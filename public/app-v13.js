@@ -4,6 +4,9 @@
 
   // ---------- State ----------
   const DEFAULT_CENTER = [33.6695, -117.8231]; // Orange County, CA
+  const ME_POLL_INTERVAL_MS = 60_000;
+  const LIVE_DETAIL_POLL_INTERVAL_MS = 15_000;
+  const COMPETITION_POLL_INTERVAL_MS = 20_000;
   const state = {
     token: localStorage.getItem('pp_token') || null,
     me: null,
@@ -60,6 +63,15 @@
     chatFriendsCache: null,
   };
   const pageNotifications = new Set();
+
+  function stopThreadPolling() {
+    if (state.threadPollTimer && typeof state.threadPollTimer.stop === 'function') {
+      state.threadPollTimer.stop();
+    } else {
+      clearInterval(state.threadPollTimer);
+    }
+    state.threadPollTimer = null;
+  }
 
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
@@ -772,9 +784,8 @@
     localStorage.removeItem('pp_token');
     localStorage.removeItem('pp_me_snapshot_v1');
     clearInterval(state.mePollTimer);
-    clearInterval(state.threadPollTimer);
+    stopThreadPolling();
     state.mePollTimer = null;
-    state.threadPollTimer = null;
     if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => { /* fine */ });
     $('#boot-screen')?.classList.add('hidden');
     $('#main-screen').classList.add('hidden');
@@ -3661,6 +3672,123 @@
   const CHAT_DRAFT_VERSION = 1;
   const CHAT_DRAFT_TTL = 24 * 60 * 60 * 1000;
   const CHAT_NEAR_BOTTOM_PX = 96;
+  const CHAT_POLL_DELAYS_MS = [15_000, 30_000, 60_000];
+  const CHAT_POLL_WAKE_THROTTLE_MS = 1500;
+
+  // Open conversations stay responsive while somebody is actively using them,
+  // then progressively back off after empty polls. Foregrounding the app or
+  // reconnecting wakes the visible room immediately; hidden/stacked modals do
+  // not spend serverless invocations.
+  function startAdaptiveChatPoll(modal, msgsEl, poll) {
+    let timer = null;
+    let dueAt = 0;
+    let idleIndex = 0;
+    let running = false;
+    let rerun = false;
+    let stopped = false;
+    let lastRunAt = 0;
+    let activityRevision = 0;
+    const startedAt = Date.now();
+
+    const canPoll = () => document.body.contains(msgsEl)
+      && currentOverlayEntry()?.el === modal
+      && !document.hidden
+      && state.connectionState !== 'offline';
+
+    const schedule = (delay, { onlySooner = false } = {}) => {
+      if (stopped) return;
+      const nextDueAt = Date.now() + delay;
+      if (onlySooner && timer != null && dueAt <= nextDueAt) return;
+      clearTimeout(timer);
+      dueAt = nextDueAt;
+      timer = setTimeout(() => {
+        timer = null;
+        dueAt = 0;
+        run();
+      }, delay);
+    };
+
+    const run = async () => {
+      if (stopped) return;
+      if (!document.body.contains(msgsEl)) {
+        stop();
+        return;
+      }
+      if (!canPoll()) {
+        schedule(CHAT_POLL_DELAYS_MS[0]);
+        return;
+      }
+      if (running) {
+        rerun = true;
+        return;
+      }
+      running = true;
+      lastRunAt = Date.now();
+      const revisionAtStart = activityRevision;
+      let changed = false;
+      try { changed = !!(await poll()); } catch { /* retry on the backed-off cadence */ }
+      finally {
+        running = false;
+        if (stopped) return;
+        idleIndex = changed || activityRevision !== revisionAtStart
+          ? 0 : Math.min(idleIndex + 1, CHAT_POLL_DELAYS_MS.length - 1);
+        if (rerun) {
+          rerun = false;
+          schedule(0);
+        } else {
+          schedule(CHAT_POLL_DELAYS_MS[idleIndex]);
+        }
+      }
+    };
+
+    const wake = ({ immediate = false } = {}) => {
+      if (stopped) return;
+      activityRevision += 1;
+      idleIndex = 0;
+      if (!immediate) {
+        schedule(CHAT_POLL_DELAYS_MS[0], { onlySooner: true });
+        return;
+      }
+      if (!canPoll()) return;
+      if (running) {
+        if (Date.now() - lastRunAt >= CHAT_POLL_WAKE_THROTTLE_MS) rerun = true;
+        return;
+      }
+      const throttle = Math.max(0, CHAT_POLL_WAKE_THROTTLE_MS - (Date.now() - lastRunAt));
+      schedule(throttle, { onlySooner: true });
+    };
+
+    const onActivity = () => wake();
+    const onModalFocus = () => {
+      if (Date.now() - startedAt >= CHAT_POLL_WAKE_THROTTLE_MS) wake({ immediate: true });
+    };
+    const onForeground = () => { if (!document.hidden) wake({ immediate: true }); };
+    const onOnline = () => wake({ immediate: true });
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(timer);
+      timer = null;
+      dueAt = 0;
+      modal.removeEventListener('input', onActivity);
+      modal.removeEventListener('pointerdown', onActivity);
+      modal.removeEventListener('focusin', onModalFocus);
+      document.removeEventListener('visibilitychange', onForeground);
+      window.removeEventListener('focus', onForeground);
+      window.removeEventListener('online', onOnline);
+    };
+
+    modal.addEventListener('input', onActivity);
+    modal.addEventListener('pointerdown', onActivity);
+    modal.addEventListener('focusin', onModalFocus);
+    document.addEventListener('visibilitychange', onForeground);
+    window.addEventListener('focus', onForeground);
+    window.addEventListener('online', onOnline);
+    modal._cleanupFns?.push(stop);
+    schedule(CHAT_POLL_DELAYS_MS[0]);
+    return { stop, wake };
+  }
+
   function prepareChatRenderBatch(msgsEl, rawItems, append) {
     const items = Array.isArray(rawItems) ? rawItems : [];
     reconcileChatOutboxMessages(msgsEl, items);
@@ -6697,7 +6825,7 @@
     const originalStatus = game.status;
     const scorePoll = setInterval(async () => {
       if (!document.body.contains(modal)) { clearInterval(scorePoll); return; }
-      if (document.hidden || state.connectionState === 'offline') return;
+      if (document.hidden || state.connectionState === 'offline' || currentOverlayEntry()?.el !== modal) return;
       try {
         const fresh = await api(`/games/${game.id}`);
         const someoneElseReported = fresh.score_submitted_by && fresh.score_submitted_by !== state.me.id
@@ -6709,7 +6837,7 @@
           transitionModal(modal, () => openGameScreen(game.id));
         }
       } catch { /* offline */ }
-    }, 5000);
+    }, LIVE_DETAIL_POLL_INTERVAL_MS);
 
     modal.querySelectorAll('[data-step]').forEach((btn) => btn.addEventListener('click', () => {
       const input = modal.querySelector(`#${btn.dataset.target}`);
@@ -7383,7 +7511,7 @@
       if (!document.body.contains(box)) { clearInterval(poll); return; }
       if (document.hidden || state.connectionState === 'offline' || !competitionOverlayCanRefresh(box)) return;
       await refresh();
-    }, 8000);
+    }, COMPETITION_POLL_INTERVAL_MS);
     box._cleanupFns?.push(() => clearInterval(poll));
   }
 
@@ -7448,15 +7576,12 @@
     chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
     addPhotoToComposer(modal, '#lgc-form', '#lgc-text', chatUX);
 
-    const pollTimer = setInterval(async () => {
-      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
-      if (document.hidden || state.connectionState === 'offline') return;
-      try {
-        const fresh = await api(`/leagues/${lg.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
-        applyRoomHearts(msgsEl, fresh.heart_counts);
-      } catch { /* offline */ }
-    }, 5000);
+    startAdaptiveChatPoll(modal, msgsEl, async () => {
+      const fresh = await api(`/leagues/${lg.id}/chat?since_id=${lastId}`);
+      if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
+      applyRoomHearts(msgsEl, fresh.heart_counts);
+      return fresh.items.length > 0;
+    });
 
     modal.querySelector('#lgc-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -8221,7 +8346,7 @@
       if (t.status !== 'active' && t.status !== 'registration') return;
       if (!competitionOverlayCanRefresh(box)) return;
       await refresh();
-    }, 8000);
+    }, COMPETITION_POLL_INTERVAL_MS);
     box._cleanupFns?.push(() => clearInterval(poll));
   }
 
@@ -8336,15 +8461,12 @@
     chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
     addPhotoToComposer(modal, '#tch-form', '#tch-text', chatUX);
 
-    const pollTimer = setInterval(async () => {
-      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
-      if (document.hidden || state.connectionState === 'offline') return;
-      try {
-        const fresh = await api(`/tournaments/${t.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
-        applyRoomHearts(msgsEl, fresh.heart_counts);
-      } catch { /* offline */ }
-    }, 5000);
+    startAdaptiveChatPoll(modal, msgsEl, async () => {
+      const fresh = await api(`/tournaments/${t.id}/chat?since_id=${lastId}`);
+      if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
+      applyRoomHearts(msgsEl, fresh.heart_counts);
+      return fresh.items.length > 0;
+    });
 
     modal.querySelector('#tch-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -8898,18 +9020,19 @@
     applyHearts(data.hearted_ids);
     refreshMe();
 
-    clearInterval(state.threadPollTimer);
-    state.threadPollTimer = setInterval(async () => {
-      if (!document.body.contains(msgsEl)) { clearInterval(state.threadPollTimer); return; }
-      if (document.hidden || state.connectionState === 'offline') return;
-      try {
-        const fresh = await api(`/chat/${userId}?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
-        applyRoomHearts(msgsEl, fresh.heart_counts);
-        markSeen(fresh.partner_read_up_to);
-        applyHearts(fresh.hearted_ids);
-      } catch { /* offline */ }
-    }, 4000);
+    stopThreadPolling();
+    const threadPoller = startAdaptiveChatPoll(modal, msgsEl, async () => {
+      const fresh = await api(`/chat/${userId}?since_id=${lastId}`);
+      if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
+      applyRoomHearts(msgsEl, fresh.heart_counts);
+      markSeen(fresh.partner_read_up_to);
+      applyHearts(fresh.hearted_ids);
+      return fresh.items.length > 0;
+    });
+    state.threadPollTimer = threadPoller;
+    modal._cleanupFns?.push(() => {
+      if (state.threadPollTimer === threadPoller) state.threadPollTimer = null;
+    });
 
     modal.querySelector('#thread-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -9001,15 +9124,12 @@
     chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
     addPhotoToComposer(modal, '#cc-form', '#cc-text', chatUX);
 
-    const pollTimer = setInterval(async () => {
-      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
-      if (document.hidden || state.connectionState === 'offline') return;
-      try {
-        const fresh = await api(`/courts/${court.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
-        applyRoomHearts(msgsEl, fresh.heart_counts);
-      } catch { /* offline */ }
-    }, 5000);
+    startAdaptiveChatPoll(modal, msgsEl, async () => {
+      const fresh = await api(`/courts/${court.id}/chat?since_id=${lastId}`);
+      if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
+      applyRoomHearts(msgsEl, fresh.heart_counts);
+      return fresh.items.length > 0;
+    });
 
     modal.querySelector('#cc-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -9102,15 +9222,12 @@
     chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
     addPhotoToComposer(modal, '#clb-form', '#clb-text', chatUX);
 
-    const pollTimer = setInterval(async () => {
-      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
-      if (document.hidden || state.connectionState === 'offline') return;
-      try {
-        const fresh = await api(`/clubs/${club.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
-        applyRoomHearts(msgsEl, fresh.heart_counts);
-      } catch { /* offline */ }
-    }, 5000);
+    startAdaptiveChatPoll(modal, msgsEl, async () => {
+      const fresh = await api(`/clubs/${club.id}/chat?since_id=${lastId}`);
+      if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
+      applyRoomHearts(msgsEl, fresh.heart_counts);
+      return fresh.items.length > 0;
+    });
 
     modal.querySelector('#club-head').addEventListener('click', async () => {
       try {
@@ -9600,15 +9717,12 @@
     chatUX.activateOutbox((message) => renderMsgs([message], true, { forceBottom: true }));
     addPhotoToComposer(modal, '#gc-form', '#gc-text', chatUX);
 
-    const pollTimer = setInterval(async () => {
-      if (!document.body.contains(msgsEl)) { clearInterval(pollTimer); return; }
-      if (document.hidden || state.connectionState === 'offline') return;
-      try {
-        const fresh = await api(`/games/${game.id}/chat?since_id=${lastId}`);
-        if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
-        applyRoomHearts(msgsEl, fresh.heart_counts);
-      } catch { /* offline */ }
-    }, 5000);
+    startAdaptiveChatPoll(modal, msgsEl, async () => {
+      const fresh = await api(`/games/${game.id}/chat?since_id=${lastId}`);
+      if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
+      applyRoomHearts(msgsEl, fresh.heart_counts);
+      return fresh.items.length > 0;
+    });
 
     modal.querySelector('#gc-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -10964,7 +11078,7 @@
     // Live sync: while this screen is open, pick up joins, scores, confirmations…
     const pollTimer = setInterval(async () => {
       if (!document.body.contains(box)) { clearInterval(pollTimer); return; }
-      if (document.hidden || state.connectionState === 'offline') return;
+      if (document.hidden || state.connectionState === 'offline' || currentOverlayEntry()?.el !== modal) return;
       try {
         const fresh = await api(`/games/${gameId}`);
         if (gameFingerprint(fresh) !== fingerprint) {
@@ -10972,7 +11086,7 @@
           refreshMe();
         }
       } catch { /* offline */ }
-    }, 5000);
+    }, LIVE_DETAIL_POLL_INTERVAL_MS);
   }
 
   function safeNotificationOverlayRoute(actionUrl) {
@@ -11346,7 +11460,7 @@
       if (tick % 3 === 0 && state.presence && state.presence.checked_in) {
         api('/presence/ping', { method: 'POST' }).catch(() => {});
       }
-    }, 12000);
+    }, ME_POLL_INTERVAL_MS);
   }
 
   function slotForNow(d = new Date()) {
@@ -11388,13 +11502,21 @@
   }
 
   function setupConnectivity() {
+    let lastForegroundRefreshAt = 0;
+    const refreshForegroundState = () => {
+      if (document.hidden || !state.token || state.connectionState === 'offline') return;
+      const now = Date.now();
+      if (now - lastForegroundRefreshAt < 5000) return;
+      lastForegroundRefreshAt = now;
+      refreshMe();
+    };
     window.addEventListener('offline', () => setConnectionState('offline'));
     window.addEventListener('online', () => {
       setConnectionState('online');
       toast('Back online 🏓');
       if (state.token) {
         flushChatOutboxForAccount(state.me && state.me.id);
-        refreshMe();
+        refreshForegroundState();
         refreshActiveView();
       }
     });
@@ -11412,8 +11534,12 @@
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) stopLocationWatch();
-      else if (autoCheckInEnabled()) startLocationWatch();
+      else {
+        if (autoCheckInEnabled()) startLocationWatch();
+        refreshForegroundState();
+      }
     });
+    window.addEventListener('focus', refreshForegroundState);
     setConnectionState(navigator.onLine ? 'online' : 'offline');
   }
 
@@ -11653,13 +11779,15 @@
     } catch (err) { toast(err.message); }
   });
 
-  // Repaint ❤️ badges from a {message_id: count} map — polls carry it so
-  // counts on already-rendered bubbles stay live without reopening the room.
+  // Repaint ❤️ badges from a bounded {message_id: count} snapshot. Only
+  // IDs present in the snapshot are authoritative; older rendered messages
+  // stay untouched after they move outside the server's sync window.
   // No-ops for DM threads (their payloads don't include heart_counts).
   function applyRoomHearts(root, counts) {
     if (!counts || !root) return;
     root.querySelectorAll('.bubble[data-room-heart], .bubble.me[data-del-msg]').forEach((b) => {
       const id = b.dataset.roomHeart || b.dataset.delMsg;
+      if (!Object.prototype.hasOwnProperty.call(counts, id)) return;
       const n = counts[id] || 0;
       let badge = b.querySelector('[data-heart-badge]');
       if (n) {

@@ -1,0 +1,13 @@
+# Upload only the production source. This allowlist makes it impossible for a
+# local recovery database, environment file, test fixture, or migration helper
+# to enter a Vercel source upload.
+/*
+!.python-version
+!.vercelignore
+!app.py
+!backend
+!public
+!pyproject.toml
+!requirements.txt
+!uv.lock
+!vercel.json

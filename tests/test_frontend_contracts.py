@@ -4,10 +4,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INDEX = (ROOT / "frontend" / "index.html").read_text()
-APP = (ROOT / "frontend" / "app.js").read_text()
-SERVICE_WORKER = (ROOT / "frontend" / "sw.js").read_text()
-STYLES = (ROOT / "frontend" / "styles.css").read_text()
+INDEX = (ROOT / "public" / "index.html").read_text()
+APP = (ROOT / "public" / "app-v13.js").read_text()
+SERVICE_WORKER = (ROOT / "public" / "sw.js").read_text()
+STYLES = (ROOT / "public" / "styles-v13.css").read_text()
 
 
 def test_map_assets_are_lazy_loaded():

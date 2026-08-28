@@ -4,8 +4,8 @@ from flask import Blueprint, g, jsonify, request
 
 from backend.app import db
 from backend.models import (
-    Club, ClubChatRead, ClubMember, Court, Message, Notification,
-    is_blocked_between, notify,
+    Club, ClubChatRead, ClubMember, Court, Game, League, Message,
+    Notification, Tournament, is_blocked_between, notify,
 )
 from backend.security import rate_limit
 
@@ -306,11 +306,24 @@ def edit_club(club_id):
 
 
 def _delete_club(club):
-    """Remove a club and everything hanging off it."""
+    """Remove a club while retaining independent competition history."""
+    # Games and competitions remain useful after a club disbands. Clear their
+    # optional foreign keys before PostgreSQL checks the club deletion.
+    for model, column in (
+        (Game, Game.club_id),
+        (Tournament, Tournament.club_id),
+        (League, League.club_id),
+    ):
+        model.query.filter(column == club.id).update(
+            {column: None}, synchronize_session=False,
+        )
+
+    # Club-room messages, club-specific notifications, and read markers have no
+    # meaning without the club. Memberships use Club.members' orphan cascade.
     Message.query.filter_by(club_id=club.id).delete(synchronize_session=False)
     ClubChatRead.query.filter_by(club_id=club.id).delete(synchronize_session=False)
     Notification.query.filter_by(related_club_id=club.id).delete(synchronize_session=False)
-    db.session.delete(club)  # members go with it (delete-orphan cascade)
+    db.session.delete(club)
 
 
 @clubs_bp.delete('/clubs/<int:club_id>')
@@ -488,15 +501,15 @@ def club_chat(club_id):
         return jsonify({'error': 'members_only'}), 403
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(Message.club_id == club_id)
-    if since_id:
-        messages = query.filter(Message.id > since_id).order_by(Message.id.asc()).all()
-    else:
-        messages = list(reversed(query.order_by(Message.id.desc()).limit(60).all()))
+    from backend.routes.chat import chat_messages_page
+    messages, has_more = chat_messages_page(query, since_id)
 
     # Reading the room marks it read — powers the Chat-tab unread badge.
-    latest_id = db.session.query(db.func.max(Message.id)).filter(
-        Message.club_id == club_id,
-    ).scalar() or 0
+    latest_id = messages[-1].id if since_id and has_more else (
+        db.session.query(db.func.max(Message.id)).filter(
+            Message.club_id == club_id,
+        ).scalar() or 0
+    )
     marker = ClubChatRead.query.filter_by(
         user_id=g.current_user.id, club_id=club.id,
     ).first()
@@ -515,6 +528,7 @@ def club_chat(club_id):
         'club': {'id': club.id, 'name': club.name},
         'items': [m.to_dict() for m in messages],
         'heart_counts': room_heart_counts('club_id', club_id),
+        'has_more': has_more,
     })
 
 

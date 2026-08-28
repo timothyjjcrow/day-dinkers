@@ -10,3 +10,5 @@ venv/
 output/
 tmp/
 .claude/
+.vercel
+.env*

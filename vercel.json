@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "flask",
+  "functions": {
+    "app.py": {
+      "excludeFiles": "{instance/**,tests/**,scripts/**,data/**,.env*,.github/**,.pytest_cache/**,frontend/**,Dockerfile,README.md,render.yaml,**/.DS_Store}"
+    }
+  },
+  "regions": ["iad1"]
+}

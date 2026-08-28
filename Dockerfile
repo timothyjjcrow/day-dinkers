@@ -15,5 +15,5 @@ COPY . .
 
 EXPOSE 8000
 
-# Update backend.app:app if the Flask entrypoint lives elsewhere.
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8000} backend.app:app"]
+# Keep one process because the app's rate limiter and push queue are in memory.
+CMD ["sh", "-c", "gunicorn --workers 1 --threads 8 --bind 0.0.0.0:${PORT:-8000} backend.wsgi:app"]

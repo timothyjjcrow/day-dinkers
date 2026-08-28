@@ -406,6 +406,15 @@ def test_production_requires_secret_key(monkeypatch):
         create_app('production')
 
 
+def test_production_requires_postgres(monkeypatch):
+    from backend.config import ProductionConfig
+
+    monkeypatch.setattr(ProductionConfig, 'SECRET_KEY', 's' * 32)
+    monkeypatch.setattr(ProductionConfig, 'SQLALCHEMY_DATABASE_URI', 'sqlite:///app.db')
+    with pytest.raises(RuntimeError, match='DATABASE_URL must point to PostgreSQL'):
+        create_app('production')
+
+
 def test_every_mutating_route_is_rate_limited():
     """Guard: any POST/PATCH/DELETE/PUT route must carry @rate_limit."""
     import pathlib
@@ -7344,6 +7353,20 @@ def test_room_chat_hearts(client):
     # Toggling off removes only that user's row.
     res = client.post(f"/api/messages/{msg['id']}/heart", headers=bh)
     assert res.get_json() == {'hearted': False, 'heart_count': 1}
+    idle_poll = client.get(
+        f"/api/courts/{court_id}/chat?since_id={msg['id']}", headers=ah,
+    ).get_json()
+    assert idle_poll['items'] == []
+    assert idle_poll['heart_counts'] == {str(msg['id']): 1}
+
+    # Zero is authoritative too, so clients can remove the final badge even
+    # when the message itself is not part of the delta page.
+    res = client.post(f"/api/messages/{msg['id']}/heart", headers=ch)
+    assert res.get_json() == {'hearted': False, 'heart_count': 0}
+    idle_poll = client.get(
+        f"/api/courts/{court_id}/chat?since_id={msg['id']}", headers=ah,
+    ).get_json()
+    assert idle_poll['heart_counts'] == {str(msg['id']): 0}
 
     # Membership gate: Cam isn't in Ana's club, so its room rejects him.
     cid = client.post('/api/clubs', json={'name': 'Hearts Club'}, headers=ah).get_json()['id']

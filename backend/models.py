@@ -28,6 +28,14 @@ class TimestampMixin:
     )
 
 
+class RateLimitBucket(db.Model):
+    """Shared fixed-window counter for stateless/multi-instance deployments."""
+    bucket_key = db.Column(db.String(64), primary_key=True)
+    window_id = db.Column(db.BigInteger, primary_key=True)
+    count = db.Column(db.Integer, nullable=False, default=0)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+
+
 SKILL_LEVELS = ['beginner', 'intermediate', 'advanced', 'pro']
 DEFAULT_RATING = 1200
 # "Usually plays" slots: <day>-<part>, e.g. mon-eve.
@@ -165,7 +173,7 @@ class Court(TimestampMixin, db.Model):
     website = db.Column(db.String(500), nullable=False, default='')
     photo_url = db.Column(db.String(500), nullable=False, default='')
     # User-uploaded photo as a data URL, served via /courts/<id>/photo
-    # (Render's free-tier disk is ephemeral, so files can't live on disk).
+    # (free container disks are commonly ephemeral, so files can't live there).
     photo_data = db.Column(db.Text)
     has_restrooms = db.Column(db.Boolean, nullable=False, default=False)
     has_water = db.Column(db.Boolean, nullable=False, default=False)
@@ -885,8 +893,8 @@ class CourtCondition(TimestampMixin, db.Model):
 
 
 class CourtPhoto(TimestampMixin, db.Model):
-    """A community photo of a court, stored as a data URL (Render free-tier
-    disk is ephemeral). Newest one doubles as the hero when no curated photo."""
+    """A community photo stored as a data URL because hosted container disks
+    are commonly ephemeral. The newest one can double as the court hero."""
     id = db.Column(db.Integer, primary_key=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)

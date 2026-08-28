@@ -11,7 +11,7 @@ from backend.config import get_config
 db = SQLAlchemy(session_options={'expire_on_commit': False})
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FRONTEND_DIR = os.path.join(PROJECT_ROOT, 'frontend')
+PUBLIC_DIR = os.path.join(PROJECT_ROOT, 'public')
 BUNDLED_COURTS_FILE = os.path.join(PROJECT_ROOT, 'data', 'courts.json.gz')
 
 
@@ -797,13 +797,19 @@ def create_app(config_name=None):
     app = Flask(__name__, static_folder=None)
     app.config.from_object(get_config(config_name))
 
-    # Never run production with a guessable signing key.
+    # Never run production with a guessable signing key or ephemeral SQLite.
     from backend.config import DEV_FALLBACK_SECRET
     if app.config.get('APP_ENV') == 'production' and \
             app.config.get('SECRET_KEY') in (None, '', 'change-me', DEV_FALLBACK_SECRET):
         raise RuntimeError(
             'SECRET_KEY must be set to a strong value in production '
             '(the dev fallback is not allowed).'
+        )
+    if app.config.get('APP_ENV') == 'production' and \
+            app.config.get('SQLALCHEMY_DATABASE_URI', '').startswith('sqlite:'):
+        raise RuntimeError(
+            'DATABASE_URL must point to PostgreSQL in production '
+            '(hosted container filesystems are not persistent).'
         )
 
     db.init_app(app)
@@ -817,27 +823,34 @@ def create_app(config_name=None):
         return resp
 
     with app.app_context():
-        _ensure_pg_schema(app)
-        _migrate_legacy_schema(app)
-        _clear_conflicting_legacy_indexes(app)
-        _upgrade_schema(app)
-        if app.config.get('RESET_DB_ON_BOOT'):
-            # One-time escape hatch for migrating off an old schema:
-            # set RESET_DB_ON_BOOT=true, deploy, then REMOVE the env var.
-            app.logger.warning('RESET_DB_ON_BOOT set — dropping and recreating all tables')
-            db.drop_all()
-            db.create_all()
-        elif app.config.get('AUTO_CREATE_DB'):
-            db.create_all()
-        _ensure_game_attempt_index(app)
-        _ensure_message_attempt_index(app)
-        _ensure_message_send_attempt_schema(app)
-        _ensure_notification_unread_dedupe_index(app)
-        _maybe_auto_seed(app)
+        if app.config.get('SCHEMA_MANAGEMENT_ENABLED'):
+            _ensure_pg_schema(app)
+            _migrate_legacy_schema(app)
+            _clear_conflicting_legacy_indexes(app)
+            _upgrade_schema(app)
+            if app.config.get('RESET_DB_ON_BOOT'):
+                # One-time escape hatch for migrating off an old schema:
+                # set RESET_DB_ON_BOOT=true, deploy, then REMOVE the env var.
+                app.logger.warning(
+                    'RESET_DB_ON_BOOT set — dropping and recreating all tables'
+                )
+                db.drop_all()
+                db.create_all()
+            elif app.config.get('AUTO_CREATE_DB'):
+                db.create_all()
+            _ensure_game_attempt_index(app)
+            _ensure_message_attempt_index(app)
+            _ensure_message_send_attempt_schema(app)
+            _ensure_notification_unread_dedupe_index(app)
+            _maybe_auto_seed(app)
+        elif app.config.get('RESET_DB_ON_BOOT'):
+            raise RuntimeError(
+                'RESET_DB_ON_BOOT cannot be used when schema management is disabled.'
+            )
 
     @app.get('/health')
     def health():
-        # A cheap DB ping keeps the health check honest — Render flags 503s.
+        # A cheap DB ping keeps the hosting health check honest.
         from sqlalchemy import text
         try:
             db.session.execute(text('SELECT 1'))
@@ -853,7 +866,7 @@ def create_app(config_name=None):
 
     @app.get('/')
     def index():
-        return send_from_directory(FRONTEND_DIR, 'index.html')
+        return send_from_directory(PUBLIC_DIR, 'index.html')
 
     # Short share links with Open Graph tags: chat apps render a rich preview
     # (crawlers can't read #hash routes), humans get bounced into the app.
@@ -944,15 +957,15 @@ def create_app(config_name=None):
     # alone could mix an old bundle with new HTML during deployment.
     @app.get('/app-v13.js')
     def frontend_app_v13():
-        return send_from_directory(FRONTEND_DIR, 'app.js')
+        return send_from_directory(PUBLIC_DIR, 'app-v13.js')
 
     @app.get('/styles-v13.css')
     def frontend_styles_v13():
-        return send_from_directory(FRONTEND_DIR, 'styles.css')
+        return send_from_directory(PUBLIC_DIR, 'styles-v13.css')
 
     @app.get('/<path:filename>')
     def frontend_assets(filename):
-        return send_from_directory(FRONTEND_DIR, filename)
+        return send_from_directory(PUBLIC_DIR, filename)
 
     return app
 
