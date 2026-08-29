@@ -457,7 +457,7 @@ def _active_tournament_payload(user):
 
 def _me_payload(user):
     # Lazy import avoids the auth/chat blueprint import cycle at startup.
-    from backend.routes.chat import community_room_unread_count
+    from backend.routes.chat import community_room_unread_counts
 
     hidden_ids = blocked_pair_ids(user.id)
     unread_message_query = Message.query.filter_by(recipient_id=user.id, read_at=None)
@@ -487,11 +487,14 @@ def _me_payload(user):
     pending_requests = pending_request_query.count()
     unread_notifications = unread_notification_query.count()
     latest = latest_query.order_by(Notification.id.desc()).first()
+    community_unread = community_room_unread_counts(user.id)
     return {
         'user': user.to_dict(),
         'presence': presence_payload(user.id),
         'unread_messages': unread_messages,
-        'community_room_unread': community_room_unread_count(user.id),
+        'community_room_unread': community_unread['total'],
+        'community_message_unread': community_unread['messages'],
+        'community_group_unread': community_unread['groups'],
         'pending_friend_requests': pending_requests,
         'unread_notifications': unread_notifications,
         'games_to_confirm': _games_to_confirm_count(user.id),

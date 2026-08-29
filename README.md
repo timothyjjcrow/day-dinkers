@@ -33,36 +33,39 @@ Demo accounts: `dana@example.com`, `marcus@example.com`, `priya@example.com`,
 
 ## Features
 
-- **Courts & map** — clustered map of ~18.5k US courts with live "players here"
-  counts, amenity filters (lighted/indoor/playing-now), text search, and
-  **geocoding area search** ("jump to Austin, TX"). Court detail has a pinned
-  hero (photos, amenities, fees, open-play hours), one-tap check-in, court chat,
-  and share links. Mobile results render progressively (8 on the map, then
-  20-at-a-time in List), and selecting a court no longer collapses the browsing
-  context while exposing Details, Play here, and Directions. Auto check-in by
-  proximity when the app is open.
-- **Location** — first-run onboarding sets a **home area**; the map and feeds
-  open there. **Players Near You** discovery (by last check-in / home court)
-  with skill filter and add-friend / message / challenge actions.
-- **Play** — action-first mobile home with **Play now / Plan ahead**. Play Now
-  confirms the court where you are physically ready, checks you in, and safely
-  joins or starts one live rally in a single flow; nearby ready players see the
-  underfilled rally until it fills or expires. Remote players can tap **I'm on
-  my way** for a bounded 5/10/15-minute hold on one spot, get Directions, and
+- **Courts & map** — clustered map of ~18.5k US courts with live activity,
+  amenity filters, text search, and **geocoding area search** ("jump to Austin,
+  TX"). The default view leads with Search, **Active now**, **Filters**, and two
+  recommended cards; exact court-name matches outrank similar place names.
+  Selecting a result opens a state-aware **Now at this court** detail directly,
+  suppressing empty metrics and counting only games the viewer can act on.
+  Venue details, reviews, photos, and management actions stay behind progressive
+  disclosures. Auto check-in by proximity is available while the app is open.
+- **Location** — one optional, per-account first-run sheet sets a **home area**;
+  the map and feeds open there. Community's People lane separates Friends and
+  Nearby players, with compact filters and one contextual action per row.
+- **Play** — action-first mobile home with **Play soon / Plan a game**. Play soon
+  offers exactly three human choices: at a court, arriving in 5–15 minutes, or
+  free sometime this hour. At-court play checks you in and safely joins or
+  starts one live game in a single flow; nearby ready players see the
+  underfilled rally until it fills or expires. Remote players can choose **I can
+  be there in 5–15 minutes** for a bounded hold on one spot, get Directions, and
   convert it only after a private exact-court check-in. Rally surfaces keep
-  physically ready, joined-roster, and on-the-way counts distinct; outsiders
+  at-court, joined-roster, and arriving counts distinct; outsiders
   see only the aggregate while roster members see the traveler's ETA. Players
-  who are not at a court can publish **Available this hour** at a selected
+  who are not at a court can publish **Free this hour** at a selected
   court. The server fixes the signal to 60 minutes; a nearby player can accept
   it through expiry to atomically create one ordinary open casual game about
   15 minutes ahead, with retry-safe publish and acceptance keys and no false
-  check-in presence. Plan Ahead keeps the guided
-  Where → When → Who planner with smart court/time/friend defaults, nearby
-  games feed, and scheduling at any court (casual or ranked),
+  check-in presence. Plan a game is a true Where → When → Who flow with three
+  smart time suggestions, a custom-time disclosure, compact answer summaries,
+  and scheduling at any court (casual or ranked),
   **recurring weekly open-play sessions**, join/leave, and an active-game banner.
-  Every underfilled roster has one **Fill the game** sheet that combines batch
-  friend invites, link sharing, and—when the host chose a public one-off
-  game—a retry-safe live card in the court room. The card follows the real
+  Join, waitlist, and instant-start changes confirm in place with Undo, Leave,
+  or Cancel management. Every underfilled roster has one adaptive **Find
+  players** sheet that leads with the best available channel—friends, court
+  chat, or link sharing—and puts the rest under More. Public games can also
+  publish a retry-safe live card in the court room. The card follows the real
   roster from open → full → open, offers join or waitlist without reserving a
   spot, and closes with the game instead of leaving stale recruiting text.
   Casual scores finalize instantly; ranked scores need an opposing player's
@@ -70,15 +73,17 @@ Demo accounts: `dana@example.com`, `marcus@example.com`, `priya@example.com`,
   before ELO moves (K=32, team-average for doubles). Results feed, win streaks,
   and a podium leaderboard. **Game visibility**: open (anyone nearby) /
   friends / private (specific invitees). Challenges create private 1v1s.
-- **Compete** — mobile-first box leagues and single-elimination tournaments,
-  with registration, seeding, round/bracket progression, role-aware action
-  queues, and one shared score → confirm → dispute → resolve result workflow.
+- **Compete** — one **Create competition** path leads to equal Tournament and
+  Box league choices. Full-page, keyboard-accessible tabbed details cover
+  overview, matches/brackets, standings/players, and chat, with one global
+  role-aware next action and one shared score → confirm → dispute → resolve
+  result workflow.
   Exact match links reopen the right result (including older league rounds),
   while live refresh preserves scroll and form context.
-- **People** — player search, friend requests, friends list with live presence,
-  per-section attention badges, and a single recency-sorted Community inbox for
-  DMs plus court, club, game, league, and tournament rooms—including active
-  competition rooms before the first message. Chat is mobile-keyboard-aware
+- **Community** — stable **Messages / People / Groups** lanes keep DMs and active
+  game chats focused, separate Friends from Nearby discovery, and give Crews,
+  Clubs, court rooms, leagues, and tournaments a durable home. Chat is
+  mobile-keyboard-aware
   across every room. Every text/photo send enters a durable, account-scoped
   outbox first, retries safely after offline/reload failures, and remains
   visibly retryable or removable without duplicate delivery.
@@ -87,9 +92,10 @@ Demo accounts: `dana@example.com`, `marcus@example.com`, `priya@example.com`,
   next-game planner. Accepted membership is the server-owned roster: Crew games
   are private, one-off, versioned snapshots, so a stale screen cannot invite a
   removed player or silently expose the group.
-- **Profile** — rating / record / streak, match history with rating deltas,
-  editable profile (photo, skill level, bio, avatar color, home court/area),
-  activity feed, install-to-home-screen hint.
+- **Me & Settings** — a compact dashboard leads with rating, next game, saved
+  courts, and recent games; deeper stats and history stay under More. Settings
+  is a separate five-destination hub for profile, notifications, privacy,
+  appearance/calendar, and account controls.
 - **Realtime + offline resilience** — polling surfaces confirmations, invites,
   joins, chat, and challenges as toasts/badges plus optional system
   notifications. Returning players see their token-scoped private snapshot

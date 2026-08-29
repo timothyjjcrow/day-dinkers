@@ -987,6 +987,62 @@ def test_court_sort_active(client, app):
     assert any(c['name'] == 'Larson Park' for c in active)
 
 
+def test_court_open_game_count_respects_visibility_and_roster_space(client):
+    host = register(client, 'court-count-host@example.com', 'Host')
+    viewer = register(client, 'court-count-viewer@example.com', 'Viewer')
+    invitee = register(client, 'court-count-invitee@example.com', 'Invitee')
+    fillers = [
+        register(client, f'court-count-fill-{i}@example.com', f'Fill {i}')
+        for i in range(3)
+    ]
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    make_game(client, host['token'], court_id, hours_ahead=6, visibility='open')
+    make_game(
+        client, host['token'], court_id, hours_ahead=24,
+        visibility='private', invite_user_ids=[invitee['user']['id']],
+    )
+    full = make_game(
+        client, host['token'], court_id, hours_ahead=48, visibility='open',
+    )
+    for player in fillers:
+        joined = client.post(
+            f"/api/games/{full['id']}/join",
+            headers=auth_headers(player['token']),
+        )
+        assert joined.status_code == 200
+    make_game(client, host['token'], court_id, hours_ahead=72, visibility='friends')
+
+    def listed(headers=None):
+        items = client.get('/api/courts?q=larson', headers=headers).get_json()['items']
+        return next(item for item in items if item['id'] == court_id)
+
+    # Anonymous and unrelated viewers see only the underfilled open game.
+    assert listed()['upcoming_games'] == 1
+    assert listed(auth_headers(viewer['token']))['upcoming_games'] == 1
+
+    request_row = client.post(
+        '/api/friends/request',
+        json={'user_id': viewer['user']['id']},
+        headers=auth_headers(host['token']),
+    ).get_json()
+    client.post(
+        f"/api/friends/{request_row['friendship_id']}/respond",
+        json={'accept': True}, headers=auth_headers(viewer['token']),
+    )
+    assert listed(auth_headers(viewer['token']))['upcoming_games'] == 2
+
+    # Favorites use the same viewer-aware enrichment as the main court list.
+    client.post(
+        f'/api/courts/{court_id}/favorite',
+        headers=auth_headers(viewer['token']),
+    )
+    favorite = client.get(
+        '/api/courts/favorites', headers=auth_headers(viewer['token']),
+    ).get_json()['items'][0]
+    assert favorite['upcoming_games'] == 2
+
+
 def test_court_list_sort_options(client):
     a = register(client, 'a@example.com', 'Ana')
     courts = client.get('/api/courts').get_json()['items']
@@ -1036,6 +1092,20 @@ def test_court_detail_player_info(client):
     assert player['is_me'] is False
     assert player['minutes_here'] == 0
     assert detail['friends_here'] == 1
+
+
+def test_court_detail_keeps_later_plans_out_of_now_signal(client):
+    player = register(client, 'now-window@example.com', 'Nora')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    near = make_game(client, player['token'], court_id, hours_ahead=1)
+    later = make_game(client, player['token'], court_id, hours_ahead=24)
+
+    detail = client.get(
+        f'/api/courts/{court_id}', headers=auth_headers(player['token']),
+    ).get_json()
+
+    assert {game['id'] for game in detail['games']} == {near['id'], later['id']}
+    assert [game['id'] for game in detail['now_games']] == [near['id']]
 
 
 def test_my_record_at_court(client):
@@ -3220,7 +3290,10 @@ def test_competition_chat_inbox_is_complete_private_and_recency_sorted(client):
     ]
     assert [row['unread'] for row in inbox['items']] == [1, 1, 1]
     assert inbox['unread'] == 3
-    assert client.get('/api/me', headers=bh).get_json()['community_room_unread'] == 3
+    me_badges = client.get('/api/me', headers=bh).get_json()
+    assert me_badges['community_room_unread'] == 3
+    assert me_badges['community_message_unread'] == 1
+    assert me_badges['community_group_unread'] == 2
     sender_inbox = client.get('/api/chat/competitions', headers=ah).get_json()
     assert sender_inbox['unread'] == 0
     assert all(row['unread'] == 0 for row in sender_inbox['items'])
@@ -3233,7 +3306,10 @@ def test_competition_chat_inbox_is_complete_private_and_recency_sorted(client):
     )
     assert tournament_row['unread'] == 0
     assert refreshed['unread'] == 2
-    assert client.get('/api/me', headers=bh).get_json()['community_room_unread'] == 2
+    me_badges = client.get('/api/me', headers=bh).get_json()
+    assert me_badges['community_room_unread'] == 2
+    assert me_badges['community_message_unread'] == 1
+    assert me_badges['community_group_unread'] == 1
 
 
 def test_competition_inbox_cap_never_hides_active_or_unread_rooms():
@@ -5677,6 +5753,7 @@ def test_monthly_leaderboard(client, app):
     old = ranked_win(a['token'], b, auth_headers(b['token']))
 
     board = client.get('/api/leaderboard?period=month').get_json()
+    assert board['period'] == 'month'
     names = [(u['display_name'], u['month_delta'], u['month_games']) for u in board['items']]
     assert names[0][0] == 'Ana' and names[0][1] > 0 and names[0][2] == 2
     assert names[1][0] == 'Ben' and names[1][1] < 0
@@ -5703,6 +5780,63 @@ def test_monthly_leaderboard(client, app):
             .scalar()
         )
         assert ana_games == 1
+
+
+def test_monthly_leaderboard_composes_with_exact_area_scope(client, app):
+    from backend.models import Game as GameModel, GamePlayer, utcnow
+
+    ana = register(client, 'month-near@example.com', 'Ana')
+    ben = register(client, 'month-far@example.com', 'Ben')
+    cam = register(client, 'month-bbox@example.com', 'Cam')
+    dana = register(client, 'month-no-games@example.com', 'Dana')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    with app.app_context():
+        users = {
+            row.display_name: row
+            for row in User.query.filter(User.id.in_([
+                ana['user']['id'], ben['user']['id'], cam['user']['id'],
+                dana['user']['id'],
+            ])).all()
+        }
+        users['Ana'].last_lat, users['Ana'].last_lng = 33.66, -117.91
+        users['Ben'].last_lat, users['Ben'].last_lng = 40.81, -124.16
+        # Inside the 50-mile bounding box, but about 60 miles from the center.
+        users['Cam'].last_lat, users['Cam'].last_lng = 34.30, -117.20
+        # Nearby all-time player with no completed ranked game this month.
+        users['Dana'].last_lat, users['Dana'].last_lng = 33.67, -117.90
+        users['Dana'].ranked_wins = 1
+
+        game = GameModel(
+            court_id=court_id,
+            creator_id=ana['user']['id'],
+            scheduled_at=utcnow(),
+            game_type='ranked',
+            visibility='open',
+            status='completed',
+            completed_at=utcnow(),
+        )
+        db.session.add(game)
+        db.session.flush()
+        db.session.add_all([
+            GamePlayer(game_id=game.id, user_id=ana['user']['id'], rating_delta=10),
+            GamePlayer(game_id=game.id, user_id=ben['user']['id'], rating_delta=30),
+            GamePlayer(game_id=game.id, user_id=cam['user']['id'], rating_delta=20),
+        ])
+        db.session.commit()
+
+    global_board = client.get('/api/leaderboard?period=month').get_json()
+    assert [item['id'] for item in global_board['items']] == [
+        ben['user']['id'], cam['user']['id'], ana['user']['id'],
+    ]
+
+    nearby_board = client.get(
+        '/api/leaderboard?lat=33.66&lng=-117.91&radius=50&period=month',
+    ).get_json()
+    assert nearby_board['period'] == 'month'
+    assert [item['id'] for item in nearby_board['items']] == [ana['user']['id']]
+    assert nearby_board['items'][0]['month_delta'] == 10
+    assert nearby_board['items'][0]['month_games'] == 1
 
 
 def test_results_feed(client):
@@ -7497,6 +7631,10 @@ def test_my_court_rooms(client):
     assert len(rooms) == 2
     assert rooms[0]['court']['id'] == other_court  # newest message first
     assert rooms[0]['unread'] == 1
+    me_badges = client.get('/api/me', headers=auth_headers(a['token'])).get_json()
+    assert me_badges['community_message_unread'] == 0
+    assert me_badges['community_group_unread'] == 3
+    assert me_badges['community_room_unread'] == 3
 
     # Reading the room clears its unread
     client.get(f'/api/courts/{court_id}/chat', headers=auth_headers(a['token']))
@@ -7614,6 +7752,10 @@ def test_club_chat_members_only_with_unread(client):
     mine = client.get('/api/clubs/mine', headers=bh).get_json()['items']
     assert mine[0]['unread'] == 2
     assert mine[0]['last_message']['body'] == 'Bring balls'
+    me_badges = client.get('/api/me', headers=bh).get_json()
+    assert me_badges['community_message_unread'] == 0
+    assert me_badges['community_group_unread'] == 2
+    assert me_badges['community_room_unread'] == 2
 
     # One ping per club per member, no matter how chatty the room gets.
     kinds = [n['kind'] for n in client.get('/api/notifications', headers=bh).get_json()['items']]

@@ -2117,7 +2117,7 @@ def accept_play_pulse(pulse_id):
         recurrence='none',
         max_players=4,
         preferred_level='any',
-        notes='Available this hour',
+        notes='Free this hour',
         is_instant=False,
     )
     db.session.add(game)
@@ -3179,8 +3179,8 @@ def declare_rally_arrival(game_id):
             announcement = notify(
                 player.user_id,
                 'rally_arrival',
-                f'{user.display_name} is on the way',
-                f'About {eta_minutes} minutes away.',
+                f'{user.display_name} is arriving',
+                f'Arriving in about {eta_minutes} minutes.',
                 related_user_id=user.id,
                 related_game_id=game.id,
                 action_url=f'/#game/{game.id}',
@@ -5120,10 +5120,19 @@ def leaderboard():
 
     Area scoping uses each player's last-known location, falling back to
     their home court — same source as players-nearby discovery."""
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    area = None
+    if lat is not None and lng is not None:
+        radius = min(max(
+            request.args.get('radius', default=50.0, type=float), 1.0,
+        ), 250.0)
+        area = (lat, lng, radius)
+
     if str(request.args.get('period') or '').strip().lower() == 'month':
         from sqlalchemy import func
         month_start = utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        rows = (
+        query = (
             db.session.query(
                 User,
                 func.coalesce(func.sum(GamePlayer.rating_delta), 0).label('delta'),
@@ -5139,10 +5148,23 @@ def leaderboard():
                 User.deleted_at.is_(None),
             )
             .group_by(User.id)
-            .order_by(func.sum(GamePlayer.rating_delta).desc())
-            .limit(50)
-            .all()
         )
+        order = (func.sum(GamePlayer.rating_delta).desc(), User.id.asc())
+        if area:
+            lat, lng, radius = area
+            rows = (
+                _leaderboard_area_query(query, lat, lng, radius)
+                .order_by(*order)
+                .limit(200)
+                .all()
+            )
+            rows = [
+                row for row in rows
+                if _leaderboard_user_within_radius(row[0], lat, lng, radius)
+            ][:50]
+        else:
+            rows = query.order_by(*order).limit(50).all()
+
         items = []
         for user, delta, games in rows:
             entry = user.to_public_dict()
@@ -5151,53 +5173,59 @@ def leaderboard():
             items.append(entry)
         return jsonify({'items': items, 'period': 'month'})
 
-    lat = request.args.get('lat', type=float)
-    lng = request.args.get('lng', type=float)
-
     query = User.query.filter(
         User.ranked_wins + User.ranked_losses > 0,
         User.deleted_at.is_(None),
     )
 
-    if lat is not None and lng is not None:
-        radius = min(max(request.args.get('radius', default=50.0, type=float), 1.0), 250.0)
-        lat_delta = radius / 69.0
-        lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
-        lat_lo, lat_hi = lat - lat_delta, lat + lat_delta
-        lng_lo, lng_hi = lng - lng_delta, lng + lng_delta
-
-        from sqlalchemy import and_, or_
-        from sqlalchemy.orm import aliased
-        home = aliased(Court)
+    if area:
+        lat, lng, radius = area
         candidates = (
-            query.outerjoin(home, User.home_court_id == home.id)
-            .filter(or_(
-                and_(User.last_lat.between(lat_lo, lat_hi),
-                     User.last_lng.between(lng_lo, lng_hi)),
-                and_(User.last_lat.is_(None),
-                     home.latitude.between(lat_lo, lat_hi),
-                     home.longitude.between(lng_lo, lng_hi)),
-            ))
-            .order_by(User.rating.desc())
+            _leaderboard_area_query(query, lat, lng, radius)
+            .order_by(User.rating.desc(), User.id.asc())
             .limit(200)
             .all()
         )
         # Exact-distance pass over the bounding-box candidates.
-        users = []
-        for user in candidates:
-            ulat, ulng = user.last_lat, user.last_lng
-            if ulat is None and user.home_court:
-                ulat, ulng = user.home_court.latitude, user.home_court.longitude
-            if ulat is None or ulng is None:
-                continue
-            if haversine_miles(lat, lng, ulat, ulng) <= radius:
-                users.append(user)
-            if len(users) >= 50:
-                break
+        users = [
+            user for user in candidates
+            if _leaderboard_user_within_radius(user, lat, lng, radius)
+        ][:50]
     else:
-        users = query.order_by(User.rating.desc()).limit(50).all()
+        users = query.order_by(User.rating.desc(), User.id.asc()).limit(50).all()
 
     return jsonify({'items': _with_title_counts(users)})
+
+
+def _leaderboard_area_query(query, lat, lng, radius):
+    """Apply the inexpensive location bounding box before exact filtering."""
+    from sqlalchemy import and_, or_
+    from sqlalchemy.orm import aliased
+
+    lat_delta = radius / 69.0
+    lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
+    lat_lo, lat_hi = lat - lat_delta, lat + lat_delta
+    lng_lo, lng_hi = lng - lng_delta, lng + lng_delta
+    home = aliased(Court)
+    return query.outerjoin(home, User.home_court_id == home.id).filter(or_(
+        and_(User.last_lat.between(lat_lo, lat_hi),
+             User.last_lng.between(lng_lo, lng_hi)),
+        and_(User.last_lat.is_(None),
+             home.latitude.between(lat_lo, lat_hi),
+             home.longitude.between(lng_lo, lng_hi)),
+    ))
+
+
+def _leaderboard_user_within_radius(user, lat, lng, radius):
+    """Check the player's preferred discovery location against the circle."""
+    user_lat, user_lng = user.last_lat, user.last_lng
+    if user_lat is None and user.home_court:
+        user_lat, user_lng = user.home_court.latitude, user.home_court.longitude
+    return bool(
+        user_lat is not None
+        and user_lng is not None
+        and haversine_miles(lat, lng, user_lat, user_lng) <= radius
+    )
 
 
 def _with_title_counts(users):

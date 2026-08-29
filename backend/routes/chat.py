@@ -1023,8 +1023,8 @@ def competition_rooms():
     return jsonify(_competition_rooms_payload(g.current_user.id))
 
 
-def community_room_unread_count(user_id):
-    """Unread total for every room shown in Community, suitable for /me."""
+def community_room_unread_counts(user_id):
+    """Unread room totals split across the Messages and Groups lanes."""
     from backend.models import (
         ClubChatRead, ClubMember, Crew, CrewChatRead, CrewMember, FavoriteCourt,
     )
@@ -1065,19 +1065,29 @@ def community_room_unread_count(user_id):
         crew_ids, user_id,
     ).values())
     game_ids, tournament_ids, league_ids = _competition_room_ids(user_id)
-    competition_unread = sum(_competition_room_unread(
+    game_unread = sum(_competition_room_unread(
         Message.game_id, GameChatRead, GameChatRead.game_id,
         game_ids, user_id,
     ).values())
-    competition_unread += sum(_competition_room_unread(
+    tournament_unread = sum(_competition_room_unread(
         Message.tournament_id, TournamentChatRead,
         TournamentChatRead.tournament_id, tournament_ids, user_id,
     ).values())
-    competition_unread += sum(_competition_room_unread(
+    league_unread = sum(_competition_room_unread(
         Message.league_id, LeagueChatRead, LeagueChatRead.league_id,
         league_ids, user_id,
     ).values())
-    return int(court_unread + club_unread + crew_unread + competition_unread)
+    messages = int(game_unread)
+    groups = int(
+        court_unread + club_unread + crew_unread
+        + tournament_unread + league_unread
+    )
+    return {'messages': messages, 'groups': groups, 'total': messages + groups}
+
+
+def community_room_unread_count(user_id):
+    """Backward-compatible aggregate unread total for every Community room."""
+    return community_room_unread_counts(user_id)['total']
 
 
 @chat_bp.get('/chat')

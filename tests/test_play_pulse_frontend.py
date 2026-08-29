@@ -29,13 +29,19 @@ def test_me_recovers_only_a_live_server_expiring_pulse_and_refreshes_hero():
     assert "renderPlay({ useCachedData: true })" in apply_me
 
 
-def test_remote_hero_leads_with_available_this_hour_without_claiming_presence():
+def test_remote_hero_leads_with_one_play_soon_entry_without_claiming_presence():
     hero = section("function rallyLauncherHtml", "async function renderPlay")
-    assert 'data-goto="play-pulse"' in hero
-    assert "<b>Available this hour</b>" in hero
-    assert "Pick an intended court" in hero
+    assert 'data-goto="play-soon"' in hero
+    assert "<b>Play soon</b>" in hero
+    assert "Now, arriving, or free this hour" in hero
+    assert 'data-goto="play-pulse"' not in hero
+    assert 'data-goto="play-now"' not in hero
+    assert "const immediateAction = here" in hero
+    assert 'data-goto="instant-rally"' in hero
+    assert "Find or start a game" in hero
+    assert ": pulse ? ''" in hero
     assert "activePlayPulseBannerHtml(pulse)" in hero
-    assert "intended court" in hero
+    assert "Nearby players can respond to the court you picked." in hero
 
     ctas = section("function setupEmptyStateCtas", "// ---------- Map / Courts ----------")
     assert "target === 'play-pulse'" in ctas
@@ -46,10 +52,11 @@ def test_court_picker_is_parameterized_and_explains_the_commitment():
     picker = section("async function openPlayNowCourtPicker", "function arrivalRequestIsAmbiguous")
     assert "intent = 'play-now'" in picker
     assert "const pulseIntent = intent === 'play-pulse'" in picker
-    assert "intended destination, not your current location or a check-in" in picker
-    assert "first player who accepts creates an open quick game" in picker
-    assert "one fixed one-hour window" in picker
-    assert "retries never extend it" in picker
+    assert "Choose a court you could reach this hour." in picker
+    assert "this does not check you in" in picker
+    assert "Your current location stays private." in picker
+    assert "server" not in picker.lower()
+    assert "retries never" not in picker
     assert "await declarePlayPulse(selected, modal, confirmButton, errorEl)" in picker
     assert "openPlayNowCourtPicker({ ...options, intent: 'play-pulse' })" in picker
 
@@ -69,7 +76,8 @@ def test_publish_attempt_is_durable_account_and_court_scoped_and_idempotent():
     assert "client_attempt_id: attempt.id" in publish
     assert "button.dataset.playPulseCreating === 'true'" in publish
     assert "playPulseRequestIsAmbiguous(error)" in publish
-    assert "will not create or extend another hour" in publish
+    assert "Couldn’t confirm Free this hour. Try again." in publish
+    assert "Retry safely" not in publish
     assert "normalizeActivePlayPulse(error?.data?.pulse)" in publish
     assert "if (!ambiguous)" in publish
     assert "error.code !== 'client_attempt_id_conflict'" not in publish
@@ -81,7 +89,7 @@ def test_active_pulse_has_directions_details_and_cancellation():
     assert "intended destination, not your current location or a check-in" in details
     assert "first nearby player who accepts creates an open quick game" in details
     assert "Directions" in details
-    assert "Cancel availability" in details
+    assert "End Free this hour" in details
     assert "cancelPlayPulse(pulse" in details
 
     cancel = section("async function cancelPlayPulse", "function playPulseCommitmentCopy")
@@ -93,11 +101,30 @@ def test_active_pulse_has_directions_details_and_cancellation():
     assert "error.code === 'pulse_not_found'" in cancel
 
     banner = section("function activePlayPulseBannerHtml", "async function checkInAndStartRally")
-    assert "Available to play at" in banner
+    assert "Free this hour at" in banner
     assert "intended destination, not a check-in" in banner
     assert "data-play-pulse-details" in banner
     assert "Directions" in banner
     assert "data-play-pulse-cancel" in banner
+
+
+def test_play_pulse_user_copy_consistently_uses_free_this_hour():
+    pulse_ui = section("async function declarePlayPulse", "async function checkInAndStartRally")
+    for old_copy in (
+        "Available to play at",
+        "Available until",
+        "Cancel availability",
+        "One-hour availability",
+        "one-hour availability",
+    ):
+        assert old_copy not in pulse_ui
+    assert "You’re free this hour at" in pulse_ui
+    assert "Free until" in pulse_ui
+    assert "End Free this hour" in pulse_ui
+
+    assert "court room" not in APP.lower()
+    assert "posted to court chat" in APP
+    assert "Posting one live card to court chat" in APP
 
 
 def test_nearby_cards_never_imply_presence_and_require_explicit_confirmation():
@@ -145,7 +172,8 @@ def test_acceptance_attempt_is_durable_pulse_scoped_and_double_tap_safe():
     accept = section("async function acceptPlayPulse", "function openPlayPulseAcceptConfirmation")
     assert "button.dataset.playPulseAccepting === 'true'" in accept
     assert "playPulseRequestIsAmbiguous(error)" in accept
-    assert "will not create a second game" in accept
+    assert "Couldn’t confirm the game. Try again." in accept
+    assert "Retry safely" not in accept
     assert "clearPlayPulseAcceptAttempt(callerSession.userId, pulse.id, attempt.id)" in accept
     assert "openGameScreen(gameId)" in accept
     assert "postPlayPulseAcceptance(pulse, attempt, callerSession)" in accept
@@ -180,4 +208,4 @@ def test_errors_mobile_targets_and_shell_revision_are_explicit():
     assert "grid-template-columns: auto minmax(0, 1fr)" in STYLES
     assert ".play-pulse-nearby-card [data-play-pulse-accept]" in STYLES
     assert "min-width: 0" in STYLES
-    assert "thirdshot-v15-r5" in SW
+    assert "thirdshot-v15-r8" in SW

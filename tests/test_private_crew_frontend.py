@@ -39,9 +39,10 @@ def test_crew_identity_and_version_survive_editing_and_immutable_retry():
 
 
 def test_attached_crew_planner_locks_the_server_owned_roster_and_recurrence():
-    assert 'The accepted Crew roster is locked for this plan' in APP
+    assert 'id="ng-crew-private"' in APP
+    assert '🔒 Private to ${esc(crewName || \'your crew\')}' in APP
+    assert 'id="ng-step-who" aria-hidden="true"' in APP
     assert 'if (!btn || btn.disabled || crewId) return;' in APP
-    assert 'This private game uses the full accepted Crew roster snapshot.' in APP
     assert 'plannedPlayerCount = crewId ? invitePeople.length + 1' in APP
     assert "recurrence: crewId ? 'none'" in APP
     assert "const recurringAllowed = !crewId && !isRanked" in APP
@@ -95,8 +96,14 @@ def test_removed_crew_drafts_are_terminal_and_chat_actions_are_keyboard_accessib
     assert "if (err.code === 'crew_not_found' && crewId)" in APP
     assert "submitButton.textContent = 'Crew unavailable'" in APP
     assert 'This saved plan was cleared.' in APP
-    assert 'role="button" tabindex="0" aria-label="Delete your message"' in APP
-    assert "event.key !== 'Enter' && event.key !== ' '" in APP
+    assert 'type="button" class="chat-message-action"' in APP
+    assert 'class="chat-message-row ${mine ? \'is-mine\' : \'is-theirs\'}"' in APP
+    assert 'aria-label="Delete your message"' in APP
+    assert ".chat-message-action[data-message-action][data-message-id]" in APP
+    assert 'role="button" tabindex="0" aria-label="Delete your message"' not in APP
+    assert "data-del-msg" not in APP
+    assert "data-room-heart" not in APP
+    assert "data-heart-msg" not in APP
 
 
 def test_crew_surfaces_keep_phone_first_layout_language():

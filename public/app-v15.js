@@ -14,15 +14,20 @@
     unreadMessages: 0,
     pendingRequests: 0,
     communityRoomUnread: 0,
+    communityMessageUnread: 0,
+    communityGroupUnread: 0,
     gamesToConfirm: 0,
     lastNotifId: null,
     tab: 'play',
     playSeg: 'games',
     chatSeg: 'chats',
+    peopleMode: 'friends',
     nearbySkill: '',
+    boardPeriod: 'all',
     map: null,
     markers: null,
     courtFilters: {
+      active: false,
       saved: false,
       players: false,
       games: false,
@@ -729,7 +734,7 @@
     game_full: 'That game is already full.',
     rally_no_longer_active: 'That rally ended. Refresh nearby rallies to find the current one.',
     rally_full: 'That rally is fully committed.',
-    arrival_slot_taken: 'Another player is already on the way, so the remote spot is held.',
+    arrival_slot_taken: 'Another player is already arriving, so that travel spot is held.',
     active_arrival_elsewhere: 'You already have a held spot at another rally.',
     arrival_already_active: 'Your spot is already held for this rally.',
     already_at_court: 'You’re already checked in at this court. Joining the rally instead.',
@@ -743,17 +748,17 @@
     active_arrival: 'You already have a spot held while heading to another rally.',
     active_rally: 'You already have a live rally in progress.',
     active_game: 'You already have a game starting during this hour.',
-    pulse_already_active: 'Your one-hour availability is already active.',
-    pulse_conflict: 'Couldn’t confirm that availability window. Retry safely.',
-    pulse_not_found: 'That one-hour availability is no longer active.',
+    pulse_already_active: 'You’re already marked free this hour.',
+    pulse_conflict: 'Couldn’t confirm Free this hour. Try again.',
+    pulse_not_found: 'That Free this hour post is no longer active.',
     pulse_start_window_closed: 'There is not enough time left to start this quick game.',
-    invalid_accept_capability: 'That one-hour availability is no longer active.',
+    invalid_accept_capability: 'That Free this hour post is no longer active.',
     invalid_eta_minutes: 'Choose a 5, 10, or 15 minute arrival time.',
     invalid_client_attempt_id: 'This saved action expired. Close this sheet and try again.',
     client_attempt_id_conflict: 'That saved action conflicts with an earlier request. Close this sheet and try again.',
-    open_call_not_available: 'This game can no longer be posted to the court room.',
+    open_call_not_available: 'This game can no longer be posted to court chat.',
     open_call_not_found: 'There is no active court post for this game.',
-    open_call_conflict: 'Couldn’t confirm the court post. Retry safely.',
+    open_call_conflict: 'Couldn’t confirm the court post. Try again.',
     scheduled_in_past: 'Pick a time in the future.',
     already_friends: 'You are already friends.',
     request_already_sent: 'Request already sent.',
@@ -1256,6 +1261,8 @@
     state.unreadMessages = 0;
     state.pendingRequests = 0;
     state.communityRoomUnread = 0;
+    state.communityMessageUnread = 0;
+    state.communityGroupUnread = 0;
     state.gamesToConfirm = 0;
     state.activeGame = null;
     state.activeArrival = null;
@@ -1440,7 +1447,24 @@
     state.presence = data.presence;
     state.unreadMessages = data.unread_messages || 0;
     if (data.community_room_unread != null) {
-      state.communityRoomUnread = Number(data.community_room_unread) || 0;
+      const roomUnread = Number(data.community_room_unread) || 0;
+      if (data.community_message_unread != null && data.community_group_unread != null) {
+        const messageUnread = Number(data.community_message_unread) || 0;
+        const groupUnread = Number(data.community_group_unread) || 0;
+        if (messageUnread + groupUnread === roomUnread) {
+          state.communityMessageUnread = messageUnread;
+          state.communityGroupUnread = groupUnread;
+        } else {
+          state.communityMessageUnread = 0;
+          state.communityGroupUnread = roomUnread;
+        }
+      } else {
+        // Older servers only expose the aggregate. Keep the global badge exact
+        // and route the unknown room total to Groups until a lane refresh splits it.
+        state.communityMessageUnread = 0;
+        state.communityGroupUnread = roomUnread;
+      }
+      state.communityRoomUnread = roomUnread;
     }
     state.pendingRequests = data.pending_friend_requests || 0;
     state.gamesToConfirm = data.games_to_confirm || 0;
@@ -1513,7 +1537,7 @@
         || previousPlayPulseView !== nextPlayPulseView)
         && state.tab === 'play' && state.playSeg === 'games'
         && !$('#main-screen').classList.contains('hidden')) {
-      // Check-in/out and one-hour availability can change in another tab.
+      // Check-in/out and Free-this-hour state can change in another tab.
       // Reuse cached discovery data while immediately swapping the hero.
       renderPlay({ useCachedData: true });
     }
@@ -1593,9 +1617,9 @@
     if (physicalSpotsLeft > 0 && onWayCount > 0) {
       return {
         icon: '🚗',
-        title: 'Remote spot held',
+        title: 'Travel spot held',
         sub: counts,
-        banner: `🚗 Remote spot held · ${counts}`,
+        banner: `🚗 Travel spot held · ${counts}`,
         readyCount, rosterCount, onWayCount, committedCount, maxPlayers,
         physicalSpotsLeft, spotsLeft,
       };
@@ -1624,6 +1648,14 @@
 
   function renderActiveGameBanner() {
     const el = $('#active-game-banner');
+    // Courts is a location-first workspace. Keeping the global game banner
+    // docked above its results sheet hides the very court decision a player is
+    // trying to make, so active-game context stays on the other primary tabs.
+    if (state.tab === 'courts') {
+      el.className = 'active-game-banner hidden';
+      $('#app').classList.remove('has-banner');
+      return;
+    }
     const trip = normalizeActiveArrival(state.activeArrival);
     if (state.activeArrival && !trip) state.activeArrival = null;
     if (trip) {
@@ -1636,7 +1668,7 @@
             <span class="agb-sub">${esc(arrivalEtaLabel(trip))} · ${esc(rallyCountsText(arrivalRallySummary(trip), { includeOpen: false }))}</span>
           </span>
         </button>
-        <button type="button" class="agb-arrived" id="agb-arrived" aria-label="I’m here at ${esc(trip.courtName)}">I’m here</button>`;
+        <button type="button" class="agb-arrived" id="agb-arrived" aria-label="I’m at ${esc(trip.courtName)}">I’m at the court</button>`;
       el.querySelector('.agb-open').onclick = () => openArrivalDetails(trip);
       el.querySelector('#agb-arrived').onclick = (event) => {
         event.stopPropagation();
@@ -1678,7 +1710,7 @@
         title: `${esc((game.players.find((p) => p.user_id === game.creator_id) || {}).display_name || 'A friend')} invited you to play`,
         sub: game.is_instant
           ? `${esc(court.name || '')} · ${esc(rallyCountsText(rallySummaryFromValue(game)))}`
-          : `${fmtDateTime(game.scheduled_at)} · ${esc(court.name || '')} · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} open`,
+        : `${fmtDateTime(game.scheduled_at)} · ${esc(court.name || '')} · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left`,
       },
       live: {
         icon: '<span class="agb-dot"></span>',
@@ -1722,7 +1754,7 @@
         </span>
         ${game.banner_state === 'invited' ? '' : '<span class="agb-chev">›</span>'}
       </button>
-      ${game.banner_state === 'invited' ? `${inviteCanAct ? `<button type="button" class="agb-join" id="agb-join" aria-label="${esc(inviteActionLabel)} at ${esc(court.name || 'this court')}">${esc(inviteActionLabel)}</button>` : '<span class="agb-unavailable">Remote spot held</span>'}<button type="button" class="agb-dismiss" id="agb-dismiss" aria-label="Decline game invite">✕</button>` : ''}`;
+      ${game.banner_state === 'invited' ? `${inviteCanAct ? `<button type="button" class="agb-join" id="agb-join" aria-label="${esc(inviteActionLabel)} at ${esc(court.name || 'this court')}">${esc(inviteActionLabel)}</button>` : '<span class="agb-unavailable">Travel spot held</span>'}<button type="button" class="agb-dismiss" id="agb-dismiss" aria-label="Decline game invite">✕</button>` : ''}`;
     const joinBtn = el.querySelector('#agb-join');
     if (joinBtn) {
       joinBtn.onclick = async (e) => {
@@ -1806,26 +1838,50 @@
     return true;
   }
 
+  function syncCommunityUnreadLanes(rooms, clubs, competitions, crews) {
+    const unreadTotal = (items) => (items || [])
+      .reduce((total, item) => total + (Number(item.unread) || 0), 0);
+    const competitionItems = competitions.items || [];
+    state.communityMessageUnread = unreadTotal(
+      competitionItems.filter((item) => item.kind === 'game'),
+    );
+    state.communityGroupUnread = unreadTotal(rooms.items)
+      + unreadTotal(clubs.items)
+      + unreadTotal(crews.items)
+      + unreadTotal(competitionItems.filter((item) => (
+        item.kind === 'tournament' || item.kind === 'league'
+      )));
+    state.communityRoomUnread = state.communityMessageUnread + state.communityGroupUnread;
+  }
+
   function renderBadges() {
-    const inboxTotal = state.unreadMessages + state.communityRoomUnread;
-    const total = inboxTotal + state.pendingRequests;
+    const messagesTotal = state.unreadMessages + state.communityMessageUnread;
+    const groupsTotal = state.communityGroupUnread;
+    const total = state.unreadMessages + state.communityRoomUnread + state.pendingRequests;
     const badge = $('#chat-badge');
     badge.textContent = total > 99 ? '99+' : String(total);
     badge.classList.toggle('hidden', total === 0);
 
     const inboxBadge = $('#chat-inbox-badge');
     if (inboxBadge) {
-      inboxBadge.textContent = inboxTotal > 99 ? '99+' : String(inboxTotal);
-      inboxBadge.classList.toggle('hidden', inboxTotal === 0);
-      $('#chat-tab-chats')?.setAttribute('aria-label', inboxTotal
-        ? `Inbox, ${inboxTotal} unread` : 'Inbox');
+      inboxBadge.textContent = messagesTotal > 99 ? '99+' : String(messagesTotal);
+      inboxBadge.classList.toggle('hidden', messagesTotal === 0);
+      $('#chat-tab-chats')?.setAttribute('aria-label', messagesTotal
+        ? `Messages, ${messagesTotal} unread` : 'Messages');
+    }
+    const groupsBadge = $('#chat-groups-badge');
+    if (groupsBadge) {
+      groupsBadge.textContent = groupsTotal > 99 ? '99+' : String(groupsTotal);
+      groupsBadge.classList.toggle('hidden', groupsTotal === 0);
+      $('#chat-tab-nearby')?.setAttribute('aria-label', groupsTotal
+        ? `Groups, ${groupsTotal} unread` : 'Groups');
     }
     const friendsBadge = $('#chat-friends-badge');
     if (friendsBadge) {
       friendsBadge.textContent = state.pendingRequests > 99 ? '99+' : String(state.pendingRequests);
       friendsBadge.classList.toggle('hidden', state.pendingRequests === 0);
       $('#chat-tab-friends')?.setAttribute('aria-label', state.pendingRequests
-        ? `Friends, ${state.pendingRequests} pending request${state.pendingRequests === 1 ? '' : 's'}` : 'Friends');
+        ? `People, ${state.pendingRequests} pending request${state.pendingRequests === 1 ? '' : 's'}` : 'People');
     }
 
     const playBadge = $('#play-badge');
@@ -1869,6 +1925,7 @@
     });
     setupTablistKeyboard($('#play-segments'));
     setupTablistKeyboard($('#chat-segments'));
+    $('#profile-settings')?.addEventListener('click', openSettingsHub);
   }
 
   function switchTab(tab, { preserveOverlayIntent = false } = {}) {
@@ -1965,7 +2022,10 @@
       if (!btn) return;
       const target = btn.dataset.goto;
       dismissAllModals(() => {
-        if (target === 'instant-rally') {
+        if (target === 'play-soon') {
+          if (state.tab !== 'play') switchTab('play');
+          openPlaySoonFlow();
+        } else if (target === 'instant-rally') {
           if (state.tab !== 'play') switchTab('play');
           startInstantRally(btn);
         } else if (target === 'play-now') {
@@ -1985,6 +2045,7 @@
           setCourtSheetSnap('half');
         } else if (target === 'chat-friends') {
           state.chatSeg = 'friends';
+          state.peopleMode = 'friends';
           document.querySelectorAll('#chat-segments button').forEach((b) => {
             const active = b.dataset.seg === 'friends';
             b.classList.toggle('active', active);
@@ -1992,9 +2053,10 @@
           });
           switchTab('chat');
         } else if (target === 'chat-nearby') {
-          state.chatSeg = 'nearby';
+          state.chatSeg = 'friends';
+          state.peopleMode = 'nearby';
           document.querySelectorAll('#chat-segments button').forEach((b) => {
-            const active = b.dataset.seg === 'nearby';
+            const active = b.dataset.seg === 'friends';
             b.classList.toggle('active', active);
             b.setAttribute('aria-selected', String(active));
           });
@@ -2218,11 +2280,30 @@
       : L.layerGroup();
     state.markers.addTo(state.map);
 
-    $('#map-filters').addEventListener('click', async (e) => {
+    // Keep the rendered map decision-light. New shells provide one combined
+    // `active` quick filter; older cached shells are upgraded in place while
+    // their more specific controls remain available in the Filters sheet.
+    const quickFilters = $('#map-filters');
+    const legacyPlayers = quickFilters?.querySelector('[data-court-filter="players"]');
+    if (legacyPlayers && !quickFilters.querySelector('[data-court-filter="active"]')) {
+      legacyPlayers.dataset.courtFilter = 'active';
+      legacyPlayers.textContent = '🟢 Active now';
+    }
+    quickFilters?.querySelector('[data-court-filter="saved"]')?.remove();
+    quickFilters?.querySelector('[data-court-filter="games"]')?.remove();
+
+    quickFilters?.addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-court-filter]');
       if (!btn) return;
       const key = btn.dataset.courtFilter;
+      if (!(key in state.courtFilters)) return;
       state.courtFilters[key] = !state.courtFilters[key];
+      if (key === 'active' && state.courtFilters.active) {
+        // The combined quick choice replaces, rather than stacks with, the
+        // two advanced activity modes.
+        state.courtFilters.players = false;
+        state.courtFilters.games = false;
+      }
       syncCourtFilterControls();
       await refreshCourtResults();
       if (!(state.courtsInView || []).length) {
@@ -2239,7 +2320,7 @@
         ));
       }
     });
-    $('#court-more-filters').addEventListener('click', openCourtFilterSheet);
+    $('#court-more-filters')?.addEventListener('click', openCourtFilterSheet);
 
     state.map.on('moveend', () => {
       const c = state.map.getCenter();
@@ -2279,7 +2360,7 @@
 
     // NB: don't pass the click event through — locateMe's arg is the `silent` flag.
     $('#locate-btn').addEventListener('click', () => locateMe(false));
-    $('#bell-btn').addEventListener('click', openActivity);
+    $('#bell-btn')?.addEventListener('click', openActivity);
     $('#looking-banner').addEventListener('click', (event) => {
       const banner = event.currentTarget;
       const rally = rallySummaryFromDataset(banner);
@@ -2287,8 +2368,13 @@
         openReadyRally(rally, banner);
         return;
       }
-      state.chatSeg = 'nearby';
-      document.querySelectorAll('#chat-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === 'nearby'));
+      state.chatSeg = 'friends';
+      state.peopleMode = 'nearby';
+      document.querySelectorAll('#chat-segments button').forEach((b) => {
+        const active = b.dataset.seg === 'friends';
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
       switchTab('chat');
     });
     $('#court-view-switch').addEventListener('click', (e) => {
@@ -2301,7 +2387,7 @@
       setCourtSheetSnap(state.courtSheetSnap === 'peek' ? 'half'
         : state.courtSheetSnap === 'half' ? 'full' : 'peek');
     });
-    $('#court-sheet-expand').addEventListener('click', () => {
+    $('#court-sheet-expand')?.addEventListener('click', () => {
       setCourtSheetSnap(state.courtSheetSnap === 'full' ? 'half' : 'full');
     });
     $('#court-sort').addEventListener('change', (e) => {
@@ -2499,6 +2585,7 @@
   }
 
   const COURT_AMENITY_FILTERS = ['indoor', 'lighted', 'nets', 'restrooms', 'water'];
+  const COURT_DETAIL_FILTERS = ['saved', 'players', 'games', ...COURT_AMENITY_FILTERS];
 
   function activeCourtFilterCount() {
     return Object.values(state.courtFilters).filter(Boolean).length;
@@ -2510,13 +2597,13 @@
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-pressed', String(active));
     });
-    const amenityCount = COURT_AMENITY_FILTERS.filter((key) => state.courtFilters[key]).length;
+    const detailCount = COURT_DETAIL_FILTERS.filter((key) => state.courtFilters[key]).length;
     const more = $('#court-more-filters');
     const badge = $('#court-filter-count');
-    if (more) more.classList.toggle('active', amenityCount > 0);
+    if (more) more.classList.toggle('active', detailCount > 0);
     if (badge) {
-      badge.textContent = String(amenityCount);
-      badge.classList.toggle('hidden', amenityCount === 0);
+      badge.textContent = String(detailCount);
+      badge.classList.toggle('hidden', detailCount === 0);
     }
   }
 
@@ -2529,6 +2616,8 @@
 
   function applyCourtFilters(items) {
     return (items || []).filter((court) => {
+      if (state.courtFilters.active
+          && !(court.players_here > 0 || court.upcoming_games > 0)) return false;
       if (state.courtFilters.saved && !(state.favIds && state.favIds.has(court.id))) return false;
       if (state.courtFilters.players && !(court.players_here > 0)) return false;
       if (state.courtFilters.games && !(court.upcoming_games > 0)) return false;
@@ -2563,7 +2652,12 @@
 
   function openCourtFilterSheet() {
     const draft = { ...state.courtFilters };
-    const options = [
+    const activityOptions = [
+      ['saved', '⭐', 'Saved courts'],
+      ['players', '🟢', 'Players here'],
+      ['games', '🏓', 'Open games'],
+    ];
+    const amenityOptions = [
       ['indoor', '🏠', 'Indoor'],
       ['lighted', '💡', 'Lighted'],
       ['nets', '🥅', 'Nets provided'],
@@ -2572,10 +2666,17 @@
     ];
     const modal = openModal(`
       ${modalHead('Filter courts')}
-      <p class="row-sub" style="margin:-4px 0 14px">Choose everything you need. Filters work together, including while you search.</p>
+      <p class="row-sub" style="margin:-4px 0 14px">Choose only what matters for this search.</p>
+      <div class="section-label" style="margin-top:0">Activity</div>
+      <div class="court-filter-grid">
+        ${activityOptions.map(([key, icon, label]) => `
+          <button type="button" class="court-filter-option ${draft[key] ? 'active' : ''}" data-filter-option="${key}" aria-pressed="${draft[key]}">
+            <span style="font-size:18px;margin-right:5px">${icon}</span>${label}
+          </button>`).join('')}
+      </div>
       <div class="section-label" style="margin-top:0">Amenities</div>
       <div class="court-filter-grid">
-        ${options.map(([key, icon, label]) => `
+        ${amenityOptions.map(([key, icon, label]) => `
           <button type="button" class="court-filter-option ${draft[key] ? 'active' : ''}" data-filter-option="${key}" aria-pressed="${draft[key]}">
             <span style="font-size:18px;margin-right:5px">${icon}</span>${label}
           </button>`).join('')}
@@ -2585,7 +2686,7 @@
         <button type="button" class="btn btn-primary" id="court-filter-apply">Show matches</button>
       </div>
     `, { label: 'Court filters' });
-    $('#court-more-filters').setAttribute('aria-expanded', 'true');
+    $('#court-more-filters')?.setAttribute('aria-expanded', 'true');
     modal._cleanupFns.push(() => $('#court-more-filters')?.setAttribute('aria-expanded', 'false'));
     const syncDraft = () => {
       modal.querySelectorAll('[data-filter-option]').forEach((btn) => {
@@ -2594,21 +2695,26 @@
         btn.setAttribute('aria-pressed', String(active));
       });
     };
-    modal.querySelector('.court-filter-grid').addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-filter-option]');
-      if (!btn) return;
-      draft[btn.dataset.filterOption] = !draft[btn.dataset.filterOption];
-      syncDraft();
+    modal.querySelectorAll('.court-filter-grid').forEach((grid) => {
+      grid.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-filter-option]');
+        if (!btn) return;
+        draft[btn.dataset.filterOption] = !draft[btn.dataset.filterOption];
+        if (['players', 'games'].includes(btn.dataset.filterOption)
+            && draft[btn.dataset.filterOption]) draft.active = false;
+        syncDraft();
+      });
     });
     modal.querySelector('#court-filter-clear').addEventListener('click', () => {
       Object.keys(draft).forEach((key) => { draft[key] = false; });
       syncDraft();
     });
-    modal.querySelector('#court-filter-apply').addEventListener('click', () => {
+    modal.querySelector('#court-filter-apply').addEventListener('click', async () => {
       state.courtFilters = draft;
       syncCourtFilterControls();
       closeModal(modal);
-      refreshCourtResults();
+      await refreshCourtResults();
+      if (state.courtFilters.saved && state.courtsInView.length) fitSearchResults();
     });
   }
 
@@ -2918,14 +3024,11 @@
     // reports more commitments than capacity (for example, 5/4). Open counts
     // are clamped separately; rewriting the denominator would hide the fault.
     const max = Math.max(1, Number(rally?.maxPlayers) || 4);
-    const roster = Math.max(0, Number(rally?.rosterCount) || ready);
     const onWay = Math.max(0, Number(rally?.onWayCount) || 0);
-    const parts = roster > ready
-      ? [`${ready} physically ready`, `${roster > max ? `${roster}/${max}` : roster} joined`, `${onWay} on the way`]
-      : [`${ready}/${max} physically ready`, `${onWay} on the way`];
+    const parts = [`${ready}/${max} at the court`, `${onWay} arriving`];
     if (includeOpen) {
       const spots = Math.max(0, Number(rally?.spotsLeft) || 0);
-      parts.push(`${spots} spot${spots === 1 ? '' : 's'} open`);
+      parts.push(`${spots} spot${spots === 1 ? '' : 's'} left`);
     }
     return parts.join(' · ');
   }
@@ -2938,7 +3041,7 @@
   }
 
   function arrivalReservationCopy(arrival) {
-    return `A spot is held until ${fmtTimeShort(arrival.expiresAt)}, as long as the rally stays active. Check in when you arrive.`;
+    return `We’ll hold one spot until ${fmtTimeShort(arrival.expiresAt)}. Check in when you arrive.`;
   }
 
   function rallyCourtForDirections(rally) {
@@ -2999,24 +3102,24 @@
   }
 
   function rallyActionState(rally) {
-    if (!rally) return { enabled: false, label: 'Rally unavailable', kind: 'committed' };
+    if (!rally) return { enabled: false, label: 'Game unavailable', kind: 'committed' };
     const ownArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
     if (isCheckedInAtCourt(rally.courtId)) {
       return (rally.spotsLeft > 0 || ownArrival)
-        ? { enabled: true, label: 'Join rally', kind: 'join' }
-        : { enabled: true, label: 'Find next rally', kind: 'next' };
+        ? { enabled: true, label: 'Join this game', kind: 'join' }
+        : { enabled: true, label: 'Find another game', kind: 'next' };
     }
     if (ownArrival) return { enabled: true, label: 'View held spot', kind: 'held' };
     if (rally.onWayCount > 0) {
-      return { enabled: false, label: 'Remote spot held', kind: 'committed' };
+      return { enabled: false, label: 'Travel spot held', kind: 'committed' };
     }
     if (rally.spotsLeft <= 0) {
-      return { enabled: false, label: 'Rally committed', kind: 'committed' };
+      return { enabled: false, label: 'Game full', kind: 'committed' };
     }
     if (!rally.arrivalAvailable) {
-      return { enabled: false, label: 'Rally wrapping up', kind: 'wrapping' };
+      return { enabled: false, label: 'Game wrapping up', kind: 'wrapping' };
     }
-    return { enabled: true, label: 'I’m on my way', kind: 'arrival' };
+    return { enabled: true, label: 'Arrive in 5–15 min', kind: 'arrival' };
   }
 
   function playerRallySummary(player) {
@@ -3167,19 +3270,19 @@
         const checkedIn = isCheckedInAtCourt(rally.courtId);
         const ownArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
         const action = checkedIn
-          ? (rally.spotsLeft > 0 || ownArrival ? 'Join rally.' : 'Find the next rally at this court.')
+          ? (rally.spotsLeft > 0 || ownArrival ? 'Join this game.' : 'Find another game at this court.')
           : ownArrival ? 'View your held spot.'
-            : !rally.arrivalAvailable ? 'Remote holds are closed because this rally is wrapping up.'
-              : rally.spotsLeft > 0 && rally.onWayCount === 0 ? 'Say you are on your way.'
-                : 'The remote spot is already held.';
+            : !rally.arrivalAvailable ? 'Travel spots are closed because this rally is wrapping up.'
+              : rally.spotsLeft > 0 && rally.onWayCount === 0 ? 'Choose a 5–15 minute arrival.'
+                : 'The travel spot is already held.';
         el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> <span><b>${esc(rally.courtName)}</b> · ${fill}</span><span class="chev">›</span>`;
         el.setAttribute('aria-label', `${fill} at ${rally.courtName}. ${action}`);
       } else if (count) {
         const firstName = players[0] && String(players[0].display_name || '').split(' ')[0];
         const who = count === 1 && firstName
           ? `${esc(firstName)} wants` : `${count} player${count === 1 ? '' : 's'} near you want`;
-        el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> ${who} to play now <span class="chev">›</span>`;
-        el.setAttribute('aria-label', `${count} nearby player${count === 1 ? '' : 's'} want to play now. View nearby players.`);
+        el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> ${who} to play soon <span class="chev">›</span>`;
+        el.setAttribute('aria-label', `${count} nearby player${count === 1 ? '' : 's'} want to play soon. View nearby players.`);
       } else {
         const firstName = String(pulse.user?.display_name || 'A nearby player').split(/\s+/)[0];
         el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> <span><b>${esc(firstName)}</b> can play at ${esc(pulse.courtName)} this hour</span><span class="chev">›</span>`;
@@ -3324,12 +3427,17 @@
     const title = document.querySelector('#court-list .sheet-title');
     const context = $('#court-list-context');
     const count = $('#court-result-count');
+    const sort = $('#court-sort');
+    const sortLabel = document.querySelector('label[for="court-sort"]');
     const n = courts.length;
     if (count) count.textContent = n ? String(n) : '0';
+    sort?.classList.toggle('hidden', n === 0);
+    sortLabel?.classList.toggle('hidden', n === 0);
     if (title) title.textContent = savedOnly ? 'Saved courts'
       : searching ? 'Search results' : n ? `${n} court${n === 1 ? '' : 's'} nearby` : 'No matching courts';
     if (context) {
       const active = [];
+      if (state.courtFilters.active) active.push('active now');
       if (state.courtFilters.saved) active.push('saved');
       if (state.courtFilters.players) active.push('players here');
       if (state.courtFilters.games) active.push('open games');
@@ -3354,12 +3462,46 @@
     }
   }
 
+  function splitExactCourtNameMatches(courts, q) {
+    const queryName = String(q || '').trim().toLocaleLowerCase();
+    const exact = [];
+    const other = [];
+    (courts || []).forEach((court) => {
+      const courtName = String(court.name || '').trim().toLocaleLowerCase();
+      // A typed court-name prefix is a stronger signal than a geocoder place
+      // with a similar name (for example, “Los Cab” versus Los Angeles).
+      const bucket = queryName && (courtName === queryName || courtName.startsWith(queryName))
+        ? exact : other;
+      bucket.push(court);
+    });
+    return { exact, other };
+  }
+
   function renderSearchSuggest(courts, places, q) {
     const el = $('#search-suggest');
     if (!el) return;
     // Only surface suggestions while this query is still what's typed.
     if (!q || state.searchQ !== q) { hideSearchSuggest(); return; }
     let html = '';
+    const { exact, other } = splitExactCourtNameMatches(courts, q);
+    const courtRowsHtml = (rows) => rows.map((c) => `
+      <button class="sug-row" role="option" aria-selected="false" data-sug-court="${c.id}">
+        <span class="sug-ico">🏓</span>
+        <span class="sug-main">
+          <span class="sug-title" style="display:block">${esc(c.name)}</span>
+          <span class="sug-sub" style="display:block">${[
+            esc(c.city || ''),
+            c.distance_miles != null ? `${c.distance_miles} mi` : '',
+            `${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`,
+            c.rating_avg ? `⭐ ${c.rating_avg}` : '',
+          ].filter(Boolean).join(' · ')}</span>
+        </span>
+        <span class="chev">›</span>
+      </button>`).join('');
+    if (exact.length) {
+      html += '<div class="sug-label">🏓 Exact court</div>';
+      html += courtRowsHtml(exact.slice(0, 2));
+    }
     if (places.length) {
       html += '<div class="sug-label">📍 Jump to area</div>';
       html += places.slice(0, 4).map((p, i) => `
@@ -3372,25 +3514,15 @@
           <span class="chev">›</span>
         </button>`).join('');
     }
-    if (courts.length) {
+    const remainingSlots = Math.max(0, 5 - Math.min(2, exact.length));
+    const visibleOther = other.slice(0, remainingSlots);
+    if (visibleOther.length) {
       html += '<div class="sug-label">🏓 Courts</div>';
-      html += courts.slice(0, 5).map((c) => `
-        <button class="sug-row" role="option" aria-selected="false" data-sug-court="${c.id}">
-          <span class="sug-ico">🏓</span>
-          <span class="sug-main">
-            <span class="sug-title" style="display:block">${esc(c.name)}</span>
-            <span class="sug-sub" style="display:block">${[
-              esc(c.city || ''),
-              c.distance_miles != null ? `${c.distance_miles} mi` : '',
-              `${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`,
-              c.rating_avg ? `⭐ ${c.rating_avg}` : '',
-            ].filter(Boolean).join(' · ')}</span>
-          </span>
-          <span class="chev">›</span>
-        </button>`).join('');
-      if (courts.length > 5) {
-        html += `<button class="sug-row sug-all" role="option" aria-selected="false" data-sug-all>See all ${courts.length} courts</button>`;
-      }
+      html += courtRowsHtml(visibleOther);
+    }
+    const shownCourtCount = Math.min(2, exact.length) + visibleOther.length;
+    if (courts.length > shownCourtCount) {
+      html += `<button class="sug-row sug-all" role="option" aria-selected="false" data-sug-all>See all ${courts.length} courts</button>`;
     }
     if (!html) {
       html = `<div class="sug-empty">🔎 Nothing matches “${esc(q)}”.<br>Try a court name or a city.</div>`;
@@ -3460,7 +3592,9 @@
     const markerLabel = `${court.name}. ${busy ? `${court.players_here} playing now` : `${court.num_courts} court${court.num_courts === 1 ? '' : 's'}`}${court.upcoming_games ? `. ${court.upcoming_games} open game${court.upcoming_games === 1 ? '' : 's'}` : ''}`;
     return L.divIcon({
       className: '',
-      html: `<div class="court-marker ${busy ? 'busy' : ''} ${fav ? 'fav' : ''} ${selected ? 'selected' : ''}" role="img" aria-label="${esc(markerLabel)}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : court.num_courts}${gameBadge}${favBadge}${condBadge}</div>`,
+      // Clusters keep their numeric venue count; a single location uses a
+      // paddle, so the same green number never means two different things.
+      html: `<div class="court-marker ${busy ? 'busy' : ''} ${fav ? 'fav' : ''} ${selected ? 'selected' : ''}" role="img" aria-label="${esc(markerLabel)}" style="width:${size}px;height:${size}px">${busy ? court.players_here + '👤' : '🏓'}${gameBadge}${favBadge}${condBadge}</div>`,
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
     });
@@ -3507,6 +3641,7 @@
     }
     const preview = $('#court-preview');
     if (preview) {
+      const checkedInHere = isCheckedInAtCourt(court.id);
       const live = court.players_here
         ? `${court.players_here} playing now`
         : court.upcoming_games ? `${court.upcoming_games} open game${court.upcoming_games === 1 ? '' : 's'}` : 'Quiet right now';
@@ -3520,14 +3655,14 @@
         </div>
         <div class="court-preview-actions">
           <button type="button" class="btn btn-secondary" data-preview-detail>Details</button>
-          <button type="button" class="btn btn-primary" data-preview-play>Play here</button>
+          <button type="button" class="btn btn-primary" data-preview-play>${checkedInHere ? 'Find a game now' : 'I’m at this court'}</button>
           <a class="btn btn-secondary" data-preview-directions href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center">Directions</a>
         </div>`;
       preview.classList.remove('hidden');
       preview.querySelector('[data-preview-detail]').addEventListener('click', () => openCourtDetail(court.id));
       preview.querySelector('[data-preview-play]').addEventListener('click', (event) => {
-        if (isCheckedInAtCourt(court.id)) startInstantRally(event.currentTarget);
-        else openPlayNowCourtPicker({ court: { id: court.id, name: court.name, city: court.city } });
+        if (checkedInHere) startInstantRally(event.currentTarget);
+        else openCheckInSheet(court);
       });
     }
     document.querySelectorAll('#court-list-items [data-court]').forEach((row) => {
@@ -3686,9 +3821,10 @@
 
   function courtRowHtml(c) {
     const cond = c.condition && COURT_CONDITION_LABELS[c.condition];
+    const quietNow = !(c.players_here > 0) && !(c.upcoming_games > 0);
     const reason = state.listSort === 'active'
       ? (c.players_here ? `${c.players_here} playing now`
-        : c.upcoming_games ? `${c.upcoming_games} game${c.upcoming_games === 1 ? '' : 's'} coming up` : 'Ready when you are')
+        : c.upcoming_games ? `${c.upcoming_games} open game${c.upcoming_games === 1 ? '' : 's'}` : 'Quiet now')
       : state.listSort === 'rating'
         ? (c.rating_avg ? `Rated ${c.rating_avg} by ${c.rating_count} player${c.rating_count === 1 ? '' : 's'}` : 'Not rated yet')
         : state.listSort === 'courts'
@@ -3701,21 +3837,54 @@
     if (c.nets_provided) tags.push('🥅 Nets');
     if (c.has_restrooms) tags.push('🚻 Restrooms');
     if (c.has_water) tags.push('🚰 Water');
+    const liveMetrics = [];
+    if (c.players_here > 0) liveMetrics.push(
+      `<span class="court-card-metric live"><b>${c.players_here}</b><span>here now</span></span>`,
+    );
+    if (c.upcoming_games > 0) liveMetrics.push(
+      `<span class="court-card-metric live"><b>${c.upcoming_games}</b><span>open game${c.upcoming_games === 1 ? '' : 's'}</span></span>`,
+    );
+    if (c.rating_count > 0 && c.rating_avg) liveMetrics.push(
+      `<span class="court-card-metric"><b>⭐ ${c.rating_avg}</b><span>${c.rating_count} rating${c.rating_count === 1 ? '' : 's'}</span></span>`,
+    );
+    const activityHtml = quietNow
+      ? `<span class="court-card-quiet">Quiet now${c.rating_count > 0 && c.rating_avg ? ` · ⭐ ${c.rating_avg}` : ''}</span>`
+      : `<span class="court-card-metrics">${liveMetrics.join('')}</span>`;
+    const reasonHtml = quietNow && state.listSort === 'active'
+      ? '' : `<span class="court-card-reason">${reason}</span>`;
+    const accessibleActivity = quietNow ? 'Quiet now' : [
+      c.players_here > 0 ? `${c.players_here} here now` : '',
+      c.upcoming_games > 0
+        ? `${c.upcoming_games} open game${c.upcoming_games === 1 ? '' : 's'}` : '',
+    ].filter(Boolean).join(', ');
+    const accessibleAmenities = [
+      c.indoor ? 'Indoor' : 'Outdoor',
+      c.lighted ? 'Lights' : '',
+      c.nets_provided ? 'Nets provided' : '',
+      c.has_restrooms ? 'Restrooms' : '',
+      c.has_water ? 'Water' : '',
+    ].filter(Boolean).join(', ');
+    const accessibleSummary = [
+      `View ${c.name}`,
+      c.distance_miles != null ? `${c.distance_miles} miles away` : c.city,
+      accessibleActivity,
+      cond ? cond[1] : '',
+      `${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`,
+      c.rating_count > 0 && c.rating_avg
+        ? `${c.rating_avg} stars from ${c.rating_count} rating${c.rating_count === 1 ? '' : 's'}` : '',
+      accessibleAmenities,
+    ].filter(Boolean).join('. ');
     return `
-      <button type="button" class="court-decision-card ${state.selectedCourtId === c.id ? 'selected' : ''}" data-court="${c.id}" aria-label="Select ${esc(c.name)}">
+      <button type="button" class="court-decision-card ${quietNow ? 'quiet' : ''} ${state.selectedCourtId === c.id ? 'selected' : ''}" data-court="${c.id}" aria-label="${esc(accessibleSummary)}">
         <span class="court-card-head">
           <span class="court-card-name">${esc(c.name)}${cond ? ` <span class="tag ${c.condition === 'good' ? 'live' : 'warn'}" style="margin:0 0 0 5px;font-size:10px;padding:2px 7px">${cond[0]} ${esc(cond[1].split(' — ')[0].split(' /')[0])}</span>` : ''}</span>
           <span class="court-card-distance">${c.distance_miles != null ? `${c.distance_miles} mi` : esc(c.city || '')}</span>
         </span>
-        <span class="court-card-reason">${reason}</span>
-        <span class="court-card-metrics">
-          <span class="court-card-metric"><b>${c.players_here || 0}</b><span>here now</span></span>
-          <span class="court-card-metric"><b>${c.upcoming_games || 0}</b><span>open games</span></span>
-          <span class="court-card-metric"><b>${c.rating_avg ? `⭐ ${c.rating_avg}` : '—'}</b><span>${c.rating_count || 0} ratings</span></span>
-        </span>
+        ${reasonHtml}
+        ${activityHtml}
         <span class="court-card-tags">
           <span class="tag">${c.num_courts} court${c.num_courts === 1 ? '' : 's'}</span>
-          ${tags.slice(0, 4).map((tag) => `<span class="tag">${tag}</span>`).join('')}
+          ${tags.slice(0, quietNow ? 2 : 4).map((tag) => `<span class="tag">${tag}</span>`).join('')}
         </span>
       </button>
     `;
@@ -3783,43 +3952,62 @@
     const recoveryBeforePlaces = !courts.length && places.length && hasFilters;
     syncCourtSheetSummary(courts, { savedOnly, searching });
 
+    const searchMatches = searching
+      ? splitExactCourtNameMatches(courts, state.searchQ)
+      : { exact: [], other: courts };
+    const displayCourts = [...searchMatches.exact, ...searchMatches.other];
+    const visibleLimit = state.courtSheetSnap === 'peek' ? 2 : state.courtListLimit;
+    const visibleCourts = displayCourts.slice(0, visibleLimit);
+    const exactIds = new Set(searchMatches.exact.map((court) => court.id));
+    const visibleExact = visibleCourts.filter((court) => exactIds.has(court.id));
+    const visibleOther = visibleCourts.filter((court) => !exactIds.has(court.id));
+    const placesHtml = places.map((p, i) => `
+      <button type="button" class="card row" data-place="${i}" style="cursor:pointer;width:100%;text-align:left;color:var(--ink)">
+        <span style="font-size:18px">📍</span>
+        <div class="row-main">
+          <div class="row-title">${esc(p.label)}</div>
+          <div class="row-sub">${esc((p.detail || '').split(',').slice(1, 4).join(',').trim())}</div>
+        </div>
+        <span class="chev">›</span>
+      </button>`).join('');
+
     // Filter recovery is the primary answer; related place jumps remain just
     // below it instead of pushing the action behind the active-game banner.
     if (recoveryBeforePlaces) html += emptyResultHtml();
+    if (visibleExact.length) {
+      html += '<div class="section-label" style="margin-top:4px">🏓 Exact court</div>';
+      html += visibleExact.map(courtRowHtml).join('');
+    }
     if (places.length) {
       html += '<div class="section-label" style="margin-top:4px">📍 Jump to area</div>';
-      html += places.map((p, i) => `
-        <button type="button" class="card row" data-place="${i}" style="cursor:pointer;width:100%;text-align:left;color:var(--ink)">
-          <span style="font-size:18px">📍</span>
-          <div class="row-main">
-            <div class="row-title">${esc(p.label)}</div>
-            <div class="row-sub">${esc((p.detail || '').split(',').slice(1, 4).join(',').trim())}</div>
-          </div>
-          <span class="chev">›</span>
-        </button>`).join('');
-      html += '<div class="section-label">Courts</div>';
+      html += placesHtml;
     }
 
     if (courts.length) {
-      const visibleLimit = state.courtSheetSnap === 'peek' ? 8 : state.courtListLimit;
-      const visibleCourts = courts.slice(0, visibleLimit);
-      html += visibleCourts.map(courtRowHtml).join('');
-      if (visibleCourts.length < courts.length) {
-        const remaining = courts.length - visibleCourts.length;
+      if (visibleOther.length) {
+        if (places.length || visibleExact.length) {
+          html += `<div class="section-label">${visibleExact.length ? 'Other courts' : 'Courts'}</div>`;
+        }
+        html += visibleOther.map(courtRowHtml).join('');
+      }
+      if (visibleCourts.length < displayCourts.length) {
+        const remaining = displayCourts.length - visibleCourts.length;
         const label = state.courtSheetSnap === 'peek'
-          ? `Browse all ${courts.length} courts`
+          ? `Browse all ${displayCourts.length} courts`
           : `Show ${Math.min(20, remaining)} more · ${remaining} remaining`;
         html += `<button type="button" class="btn btn-primary btn-block" id="court-show-more" style="margin:2px 0 10px">${label}</button>`;
       }
     } else if (!recoveryBeforePlaces) html += emptyResultHtml();
-    html += `<button class="btn btn-secondary btn-block" id="list-add-court" style="margin-top:10px">➕ Missing a court? Add it</button>`;
+    if (state.courtSheetSnap !== 'peek') {
+      html += '<button class="btn btn-secondary btn-block" id="list-add-court" style="margin-top:10px">➕ Missing a court? Add it</button>';
+    }
 
     el.innerHTML = html;
-    el.querySelector('#list-add-court').addEventListener('click', openAddCourtSheet);
+    el.querySelector('#list-add-court')?.addEventListener('click', openAddCourtSheet);
     el.querySelector('#court-clear-results')?.addEventListener('click', clearCourtFilters);
     el.querySelector('#court-show-more')?.addEventListener('click', () => {
       if (state.courtSheetSnap === 'peek') {
-        const firstNewIndex = 8;
+        const firstNewIndex = 2;
         setCourtSheetSnap('half');
         el.querySelectorAll('[data-court]')[firstNewIndex]?.focus({ preventScroll: true });
         return;
@@ -3833,10 +4021,7 @@
     });
     const byId = new Map(courts.map((court) => [court.id, court]));
     el.querySelectorAll('[data-court]').forEach((row) => {
-      row.addEventListener('click', () => selectCourtOnMap(
-        byId.get(Number(row.dataset.court)),
-        { preserveList: state.courtSheetSnap !== 'peek' },
-      ));
+      row.addEventListener('click', () => openCourtDetail(Number(row.dataset.court)));
     });
     el.querySelectorAll('[data-place]').forEach((row) => {
       const p = places[Number(row.dataset.place)];
@@ -4161,7 +4346,8 @@
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop'
       + (opts.chat ? ' chat-modal' : '')
-      + (opts.court ? ' court-modal' : '');
+      + (opts.court ? ' court-modal' : '')
+      + (opts.page ? ' page-modal' : '');
     backdrop.innerHTML = `<div class="modal">${html}</div>`;
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop || (e.target.closest('.modal-close') && e.target.closest('.modal-backdrop') === backdrop)) {
@@ -5526,7 +5712,7 @@
     for (let i = 1; i <= 5; i++) {
       const filled = i <= rating;
       out += interactive
-        ? `<button type="button" class="star-btn ${filled ? 'on' : ''}" data-star="${i}">★</button>`
+        ? `<button type="button" class="star-btn ${filled ? 'on' : ''}" data-star="${i}" aria-label="${i} star${i === 1 ? '' : 's'}" aria-pressed="${filled}">★</button>`
         : `<span class="star ${filled ? 'on' : ''}">★</span>`;
     }
     return out;
@@ -5925,6 +6111,10 @@
     const mapsUrl = /iPhone|iPad|Macintosh/.test(navigator.userAgent)
       ? `https://maps.apple.com/?daddr=${encodeURIComponent(addrForMaps || `${court.latitude},${court.longitude}`)}&ll=${court.latitude},${court.longitude}`
       : `https://www.google.com/maps/dir/?api=1&destination=${court.latitude},${court.longitude}`;
+    const courtAddressDisplay = [court.address, court.city].filter(Boolean).join(', ')
+      || (court.latitude != null ? `${court.latitude.toFixed(5)}, ${court.longitude.toFixed(5)}` : '');
+    const courtAddressText = [court.address, court.city, court.state, court.zip_code]
+      .filter(Boolean).join(', ') || courtAddressDisplay;
 
     const visiblePlayersHere = Array.isArray(court.players_here) ? court.players_here : [];
     const nHere = Math.max(visiblePlayersHere.length, Number(court.players_here_count) || 0);
@@ -5936,10 +6126,8 @@
           else if (p.is_friend) badges.push('<span class="tag" style="margin:0 0 0 6px">🤝 Friend</span>');
           if (p.looking_for_game) badges.push('<span class="tag live" style="margin:0 0 0 6px">Wants to play</span>');
           const record = (p.ranked_wins + p.ranked_losses) > 0 ? ` · ${p.ranked_wins}W–${p.ranked_losses}L` : '';
-          const actions = p.is_me ? '' : `
-            <button class="btn btn-sm" data-challenge="${p.id}" title="Challenge to a ranked match" style="background:var(--violet-100);color:var(--violet-700)">⚔️</button>
-            <button class="btn btn-secondary btn-sm" data-msg-user="${p.id}" title="Message" aria-label="Message ${esc(p.display_name)}">💬</button>
-            ${!p.is_friend ? `<button class="btn btn-primary btn-sm" data-add-friend-inline="${p.id}" title="Add friend">＋</button>` : ''}`;
+          const actions = p.is_me ? ''
+            : `<button class="btn btn-secondary btn-sm" data-msg-user="${p.id}" aria-label="Message ${esc(p.display_name)}">Message</button>`;
           return `
           <div class="card row" style="padding:11px">
             <div data-view-user="${p.id}" style="cursor:pointer">${avatarHtml(p)}</div>
@@ -5955,11 +6143,12 @@
         ? `<div class="empty-state" style="padding:14px">${nHere} player${nHere === 1 ? ' is' : 's are'} checked in. Their profiles aren’t shared here.</div>`
         : '<div class="empty-state" style="padding:14px">No one checked in right now — be the first!</div>';
 
+    const allCourtGames = Array.isArray(court.games) ? court.games : [];
     let gamesHtml = '';
     // Group by day (backend sends them sorted by scheduled_at).
     const gamesByDay = [];
-    if (court.games.length) {
-      for (const g of court.games) {
+    if (allCourtGames.length) {
+      for (const g of allCourtGames) {
         const label = upcomingDayLabel(g.scheduled_at);
         if (!gamesByDay.length || gamesByDay[gamesByDay.length - 1].label !== label) {
           gamesByDay.push({ label, games: [] });
@@ -5974,7 +6163,7 @@
       }
       gamesHtml += '<div id="cd-games-list"></div>';
     } else {
-      gamesHtml = '<div class="empty-state" style="padding:14px">No upcoming games here yet.<br><button class="btn btn-secondary btn-sm" id="cd-schedule-empty" style="margin-top:8px">📅 Schedule one</button></div>';
+      gamesHtml = '<div class="empty-state" style="padding:14px">No games scheduled yet.</div>';
     }
 
     const checkedIn = court.is_checked_in;
@@ -5987,28 +6176,36 @@
     if (court.website) linkParts.push(`<a href="${esc(court.website)}" target="_blank" rel="noopener">🌐 Website</a>`);
     if (court.phone) linkParts.push(`<a href="tel:${esc(court.phone)}">📞 ${esc(court.phone)}</a>`);
 
-    // At-a-glance strip: each cell jumps to its section further down the sheet.
-    const distMi = state.userLoc && court.latitude != null
-      ? milesBetween(state.userLoc, [court.latitude, court.longitude]) : null;
-    const nGames = court.games.length;
-    const statCells = [
-      {
-        v: court.rating_avg ? `⭐ ${court.rating_avg}` : '☆ —',
-        l: court.rating_avg ? `${court.rating_count} rating${court.rating_count === 1 ? '' : 's'}` : 'rate it first',
-        to: 'cd-sec-reviews',
-      },
-      { v: String(nHere), l: 'playing now', to: 'cd-sec-players', hot: nHere > 0 },
-      { v: String(nGames), l: `game${nGames === 1 ? '' : 's'} coming up`, to: 'cd-sec-games', hot: nGames > 0 },
-    ];
-    if (distMi != null) {
-      statCells.push({ v: distMi < 10 ? distMi.toFixed(1) : String(Math.round(distMi)), l: 'miles away' });
-    }
-    const statsHtml = `
-      <div class="cd-stats" style="grid-template-columns:repeat(${statCells.length},1fr)">
-        ${statCells.map((s) => `
-          <button class="cd-stat${s.hot ? ' hot' : ''}"${s.to ? ` data-scroll-to="${s.to}"` : ' disabled style="cursor:default"'}>
-            <span class="cd-stat-v">${s.v}</span><span class="cd-stat-l">${s.l}</span>
-          </button>`).join('')}
+    // "Now" is the decision users opened the court to make. Static venue
+    // details and account-management actions stay one disclosure away.
+    const fallbackNowLimit = Date.now() + 2 * 60 * 60 * 1000;
+    const nowGames = Array.isArray(court.now_games) ? court.now_games : allCourtGames.filter((game) => (
+      new Date(game.scheduled_at).getTime() <= fallbackNowLimit
+    ));
+    const actionableGames = nowGames.filter((game) => game.is_joined || Number(game.spots_left) > 0);
+    const nGames = actionableGames.length;
+    const myOpenGame = nowGames.find((game) => game.is_joined && game.status === 'upcoming') || null;
+    const quietNow = nHere === 0 && nGames === 0;
+    const nowSummary = quietNow
+      ? '<p class="cd-now-quiet">Quiet now — be the first to get a game going.</p>'
+      : `<div class="cd-now-signals">
+          <button type="button" class="cd-now-signal${nHere ? ' hot' : ''}" data-scroll-to="cd-sec-players">
+            <b>${nHere}</b><span>at the court</span><span class="chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="cd-now-signal${nGames ? ' hot' : ''}" data-scroll-to="cd-sec-games">
+            <b>${nGames}</b><span>open game${nGames === 1 ? '' : 's'}</span><span class="chev" aria-hidden="true">›</span>
+          </button>
+        </div>`;
+    const primaryAction = myOpenGame
+      ? `<button class="btn btn-primary btn-block cd-primary-action" id="cd-open-game" data-game-id="${myOpenGame.id}">Open your game</button>`
+      : checkedIn
+        ? '<button class="btn btn-primary btn-block cd-primary-action" id="cd-play-now">Find or start a game</button>'
+        : `<a class="btn btn-primary btn-block cd-primary-action" href="${mapsUrl}" target="_blank" rel="noopener">Get directions</a>`;
+    const secondaryActions = `
+      <div class="cd-now-actions">
+        ${checkedIn ? '' : '<button type="button" class="btn btn-secondary" id="cd-checkin">I’m at this court</button>'}
+        <button type="button" class="btn btn-secondary" id="cd-schedule">Plan a game</button>
+        <button type="button" class="btn btn-secondary" id="cd-chat">${checkedIn ? 'Message players' : 'Message the court'}</button>
       </div>`;
 
     if (!routedOverlayLoadIsCurrent(routeLoad)) return;
@@ -6017,64 +6214,82 @@
         ${heroImg}
         <div class="cd-hero-shade"></div>
         <div class="cd-hero-actions">
-          <button class="glass-btn" id="cd-share" title="Share" aria-label="Share court"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg></button>
-          <button class="glass-btn" id="cd-favorite" title="Save" aria-label="Save court">${isFavorite ? '★' : '☆'}</button>
-          ${court.photo_count > 0
-            ? `<button class="glass-btn" id="cd-gallery" title="Photos" aria-label="View court photos" style="font-size:13px">📷 ${court.photo_count}</button>`
-            : '<button class="glass-btn" id="cd-add-photo" title="Add a photo" aria-label="Add a photo">📷</button>'}
+          <details class="cd-hero-more">
+            <summary class="glass-btn" aria-label="More court actions">More</summary>
+            <div class="cd-hero-more-menu">
+              <button type="button" id="cd-share">Share court</button>
+              <button type="button" id="cd-favorite">${isFavorite ? '★ Saved' : '☆ Save court'}</button>
+              ${court.photo_count > 0
+                ? `<button type="button" id="cd-gallery">📷 View ${court.photo_count} photo${court.photo_count === 1 ? '' : 's'}</button>`
+                : '<button type="button" id="cd-add-photo">📷 Add a photo</button>'}
+            </div>
+          </details>
           <button class="glass-btn modal-close" aria-label="Close">✕</button>
         </div>
         <div class="cd-hero-title">
           <h2>${esc(court.name)}</h2>
-          <div id="cd-address" role="button" title="Copy address" style="cursor:pointer">
-            ${esc([court.address, court.city].filter(Boolean).join(', ')
-              || (court.latitude != null ? `${court.latitude.toFixed(5)}, ${court.longitude.toFixed(5)}` : ''))}
+          <button type="button" id="cd-address" class="cd-address-copy" title="Copy address" aria-label="Copy court address: ${esc(courtAddressText)}">
+            ${esc(courtAddressDisplay)}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;opacity:.85"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-          </div>
+          </button>
         </div>
       </div>
       <div class="cd-scroll">
       ${court.closed ? '<div class="card" style="background:var(--red-50);color:var(--red-700);text-align:center;padding:10px 14px;margin-bottom:10px;font-weight:700">🚫 This court is reported permanently closed</div>' : ''}
-      ${statsHtml}
-      <button class="btn ${checkedIn ? 'btn-danger' : 'btn-primary'} btn-block" id="cd-checkin" style="padding:15px;margin-bottom:10px">
-        ${checkedIn ? 'Check out' : "📍 I'm here — check in"}
-      </button>
-      <div class="action-grid">
-        <button class="action-tile" id="cd-play-now"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg></span>Play now</button>
-        <button class="action-tile" id="cd-schedule"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span>Schedule</button>
-        <button class="action-tile" id="cd-chat" style="position:relative"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>Chat${court.chat_unread ? `<span class="badge" style="top:6px;right:10px">${court.chat_unread > 9 ? '9+' : court.chat_unread}</span>` : ''}</button>
-        <a class="action-tile" href="${mapsUrl}" target="_blank" rel="noopener"><span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg></span>Directions</a>
-      </div>
-      <div id="cd-weather"></div>
-      ${court.latest_condition ? (() => {
-        const c = COURT_CONDITION_LABELS[court.latest_condition.condition] || ['📣', court.latest_condition.condition];
-        const mins = Math.max(1, Math.round((Date.now() - new Date(court.latest_condition.reported_at)) / 60000));
-        return `<div class="card row" style="margin-top:12px;padding:10px 14px;background:${court.latest_condition.condition === 'good' ? 'var(--green-50)' : 'var(--amber-50)'}">
-          <span style="font-size:18px">${c[0]}</span>
-          <div class="row-main">
-            <div class="row-title" style="font-size:14px">${c[1]}</div>
-            <div class="row-sub">reported ${mins < 60 ? `${mins}m` : `${Math.round(mins / 60)}h`} ago by ${esc(court.latest_condition.user_name)}</div>
+      <section class="card cd-now-card" aria-labelledby="cd-now-heading">
+        <div class="cd-now-heading">
+          <div>
+            <div class="row-sub">At this court</div>
+            <h3 id="cd-now-heading">Now at this court</h3>
           </div>
-        </div>`;
-      })() : ''}
-      <div style="margin-top:14px">${chipsHtml}
-        ${state.token && state.me && state.me.home_court_id !== court.id
-          ? '<button id="cd-sethome" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">🏠 Make home court</button>'
-          : (state.me && state.me.home_court_id === court.id ? '<span class="tag" style="margin:0">🏠 Your home court</span>' : '')}
-        <button id="cd-suggest" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">✏️ Suggest an edit</button>
-        <button id="cd-condition" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">📣 Report conditions</button>
-      </div>
-      ${court.busy_times && court.busy_times.length
-        ? `<div class="row-sub" style="margin-top:10px">📊 Popular here: ${court.busy_times.map((b) => esc(b.label)).join(' · ')}</div>`
-        : ''}
-      ${court.open_play_schedule ? `
-        <details class="cd-hours">
-          <summary>🕑 Open play hours</summary>
-          <p>${esc(court.open_play_schedule)}</p>
-        </details>` : ''}
-      ${linkParts.length ? `<div class="cd-links">${linkParts.join('')}</div>` : ''}
+          ${quietNow ? '<span class="tag">Quiet now</span>' : '<span class="tag live">Active now</span>'}
+        </div>
+        ${nowSummary}
+        ${primaryAction}
+        ${secondaryActions}
+        <div id="cd-weather"></div>
+        ${court.latest_condition ? (() => {
+          const c = COURT_CONDITION_LABELS[court.latest_condition.condition] || ['📣', court.latest_condition.condition];
+          const mins = Math.max(1, Math.round((Date.now() - new Date(court.latest_condition.reported_at)) / 60000));
+          return `<div class="card row" style="margin-top:12px;padding:10px 14px;background:${court.latest_condition.condition === 'good' ? 'var(--green-50)' : 'var(--amber-50)'}">
+            <span style="font-size:18px">${c[0]}</span>
+            <div class="row-main">
+              <div class="row-title" style="font-size:14px">${c[1]}</div>
+              <div class="row-sub">reported ${mins < 60 ? `${mins}m` : `${Math.round(mins / 60)}h`} ago by ${esc(court.latest_condition.user_name)}</div>
+            </div>
+          </div>`;
+        })() : ''}
+      </section>
       <div class="section-label" id="cd-sec-players">Playing now (${nHere})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
       ${playersHtml}
+      <div class="section-label" id="cd-sec-games">Upcoming games</div>
+      ${gamesHtml}
+      <details class="card cd-progressive cd-court-details">
+        <summary>Court details</summary>
+        <div class="cd-progressive-body">
+          <div>${chipsHtml}</div>
+          ${court.busy_times && court.busy_times.length
+            ? `<div class="row-sub" style="margin-top:10px">📊 Popular here: ${court.busy_times.map((b) => esc(b.label)).join(' · ')}</div>`
+            : ''}
+          ${court.open_play_schedule ? `
+            <div class="cd-hours">
+              <div class="row-title">🕑 Open play hours</div>
+              <p>${esc(court.open_play_schedule)}</p>
+            </div>` : ''}
+          ${linkParts.length ? `<div class="cd-links">${linkParts.join('')}</div>` : ''}
+          <div class="cd-management-actions">
+            ${state.token && state.me && state.me.home_court_id !== court.id
+              ? '<button id="cd-sethome" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">🏠 Make home court</button>'
+              : (state.me && state.me.home_court_id === court.id ? '<span class="tag" style="margin:0">🏠 Your home court</span>' : '')}
+            <button id="cd-suggest" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">✏️ Suggest an edit</button>
+            <button id="cd-condition" class="tag" style="border:1px dashed var(--line);background:transparent;cursor:pointer">📣 Report conditions</button>
+          </div>
+          ${checkedIn ? '<button type="button" class="btn btn-danger btn-block" id="cd-checkout">Check out</button>' : ''}
+        </div>
+      </details>
+      <details class="card cd-progressive cd-community-details">
+        <summary>More at this court</summary>
+        <div class="cd-progressive-body">
       ${(court.regulars || []).length ? `
         <div class="section-label">Court regulars</div>
         ${court.regulars.map((p, i) => `
@@ -6116,13 +6331,15 @@
           </div>`).join('')}` : ''}
       <div id="cd-clubs"></div>
       <div id="cd-leagues"></div>
-      <div class="section-label" id="cd-sec-games">Upcoming games</div>
-      ${gamesHtml}
       ${(court.recent_results || []).length ? `
         <div class="section-label">Recent results here</div>
         ${court.recent_results.map(resultRowHtml).join('')}` : ''}
-      <div class="section-label" id="cd-sec-reviews">Reviews${court.rating_avg ? ` · ⭐ ${court.rating_avg} (${court.rating_count})` : ''}</div>
-      <div id="cd-reviews"></div>
+        </div>
+      </details>
+      <details class="card cd-progressive cd-reviews-details">
+        <summary id="cd-sec-reviews">Reviews${court.rating_avg ? ` · ⭐ ${court.rating_avg} (${court.rating_count})` : ''}</summary>
+        <div class="cd-progressive-body" id="cd-reviews"></div>
+      </details>
       </div>
     `, { court: true, route: { kind: 'court', id: court.id } });
 
@@ -6184,22 +6401,21 @@
       }));
     }).catch(() => { /* leagues section is a nicety */ });
 
-    modal.querySelector('#cd-checkin').addEventListener('click', async () => {
-      if (checkedIn) {
-        const prev = state.presence;
-        try {
-          await api('/checkout', { method: 'POST' });
-          const followupLoad = beginFollowupAfterClosingModal(modal);
-          toast('Checked out 👋');
-          await refreshMe();
-          fetchCourtsInView();
-          if (followupLoad && routedOverlayLoadIsCurrent(followupLoad)) {
-            maybeAskConditions(prev);
-          }
-        } catch (e) { toast(e.message); }
-        return;
-      }
+    modal.querySelector('#cd-checkin')?.addEventListener('click', () => {
       transitionModal(modal, () => openCheckInSheet(court));
+    });
+    modal.querySelector('#cd-checkout')?.addEventListener('click', async () => {
+      const prev = state.presence;
+      try {
+        await api('/checkout', { method: 'POST' });
+        const followupLoad = beginFollowupAfterClosingModal(modal);
+        toast('Checked out 👋');
+        await refreshMe();
+        fetchCourtsInView();
+        if (followupLoad && routedOverlayLoadIsCurrent(followupLoad)) {
+          maybeAskConditions(prev);
+        }
+      } catch (e) { toast(e.message); }
     });
 
     modal.querySelector('#cd-sethome')?.addEventListener('click', async (e) => {
@@ -6263,19 +6479,16 @@
     });
 
     modal.querySelector('#cd-address').addEventListener('click', async () => {
-      const addressText = [court.address, court.city, court.state, court.zip_code]
-        .filter(Boolean).join(', ')
-        || (court.latitude != null ? `${court.latitude.toFixed(5)}, ${court.longitude.toFixed(5)}` : '');
       // writeText can reject even on secure contexts (unfocused document,
       // denied permission) — always fall back to the hidden-textarea trick.
       let copied = false;
       if (navigator.clipboard && window.isSecureContext) {
-        copied = await navigator.clipboard.writeText(addressText).then(() => true, () => false);
+        copied = await navigator.clipboard.writeText(courtAddressText).then(() => true, () => false);
       }
       if (!copied) {
         try {
           const ta = document.createElement('textarea');
-          ta.value = addressText;
+          ta.value = courtAddressText;
           ta.style.cssText = 'position:fixed;opacity:0';
           document.body.appendChild(ta);
           ta.select();
@@ -6299,12 +6512,11 @@
       } catch { /* user cancelled share */ }
     });
 
-    modal.querySelector('#cd-play-now').addEventListener('click', (event) => {
-      if (isCheckedInAtCourt(court.id)) {
-        startInstantRally(event.currentTarget, { fromModal: modal });
-      } else {
-        transitionModal(modal, () => openPlayNowCourtPicker({ court }));
-      }
+    modal.querySelector('#cd-play-now')?.addEventListener('click', (event) => {
+      startInstantRally(event.currentTarget, { fromModal: modal });
+    });
+    modal.querySelector('#cd-open-game')?.addEventListener('click', (event) => {
+      transitionModal(modal, () => openGameScreen(Number(event.currentTarget.dataset.gameId)));
     });
     modal.querySelector('#cd-schedule').addEventListener('click', () => {
       transitionModal(modal, () => openNewGameModal({ court }));
@@ -6318,7 +6530,7 @@
       try {
         const data = await api(`/courts/${court.id}/favorite`, { method: 'POST' });
         isFavorite = data.favorited;
-        favBtn.textContent = isFavorite ? '★' : '☆';
+        favBtn.textContent = isFavorite ? '★ Saved' : '☆ Save court';
         if (state.favIds) state.favIds[isFavorite ? 'add' : 'delete'](court.id);
         fetchCourtsInView(); // restar the map markers
         toast(isFavorite ? 'Court saved ⭐' : 'Removed from saved courts');
@@ -6475,7 +6687,7 @@
     state.playGamesCache = null;
     refreshLookingBanner();
     if (state.tab === 'play' && state.playSeg === 'games') renderPlay();
-    if (state.tab === 'chat' && state.chatSeg === 'nearby') renderChat();
+    if (state.tab === 'chat' && state.chatSeg === 'friends' && state.peopleMode === 'nearby') renderChat();
   }
 
   async function declarePlayPulse(court, modal, button, errorEl = null) {
@@ -6489,12 +6701,12 @@
       errorEl.focus({ preventScroll: true });
     };
     if (!callerSession) {
-      showError('Sign in again before sharing your availability.');
+      showError('Sign in again before sharing that you’re free this hour.');
       return null;
     }
     const attempt = pendingPlayPulseCreateAttempt(callerSession.userId, selected.id);
     if (!attempt) {
-      showError('This device could not save a safe retry. Free some browser storage and try again.');
+      showError('This device could not save your request. Free some browser storage and try again.');
       return null;
     }
     const original = button.textContent;
@@ -6502,7 +6714,7 @@
     button.dataset.playPulseCreating = 'true';
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
-    button.textContent = 'Sharing availability…';
+    button.textContent = 'Sharing that you’re free…';
     modalBox?.setAttribute('aria-busy', 'true');
     errorEl?.classList.add('hidden');
     let record = playPulseCreateInFlight;
@@ -6525,7 +6737,7 @@
       if (!instantRallySessionMatches(callerSession)) return null;
       const responsePulse = playPulseFromValue(response && response.pulse);
       if (!responsePulse) {
-        const malformed = new Error('The server did not confirm the availability window. Retry safely.');
+        const malformed = new Error('We couldn’t confirm Free this hour. Try again.');
         malformed.isNetworkError = true;
         throw malformed;
       }
@@ -6537,14 +6749,14 @@
         if (modal && document.body.contains(modal)) closeModal(modal);
         refreshPlayPulseSurfaces();
         refreshMe().catch(() => {});
-        toast('Your saved one-hour window already ended. Start a new one when you’re still free.');
+        toast('That Free this hour window already ended. Start a new one when you’re still free.');
         return null;
       }
       invalidateMeRequests();
       state.activePlayPulse = pulse;
       refreshPlayPulseSurfaces();
       refreshMe().catch(() => {});
-      toast(`Available to play at ${pulse.courtName} until ${fmtTimeShort(pulse.expiresAt)}`);
+      toast(`You’re free this hour at ${pulse.courtName} · until ${fmtTimeShort(pulse.expiresAt)}`);
       if (modal && document.body.contains(modal) && currentOverlayEntry()?.el === modal) {
         transitionModal(modal, () => openPlayPulseDetails(pulse));
       }
@@ -6567,7 +6779,7 @@
         clearPlayPulseCreateAttempt(callerSession.userId, selected.id, attempt.id);
       }
       showError(ambiguous
-        ? 'Couldn’t confirm the window. Retry safely: the same request will not create or extend another hour.'
+        ? 'Couldn’t confirm Free this hour. Try again.'
         : error.message);
       return null;
     } finally {
@@ -6577,7 +6789,7 @@
         button.disabled = false;
         button.removeAttribute('aria-busy');
         button.textContent = errorEl && !errorEl.classList.contains('hidden')
-          ? 'Retry safely' : original;
+          ? 'Try again' : original;
         modalBox?.removeAttribute('aria-busy');
       }
     }
@@ -6605,9 +6817,9 @@
       if (response?.cancelled === false && response?.pulse?.end_reason === 'matched') {
         toast('A player already accepted — your quick game was not cancelled.');
       } else if (response?.cancelled === false) {
-        toast('That one-hour availability had already ended.');
+        toast('That Free this hour post had already ended.');
       } else {
-        toast('One-hour availability cancelled');
+        toast('Free this hour ended');
       }
       refreshPlayPulseSurfaces();
       refreshMe().catch(() => {});
@@ -6620,7 +6832,7 @@
         if (modal && document.body.contains(modal)) closeModal(modal);
         refreshPlayPulseSurfaces();
         refreshMe().catch(() => {});
-        toast('That availability window already ended');
+        toast('That Free this hour post already ended');
         return true;
       }
       toast(error.message);
@@ -6654,7 +6866,7 @@
     };
     const storageKey = playPulseAcceptAttemptKey(callerSession.userId, pulse.id);
     if (!storageKey || !persistRecoveryValue(storageKey, JSON.stringify(refreshedAttempt))) {
-      const storageError = new Error('This device could not save a safe retry. Free some browser storage and try again.');
+      const storageError = new Error('This device could not save your request. Free some browser storage and try again.');
       storageError.code = 'retry_storage_unavailable';
       throw storageError;
     }
@@ -6713,7 +6925,7 @@
       callerSession.userId, pulse.id, pulse.acceptCapability,
     );
     if (!attempt) {
-      showError('This device could not save a safe retry. Free some browser storage and try again.');
+      showError('This device could not save your request. Free some browser storage and try again.');
       return null;
     }
     const original = button.textContent;
@@ -6738,7 +6950,7 @@
       if (!instantRallySessionMatches(callerSession)) return null;
       const gameId = safePositiveId(response && response.game && response.game.id);
       if (!gameId) {
-        const malformed = new Error('The server did not confirm the quick game. Retry safely.');
+        const malformed = new Error('We couldn’t confirm the quick game. Try again.');
         malformed.isNetworkError = true;
         throw malformed;
       }
@@ -6751,7 +6963,7 @@
       if (modal && document.body.contains(modal) && currentOverlayEntry()?.el === modal) {
         transitionModal(modal, () => openGameScreen(gameId));
       } else openGameScreen(gameId);
-      if (state.tab === 'chat' && state.chatSeg === 'nearby') renderChat();
+      if (state.tab === 'chat' && state.chatSeg === 'friends' && state.peopleMode === 'nearby') renderChat();
       return response;
     } catch (error) {
       if (!instantRallySessionMatches(callerSession)) return null;
@@ -6761,10 +6973,10 @@
       }
       if (['pulse_not_found', 'pulse_start_window_closed', 'invalid_accept_capability'].includes(error.code)) {
         refreshLookingBanner();
-        if (state.tab === 'chat' && state.chatSeg === 'nearby') renderChat();
+        if (state.tab === 'chat' && state.chatSeg === 'friends' && state.peopleMode === 'nearby') renderChat();
       }
       showError(ambiguous
-        ? 'Couldn’t confirm the game. Retry safely: the same request will not create a second game.'
+        ? 'Couldn’t confirm the game. Try again.'
         : error.message);
       return null;
     } finally {
@@ -6774,7 +6986,7 @@
         button.disabled = false;
         button.removeAttribute('aria-busy');
         button.textContent = errorEl && !errorEl.classList.contains('hidden')
-          ? 'Retry safely' : original;
+          ? 'Try again' : original;
         modal?.querySelector('.modal')?.removeAttribute('aria-busy');
       }
     }
@@ -6787,8 +6999,8 @@
     );
     const pulse = normalizeActivePlayPulse(pulseRecord) || (retry ? pulseRecord : null);
     if (!pulse) {
-      toast('That one-hour availability is no longer active.');
-      if (state.tab === 'chat' && state.chatSeg === 'nearby') renderChat();
+      toast('That Free this hour post is no longer active.');
+      if (state.tab === 'chat' && state.chatSeg === 'friends' && state.peopleMode === 'nearby') renderChat();
       return null;
     }
     const first = String(pulse.user?.display_name || 'This player').split(/\s+/)[0];
@@ -6796,11 +7008,11 @@
       ${modalHead(`🏓 Play at ${pulse.courtName}`)}
       <div class="play-pulse-confirm-person">
         ${pulse.user ? avatarHtml(pulse.user, 'sm') : '<span class="play-pulse-avatar" aria-hidden="true">🏓</span>'}
-        <div><b>${esc(first)} can play at ${esc(pulse.courtName)} this hour</b><span>Available until ${esc(fmtTimeShort(pulse.expiresAt))}</span></div>
+        <div><b>${esc(first)} can play at ${esc(pulse.courtName)} this hour</b><span>Free until ${esc(fmtTimeShort(pulse.expiresAt))}</span></div>
       </div>
       <p class="play-pulse-commitment">${esc(playPulseCommitmentCopy(pulse))}</p>
       <p class="form-error hidden" id="play-pulse-accept-error" role="alert" tabindex="-1"></p>
-      <button type="button" class="btn btn-primary btn-block" id="play-pulse-accept-confirm">${retry ? 'Retry safely' : 'Create quick game'}</button>
+      <button type="button" class="btn btn-primary btn-block" id="play-pulse-accept-confirm">${retry ? 'Try again' : 'Create quick game'}</button>
       <button type="button" class="btn-link modal-close btn-block">Not now</button>
     `, { label: `Create a quick game with ${first} at ${pulse.courtName}` });
     const button = modal.querySelector('#play-pulse-accept-confirm');
@@ -6814,22 +7026,22 @@
     const pulse = normalizeActivePlayPulse(pulseValue);
     if (!pulse) {
       state.activePlayPulse = null;
-      toast('Your one-hour availability has ended.');
+      toast('Your Free this hour post has ended.');
       refreshPlayPulseSurfaces();
       return null;
     }
     const directions = playPulseDirectionsUrl(pulse);
     const modal = openModal(`
-      ${modalHead('Available this hour')}
+      ${modalHead('Free this hour')}
       <div class="play-pulse-detail-card">
         <span aria-hidden="true">📍</span>
-        <div><b>${esc(pulse.courtName)}</b><span>Available until ${esc(fmtTimeShort(pulse.expiresAt))}</span></div>
+        <div><b>${esc(pulse.courtName)}</b><span>Free until ${esc(fmtTimeShort(pulse.expiresAt))}</span></div>
       </div>
       <p class="play-pulse-commitment">This court is your intended destination, not your current location or a check-in. The first nearby player who accepts creates an open quick game starting in about 15 minutes for both of you and you’ll be notified.</p>
       ${directions ? `<a class="btn btn-secondary btn-block play-pulse-directions" href="${directions}" target="_blank" rel="noopener" aria-label="Directions to ${esc(pulse.courtName)} (opens Maps)">Directions</a>` : ''}
-      <button type="button" class="btn btn-danger btn-block" id="play-pulse-cancel-detail">Cancel availability</button>
+      <button type="button" class="btn btn-danger btn-block" id="play-pulse-cancel-detail">End Free this hour</button>
       <button type="button" class="btn-link modal-close btn-block">Done</button>
-    `, { label: `Availability at ${pulse.courtName}` });
+    `, { label: `Free this hour at ${pulse.courtName}` });
     modal.querySelector('#play-pulse-cancel-detail').addEventListener('click', (event) => {
       cancelPlayPulse(pulse, event.currentTarget, modal);
     });
@@ -6841,10 +7053,10 @@
     if (!pulse) return '';
     const directions = playPulseDirectionsUrl(pulse);
     return `
-      <section class="play-pulse-active" aria-label="Available to play at ${esc(pulse.courtName)} until ${esc(fmtTimeShort(pulse.expiresAt))}. This is an intended destination, not a check-in.">
+      <section class="play-pulse-active" aria-label="Free this hour at ${esc(pulse.courtName)} until ${esc(fmtTimeShort(pulse.expiresAt))}. This is an intended destination, not a check-in.">
         <button type="button" class="play-pulse-active-main" data-play-pulse-details>
           <span class="play-pulse-active-icon" aria-hidden="true">📍</span>
-          <span><b>Available to play at ${esc(pulse.courtName)}</b><small>Until ${esc(fmtTimeShort(pulse.expiresAt))} · intended destination</small></span>
+          <span><b>Free this hour at ${esc(pulse.courtName)}</b><small>Until ${esc(fmtTimeShort(pulse.expiresAt))} · intended destination</small></span>
           <span class="chev" aria-hidden="true">›</span>
         </button>
         <div class="play-pulse-active-actions">
@@ -6901,9 +7113,11 @@
         presenceConfirmed: true,
         expectedCourtId: selected.id,
         fromModal: modal,
+        confirmationButton: button,
+        confirmationOriginalHtml: original,
         onError: (error, retrySafely) => {
           showError(retrySafely
-            ? 'We could not confirm the rally. Your check-in is saved; retrying safely will not create a duplicate.'
+            ? 'We couldn’t confirm the rally. Your check-in is saved; try again.'
             : error.message);
         },
       });
@@ -6921,13 +7135,91 @@
     } finally {
       if (button && document.body.contains(button)) {
         delete button.dataset.playNowStarting;
-        button.disabled = false;
-        button.removeAttribute('aria-busy');
-        button.textContent = errorEl && !errorEl.classList.contains('hidden')
-          ? 'Retry safely' : original;
+        if (!button.dataset.instantRallyAction) {
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          button.textContent = errorEl && !errorEl.classList.contains('hidden')
+            ? 'Try again' : original;
+        }
         modalBox?.removeAttribute('aria-busy');
       }
     }
+  }
+
+  function openPlaySoonFlow() {
+    const modal = openModal(`
+      ${modalHead('Play soon')}
+      <p class="play-now-intro">What fits right now?</p>
+      <div class="play-soon-choices" role="group" aria-label="When you can play">
+        <button type="button" class="btn btn-primary btn-block" data-play-soon-choice="at-court">I’m at a court now</button>
+        <button type="button" class="btn btn-secondary btn-block" data-play-soon-choice="arriving">I can be there in 5–15 minutes</button>
+        <button type="button" class="btn btn-secondary btn-block" data-play-soon-choice="available">I’m free sometime this hour</button>
+      </div>
+      <button type="button" class="btn-link modal-close btn-block">Not now</button>
+    `, { label: 'Choose when you can play' });
+    modal.querySelector('[data-play-soon-choice="at-court"]').addEventListener('click', (event) => {
+      if (state.presence && state.presence.checked_in) {
+        startInstantRally(event.currentTarget, { fromModal: modal });
+        return;
+      }
+      transitionModal(modal, () => openPlayNowCourtPicker());
+    });
+    modal.querySelector('[data-play-soon-choice="arriving"]').addEventListener('click', () => {
+      transitionModal(modal, openPlaySoonArrivalChoices);
+    });
+    modal.querySelector('[data-play-soon-choice="available"]').addEventListener('click', () => {
+      transitionModal(modal, openPlayPulseCourtPicker);
+    });
+    return modal;
+  }
+
+  async function openPlaySoonArrivalChoices() {
+    const accountId = Number(state.me && state.me.id);
+    const modal = openModal(`
+      ${modalHead('Arrive in 5–15 minutes')}
+      <p class="play-now-intro">Choose a live rally. You’ll pick a 5, 10, or 15 minute arrival time next.</p>
+      <div id="play-soon-rallies" aria-live="polite" aria-busy="true">
+        <div class="play-now-loading" role="status"><span class="spinner"></span><span>Finding nearby rallies…</span></div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-block hidden" id="play-soon-hour-fallback">Share that I’m free this hour</button>
+      <button type="button" class="btn-link modal-close btn-block">Not now</button>
+    `, { label: 'Nearby rallies you can reach' });
+    const results = modal.querySelector('#play-soon-rallies');
+    const fallback = modal.querySelector('#play-soon-hour-fallback');
+    fallback.addEventListener('click', () => transitionModal(modal, openPlayPulseCourtPicker));
+    try {
+      const loc = areaLatLng();
+      const response = await api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=25`);
+      if (!document.body.contains(modal) || Number(state.me && state.me.id) !== accountId) return modal;
+      const rallies = normalizeLookingRallies(response).filter((rally) => {
+        const ownArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
+        return !!ownArrival || (rally.arrivalAvailable && rally.spotsLeft > 0 && rally.onWayCount === 0);
+      });
+      results.setAttribute('aria-busy', 'false');
+      fallback.classList.toggle('hidden', rallies.length > 0);
+      results.innerHTML = rallies.length ? rallies.map((rally) => {
+        const action = rallyActionState(rally);
+        return `<article class="card nearby-rally-card">
+          <div class="row">
+            <div class="row-main"><div class="row-title">${esc(rally.courtName)}</div><div class="row-sub">${esc(rallyCountsText(rally))}</div></div>
+            ${rally.distanceMiles != null ? `<span class="tag">${esc(rally.distanceMiles)} mi</span>` : ''}
+          </div>
+          <button type="button" class="btn btn-primary btn-block" data-play-soon-rally ${rallyDatasetAttributes(rally)}>${esc(action.label)}</button>
+        </article>`;
+      }).join('') : '<div class="empty-state" style="padding:14px">No nearby rally has a travel spot right now. You can still let players know you’re free this hour.</div>';
+      results.querySelectorAll('[data-play-soon-rally]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const rally = rallies.find((item) => item.gameId === Number(button.dataset.rallyGameId));
+          openReadyRally(rally || rallySummaryFromDataset(button), button);
+        });
+      });
+    } catch {
+      if (!document.body.contains(modal)) return modal;
+      results.setAttribute('aria-busy', 'false');
+      results.innerHTML = '<div class="empty-state" style="padding:14px">Nearby rallies aren’t available right now. You can still share that you’re free this hour.</div>';
+      fallback.classList.remove('hidden');
+    }
+    return modal;
   }
 
   async function openPlayNowCourtPicker({ court = null, rally = null, intent = 'play-now' } = {}) {
@@ -6936,14 +7228,14 @@
       id: rally.courtId,
       name: rally.courtName,
       city: rally.courtCity,
-    }), rally ? `${rally.readyCount || 1} ready now` : 'Selected court');
+    }), rally ? `${rally.readyCount || 1} at the court` : 'Selected court');
     let selected = preset;
     const modal = openModal(`
-      ${modalHead(pulseIntent ? 'Available this hour' : '⚡ Play now')}
+      ${modalHead(pulseIntent ? 'Free this hour' : 'At the court')}
       <form id="play-now-form" novalidate>
         <p class="play-now-intro">${pulseIntent
-          ? 'Choose where you could play during the next hour. This is an intended destination, not your current location or a check-in. The first player who accepts creates an open quick game starting in about 15 minutes for both of you.'
-          : 'Choose the court where you are physically playing. We’ll check you in, then join or start its live rally.'}</p>
+          ? 'Choose a court you could reach this hour. Nearby players can respond; this does not check you in.'
+          : 'Choose the court you’re at. We’ll check you in, then join or start its live rally.'}</p>
         <div class="form-field">
           <label for="play-now-search">Court</label>
           <input type="search" id="play-now-search" placeholder="Search courts…" autocomplete="off" />
@@ -6951,18 +7243,18 @@
         <div class="play-now-courts" id="play-now-courts" role="listbox" aria-label="Court choices" aria-busy="true">
           <div class="play-now-loading" role="status"><span class="spinner"></span><span>Finding current, saved, home, and nearby courts…</span></div>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm hidden" id="play-now-retry-courts">Retry court suggestions</button>
+        <button type="button" class="btn btn-secondary btn-sm hidden" id="play-now-retry-courts">Try court suggestions again</button>
         <div class="play-now-selection ${preset ? '' : 'hidden'}" id="play-now-selection" role="status">
           <span aria-hidden="true">📍</span><span><b id="play-now-selected-name">${preset ? esc(preset.name) : ''}</b><small>${pulseIntent ? 'Intended destination · not a check-in' : 'I am at this court now'}</small></span>
         </div>
         <p class="play-now-privacy"><span aria-hidden="true">👀</span> ${pulseIntent
-          ? 'Signed-in players nearby may see that you can play at this destination. The server starts one fixed one-hour window when it confirms; retries never extend it.'
-          : 'Signed-in players nearby may see your fresh ready status at this court. It expires automatically.'}</p>
+          ? 'Nearby signed-in players may see this court for the next hour. Your current location stays private.'
+          : 'Nearby signed-in players may see that you’re at this court. This status expires automatically.'}</p>
         <p class="form-error hidden" id="play-now-error" role="alert" tabindex="-1"></p>
-        <button type="submit" class="btn btn-primary btn-block" id="play-now-confirm" ${preset ? '' : 'disabled'}>${pulseIntent ? 'Available this hour' : 'I’m here &amp; ready'}</button>
+        <button type="submit" class="btn btn-primary btn-block" id="play-now-confirm" ${preset ? '' : 'disabled'}>${pulseIntent ? 'Share for this hour' : 'Find a game now'}</button>
         <button type="button" class="btn-link modal-close btn-block">Cancel</button>
       </form>
-    `, { label: pulseIntent ? 'Share one-hour availability at a court' : 'Play now at a court' });
+    `, { label: pulseIntent ? 'Share that you are free this hour at a court' : 'Choose the court you are at now' });
     const resultsEl = modal.querySelector('#play-now-courts');
     const searchEl = modal.querySelector('#play-now-search');
     const confirmButton = modal.querySelector('#play-now-confirm');
@@ -7039,7 +7331,7 @@
       if (searchEl.value.trim().length < 2) renderCourtRows();
       if (!saved && !nearby && searchEl.value.trim().length < 2) {
         retryButton.classList.remove('hidden');
-        errorEl.textContent = 'Court suggestions could not load. Search for a court or retry.';
+        errorEl.textContent = 'Court suggestions could not load. Search for a court or try again.';
         errorEl.classList.remove('hidden');
       }
     };
@@ -7164,7 +7456,7 @@
     }
     const attempt = pendingRallyArrivalAttempt(callerSession.userId, gameId, etaMinutes);
     if (!attempt) {
-      const error = new Error('Nothing was sent because this browser could not save a safe retry.');
+      const error = new Error('Nothing was sent because this browser could not save your request.');
       error.code = 'arrival_attempt_unavailable';
       throw error;
     }
@@ -7228,13 +7520,13 @@
     const existingArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
     if (existingArrival) return openArrivalDetails(existingArrival);
     if (!rally.arrivalAvailable || !rally.arrivalCapability) {
-      toast('This rally is wrapping up, so remote spot holds are closed. Refresh nearby rallies for the next one.');
+      toast('This rally is wrapping up, so travel spots are closed. Refresh nearby rallies for the next one.');
       refreshLookingBanner();
       return null;
     }
     if (rally.spotsLeft <= 0 || rally.onWayCount > 0) {
       toast(rally.onWayCount > 0
-        ? 'Another player is already on the way, so the remote spot is held.'
+        ? 'Another player is already arriving, so that travel spot is held.'
         : 'That rally is fully committed.');
       return null;
     }
@@ -7244,11 +7536,10 @@
     const initialEta = pending ? pending.etaMinutes : 10;
     const modal = openModal(`
       ${modalHead(`🚗 Head to ${rally.courtName}`)}
-      <div class="arrival-summary${rally.rosterCount > rally.readyCount ? ' has-roster' : ''}" aria-label="${esc(rallyCountsText(rally))}">
-        <span><b>${rally.readyCount}/${rally.maxPlayers}</b><small>physically ready</small></span>
-        ${rally.rosterCount > rally.readyCount ? `<span><b>${rally.rosterCount}</b><small>joined</small></span>` : ''}
-        <span><b>${rally.onWayCount}</b><small>on the way</small></span>
-        <span><b>${rally.spotsLeft}</b><small>spot${rally.spotsLeft === 1 ? '' : 's'} open</small></span>
+      <div class="arrival-summary" aria-label="${esc(rallyCountsText(rally))}">
+        <span><b>${rally.readyCount}/${rally.maxPlayers}</b><small>at the court</small></span>
+        <span><b>${rally.onWayCount}</b><small>arriving</small></span>
+        <span><b>${rally.spotsLeft}</b><small>spot${rally.spotsLeft === 1 ? '' : 's'} left</small></span>
       </div>
       <form id="arrival-eta-form" novalidate>
         <fieldset class="arrival-eta-fieldset">
@@ -7261,8 +7552,8 @@
               </label>`).join('')}
           </div>
         </fieldset>
-        <p class="arrival-hold-explainer">One remote spot can be held. The server will confirm the exact expiration time, and the hold ends sooner if the rally closes.</p>
-        ${pending ? `<p class="arrival-retry-note" role="status">Retrying the same ${pending.etaMinutes}-minute hold request won’t create or extend another hold.</p>` : ''}
+        <p class="arrival-hold-explainer">We’ll hold one travel spot while you head over. It ends if the rally closes first.</p>
+        ${pending ? `<p class="arrival-retry-note" role="status">We still need to confirm your ${pending.etaMinutes}-minute arrival.</p>` : ''}
         <p class="form-error hidden" id="arrival-error" role="alert" tabindex="-1"></p>
         <button type="submit" class="btn btn-primary btn-block" id="arrival-confirm">Hold my spot · ${initialEta} min</button>
         <a class="btn btn-secondary btn-block arrival-directions" data-arrival-directions target="_blank" rel="noopener" aria-label="Directions to ${esc(rally.courtName)} (opens Maps)">Directions</a>
@@ -7275,7 +7566,7 @@
     const errorEl = modal.querySelector('#arrival-error');
     const syncEta = () => {
       const eta = Number(form.elements['arrival-eta'].value) || initialEta;
-      button.textContent = pending ? `Retry same request · ${eta} min` : `Hold my spot · ${eta} min`;
+      button.textContent = pending ? `Try again · ${eta} min` : `Hold my spot · ${eta} min`;
     };
     form.addEventListener('change', syncEta);
     form.addEventListener('submit', async (event) => {
@@ -7290,7 +7581,7 @@
       }
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
-      button.textContent = pending ? 'Retrying the same hold…' : 'Holding your spot…';
+      button.textContent = pending ? 'Checking your spot…' : 'Holding your spot…';
       errorEl.classList.add('hidden');
       try {
         const result = await reserveRallyArrival(rally, eta);
@@ -7347,7 +7638,7 @@
         }
         const ambiguous = arrivalRequestIsAmbiguous(error);
         errorEl.textContent = ambiguous
-          ? 'We could not confirm the response. Retry safely: the same request will not create or extend another hold.'
+          ? 'We couldn’t confirm your spot. Try again.'
           : error.message;
         errorEl.classList.remove('hidden');
         errorEl.focus({ preventScroll: true });
@@ -7419,14 +7710,13 @@
         <div><b>Spot held at ${esc(arrival.courtName)}</b><span>${esc(arrivalEtaLabel(arrival))}</span></div>
       </div>
       <p class="arrival-reservation-copy">${esc(arrivalReservationCopy(arrival))}</p>
-      <div class="arrival-summary${arrival.rosterCount > arrival.readyCount ? ' has-roster' : ''}" aria-label="${esc(rallyCountsText(rally))}">
-        <span><b>${arrival.readyCount}/${arrival.maxPlayers}</b><small>physically ready</small></span>
-        ${arrival.rosterCount > arrival.readyCount ? `<span><b>${arrival.rosterCount}</b><small>joined</small></span>` : ''}
-        <span><b>${arrival.onWayCount}</b><small>on the way</small></span>
-        <span><b>${arrival.physicalSpotsLeft}</b><small>physical spot${arrival.physicalSpotsLeft === 1 ? '' : 's'}</small></span>
+      <div class="arrival-summary" aria-label="${esc(rallyCountsText(rally))}">
+        <span><b>${arrival.readyCount}/${arrival.maxPlayers}</b><small>at the court</small></span>
+        <span><b>${arrival.onWayCount}</b><small>arriving</small></span>
+        <span><b>${arrival.physicalSpotsLeft}</b><small>spot${arrival.physicalSpotsLeft === 1 ? '' : 's'} left</small></span>
       </div>
       <a class="btn btn-secondary btn-block arrival-directions" data-arrival-directions target="_blank" rel="noopener" aria-label="Directions to ${esc(arrival.courtName)} (opens Maps)">Directions</a>
-      <button type="button" class="btn btn-primary btn-block" id="arrival-im-here">I’m here</button>
+      <button type="button" class="btn btn-primary btn-block" id="arrival-im-here">I’m at the court</button>
       <button type="button" class="btn btn-danger btn-block" id="arrival-cancel">Cancel trip</button>
       <p class="form-error hidden" id="arrival-detail-error" role="alert" tabindex="-1"></p>
       <button type="button" class="btn-link modal-close btn-block">Close</button>
@@ -7445,9 +7735,9 @@
     if (!rally || !rally.courtId) return null;
     const modal = openModal(`
       ${modalHead(`📍 You’re at ${rally.courtName}`)}
-      <p class="arrival-checkin-copy">Your court check-in is private. Join the rally to appear physically ready to its players.</p>
+      <p class="arrival-checkin-copy">Your court check-in is private. Join the rally to show its players that you’re at the court.</p>
       <p class="form-error hidden" id="at-court-join-error" role="alert" tabindex="-1"></p>
-      <button type="button" class="btn btn-primary btn-block" id="at-court-join">Join rally</button>
+      <button type="button" class="btn btn-primary btn-block" id="at-court-join">Join this game</button>
       <button type="button" class="btn btn-secondary btn-block modal-close">Not now</button>
     `, { label: `Join the rally at ${rally.courtName}` });
     const button = modal.querySelector('#at-court-join');
@@ -7460,7 +7750,7 @@
       const result = await openReadyRally(rally, button);
       if (!instantRallySessionMatches(callerSession) || !document.body.contains(errorEl)) return;
       if (!result) {
-        errorEl.textContent = 'We could not confirm the join. Your private court check-in is saved; tap Join rally to retry.';
+        errorEl.textContent = 'We could not confirm the join. Your private court check-in is saved; tap Join this game again.';
         errorEl.classList.remove('hidden');
         errorEl.focus({ preventScroll: true });
       }
@@ -7480,7 +7770,7 @@
     }
     const modal = openModal(`
       ${modalHead(`📍 Are you at ${rally.courtName}?`)}
-      <p class="arrival-checkin-copy">Only continue once you’re physically at this court. This checks you in privately, then joins the current rally without broadcasting a ready signal first.</p>
+      <p class="arrival-checkin-copy">Only continue once you’re at this court. This checks you in privately, then adds you to the current rally.</p>
       <p class="form-error hidden" id="arrival-checkin-error" role="alert" tabindex="-1"></p>
       <button type="button" class="btn btn-primary btn-block" id="arrival-checkin-confirm">Check in &amp; join</button>
       <button type="button" class="btn btn-secondary btn-block modal-close">Not there yet</button>
@@ -7567,7 +7857,8 @@
     const courtId = safePositiveId(summary && summary.courtId);
     const sourceModal = button && button.closest('.modal-backdrop');
     if (!courtId) {
-      state.chatSeg = 'nearby';
+      state.chatSeg = 'friends';
+      state.peopleMode = 'nearby';
       switchTab('chat');
       return null;
     }
@@ -7600,19 +7891,83 @@
     });
     if (button?.dataset.joiningRally === 'true') return null;
     const original = button?.innerHTML;
+    const originalAriaLabel = button?.getAttribute('aria-label');
     if (button) {
       button.dataset.joiningRally = 'true';
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
       button.textContent = 'Joining…';
     }
+    let keepConfirmation = false;
     try {
       await api(`/games/${gameId}/join`, { method: 'POST' });
       if (!instantRallySessionMatches(callerSession)) return null;
       clearArrivalAfterConfirmedMembership(callerSession, gameId);
       toast("You're in the rally! 🏓");
       refreshMe().catch(() => {});
-      openResolvedRallyGame(gameId, sourceModal || null);
+      if (button && document.body.contains(button)) {
+        keepConfirmation = true;
+        button._rallyJoinConfirmationCleanup?.();
+        let confirmationTimer = null;
+        const cleanup = () => {
+          clearTimeout(confirmationTimer);
+          confirmationTimer = null;
+          button.removeEventListener('click', undoJoin, true);
+          delete button.dataset.rallyJoinUndo;
+          delete button._rallyJoinConfirmationCleanup;
+        };
+        const openJoinedGame = () => {
+          cleanup();
+          delete button.dataset.joiningRally;
+          openResolvedRallyGame(gameId, sourceModal || null);
+        };
+        const restoreJoinControl = () => {
+          cleanup();
+          delete button.dataset.joiningRally;
+          if (!document.body.contains(button)) return;
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          if (originalAriaLabel == null) button.removeAttribute('aria-label');
+          else button.setAttribute('aria-label', originalAriaLabel);
+          button.innerHTML = original;
+        };
+        async function undoJoin(event) {
+          if (button.dataset.rallyJoinUndo !== 'true') return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          clearTimeout(confirmationTimer);
+          confirmationTimer = null;
+          button.dataset.rallyJoinUndo = 'pending';
+          button.disabled = true;
+          button.textContent = 'Undoing…';
+          try {
+            await api(`/games/${gameId}/leave`, { method: 'POST' });
+            if (!instantRallySessionMatches(callerSession)) { cleanup(); return; }
+            cleanup();
+            button.textContent = 'Left game ✓';
+            toast('Join undone');
+            refreshMe().catch(() => {});
+            setTimeout(restoreJoinControl, 800);
+          } catch (error) {
+            if (!instantRallySessionMatches(callerSession)) { cleanup(); return; }
+            button.dataset.rallyJoinUndo = 'true';
+            button.disabled = false;
+            button.textContent = 'Joined ✓ · Undo';
+            confirmationTimer = setTimeout(openJoinedGame, 4000);
+            toast(error.message);
+          }
+        }
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.dataset.rallyJoinUndo = 'true';
+        button.textContent = 'Joined ✓ · Undo';
+        button.setAttribute('aria-label', 'Joined. Undo joining this rally');
+        button.addEventListener('click', undoJoin, true);
+        button._rallyJoinConfirmationCleanup = cleanup;
+        confirmationTimer = setTimeout(openJoinedGame, 4000);
+      } else {
+        openResolvedRallyGame(gameId, sourceModal || null);
+      }
       return gameId;
     } catch (error) {
       if (!instantRallySessionMatches(callerSession)) return null;
@@ -7658,7 +8013,7 @@
       toast(error.message);
       return null;
     } finally {
-      if (button && document.body.contains(button)) {
+      if (!keepConfirmation && button && document.body.contains(button)) {
         delete button.dataset.joiningRally;
         button.disabled = false;
         button.removeAttribute('aria-busy');
@@ -7671,13 +8026,13 @@
     const modal = openModal(`
       <div class="checkin-sheet">
         <div class="celebrate-emoji" style="font-size:46px">📍</div>
-        <h3 style="margin:6px 0 2px">Check in at ${esc(court.name)}</h3>
-        <p class="row-sub" style="margin-bottom:10px">Choose what you’re doing at this court.</p>
+        <h3 style="margin:6px 0 2px">I’m at ${esc(court.name)}</h3>
+        <p class="row-sub" style="margin-bottom:10px">What do you want to do?</p>
         <button class="btn btn-primary btn-block" id="ci-lfg" style="margin-bottom:10px;padding:16px">
-          <svg class="pb-ic"><use href="#pb"/></svg> I’m here &amp; ready — find a game
+          <svg class="pb-ic"><use href="#pb"/></svg> Find a game now
         </button>
         <button class="btn btn-secondary btn-block" id="ci-play" style="padding:16px">
-          👍 Just playing with my group
+          👍 Just check in
         </button>
         <p class="play-now-privacy"><span aria-hidden="true">👀</span> If you’re ready, signed-in players nearby may see that fresh status until it expires automatically.</p>
         <p class="form-error hidden" id="ci-error" role="alert" tabindex="-1"></p>
@@ -7817,7 +8172,7 @@
       } else if (game.spots_left > 0) {
         action = `<button class="btn btn-primary btn-sm" data-game-join="${game.id}">Join</button>`;
       } else if (game.waitlist_position) {
-        action = `<span class="tag" style="margin:0">⏳ #${game.waitlist_position} in line</span>`;
+        action = `<button class="btn btn-secondary btn-sm" data-game-waitlist-manage="${game.id}">Waitlisted #${game.waitlist_position}</button>`;
       } else {
         action = `<span class="tag warn" style="margin:0">Full</span>
           <button class="btn btn-secondary btn-sm" data-game-waitlist="${game.id}">⏳ Waitlist</button>`;
@@ -7828,7 +8183,7 @@
         cardStyle = 'border:2px solid var(--amber-500)';
         banner = `<div class="status-banner confirm-banner">📝 ${esc(game.score_submitted_by_name || 'Opponent')} reported <b>${scoreText}</b> — is that right?</div>`;
         action = `<button class="btn btn-primary btn-sm" data-game-confirm="${game.id}">✓ Confirm</button>
-                  <button class="btn btn-danger btn-sm" data-game-dispute="${game.id}">✕</button>`;
+                  <button class="btn btn-danger btn-sm" data-game-dispute="${game.id}" aria-label="Dispute this score">✕</button>`;
       } else {
         banner = `<div class="status-banner">⏳ ${scoreText} reported — waiting for opponents to confirm</div>`;
       }
@@ -7878,13 +8233,89 @@
         await openReadyRally(rallySummaryFromDataset(b), b);
         return;
       }
-      try { await api(`/games/${b.dataset.gameJoin}/join`, { method: 'POST' }); toast('You joined the game! \u{1F3BE}'); refreshMe(); refresh(); }
-      catch (err) { toast(err.message); }
+      if (b.disabled) return;
+      if (b.dataset.undoJoin === 'true') {
+        clearTimeout(b._confirmationTimer);
+        b.disabled = true;
+        b.textContent = 'Undoing…';
+        try {
+          await api(`/games/${b.dataset.gameJoin}/leave`, { method: 'POST' });
+          b.textContent = 'Left game ✓';
+          toast('Join undone');
+          refreshMe();
+          setTimeout(refresh, 450);
+        } catch (err) {
+          b.disabled = false;
+          b.textContent = 'Joined ✓ · Undo';
+          toast(err.message);
+        }
+        return;
+      }
+      const original = b.textContent;
+      b.disabled = true;
+      b.setAttribute('aria-busy', 'true');
+      b.textContent = 'Joining…';
+      try {
+        await api(`/games/${b.dataset.gameJoin}/join`, { method: 'POST' });
+        b.removeAttribute('aria-busy');
+        b.dataset.undoJoin = 'true';
+        b.disabled = false;
+        b.textContent = 'Joined ✓ · Undo';
+        b.setAttribute('aria-label', 'Joined. Undo joining this game');
+        toast('Joined 🏓');
+        refreshMe();
+        b._confirmationTimer = setTimeout(refresh, 4000);
+      } catch (err) {
+        b.disabled = false;
+        b.removeAttribute('aria-busy');
+        b.textContent = original;
+        toast(err.message);
+      }
     }));
     rootEl.querySelectorAll('[data-game-waitlist]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
-      try { await api(`/games/${b.dataset.gameWaitlist}/waitlist`, { method: 'POST' }); toast("You're on the waitlist — we'll ping you if a spot opens ⏳"); refresh(); }
-      catch (err) { toast(err.message); }
+      if (b.disabled) return;
+      if (b.dataset.undoWaitlist === 'true') {
+        clearTimeout(b._confirmationTimer);
+        b.disabled = true;
+        b.textContent = 'Leaving…';
+        try {
+          await api(`/games/${b.dataset.gameWaitlist}/waitlist/leave`, { method: 'POST' });
+          b.textContent = 'Left waitlist ✓';
+          toast('Left the waitlist');
+          setTimeout(refresh, 450);
+        } catch (err) {
+          b.disabled = false;
+          b.textContent = b.dataset.confirmationLabel || 'Waitlisted · Leave';
+          toast(err.message);
+        }
+        return;
+      }
+      const original = b.textContent;
+      b.disabled = true;
+      b.setAttribute('aria-busy', 'true');
+      b.textContent = 'Joining waitlist…';
+      try {
+        const updated = await api(`/games/${b.dataset.gameWaitlist}/waitlist`, { method: 'POST' });
+        b.removeAttribute('aria-busy');
+        const position = Number(updated.waitlist_position) || null;
+        b.dataset.undoWaitlist = 'true';
+        b.dataset.confirmationLabel = position ? `Waitlisted #${position} · Leave` : 'Waitlisted · Leave';
+        b.disabled = false;
+        b.textContent = b.dataset.confirmationLabel;
+        b.setAttribute('aria-label', `${b.dataset.confirmationLabel}. Leave the waitlist`);
+        toast("Waitlisted — we'll let you know if a spot opens ⏳");
+        b._confirmationTimer = setTimeout(refresh, 4000);
+      } catch (err) {
+        b.disabled = false;
+        b.removeAttribute('aria-busy');
+        b.textContent = original;
+        toast(err.message);
+      }
+    }));
+    rootEl.querySelectorAll('[data-game-waitlist-manage]').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openGameScreen(Number(b.dataset.gameWaitlistManage));
     }));
     rootEl.querySelectorAll('[data-game-confirm]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -7970,7 +8401,9 @@
       </span>`).join('');
     return `
       <div class="roster-boost-summary${full ? ' is-full' : ''}">
-        <div class="roster-boost-count"><b>${full ? 'Roster full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</b>
+        <div class="roster-boost-count"><b>${full ? 'Roster full' : spotsLeft === 1
+          ? '1 spot left. The first person to join gets it.'
+          : `${spotsLeft} spots left. The next ${spotsLeft} players to join get them.`}</b>
           <span>${players.length}/${game.max_players} players · ${esc(fmtDateTime(game.scheduled_at))}</span>
         </div>
         <div class="roster-boost-people">${roster}</div>
@@ -8001,12 +8434,16 @@
     const sentInviteIds = new Set();
 
     const sheet = openModal(`
-      ${modalHead('＋ Fill the game')}
+      ${modalHead('Find players')}
       <div class="roster-boost">
         <div id="rb-summary"></div>
-        <p class="roster-boost-trust">Invites don’t reserve a spot. First joins fill the roster.</p>
-        ${game.is_instant ? `<p class="arrival-retry-note">${esc(rallyCountsText(rallySummaryFromValue(game)))}. Invitations do not replace the traveling player’s held spot.</p>` : ''}
-        <section class="roster-boost-channel" aria-labelledby="rb-friends-title">
+        ${game.is_instant ? `<p class="arrival-retry-note">${esc(rallyCountsText(rallySummaryFromValue(game)))}. A player who is arriving keeps the travel spot shown above.</p>` : ''}
+        <div id="rb-primary-channel"></div>
+        <details class="roster-boost-more hidden" id="rb-more-channels">
+          <summary>More ways to share</summary>
+          <div class="roster-boost-more-body" id="rb-more-channels-body"></div>
+        </details>
+        <section class="roster-boost-channel" id="rb-friends-channel" aria-labelledby="rb-friends-title">
           <div class="roster-boost-channel-head">
             <span class="roster-boost-channel-icon">👥</span>
             <div><b id="rb-friends-title">Invite friends</b><span>Pick several and send once.</span></div>
@@ -8017,12 +8454,12 @@
         <section class="roster-boost-channel hidden" id="rb-court-channel" aria-labelledby="rb-court-title">
           <div class="roster-boost-channel-head">
             <span class="roster-boost-channel-icon">📣</span>
-            <div><b id="rb-court-title">Ask the court</b><span>Post one live card in ${esc(game.court?.name || 'court')} chat.</span></div>
+            <div><b id="rb-court-title">Post to court chat</b><span>Share one live opening in ${esc(game.court?.name || 'court')} chat.</span></div>
           </div>
           <button type="button" class="btn btn-secondary btn-block" id="rb-post-court">Post to court chat</button>
           <button type="button" class="roster-boost-withdraw hidden" id="rb-withdraw-court">Withdraw court post</button>
         </section>
-        <section class="roster-boost-channel" aria-labelledby="rb-share-title">
+        <section class="roster-boost-channel" id="rb-share-channel" aria-labelledby="rb-share-title">
           <div class="roster-boost-channel-head">
             <span class="roster-boost-channel-icon">📤</span>
             <div><b id="rb-share-title">Share anywhere</b><span>Text the live game link to any group.</span></div>
@@ -8032,17 +8469,23 @@
         <div class="roster-boost-receipts" id="rb-receipts"></div>
         <div class="roster-boost-status" id="rb-status" role="status" aria-live="polite" aria-atomic="true"></div>
       </div>
-    `, { label: 'Fill the game' });
+    `, { label: 'Find players' });
 
     const summaryEl = sheet.querySelector('#rb-summary');
+    const friendsSection = sheet.querySelector('#rb-friends-channel');
     const friendsEl = sheet.querySelector('#rb-friends');
     const sendButton = sheet.querySelector('#rb-invite-send');
     const courtSection = sheet.querySelector('#rb-court-channel');
     const postButton = sheet.querySelector('#rb-post-court');
     const withdrawButton = sheet.querySelector('#rb-withdraw-court');
     const shareButton = sheet.querySelector('#rb-share');
+    const shareSection = sheet.querySelector('#rb-share-channel');
+    const primaryChannel = sheet.querySelector('#rb-primary-channel');
+    const moreChannels = sheet.querySelector('#rb-more-channels');
+    const moreChannelsBody = sheet.querySelector('#rb-more-channels-body');
     const receiptsEl = sheet.querySelector('#rb-receipts');
     const statusEl = sheet.querySelector('#rb-status');
+    let primaryChannelId = '';
 
     const announce = (message, tone = '') => {
       statusEl.textContent = message || '';
@@ -8065,6 +8508,7 @@
     };
     const renderFriends = () => {
       if (!friendsReady) {
+        friendsSection.classList.remove('hidden');
         friendsEl.innerHTML = friendsError
           ? '<button type="button" class="btn btn-secondary btn-block" id="rb-friends-retry">Retry loading friends</button>'
           : '<div class="roster-boost-loading">Loading your crew…</div>';
@@ -8073,6 +8517,7 @@
         return;
       }
       const candidates = invitableFriends();
+      friendsSection.classList.toggle('hidden', candidates.length === 0);
       const candidateIds = new Set(candidates.map((friend) => Number(friend.id)));
       [...selected].forEach((userId) => { if (!candidateIds.has(userId)) selected.delete(userId); });
       friendsEl.innerHTML = candidates.length ? candidates.map((friend) => {
@@ -8083,9 +8528,7 @@
           data-rb-friend="${userId}" aria-pressed="${active}" ${sent ? 'disabled' : ''}>
           ${avatarHtml(friend, 'sm')} ${esc((friend.display_name || 'Player').split(' ')[0])}${sent ? ' ✓' : ''}
         </button>`;
-      }).join('') : `<div class="empty-state roster-boost-empty">${friends.length
-        ? 'Everyone in your friends list is already on this roster.'
-        : 'No friends here yet — the share link still works for any group.'}</div>`;
+      }).join('') : '';
       syncSendButton();
     };
     const renderCourtAction = () => {
@@ -8110,7 +8553,7 @@
       } else {
         postButton.disabled = busy || !gameOpenCallCanBeCreated(game);
         postButton.textContent = gameOpenCallCanBeCreated(game)
-          ? `Post ${game.spots_left} open spot${game.spots_left === 1 ? '' : 's'} to court chat`
+          ? `Post ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left to court chat`
           : 'Court posting is no longer available';
       }
     };
@@ -8126,8 +8569,41 @@
       renderFriends();
       renderCourtAction();
       renderReceipts();
+      const full = Number(game.spots_left) <= 0 || game.status !== 'upcoming';
+      const hasFriends = friendsReady && invitableFriends().length > 0;
+      const hasCourtPost = !courtSection.classList.contains('hidden');
+      const callState = String(openCall && openCall.state || '');
+      const canManageCourtPost = ['open', 'full'].includes(callState) && !!openCall.can_withdraw;
+      const canCreateCourtPost = !openCall && gameOpenCallCanBeCreated(game);
+      const hasCourtAction = hasCourtPost && (canManageCourtPost || canCreateCourtPost);
+      friendsSection.classList.toggle('hidden', full || (friendsReady && !hasFriends));
+      courtSection.classList.toggle('hidden', full || !hasCourtPost);
+      shareSection.classList.toggle('hidden', full);
+      postButton.classList.toggle('btn-primary', !full && !hasFriends && hasCourtAction);
+      postButton.classList.toggle('btn-secondary', full || hasFriends || !hasCourtAction);
+      shareButton.classList.toggle('btn-primary', !full && !hasFriends && !hasCourtAction);
+      shareButton.classList.toggle('btn-secondary', full || hasFriends || hasCourtAction);
       shareButton.disabled = busy;
-      if (Number(game.spots_left) <= 0 && !statusEl.textContent) {
+      const availableChannels = [friendsSection, courtSection, shareSection]
+        .filter((section) => !section.classList.contains('hidden'));
+      const usableChannels = [
+        hasFriends ? friendsSection : null,
+        hasCourtAction ? courtSection : null,
+        !full ? shareSection : null,
+      ].filter((section) => section && availableChannels.includes(section));
+      const orderedChannels = [
+        ...usableChannels,
+        ...availableChannels.filter((section) => !usableChannels.includes(section)),
+      ];
+      const lead = orderedChannels[0] || null;
+      if ((lead?.id || '') !== primaryChannelId) {
+        primaryChannelId = lead?.id || '';
+        moreChannels.open = false;
+      }
+      if (lead) primaryChannel.appendChild(lead);
+      orderedChannels.slice(1).forEach((section) => moreChannelsBody.appendChild(section));
+      moreChannels.classList.toggle('hidden', orderedChannels.length < 2);
+      if (full && !statusEl.textContent) {
         announce('Roster full — game on! 🏓', 'success');
       }
     };
@@ -8147,7 +8623,7 @@
     const loadFriends = async () => {
       friendsReady = false;
       friendsError = false;
-      renderFriends();
+      renderAll();
       try {
         const response = await api('/friends');
         if (!document.body.contains(sheet) || Number(state.me && state.me.id) !== accountId) return;
@@ -8157,7 +8633,7 @@
         if (!document.body.contains(sheet)) return;
         friendsError = true;
       }
-      renderFriends();
+      renderAll();
     };
     const refreshGame = async () => {
       const fresh = await api(`/games/${game.id}`);
@@ -8202,12 +8678,12 @@
       if (postButton.disabled || busy) return;
       const attempt = pendingGameOpenCallAttempt(accountId, game.id);
       if (!attempt) {
-        announce('Nothing was posted because this browser could not save a safe retry.', 'error');
+        announce('Nothing was posted because this browser could not save your request.', 'error');
         return;
       }
       busy = true;
       renderAll();
-      announce('Posting one live card to the court room…');
+      announce('Posting one live card to court chat…');
       try {
         const response = await api(`/games/${game.id}/open-call`, {
           method: 'POST',
@@ -8216,12 +8692,12 @@
         openCall = response.open_call;
         postReceipt = response.open_call.state === 'withdrawn'
           ? 'Court post already withdrawn'
-          : 'Court room post is live';
+          : 'Court chat post is live';
         if (response.game) acceptFreshGame(response.game, response.open_call);
         announce(postReceipt, 'success');
       } catch (error) {
         announce(error.isNetworkError
-          ? 'Confirmation was interrupted — tap Post again to recover safely.'
+          ? 'We couldn’t confirm the post. Tap Post again.'
           : error.message, 'error');
       } finally {
         busy = false;
@@ -8618,6 +9094,119 @@
     if (original != null) button.innerHTML = original;
   }
 
+  function showInstantRallyManagement(button, result, options = {}, callerSession = null) {
+    const game = result && result.game;
+    const gameId = safePositiveId(game && game.id);
+    const ownsRally = !!game && (game.is_creator
+      || safePositiveId(game.creator_id) === safePositiveId(callerSession && callerSession.userId));
+    if (!button || !gameId || !ownsRally || result.outcome === 'joined' || result.recovered
+        || !document.body.contains(button)) return false;
+
+    button._instantRallyManagementCleanup?.();
+    const sourceModal = options.fromModal || button.closest('.modal-backdrop') || null;
+    const originalHtml = options.confirmationOriginalHtml ?? button.innerHTML;
+    const originalAriaLabel = button.getAttribute('aria-label');
+    let confirmationTimer = null;
+    let more = null;
+
+    const clearManagement = () => {
+      clearTimeout(confirmationTimer);
+      confirmationTimer = null;
+      more?.remove();
+      more = null;
+      button.removeEventListener('click', handlePrimaryClick, true);
+      delete button.dataset.instantRallyAction;
+      delete button.dataset.instantRallyGameId;
+      delete button._instantRallyManagementCleanup;
+    };
+
+    const restoreLauncher = () => {
+      if (!document.body.contains(button)) return;
+      clearManagement();
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      if (originalAriaLabel == null) button.removeAttribute('aria-label');
+      else button.setAttribute('aria-label', originalAriaLabel);
+      button.innerHTML = originalHtml;
+    };
+
+    const cancelRally = async (trigger) => {
+      if (!instantRallySessionMatches(callerSession)) {
+        clearManagement();
+        return;
+      }
+      clearTimeout(confirmationTimer);
+      confirmationTimer = null;
+      trigger.disabled = true;
+      trigger.setAttribute('aria-busy', 'true');
+      trigger.textContent = 'Cancelling…';
+      try {
+        await api(`/games/${gameId}/cancel`, { method: 'POST' });
+        if (!instantRallySessionMatches(callerSession)) return;
+        more?.remove();
+        more = null;
+        button.dataset.instantRallyAction = 'cancelled';
+        button.disabled = true;
+        button.removeAttribute('aria-busy');
+        button.textContent = 'Game cancelled ✓';
+        state.playGamesCache = null;
+        toast('Game cancelled');
+        refreshMe().catch(() => {});
+        fetchCourtsInView();
+        setTimeout(restoreLauncher, 1200);
+      } catch (error) {
+        if (!instantRallySessionMatches(callerSession)) return;
+        trigger.disabled = false;
+        trigger.removeAttribute('aria-busy');
+        trigger.textContent = trigger === button ? 'Game started · Cancel' : 'Cancel game';
+        button.dataset.instantRallyAction = trigger === button ? 'cancel' : 'open';
+        toast(error.message);
+      }
+    };
+
+    const revealManagement = () => {
+      if (!instantRallySessionMatches(callerSession) || !document.body.contains(button)) {
+        clearManagement();
+        return;
+      }
+      button.dataset.instantRallyAction = 'open';
+      button.textContent = 'Open game';
+      button.setAttribute('aria-label', 'Game started. Open game details');
+      more = document.createElement('details');
+      more.className = 'game-more-actions instant-rally-management';
+      more.innerHTML = '<summary>More</summary><div class="game-more-actions-body"><button type="button" class="btn btn-danger btn-block">Cancel game</button></div>';
+      more.querySelector('button').addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelRally(event.currentTarget);
+      });
+      button.insertAdjacentElement('afterend', more);
+    };
+
+    function handlePrimaryClick(event) {
+      const action = button.dataset.instantRallyAction;
+      if (!action) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (action === 'cancel') {
+        cancelRally(button);
+      } else if (action === 'open') {
+        openResolvedRallyGame(gameId, sourceModal);
+      }
+    }
+
+    button._instantRallyManagementCleanup = clearManagement;
+    button.dataset.instantRallyAction = 'cancel';
+    button.dataset.instantRallyGameId = String(gameId);
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    button.textContent = 'Game started · Cancel';
+    button.setAttribute('aria-label', 'Game started. Cancel this game');
+    button.addEventListener('click', handlePrimaryClick, true);
+    confirmationTimer = setTimeout(revealManagement, 4000);
+    return true;
+  }
+
   async function startInstantRally(button, options = {}) {
     if ((!state.presence || !state.presence.checked_in) && !options.presenceConfirmed) {
       openPlayNowCourtPicker();
@@ -8668,7 +9257,7 @@
         if (!instantRallySessionMatches(callerSession)) return { abandoned: true };
         const game = result && result.game;
         if (!game || !safePositiveId(game.id)) {
-          const malformed = new Error('The rally may have started, but its game could not be confirmed. Retry safely.');
+          const malformed = new Error('The rally may have started, but we couldn’t confirm its game. Try again.');
           malformed.isNetworkError = true;
           throw malformed;
         }
@@ -8707,7 +9296,7 @@
           state.playGamesCache = null;
           toast(error.code === 'active_rally_elsewhere'
             ? 'You already have a rally in progress — opening it now'
-            : 'That rally already exists — opening it safely');
+            : 'That rally already exists — opening it');
           refreshMe().catch(() => {});
           return {
             result: { outcome: 'existing', recovered: true, game: recoveredGame },
@@ -8752,7 +9341,10 @@
         { error: resolution.error, retrySafely: false }, options, callerSession,
       );
     }
-    return finishInstantRallyCall(resolution, options, callerSession);
+    const finishOptions = button && !options.confirmationButton
+      ? { ...options, confirmationButton: button }
+      : options;
+    return finishInstantRallyCall(resolution, finishOptions, callerSession);
   }
 
   function finishInstantRallyCall(resolution, options = {}, callerSession = null) {
@@ -8778,7 +9370,7 @@
         return null;
       }
       const message = resolution.retrySafely
-        ? 'Couldn’t confirm the rally — tap again to safely check it'
+        ? 'Couldn’t confirm the rally — tap again'
         : resolution.error.message;
       if (options.onError) options.onError(resolution.error, resolution.retrySafely);
       else toast(message);
@@ -8786,7 +9378,11 @@
     }
     const result = resolution.result;
     const gameId = safePositiveId(result && result.game && result.game.id);
-    if (gameId && options.openGame !== false) {
+    const confirmationButton = options.confirmationButton || null;
+    const keptAnchor = showInstantRallyManagement(
+      confirmationButton, result, options, callerSession,
+    );
+    if (gameId && options.openGame !== false && !keptAnchor) {
       // Each caller owns its own current sheet/navigation intent. The shared
       // promise only deduplicates the network mutation, so a dismissed first
       // sheet cannot strand a later, still-visible confirmation sheet.
@@ -8799,47 +9395,64 @@
     const here = state.presence && state.presence.checked_in;
     const pulse = here ? null : normalizeActivePlayPulse(state.activePlayPulse);
     if (!here && state.activePlayPulse && !pulse) state.activePlayPulse = null;
-    const title = here ? `Ready at ${esc(state.presence.court_name)}`
-      : pulse ? 'Your hour is live' : 'How do you want to play?';
+    const title = here ? `At ${esc(state.presence.court_name)}`
+      : pulse ? 'Your hour is live' : 'Ready to play?';
     const sub = here
-      ? 'Start a pickup game in seconds, or make a plan for later.'
-      : pulse ? 'Nearby players can turn your destination into a real quick game.'
-        : 'Share where you could play this hour, jump in now, or make a plan.';
-    const actions = here || pulse ? `
-          <button type="button" class="rally-action primary" data-goto="${here ? 'instant-rally' : 'play-now'}">
+      ? 'Start or join the live rally here, or make a plan for later.'
+      : pulse ? 'Nearby players can respond to the court you picked.'
+        : 'Play soon, arrive in a few minutes, or play anytime in the next hour.';
+    const immediateAction = here
+      ? `<button type="button" class="rally-action primary" data-goto="instant-rally">
+          <span class="rally-action-icon">⚡</span>
+          <span><b>Find or start a game</b><small>At ${esc(state.presence.court_name)}</small></span>
+        </button>`
+      : pulse ? ''
+        : `<button type="button" class="rally-action primary" data-goto="play-soon">
             <span class="rally-action-icon">⚡</span>
-            <span><b>${here ? 'Start a rally here' : 'Play now'}</b><small>${here ? 'Join one or create one' : 'Confirm where you are'}</small></span>
-          </button>
-          <button type="button" class="rally-action" data-goto="new-game">
-            <span class="rally-action-icon">📅</span>
-            <span><b>Plan ahead</b><small>Pick a time &amp; crew</small></span>
-          </button>` : `
-          <button type="button" class="rally-action primary" data-goto="play-pulse">
-            <span class="rally-action-icon">📣</span>
-            <span><b>Available this hour</b><small>Pick an intended court</small></span>
-          </button>
-          <button type="button" class="rally-action" data-goto="play-now">
-            <span class="rally-action-icon">⚡</span>
-            <span><b>Play now</b><small>Confirm where you are</small></span>
-          </button>
-          <button type="button" class="rally-action" data-goto="new-game">
-            <span class="rally-action-icon">📅</span>
-            <span><b>Plan ahead</b><small>Pick a time &amp; crew</small></span>
+            <span><b>Play soon</b><small>Now, arriving, or free this hour</small></span>
           </button>`;
+    const actions = `${immediateAction}
+      <button type="button" class="rally-action" data-goto="new-game">
+        <span class="rally-action-icon">📅</span>
+        <span><b>Plan a game</b><small>Choose where, when, and who</small></span>
+      </button>`;
     return `
       <section class="rally-launch" aria-labelledby="rally-title">
         <div class="rally-kicker">Get on court</div>
         <h3 id="rally-title">${title}</h3>
         <p>${sub}</p>
         ${pulse ? activePlayPulseBannerHtml(pulse) : ''}
-        <div class="rally-actions ${!here && !pulse ? 'three' : ''}">${actions}</div>
+        <div class="rally-actions">${actions}</div>
       </section>`;
+  }
+
+  function playMoreRoutesHtml() {
+    return `<section class="play-more-routes" aria-labelledby="play-more-title">
+      <div class="section-label" id="play-more-title">More ways to play</div>
+      <div class="row">
+        ${state.playSeg === 'games' ? '' : '<button type="button" class="btn btn-secondary" data-play-route="games">🏓 Games</button>'}
+        <button type="button" class="btn btn-secondary" data-play-route="scores" ${state.playSeg === 'scores' ? 'aria-current="page"' : ''}>🏆 Rankings</button>
+        <button type="button" class="btn btn-secondary" data-play-route="brackets" ${state.playSeg === 'brackets' ? 'aria-current="page"' : ''}>🎯 Competitions</button>
+      </div>
+    </section>`;
+  }
+
+  function bindPlayMoreRoutes(root) {
+    root.querySelectorAll('[data-play-route]').forEach((button) => button.addEventListener('click', () => {
+      state.playSeg = button.dataset.playRoute;
+      syncPlayFab();
+      renderPlay();
+    }));
   }
 
   async function renderPlay({ reuseFresh = false, useCachedData = false } = {}) {
     const seg = state.playSeg;
     const liveEl = $('#play-content');
-    liveEl.setAttribute('aria-labelledby', `play-tab-${seg}`);
+    if (document.getElementById(`play-tab-${seg}`)) liveEl.setAttribute('aria-labelledby', `play-tab-${seg}`);
+    else {
+      liveEl.removeAttribute('aria-labelledby');
+      liveEl.setAttribute('aria-label', 'Play');
+    }
     const viewKey = `${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}`;
     if (reuseFresh && viewIsFresh(liveEl, viewKey)) return;
     const renderSeq = ++state.playRenderSeq;
@@ -8855,14 +9468,28 @@
       return true;
     };
     const loc = areaLatLng();
-    if (seg === 'brackets') { await renderTournaments(el, () => renderPlay()); commit(); return; }
+    if (seg === 'brackets') {
+      await renderTournaments(el, () => renderPlay());
+      el.insertAdjacentHTML('afterbegin', playMoreRoutesHtml());
+      bindPlayMoreRoutes(el);
+      commit();
+      return;
+    }
     try {
       if (seg === 'scores') {
-        const scope = state.boardScope || 'near';
-        const boardUrl = scope === 'near'
-          ? `/leaderboard?lat=${loc.lat}&lng=${loc.lng}&radius=50`
-          : scope === 'month' ? '/leaderboard?period=month' : '/leaderboard';
-        const isMonth = scope === 'month';
+        let scope = state.boardScope || 'near';
+        if (scope === 'month') {
+          // Migrate the former one-dimensional "This month" scope in memory.
+          scope = 'all';
+          state.boardScope = 'all';
+          state.boardPeriod = 'month';
+        }
+        const period = state.boardPeriod === 'month' ? 'month' : 'all';
+        const params = [];
+        if (scope === 'near') params.push(`lat=${loc.lat}`, `lng=${loc.lng}`, 'radius=50');
+        if (period === 'month') params.push('period=month');
+        const boardUrl = `/leaderboard${params.length ? `?${params.join('&')}` : ''}`;
+        const isMonth = period === 'month';
         const boardVal = (u) => (isMonth
           ? `<span class="${u.month_delta >= 0 ? 'delta-up' : 'delta-down'}">${u.month_delta >= 0 ? '+' : ''}${u.month_delta}</span>`
           : u.rating);
@@ -8870,11 +9497,16 @@
           api(boardUrl),
           api(`/games/results?lat=${loc.lat}&lng=${loc.lng}`),
         ]);
-        let html = `
-          <div class="segmented" id="board-scope" style="margin:2px 0 12px">
-            <button data-scope="near" class="${scope === 'near' ? 'active' : ''}">📍 Near me</button>
-            <button data-scope="all" class="${scope === 'all' ? 'active' : ''}">🌎 Everyone</button>
-            <button data-scope="month" class="${isMonth ? 'active' : ''}">📈 This month</button>
+        let html = playMoreRoutesHtml() + `
+          <div class="rankings-filters">
+            <div class="segmented" id="board-geography" role="group" aria-label="Ranking area">
+              <button type="button" data-scope="near" class="${scope === 'near' ? 'active' : ''}" aria-pressed="${scope === 'near'}">📍 Near me</button>
+              <button type="button" data-scope="all" class="${scope === 'all' ? 'active' : ''}" aria-pressed="${scope === 'all'}">🌎 Everyone</button>
+            </div>
+            <div class="segmented" id="board-period" role="group" aria-label="Ranking period">
+              <button type="button" data-period="all" class="${!isMonth ? 'active' : ''}" aria-pressed="${!isMonth}">All time</button>
+              <button type="button" data-period="month" class="${isMonth ? 'active' : ''}" aria-pressed="${isMonth}">This month</button>
+            </div>
           </div>`;
 
         if (board.items.length) {
@@ -8905,8 +9537,20 @@
               </div>`).join('');
           }
           const me = state.me;
-          if (me && !board.items.some((u) => u.id === me.id)) {
-            html += `<div class="card row" style="padding:10px 14px">
+          const meIndex = me ? board.items.findIndex((u) => u.id === me.id) : -1;
+          if (me && meIndex >= 10) {
+            const boardMe = board.items[meIndex];
+            html += `<div class="card row you-row" data-view-user="${boardMe.id}" style="cursor:pointer;padding:10px 14px">
+              <div class="rank-num">${meIndex + 1}</div>
+              ${avatarHtml(boardMe, 'sm')}
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">You</div>
+                <div class="row-sub">${isMonth ? `${boardMe.month_games} ranked game${boardMe.month_games === 1 ? '' : 's'} this month` : `${boardMe.ranked_wins}W – ${boardMe.ranked_losses}L`}</div>
+              </div>
+              <div class="stat-value" style="font-size:16px">${boardVal(boardMe)}</div>
+            </div>`;
+          } else if (me && meIndex === -1) {
+            html += `<div class="card row you-row" style="padding:10px 14px">
               <div class="rank-num">—</div>
               ${avatarHtml(me, 'sm')}
               <div class="row-main">
@@ -8938,14 +9582,21 @@
 
         if (state.playSeg !== seg) return; // a newer segment render owns the panel
         el.innerHTML = html;
-        el.querySelector('#board-scope').addEventListener('click', (e) => {
+        el.querySelector('#board-geography').addEventListener('click', (e) => {
           const btn = e.target.closest('button');
           if (!btn) return;
           state.boardScope = btn.dataset.scope;
           renderPlay();
         });
+        el.querySelector('#board-period').addEventListener('click', (e) => {
+          const btn = e.target.closest('button');
+          if (!btn) return;
+          state.boardPeriod = btn.dataset.period;
+          renderPlay();
+        });
         bindGameButtons(el, renderPlay);
         bindUserButtons(el);
+        bindPlayMoreRoutes(el);
         commit();
         return;
       }
@@ -8957,12 +9608,10 @@
           api('/games?mine=1'),
           api('/games?friends=1').catch(() => ({ items: [] })),
           api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60`),
-          api('/tournaments?mine=1').catch(() => ({ items: [] })),
-          api(`/tournaments?lat=${loc.lat}&lng=${loc.lng}&radius=60`).catch(() => ({ items: [] })),
         ]);
         state.playGamesCache = gameBundle;
       }
-      const [mine, friends, nearby, tMine, tNear] = gameBundle;
+      const [mine, friends, nearby] = gameBundle;
       const nowMs = Date.now();
       const toScore = mine.items.filter((g) =>
         g.status === 'upcoming' && g.can_enter_score
@@ -8982,62 +9631,7 @@
       const nearbyOpen = nearby.items.filter((g) =>
         !mineIds.has(g.id) && !friendsIds.has(g.id) && !instantRallyClosed(g));
 
-      // --- "This week" planner: one strip answering "when is there play?" ---
-      const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-      const week = [];
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(); d.setDate(d.getDate() + i); d.setHours(0, 0, 0, 0);
-        week.push(d);
-      }
-      const events = [];
-      const evSeen = new Set();
-      const addGameEvent = (g) => {
-        if (g.status !== 'upcoming' || instantRallyScorePending(g)
-            || instantRallyClosed(g) || evSeen.has(`g${g.id}`)) return;
-        evSeen.add(`g${g.id}`);
-        events.push({ when: new Date(g.scheduled_at), type: 'game', item: g });
-      };
-      mine.items.forEach(addGameEvent);
-      friendsGames.forEach(addGameEvent);
-      nearbyOpen.forEach(addGameEvent);
-      [...(tMine.items || []), ...(tNear.items || [])].forEach((t) => {
-        if (evSeen.has(`t${t.id}`) || (t.status !== 'registration' && t.status !== 'active')) return;
-        evSeen.add(`t${t.id}`);
-        events.push({ when: new Date(t.starts_at), type: 'tournament', item: t });
-      });
-      const countsByDay = week.map((d) => events.filter((ev) => dayKey(ev.when) === dayKey(d)).length);
-      const sel = state.weekDayFilter;
-      const dayLabelShort = (d, i) => (i === 0 ? 'Today' : i === 1 ? 'Tmrw' : d.toLocaleDateString([], { weekday: 'short' }));
-
-      let html = rallyLauncherHtml() + `<div class="quick-times" id="week-strip" style="margin:2px 0 10px">${week.map((d, i) => `
-        <button type="button" data-day-i="${i}" class="${sel === i ? 'active' : ''}">${dayLabelShort(d, i)}${countsByDay[i] ? ` · ${countsByDay[i]}` : ''}</button>`).join('')}</div>`;
-      const bindWeekStrip = () => el.querySelector('#week-strip')?.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-day-i]');
-        if (!btn) return;
-        const i = Number(btn.dataset.dayI);
-        state.weekDayFilter = state.weekDayFilter === i ? null : i;
-        renderPlay({ useCachedData: true });
-      });
-
-      if (sel != null) {
-        // Day view: just that day's play, in time order.
-        const dayEvents = events
-          .filter((ev) => dayKey(ev.when) === dayKey(week[sel]))
-          .sort((a, b) => a.when - b.when);
-        html += `<div class="section-label">📅 ${sel === 0 ? 'Today' : week[sel].toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</div>`;
-        html += dayEvents.length
-          ? dayEvents.map((ev) => (ev.type === 'tournament' ? tournamentCardHtml(ev.item) : gameCardHtml(ev.item))).join('')
-          : '<div class="empty-state" style="padding:18px">Nothing on the calendar yet.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px"><svg class="pb-ic"><use href="#pb"/></svg> Start a game</button></div>';
-        if (state.playSeg !== seg) return; // a newer segment render owns the panel
-        el.innerHTML = html;
-        bindWeekStrip();
-        bindGameButtons(el, renderPlay);
-        el.querySelectorAll('[data-open-tournament]').forEach((card) => {
-          card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
-        });
-        commit();
-        return;
-      }
+      let html = rallyLauncherHtml();
 
       if (toScore.length) {
         html += '<div class="section-label" style="margin-top:6px"><svg class="pb-ic"><use href="#pb"/></svg> Played — enter the score</div>';
@@ -9052,8 +9646,8 @@
         html += waiting.map((g) => gameCardHtml(g)).join('');
       }
       if (upcoming.length) {
-        html += '<div class="section-label">Your upcoming games</div>';
-        html += upcoming.map((g) => gameCardHtml(g)).join('');
+        html += '<div class="section-label">Next game</div>';
+        html += gameCardHtml(upcoming[0]);
       }
       // Weekly open-play sessions get their own discovery section, whether a
       // friend hosts them or they're just nearby. Your own stay under "upcoming".
@@ -9061,10 +9655,6 @@
       const weeklySessions = [...friendsGames.filter(isWeekly), ...nearbyOpen.filter(isWeekly)];
       const friendsOneOff = friendsGames.filter((g) => !isWeekly(g));
       const nearbyOneOff = nearbyOpen.filter((g) => !isWeekly(g));
-      if (friendsOneOff.length) {
-        html += '<div class="section-label">🤝 Friends playing</div>';
-        html += friendsOneOff.map((g) => gameCardHtml(g)).join('');
-      }
       // Best skill/time fits get pulled out of the nearby list into their own rail.
       const picked = nearbyOneOff
         .filter((g) => gameMatchReasons(g).length)
@@ -9073,26 +9663,34 @@
         .slice(0, 3);
       const pickedIds = new Set(picked.map((g) => g.id));
       const restNearby = nearbyOneOff.filter((g) => !pickedIds.has(g.id));
-      if (picked.length) {
-        html += '<div class="section-label">⭐ Picked for you</div>';
-        html += picked.map((g) => gameCardHtml(g)).join('');
-      }
-      if (restNearby.length || !picked.length) {
-        html += '<div class="section-label">Nearby games</div>';
-        html += restNearby.length
-          ? restNearby.map((g) => gameCardHtml(g)).join('')
-          : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px"><svg class="pb-ic"><use href="#pb"/></svg> Start a game</button><br><button class="btn btn-secondary btn-sm" data-invite-share style="margin-top:8px">💌 Invite friends to play</button></div>';
-      }
-      if (weeklySessions.length) {
-        html += '<div class="section-label">🔁 Weekly open play</div>';
-        html += weeklySessions.map((g) => gameCardHtml(g)).join('');
+      const discovery = [];
+      const discoveryIds = new Set();
+      [...friendsOneOff, ...picked, ...restNearby, ...weeklySessions].forEach((game) => {
+        if (!discoveryIds.has(game.id)) { discoveryIds.add(game.id); discovery.push(game); }
+      });
+      const featuredDiscovery = discovery.slice(0, 2);
+      html += '<div class="section-label">Games near you</div>';
+      html += featuredDiscovery.length
+        ? featuredDiscovery.map((game) => gameCardHtml(game, { compact: true })).join('')
+        : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px"><svg class="pb-ic"><use href="#pb"/></svg> Start a game</button><br><button class="btn btn-secondary btn-sm" data-invite-share style="margin-top:8px">💌 Invite friends to play</button></div>';
+      const moreUpcoming = upcoming.slice(1);
+      const moreDiscovery = discovery.slice(2);
+      if (moreUpcoming.length || moreDiscovery.length) {
+        html += `<details class="play-game-depth">
+          <summary>See all games · ${moreUpcoming.length + moreDiscovery.length} more</summary>
+          <div class="play-game-depth-body">
+            ${moreUpcoming.length ? `<div class="section-label">Your upcoming games</div>${moreUpcoming.map((game) => gameCardHtml(game, { compact: true })).join('')}` : ''}
+            ${moreDiscovery.length ? `<div class="section-label">More nearby games</div>${moreDiscovery.map((game) => gameCardHtml(game, { compact: true })).join('')}` : ''}
+          </div>
+        </details>`;
       }
       // Capture spontaneous pickup games that never got scheduled here.
       html += '<button class="btn btn-secondary btn-block" id="pl-log-game" style="margin-top:14px">✍️ Log a game you already played</button>';
+      html += playMoreRoutesHtml();
 
       if (state.playSeg !== seg) return; // a newer segment render owns the panel
       el.innerHTML = html;
-      bindWeekStrip();
+      bindPlayMoreRoutes(el);
       el.querySelector('#pl-log-game')?.addEventListener('click', openLogGameSheet);
       bindGameButtons(el, renderPlay);
       commit();
@@ -9122,7 +9720,7 @@
   }
 
   function setupPlay() {
-    $('#play-segments').addEventListener('click', (e) => {
+    $('#play-segments')?.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       const changed = state.playSeg !== btn.dataset.seg;
@@ -9135,19 +9733,21 @@
       syncPlayFab();
       renderPlay({ reuseFresh: !changed });
     });
-    $('#new-game-fab').addEventListener('click', () => {
+    $('#new-game-fab')?.addEventListener('click', () => {
       if (state.playSeg === 'scores') openNewGameModal({ gameType: 'ranked' });
       else if (state.playSeg === 'brackets') openCompetitionCreateSheet();
       else openNewGameModal();
     });
     syncPlayFab();
-    $('#play-activity').addEventListener('click', openActivity);
-    $('#play-avatar-button').addEventListener('click', () => switchTab('profile'));
+    $('#play-activity')?.addEventListener('click', openActivity);
+    $('#play-avatar-button')?.addEventListener('click', () => switchTab('profile'));
   }
 
   function syncPlayFab() {
     const fab = $('#new-game-fab');
     if (!fab) return;
+    // Compete owns one labeled create path in its page content.
+    fab.classList.toggle('hidden', state.playSeg === 'brackets');
     const label = state.playSeg === 'scores' ? 'Start a ranked game'
       : state.playSeg === 'brackets' ? 'Create a competition' : 'Start a new game';
     fab.setAttribute('aria-label', label);
@@ -9218,11 +9818,11 @@
       </div>
       <div class="score-grid">
         <div class="score-panel"><div class="score-team-label">You</div>
-          <div class="score-stepper"><button type="button" data-lg-step="-1" data-lg-target="lg-s1">−</button><input type="number" id="lg-s1" min="0" max="99" value="11" inputmode="numeric" /><button type="button" data-lg-step="1" data-lg-target="lg-s1">＋</button></div>
+          <div class="score-stepper"><button type="button" data-lg-step="-1" data-lg-target="lg-s1" aria-label="Decrease your score">−</button><input type="number" id="lg-s1" min="0" max="99" value="11" inputmode="numeric" aria-label="Your score" /><button type="button" data-lg-step="1" data-lg-target="lg-s1" aria-label="Increase your score">＋</button></div>
         </div>
         <div class="score-vs">vs</div>
         <div class="score-panel"><div class="score-team-label" id="lg-opp-label">Them</div>
-          <div class="score-stepper"><button type="button" data-lg-step="-1" data-lg-target="lg-s2">−</button><input type="number" id="lg-s2" min="0" max="99" value="9" inputmode="numeric" /><button type="button" data-lg-step="1" data-lg-target="lg-s2">＋</button></div>
+          <div class="score-stepper"><button type="button" data-lg-step="-1" data-lg-target="lg-s2" aria-label="Decrease opponent score">−</button><input type="number" id="lg-s2" min="0" max="99" value="9" inputmode="numeric" aria-label="Opponent score" /><button type="button" data-lg-step="1" data-lg-target="lg-s2" aria-label="Increase opponent score">＋</button></div>
         </div>
       </div>
       <button class="btn btn-primary btn-block" id="lg-submit" style="padding:15px;margin-top:12px">Save result</button>
@@ -9313,7 +9913,6 @@
       ? Number(value) : null;
     let court = plannerOptions.court || null;
     const defaultType = plannerOptions.gameType === 'ranked' ? 'ranked' : 'casual';
-    const startNow = plannerOptions.startNow === true;
     const preferredSlot = typeof plannerOptions.preferredSlot === 'string' ? plannerOptions.preferredSlot : null;
     const preferredScheduledAt = typeof plannerOptions.scheduledAt === 'string' ? plannerOptions.scheduledAt : null;
     const requestedMaxPlayers = [2, 4, 6, 8, 10, 12].includes(Number(plannerOptions.maxPlayers))
@@ -9334,8 +9933,7 @@
       ...(Array.isArray(plannerOptions.inviteUserIds) ? plannerOptions.inviteUserIds : []),
       ...presetInvitees.map((person) => person.id),
     ].map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 20);
-    const plannerTitle = startNow ? 'Play now'
-      : presetCrewId ? `Plan with ${presetCrewName || 'your crew'}`
+    const plannerTitle = presetCrewId ? `Plan with ${presetCrewName || 'your crew'}`
         : plannerOptions.sourceGameId ? 'Plan the next game' : 'Plan a game';
     const plannerShell = openModal(`
       ${modalHead(plannerTitle)}
@@ -9471,8 +10069,9 @@
         selHour = { am: 10, pm: 14, eve: 18 }[slotPart] || selHour;
       }
     }
-    if (preferredScheduledAt) {
-      const preferredDate = new Date(preferredScheduledAt);
+    const initialScheduledAt = (restoredDraft && restoredDraft.scheduledAt) || preferredScheduledAt;
+    if (initialScheduledAt) {
+      const preferredDate = new Date(initialScheduledAt);
       const dayIdx = days.findIndex((day) => day.toDateString() === preferredDate.toDateString());
       if (Number.isFinite(preferredDate.getTime())
           && preferredDate.getTime() > Date.now() + 50 * 60000
@@ -9483,13 +10082,32 @@
       }
     }
 
-    const dayChips = days.map((d, i) =>
-      `<button type="button" data-day="${i}" aria-pressed="${i === selDayIdx}" class="${i === selDayIdx ? 'active' : ''}">${dayLabel(d, i)}</button>`).join('');
-    const timeChips = timePresets.map((h) =>
-      `<button type="button" data-hour="${h}" aria-pressed="${h === selHour}" class="${h === selHour ? 'active' : ''}">${timeLabel(h)}</button>`).join('');
+    // Keep the first decision light: offer three useful complete date/time
+    // choices instead of asking players to scan a day-by-time matrix.
+    const smartTimeSuggestions = [];
+    const smartTimeKeys = new Set();
+    const addSmartTime = (dayIdx, hour) => {
+      if (smartTimeSuggestions.length >= 3 || !days[dayIdx] || !timePresets.includes(hour)) return;
+      const date = new Date(days[dayIdx]);
+      date.setHours(hour, 0, 0, 0);
+      const key = `${dayIdx}:${hour}`;
+      if (date.getTime() <= Date.now() + 50 * 60000 || smartTimeKeys.has(key)) return;
+      smartTimeKeys.add(key);
+      smartTimeSuggestions.push({ dayIdx, hour, date });
+    };
+    addSmartTime(selDayIdx, selHour);
+    for (let dayIdx = selDayIdx; dayIdx < days.length && smartTimeSuggestions.length < 3; dayIdx++) {
+      [10, 14, 18, 20].forEach((hour) => addSmartTime(dayIdx, hour));
+    }
+    for (let dayIdx = 0; dayIdx < days.length && smartTimeSuggestions.length < 3; dayIdx++) {
+      timePresets.forEach((hour) => addSmartTime(dayIdx, hour));
+    }
+    const smartTimeLabel = ({ date, dayIdx, hour }) => `${dayLabel(date, dayIdx)} at ${timeLabel(hour)}`;
+    const smartTimeChips = smartTimeSuggestions.map((slot) =>
+      `<button type="button" data-smart-time="${slot.date.toISOString()}" data-smart-day="${slot.dayIdx}" data-smart-hour="${slot.hour}" aria-pressed="${slot.dayIdx === selDayIdx && slot.hour === selHour}" class="${slot.dayIdx === selDayIdx && slot.hour === selHour ? 'active' : ''}">${smartTimeLabel(slot)}</button>`).join('');
 
     const inviteChipHtml = (f, selected = false) => `
-      <button type="button" class="invite-chip ${selected ? 'active' : ''}" data-fid="${f.id}" aria-pressed="${selected}" ${crewId ? 'disabled aria-disabled="true" title="The accepted Crew roster is locked for this plan"' : ''}>
+      <button type="button" class="invite-chip ${selected ? 'active' : ''}" data-fid="${f.id}" aria-pressed="${selected}">
         ${avatarHtml(f, 'sm')} ${esc(f.display_name.split(' ')[0])}
       </button>`;
     const friendChips = invitePeople.map((f) => inviteChipHtml(f, initialInviteIds.has(f.id))).join('');
@@ -9504,20 +10122,22 @@
       </button>`).join('');
 
     const hasPresetInvites = initialInviteIds.size > 0;
-    const plannerCrewHtml = sourceLabel ? `<div class="planner-crew-preset" id="ng-crew-preset" role="status">
+    const plannerCrewHtml = sourceLabel || crewId ? `<div class="planner-crew-preset" id="ng-crew-preset" role="status">
       <div class="planner-crew-avatars">${invitePeople.filter((person) => initialInviteIds.has(person.id)).slice(0, 4).map((person) => avatarHtml(person, 'sm')).join('')}</div>
-      <div class="row-main"><b id="ng-crew-title">${esc(sourceLabel)}</b><div class="row-sub" id="ng-crew-copy">${esc(availabilityLabel || `${initialInviteIds.size} teammate${initialInviteIds.size === 1 ? '' : 's'} selected`)}</div></div>
+      <div class="row-main"><b id="ng-crew-title">${esc(sourceLabel || crewName || 'Your Crew')}</b><div class="row-sub" id="ng-crew-copy">${crewId
+        ? `🔒 Private to all ${initialInviteIds.size + 1} accepted crew members.`
+        : esc(availabilityLabel || `${initialInviteIds.size} teammate${initialInviteIds.size === 1 ? '' : 's'} selected`)}</div></div>
     </div>` : '';
     const plannerRecoveryHtml = restoredDraft
       ? `<div class="planner-recovery ${restoredDraft.status === 'submitting' ? 'warn' : ''}" role="status">
           <div class="row-main">
-            <b>${restoredDraft.status === 'submitting' ? 'Finish this exact game safely' : 'Continuing your saved plan'}</b>
+            <b>${restoredDraft.status === 'submitting' ? 'Confirm this game' : 'Continuing your saved plan'}</b>
             <div class="row-sub">${restoredDraft.status === 'submitting'
-              ? 'The confirmation was interrupted. This retry cannot create a duplicate or change the plan.'
+              ? 'We lost the confirmation. Check My games or try this same plan again.'
               : 'Review the time and people, then schedule when ready.'}</div>
           </div>
           ${restoredDraft.status === 'submitting'
-            ? '<button type="button" class="btn btn-secondary btn-sm" id="ng-check-games">My games</button><button type="button" class="btn btn-primary btn-sm" id="ng-retry-exact">Finish safely</button>'
+            ? '<button type="button" class="btn btn-secondary btn-sm" id="ng-check-games">My games</button><button type="button" class="btn btn-primary btn-sm" id="ng-retry-exact">Try again</button>'
             : '<button type="button" class="btn btn-secondary btn-sm" id="ng-start-over">Start over</button>'}
         </div>`
       : (savedDraft && explicitPlannerIntent
@@ -9533,7 +10153,11 @@
       ${plannerRecoveryHtml}
       ${plannerCrewHtml}
 
-      <section class="planner-step" aria-labelledby="planner-where-title">
+      <div class="court-selected hidden" id="ng-answer-where" role="group" aria-label="Where">
+        <div class="row-main"><div class="row-title"><span class="row-sub">Where</span> · <span id="ng-answer-where-value">${court ? esc(court.name) : 'Choose a court'}</span></div></div>
+        <button type="button" class="btn btn-secondary btn-sm" id="ng-back-where" aria-label="Change where">Change</button>
+      </div>
+      <section class="planner-step" id="ng-step-where" aria-labelledby="planner-where-title">
         <div class="planner-step-head">
           <span class="planner-step-num">1</span>
           <div><div class="planner-step-title" id="planner-where-title">Where are you playing?</div><div class="planner-step-sub">Current, saved, and nearby courts come first.</div></div>
@@ -9550,49 +10174,58 @@
           <div id="ng-court-results" style="margin-top:8px">${suggestionRows}</div>
         </div>
         <input type="hidden" id="ng-court-id" value="${court ? court.id : ''}" />
+        <button type="button" class="btn btn-primary btn-block planner-next" id="ng-next-when" ${court ? '' : 'disabled'}>Choose when</button>
       </section>
 
-      <section class="planner-step" aria-labelledby="planner-when-title">
+      <div class="court-selected hidden" id="ng-answer-when" role="group" aria-label="When">
+        <div class="row-main"><div class="row-title"><span class="row-sub">When</span> · <span id="ng-answer-when-value">${dayLabel(days[selDayIdx], selDayIdx)} at ${timeLabel(selHour)}</span></div></div>
+        <button type="button" class="btn btn-secondary btn-sm" id="ng-back-when" aria-label="Change when">Change</button>
+      </div>
+      <section class="planner-step hidden" id="ng-step-when" aria-labelledby="planner-when-title">
         <div class="planner-step-head">
           <span class="planner-step-num">2</span>
-          <div><div class="planner-step-title" id="planner-when-title">When?</div><div class="planner-step-sub">Start a live pickup game or choose a time this week.</div></div>
+          <div><div class="planner-step-title" id="planner-when-title">When?</div><div class="planner-step-sub">Pick a suggestion or choose any other time.</div></div>
         </div>
-        <div class="segmented" id="ng-mode" role="group" aria-label="Game timing">
-          <button type="button" data-mode="now" aria-pressed="${startNow}" ${startNow ? 'class="active"' : ''}>⚡ Right now</button>
-          <button type="button" data-mode="later" aria-pressed="${!startNow}" ${startNow ? '' : 'class="active"'}>📅 Plan ahead</button>
-        </div>
-        <div id="ng-later-fields" class="${startNow ? 'hidden' : ''}">
-          <div class="quick-times" id="ng-days" style="margin-bottom:8px">${dayChips}</div>
-          <div class="quick-times" id="ng-hours" style="margin-bottom:8px">${timeChips}
-            <button type="button" data-hour="custom">Custom…</button>
-          </div>
-          <input type="datetime-local" id="ng-when" aria-label="Custom game date and time" class="hidden" style="margin-bottom:12px" />
+        <div id="ng-later-fields">
+          <div class="quick-times" id="ng-smart-times" role="group" aria-label="Suggested game times" style="margin-bottom:8px">${smartTimeChips}</div>
+          <details id="ng-other-time" style="margin-bottom:12px">
+            <summary>Choose another time</summary>
+            <input type="datetime-local" id="ng-when" aria-label="Game date and time" style="margin-top:10px" />
+          </details>
           <div id="ng-busy-hint" class="row-sub" style="margin-bottom:4px"></div>
         </div>
+        ${crewId ? `<div class="planner-crew-private" id="ng-crew-private" role="status">
+          <b>🔒 Private to ${esc(crewName || 'your crew')}</b>
+          <span>All ${initialInviteIds.size + 1} accepted player${initialInviteIds.size ? 's are' : ' is'} included.</span>
+        </div>` : ''}
+        ${crewId ? '' : '<button type="button" class="btn btn-primary btn-block planner-next" id="ng-next-who">Choose who</button>'}
       </section>
 
-      <section class="planner-step" aria-labelledby="planner-who-title">
+      ${crewId ? `<section class="planner-step hidden" id="ng-step-who" aria-hidden="true">
+        <div id="ng-friends-wrap" class="hidden" aria-hidden="true"></div>
+      </section>` : `<section class="planner-step hidden" id="ng-step-who" aria-labelledby="planner-who-title">
         <div class="planner-step-head">
           <span class="planner-step-num">3</span>
-          <div><div class="planner-step-title" id="planner-who-title">Who should see it?</div><div class="planner-step-sub">${crewId ? 'This private game uses the full accepted Crew roster snapshot.' : 'Keep it open, share with friends, or invite your crew.'}</div></div>
+          <div><div class="planner-step-title" id="planner-who-title">Who should see it?</div><div class="planner-step-sub">Keep it open, share with friends, or invite specific players.</div></div>
         </div>
         <div class="type-cards vis-cards" id="ng-vis" role="group" aria-label="Who can join">
-          <button type="button" data-vis="open" ${crewId ? 'disabled' : ''} aria-pressed="${initialVisibility === 'open'}" class="${initialVisibility === 'open' ? 'active' : ''}"><span style="font-size:19px">🌍</span><b>Anyone</b><small>Nearby players</small></button>
-          <button type="button" data-vis="friends" ${crewId ? 'disabled' : ''} aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}"><span style="font-size:19px">🤝</span><b>Friends</b><small>All your friends</small></button>
-          <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}"><span style="font-size:19px">🔒</span><b>${crewId ? 'Accepted Crew' : 'Specific'}</b><small>${crewId ? 'Full roster' : 'Only who you pick'}</small></button>
+          <button type="button" data-vis="open" aria-pressed="${initialVisibility === 'open'}" class="${initialVisibility === 'open' ? 'active' : ''}"><span style="font-size:19px">🌍</span><b>Anyone</b><small>Nearby players</small></button>
+          <button type="button" data-vis="friends" aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}"><span style="font-size:19px">🤝</span><b>Friends</b><small>All your friends</small></button>
+          <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}"><span style="font-size:19px">🔒</span><b>Specific</b><small>Only who you pick</small></button>
+        </div>
+        <div class="planner-inline-warning ${initialVisibility === 'friends' && friends.length === 0 ? '' : 'hidden'}" id="ng-friends-empty" role="status">
+          You don’t have any friends here yet. Add friends from Community, or choose Anyone so nearby players can join.
         </div>
         <div id="ng-friends-wrap" class="${initialVisibility === 'private' ? '' : 'hidden'}" style="margin-top:10px">
           ${invitePeople.length
             ? `<div class="invite-chips" id="ng-invites">${friendChips}</div>
-               <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">${crewId
-                 ? `${initialInviteIds.size} accepted teammate${initialInviteIds.size === 1 ? '' : 's'} — everyone shown is included.`
-                 : (hasPresetInvites ? `${initialInviteIds.size} invited — only selected players will see this game.` : 'Pick who to invite — only they will see this game.')}</p>`
+               <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">${hasPresetInvites ? `${initialInviteIds.size} invited — only selected players will see this game.` : 'Pick who to invite — only they will see this game.'}</p>`
             : '<p class="row-sub">Add friends first to invite specific people.</p>'}
         </div>
-      </section>
+      </section>`}
 
-      <details class="planner-advanced" id="ng-advanced">
-        <summary><span>Game options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${crewId ? `${initialInviteIds.size + 1} accepted Crew players` : (presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`)} · ${presetPreferredLevel === 'any' ? 'Any level' : skillLabel(presetPreferredLevel)}</span></summary>
+      <details class="planner-advanced hidden" id="ng-advanced">
+        <summary><span>More options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${crewId ? `${initialInviteIds.size + 1} accepted Crew players` : (presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`)} · ${presetPreferredLevel === 'any' ? 'Any level' : skillLabel(presetPreferredLevel)}</span></summary>
         <div class="planner-advanced-body">
           <div class="form-grid">
             <div class="form-field">
@@ -9617,10 +10250,6 @@
                 <option value="12" ${presetMaxPlayers === 12 ? 'selected' : ''}>12</option>
               </select>
             </div>
-            ${crewId ? `<div class="form-field">
-              <label>Accepted Crew snapshot</label>
-              <div class="crew-roster-lock" id="ng-crew-capacity">All ${initialInviteIds.size + 1} accepted players are included. Capacity is fixed to this roster.</div>
-            </div>` : ''}
           </div>
 
           <div class="form-field">
@@ -9652,11 +10281,11 @@
         </div>
       </details>
 
-      <div class="planner-submit-bar">
+      <div class="planner-submit-bar hidden">
         <div class="form-error hidden" id="ng-submit-error" role="alert" tabindex="-1"></div>
-        <div class="planner-summary" id="ng-summary">${court ? esc(court.name) : 'Choose a court'} · ${startNow ? 'Right now' : `${dayLabel(days[selDayIdx], selDayIdx)} at ${timeLabel(selHour)}`}</div>
+        <div class="planner-summary" id="ng-summary">${court ? esc(court.name) : 'Choose a court'} · ${dayLabel(days[selDayIdx], selDayIdx)} at ${timeLabel(selHour)}</div>
         <button class="btn btn-primary btn-block" id="ng-submit" style="padding:15px">
-          ${startNow ? 'Start game now' : 'Schedule game'}
+          Schedule game
         </button>
       </div>
     `;
@@ -9674,7 +10303,6 @@
     let plannerSaveTimer = null;
     let exactRetryRequested = false;
     const plannerScheduledIso = () => {
-      if (nowMode) return null;
       let value;
       if (customMode) {
         const raw = modal.querySelector('#ng-when').value;
@@ -9689,7 +10317,7 @@
       status,
       submitStartedAt: status === 'submitting' ? (plannerSubmitStartedAt || Date.now()) : null,
       clientAttemptId: plannerAttemptId,
-      mode: nowMode ? 'now' : 'later',
+      mode: 'later',
       courtId: Number(modal.querySelector('#ng-court-id').value) || null,
       scheduledAt: plannerScheduledIso(),
       timeKind: customMode ? 'custom' : 'preset',
@@ -9735,7 +10363,7 @@
       if ((plannerDirty || plannerSubmitting) && !plannerSubmitted) {
         flushPlannerDraft(plannerSubmitting ? 'submitting' : 'editing');
         toast(plannerSubmitting
-          ? 'Couldn’t confirm the game — check My games before retrying'
+          ? 'Couldn’t confirm the game — check My games'
           : 'Plan saved — finish it anytime');
       }
     });
@@ -9745,7 +10373,7 @@
     const partOfHour = (h) => (h >= 5 && h < 12 ? 'mornings' : h < 17 ? 'afternoons' : h < 23 ? 'evenings' : null);
     const updateBusyHint = () => {
       const el = modal.querySelector('#ng-busy-hint');
-      if (!busyTimes || !busyTimes.length || nowMode) { el.innerHTML = ''; return; }
+      if (!busyTimes || !busyTimes.length) { el.innerHTML = ''; return; }
       let when;
       if (customMode) {
         const raw = modal.querySelector('#ng-when').value;
@@ -9774,19 +10402,22 @@
 
     const updatePlannerSummary = () => {
       const summary = modal.querySelector('#ng-summary');
-      if (!summary) return;
       const courtName = modal.querySelector('#ng-court-name').textContent || 'Choose a court';
-      let whenText = 'Right now';
-      if (!nowMode) {
-        if (customMode) {
-          const raw = modal.querySelector('#ng-when').value;
-          const parsed = raw ? new Date(raw) : null;
-          whenText = parsed && Number.isFinite(parsed.getTime()) ? fmtDateTime(parsed.toISOString()) : 'Choose a time';
-        } else {
-          whenText = `${dayLabel(days[selDayIdx], selDayIdx)} at ${timeLabel(selHour)}`;
-        }
+      let whenText;
+      if (customMode) {
+        const raw = modal.querySelector('#ng-when').value;
+        const parsed = raw ? new Date(raw) : null;
+        whenText = parsed && Number.isFinite(parsed.getTime()) ? fmtDateTime(parsed.toISOString()) : 'Choose a time';
+      } else {
+        whenText = `${dayLabel(days[selDayIdx], selDayIdx)} at ${timeLabel(selHour)}`;
       }
-      summary.textContent = `${courtName} · ${whenText}`;
+      if (summary) summary.textContent = `${courtName} · ${whenText}`;
+      const whereAnswer = modal.querySelector('#ng-answer-where');
+      modal.querySelector('#ng-answer-where-value').textContent = courtName;
+      whereAnswer.setAttribute('aria-label', `Where: ${courtName}`);
+      const whenAnswer = modal.querySelector('#ng-answer-when');
+      modal.querySelector('#ng-answer-when-value').textContent = whenText;
+      whenAnswer.setAttribute('aria-label', `When: ${whenText}`);
     };
 
     // --- Court picking ---
@@ -9795,6 +10426,7 @@
       modal.querySelector('#ng-court-name').textContent = name || '';
       modal.querySelector('#ng-court-selected').classList.toggle('hidden', !id);
       modal.querySelector('#ng-court-picker').classList.toggle('hidden', !!id);
+      modal.querySelector('#ng-next-when').disabled = !id;
       modal.querySelector('#ng-court-warning')?.remove();
       loadBusyHint(id);
       updatePlannerSummary();
@@ -9832,72 +10464,45 @@
     });
 
     // --- When ---
-    let nowMode = startNow;
     let customMode = false;
     updatePlannerSummary();
-    modal.querySelector('#ng-mode').addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
+    const otherTimeDetails = modal.querySelector('#ng-other-time');
+    modal.querySelector('#ng-smart-times').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-smart-time]');
       if (!btn) return;
-      nowMode = btn.dataset.mode === 'now';
-      modal.querySelectorAll('#ng-mode button').forEach((b) => {
+      customMode = false;
+      selDayIdx = Number(btn.dataset.smartDay);
+      selHour = Number(btn.dataset.smartHour);
+      modal.querySelectorAll('#ng-smart-times button').forEach((b) => {
         const active = b === btn;
         b.classList.toggle('active', active);
         b.setAttribute('aria-pressed', String(active));
       });
-      modal.querySelector('#ng-later-fields').classList.toggle('hidden', nowMode);
-      modal.querySelector('#ng-submit').textContent = nowMode ? 'Start game now' : 'Schedule game';
-      if (nowMode) modal.querySelector('#ng-time-warning')?.remove();
-      updateBusyHint();
-      updatePlannerSummary();
-      markPlannerDirty();
-    });
-    modal.querySelector('#ng-days').addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      selDayIdx = Number(btn.dataset.day);
-      modal.querySelectorAll('#ng-days button').forEach((b) => {
-        const active = b === btn;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', String(active));
-      });
+      otherTimeDetails.open = false;
       modal.querySelector('#ng-time-warning')?.remove();
       updateBusyHint();
       updatePlannerSummary();
       markPlannerDirty();
     });
-    modal.querySelector('#ng-hours').addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      modal.querySelectorAll('#ng-hours button').forEach((b) => {
-        const active = b === btn;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', String(active));
-      });
-      if (btn.dataset.hour === 'custom') {
-        customMode = true;
-        const whenEl = modal.querySelector('#ng-when');
-        whenEl.classList.remove('hidden');
-        if (!whenEl.value) {
-          const d = new Date(days[selDayIdx]); d.setHours(selHour || 18);
-          const pad2 = (n) => String(n).padStart(2, '0');
-          whenEl.value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:00`;
-        }
-      } else {
-        customMode = false;
-        selHour = Number(btn.dataset.hour);
-        modal.querySelector('#ng-when').classList.add('hidden');
-      }
-      modal.querySelector('#ng-time-warning')?.remove();
-      updateBusyHint();
-      updatePlannerSummary();
-      markPlannerDirty();
+    otherTimeDetails.addEventListener('toggle', () => {
+      if (!otherTimeDetails.open) return;
+      const whenEl = modal.querySelector('#ng-when');
+      if (whenEl.value) return;
+      const d = new Date(days[selDayIdx]); d.setHours(selHour || 18);
+      const pad2 = (n) => String(n).padStart(2, '0');
+      whenEl.value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:00`;
     });
     modal.querySelector('#ng-when').addEventListener('input', () => {
       const value = new Date(modal.querySelector('#ng-when').value);
+      customMode = true;
+      modal.querySelectorAll('#ng-smart-times button').forEach((button) => {
+        button.classList.remove('active');
+        button.setAttribute('aria-pressed', 'false');
+      });
       if (Number.isFinite(value.getTime()) && value.getTime() > Date.now()) modal.querySelector('#ng-time-warning')?.remove();
       updateBusyHint(); updatePlannerSummary(); markPlannerDirty();
     });
-    // Initial hint for a preselected court (after nowMode/customMode exist).
+    // Initial hint for a preselected court (after customMode exists).
     if (court) {
       if (court.busy_times) { busyTimes = court.busy_times; updateBusyHint(); }
       else loadBusyHint(court.id);
@@ -9985,21 +10590,20 @@
 
     // --- Visibility / invites ---
     const friendsWrap = modal.querySelector('#ng-friends-wrap');
+    const friendsEmpty = modal.querySelector('#ng-friends-empty');
     const updateCrewPresetBanner = () => {
       const title = modal.querySelector('#ng-crew-title');
       const copy = modal.querySelector('#ng-crew-copy');
       if (!title || !copy) return;
       if (crewId) {
         title.textContent = `${crewName || 'Your Crew'} · ${inviteIds.size + 1} accepted player${inviteIds.size === 0 ? '' : 's'}`;
-        copy.textContent = `Accepted roster snapshot${crewVersion == null ? '' : ` v${crewVersion}`} · everyone shown is included.`;
+        copy.textContent = `🔒 Private to all ${inviteIds.size + 1} accepted crew members.`;
         return;
       }
       if (visibility !== 'private') {
         if (crewName) title.textContent = crewName;
         else title.textContent = 'Crew selection saved';
-        copy.textContent = crewId
-          ? 'Crew games stay private. Switch back to Specific to invite these teammates.'
-          : 'Switch back to Specific to invite these teammates directly.';
+        copy.textContent = 'Switch back to Specific to invite these teammates directly.';
         return;
       }
       title.textContent = inviteIds.size
@@ -10013,7 +10617,7 @@
             ? `${inviteIds.size} teammate${inviteIds.size === 1 ? '' : 's'} will get a direct invite.`
             : 'Select at least one available teammate to keep this private.');
     };
-    modal.querySelector('#ng-vis').addEventListener('click', (e) => {
+    modal.querySelector('#ng-vis')?.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
       if (crewId && btn.dataset.vis !== 'private') return;
@@ -10024,6 +10628,7 @@
         b.setAttribute('aria-pressed', String(active));
       });
       friendsWrap.classList.toggle('hidden', visibility !== 'private');
+      friendsEmpty?.classList.toggle('hidden', visibility !== 'friends' || friends.length > 0);
       updateCrewPresetBanner();
       markPlannerDirty();
     });
@@ -10077,6 +10682,8 @@
       modal.querySelector('#ng-max').value = String(nextCapacity);
       const capacity = modal.querySelector('#ng-crew-capacity');
       if (capacity) capacity.textContent = `All ${playerCount} accepted players are included. Capacity is fixed to this roster.`;
+      const privateSummary = modal.querySelector('#ng-crew-private');
+      if (privateSummary) privateSummary.innerHTML = `<b>🔒 Private to ${esc(crewName || 'your crew')}</b><span>All ${playerCount} accepted players are included.</span>`;
       const rankedButton = modal.querySelector('#ng-type button[data-val="ranked"]');
       const rankedEligible = [2, 4].includes(playerCount);
       if (rankedButton) {
@@ -10114,48 +10721,34 @@
     // the UI and the eventual POST payload are guaranteed to agree.
     if (restoredDraft) {
       if (restoredCourt) setCourt(restoredCourt.id, restoredCourt.name, { dirty: false });
-      nowMode = restoredDraft.mode === 'now';
-      modal.querySelectorAll('#ng-mode button').forEach((btn) => {
-        const active = btn.dataset.mode === (nowMode ? 'now' : 'later');
+      const restoredTime = restoredDraft.scheduledAt ? new Date(restoredDraft.scheduledAt) : null;
+      const validTime = restoredTime && Number.isFinite(restoredTime.getTime()) && restoredTime.getTime() > Date.now();
+      if (validTime) {
+        const matchingDay = days.findIndex((day) => day.toDateString() === restoredTime.toDateString());
+        const isPreset = restoredDraft.timeKind === 'preset' && matchingDay >= 0
+          && restoredTime.getMinutes() === 0 && timePresets.includes(restoredTime.getHours());
+        if (isPreset) {
+          customMode = false;
+          selDayIdx = matchingDay;
+          selHour = restoredTime.getHours();
+        } else {
+          customMode = true;
+          const pad2 = (n) => String(n).padStart(2, '0');
+          modal.querySelector('#ng-when').value = `${restoredTime.getFullYear()}-${pad2(restoredTime.getMonth() + 1)}-${pad2(restoredTime.getDate())}T${pad2(restoredTime.getHours())}:${pad2(restoredTime.getMinutes())}`;
+        }
+      } else {
+        customMode = true;
+        selHour = null;
+        setPlannerWarning('ng-time-warning', 'Your saved time has passed. Choose a new time.');
+      }
+      otherTimeDetails.open = customMode;
+      modal.querySelectorAll('#ng-smart-times button').forEach((btn) => {
+        const active = !customMode
+          && Number(btn.dataset.smartDay) === selDayIdx
+          && Number(btn.dataset.smartHour) === selHour;
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', String(active));
       });
-      modal.querySelector('#ng-later-fields').classList.toggle('hidden', nowMode);
-      modal.querySelector('#ng-submit').textContent = nowMode ? 'Start game now' : 'Schedule game';
-
-      if (!nowMode) {
-        const restoredTime = restoredDraft.scheduledAt ? new Date(restoredDraft.scheduledAt) : null;
-        const validTime = restoredTime && Number.isFinite(restoredTime.getTime()) && restoredTime.getTime() > Date.now();
-        if (validTime) {
-          const matchingDay = days.findIndex((day) => day.toDateString() === restoredTime.toDateString());
-          const isPreset = restoredDraft.timeKind === 'preset' && matchingDay >= 0
-            && restoredTime.getMinutes() === 0 && timePresets.includes(restoredTime.getHours());
-          if (isPreset) {
-            customMode = false;
-            selDayIdx = matchingDay;
-            selHour = restoredTime.getHours();
-          } else {
-            customMode = true;
-            const pad2 = (n) => String(n).padStart(2, '0');
-            modal.querySelector('#ng-when').value = `${restoredTime.getFullYear()}-${pad2(restoredTime.getMonth() + 1)}-${pad2(restoredTime.getDate())}T${pad2(restoredTime.getHours())}:${pad2(restoredTime.getMinutes())}`;
-          }
-        } else {
-          customMode = true;
-          selHour = null;
-          setPlannerWarning('ng-time-warning', 'Your saved time has passed. Choose a new time.');
-        }
-        modal.querySelector('#ng-when').classList.toggle('hidden', !customMode);
-        modal.querySelectorAll('#ng-days button').forEach((btn) => {
-          const active = !customMode && Number(btn.dataset.day) === selDayIdx;
-          btn.classList.toggle('active', active);
-          btn.setAttribute('aria-pressed', String(active));
-        });
-        modal.querySelectorAll('#ng-hours button').forEach((btn) => {
-          const active = customMode ? btn.dataset.hour === 'custom' : Number(btn.dataset.hour) === selHour;
-          btn.classList.toggle('active', active);
-          btn.setAttribute('aria-pressed', String(active));
-        });
-      }
 
       const restoredCrewSize = crewId ? initialInviteIds.size + 1 : null;
       gameType = crewId && ![2, 4].includes(restoredCrewSize) && restoredDraft.gameType === 'ranked'
@@ -10184,6 +10777,7 @@
         btn.setAttribute('aria-pressed', String(active));
       });
       friendsWrap.classList.toggle('hidden', visibility !== 'private');
+      friendsEmpty?.classList.toggle('hidden', visibility !== 'friends' || friends.length > 0);
       const currentInviteeIds = new Set(invitePeople.map((person) => person.id));
       inviteIds.clear();
       const restoredInviteIds = crewId
@@ -10227,6 +10821,73 @@
       updateBusyHint();
       updatePlannerSummary();
     }
+
+    let plannerStep = restoredDraft ? (crewId ? 'when' : 'who') : 'where';
+    const syncPlannerStep = ({ focus = false } = {}) => {
+      const whereStep = modal.querySelector('#ng-step-where');
+      const whenStep = modal.querySelector('#ng-step-when');
+      const whoStep = modal.querySelector('#ng-step-who');
+      const whereAnswer = modal.querySelector('#ng-answer-where');
+      const whenAnswer = modal.querySelector('#ng-answer-when');
+      const finalStep = crewId ? plannerStep === 'when' : plannerStep === 'who';
+      updatePlannerSummary();
+      whereStep.classList.toggle('hidden', plannerStep !== 'where');
+      whenStep.classList.toggle('hidden', plannerStep !== 'when');
+      whoStep.classList.toggle('hidden', plannerStep !== 'who' || !!crewId);
+      whereAnswer.classList.toggle('hidden', plannerStep === 'where');
+      whenAnswer.classList.toggle('hidden', plannerStep !== 'who');
+      modal.querySelector('#ng-advanced').classList.toggle('hidden', !finalStep);
+      modal.querySelector('.planner-submit-bar').classList.toggle('hidden', !finalStep);
+      [whereStep, whenStep, whoStep].forEach((step) => {
+        step.setAttribute('aria-hidden', String(step.classList.contains('hidden')));
+      });
+      [whereAnswer, whenAnswer].forEach((answer) => {
+        answer.setAttribute('aria-hidden', String(answer.classList.contains('hidden')));
+      });
+      if (focus) {
+        const visible = plannerStep === 'where' ? whereStep : plannerStep === 'when' ? whenStep : whoStep;
+        const title = visible.querySelector('.planner-step-title');
+        title?.setAttribute('tabindex', '-1');
+        title?.focus({ preventScroll: true });
+      }
+    };
+    const chosenPlannerTime = () => {
+      if (customMode) {
+        const raw = modal.querySelector('#ng-when').value;
+        return raw ? new Date(raw) : null;
+      }
+      if (selHour == null) return null;
+      const value = new Date(days[selDayIdx]);
+      value.setHours(selHour, 0, 0, 0);
+      return value;
+    };
+    modal.querySelector('#ng-next-when').addEventListener('click', () => {
+      if (!modal.querySelector('#ng-court-id').value) {
+        modal.querySelector('#ng-court-search').focus();
+        return;
+      }
+      plannerStep = 'when';
+      syncPlannerStep({ focus: true });
+    });
+    modal.querySelector('#ng-back-where').addEventListener('click', () => {
+      plannerStep = 'where';
+      syncPlannerStep({ focus: true });
+    });
+    modal.querySelector('#ng-next-who')?.addEventListener('click', () => {
+      const selectedTime = chosenPlannerTime();
+      if (!selectedTime || !Number.isFinite(selectedTime.getTime()) || selectedTime.getTime() <= Date.now()) {
+        setPlannerWarning('ng-time-warning', 'Choose a future time.');
+        (customMode ? modal.querySelector('#ng-when') : modal.querySelector('#ng-smart-times button.active'))?.focus();
+        return;
+      }
+      plannerStep = 'who';
+      syncPlannerStep({ focus: true });
+    });
+    modal.querySelector('#ng-back-when')?.addEventListener('click', () => {
+      plannerStep = 'when';
+      syncPlannerStep({ focus: true });
+    });
+    syncPlannerStep();
 
     let ignoreRestoredAdvancedToggle = !!(restoredDraft && restoredDraft.advancedOpen);
     modal.querySelector('#ng-advanced').addEventListener('toggle', () => {
@@ -10277,7 +10938,7 @@
       const retry = modal.querySelector('#ng-retry-exact');
       if (retry && !frozenSubmitPayload) {
         retry.disabled = true;
-        retry.textContent = 'Exact retry unavailable';
+        retry.textContent = 'Check My games';
       }
     }
     if (plannerSubmitting || protectedSubmittingDraft) modal.querySelector('#ng-submit').disabled = true;
@@ -10321,7 +10982,7 @@
       const exactPayload = exactRetry
         ? sanitizeGameCreatePayload(frozenSubmitPayload, plannerAttemptId) : null;
       if (exactRetry && !exactPayload) {
-        showPlannerSubmitError('That exact retry is unavailable. Check My games before starting a new plan.');
+        showPlannerSubmitError('This plan can’t be confirmed here. Check My games before starting a new plan.');
         return;
       }
       const courtId = exactRetry ? exactPayload.court_id : modal.querySelector('#ng-court-id').value;
@@ -10329,21 +10990,19 @@
       let scheduledAt;
       if (exactRetry) {
         scheduledAt = new Date(exactPayload.scheduled_at);
-      } else if (nowMode) {
-        scheduledAt = new Date();
       } else if (customMode) {
         const v = modal.querySelector('#ng-when').value;
         if (!v) { showPlannerSubmitError('Pick a date and time.', modal.querySelector('#ng-when')); return; }
         scheduledAt = new Date(v);
         if (!Number.isFinite(scheduledAt.getTime())) { showPlannerSubmitError('Choose a valid date and time.', modal.querySelector('#ng-when')); return; }
       } else {
-        if (selHour == null) { showPlannerSubmitError('Pick a time.', modal.querySelector('#ng-hours button')); return; }
+        if (selHour == null) { showPlannerSubmitError('Pick a time.', modal.querySelector('#ng-smart-times button')); return; }
         scheduledAt = new Date(days[selDayIdx]);
         scheduledAt.setHours(selHour, 0, 0, 0);
       }
-      if (!exactRetry && !nowMode && scheduledAt.getTime() <= Date.now()) {
+      if (!exactRetry && scheduledAt.getTime() <= Date.now()) {
         setPlannerWarning('ng-time-warning', 'That time has passed. Choose a future time.');
-        showPlannerSubmitError('Choose a future time.', customMode ? modal.querySelector('#ng-when') : modal.querySelector('#ng-hours button.active'));
+        showPlannerSubmitError('Choose a future time.', customMode ? modal.querySelector('#ng-when') : modal.querySelector('#ng-smart-times button.active'));
         return;
       }
       if (!exactRetry && visibility === 'private' && inviteIds.size === 0) {
@@ -10393,7 +11052,7 @@
       const btn = e.currentTarget;
       if (btn.disabled) return;
       btn.disabled = true;
-      btn.textContent = nowMode ? 'Starting game…' : 'Scheduling…';
+      btn.textContent = 'Scheduling…';
       plannerSubmitting = true;
       plannerSubmitStartedAt ||= Date.now();
       frozenSubmitPayload = requestPayload;
@@ -10402,8 +11061,8 @@
         plannerSubmitStartedAt = null;
         frozenSubmitPayload = null;
         btn.disabled = false;
-        btn.textContent = nowMode ? 'Start game now' : 'Schedule game';
-        showPlannerSubmitError('Nothing was sent because this browser could not save a safe retry. Free up browser storage, then try again.');
+        btn.textContent = 'Schedule game';
+        showPlannerSubmitError('Nothing was sent because this browser could not save your plan. Free up browser storage, then try again.');
         return;
       }
       modal.classList.add('planner-submitting');
@@ -10419,7 +11078,7 @@
         plannerSubmitted = true;
         clearGameDraft();
         closeModal(modal);
-        toast(nowMode ? "Game on — let's fill the roster 🏓" : "Game scheduled — let's fill the roster 🏓");
+        toast("Game scheduled — let's fill the roster 🏓");
         state.playGamesCache = null;
         if (state.tab === 'play') {
           state.playSeg = 'games';
@@ -10486,7 +11145,7 @@
                   : 'This Crew is too large to schedule as one game.');
             setPlannerWarning('ng-invite-warning', message, friendsWrap);
             submitButton.disabled = !schedulable;
-            submitButton.textContent = nowMode ? 'Start game now' : 'Schedule game';
+            submitButton.textContent = 'Schedule game';
             showPlannerSubmitError(message, null);
             flushPlannerDraft('editing');
           } catch (refreshError) {
@@ -10534,7 +11193,7 @@
             .forEach((section) => section.removeAttribute('inert'));
           const btn = modal.querySelector('#ng-submit');
           btn.disabled = false;
-          btn.textContent = nowMode ? 'Start game now' : 'Schedule game';
+          btn.textContent = 'Schedule game';
           showPlannerSubmitError(message, inviteIds.size ? null : modal.querySelector('#ng-invites button:not(:disabled)'));
           flushPlannerDraft('editing');
           return;
@@ -10547,7 +11206,7 @@
             plannerSubmitted = true;
             clearGameDraft();
             closeModal(modal);
-            toast('That safety key already belongs to a game — opening it');
+            toast('That game already exists — opening it');
             state.playGamesCache = null;
             refreshMe();
             openGameScreen(existingGameId);
@@ -10558,7 +11217,7 @@
           plannerDirty = true;
           flushPlannerDraft('submitting');
           closeModal(modal);
-          toast('This retry already belongs to a game — check My games');
+          toast('This game may already exist — check My games');
           return;
         }
         const ambiguous = err.isNetworkError || Number(err.status) === 429 || Number(err.status) >= 500;
@@ -10568,7 +11227,7 @@
           // Keep the exact request frozen; reopening can only replay this body.
           flushPlannerDraft('submitting');
           closeModal(modal);
-          toast('Confirmation was interrupted — reopen Plan ahead to finish safely');
+          toast('We couldn’t confirm the game — reopen Plan a game to check it');
           return;
         }
 
@@ -10585,7 +11244,7 @@
           .forEach((section) => section.removeAttribute('inert'));
         const submit = modal.querySelector('#ng-submit');
         submit.disabled = false;
-        submit.textContent = nowMode ? 'Start game now' : 'Schedule game';
+        submit.textContent = 'Schedule game';
         showPlannerSubmitError(err.message);
         flushPlannerDraft('editing');
       }
@@ -10821,6 +11480,60 @@
       </div>`;
   }
 
+  function competitionDetailTabsHtml(items) {
+    return `<nav class="competition-detail-nav competition-detail-tabs" role="tablist" aria-label="Competition sections">
+      ${items.map(([target, label], index) => `<button type="button" class="btn btn-secondary btn-sm" id="${target}-tab" role="tab" data-competition-tab="${target}" aria-controls="${target}-panel" aria-selected="${index === 0}" tabindex="${index === 0 ? '0' : '-1'}">${label}</button>`).join('')}
+    </nav>`;
+  }
+
+  function bindCompetitionDetailTabs(root, initialTarget = null) {
+    const tabs = [...root.querySelectorAll('[data-competition-tab]')];
+    const markers = tabs.map((tab) => root.querySelector(`#${CSS.escape(tab.dataset.competitionTab)}`));
+    if (!tabs.length || markers.some((marker) => !marker)) return;
+
+    markers.forEach((marker, index) => {
+      const target = tabs[index].dataset.competitionTab;
+      const nextMarker = markers[index + 1] || null;
+      const panel = document.createElement('section');
+      panel.id = `${target}-panel`;
+      panel.className = 'competition-detail-panel';
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', tabs[index].id);
+      marker.before(panel);
+      let node = marker;
+      while (node && node !== nextMarker) {
+        const next = node.nextSibling;
+        panel.appendChild(node);
+        node = next;
+      }
+    });
+
+    const activate = (target, { focus = false } = {}) => {
+      const selected = tabs.find((tab) => tab.dataset.competitionTab === target) || tabs[0];
+      tabs.forEach((tab) => {
+        const active = tab === selected;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+        root.querySelector(`#${CSS.escape(tab.getAttribute('aria-controls'))}`).hidden = !active;
+      });
+      if (focus) selected.focus({ preventScroll: true });
+    };
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => activate(tab.dataset.competitionTab));
+      tab.addEventListener('keydown', (event) => {
+        let nextIndex = null;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = tabs.length - 1;
+        if (nextIndex == null) return;
+        event.preventDefault();
+        activate(tabs[nextIndex].dataset.competitionTab, { focus: true });
+      });
+    });
+    activate(initialTarget);
+  }
+
   async function renderTournaments(el, retryFn) {
     const loc = areaLatLng();
     try {
@@ -10834,7 +11547,7 @@
       const live = mine.items.filter((t) => t.status !== 'completed');
       const past = mine.items.filter((t) => t.status === 'completed');
 
-      let html = '<button class="btn btn-primary btn-block" id="tour-create" style="margin:2px 0 14px">🏆 Create a tournament</button>';
+      let html = '<button class="btn btn-primary btn-block" id="competition-create" style="margin:2px 0 14px">＋ Create competition</button>';
       if (live.length) {
         html += '<div class="section-label">Your tournaments</div>';
         html += live.map(tournamentCardHtml).join('');
@@ -10862,17 +11575,15 @@
           </div>
           <span class="chev">›</span>
         </div>`).join('');
-      html += '<button class="btn btn-secondary btn-block btn-sm" id="league-create" style="margin-top:4px">📦 Start a box league</button>';
 
       if (state.playSeg !== 'brackets') return; // user already switched away
       el.innerHTML = html;
-      el.querySelector('#tour-create').addEventListener('click', openCreateTournamentSheet);
-      el.querySelector('#league-create').addEventListener('click', openCreateLeagueSheet);
+      el.querySelector('#competition-create').addEventListener('click', openCompetitionCreateSheet);
       el.querySelectorAll('[data-open-league]').forEach((card) => {
-        card.addEventListener('click', () => openLeagueScreen(Number(card.dataset.openLeague)));
+        makePressable(card, () => openLeagueScreen(Number(card.dataset.openLeague)));
       });
       el.querySelectorAll('[data-open-tournament]').forEach((card) => {
-        card.addEventListener('click', () => openTournamentScreen(Number(card.dataset.openTournament)));
+        makePressable(card, () => openTournamentScreen(Number(card.dataset.openTournament)));
       });
     } catch (e) {
       renderError(el, e.message, retryFn || (() => renderTournaments(el)));
@@ -10968,8 +11679,17 @@
       </details>`;
   }
 
-  function competitionActionNeeded(parent) {
-    return (parent.matches || []).map((match) => {
+  function tournamentCheckinState(tournament) {
+    const myEntry = (tournament.entries || []).find((entry) => entry.id === tournament.my_entry_id) || null;
+    const startsAt = new Date(tournament.starts_at).getTime();
+    const open = Number.isFinite(startsAt)
+      && Date.now() >= startsAt - 24 * 3600e3
+      && (tournament.status === 'registration' || tournament.status === 'active');
+    return { myEntry, canCheckIn: !!(myEntry && open && !myEntry.checked_in) };
+  }
+
+  function competitionActionNeeded(kind, parent) {
+    const actions = (parent.matches || []).map((match) => {
       const result = normalizeCompetitionResult(match);
       if (match.can_confirm_result || match.awaiting_your_confirmation) {
         return { match, priority: 0, title: 'Review reported score', detail: 'Confirm it or flag a problem.' };
@@ -10986,27 +11706,102 @@
         };
       }
       return null;
-    }).filter(Boolean).sort((a, b) => a.priority - b.priority || a.match.id - b.match.id);
+    }).filter(Boolean);
+
+    if (kind === 'league' && parent.status === 'registration') {
+      if (parent.is_organizer && Number(parent.member_count) >= 3) {
+        actions.push({
+          action: 'start', priority: -1, title: 'Start the league',
+          detail: `${parent.member_count} players are ready. Seed the boxes and begin round 1.`,
+          label: 'Start league', controlId: 'lg-start', targetTab: 'lg-standings', direct: true,
+        });
+      } else if (!parent.joined && Number(parent.member_count) < Number(parent.max_players)) {
+        actions.push({
+          action: 'join', priority: 4, title: 'Join this league',
+          detail: 'Claim a place before registration fills.',
+          label: 'Join league', controlId: 'lg-join', targetTab: 'lg-standings', direct: true,
+        });
+      }
+    }
+
+    if (kind === 'tournament') {
+      const { canCheckIn } = tournamentCheckinState(parent);
+      if (canCheckIn) {
+        actions.push({
+          action: 'checkin', priority: -2, title: 'Check in at the court',
+          detail: 'Let the organizer know your entry is here.',
+          label: 'Check in', controlId: 'td-checkin', targetTab: 'td-players', direct: true,
+        });
+      }
+      if (parent.status === 'registration' && parent.is_organizer && Number(parent.entry_count) >= 2) {
+        actions.push({
+          action: 'start', priority: -1, title: 'Start the tournament',
+          detail: `${parent.entry_count} ${parent.event_type === 'doubles' ? 'teams are' : 'players are'} ready. Generate the matches now.`,
+          label: 'Start tournament', controlId: 'td-start', targetTab: 'td-players', direct: true,
+        });
+      } else if (parent.status === 'registration' && !parent.my_entry_id
+          && Number(parent.entry_count) < Number(parent.max_entries)) {
+        const needsPartner = parent.event_type === 'doubles';
+        actions.push({
+          action: 'register', priority: 4,
+          title: needsPartner ? 'Choose a partner and register' : 'Register for this tournament',
+          detail: `${Number(parent.max_entries) - Number(parent.entry_count)} spot${Number(parent.max_entries) - Number(parent.entry_count) === 1 ? '' : 's'} left.`,
+          label: needsPartner ? 'Choose partner' : 'Register', controlId: 'td-register',
+          focusId: needsPartner ? 'td-partner' : null, targetTab: 'td-players', direct: !needsPartner,
+        });
+      }
+    }
+
+    return actions.sort((a, b) => a.priority - b.priority
+      || Number(a.match?.id || 0) - Number(b.match?.id || 0));
   }
 
   function competitionActionNeededHtml(kind, parent) {
-    const items = competitionActionNeeded(parent);
-    if (!items.length) return '';
+    const next = competitionActionNeeded(kind, parent)[0];
+    if (!next) return '';
+    if (!next.match) {
+      return `
+        <section class="competition-actions" aria-labelledby="${kind}-actions-title">
+          <div class="section-label" id="${kind}-actions-title">Your next action</div>
+          <button type="button" class="card competition-action-card competition-global-action" data-competition-global-action="${next.action}" data-competition-control="${next.controlId}" data-competition-target="${next.targetTab}" data-competition-direct="${next.direct}" ${next.focusId ? `data-competition-focus="${next.focusId}"` : ''} style="width:100%;text-align:left">
+            <span class="row-main">
+              <span class="row-title" style="display:block">${esc(next.title)}</span>
+              <span class="row-sub" style="display:block">${esc(next.detail)}</span>
+            </span>
+            <span class="tag live" style="margin:0">${esc(next.label)}</span>
+          </button>
+        </section>`;
+    }
+    const { match, title, detail } = next;
+    const context = competitionMatchContext(kind, parent, match);
     return `
       <section class="competition-actions" aria-labelledby="${kind}-actions-title">
-        <div class="section-label" id="${kind}-actions-title">Action needed · ${items.length}</div>
-        ${items.map(({ match, title, detail }) => {
-          const context = competitionMatchContext(kind, parent, match);
-          return `
-            <div class="card competition-action-card" data-result-match="${match.id}" data-match-key="${match.id}">
-              <div class="row-main">
-                <div class="row-title">${esc(title)}</div>
-                <div class="row-sub">${esc(competitionSideName(context.side1))} vs ${esc(competitionSideName(context.side2))} · ${esc(detail)}</div>
-              </div>
-              <span class="chev" aria-hidden="true">›</span>
-            </div>`;
-        }).join('')}
+        <div class="section-label" id="${kind}-actions-title">Your next action</div>
+        <div class="card competition-action-card" data-result-match="${match.id}" data-match-key="${match.id}">
+          <div class="row-main">
+            <div class="row-title">${esc(title)}</div>
+            <div class="row-sub">${esc(competitionSideName(context.side1))} vs ${esc(competitionSideName(context.side2))} · ${esc(detail)}</div>
+          </div>
+          <span class="chev" aria-hidden="true">›</span>
+        </div>
       </section>`;
+  }
+
+  function bindCompetitionGlobalAction(root) {
+    root.querySelectorAll('[data-competition-global-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const control = root.querySelector(`#${CSS.escape(button.dataset.competitionControl)}`);
+        if (!control) return;
+        const direct = button.dataset.competitionDirect === 'true' && !control.disabled;
+        if (direct) {
+          control.click();
+          return;
+        }
+        root.querySelector(`[data-competition-tab="${button.dataset.competitionTarget}"]`)?.click();
+        const focusId = button.dataset.competitionFocus;
+        (focusId ? root.querySelector(`#${CSS.escape(focusId)}`) : control)?.focus({ preventScroll: true });
+      });
+    });
   }
 
   function captureCompetitionViewState(box) {
@@ -11023,6 +11818,7 @@
       bracketScrollLeft: bracket?.scrollLeft || 0,
       focusKey,
       focusMatchIndex,
+      activeCompetitionTab: modal?.querySelector('[data-competition-tab][aria-selected="true"]')?.dataset.competitionTab || null,
     };
   }
 
@@ -11253,7 +12049,7 @@
       toast(e.message); clearDeadDeepLink(overlayRouteHash(route)); return;
     }
     if (!routedOverlayLoadIsCurrent(routeLoad)) return;
-    const box = openModal(modalHead('League'), { route, label: 'League' });
+    const box = openModal(modalHead('League'), { route, label: 'League', page: true });
     const content = box.querySelector('.modal');
     let deepLinkOpened = false;
 
@@ -11288,12 +12084,19 @@
         cancelled: '<span class="tag warn" style="margin:0">Cancelled</span>',
       }[lg.status] || '';
       const rankMember = (a, b) => (b.points - a.points) || (b.wins - a.wins) || ((b.user?.rating || 0) - (a.user?.rating || 0));
+      const leagueNav = [['lg-overview', 'Overview']];
+      if (lg.status === 'active' || lg.status === 'completed') leagueNav.push(['lg-matches', 'Matches'], ['lg-standings', 'Standings']);
+      else if (lg.status === 'registration') leagueNav.push(['lg-standings', 'Players']);
+      if (lg.joined) leagueNav.push(['lg-chat', 'Chat']);
+      const currentRoundMatches = (lg.matches || []).filter((match) => match.round === lg.current_round);
+      const nextActionHtml = competitionActionNeededHtml('league', { ...lg, matches: currentRoundMatches });
       let body = `
         ${modalHead(`📦 ${lg.name}`)}
         <div class="row-sub" style="margin:-6px 0 6px">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size} · new round every ${lg.round_days} days</div>
-        <div style="margin-bottom:12px">${statusChip}${lg.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(lg.club_name)}</span>` : ''}</div>
-        ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}
-        ${lg.joined ? `<button class="btn btn-secondary btn-block" id="lg-chat" style="margin-bottom:10px;position:relative">💬 League chat${lg.chat_unread ? ` <span class="badge" style="position:static;margin-left:6px">${lg.chat_unread > 9 ? '9+' : lg.chat_unread}</span>` : ''}</button>` : ''}`;
+        ${nextActionHtml}
+        ${competitionDetailTabsHtml(leagueNav)}
+        <div id="lg-overview" tabindex="-1" style="margin-bottom:12px">${statusChip}${lg.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(lg.club_name)}</span>` : ''}</div>
+        ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}`;
 
       if (lg.status === 'completed' && lg.champion_name) {
         const champ = lg.members.find((member) => member.user && member.user.id === lg.champion_user_id);
@@ -11307,7 +12110,7 @@
 
       if (lg.status === 'registration') {
         body += `<div class="row-sub" style="margin-bottom:10px">Starts ${fmtDateTime(lg.starts_at)}. Players are seeded into boxes by rating; play everyone in your box each round — winners move up, last place drops down.</div>`;
-        body += '<div class="section-label">Signed up</div>';
+        body += '<div class="section-label" id="lg-standings" tabindex="-1">Signed up</div>';
         body += lg.members.map((member) => `
           <div class="card row" data-view-user="${member.user.id}" style="cursor:pointer;padding:10px 14px">
             ${avatarHtml(member.user, 'sm')}
@@ -11326,35 +12129,23 @@
 
       if (lg.status === 'active' || lg.status === 'completed') {
         const myId = state.me.id;
-        const roundMatches = (lg.matches || []).filter((match) => match.round === lg.current_round);
-        body += competitionActionNeededHtml('league', { ...lg, matches: roundMatches });
-        const mine = roundMatches.filter((match) => match.player1?.id === myId || match.player2?.id === myId);
-        if (mine.length) {
-          body += '<div class="section-label">🎯 Your matches this round</div>';
-          body += mine.map((match) => leagueMatchCardHtml(match, { mine: true })).join('');
-        }
-
-        const boxes = {};
-        lg.members.forEach((member) => { if (member.box) (boxes[member.box] = boxes[member.box] || []).push(member); });
-        Object.keys(boxes).sort((a, b) => a - b).forEach((boxNumber) => {
-          body += `<div class="section-label">📦 Box ${boxNumber}${Number(boxNumber) === 1 ? ' · top box' : ''}</div>`;
-          body += boxes[boxNumber].sort(rankMember).map((member, index) => `
-            <div class="card row" data-view-user="${member.user.id}" style="cursor:pointer;padding:9px 14px">
-              <span style="font-size:14px;width:20px;text-align:center;font-weight:700">${index + 1}</span>
-              ${avatarHtml(member.user, 'sm')}
-              <div class="row-main">
-                <div class="row-title" style="font-size:14px">${esc(member.user.display_name)}${member.user.id === myId ? ' <span class="tag" style="margin:0 0 0 4px">You</span>' : ''}</div>
-                <div class="row-sub">${member.wins}–${member.losses} this season</div>
-              </div>
-              <b style="font-size:14px">${member.points} pt${member.points === 1 ? '' : 's'}</b>
-            </div>`).join('');
-          const matches = roundMatches.filter((match) => match.box === Number(boxNumber));
-          if (matches.length) {
-            body += '<div class="competition-box-matches" aria-label="Box match results">';
-            body += matches.map((match) => leagueMatchCardHtml(match)).join('');
-            body += '</div>';
-          }
+        const roundMatches = currentRoundMatches;
+        body += '<div id="lg-matches" tabindex="-1"></div>';
+        const matchesByBox = {};
+        roundMatches.forEach((match) => {
+          (matchesByBox[match.box] = matchesByBox[match.box] || []).push(match);
         });
+        const matchBoxes = Object.keys(matchesByBox).sort((a, b) => a - b);
+        if (matchBoxes.length) {
+          matchBoxes.forEach((boxNumber) => {
+            body += `<div class="section-label">📦 Box ${boxNumber} matches</div>`;
+            body += matchesByBox[boxNumber].map((match) => leagueMatchCardHtml(match, {
+              mine: match.player1?.id === myId || match.player2?.id === myId,
+            })).join('');
+          });
+        } else {
+          body += '<div class="empty-state" style="padding:16px">No matches are scheduled for this round.</div>';
+        }
 
         if (lg.status === 'active' && lg.is_organizer) {
           const unresolved = roundMatches.filter((match) => normalizeCompetitionResult(match).blocksProgression);
@@ -11367,10 +12158,34 @@
             </div>
             <button class="btn btn-secondary btn-block" id="lg-cancel" style="margin-top:8px;color:#c92a2a">🗑 Cancel league</button>`;
         }
+
+        const boxes = {};
+        lg.members.forEach((member) => { if (member.box) (boxes[member.box] = boxes[member.box] || []).push(member); });
+        body += '<div id="lg-standings" tabindex="-1"></div>';
+        Object.keys(boxes).sort((a, b) => a - b).forEach((boxNumber) => {
+          body += `<div class="section-label">📦 Box ${boxNumber}${Number(boxNumber) === 1 ? ' · top box' : ''}</div>`;
+          body += boxes[boxNumber].sort(rankMember).map((member, index) => `
+            <div class="card row" data-view-user="${member.user.id}" style="cursor:pointer;padding:9px 14px">
+              <span style="font-size:14px;width:20px;text-align:center;font-weight:700">${index + 1}</span>
+              ${avatarHtml(member.user, 'sm')}
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">${esc(member.user.display_name)}${member.user.id === myId ? ' <span class="tag" style="margin:0 0 0 4px">You</span>' : ''}</div>
+                <div class="row-sub">${member.wins}–${member.losses} this season</div>
+              </div>
+              <b style="font-size:14px">${member.points} pt${member.points === 1 ? '' : 's'}</b>
+            </div>`).join('');
+        });
+      }
+
+      if (lg.joined) {
+        body += `<button class="btn btn-secondary btn-block" id="lg-chat" style="margin-bottom:10px;position:relative">💬 Open league chat${lg.chat_unread ? ` <span class="badge" style="position:static;margin-left:6px">${lg.chat_unread > 9 ? '9+' : lg.chat_unread}</span>` : ''}</button>`;
       }
 
       content.innerHTML = body;
       setDialogLabel(content, 'League');
+      bindCompetitionDetailTabs(
+        content, snapshot?.activeCompetitionTab || (requestedMatchId ? 'lg-matches' : null),
+      );
       bindUserButtons(box);
       content.querySelector('#lg-chat')?.addEventListener('click', () => transitionModal(box, () => openLeagueChat(lg)));
       const act = (path, confirmMsg) => async (event) => {
@@ -11392,6 +12207,7 @@
       content.querySelector('#lg-advance')?.addEventListener('click', act('advance', `Close round ${lg.current_round}? Box winners move up, last place drops.`));
       content.querySelector('#lg-complete')?.addEventListener('click', act('complete', 'Finish the season and crown the champion?'));
       content.querySelector('#lg-cancel')?.addEventListener('click', act('cancel', 'Cancel this league for everyone?'));
+      bindCompetitionGlobalAction(content);
       content.querySelectorAll('[data-result-match]').forEach((card) => {
         makePressable(card, () => {
           const match = (lg.matches || []).find((item) => item.id === Number(card.dataset.resultMatch));
@@ -11439,7 +12255,7 @@
     const modal = openModal(`
       <div class="thread">
         <div class="thread-head">
-          <button class="modal-close" style="font-size:18px">‹</button>
+          <button type="button" class="modal-close" style="font-size:18px" aria-label="Back">‹</button>
           <span style="font-size:22px">📦</span>
           <div class="row-main">
             <div class="row-title">${esc(lg.name)}</div>
@@ -11467,14 +12283,15 @@
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div class="chat-message-row ${mine ? 'is-mine' : 'is-theirs'}" data-message-row="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
+          <div class="bubble ${mine ? 'me' : 'them'}" data-message-id="${m.id}" style="max-width:100%">${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
+          ${chatMessageActionHtml(m, mine)}
         </div>`;
       }).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
@@ -11714,7 +12531,7 @@
           <button type="button" data-val="" class="active" aria-pressed="true">Casual</button>
           <button type="button" data-val="1" aria-pressed="false">⚡ Ranked</button>
         </div>
-        <div class="row-sub" style="margin-top:6px">Ranked: every match counts toward player ratings when the tournament finishes.</div>
+        <div class="row-sub" id="tc-ranked-hint" style="margin-top:6px">Casual: results are recorded, with no rating changes.</div>
       </div>
       ${myClubs.length ? `
       <div class="form-field">
@@ -11789,7 +12606,11 @@
         : "Single elimination — lose and you're out, seeded by rating.";
     });
     segPick('#tc-event');
-    segPick('#tc-ranked');
+    segPick('#tc-ranked', (value) => {
+      modal.querySelector('#tc-ranked-hint').textContent = value
+        ? 'Ranked: every match counts toward player ratings when the tournament finishes.'
+        : 'Casual: results are recorded, with no rating changes.';
+    });
 
     let tcClubId = null;
     modal.querySelector('#tc-club')?.addEventListener('click', (e) => {
@@ -11994,7 +12815,7 @@
     }
     if (!routedOverlayLoadIsCurrent(routeLoad)) return;
 
-    const box = openModal(modalHead('Tournament'), { route, label: 'Tournament' });
+    const box = openModal(modalHead('Tournament'), { route, label: 'Tournament', page: true });
     const content = box.querySelector('.modal');
     let deepLinkOpened = false;
     const runMutation = async (request) => {
@@ -12039,11 +12860,21 @@
           : fmtDateTime(t.starts_at),
         `${T_FORMAT_LABEL[t.format] || t.format} · ${isDoubles ? 'Doubles' : 'Singles'}${t.ranked ? ' · ⚡ Ranked' : ''}`,
       ].filter(Boolean);
+      const hasTournamentChat = !!(t.my_entry_id || t.is_organizer);
+      const tournamentNav = [['td-overview', 'Overview']];
+      if (t.status === 'active' || t.status === 'completed') {
+        tournamentNav.push(['td-matches', t.format === 'single_elim' ? 'Bracket' : 'Matches']);
+      }
+      if (t.status !== 'cancelled') tournamentNav.push(['td-players', isDoubles ? 'Teams' : 'Players']);
+      if (hasTournamentChat) tournamentNav.push(['td-chat', 'Chat']);
+      const nextActionHtml = competitionActionNeededHtml('tournament', t);
 
       let body = `
         ${modalHead(t.name)}
         <div class="row-sub" style="margin:-6px 0 6px">${meta.map(esc).join(' · ')}</div>
-        <div style="margin-bottom:12px">${tournamentStatusChip(t)}${t.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(t.club_name)}</span>` : ''}</div>
+        ${nextActionHtml}
+        ${competitionDetailTabsHtml(tournamentNav)}
+        <div id="td-overview" tabindex="-1" style="margin-bottom:12px">${tournamentStatusChip(t)}${t.club_name ? ` <span class="tag" style="margin:0 0 0 4px">🏛 ${esc(t.club_name)}</span>` : ''}</div>
         ${t.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(t.description)}</div>` : ''}`;
 
       if (t.status === 'completed' && t.champion) {
@@ -12055,16 +12886,14 @@
           </div>`;
       }
 
-      const checkinOpen = Date.now() >= new Date(t.starts_at).getTime() - 24 * 3600e3
-        && (t.status === 'registration' || t.status === 'active');
-      const myEntry = t.entries.find((en) => en.id === t.my_entry_id);
+      const { myEntry, canCheckIn } = tournamentCheckinState(t);
       const hereTag = (en) => (en.checked_in
         ? ' <span class="tag" style="background:var(--green-100);color:var(--green-ink)">🙋 here</span>' : '');
-      const checkinButton = (myEntry && checkinOpen && !myEntry.checked_in)
+      const checkinButton = canCheckIn
         ? '<button class="btn btn-primary btn-block" id="td-checkin" style="margin-top:12px">🙋 Check in — we\'re here</button>' : '';
 
       if (t.status === 'registration') {
-        body += `<div class="section-label">Entries (${t.entry_count}/${t.max_entries})</div>`;
+        body += `<div class="section-label" id="td-players" tabindex="-1">Entries (${t.entry_count}/${t.max_entries})</div>`;
         body += t.entries.length ? t.entries.map((en) => `
           <div class="card row" style="padding:10px 14px">
             ${avatarHtml(en.players[0] || {}, 'sm')}
@@ -12096,7 +12925,6 @@
         body += '<button class="btn btn-secondary btn-block" id="td-share" style="margin-top:8px">📤 Share — invite players</button>';
         if (t.my_entry_id || t.is_organizer) {
           body += '<button class="btn btn-secondary btn-block" id="td-ics" style="margin-top:8px">📅 Add to calendar</button>';
-          body += `<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:8px">💬 Tournament chat${t.chat_unread ? ` <span class="tag live" style="margin:0 0 0 6px">${t.chat_unread > 9 ? '9+' : t.chat_unread} new</span>` : ''}</button>`;
         }
         if (t.is_organizer) {
           body += `
@@ -12106,20 +12934,17 @@
             <button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:8px">Cancel tournament</button>`;
         }
       } else if (t.status !== 'cancelled') {
-        body += competitionActionNeededHtml('tournament', t);
+        body += '<div id="td-matches" tabindex="-1"></div>';
         body += t.format === 'round_robin' ? roundRobinHtml(t) : bracketHtml(t);
         if (t.status === 'active') {
           body += '<div class="competition-progression-note">Open any match for its result status and activity. Bracket progression waits for confirmation.</div>';
-        }
-        if (t.my_entry_id || t.is_organizer) {
-          body += `<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:12px">💬 Tournament chat${t.chat_unread ? ` <span class="tag live" style="margin:0 0 0 6px">${t.chat_unread > 9 ? '9+' : t.chat_unread} new</span>` : ''}</button>`;
         }
         if (t.status === 'active' && t.is_organizer) {
           body += '<button class="btn btn-secondary btn-block" id="td-edit" style="margin-top:8px">✏️ Edit details</button>';
           body += '<button class="btn btn-secondary btn-block" id="td-cancel" style="margin-top:8px">Cancel tournament</button>';
         }
         body += checkinButton;
-        body += `<div class="section-label" style="margin-top:14px">${isDoubles ? 'Teams' : 'Players'}</div>`;
+        body += `<div class="section-label" id="td-players" tabindex="-1" style="margin-top:14px">${isDoubles ? 'Teams' : 'Players'}</div>`;
         body += t.entries.map((en) => `
           <div class="card row" style="padding:8px 14px">
             ${avatarHtml(en.players[0] || {}, 'sm')}
@@ -12130,8 +12955,15 @@
         body += '<div class="empty-state" style="padding:16px">This tournament was cancelled.</div>';
       }
 
+      if (hasTournamentChat) {
+        body += `<button class="btn btn-secondary btn-block" id="td-chat" style="margin-top:12px">💬 Open tournament chat${t.chat_unread ? ` <span class="tag live" style="margin:0 0 0 6px">${t.chat_unread > 9 ? '9+' : t.chat_unread} new</span>` : ''}</button>`;
+      }
+
       content.innerHTML = body;
       setDialogLabel(content, 'Tournament');
+      bindCompetitionDetailTabs(
+        content, snapshot?.activeCompetitionTab || (requestedMatchId ? 'td-matches' : null),
+      );
 
       // --- actions ---
       content.querySelector('#td-chat')?.addEventListener('click', () => openTournamentChat(t));
@@ -12204,6 +13036,7 @@
           if (state.tab === 'play' && state.playSeg === 'brackets') renderPlay();
         } catch (err) { toast(err.message); }
       });
+      bindCompetitionGlobalAction(content);
       content.querySelectorAll('[data-result-match]').forEach((card) => {
         makePressable(card, () => {
           const match = t.matches.find((item) => item.id === Number(card.dataset.resultMatch));
@@ -12324,7 +13157,7 @@
     const modal = openModal(`
       <div class="thread">
         <div class="thread-head">
-          <button class="modal-close" style="font-size:18px">‹</button>
+          <button type="button" class="modal-close" style="font-size:18px" aria-label="Back">‹</button>
           <span style="font-size:22px">🏆</span>
           <div class="row-main">
             <div class="row-title">Tournament chat</div>
@@ -12352,14 +13185,15 @@
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div class="chat-message-row ${mine ? 'is-mine' : 'is-theirs'}" data-message-row="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
+          <div class="bubble ${mine ? 'me' : 'them'}" data-message-id="${m.id}" style="max-width:100%">${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
+          ${chatMessageActionHtml(m, mine)}
         </div>`;
       }).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
@@ -12390,7 +13224,32 @@
   }
 
   // ---------- Chat & Friends ----------
+  function configureCommunityLaneTabs() {
+    const labels = [
+      ['#chat-tab-chats', 'Messages'],
+      ['#chat-tab-friends', 'People'],
+      ['#chat-tab-nearby', 'Groups'],
+    ];
+    labels.forEach(([selector, label]) => {
+      const button = $(selector);
+      if (!button) return;
+      const badge = button.querySelector('.segment-badge');
+      button.replaceChildren(document.createTextNode(`${label} `));
+      if (badge) button.appendChild(badge);
+    });
+  }
+
+  function chatMessageActionHtml(message, mine) {
+    const id = Number(message && message.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return '';
+    const sender = esc(message.sender_name || 'this player');
+    return mine
+      ? `<button type="button" class="chat-message-action" data-message-action="delete" data-message-id="${id}" aria-label="Delete your message">🗑</button>`
+      : `<button type="button" class="chat-message-action" data-message-action="heart" data-message-id="${id}" aria-label="React to ${sender} with a heart">♡</button>`;
+  }
+
   function setupChat() {
+    configureCommunityLaneTabs();
     $('#chat-segments').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
@@ -12410,7 +13269,7 @@
     if (!message) return item.emptyText || 'Start the conversation';
     if (message.open_call) {
       const call = message.open_call;
-      if (call.state === 'open') return `🏓 ${call.spots_left} spot${call.spots_left === 1 ? '' : 's'} open · ${esc(fmtDateTime(call.scheduled_at))}`;
+      if (call.state === 'open') return `🏓 ${call.spots_left} spot${call.spots_left === 1 ? '' : 's'} left · ${esc(fmtDateTime(call.scheduled_at))}`;
       if (call.state === 'full') return `✓ Roster full · ${esc(fmtDateTime(call.scheduled_at))}`;
       return call.state === 'withdrawn' ? 'Court game post withdrawn' : 'Court game post closed';
     }
@@ -12433,7 +13292,10 @@
     return details.join(' · ');
   }
 
-  function universalInboxHtml(data, rooms, clubs, competitions, crews = { items: [], invitations: [] }) {
+  function universalInboxHtml(
+    data, rooms, clubs, competitions, crews = { items: [], invitations: [] },
+    { lane = 'messages' } = {},
+  ) {
     const items = [];
     (data.items || []).forEach((chat) => items.push({
       kind: 'dm', id: chat.user.id, title: chat.user.display_name,
@@ -12461,18 +13323,36 @@
     (rooms.items || []).forEach((room) => items.push({
       kind: 'court', id: room.court.id, title: room.court.name,
       iconHtml: '<span class="inbox-room-icon">🏓</span>', lastMessage: room.last_message,
-      unread: room.unread || 0, emptyText: 'Court room',
+      unread: room.unread || 0, emptyText: 'Court chat',
     }));
     (competitions.items || []).forEach((room) => items.push({
       kind: room.kind, id: room.id, title: room.title,
       iconHtml: `<span class="inbox-room-icon">${room.kind === 'game' ? '🏓' : room.kind === 'tournament' ? '🏆' : '📦'}</span>`,
       lastMessage: room.last_message, unread: room.unread || 0,
-      emptyText: competitionInboxContext(room), eventAt: room.event_at,
+      emptyText: competitionInboxContext(room), eventAt: room.event_at, status: room.status,
     }));
 
-    const recent = items.filter((item) => item.lastMessage)
+    const groupKinds = new Set(['club', 'crew', 'court', 'tournament', 'league']);
+    const activeStatuses = new Set(['registration', 'active', 'upcoming', 'awaiting_confirmation']);
+    const visibleItems = items.filter((item) => (
+      lane === 'groups'
+        ? groupKinds.has(item.kind)
+        : !groupKinds.has(item.kind)
+          && (item.kind !== 'game' || activeStatuses.has(item.status) || item.unread > 0)
+    ));
+    const activeGames = lane === 'messages' ? visibleItems.filter((item) => (
+      item.kind === 'game' && activeStatuses.has(item.status)
+    )).sort((a, b) => {
+      if (a.unread !== b.unread) return b.unread - a.unread;
+      if (a.eventAt && b.eventAt) return new Date(a.eventAt) - new Date(b.eventAt);
+      return a.eventAt ? -1 : b.eventAt ? 1 : a.title.localeCompare(b.title);
+    }) : [];
+    const activeIds = new Set(activeGames.map((item) => `${item.kind}:${item.id}`));
+    const recent = visibleItems.filter((item) => item.lastMessage
+        && !activeIds.has(`${item.kind}:${item.id}`))
       .sort((a, b) => b.lastMessage.id - a.lastMessage.id);
-    const ready = items.filter((item) => !item.lastMessage)
+    const ready = visibleItems.filter((item) => !item.lastMessage
+        && !activeIds.has(`${item.kind}:${item.id}`))
       .sort((a, b) => {
         if (a.eventAt && b.eventAt) return new Date(a.eventAt) - new Date(b.eventAt);
         return a.eventAt ? -1 : b.eventAt ? 1 : a.title.localeCompare(b.title);
@@ -12498,7 +13378,7 @@
       crew: crewSummaryFrom(invitation),
     })).filter((entry) => entry.crew);
     let html = '';
-    if (invitations.length) {
+    if (lane === 'groups' && invitations.length) {
       html += '<div class="section-label" style="margin-top:4px">Crew invitations</div>';
       html += invitations.map(({ invitation, crew }) => {
         const inviter = invitation.inviter && invitation.inviter.display_name
@@ -12517,37 +13397,131 @@
         </div>`;
       }).join('');
     }
+    if (lane === 'groups') {
+      const crewItems = visibleItems.filter((item) => item.kind === 'crew');
+      const clubItems = visibleItems.filter((item) => item.kind === 'club');
+      const conversationItems = visibleItems.filter((item) => ['court', 'tournament', 'league'].includes(item.kind))
+        .sort((a, b) => {
+          if (a.unread !== b.unread) return b.unread - a.unread;
+          if (a.lastMessage && b.lastMessage) return b.lastMessage.id - a.lastMessage.id;
+          return a.lastMessage ? -1 : b.lastMessage ? 1 : a.title.localeCompare(b.title);
+        });
+      html += '<div class="section-label" style="margin-top:4px">Your crews</div>';
+      html += crewItems.length ? crewItems.map((item) => rowHtml(item)).join('')
+        : '<div class="empty-state community-lane-empty" style="padding:14px">Crews you create after a game stay here for the next plan.</div>';
+      html += '<div class="section-label">Your clubs</div>';
+      html += clubItems.length ? clubItems.map((item) => rowHtml(item)).join('')
+        : '<div class="empty-state community-lane-empty" style="padding:14px">Join a local club or start one for your court.</div>';
+      if (conversationItems.length) {
+        html += '<div class="section-label">Group conversations</div>';
+        html += conversationItems.map((item) => rowHtml(item)).join('');
+      }
+      html += `<div class="section-label">Find your group</div>
+        <div class="community-group-actions" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <button class="btn btn-secondary" id="club-find">🔎 Find clubs</button>
+          <button class="btn btn-secondary" id="club-new">＋ Start a club</button>
+        </div>`;
+      return html;
+    }
+
+    if (activeGames.length) {
+      html += '<div class="section-label" style="margin-top:4px">Active game chats</div>';
+      html += activeGames.map((item) => rowHtml(item, 'inbox-row-pinned')).join('');
+    }
     if (recent.length) {
-      html += '<div class="section-label" style="margin-top:4px">Recent conversations</div>';
+      html += `<div class="section-label" style="margin-top:${activeGames.length ? '18px' : '4px'}">Messages</div>`;
       html += recent.map((item) => rowHtml(item)).join('');
     }
     if (ready.length) {
-      html += `<div class="section-label" style="margin-top:${recent.length ? '18px' : '4px'}">Ready to coordinate</div>`;
+      html += `<div class="section-label" style="margin-top:${activeGames.length || recent.length ? '18px' : '4px'}">Ready to coordinate</div>`;
       html += ready.map((item, index) => rowHtml(item, index >= 8 ? 'inbox-ready-extra hidden' : '')).join('');
       if (ready.length > 8) {
-        html += `<button type="button" class="btn btn-secondary btn-block" id="inbox-show-ready">Show ${ready.length - 8} more active chats</button>`;
+        html += `<button type="button" class="btn btn-secondary btn-block" id="inbox-show-ready">Show ${ready.length - 8} more chats</button>`;
       }
     }
-    if (!items.length && !invitations.length) {
-      html = `<div class="empty-state"><span class="big">💬</span><b>Your conversations will live here.</b><br>Find your crew or start a game to open a shared chat.
+    if (!visibleItems.length) {
+      html = `<div class="empty-state"><span class="big">💬</span><b>Your messages will live here.</b><br>Start with a player or coordinate an upcoming game.
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
-          <button class="btn btn-secondary" data-goto="chat-friends">🤝 Find friends</button>
-          <button class="btn btn-primary" data-goto="new-game">🏓 Start a game</button>
+          <button class="btn btn-secondary" data-goto="chat-friends">Find players</button>
+          <button class="btn btn-primary" data-goto="new-game">Plan a game</button>
         </div></div>`;
     }
-    html += `<div class="section-label">Build your community</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button class="btn btn-secondary" id="club-find">🔎 Find clubs</button>
-        <button class="btn btn-secondary" id="club-new">＋ Start a club</button>
-      </div>`;
     return html;
+  }
+
+  function bindCommunityConversationRows(el) {
+    el.querySelectorAll('[data-inbox-kind]').forEach((row) => row.addEventListener('click', async () => {
+      if (row.disabled) return;
+      row.disabled = true;
+      const kind = row.dataset.inboxKind;
+      const id = Number(row.dataset.inboxId);
+      try {
+        if (kind === 'dm') await openThread(id);
+        else if (kind === 'court') await openCourtChat({ id, name: row.dataset.inboxTitle });
+        else if (kind === 'club') await openClubScreen(id);
+        else if (kind === 'crew') await openCrewChatById(id);
+        else if (kind === 'game') await openGameChat({ id });
+        else if (kind === 'tournament') await openTournamentChat({ id });
+        else if (kind === 'league') await openLeagueChat({ id, name: row.dataset.inboxTitle });
+      } finally {
+        row.disabled = false;
+        // The room GET is the authoritative read action. Re-fetch whichever
+        // stable Community lane the player returns to so its count stays exact.
+        if (state.tab === 'chat') renderChat();
+      }
+    }));
+  }
+
+  function bindCrewInvitationActions(el) {
+    el.querySelectorAll('[data-crew-response]').forEach((button) => button.addEventListener('click', async () => {
+      const crewId = Number(button.dataset.crewId);
+      const accept = button.dataset.crewResponse === 'accept';
+      const card = button.closest('[data-crew-invitation]');
+      const buttons = [...(card?.querySelectorAll('[data-crew-response]') || [])];
+      buttons.forEach((item) => { item.disabled = true; });
+      button.textContent = accept ? 'Joining…' : 'Declining…';
+      try {
+        await api(`/crews/${crewId}/respond`, {
+          method: 'POST', body: JSON.stringify({ accept }),
+        });
+        toast(accept ? 'Joined the crew 🏓' : 'Crew invitation declined');
+        renderChat();
+        refreshMe();
+        if (accept) openCrewScreen(crewId);
+      } catch (error) {
+        toast(error.message);
+        buttons.forEach((item) => { item.disabled = false; });
+        button.textContent = accept ? 'Join crew' : 'Decline';
+      }
+    }));
+  }
+
+  async function renderPeopleLane(el, { useCachedData = false } = {}) {
+    const mode = state.peopleMode === 'nearby' ? 'nearby' : 'friends';
+    el.innerHTML = `
+      <div class="segmented community-people-switch" id="people-mode" role="tablist" aria-label="People views" style="margin:2px 0 12px">
+        <button type="button" id="people-tab-friends" role="tab" data-people-mode="friends" aria-controls="people-content" aria-selected="${mode === 'friends'}" class="${mode === 'friends' ? 'active' : ''}">Friends</button>
+        <button type="button" id="people-tab-nearby" role="tab" data-people-mode="nearby" aria-controls="people-content" aria-selected="${mode === 'nearby'}" class="${mode === 'nearby' ? 'active' : ''}">Nearby</button>
+      </div>
+      <div id="people-content" role="tabpanel" aria-labelledby="people-tab-${mode}"></div>`;
+    const body = el.querySelector('#people-content');
+    if (mode === 'nearby') await renderNearbyPlayers(body);
+    else await renderFriends(body, { useCachedData });
+    setupTablistKeyboard(el.querySelector('#people-mode'));
+    el.querySelector('#people-mode').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-people-mode]');
+      if (!button || button.dataset.peopleMode === state.peopleMode) return;
+      state.peopleMode = button.dataset.peopleMode;
+      renderChat({ useCachedData: state.peopleMode === 'friends' });
+    });
   }
 
   async function renderChat({ reuseFresh = false, useCachedData = false } = {}) {
     const seg = state.chatSeg;
     const liveEl = $('#chat-content');
     liveEl.setAttribute('aria-labelledby', `chat-tab-${seg}`);
-    const viewKey = `${state.me?.id || 'signed-out'}:chat:${seg}:${areaViewKey()}`;
+    const peopleKey = seg === 'friends' ? `:${state.peopleMode}` : '';
+    const viewKey = `${state.me?.id || 'signed-out'}:chat:${seg}${peopleKey}:${areaViewKey()}`;
     if (reuseFresh && viewIsFresh(liveEl, viewKey)) return;
     const renderSeq = ++state.chatRenderSeq;
     const hadUsableContent = beginViewRender(liveEl, viewKey, 5);
@@ -12567,52 +13541,10 @@
           api('/crews/mine').catch(() => ({ items: [], invitations: [] })),
         ]);
         if (renderSeq !== state.chatRenderSeq || state.chatSeg !== seg) return;
-        state.communityRoomUnread = [rooms, clubs, competitions, crews]
-          .flatMap((group) => group.items || [])
-          .reduce((total, item) => total + Number(item.unread || 0), 0);
+        syncCommunityUnreadLanes(rooms, clubs, competitions, crews);
         renderBadges();
-        el.innerHTML = universalInboxHtml(data, rooms, clubs, competitions, crews);
-        el.querySelectorAll('[data-inbox-kind]').forEach((row) => row.addEventListener('click', async () => {
-          if (row.disabled) return;
-          row.disabled = true;
-          const kind = row.dataset.inboxKind;
-          const id = Number(row.dataset.inboxId);
-          try {
-            if (kind === 'dm') await openThread(id);
-            else if (kind === 'court') await openCourtChat({ id, name: row.dataset.inboxTitle });
-            else if (kind === 'club') await openClubScreen(id);
-            else if (kind === 'crew') await openCrewChatById(id);
-            else if (kind === 'game') await openGameChat({ id });
-            else if (kind === 'tournament') await openTournamentChat({ id });
-            else if (kind === 'league') await openLeagueChat({ id, name: row.dataset.inboxTitle });
-          } finally {
-            row.disabled = false;
-            // The room GET is the authoritative read action. Re-fetching the
-            // inbox keeps counts exact on success and unchanged on failure.
-            if (state.tab === 'chat' && state.chatSeg === 'chats') renderChat();
-          }
-        }));
-        el.querySelectorAll('[data-crew-response]').forEach((button) => button.addEventListener('click', async () => {
-          const crewId = Number(button.dataset.crewId);
-          const accept = button.dataset.crewResponse === 'accept';
-          const card = button.closest('[data-crew-invitation]');
-          const buttons = [...(card?.querySelectorAll('[data-crew-response]') || [])];
-          buttons.forEach((item) => { item.disabled = true; });
-          button.textContent = accept ? 'Joining…' : 'Declining…';
-          try {
-            await api(`/crews/${crewId}/respond`, {
-              method: 'POST', body: JSON.stringify({ accept }),
-            });
-            toast(accept ? 'Joined the crew 🏓' : 'Crew invitation declined');
-            renderChat();
-            refreshMe();
-            if (accept) openCrewScreen(crewId);
-          } catch (error) {
-            toast(error.message);
-            buttons.forEach((item) => { item.disabled = false; });
-            button.textContent = accept ? 'Join crew' : 'Decline';
-          }
-        }));
+        el.innerHTML = universalInboxHtml(data, rooms, clubs, competitions, crews, { lane: 'messages' });
+        bindCommunityConversationRows(el);
         el.querySelector('#inbox-show-ready')?.addEventListener('click', (event) => {
           const firstRevealed = el.querySelector('.inbox-ready-extra');
           el.querySelectorAll('.inbox-ready-extra').forEach((row) => row.classList.remove('hidden'));
@@ -12622,9 +13554,24 @@
         el.querySelector('#club-find')?.addEventListener('click', openFindClubsSheet);
         el.querySelector('#club-new')?.addEventListener('click', openCreateClubSheet);
       } else if (seg === 'nearby') {
-        await renderNearbyPlayers(el);
+        const [rooms, clubs, competitions, crews] = await Promise.all([
+          api('/chat/courts'),
+          api('/clubs/mine'),
+          api('/chat/competitions'),
+          api('/crews/mine').catch(() => ({ items: [], invitations: [] })),
+        ]);
+        if (renderSeq !== state.chatRenderSeq || state.chatSeg !== seg) return;
+        syncCommunityUnreadLanes(rooms, clubs, competitions, crews);
+        renderBadges();
+        el.innerHTML = universalInboxHtml(
+          { items: [] }, rooms, clubs, competitions, crews, { lane: 'groups' },
+        );
+        bindCommunityConversationRows(el);
+        bindCrewInvitationActions(el);
+        el.querySelector('#club-find')?.addEventListener('click', openFindClubsSheet);
+        el.querySelector('#club-new')?.addEventListener('click', openCreateClubSheet);
       } else {
-        await renderFriends(el, { useCachedData });
+        await renderPeopleLane(el, { useCachedData });
       }
       commit();
     } catch (e) {
@@ -12669,11 +13616,15 @@
         || String(a.display_name || '').localeCompare(String(b.display_name || ''));
     });
     let html = `
-      <div class="form-field" style="margin-top:4px">
-        <div class="quick-times" id="nearby-skill">
-          ${skills.map(([v, label]) => `<button type="button" data-skill="${v}" class="${v === skill ? 'active' : ''}" aria-pressed="${v === skill}">${label}</button>`).join('')}
+      <details class="nearby-filter" style="margin:4px 0 12px">
+        <summary>Level: ${esc((skills.find(([value]) => value === skill) || skills[0])[1])}</summary>
+        <div class="form-field" style="margin:8px 0 0">
+          <label class="sr-only" for="nearby-skill">Filter nearby players by level</label>
+          <select id="nearby-skill">
+            ${skills.map(([value, label]) => `<option value="${value}" ${value === skill ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>
         </div>
-      </div>`;
+      </details>`;
 
     if (pulses.length) {
       html += '<div class="section-label">📣 Can play this hour</div><div class="nearby-play-pulses">';
@@ -12688,7 +13639,7 @@
             </div>
             <div class="play-pulse-nearby-copy">
               <b>${esc(first)} can play at ${esc(pulse.courtName)} this hour</b>
-              <span>${esc(proximity)}available until ${esc(fmtTimeShort(pulse.expiresAt))} · intended destination, not current presence</span>
+              <span>${esc(proximity)}free until ${esc(fmtTimeShort(pulse.expiresAt))} · intended destination, not current presence</span>
               <small>Confirming creates an open quick game starting in about 15 minutes and notifies ${esc(first)}.</small>
             </div>
             <button type="button" class="btn btn-primary btn-sm" data-play-pulse-accept="${pulse.id}" aria-label="Play with ${esc(first)} at ${esc(pulse.courtName)}">Play there</button>
@@ -12698,7 +13649,7 @@
     }
 
     if (rallies.length) {
-      html += '<div class="section-label">⚡ Ready now</div><div class="nearby-rallies">';
+      html += '<div class="section-label">Games starting now</div><div class="nearby-rallies">';
       html += rallies.map((rally) => {
         const action = rallyActionState(rally);
         return `
@@ -12724,7 +13675,9 @@
               : `<span class="tag warn" style="margin:0">${esc(rallyAction.label)}</span>`;
           } else if (readyAtCourt) {
             action = `<button type="button" class="btn btn-secondary btn-sm" data-nearby-court="${p.checked_in_court.id}">View court</button>`;
-          } else if (p.is_friend) action = '<span class="tag" style="margin:0">Friends ✓</span>';
+          } else if (p.is_friend) {
+            action = `<button class="btn btn-secondary btn-sm" data-msg="${p.id}">Message</button>`;
+          }
           else if (p.friendship_status === 'pending') action = p.outgoing
             ? '<span class="tag" style="margin:0">Pending</span>'
             : `<button class="btn btn-primary btn-sm" data-respond-inline="${p.friendship_id}">Accept</button>`;
@@ -12743,20 +13696,20 @@
                 <div class="row-title">${esc(p.display_name)}${p.current_streak >= 2 ? ' 🔥' : ''}</div>
                 <div class="row-sub">${sub}</div>
               </div>
-              <button class="btn btn-secondary btn-sm" data-msg="${p.id}" aria-label="Message ${esc(p.display_name)}">💬</button>
               ${action}
             </div>`;
         }).join('')
       : pulses.length || rallies.length ? ''
         : '<div class="empty-state"><span class="big">📍</span>No players near you yet.<br>Check in at a court so others can find you!<br><button class="btn btn-primary" data-goto="courts" style="margin-top:10px">🗺 Browse courts</button></div>';
 
-    html += '<p class="nearby-privacy"><span aria-hidden="true">👀</span> Court check-ins show current presence. One-hour availability shows only an intended destination, expires at the server time shown, and never checks someone in.</p>';
+    html += `<details class="nearby-privacy">
+      <summary>How location sharing works</summary>
+      <p>Court check-ins show where you are now. Free this hour shares only where you intend to play and expires automatically.</p>
+    </details>`;
 
     el.innerHTML = html;
-    el.querySelector('#nearby-skill').addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      state.nearbySkill = btn.dataset.skill;
+    el.querySelector('#nearby-skill').addEventListener('change', (e) => {
+      state.nearbySkill = e.currentTarget.value;
       renderChat();
     });
     el.querySelectorAll('[data-rally-action]').forEach((button) => button.addEventListener('click', () => {
@@ -12810,7 +13763,7 @@
             <div class="row-sub">${skillLabel(f.skill_level)} · ${f.rating}</div>
           </div>
           <button class="btn btn-primary btn-sm" data-respond="${f.friendship_id}" data-accept="1">Accept</button>
-          <button class="btn btn-secondary btn-sm" data-respond="${f.friendship_id}" data-accept="0">✕</button>
+          <button class="btn btn-secondary btn-sm" data-respond="${f.friendship_id}" data-accept="0" aria-label="Decline friend request from ${esc(f.display_name)}">✕</button>
         </div>`).join('');
     }
 
@@ -12866,9 +13819,8 @@
                 : `${skillLabel(f.skill_level)} · ${f.rating}`}</div>
             </div>
             ${f.checked_in_court && f.checked_in_court.looking_for_game
-              ? `<button class="btn btn-primary btn-sm" data-coming="${f.id}" title="Tell them you're on your way"><svg class="pb-ic"><use href="#pb"/></svg> On my way</button>`
-              : `<button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game"><svg class="pb-ic"><use href="#pb"/></svg></button>`}
-            <button class="btn btn-secondary btn-sm" data-msg="${f.id}" aria-label="Message ${esc(f.display_name)}">💬</button>
+              ? `<button class="btn btn-primary btn-sm" data-coming="${f.id}" title="Tell them you can be there soon"><svg class="pb-ic"><use href="#pb"/></svg> I can be there soon</button>`
+              : `<button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" aria-label="Invite ${esc(f.display_name)} to a game">Invite</button>`}
           </div>`).join('')
       : (wantedSlots ? '' : '<div class="empty-state" style="padding:18px">No friends yet — search above to find players.</div>');
 
@@ -12922,7 +13874,6 @@
       state.friendSlotFilter = btn.dataset.slots;
       renderChat({ useCachedData: true });
     });
-    el.querySelectorAll('[data-msg]').forEach((b) => b.addEventListener('click', () => openThread(Number(b.dataset.msg))));
     el.querySelectorAll('[data-invite]').forEach((b) => b.addEventListener('click', () => {
       const court = b.dataset.inviteCourt
         ? { id: Number(b.dataset.inviteCourt), name: b.dataset.inviteCourtName }
@@ -12933,7 +13884,7 @@
       b.disabled = true;
       try {
         await api(`/players/${b.dataset.coming}/coming`, { method: 'POST' });
-        toast("They know you're on your way 🏓");
+        toast('They know you can be there soon 🏓');
         b.textContent = '✓ Sent';
       } catch (e) { toast(e.message); b.disabled = false; }
     }));
@@ -12953,13 +13904,25 @@
 
     let timer;
     const search = el.querySelector('#friend-search');
+    if (!search) return;
     search.addEventListener('input', () => {
       clearTimeout(timer);
       timer = setTimeout(async () => {
+        if (!search.isConnected) return;
         const q = search.value.trim();
-        const resultsEl = el.querySelector('#friend-search-results');
+        let resultsEl = el.querySelector('#friend-search-results');
+        if (!resultsEl) return;
         if (q.length < 2) { resultsEl.innerHTML = ''; return; }
-        const data = await api(`/users/search?q=${encodeURIComponent(q)}`);
+        let data;
+        try {
+          data = await api(`/users/search?q=${encodeURIComponent(q)}`);
+        } catch (error) {
+          if (search.isConnected && search.value.trim() === q) toast(error.message);
+          return;
+        }
+        if (!search.isConnected || search.value.trim() !== q) return;
+        resultsEl = el.querySelector('#friend-search-results');
+        if (!resultsEl) return;
         resultsEl.innerHTML = data.items.map((u) => {
           let action;
           if (u.friendship_status === 'accepted') action = '<span class="tag" style="margin:0">Friends ✓</span>';
@@ -13008,7 +13971,7 @@
     const modal = openModal(`
       <div class="thread">
         <div class="thread-head">
-          <button class="modal-close" style="font-size:18px">‹</button>
+          <button type="button" class="modal-close" style="font-size:18px" aria-label="Back">‹</button>
           ${avatarHtml(data.user, 'sm')}
           <div class="row-main">
             <div class="row-title">${esc(data.user.display_name)}</div>
@@ -13035,13 +13998,19 @@
       items = batch.items;
       if (append && !items.length) return;
       const snapshot = chatUX.captureScroll();
-      const html = items.map((m) => `
-        <div class="bubble ${m.sender_id === state.me.id ? 'me' : 'them'}" data-message-id="${m.id}" ${m.sender_id === state.me.id ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-heart-msg="${m.id}" title="Tap to ❤️"`}>
+      const html = items.map((m) => {
+        const mine = m.sender_id === state.me.id;
+        return `
+        <div class="chat-message-row ${mine ? 'is-mine' : 'is-theirs'}" data-message-row="${m.id}" style="display:flex;gap:6px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%;align-items:flex-end">
+        <div class="bubble ${mine ? 'me' : 'them'}" data-message-id="${m.id}">
           ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
           ${esc(m.body)}
-          <div class="bubble-time">${fmtTimeShort(m.created_at)}${m.sender_id === state.me.id && m.read_at ? ' · <span title="Seen">✓✓</span>' : ''}</div>
+          <div class="bubble-time">${fmtTimeShort(m.created_at)}${mine && m.read_at ? ' · <span title="Seen">✓✓</span>' : ''}</div>
           ${m.hearted ? '<span class="bubble-heart">❤️</span>' : ''}
-        </div>`).join('');
+        </div>
+        ${chatMessageActionHtml(m, mine)}
+        </div>`;
+      }).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
       else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">Say hi! 👋</div>';
@@ -13051,9 +14020,9 @@
     // Live ✓✓: flip 'Seen' onto already-rendered bubbles as the partner reads.
     const markSeen = (upTo) => {
       if (!upTo) return;
-      msgsEl.querySelectorAll('.bubble.me[data-del-msg]').forEach((b) => {
+      msgsEl.querySelectorAll('.bubble.me[data-message-id]').forEach((b) => {
         const t = b.querySelector('.bubble-time');
-        if (Number(b.dataset.delMsg) <= upTo && t && !t.textContent.includes('✓✓')) {
+        if (Number(b.dataset.messageId) <= upTo && t && !t.textContent.includes('✓✓')) {
           t.insertAdjacentHTML('beforeend', ' · <span title="Seen">✓✓</span>');
         }
       });
@@ -13062,9 +14031,9 @@
     const applyHearts = (ids) => {
       if (!ids) return;
       const set = new Set(ids);
-      msgsEl.querySelectorAll('.bubble.me[data-del-msg]').forEach((b) => {
+      msgsEl.querySelectorAll('.bubble.me[data-message-id]').forEach((b) => {
         const has = b.querySelector('.bubble-heart');
-        const want = set.has(Number(b.dataset.delMsg));
+        const want = set.has(Number(b.dataset.messageId));
         if (want && !has) b.insertAdjacentHTML('beforeend', '<span class="bubble-heart">❤️</span>');
         if (!want && has) has.remove();
       });
@@ -13133,7 +14102,7 @@
       open: 'Open', full: 'Full', closed: 'Closed', withdrawn: 'Withdrawn',
     }[stateName];
     const title = stateName === 'open'
-      ? `${call.spots_left} spot${call.spots_left === 1 ? '' : 's'} open`
+      ? `${call.spots_left} spot${call.spots_left === 1 ? '' : 's'} left`
       : stateName === 'full' ? 'Roster is full'
         : stateName === 'withdrawn' ? 'Court post withdrawn' : 'Game closed';
     const skill = call.preferred_level && call.preferred_level !== 'any'
@@ -13142,7 +14111,7 @@
       ? `<button type="button" class="btn btn-primary" data-open-call-action="join" data-open-call-game="${call.game_id}">Join game</button>`
       : call.can_waitlist
         ? `<button type="button" class="btn btn-primary" data-open-call-action="waitlist" data-open-call-game="${call.game_id}">Join waitlist</button>`
-        : `<button type="button" class="btn btn-secondary" data-open-call-action="open" data-open-call-game="${call.game_id}">${call.is_joined ? 'Open your game' : 'View game'}</button>`;
+        : `<button type="button" class="btn btn-secondary" data-open-call-action="open" data-open-call-game="${call.game_id}">${call.is_joined && ['open', 'full'].includes(stateName) ? 'Open your game' : 'View game details'}</button>`;
     return `<article class="court-open-call is-${stateName}" data-open-call-id="${call.id}"
       data-open-call-fingerprint="${esc(courtOpenCallFingerprint(call))}">
       <div class="court-open-call-head">
@@ -13207,7 +14176,7 @@
     const modal = openModal(`
       <div class="thread">
         <div class="thread-head">
-          <button class="modal-close" style="font-size:18px">‹</button>
+          <button type="button" class="modal-close" style="font-size:18px" aria-label="Back">‹</button>
           <span style="font-size:22px">🏟</span>
           <div class="row-main">
             <div class="row-title">${esc(court.name)}</div>
@@ -13236,14 +14205,15 @@
         if (m.open_call) return courtOpenCallMessageHtml(m);
         const mine = m.sender_id === state.me.id;
         return `
-        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div class="chat-message-row ${mine ? 'is-mine' : 'is-theirs'}" data-message-row="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
+          <div class="bubble ${mine ? 'me' : 'them'}" data-message-id="${m.id}" style="max-width:100%">${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
+          ${chatMessageActionHtml(m, mine)}
         </div>`;
       }).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
@@ -13308,9 +14278,11 @@
 
   // ---------- Crews ----------
   function showCommunityInbox() {
-    state.chatSeg = 'chats';
+    // Crew consent belongs in the persistent Groups lane, even though the
+    // legacy helper name remains for deep-link compatibility.
+    state.chatSeg = 'nearby';
     document.querySelectorAll('#chat-segments button').forEach((button) => {
-      const active = button.dataset.seg === 'chats';
+      const active = button.dataset.seg === 'nearby';
       button.classList.toggle('active', active);
       button.setAttribute('aria-selected', String(active));
     });
@@ -13494,7 +14466,7 @@
     const modal = openModal(`
       <div class="thread">
         <div class="thread-head">
-          <button class="modal-close" style="font-size:18px">‹</button>
+          <button type="button" class="modal-close" style="font-size:18px" aria-label="Back">‹</button>
           <span class="inbox-room-icon crew" aria-hidden="true">👥</span>
           <button type="button" class="row-main crew-chat-head" id="crew-chat-head">
             <span class="row-title">${esc(crew.name)}</span>
@@ -13520,16 +14492,14 @@
       const snapshot = chatUX.captureScroll();
       const html = items.map((message) => {
         const mine = message.sender_id === state.me.id;
-        const actionAttrs = mine
-          ? `data-del-msg="${message.id}" role="button" tabindex="0" aria-label="Delete your message" title="Delete message"`
-          : `data-room-heart="${message.id}" role="button" tabindex="0" aria-label="React to ${esc(message.sender_name || 'this player')} with a heart" title="React with a heart"`;
-        return `<div data-message-id="${message.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        return `<div class="chat-message-row ${mine ? 'is-mine' : 'is-theirs'}" data-message-row="${message.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(message.sender_color)}">${esc(initials(message.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${actionAttrs}>${message.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${message.heart_count > 1 ? ` ${message.heart_count}` : ''}</span>` : ''}
+          <div class="bubble ${mine ? 'me' : 'them'}" data-message-id="${message.id}" style="max-width:100%">${message.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${message.heart_count > 1 ? ` ${message.heart_count}` : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(message.sender_name)}</div>`}
             ${message.has_image ? `<div data-img-id="${message.id}" style="min-height:60px;min-width:120px;margin-bottom:${message.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(message.body)}<div class="bubble-time">${fmtTimeShort(message.created_at)}</div>
           </div>
+          ${chatMessageActionHtml(message, mine)}
         </div>`;
       }).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
@@ -13587,7 +14557,7 @@
     const modal = openModal(`
       <div class="thread">
         <div class="thread-head">
-          <button class="modal-close" style="font-size:18px">‹</button>
+          <button type="button" class="modal-close" style="font-size:18px" aria-label="Back">‹</button>
           <span style="font-size:22px">🏛</span>
           <div class="row-main" id="club-head" style="cursor:pointer">
             <div class="row-title">${esc(club.name)}</div>
@@ -13620,14 +14590,15 @@
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div class="chat-message-row ${mine ? 'is-mine' : 'is-theirs'}" data-message-row="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
+          <div class="bubble ${mine ? 'me' : 'them'}" data-message-id="${m.id}" style="max-width:100%">${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
+          ${chatMessageActionHtml(m, mine)}
         </div>`;
       }).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
@@ -13647,12 +14618,12 @@
       return fresh.items.length > 0;
     });
 
-    modal.querySelector('#club-head').addEventListener('click', async () => {
+    makePressable(modal.querySelector('#club-head'), async () => {
       try {
         const fresh = await api(`/clubs/${club.id}`);
         transitionModal(modal, () => openClubInfo(fresh));
       } catch (e) { toast(e.message); }
-    });
+    }, `Open ${club.name} club info`);
     modal.querySelector('#clb-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = input.value.trim();
@@ -13681,7 +14652,7 @@
           <div class="row-title" style="font-size:14px">${esc(m.display_name)}${m.role === 'owner' ? ' 👑' : ''}${m.current_streak >= 2 ? ' 🔥' : ''}</div>
           <div class="row-sub">${skillLabel(m.skill_level)} · ${m.rating}${overall}${clubRec}</div>
         </div>
-        ${isOwner && m.id !== state.me.id ? `<button class="btn btn-secondary btn-sm" data-boot="${m.id}" title="Remove from club">✕</button>` : ''}
+        ${isOwner && m.id !== state.me.id ? `<button class="btn btn-secondary btn-sm" data-boot="${m.id}" title="Remove from club" aria-label="Remove ${esc(m.display_name)} from club">✕</button>` : ''}
       </div>`;
     }).join('');
 
@@ -13761,16 +14732,16 @@
       } catch (e) { toast(e.message); }
     };
 
-    modal.querySelector('#club-court')?.addEventListener('click', () => {
+    makePressable(modal.querySelector('#club-court'), () => {
       transitionModal(modal, () => openCourtDetail(club.home_court_id));
-    });
-    modal.querySelectorAll('[data-open-game]').forEach((row) => row.addEventListener('click', () => {
+    }, `Open ${club.home_court_name || 'home court'}`);
+    modal.querySelectorAll('[data-open-game]').forEach((row) => makePressable(row, () => {
       transitionModal(modal, () => openGameScreen(Number(row.dataset.openGame)));
     }));
-    modal.querySelectorAll('[data-open-club-tournament]').forEach((row) => row.addEventListener('click', () => {
+    modal.querySelectorAll('[data-open-club-tournament]').forEach((row) => makePressable(row, () => {
       transitionModal(modal, () => openTournamentScreen(Number(row.dataset.openClubTournament)));
     }));
-    modal.querySelectorAll('[data-open-club-league]').forEach((row) => row.addEventListener('click', () => {
+    modal.querySelectorAll('[data-open-club-league]').forEach((row) => makePressable(row, () => {
       transitionModal(modal, () => openLeagueScreen(Number(row.dataset.openClubLeague)));
     }));
     modal.querySelector('#club-chat-btn')?.addEventListener('click', () => {
@@ -14023,7 +14994,7 @@
           ${cl.joined ? '<span class="tag" style="margin:0">Member ✓</span>' : '<span class="chev">›</span>'}
         </div>`).join('')
         : '<div class="empty-state"><span class="big">🏛</span>No clubs found.<br>Start one and invite your crew!</div>';
-      resultsEl.querySelectorAll('[data-open-club]').forEach((row) => row.addEventListener('click', () => {
+      resultsEl.querySelectorAll('[data-open-club]').forEach((row) => makePressable(row, () => {
         transitionModal(modal, () => openClubScreen(Number(row.dataset.openClub)));
       }));
     };
@@ -14087,7 +15058,7 @@
     const modal = openModal(`
       <div class="thread">
         <div class="thread-head">
-          <button class="modal-close" style="font-size:18px">‹</button>
+          <button type="button" class="modal-close" style="font-size:18px" aria-label="Back">‹</button>
           <span style="font-size:22px"><svg class="pb-ic"><use href="#pb"/></svg></span>
           <div class="row-main">
             <div class="row-title">Game chat</div>
@@ -14115,14 +15086,15 @@
       const html = items.map((m) => {
         const mine = m.sender_id === state.me.id;
         return `
-        <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+        <div class="chat-message-row ${mine ? 'is-mine' : 'is-theirs'}" data-message-row="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
           ${mine ? '' : `<div class="avatar sm" style="background:${esc(m.sender_color)}">${esc(initials(m.sender_name))}</div>`}
-          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${mine ? `data-del-msg="${m.id}" title="Tap to delete"` : `data-room-heart="${m.id}" title="Tap to ❤️"`}>${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
+          <div class="bubble ${mine ? 'me' : 'them'}" data-message-id="${m.id}" style="max-width:100%">${m.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${m.heart_count > 1 ? ' ' + m.heart_count : ''}</span>` : ''}
             ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(m.sender_name)}</div>`}
             ${m.has_image ? `<div data-img-id="${m.id}" style="min-height:60px;min-width:120px;margin-bottom:${m.body ? '6px' : '0'}">⏳</div>` : ''}
             ${esc(m.body)}
             <div class="bubble-time">${fmtTimeShort(m.created_at)}</div>
           </div>
+          ${chatMessageActionHtml(m, mine)}
         </div>`;
       }).join('');
       if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
@@ -14173,21 +15145,28 @@
     if (!routedOverlayLoadIsCurrent(modalLoad)) return;
 
     let friendAction = '';
+    let profileMoreAction = '';
     if (userId !== state.me.id) {
       if (user.is_blocked) {
         friendAction = '<span class="tag warn" style="margin:0">🚫 Blocked</span>';
       } else if (user.friendship_status === 'accepted') {
-        friendAction = `<button class="btn btn-primary" id="up-challenge">⚔️ Challenge</button>
-          <button class="btn btn-secondary" id="up-msg">💬 Message</button>
-          <button class="btn btn-danger" id="up-remove">Remove friend</button>`;
+        friendAction = '<button class="btn btn-primary" id="up-msg">Message</button>';
       } else if (user.friendship_status === 'pending') {
         friendAction = user.outgoing
           ? '<span class="tag" style="margin:0">Request pending…</span>'
           : `<button class="btn btn-primary" id="up-accept">Accept friend request</button>`;
       } else {
-        friendAction = `<button class="btn btn-primary" id="up-add">＋ Add friend</button>
-          <button class="btn btn-secondary" id="up-msg">💬 Message</button>`;
+        friendAction = '<button class="btn btn-primary" id="up-add">＋ Add friend</button>';
       }
+      profileMoreAction = `<details class="profile-more-actions">
+        <summary class="btn btn-secondary" aria-label="More actions for ${esc(user.display_name)}">More</summary>
+        <div class="profile-more-menu">
+          ${user.friendship_status === 'accepted' ? '<button type="button" class="btn btn-secondary btn-block" id="up-challenge">Challenge to a ranked game</button>' : ''}
+          ${user.friendship_status === 'accepted' ? '<button type="button" class="btn btn-secondary btn-block" id="up-remove">Remove friend</button>' : ''}
+          <button type="button" class="btn btn-secondary btn-block" id="up-block">${user.is_blocked ? 'Unblock user' : 'Block user'}</button>
+          <button type="button" class="btn btn-secondary btn-block" id="up-report">Report</button>
+        </div>
+      </details>`;
     }
 
     const games = user.recent_games || [];
@@ -14253,19 +15232,10 @@
       ${tournamentTitlesHtml(user.tournament_titles, user.league_titles)}
       ${h2hHtml}
       ${availHtml}
-      <div class="action-row">${friendAction}</div>
+      <div class="action-row">${friendAction}${profileMoreAction}</div>
       ${upcoming.length ? `<div class="section-label">Upcoming games</div>${upcoming.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
       ${courts.length ? `<div class="section-label">Courts</div>${courts.map(courtRow).join('')}` : ''}
       ${games.length ? `<div class="section-label">Recent games</div>${games.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
-      ${userId !== state.me.id ? `
-        <div style="text-align:center;margin-top:18px">
-          <button id="up-block" style="background:transparent;color:${user.is_blocked ? 'var(--ink-soft)' : '#e03131'};font-size:13px;font-weight:600">
-            ${user.is_blocked ? 'Unblock user' : '🚫 Block user'}
-          </button>
-          <button id="up-report" style="background:transparent;color:var(--ink-soft);font-size:13px;font-weight:600;margin-left:14px">
-            ⚑ Report
-          </button>
-        </div>` : ''}
     `, { label: `${user.display_name} profile` });
 
     bindGameButtons(modal, () => transitionModal(modal, () => openUserProfile(userId)));
@@ -14344,7 +15314,7 @@
       if (state.presence && state.presence.checked_in) court = { id: state.presence.court_id, name: state.presence.court_name };
       else if (state.me.home_court_id) court = { id: state.me.home_court_id, name: state.me.home_court_name };
       else if (user.home_court_id) court = { id: user.home_court_id, name: user.home_court_name };
-      if (!court) { toast('Set a home court first (Profile → Edit) to challenge'); return; }
+      if (!court) { toast('Set a home court first (Me → Edit profile) to challenge'); return; }
       transitionModal(modal, () => openChallengeSheet(user, court));
     });
     modal.querySelector('#up-schedule-shared')?.addEventListener('click', () => {
@@ -14394,6 +15364,263 @@
     return promise;
   }
 
+  async function subscribeGamesCalendar() {
+    const modalLoad = beginRoutedOverlayLoad(null);
+    let webcal;
+    let feed;
+    try {
+      const { token } = await api('/calendar/token');
+      feed = `${location.host}/api/calendar/${token}.ics`;
+      webcal = `webcal://${feed}`;
+    } catch (error) {
+      if (routedOverlayLoadIsCurrent(modalLoad)) toast(error.message);
+      return;
+    }
+    if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'My Third Shot games', url: `${location.protocol}//${feed}` });
+      } else {
+        await navigator.clipboard.writeText(webcal);
+        toast('Calendar link copied — add it in your calendar app 📅');
+      }
+    } catch {
+      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
+      openModal(`
+        ${modalHead('📅 Games calendar')}
+        <p class="row-sub" style="margin-bottom:10px">In your calendar app, choose “Subscribe” or “Add calendar by URL” and paste this link.</p>
+        <input type="text" readonly value="${esc(webcal)}" onclick="this.select()" style="font-size:12.5px" />
+      `);
+    }
+  }
+
+  function openNotificationSettings() {
+    const notifications = Object.entries((state.me && state.me.muteable_notifications) || {});
+    const modal = openModal(`
+      ${modalHead('Notifications')}
+      <p class="row-sub" style="margin-bottom:10px">Choose the optional updates you want. Score confirmations, invites, and challenges always come through.</p>
+      <div class="settings-notification-list">
+        ${notifications.length ? notifications.map(([kind, label]) => `
+          <label class="card row" style="gap:10px;cursor:pointer">
+            <span class="row-main"><span class="row-title" style="font-size:14px">${esc(label)}</span></span>
+            <input type="checkbox" class="settings-notification-toggle" data-kind="${esc(kind)}" ${(state.me.muted_notifications || []).includes(kind) ? '' : 'checked'} style="width:20px;height:20px;flex:0 0 auto" />
+          </label>`).join('') : '<div class="empty-state" style="padding:16px">No optional notification categories are available.</div>'}
+      </div>
+    `, { label: 'Notification settings' });
+    modal.querySelectorAll('.settings-notification-toggle').forEach((toggle) => {
+      toggle.addEventListener('change', async () => {
+        const muted = [...modal.querySelectorAll('.settings-notification-toggle')]
+          .filter((item) => !item.checked).map((item) => item.dataset.kind);
+        toggle.disabled = true;
+        try {
+          applyMe(await api('/me', {
+            method: 'PATCH', body: JSON.stringify({ muted_notifications: muted }),
+          }));
+        } catch (error) {
+          toggle.checked = !toggle.checked;
+          toast(error.message);
+        } finally {
+          toggle.disabled = false;
+        }
+      });
+    });
+  }
+
+  async function loadBlockedPlayers(root) {
+    const box = root.querySelector('[data-blocked-players]');
+    if (!box) return;
+    try {
+      const data = await api('/users/blocked');
+      box.innerHTML = data.items.length ? data.items.map((user) => `
+        <div class="card row">
+          ${avatarHtml(user, 'sm')}
+          <div class="row-main"><div class="row-title" style="font-size:14px">${esc(user.display_name)}</div></div>
+          <button type="button" class="btn btn-secondary btn-sm" data-unblock="${user.id}">Unblock</button>
+        </div>`).join('') : '<div class="row-sub">No blocked players.</div>';
+      box.querySelectorAll('[data-unblock]').forEach((button) => button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          await api(`/users/${button.dataset.unblock}/unblock`, { method: 'POST' });
+          toast('Player unblocked');
+          loadBlockedPlayers(root);
+        } catch (error) {
+          button.disabled = false;
+          toast(error.message);
+        }
+      }));
+    } catch {
+      box.innerHTML = '<div class="row-sub">Could not load blocked players right now.</div>';
+    }
+  }
+
+  function openPrivacySafetySettings() {
+    const modal = openModal(`
+      ${modalHead('Privacy & safety')}
+      <button type="button" class="card row btn-reset" id="privacy-home-area" style="width:100%;text-align:left">
+        <span aria-hidden="true">🏠</span><span class="row-main"><span class="row-title">Home area</span><span class="row-sub">${state.me.home_area ? esc(state.me.home_area) : 'Choose where nearby results begin'}</span></span><span class="chev">›</span>
+      </button>
+      <div class="card row">
+        <span aria-hidden="true">📍</span><span class="row-main"><span class="row-title">Auto check-in</span><span class="row-sub">Only while Third Shot is open</span></span>
+        <button type="button" class="btn btn-sm ${autoCheckInEnabled() ? 'btn-primary' : 'btn-secondary'}" id="privacy-auto-checkin" aria-pressed="${autoCheckInEnabled()}">${autoCheckInEnabled() ? 'On' : 'Off'}</button>
+      </div>
+      <button type="button" class="card row btn-reset" id="privacy-replay-setup" style="width:100%;text-align:left">
+        <span aria-hidden="true">👋</span><span class="row-main"><span class="row-title">Quick setup</span><span class="row-sub">Review home-area choices</span></span><span class="chev">›</span>
+      </button>
+      <div class="section-label">Blocked players</div>
+      <div data-blocked-players><div class="row-sub">Loading…</div></div>
+    `, { label: 'Privacy and safety settings' });
+    modal.querySelector('#privacy-home-area').addEventListener('click', () => {
+      transitionModal(modal, () => openHomeAreaSheet({ onSet: renderProfile }));
+    });
+    modal.querySelector('#privacy-replay-setup').addEventListener('click', () => {
+      transitionModal(modal, () => openHomeAreaOnboarding({ replay: true, onComplete: renderProfile }));
+    });
+    modal.querySelector('#privacy-auto-checkin').addEventListener('click', () => {
+      if (!autoCheckInEnabled()) {
+        transitionModal(modal, () => openAutoCheckInConsent(renderProfile));
+        return;
+      }
+      setAutoCheckInEnabled(false);
+      stopLocationWatch();
+      toast('Auto check-in off');
+      transitionModal(modal, openPrivacySafetySettings);
+    });
+    loadBlockedPlayers(modal);
+  }
+
+  function openAppearanceCalendarSettings() {
+    const modal = openModal(`
+      ${modalHead('Appearance & calendar')}
+      <div class="section-label" style="margin-top:4px">Appearance</div>
+      <div class="segmented" id="settings-theme" role="group" aria-label="Appearance">
+        ${['auto', 'light', 'dark'].map((theme) => `<button type="button" data-theme-pick="${theme}" class="${themePref() === theme ? 'active' : ''}" aria-pressed="${themePref() === theme}">${theme === 'auto' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark'}</button>`).join('')}
+      </div>
+      <div class="section-label">Games calendar</div>
+      <button type="button" class="card row btn-reset" id="settings-calendar" style="width:100%;text-align:left">
+        <span aria-hidden="true">📅</span><span class="row-main"><span class="row-title">Subscribe to your games</span><span class="row-sub">Keep upcoming games synced in any calendar app</span></span><span class="chev">›</span>
+      </button>
+    `, { label: 'Appearance and calendar settings' });
+    modal.querySelectorAll('[data-theme-pick]').forEach((button) => button.addEventListener('click', () => {
+      localStorage.setItem('pp_theme', button.dataset.themePick);
+      applyTheme();
+      modal.querySelectorAll('[data-theme-pick]').forEach((item) => {
+        const active = item === button;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-pressed', String(active));
+      });
+    }));
+    modal.querySelector('#settings-calendar').addEventListener('click', subscribeGamesCalendar);
+  }
+
+  function openAccountSettings() {
+    const installHtml = !window.matchMedia('(display-mode: standalone)').matches
+      ? (state.installPrompt
+          ? '<button type="button" class="card row btn-reset" id="account-install" style="width:100%;text-align:left"><span aria-hidden="true">📲</span><span class="row-main"><span class="row-title">Install Third Shot</span><span class="row-sub">Open full screen and keep the app close</span></span><span class="chev">›</span></button>'
+          : '<div class="card row"><span aria-hidden="true">📱</span><span class="row-main"><span class="row-title">Install Third Shot</span><span class="row-sub">Use your browser’s Add to Home Screen command</span></span></div>') : '';
+    const modal = openModal(`
+      ${modalHead('Account')}
+      ${installHtml}
+      <details class="settings-account-section">
+        <summary>Change password</summary>
+        <div class="form-field" style="margin-top:10px">
+          <label class="sr-only" for="account-current-password">Current password</label>
+          <input type="password" id="account-current-password" placeholder="Current password" autocomplete="current-password" />
+          <label class="sr-only" for="account-new-password">New password</label>
+          <input type="password" id="account-new-password" placeholder="New password (6+ characters)" autocomplete="new-password" style="margin-top:8px" />
+          <button type="button" class="btn btn-secondary btn-block" id="account-password-save" style="margin-top:8px">Update password</button>
+        </div>
+      </details>
+      <button type="button" class="btn btn-secondary btn-block" id="account-logout" style="margin-top:14px">Log out</button>
+      <details class="settings-account-section" style="margin-top:18px">
+        <summary style="color:#e03131">Delete account</summary>
+        <div class="form-field" style="margin-top:10px">
+          <p class="row-sub">Permanently removes your profile, friends, messages, and check-ins. This cannot be undone.</p>
+          <label class="sr-only" for="account-delete-password">Confirm password</label>
+          <input type="password" id="account-delete-password" placeholder="Confirm your password" autocomplete="current-password" />
+          <button type="button" class="btn btn-danger btn-block" id="account-delete" style="margin-top:8px">Delete my account</button>
+        </div>
+      </details>
+    `, { label: 'Account settings' });
+    modal.querySelector('#account-install')?.addEventListener('click', async () => {
+      const prompt = state.installPrompt;
+      if (!prompt) return;
+      state.installPrompt = null;
+      try {
+        prompt.prompt();
+        const choice = await prompt.userChoice;
+        toast(choice.outcome === 'accepted' ? 'Installing — see you on the home screen! 📲' : 'Maybe later 👍');
+      } catch { /* browser cancelled */ }
+    });
+    modal.querySelector('#account-password-save').addEventListener('click', async (event) => {
+      const current = modal.querySelector('#account-current-password').value;
+      const next = modal.querySelector('#account-new-password').value;
+      if (!current || !next) { toast('Fill in both password fields'); return; }
+      event.currentTarget.disabled = true;
+      try {
+        await api('/auth/change-password', {
+          method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }),
+        });
+        modal.querySelector('#account-current-password').value = '';
+        modal.querySelector('#account-new-password').value = '';
+        toast('Password updated 🔒');
+      } catch (error) {
+        toast(/email or password/i.test(error.message) ? 'Current password is incorrect' : error.message);
+      } finally {
+        event.currentTarget.disabled = false;
+      }
+    });
+    modal.querySelector('#account-logout').addEventListener('click', () => {
+      closeModal(modal);
+      logout();
+    });
+    modal.querySelector('#account-delete').addEventListener('click', async (event) => {
+      const password = modal.querySelector('#account-delete-password').value;
+      if (!password) { toast('Enter your password to confirm'); return; }
+      if (!window.confirm('Delete your account forever? This cannot be undone.')) return;
+      event.currentTarget.disabled = true;
+      try {
+        await api('/me', { method: 'DELETE', body: JSON.stringify({ password }) });
+        closeModal(modal);
+        logout();
+      } catch (error) {
+        event.currentTarget.disabled = false;
+        toast(error.message);
+      }
+    });
+  }
+
+  function openSettingsHub() {
+    const destinations = [
+      ['edit-profile', '✏️', 'Edit profile', 'Name, photo, skill, availability, and home court'],
+      ['notifications', '🔔', 'Notifications', 'Choose optional alerts'],
+      ['privacy', '🛡️', 'Privacy & safety', 'Location choices and blocked players'],
+      ['appearance', '🌗', 'Appearance & calendar', 'Theme and game calendar'],
+      ['account', '🔐', 'Account', 'Password, install, sign out, or delete'],
+    ];
+    const modal = openModal(`
+      ${modalHead('Settings')}
+      <div class="settings-destinations">
+        ${destinations.map(([key, icon, title, copy]) => `
+          <button type="button" class="card row inbox-row settings-destination" data-settings-destination="${key}">
+            <span aria-hidden="true" style="font-size:20px">${icon}</span>
+            <span class="row-main"><span class="row-title" style="display:block">${title}</span><span class="row-sub" style="display:block">${copy}</span></span><span class="chev">›</span>
+          </button>`).join('')}
+      </div>
+    `, { label: 'Settings' });
+    const handlers = {
+      'edit-profile': openEditProfile,
+      notifications: openNotificationSettings,
+      privacy: openPrivacySafetySettings,
+      appearance: openAppearanceCalendarSettings,
+      account: openAccountSettings,
+    };
+    modal.querySelectorAll('[data-settings-destination]').forEach((button) => {
+      button.addEventListener('click', () => transitionModal(
+        modal, handlers[button.dataset.settingsDestination],
+      ));
+    });
+  }
+
   async function renderProfile({ reuseDashboard = false } = {}) {
     const generation = ++profileRenderGeneration;
     const el = $('#profile-content');
@@ -14408,104 +15635,43 @@
     const winPct = total ? Math.round((me.ranked_wins / total) * 100) : 0;
 
     el.innerHTML = `
-      <div class="profile-hero">
-        ${avatarHtml(me)}
-        <div class="profile-name">${esc(me.display_name)}</div>
-        <div class="profile-sub">${skillLabel(me.skill_level)}${me.home_court_name ? ` · 🏠 ${esc(me.home_court_name)}` : ''}</div>
-        ${me.bio ? `<p class="profile-sub" style="margin-top:8px">${esc(me.bio)}</p>` : ''}
+      <div class="profile-dashboard-head">
+        <div class="profile-hero">
+          ${avatarHtml(me)}
+          <div class="profile-name">${esc(me.display_name)}</div>
+          <div class="profile-sub">${skillLabel(me.skill_level)}${me.home_court_name ? ` · 🏠 ${esc(me.home_court_name)}` : ''}</div>
+          ${me.bio ? `<p class="profile-sub" style="margin-top:8px">${esc(me.bio)}</p>` : ''}
+        </div>
       </div>
       <div class="stat-grid">
-        <div class="stat-card"><div class="stat-value">${me.rating}</div><div class="stat-label">Rating${me.best_rating > me.rating ? ` · peak ${me.best_rating}` : ''}</div></div>
+        <button type="button" class="stat-card" id="pf-rankings" aria-label="Open rankings. Your rating is ${me.rating}"><div class="stat-value">${me.rating}</div><div class="stat-label">Rating${me.best_rating > me.rating ? ` · peak ${me.best_rating}` : ''} · Rankings</div></button>
         <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">${(me.ranked_wins + me.ranked_losses) ? `Ranked record · ${winPct}%` : 'Ranked record'}</div></div>
         <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? '🔥' : ''}${me.current_streak}</div><div class="stat-label">Streak · best ${me.best_streak}</div></div>
       </div>
-      <div id="pf-play-stats" aria-busy="true" style="min-height:146px">
-        <div class="section-label">Your play stats</div>${skeletonHtml(1)}
-      </div>
-      ${state.presence && state.presence.checked_in ? `
-        <div class="card row">
-          <span style="font-size:22px">📍</span>
-          <div class="row-main">
-            <div class="row-title">Checked in at ${esc(state.presence.court_name)}</div>
-            <div class="row-sub">${state.presence.looking_for_game ? 'Looking for a game' : 'Just playing'}</div>
-          </div>
-          <button class="btn btn-secondary btn-sm" id="pf-checkout">Check out</button>
-        </div>` : ''}
       <div id="pf-upcoming" aria-busy="true" style="min-height:108px">
-        <div class="section-label">My upcoming games</div>${skeletonHtml(1)}
+        <div class="section-label">Next game</div>${skeletonHtml(1)}
       </div>
       <div id="pf-courts" aria-busy="true" style="min-height:108px">
         <div class="section-label">Saved courts</div>${skeletonHtml(1)}
       </div>
       <div id="pf-history" aria-busy="true" style="min-height:166px">
-        <div class="section-label">Match history</div>${skeletonHtml(2)}
+        <div class="section-label">Recent games</div>${skeletonHtml(2)}
       </div>
-      <div class="section-label">Settings</div>
-      <div class="card row" style="margin-bottom:10px">
-        <span style="font-size:20px">🏠</span>
-        <div class="row-main">
-          <div class="row-title" style="font-size:14px">Home area</div>
-          <div class="row-sub">${me.home_area ? esc(me.home_area) : 'Where the app opens — courts, games & players near you'}</div>
+      <details class="profile-dashboard-more">
+        <summary>More stats and history</summary>
+        <div class="profile-dashboard-actions" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:4px 0 12px">
+          <button type="button" class="btn btn-secondary btn-sm" id="pf-invite">Invite</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="pf-activity">Activity</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="pf-feedback">Feedback</button>
         </div>
-        <button class="btn btn-secondary btn-sm" id="pf-home">${me.home_area ? 'Change' : 'Set'}</button>
-      </div>
-      <div class="card row" style="margin-bottom:10px">
-        <span style="font-size:20px">📍</span>
-        <div class="row-main">
-          <div class="row-title" style="font-size:14px">Auto check-in</div>
-          <div class="row-sub">Checks you in when you arrive at a court (while the app is open)</div>
+        <div id="pf-play-stats" aria-busy="true" style="min-height:146px">
+          <div class="section-label">Your play stats</div>${skeletonHtml(1)}
         </div>
-        <button class="btn btn-sm ${autoCheckInEnabled() ? 'btn-primary' : 'btn-secondary'}" id="pf-auto" aria-pressed="${autoCheckInEnabled()}">
-          ${autoCheckInEnabled() ? 'On' : 'Off'}
-        </button>
-      </div>
-      <div class="card row" style="margin-bottom:10px">
-        <span style="font-size:20px">📅</span>
-        <div class="row-main">
-          <div class="row-title" style="font-size:14px">Games calendar</div>
-          <div class="row-sub">Subscribe so your games sync to any calendar app</div>
+        <div id="pf-upcoming-more">
         </div>
-        <button class="btn btn-secondary btn-sm" id="pf-calendar">Subscribe</button>
-      </div>
-      <div class="card row" style="margin-bottom:10px">
-        <span style="font-size:20px">🌗</span>
-        <div class="row-main">
-          <div class="row-title" style="font-size:14px">Appearance</div>
-          <div class="row-sub">Dark theme, or follow your device</div>
+        <div id="pf-history-more">
         </div>
-        <div style="display:flex;gap:6px">
-          ${['auto', 'light', 'dark'].map((t) => `
-            <button class="btn btn-sm ${themePref() === t ? 'btn-primary' : 'btn-secondary'}" data-theme-pick="${t}">${t === 'auto' ? 'Auto' : t === 'light' ? '☀️' : '🌙'}</button>`).join('')}
-        </div>
-      </div>
-      <div class="card row" style="margin-bottom:10px">
-        <span style="font-size:20px">💌</span>
-        <div class="row-main">
-          <div class="row-title" style="font-size:14px">Invite friends</div>
-          <div class="row-sub">Share your link — they'll land right on your profile</div>
-        </div>
-        <button class="btn btn-primary btn-sm" id="pf-invite">Share</button>
-      </div>
-      ${!window.matchMedia('(display-mode: standalone)').matches ? (state.installPrompt ? `
-        <button class="card row btn-reset" id="pf-install" style="margin-bottom:10px;width:100%;text-align:left;cursor:pointer">
-          <span style="font-size:20px">📲</span>
-          <div class="row-main">
-            <div class="row-title" style="font-size:14px">Install Third Shot</div>
-            <div class="row-sub">One tap — works offline-ish, opens full screen.</div>
-          </div>
-          <span class="chev">›</span>
-        </button>` : `
-        <div class="card row" style="margin-bottom:10px">
-          <span style="font-size:20px">📱</span>
-          <div class="row-main">
-            <div class="row-title" style="font-size:14px">Get the app feel</div>
-            <div class="row-sub">In your browser menu tap <b>Add to Home Screen</b> — Third Shot installs like an app.</div>
-          </div>
-        </div>`) : ''}
-      <button class="btn btn-secondary btn-block" id="pf-edit" style="margin-bottom:10px">✏️ Edit profile</button>
-      <button class="btn btn-secondary btn-block" id="pf-activity" style="margin-bottom:10px">🔔 Activity</button>
-      <button class="btn btn-secondary btn-block" id="pf-feedback" style="margin-bottom:10px">💡 Send feedback</button>
-      <button class="btn btn-danger btn-block" id="pf-logout">Log out</button>
+      </details>
     `;
 
     // One dashboard response keeps Profile to a single mobile round trip while
@@ -14543,91 +15709,12 @@
         } catch (err) { toast(err.message); btn.disabled = false; }
       });
     });
-    el.querySelector('#pf-install')?.addEventListener('click', async () => {
-      const prompt = state.installPrompt;
-      if (!prompt) return;
-      state.installPrompt = null;
-      try {
-        prompt.prompt();
-        const choice = await prompt.userChoice;
-        toast(choice.outcome === 'accepted' ? 'Installing — see you on the home screen! 📲' : 'Maybe later 👍');
-      } catch { /* browser said no */ }
-      renderProfile();
-    });
     el.querySelector('#pf-invite').addEventListener('click', shareInviteLink);
-    el.querySelectorAll('[data-theme-pick]').forEach((b) => b.addEventListener('click', () => {
-      localStorage.setItem('pp_theme', b.dataset.themePick);
-      applyTheme();
-      renderProfile();
-    }));
-    el.querySelector('#pf-auto').addEventListener('click', () => {
-      if (!autoCheckInEnabled()) {
-        openAutoCheckInConsent(renderProfile);
-        return;
-      }
-      setAutoCheckInEnabled(false);
-      stopLocationWatch();
-      toast('Auto check-in off');
-      renderProfile();
-    });
-
-    el.querySelector('#pf-calendar').addEventListener('click', async () => {
-      const modalLoad = beginRoutedOverlayLoad(null);
-      let webcal;
-      let feed;
-      try {
-        const { token } = await api('/calendar/token');
-        // webcal:// prompts a subscribe (auto-updating), unlike a one-off .ics.
-        feed = `${location.host}/api/calendar/${token}.ics`;
-        webcal = `webcal://${feed}`;
-      } catch (e) {
-        if (!routedOverlayLoadIsCurrent(modalLoad)) return;
-        toast(e.message); return;
-      }
-      if (!routedOverlayLoadIsCurrent(modalLoad)) return;
-      try {
-        if (navigator.share) {
-          await navigator.share({ title: 'My Third Shot games', url: `${location.protocol}//${feed}` });
-        } else {
-          await navigator.clipboard.writeText(webcal);
-          toast('Calendar link copied — add it in your calendar app 📅');
-        }
-      } catch {
-        if (!routedOverlayLoadIsCurrent(modalLoad)) return;
-        // Share cancelled or clipboard blocked — show the link so the user
-        // can copy it themselves instead of a raw browser error.
-        openModal(`
-          ${modalHead('📅 Games calendar')}
-          <p class="row-sub" style="margin-bottom:10px">In your calendar app, choose “Subscribe” or “Add calendar by URL” and paste this link — your games will stay in sync.</p>
-          <input type="text" readonly value="${esc(webcal)}" onclick="this.select()" style="font-size:12.5px" />
-        `);
-      }
-    });
-    el.querySelector('#pf-home').addEventListener('click', () => {
-      openHomeAreaSheet({ onSet: renderProfile });
-    });
-    el.querySelector('#pf-logout').addEventListener('click', logout);
-    el.querySelector('#pf-edit').addEventListener('click', openEditProfile);
     el.querySelector('#pf-activity').addEventListener('click', openActivity);
-    el.querySelector('#pf-checkout')?.addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      if (btn.disabled) return;
-      btn.disabled = true;
-      btn.textContent = 'Checking out…';
-      const prev = state.presence;
-      const followupLoad = beginRoutedOverlayLoad(null);
-      try {
-        await api('/checkout', { method: 'POST' });
-        await refreshMe();
-        renderProfile();
-        if (routedOverlayLoadIsCurrent(followupLoad)) maybeAskConditions(prev);
-      } catch (err) {
-        toast(err.message);
-        btn.disabled = false;
-        btn.textContent = 'Check out';
-      }
+    el.querySelector('#pf-rankings').addEventListener('click', () => {
+      state.playSeg = 'scores';
+      switchTab('play');
     });
-
     const [mineResult, statsResult, favoritesResult, historyResult] = await profileDataPromise;
     if (!renderIsCurrent()) return;
 
@@ -14636,8 +15723,10 @@
     // the DOM as soon as the generation/current-view guard above stops matching.
     const statsEl = el.querySelector('#pf-play-stats');
     const upcomingEl = el.querySelector('#pf-upcoming');
+    const upcomingMoreEl = el.querySelector('#pf-upcoming-more');
     const courtsEl = el.querySelector('#pf-courts');
     const historyEl = el.querySelector('#pf-history');
+    const historyMoreEl = el.querySelector('#pf-history-more');
     [statsEl, upcomingEl, courtsEl, historyEl].forEach((section) => {
       section.innerHTML = '';
       section.removeAttribute('aria-busy');
@@ -14653,13 +15742,19 @@
       const up = (mine.items || []).filter((game) =>
         game.status === 'upcoming' && !scorePending.includes(game) && !instantRallyClosed(game)
           && (instantRallyAssembly(game) || new Date(game.scheduled_at).getTime() > nowMs));
-      if (scorePending.length || up.length) {
-        upcomingEl.innerHTML = (scorePending.length
-          ? '<div class="section-label">Played — enter the score</div>'
-            + scorePending.map((game) => gameCardHtml(game)).join('') : '')
-          + (up.length ? '<div class="section-label">My upcoming games</div>'
-            + up.map((game) => gameCardHtml(game)).join('') : '');
+      const ordered = [...scorePending, ...up];
+      const nextGame = ordered[0] || null;
+      if (nextGame) {
+        upcomingEl.innerHTML = `<div class="section-label">${scorePending.includes(nextGame) ? 'Played — enter the score' : 'Next game'}</div>${gameCardHtml(nextGame)}`;
+        const remaining = ordered.slice(1);
+        upcomingMoreEl.innerHTML = remaining.length
+          ? `<div class="section-label">More upcoming games</div>${remaining.map((game) => gameCardHtml(game, { compact: true })).join('')}`
+          : '';
         bindGameButtons(upcomingEl, renderProfile);
+        bindGameButtons(upcomingMoreEl, renderProfile);
+      } else {
+        upcomingEl.innerHTML = '<div class="section-label">Next game</div><div class="empty-state" style="padding:14px">Nothing planned yet.<br><button type="button" class="btn btn-primary btn-sm" id="pf-plan-game" style="margin-top:9px">Plan a game</button></div>';
+        upcomingEl.querySelector('#pf-plan-game').addEventListener('click', () => openNewGameModal());
       }
     } catch { /* ignore */ }
 
@@ -14791,25 +15886,34 @@
         seen.add(me.home_court_id);
       }
       (favs.items || []).forEach((c) => { if (!seen.has(c.id)) { rows.push({ ...c, is_home: false }); seen.add(c.id); } });
+      const savedCourtRowHtml = (c) => `
+        <div class="card row" data-pfcourt="${c.id}" style="cursor:pointer">
+          <span style="font-size:18px">${c.is_home ? '🏠' : '⭐'}</span>
+          <div class="row-main">
+            <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
+            <div class="row-sub">${esc(c.city || '')}${c.is_home ? ' · Home court' : ''}${c.rating_avg ? ` · ⭐ ${c.rating_avg}` : ''}</div>
+          </div>
+          <span class="chev">›</span>
+        </div>`;
+      const featuredCourts = rows.slice(0, 3);
+      const moreCourts = rows.slice(3);
       courtsEl.innerHTML = '<div class="section-label">Saved courts</div>' + (rows.length
-        ? rows.map((c) => `
-            <div class="card row" data-pfcourt="${c.id}" style="cursor:pointer">
-              <span style="font-size:18px">${c.is_home ? '🏠' : '⭐'}</span>
-              <div class="row-main">
-                <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
-                <div class="row-sub">${esc(c.city || '')}${c.is_home ? ' · Home court' : ''}${c.rating_avg ? ` · ⭐ ${c.rating_avg}` : ''}</div>
-              </div>
-              <span class="chev">›</span>
-            </div>`).join('')
+        ? `${featuredCourts.map(savedCourtRowHtml).join('')}${moreCourts.length ? `
+            <details class="profile-saved-courts-more">
+              <summary>See all ${rows.length} saved courts</summary>
+              ${moreCourts.map(savedCourtRowHtml).join('')}
+            </details>` : ''}`
         : '<div class="empty-state" style="padding:16px">No saved courts yet — tap ☆ on a court to save it.<br><button class="btn btn-secondary btn-sm" data-goto="courts-list" style="margin-top:10px">🗺 Browse courts</button></div>');
       courtsEl.querySelectorAll('[data-pfcourt]').forEach((row) =>
-        row.addEventListener('click', () => openCourtDetail(Number(row.dataset.pfcourt))));
+        makePressable(row, () => openCourtDetail(Number(row.dataset.pfcourt))));
     } catch { /* ignore */ }
 
     try {
       const history = historyResult.status === 'fulfilled' ? historyResult.value : null;
       if (!history) throw historyResult.reason;
       if (history.items.length) {
+        historyEl.innerHTML = `<div class="section-label">Recent games</div>${history.items.slice(0, 3).map(resultRowHtml).join('')}`;
+        bindGameButtons(historyEl, renderProfile);
         const filters = [
           ['all', 'All', () => true],
           ['wins', '🏆 Wins', (g) => g.you_won === true],
@@ -14821,21 +15925,21 @@
         const render = () => {
           const test = filters.find(([k]) => k === active)[2];
           const rows = history.items.filter(test);
-          historyEl.innerHTML = `
+          historyMoreEl.innerHTML = `
             <div class="section-label">Match history</div>
             <div class="quick-times" style="margin:0 0 10px">
               ${filters.map(([k, label]) => `<button type="button" data-hf="${k}" class="${k === active ? 'active' : ''}">${label}</button>`).join('')}
             </div>
             ${rows.length ? rows.map(resultRowHtml).join('')
               : '<div class="empty-state" style="padding:14px">No games match this filter yet.</div>'}`;
-          historyEl.querySelectorAll('[data-hf]').forEach((b) => b.addEventListener('click', () => {
+          historyMoreEl.querySelectorAll('[data-hf]').forEach((b) => b.addEventListener('click', () => {
             active = b.dataset.hf;
             render();
           }));
-          bindGameButtons(historyEl, renderProfile);
+          bindGameButtons(historyMoreEl, renderProfile);
         };
         render();
-      }
+      } else historyEl.innerHTML = '<div class="section-label">Recent games</div><div class="empty-state" style="padding:14px">Your completed games will show up here.</div>';
     } catch { /* ignore */ }
   }
 
@@ -14890,40 +15994,6 @@
       </div>
       <button type="submit" class="btn btn-primary btn-block" id="ep-save">Save</button>
       </form>
-      <details style="margin-top:22px">
-        <summary style="font-size:13px;font-weight:600;cursor:pointer">🔔 Notifications</summary>
-        <div style="margin-top:10px">
-          <p class="row-sub" style="margin-bottom:8px">Silence the optional ones — score confirmations, invites, and challenges always come through.</p>
-          ${Object.entries((state.me && state.me.muteable_notifications) || {}).map(([kind, label]) => `
-            <label class="row" style="gap:10px;padding:7px 0;cursor:pointer">
-              <input type="checkbox" class="ep-notif-toggle" data-kind="${kind}" ${(state.me.muted_notifications || []).includes(kind) ? '' : 'checked'} style="width:18px;height:18px;flex:0 0 auto" />
-              <span style="font-size:14px">${esc(label)}</span>
-            </label>`).join('')}
-        </div>
-      </details>
-      <details style="margin-top:22px" id="ep-blocked-wrap">
-        <summary style="font-size:13px;font-weight:600;cursor:pointer">🚫 Blocked players</summary>
-        <div id="ep-blocked" style="margin-top:10px"><div class="row-sub">Loading…</div></div>
-      </details>
-      <details style="margin-top:22px">
-        <summary style="font-size:13px;font-weight:600;cursor:pointer">Change password</summary>
-        <div class="form-field" style="margin-top:10px">
-          <label class="sr-only" for="ep-pw-current">Current password</label>
-          <input type="password" id="ep-pw-current" placeholder="Current password" autocomplete="current-password" />
-          <label class="sr-only" for="ep-pw-new">New password</label>
-          <input type="password" id="ep-pw-new" placeholder="New password (6+ characters)" autocomplete="new-password" style="margin-top:8px" />
-          <button type="button" class="btn btn-secondary btn-block" id="ep-pw-save" style="margin-top:8px">Update password</button>
-        </div>
-      </details>
-      <details style="margin-top:22px">
-        <summary style="color:#e03131;font-size:13px;font-weight:600;cursor:pointer">Danger zone</summary>
-        <div class="form-field" style="margin-top:10px">
-          <label for="ep-delete-password">Delete account</label>
-          <p class="row-sub" style="margin-bottom:8px">Permanently removes your profile, friends, messages, and check-ins. Completed match results stay for your opponents, shown as “Deleted player”. This cannot be undone.</p>
-          <input type="password" id="ep-delete-password" placeholder="Confirm your password" autocomplete="current-password" />
-          <button type="button" class="btn btn-danger btn-block" id="ep-delete" style="margin-top:8px">Delete my account</button>
-        </div>
-      </details>
     `);
 
     const formUX = bindModalFormUX(modal, '#ep-save', { draftKey: 'edit-profile' });
@@ -14977,65 +16047,6 @@
       }, 300);
     });
 
-    // Blocked players — the one place they still show, so unblocking is possible.
-    const loadBlocked = async () => {
-      const box = modal.querySelector('#ep-blocked');
-      try {
-        const data = await api('/users/blocked');
-        box.innerHTML = data.items.length
-          ? data.items.map((u) => `
-              <div class="row" style="margin-bottom:8px">
-                ${avatarHtml(u, 'sm')}
-                <div class="row-main"><div class="row-title" style="font-size:14px">${esc(u.display_name)}</div></div>
-                <button class="btn btn-secondary btn-sm" data-unblock="${u.id}">Unblock</button>
-              </div>`).join('')
-          : '<div class="row-sub">No one — your courts are drama-free 🌿</div>';
-        box.querySelectorAll('[data-unblock]').forEach((b) => b.addEventListener('click', async () => {
-          try {
-            await api(`/users/${b.dataset.unblock}/unblock`, { method: 'POST' });
-            toast('Unblocked');
-            loadBlocked();
-          } catch (e) { toast(e.message); }
-        }));
-      } catch { box.innerHTML = '<div class="row-sub">Could not load right now.</div>'; }
-    };
-    modal.querySelector('#ep-blocked-wrap').addEventListener('toggle', (e) => {
-      if (e.target.open) loadBlocked();
-    });
-
-    modal.querySelector('#ep-pw-save').addEventListener('click', async () => {
-      const current = modal.querySelector('#ep-pw-current').value;
-      const next = modal.querySelector('#ep-pw-new').value;
-      if (!current || !next) { toast('Fill in both password fields'); return; }
-      try {
-        await api('/auth/change-password', {
-          method: 'POST',
-          body: JSON.stringify({ current_password: current, new_password: next }),
-        });
-        modal.querySelector('#ep-pw-current').value = '';
-        modal.querySelector('#ep-pw-new').value = '';
-        toast('Password updated 🔒');
-      } catch (e) {
-        // The generic auth message talks about email — confusing here.
-        toast(/email or password/i.test(e.message) ? 'Current password is incorrect' : e.message);
-      }
-    });
-
-    modal.querySelector('#ep-delete').addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      if (btn.disabled) return;
-      const password = modal.querySelector('#ep-delete-password').value;
-      if (!password) { toast('Enter your password to confirm'); return; }
-      if (!window.confirm('Delete your account forever? This cannot be undone.')) return;
-      btn.disabled = true;
-      try {
-        await api('/me', { method: 'DELETE', body: JSON.stringify({ password }) });
-        toast('Account deleted. Goodbye 👋');
-        closeModal(modal);
-        logout();
-      } catch (err) { toast(err.message); btn.disabled = false; }
-    });
-
     modal.querySelector('#ep-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       formUX.clearError();
@@ -15054,9 +16065,6 @@
           avatar_color: color,
           avatar_url: avatarUrlInput.value.trim(),
           availability: [...modal.querySelectorAll('[data-av].active')].map((c) => c.dataset.av),
-          // Unchecked = muted.
-          muted_notifications: [...modal.querySelectorAll('.ep-notif-toggle')]
-            .filter((c) => !c.checked).map((c) => c.dataset.kind),
         };
         const courtId = modal.querySelector('#ep-court-id').value;
         if (courtId) body.home_court_id = Number(courtId);
@@ -15073,18 +16081,6 @@
       }
     });
 
-    // Notification switches live below the Save button — apply them the
-    // instant they're flipped so closing the sheet can't lose the change.
-    modal.querySelectorAll('.ep-notif-toggle').forEach((t) => t.addEventListener('change', async () => {
-      const muted = [...modal.querySelectorAll('.ep-notif-toggle')]
-        .filter((c) => !c.checked).map((c) => c.dataset.kind);
-      try {
-        applyMe(await api('/me', { method: 'PATCH', body: JSON.stringify({ muted_notifications: muted }) }));
-      } catch (e) {
-        t.checked = !t.checked; // roll the switch back so the UI stays honest
-        toast(e.message);
-      }
-    }));
   }
 
   function gameFingerprint(game) {
@@ -15181,12 +16177,12 @@
         </div>`
       : game.players.map(playerRow).join('');
     if (!playersHtml && assembly && rosterCount > 0) {
-      playersHtml = '<div class="empty-state" style="padding:12px">Joined-player identities stay private until you join this rally at the court.</div>';
+      playersHtml = '<div class="empty-state" style="padding:12px">Player identities stay private until you join this rally at the court.</div>';
     }
     const arrivals = rally ? (Array.isArray(game.arrivals) ? game.arrivals : [])
       .map((value) => normalizeActiveArrival(value, rally)).filter(Boolean) : [];
     const arrivalsHtml = rally && rally.onWayCount > 0 ? `
-      <div class="section-label">On the way (${rally.onWayCount})</div>
+      <div class="section-label">Arriving (${rally.onWayCount})</div>
       <div class="arrival-roster">
         ${arrivals.length ? arrivals.map((arrival) => {
           const person = arrival.user || {};
@@ -15195,9 +16191,9 @@
             ${avatarHtml(person, 'sm')}
             <div class="row-main"><div class="row-title">${esc(person.display_name || 'Player')}</div>
               <div class="row-sub">ETA ${esc(fmtTimeShort(arrival.arrivesAt))} · spot held until ${esc(fmtTimeShort(arrival.expiresAt))}</div>
-            </div><span class="tag live">On the way</span>
+            </div><span class="tag live">Arriving</span>
           </div>`;
-        }).join('') : '<div class="empty-state" style="padding:12px">One player is on the way. Their identity is visible only to the current court roster.</div>'}
+        }).join('') : '<div class="empty-state" style="padding:12px">One player is arriving. Their identity is visible only to the current court roster.</div>'}
       </div>` : '';
 
     let actions = '';
@@ -15209,19 +16205,19 @@
           actions = `<div class="arrival-inline-held"><b>✓ Your spot is held</b><span>${esc(arrivalReservationCopy(myArrival))}</span></div>
             <button class="btn btn-primary btn-block" id="gs-arrival-details" style="padding:16px">View trip details</button>`;
         } else if (isCheckedInAtCourt(rally.courtId) && (rally.spotsLeft > 0 || myArrival)) {
-          actions = '<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px"><svg class="pb-ic"><use href="#pb"/></svg> Join this rally</button>';
+          actions = '<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px"><svg class="pb-ic"><use href="#pb"/></svg> Join this game</button>';
         } else if (isCheckedInAtCourt(rally.courtId)) {
-          actions = '<div class="empty-state" style="padding:12px">This rally is committed. Your court check-in stays active while we find the next rally here.</div><button class="btn btn-primary btn-block" id="gs-join" style="margin-top:10px;padding:16px">Find next rally at this court</button>';
+          actions = '<div class="empty-state" style="padding:12px">This game is full. Your court check-in stays active while we find another game here.</div><button class="btn btn-primary btn-block" id="gs-join" style="margin-top:10px;padding:16px">Find another game here</button>';
         } else if (!isCheckedInAtCourt(rally.courtId)
             && rally.arrivalAvailable && rally.arrivalCapability
             && rally.spotsLeft > 0 && rally.onWayCount === 0) {
-          actions = `<button class="btn btn-primary btn-block" id="gs-arrival" style="padding:16px">I’m on my way</button>
-            <p class="arrival-action-note">Choose a 5, 10, or 15 minute ETA. You are not counted physically ready until you check in at the court.</p>`;
+          actions = `<button class="btn btn-primary btn-block" id="gs-arrival" style="padding:16px">Arrive in 5–15 min</button>
+            <p class="arrival-action-note">Choose a 5, 10, or 15 minute arrival. You count as at the court after you check in there.</p>`;
         } else {
           actions = `<div class="empty-state" style="padding:12px">${!rally.arrivalAvailable
-            ? '⌛ This rally is wrapping up, so remote spot holds are closed. Refresh Nearby for the next rally.'
+            ? '⌛ This rally is wrapping up, so travel spots are closed. Refresh Nearby for the next rally.'
             : rally.onWayCount > 0
-              ? '🚗 The one remote spot is held by another player. No additional spot is promised.'
+              ? '🚗 The travel spot is held by another player. No additional spot is promised.'
               : '🏓 This rally is fully committed.'}</div>`;
         }
       } else if (!game.is_joined && game.spots_left > 0) {
@@ -15236,6 +16232,7 @@
             : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">⏳ Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
       } else if (game.is_joined) {
         const startsAhead = new Date(game.scheduled_at).getTime() > Date.now();
+        const moreActions = [];
         if (game.is_instant && game.players.length >= 2) {
           actions = '<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">✓ We finished — enter score</button>';
         } else if (!game.is_instant && !startsAhead && game.players.length >= 2) {
@@ -15245,24 +16242,35 @@
           const mine = game.players.find((p) => p.user_id === (state.me && state.me.id));
           if (mine && !mine.attending) {
             // Vouching you'll show up is the main ask before a game starts.
-            actions += `<button class="btn ${actions ? 'btn-secondary' : 'btn-primary'} btn-block" id="gs-attend" style="margin-top:${actions ? '10px' : '0'};padding:15px">👋 I'm coming — count me in</button>`;
+            const attend = `<button class="btn ${actions ? 'btn-secondary' : 'btn-primary'} btn-block" id="gs-attend">👋 I'm coming — count me in</button>`;
+            if (actions) moreActions.push(attend);
+            else actions = attend;
           }
         }
         // A live, underfilled rally still needs recruiting; hiding these once
         // its start time passed was the sharpest post-create dead end.
         if (canFillRoster) {
-          actions += `<button class="btn ${actions ? 'btn-secondary' : 'btn-primary'} btn-block roster-boost-launch" id="gs-fill-roster" style="margin-top:${actions ? '10px' : '0'};padding:15px">＋ Fill the game · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left</button>`;
+          const fill = `<button class="btn ${actions ? 'btn-secondary' : 'btn-primary'} btn-block roster-boost-launch" id="gs-fill-roster">＋ Find players · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left</button>`;
+          if (actions) moreActions.push(fill);
+          else actions = fill;
         }
         if (!game.is_instant && startsAhead) {
-          actions += '<button class="btn btn-secondary btn-block" id="gs-calendar" style="margin-top:10px">📅 Add to calendar</button>';
+          moreActions.push('<button class="btn btn-secondary btn-block" id="gs-calendar">📅 Add to calendar</button>');
           if (game.is_creator && game.recurrence !== 'weekly') {
-            actions += '<button class="btn btn-secondary btn-block" id="gs-reschedule" style="margin-top:10px">🕑 Reschedule</button>';
+            moreActions.push('<button class="btn btn-secondary btn-block" id="gs-reschedule">🕑 Reschedule</button>');
           }
         }
-        actions += `<div class="action-row" style="margin-top:10px">
-          <button class="btn btn-secondary" id="gs-leave">Leave game</button>
-          ${game.is_creator ? '<button class="btn btn-danger" id="gs-cancel">Cancel game</button>' : ''}
-        </div>`;
+        moreActions.push('<button class="btn btn-secondary btn-block" id="gs-share">📤 Share game</button>');
+        moreActions.push('<button class="btn btn-secondary btn-block" id="gs-leave">Leave game</button>');
+        if (game.is_creator) {
+          moreActions.push('<details class="game-danger-actions"><summary>Cancel this game…</summary><button class="btn btn-danger btn-block" id="gs-cancel">Cancel for everyone</button></details>');
+        }
+        if (moreActions.length) {
+          actions += `<details class="game-more-actions">
+            <summary>More</summary>
+            <div class="game-more-actions-body">${moreActions.join('')}</div>
+          </details>`;
+        }
       }
     } else if (game.status === 'awaiting_confirmation' && game.awaiting_your_confirmation) {
       actions = `
@@ -15299,7 +16307,7 @@
           <div class="row-sub">${subline}</div>
         </div>
         ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="Game chat — current players only" aria-label="Game chat — current players only" style="box-shadow:none;font-size:17px;position:relative">💬${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
-        ${canFillRoster ? '' : '<button class="icon-btn" id="gs-share" title="Share game" aria-label="Share game" style="box-shadow:none;font-size:17px">📤</button>'}
+        ${!game.is_joined && !canFillRoster ? '<button class="icon-btn" id="gs-share" title="Share game" aria-label="Share game" style="box-shadow:none;font-size:17px">📤</button>' : ''}
         <button class="modal-close" aria-label="Close">✕</button>
       </div>
       <div class="card row" id="gs-court" style="cursor:pointer">
@@ -15315,7 +16323,7 @@
       <div id="gs-weather"></div>
       <div id="gs-stakes"></div>
       ${game.notes && !(game.is_instant && game.notes === '⚡ Instant rally') ? `<div class="row-sub" style="margin:0 0 12px 4px">“${esc(game.notes)}”</div>` : ''}
-      <div class="section-label">${assembly ? `Joined roster (${rosterCount}/${game.max_players})` : `Players (${readyCount}/${game.max_players})`}</div>
+      <div class="section-label">${assembly ? `At the court (${readyCount}/${game.max_players})` : `Players (${readyCount}/${game.max_players})`}</div>
       ${playersHtml}
       ${arrivalsHtml}
       <div style="margin-top:16px">${actions}</div>`;
@@ -15368,6 +16376,13 @@
 
     const reopenFresh = async () => {
       try { render(await api(`/games/${gameId}`)); } catch (e) { toast(e.message); }
+    };
+
+    const rememberFresh = (fresh) => {
+      if (!fresh || Number(fresh.id) !== Number(gameId)) return false;
+      game = fresh;
+      fingerprint = gameFingerprint(fresh);
+      return true;
     };
 
     function bind() {
@@ -15459,7 +16474,7 @@
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
       box.querySelector('#gs-calendar')?.addEventListener('click', () => downloadIcs(game));
       box.querySelector('#gs-fill-roster')?.addEventListener('click', () => {
-        openRosterBoostSheet(game, { onGameUpdated: render });
+        transitionModal(modal, () => openRosterBoostSheet(game));
       });
       box.querySelector('#gs-attend')?.addEventListener('click', async () => {
         try {
@@ -15523,19 +16538,65 @@
           toast('MVP vote in 🌟');
         } catch (e) { toast(e.message); }
       }));
-      box.querySelector('#gs-waitlist')?.addEventListener('click', async () => {
+      box.querySelector('#gs-waitlist')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        if (button.disabled) return;
+        if (button.dataset.undoWaitlist === 'true') {
+          clearTimeout(button._confirmationTimer);
+          button.disabled = true;
+          button.textContent = 'Leaving…';
+          try {
+            const fresh = await api(`/games/${gameId}/waitlist/leave`, { method: 'POST' });
+            rememberFresh(fresh);
+            button.textContent = 'Left waitlist ✓';
+            toast('Left the waitlist');
+            setTimeout(() => render(game), 650);
+          } catch (e) {
+            button.disabled = false;
+            button.textContent = button.dataset.confirmationLabel || 'Waitlisted · Leave';
+            toast(e.message);
+          }
+          return;
+        }
+        const original = button.textContent;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = 'Joining waitlist…';
         try {
-          await api(`/games/${gameId}/waitlist`, { method: 'POST' });
-          toast("You're on the waitlist ⏳");
-          reopenFresh();
-        } catch (e) { toast(e.message); reopenFresh(); }
+          const fresh = await api(`/games/${gameId}/waitlist`, { method: 'POST' });
+          rememberFresh(fresh);
+          const position = Number(fresh.waitlist_position) || null;
+          button.dataset.undoWaitlist = 'true';
+          button.dataset.confirmationLabel = position ? `Waitlisted #${position} · Leave` : 'Waitlisted · Leave';
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          button.textContent = button.dataset.confirmationLabel;
+          button.setAttribute('aria-label', `${button.dataset.confirmationLabel}. Leave the waitlist`);
+          toast("Waitlisted — we'll let you know if a spot opens ⏳");
+          button._confirmationTimer = setTimeout(() => render(game), 4000);
+        } catch (e) {
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          button.textContent = original;
+          toast(e.message);
+        }
       });
-      box.querySelector('#gs-waitlist-leave')?.addEventListener('click', async () => {
+      box.querySelector('#gs-waitlist-leave')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        if (button.disabled) return;
+        button.disabled = true;
+        button.textContent = 'Leaving…';
         try {
-          await api(`/games/${gameId}/waitlist/leave`, { method: 'POST' });
+          const fresh = await api(`/games/${gameId}/waitlist/leave`, { method: 'POST' });
+          rememberFresh(fresh);
+          button.textContent = 'Left waitlist ✓';
           toast('Left the waitlist');
-          reopenFresh();
-        } catch (e) { toast(e.message); reopenFresh(); }
+          setTimeout(() => render(game), 650);
+        } catch (e) {
+          button.disabled = false;
+          button.textContent = 'Leave waitlist';
+          toast(e.message);
+        }
       });
       box.querySelector('#gs-share')?.addEventListener('click', () => shareGame(game));
       box.querySelector('#gs-arrival')?.addEventListener('click', () => {
@@ -15549,15 +16610,51 @@
         else reopenFresh();
       });
       box.querySelector('#gs-join')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
         if (game.is_instant) {
-          await openReadyRally(rallySummaryFromValue(game), event.currentTarget);
+          await openReadyRally(rallySummaryFromValue(game), button);
           return;
         }
+        if (button.disabled) return;
+        if (button.dataset.undoJoin === 'true') {
+          clearTimeout(button._confirmationTimer);
+          button.disabled = true;
+          button.textContent = 'Undoing…';
+          try {
+            const fresh = await api(`/games/${gameId}/leave`, { method: 'POST' });
+            rememberFresh(fresh);
+            button.textContent = 'Left game ✓';
+            toast('Join undone');
+            refreshMe();
+            setTimeout(() => render(game), 650);
+          } catch (e) {
+            button.disabled = false;
+            button.textContent = 'Joined ✓ · Undo';
+            toast(e.message);
+          }
+          return;
+        }
+        const original = button.innerHTML;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = 'Joining…';
         try {
-          await api(`/games/${gameId}/join`, { method: 'POST' });
+          const fresh = await api(`/games/${gameId}/join`, { method: 'POST' });
+          rememberFresh(fresh);
+          button.dataset.undoJoin = 'true';
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          button.textContent = 'Joined ✓ · Undo';
+          button.setAttribute('aria-label', 'Joined. Undo joining this game');
           toast(isChallenge ? 'Challenge accepted! ⚔️' : "You're in! 🏓");
-          refreshMe(); reopenFresh();
-        } catch (e) { toast(e.message); reopenFresh(); }
+          refreshMe();
+          button._confirmationTimer = setTimeout(() => render(game), 4000);
+        } catch (e) {
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          button.innerHTML = original;
+          toast(e.message);
+        }
       });
       box.querySelector('#gs-decline')?.addEventListener('click', async () => {
         try {
@@ -15592,7 +16689,7 @@
       const rematchLabel = () => {
         rematchAttempt = readRematchAttempt(gameId);
         if (rematchAttempt && rematchAttempt.gameId) return '↗ Open the rematch';
-        if (rematchAttempt && rematchAttempt.payload) return '↻ Finish starting the rematch safely';
+        if (rematchAttempt && rematchAttempt.payload) return '↻ Continue starting the rematch';
         return `⚡ Play again now at ${court.name || 'this court'}`;
       };
       if (rematchButton) rematchButton.textContent = rematchLabel();
@@ -15611,7 +16708,7 @@
           btn.textContent = rematchLabel();
           if (planButton) planButton.disabled = false;
         };
-        btn.textContent = rematchAttempt ? 'Finishing the rematch safely…' : 'Starting the rematch…';
+        btn.textContent = rematchAttempt ? 'Checking the rematch…' : 'Starting the rematch…';
         let requestPayload = rematchAttempt && rematchAttempt.payload;
         let postStarted = false;
         try {
@@ -15638,7 +16735,7 @@
               client_attempt_id: rematchClientAttemptId(gameId),
             });
             if (!requestPayload) {
-              toast('Nothing was sent because this browser could not save a safe rematch retry');
+              toast('Nothing was sent because this browser could not save the rematch');
               restoreIntents();
               return;
             }
@@ -15676,7 +16773,7 @@
           }
           if (err.code === 'crew_changed') loadCrew(true);
           toast(ambiguous
-            ? 'Confirmation was interrupted — tap Finish rematch safely to recover it'
+            ? 'We couldn’t confirm the rematch — tap Continue rematch to check it'
             : err.message);
           restoreIntents();
         }
@@ -15950,26 +17047,44 @@
   // City typeahead against /geocode: tappable place rows under the input.
   function bindCitySearch(input, resultsEl, onPick) {
     let timer;
+    let searchSeq = 0;
+    const renderFeedback = (message, isError = false) => {
+      resultsEl.innerHTML = `<div class="city-search-feedback${isError ? ' is-error' : ''}" role="${isError ? 'alert' : 'status'}">${esc(message)}</div>`;
+    };
     input.addEventListener('input', () => {
       clearTimeout(timer);
+      const seq = ++searchSeq;
       const q = input.value.trim();
+      resultsEl.removeAttribute('aria-busy');
       if (q.length < 3) { resultsEl.innerHTML = ''; return; }
+      renderFeedback('Searching cities…');
+      resultsEl.setAttribute('aria-busy', 'true');
       timer = setTimeout(async () => {
-        let places = [];
         try {
-          places = ((await api(`/geocode?q=${encodeURIComponent(q)}`)).items || []).slice(0, 4);
-        } catch { /* search is best-effort */ }
-        resultsEl.innerHTML = places.map((p, i) => `
-          <div class="card row" data-city="${i}" style="cursor:pointer;padding:10px 12px;margin-top:6px">
-            <span>📍</span>
-            <div class="row-main">
-              <div class="row-title" style="font-size:14px">${esc(p.label)}</div>
-              <div class="row-sub">${esc((p.detail || '').split(',').slice(1, 3).join(',').trim())}</div>
-            </div>
-          </div>`).join('');
-        resultsEl.querySelectorAll('[data-city]').forEach((row) => {
-          row.addEventListener('click', () => onPick(places[Number(row.dataset.city)]));
-        });
+          const response = await api(`/geocode?q=${encodeURIComponent(q)}`);
+          if (seq !== searchSeq || input.value.trim() !== q) return;
+          const places = (response.items || []).slice(0, 4);
+          resultsEl.removeAttribute('aria-busy');
+          if (!places.length) {
+            renderFeedback(`No cities found for “${q}”.`);
+            return;
+          }
+          resultsEl.innerHTML = places.map((p, i) => `
+            <button type="button" class="card row city-search-result" data-city="${i}" aria-label="Use ${esc(p.label)} as your home area">
+              <span>📍</span>
+              <div class="row-main">
+                <div class="row-title" style="font-size:14px">${esc(p.label)}</div>
+                <div class="row-sub">${esc((p.detail || '').split(',').slice(1, 3).join(',').trim())}</div>
+              </div>
+            </button>`).join('');
+          resultsEl.querySelectorAll('[data-city]').forEach((row) => {
+            row.addEventListener('click', () => onPick(places[Number(row.dataset.city)]));
+          });
+        } catch {
+          if (seq !== searchSeq || input.value.trim() !== q) return;
+          resultsEl.removeAttribute('aria-busy');
+          renderFeedback('Couldn’t search cities. Check your connection and try again.', true);
+        }
       }, 350);
     });
   }
@@ -15980,12 +17095,13 @@
     const modal = openModal(`
       <div class="checkin-sheet">
         <div class="celebrate-emoji" style="font-size:46px">📍</div>
-        <h3 style="margin:6px 0 2px">Set your home area</h3>
+        <h3 style="margin:6px 0 2px">Where do you usually play?</h3>
         <p class="row-sub" style="margin-bottom:18px">${esc(intro || 'Courts, games, and players near here greet you when the app opens.')}</p>
         <button class="btn btn-primary btn-block" id="ha-loc" style="padding:15px;margin-bottom:8px">Use my current location</button>
         <div class="form-field" style="margin:2px 0 0">
+          <label class="sr-only" for="ha-city">Search for your home city</label>
           <input type="search" id="ha-city" placeholder="Or search your city…" autocomplete="off" />
-          <div id="ha-results"></div>
+          <div id="ha-results" aria-live="polite"></div>
         </div>
         <button class="btn-link modal-close btn-block">${esc(dismissLabel)}</button>
       </div>
@@ -16010,7 +17126,7 @@
   }
 
   // Onboarding step 2: seed the saved-courts list — saved courts power the
-  // Saved filter, court rooms, and new-game pings, so an empty list is a
+  // Saved filter, court chat, and new-game pings, so an empty list is a
   // quieter app. Skips itself when there's nothing decent nearby.
   async function maybeSuggestStarterCourts(next) {
     const modalLoad = beginRoutedOverlayLoad(null);
@@ -16030,14 +17146,14 @@
       <div class="checkin-sheet">
         <div class="celebrate-emoji" style="font-size:46px">⭐</div>
         <h3 style="margin:6px 0 2px">Save your courts</h3>
-        <p class="row-sub" style="margin-bottom:14px">The best-known courts near you — saved courts get their own chat room and game alerts.</p>
+        <p class="row-sub" style="margin-bottom:14px">The best-known courts near you — saved courts get their own court chat and game alerts.</p>
         ${courts.map((c) => `
           <div class="card row" style="padding:11px;text-align:left">
             <div class="row-main">
               <div class="row-title" style="font-size:14px">${esc(c.name)}</div>
               <div class="row-sub">${[esc(c.city || ''), `${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`, c.rating_avg ? `⭐ ${c.rating_avg}` : ''].filter(Boolean).join(' · ')}</div>
             </div>
-            <button class="btn btn-secondary btn-sm" data-star-court="${c.id}" style="font-size:16px;min-width:44px">☆</button>
+            <button class="btn btn-secondary btn-sm" data-star-court="${c.id}" aria-label="Save ${esc(c.name)}" style="font-size:16px;min-width:44px">☆</button>
           </div>`).join('')}
         <button class="btn btn-primary btn-block modal-close" style="margin-top:6px">Done</button>
       </div>
@@ -16057,21 +17173,43 @@
     });
   }
 
+  function homeAreaOnboardingKey(accountId = state.me && state.me.id) {
+    const id = Number(accountId);
+    return Number.isSafeInteger(id) && id > 0 ? `pp_onboarded_home:${id}` : '';
+  }
+
+  function completeHomeAreaOnboarding(accountId = state.me && state.me.id) {
+    const key = homeAreaOnboardingKey(accountId);
+    if (key) localStorage.setItem(key, '1');
+  }
+
+  function openHomeAreaOnboarding({ replay = false, onComplete } = {}) {
+    if (!state.me) return null;
+    const accountId = state.me.id;
+    const finish = () => {
+      completeHomeAreaOnboarding(accountId);
+      if (Number(state.me && state.me.id) === Number(accountId)) onComplete?.();
+    };
+    return openHomeAreaSheet({
+      intro: replay
+        ? 'Choose the area Third Shot should use for nearby courts, games, and players.'
+        : 'Optional: choose a home area so Third Shot opens near the courts and players you care about.',
+      dismissLabel: replay ? 'Keep current area' : 'Maybe later',
+      onSet: finish,
+      onDismiss: finish,
+    });
+  }
+
   function maybeOnboardHomeArea() {
     if (!state.me) return;
-    // Returning / already-prompted users skip straight to the tour check.
-    if (state.me.home_lat != null || localStorage.getItem('pp_onboarded_home') === '1') {
-      maybeShowTour();
+    const key = homeAreaOnboardingKey();
+    if (!key) return;
+    if (state.me.home_lat != null) {
+      completeHomeAreaOnboarding();
       return;
     }
-    localStorage.setItem('pp_onboarded_home', '1');
-    // Home area → starter courts → quick tour; dismissing skips ahead.
-    openHomeAreaSheet({
-      intro: 'So Third Shot opens to courts, games, and players near you — anywhere in the US.',
-      dismissLabel: 'Maybe later',
-      onSet: () => maybeSuggestStarterCourts(maybeShowTour),
-      onDismiss: maybeShowTour,
-    });
+    if (localStorage.getItem(key) === '1') return;
+    openHomeAreaOnboarding();
   }
 
   // One-time 3-step welcome tour for brand-new users.
@@ -16476,26 +17614,14 @@
     state.installPrompt = e;
   });
 
-  // Tap a partner's DM bubble to ❤️ it (tap again to take it back).
-  document.addEventListener('click', async (e) => {
-    const bubble = e.target.closest('.bubble.them[data-heart-msg]');
-    if (!bubble) return;
-    try {
-      const res = await api(`/messages/${bubble.dataset.heartMsg}/heart`, { method: 'POST' });
-      const badge = bubble.querySelector('.bubble-heart');
-      if (res.hearted && !badge) bubble.insertAdjacentHTML('beforeend', '<span class="bubble-heart">❤️</span>');
-      if (!res.hearted && badge) badge.remove();
-    } catch (err) { toast(err.message); }
-  });
-
   // Repaint ❤️ badges from a bounded {message_id: count} snapshot. Only
   // IDs present in the snapshot are authoritative; older rendered messages
   // stay untouched after they move outside the server's sync window.
   // No-ops for DM threads (their payloads don't include heart_counts).
   function applyRoomHearts(root, counts) {
     if (!counts || !root) return;
-    root.querySelectorAll('.bubble[data-room-heart], .bubble.me[data-del-msg]').forEach((b) => {
-      const id = b.dataset.roomHeart || b.dataset.delMsg;
+    root.querySelectorAll('.bubble[data-message-id]').forEach((b) => {
+      const id = b.dataset.messageId;
       if (!Object.prototype.hasOwnProperty.call(counts, id)) return;
       const n = counts[id] || 0;
       let badge = b.querySelector('[data-heart-badge]');
@@ -16509,42 +17635,41 @@
     });
   }
 
-  // Room chats: tap anyone else's bubble to toggle your ❤️; badge shows count.
+  // Message bubbles are inert. Every chat exposes the same adjacent native
+  // button for a reaction or deletion, so the action is visible and keyboard
+  // accessible without turning conversational content into a hidden target.
   document.addEventListener('click', async (e) => {
-    const bubble = e.target.closest('.bubble.them[data-room-heart]');
-    if (!bubble) return;
+    const button = e.target.closest('.chat-message-action[data-message-action][data-message-id]');
+    if (!button || button.disabled) return;
+    const id = Number(button.dataset.messageId);
+    const row = button.closest('[data-message-row]') || button.parentElement;
+    const bubble = row?.querySelector(`.bubble[data-message-id="${id}"]`);
+    if (!id || !bubble) return;
+    if (button.dataset.messageAction === 'delete') {
+      if (!confirm('Delete this message?')) return;
+      button.disabled = true;
+      try {
+        await api(`/messages/${id}`, { method: 'DELETE' });
+        row.remove();
+        toast('Message deleted');
+      } catch (err) {
+        button.disabled = false;
+        toast(err.message);
+      }
+      return;
+    }
+    button.disabled = true;
     try {
-      const res = await api(`/messages/${bubble.dataset.roomHeart}/heart`, { method: 'POST' });
-      let badge = bubble.querySelector('[data-heart-badge]');
-      if (res.heart_count) {
-        const label = `❤️${res.heart_count > 1 ? ' ' + res.heart_count : ''}`;
+      const res = await api(`/messages/${id}/heart`, { method: 'POST' });
+      let badge = bubble.querySelector('.bubble-heart');
+      const count = res.heart_count == null ? (res.hearted ? 1 : 0) : Number(res.heart_count);
+      if (count) {
+        const label = `❤️${count > 1 ? ' ' + count : ''}`;
         if (badge) badge.textContent = label;
         else bubble.insertAdjacentHTML('afterbegin', `<span class="bubble-heart" data-heart-badge>${label}</span>`);
-      } else if (badge) {
-        badge.remove();
-      }
+      } else if (badge) badge.remove();
     } catch (err) { toast(err.message); }
-  });
-
-  // Tap your own chat bubble (any thread type) to delete it.
-  document.addEventListener('click', async (e) => {
-    const bubble = e.target.closest('.bubble.me[data-del-msg]');
-    if (!bubble) return;
-    if (!confirm('Delete this message?')) return;
-    try {
-      await api(`/messages/${bubble.dataset.delMsg}`, { method: 'DELETE' });
-      (bubble.closest('[style*="align-self"]') || bubble).remove();
-      toast('Message deleted');
-    } catch (err) { toast(err.message); }
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    const bubble = event.target.closest(
-      '.bubble[role="button"][data-room-heart], .bubble[role="button"][data-del-msg]',
-    );
-    if (!bubble) return;
-    event.preventDefault();
-    bubble.click();
+    finally { button.disabled = false; }
   });
   window.addEventListener('unhandledrejection', (e) => {
     const reason = e.reason || {};

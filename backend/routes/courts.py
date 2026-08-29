@@ -257,7 +257,14 @@ def _rating_summary_for(court_ids):
     }
 
 
-def _active_counts_for(court_ids):
+def _active_counts_for(court_ids, current_user=None):
+    """Return fresh players and viewer-visible games with an open roster spot.
+
+    Court summaries used to count every future game, including full and
+    invite-only games the viewer could not see. That made the map promise an
+    "open game" that disappeared on tap. Keep this aggregate aligned with the
+    same discovery/privacy rules as the games feed.
+    """
     if not court_ids:
         return {}, {}
     rows = (
@@ -272,17 +279,40 @@ def _active_counts_for(court_ids):
         .all()
     )
     players = {court_id: count for court_id, count in rows}
+    now = utcnow()
     game_rows = (
-        db.session.query(Game.court_id, func.count(Game.id))
+        Game.query
         .filter(
             Game.court_id.in_(court_ids),
             Game.status == 'upcoming',
-            Game.scheduled_at >= utcnow(),
+            # Match the discovery/detail window; live rallies scheduled a few
+            # minutes ago remain joinable while their assembly is active.
+            Game.scheduled_at >= now - timedelta(hours=2),
         )
-        .group_by(Game.court_id)
         .all()
     )
-    games = {court_id: count for court_id, count in game_rows}
+    viewer_id = current_user.id if current_user else None
+    viewer_friends = friend_ids(viewer_id) if viewer_id else set()
+    hidden_ids = blocked_pair_ids(viewer_id) if viewer_id else set()
+    # Local import avoids the games -> courts import cycle at module load.
+    from backend.routes.games import (
+        _game_has_blocked_participant,
+        _instant_game_discovery_allowed,
+        _instant_rally_is_actionable,
+    )
+    games = {}
+    for game in game_rows:
+        if len(game.players) >= game.max_players:
+            continue
+        if not game.visible_to(viewer_id, viewer_friends):
+            continue
+        if _game_has_blocked_participant(game, viewer_id, hidden_ids):
+            continue
+        if not _instant_game_discovery_allowed(game, current_user, viewer_friends):
+            continue
+        if game.is_instant and not _instant_rally_is_actionable(game, now):
+            continue
+        games[game.court_id] = games.get(game.court_id, 0) + 1
     return players, games
 
 
@@ -290,6 +320,7 @@ def _active_counts_for(court_ids):
 def list_courts():
     """Court search: by map bounds (west,south,east,north) or lat/lng radius, plus text query."""
     cleanup_stale_presence()
+    current_user = optional_current_user()
     query = Court.query.filter(
         Court.latitude.isnot(None),
         Court.longitude.isnot(None),
@@ -373,14 +404,16 @@ def list_courts():
     elif sort == 'active':
         # Rank by live activity — needs the counts computed on the full
         # candidate pool before the limit cut, then closest as a tiebreak.
-        pool_players, pool_games = _active_counts_for([c['id'] for c in items])
+        pool_players, pool_games = _active_counts_for(
+            [c['id'] for c in items], current_user,
+        )
         items.sort(key=lambda c: (
             -(pool_players.get(c['id'], 0) + pool_games.get(c['id'], 0)),
             c.get('distance_miles', 1e9),
         ))
     items = items[:limit]
 
-    _enrich_court_summaries(items)
+    _enrich_court_summaries(items, current_user)
 
     return jsonify({'items': items, 'count': len(items)})
 
@@ -619,9 +652,18 @@ def court_detail(court_id):
             )
         )
 
+    visible_upcoming = [game for game in upcoming if game_visible(game)]
     payload['games'] = [
         _discovery_game_payload(game, current_user, viewer_friends)
-        for game in upcoming if game_visible(game)
+        for game in visible_upcoming
+    ]
+    # "Now at this court" is an immediate assembly signal, not a count of
+    # every plan on the calendar. Keep later games in `games` below while
+    # giving the client a bounded, authoritative set for the Now card.
+    now_window_end = now + timedelta(hours=2)
+    payload['now_games'] = [
+        _discovery_game_payload(game, current_user, viewer_friends)
+        for game in visible_upcoming if game.scheduled_at <= now_window_end
     ]
     payload['recent_results'] = [
         _discovery_game_payload(game, current_user, viewer_friends)
@@ -905,10 +947,10 @@ def _conditions_for(court_ids):
     return {r.court_id: r.condition for r in rows}  # later (newer) rows win
 
 
-def _enrich_court_summaries(items):
+def _enrich_court_summaries(items, current_user=None):
     """Add the same live discovery signals to every court summary payload."""
     ids = [item['id'] for item in items]
-    players, games = _active_counts_for(ids)
+    players, games = _active_counts_for(ids, current_user)
     ratings = _rating_summary_for(ids)
     conditions = _conditions_for(ids)
     for item in items:
@@ -1110,7 +1152,7 @@ def favorite_courts_payload(user):
         favorite.court.to_summary_dict()
         for favorite in favorites
         if favorite.court
-    ])
+    ], user)
     return {'items': items}
 
 

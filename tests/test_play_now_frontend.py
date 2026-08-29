@@ -24,7 +24,7 @@ def test_global_play_now_uses_compact_court_confirmation_not_planner():
     assert "🏠 Home" in picker
     assert "distance_miles" in picker
     assert 'id="play-now-search"' in picker
-    assert "I’m here &amp; ready" in picker
+    assert "Find a game now" in picker
 
 
 def test_ready_confirmation_checks_in_before_durable_rally_resolution():
@@ -37,7 +37,8 @@ def test_ready_confirmation_checks_in_before_durable_rally_resolution():
     assert "? checkedIn.presence : fallbackPresence;" in flow
     assert "presenceConfirmed: true" in flow
     assert "expectedCourtId: selected.id" in flow
-    assert "Retry safely" in flow
+    assert "Your check-in is saved; try again." in flow
+    assert "Retry safely" not in flow
     assert "const callerSession = instantRallySession();" in flow
     assert flow.index("if (!instantRallySessionMatches(callerSession)) return null;") < flow.index(
         "invalidateMeRequests();"
@@ -47,8 +48,9 @@ def test_ready_confirmation_checks_in_before_durable_rally_resolution():
 
 def test_checkin_sheet_keeps_plain_group_checkin_and_ready_privacy_copy():
     sheet = section("function openCheckInSheet", "// ---------- Games ----------")
-    assert "I’m here &amp; ready — find a game" in sheet
-    assert "Just playing with my group" in sheet
+    assert "I’m at ${esc(court.name)}" in sheet
+    assert "Find a game now" in sheet
+    assert "Just check in" in sheet
     assert "JSON.stringify({ looking_for_game: false })" in sheet
     assert "signed-in players nearby" in sheet
     assert "expires automatically" in sheet
@@ -153,7 +155,7 @@ def test_instant_games_stay_assembly_first_until_explicit_finish():
     instant_card = card[card.index("game.status === 'upcoming' && assembly"):card.index("} else if (game.status === 'upcoming')")]
     assert "data-game-waitlist" not in instant_card
     assert "rallyActionState(rally)" in instant_card
-    assert "Remote spot held" in APP
+    assert "Travel spot held" in APP
     assert "instantRallyScorePending(game)" in card
     assert "Played? Tap to enter the score." in card
 
@@ -163,14 +165,14 @@ def test_instant_games_stay_assembly_first_until_explicit_finish():
     assert "We finished — enter score" in detail
     assert "!game.is_instant && !startsAhead" in detail
     assert "No additional spot is promised." in detail
-    assert "Joined-player identities stay private until you join this rally at the court." in detail
-    assert "Joined roster (${rosterCount}/${game.max_players})" in detail
+    assert "Player identities stay private until you join this rally at the court." in detail
+    assert "At the court (${readyCount}/${game.max_players})" in detail
     assert "Players (${readyCount}/${game.max_players})" in detail
 
     play = section("async function renderPlay", "function updatePlayHeader")
     assert "g.status === 'upcoming' && g.can_enter_score" in play
     assert "? instantRallyScorePending(g)" in play
-    assert "g.status !== 'upcoming' || instantRallyScorePending(g)" in play
+    assert "!toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g)" in play
     profile = section("// My upcoming games", "// Personal play stats")
     assert "const scorePending = (mine.items || []).filter((game) => instantRallyScorePending(game))" in profile
     assert "Played — enter the score" in profile
@@ -224,9 +226,10 @@ def test_play_now_controls_have_mobile_and_accessibility_contracts():
     assert ".nearby-rally-card [data-rally-action]" in STYLES
     assert "min-height: 44px" in STYLES
     assert ".active-game-banner.state-rally" in STYLES
-    assert 'aria-pressed="${v === skill}"' in APP
-    assert 'aria-label="Message ${esc(p.display_name)}"' in APP
-    assert 'aria-label="Message ${esc(f.display_name)}"' in APP
+    assert 'id="nearby-skill"' in APP
+    assert '<details class="nearby-filter"' in APP
+    assert "How location sharing works" in APP
+    assert 'action = `<button class="btn btn-secondary btn-sm" data-msg="${p.id}">Message</button>`' in APP
 
 
 def test_court_detail_uses_private_safe_presence_aggregate():

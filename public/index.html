@@ -7,7 +7,7 @@
   <!-- The UI is light-only; stop dark-mode browsers auto-darkening form controls. -->
   <meta name="color-scheme" content="light" />
   <title>Third Shot — Find courts, friends & games</title>
-  <link rel="stylesheet" href="/styles-v15.css" />
+  <link rel="stylesheet" href="/styles-v15.css?v=r8" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-512.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
@@ -71,13 +71,10 @@
             <button id="search-clear" class="search-clear hidden" aria-label="Clear search">✕</button>
           </div>
           <button id="locate-btn" class="icon-btn" title="My location" aria-label="Center on my location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/></svg></button>
-          <button id="bell-btn" class="icon-btn" title="Activity" aria-label="Activity and notifications" style="position:relative"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg><span id="bell-badge" class="badge hidden" style="top:4px;right:4px"></span></button>
         </div>
         <div id="search-suggest" class="search-suggest hidden" role="listbox" aria-label="Court search suggestions"></div>
         <div class="map-filters" id="map-filters" aria-label="Quick court filters">
-          <button type="button" data-court-filter="saved" aria-pressed="false">⭐ Saved</button>
-          <button type="button" data-court-filter="players" aria-pressed="false">🟢 Players here</button>
-          <button type="button" data-court-filter="games" aria-pressed="false"><svg class="pb-ic"><use href="#pb"/></svg> Open games</button>
+          <button type="button" data-court-filter="active" aria-pressed="false"><span aria-hidden="true">●</span> Active now</button>
           <button type="button" id="court-more-filters" aria-expanded="false">⚙ Filters <span id="court-filter-count" class="filter-count hidden">0</span></button>
         </div>
         <button type="button" id="use-map-area" class="use-map-area hidden">Search this area</button>
@@ -91,7 +88,6 @@
                 <button type="button" role="tab" data-court-view="map" class="active" aria-selected="true">Map</button>
                 <button type="button" role="tab" data-court-view="list" aria-selected="false">List <span id="court-result-count">0</span></button>
               </div>
-              <button type="button" class="court-sheet-expand" id="court-sheet-expand" aria-label="Show full court list">⌃</button>
             </div>
             <div class="court-sheet-summary">
               <div class="row-main">
@@ -128,14 +124,8 @@
               <button id="play-avatar-button" class="header-avatar-button" type="button" aria-label="Open my profile"></button>
             </div>
           </div>
-          <div class="segmented" id="play-segments" role="tablist" aria-label="Play views">
-            <button type="button" role="tab" id="play-tab-games" aria-controls="play-content" data-seg="games" class="active" aria-selected="true">Today</button>
-            <button type="button" role="tab" id="play-tab-brackets" aria-controls="play-content" data-seg="brackets" aria-selected="false">Compete</button>
-            <button type="button" role="tab" id="play-tab-scores" aria-controls="play-content" data-seg="scores" aria-selected="false">Rankings</button>
-          </div>
         </header>
-        <div id="play-content" class="tab-scroll" role="tabpanel" aria-labelledby="play-tab-games"></div>
-        <button id="new-game-fab" class="fab" aria-label="Start a new game"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+        <div id="play-content" class="tab-scroll" aria-live="polite"></div>
       </section>
 
       <!-- Chat tab -->
@@ -143,9 +133,9 @@
         <header class="tab-header">
           <h2>Community</h2>
           <div class="segmented" id="chat-segments" role="tablist" aria-label="Community views">
-            <button type="button" role="tab" id="chat-tab-chats" aria-controls="chat-content" data-seg="chats" class="active" aria-selected="true">Inbox <span id="chat-inbox-badge" class="segment-badge hidden"></span></button>
-            <button type="button" role="tab" id="chat-tab-friends" aria-controls="chat-content" data-seg="friends" aria-selected="false">Friends <span id="chat-friends-badge" class="segment-badge hidden"></span></button>
-            <button type="button" role="tab" id="chat-tab-nearby" aria-controls="chat-content" data-seg="nearby" aria-selected="false">Nearby</button>
+            <button type="button" role="tab" id="chat-tab-chats" aria-controls="chat-content" data-seg="chats" class="active" aria-selected="true">Messages <span id="chat-inbox-badge" class="segment-badge hidden"></span></button>
+            <button type="button" role="tab" id="chat-tab-friends" aria-controls="chat-content" data-seg="friends" aria-selected="false">People <span id="chat-friends-badge" class="segment-badge hidden"></span></button>
+            <button type="button" role="tab" id="chat-tab-nearby" aria-controls="chat-content" data-seg="nearby" aria-selected="false">Groups <span id="chat-groups-badge" class="segment-badge hidden"></span></button>
           </div>
         </header>
         <div id="chat-content" class="tab-scroll" role="tabpanel" aria-labelledby="chat-tab-chats"></div>
@@ -153,7 +143,14 @@
 
       <!-- Profile tab -->
       <section id="tab-profile" class="tab-panel hidden">
-        <header class="tab-header"><h2>Me</h2></header>
+        <header class="tab-header">
+          <div class="tab-title-row">
+            <h2>Me</h2>
+            <button id="profile-settings" class="header-icon-btn" type="button" aria-label="Open settings" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </header>
         <div id="profile-content" class="tab-scroll"></div>
       </section>
 
@@ -193,7 +190,7 @@
       syncBoot();
     })();
   </script>
-  <script src="/crew-planner-v15.js"></script>
-  <script src="/app-v15.js"></script>
+  <script src="/crew-planner-v15.js?v=r8"></script>
+  <script src="/app-v15.js?v=r8"></script>
 </body>
 </html>

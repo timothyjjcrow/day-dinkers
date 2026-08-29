@@ -28,14 +28,14 @@ def test_map_tiles_work_without_a_provider_api_key():
     assert "OpenStreetMap</a> contributors" in APP
 
 
-def test_primary_mobile_views_keep_accessible_tab_contracts():
-    assert 'id="play-segments" role="tablist"' in INDEX
+def test_primary_mobile_views_keep_accessible_navigation_contracts():
+    assert 'id="play-segments" role="tablist"' not in INDEX
     assert 'id="chat-segments" role="tablist"' in INDEX
-    assert 'id="play-content" class="tab-scroll" role="tabpanel"' in INDEX
+    assert 'id="play-content" class="tab-scroll" aria-live="polite"' in INDEX
     assert 'id="chat-content" class="tab-scroll" role="tabpanel"' in INDEX
     assert "setupTablistKeyboard($('#play-segments'))" in APP
     assert "setupTablistKeyboard($('#chat-segments'))" in APP
-    assert "liveEl.setAttribute('aria-labelledby', `play-tab-${seg}`);" in APP
+    assert "liveEl.setAttribute('aria-label', 'Play');" in APP
     assert "liveEl.setAttribute('aria-labelledby', `chat-tab-${seg}`);" in APP
 
 
@@ -86,7 +86,8 @@ def test_location_and_invite_controls_preserve_explicit_user_choice():
 
 
 def test_checked_in_players_can_launch_and_fill_an_instant_rally():
-    assert "data-goto=\"${here ? 'instant-rally' : 'play-now'}\"" in APP
+    assert 'data-goto="play-soon"' in APP
+    assert "I’m at a court now" in APP
     assert "async function startInstantRally(button, options = {})" in APP
     assert "openPlayNowCourtPicker();" in APP
     assert "api('/games/rally'" in APP
@@ -116,7 +117,8 @@ def test_underfilled_games_use_one_live_roster_boost_sheet():
         'id="rb-share"', 'id="rb-status"',
     ):
         assert selector in APP
-    assert "Invites don’t reserve a spot. First joins fill the roster." in APP
+    assert "1 spot left. The first person to join gets it." in APP
+    assert "`${spotsLeft} spots left. The next ${spotsLeft} players to join get them.`" in APP
     assert "pendingGameOpenCallAttempt(accountId, game.id)" in APP
     assert "clearGameOpenCallAttempts(accountId);" in APP
     assert "body: JSON.stringify({ client_attempt_id: attempt.id })" in APP
@@ -138,11 +140,11 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r5';" in SERVICE_WORKER
-    assert "const CORE_SHELL = ['/', '/styles-v15.css', '/crew-planner-v15.js', '/app-v15.js'];" in SERVICE_WORKER
-    assert 'href="/styles-v15.css"' in INDEX
-    assert 'src="/crew-planner-v15.js"' in INDEX
-    assert 'src="/app-v15.js"' in INDEX
+    assert "const CACHE = 'thirdshot-v15-r8';" in SERVICE_WORKER
+    assert "const CORE_SHELL = ['/', '/styles-v15.css?v=r8', '/crew-planner-v15.js?v=r8', '/app-v15.js?v=r8'];" in SERVICE_WORKER
+    assert 'href="/styles-v15.css?v=r8"' in INDEX
+    assert 'src="/crew-planner-v15.js?v=r8"' in INDEX
+    assert 'src="/app-v15.js?v=r8"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -177,11 +179,15 @@ def test_returning_players_get_snapshot_first_launch_instead_of_a_blank_screen()
 
 
 def test_court_results_render_progressively_without_collapsing_list_context():
-    assert "const visibleLimit = state.courtSheetSnap === 'peek' ? 8 : state.courtListLimit;" in APP
+    assert "const visibleLimit = state.courtSheetSnap === 'peek' ? 2 : state.courtListLimit;" in APP
+    assert "const firstNewIndex = 2;" in APP
     assert 'id="court-show-more"' in APP
     assert "state.courtListLimit += 20;" in APP
-    assert "{ preserveList: state.courtSheetSnap !== 'peek' }" in APP
-    assert "if (!preserveList || state.courtSheetSnap === 'peek') setCourtSheetSnap('half');" in APP
+    listing = APP[APP.index("function renderCourtList"):APP.index("function openSuggestEditSheet")]
+    markers = APP[APP.index("function drawMarkers"):APP.index("function setCourtMarkerSelected")]
+    assert "openCourtDetail(Number(row.dataset.court))" in listing
+    assert "selectCourtOnMap" not in listing
+    assert "on('click', () => selectCourtOnMap(court))" in markers
     assert 'aria-label="${n} courts in this area. Activate to zoom in"' in APP
     assert 'aria-label="${esc(markerLabel)}"' in APP
     assert "resultSignature !== state.courtListSignature" in APP
@@ -200,10 +206,16 @@ def test_rankings_and_fab_always_offer_the_contextual_next_action():
 def test_community_is_a_universal_attention_aware_inbox():
     assert 'id="chat-inbox-badge"' in INDEX
     assert 'id="chat-friends-badge"' in INDEX
+    assert 'id="chat-groups-badge"' in INDEX
     assert "api('/chat/competitions')" in APP
     for kind in ('game', 'tournament', 'league'):
         assert f"kind === '{kind}'" in APP
-    assert "Recent conversations" in APP
+    assert "Active game chats" in APP
+    assert "Your crews" in APP
+    assert "Your clubs" in APP
+    assert "function renderPeopleLane" in APP
+    assert "{ lane: 'messages' }" in APP
+    assert "{ lane: 'groups' }" in APP
     assert "Ready to coordinate" in APP
     assert "state.communityRoomUnread" in APP
     assert "data.community_room_unread != null" in APP
@@ -212,6 +224,14 @@ def test_community_is_a_universal_attention_aware_inbox():
     assert "api('/chat/competitions')," in APP
     assert "avatarHtml(chat.user, '', 'span')" in APP
     assert "firstRevealed?.focus({ preventScroll: true });" in APP
+
+
+def test_people_search_ignores_stale_community_renders():
+    friends = APP[APP.index("async function renderFriends"):APP.index("async function openThread")]
+    assert "if (!search) return;" in friends
+    assert "if (!search.isConnected) return;" in friends
+    assert "if (!resultsEl) return;" in friends
+    assert "if (!search.isConnected || search.value.trim() !== q) return;" in friends
 
 
 def test_every_chat_channel_uses_shared_mobile_continuity():
@@ -302,7 +322,8 @@ def test_logout_is_a_hard_account_privacy_boundary():
     assert "panel.replaceChildren();" in APP
     assert "function areaViewKey()" in APP
     assert "`${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}`" in APP
-    assert "`${state.me?.id || 'signed-out'}:chat:${seg}:${areaViewKey()}`" in APP
+    assert "const peopleKey = seg === 'friends' ? `:${state.peopleMode}` : '';" in APP
+    assert "`${state.me?.id || 'signed-out'}:chat:${seg}${peopleKey}:${areaViewKey()}`" in APP
     assert "const CHAT_DRAFT_TTL = 24 * 60 * 60 * 1000;" in APP
     assert "const requestToken = state.token;" in APP
     assert "state.token === requestToken" in APP
@@ -327,6 +348,7 @@ def test_logout_is_a_hard_account_privacy_boundary():
 
 def test_chat_rendering_deduplicates_poll_and_post_races():
     assert "function prepareChatRenderBatch(msgsEl, rawItems, append)" in APP
-    assert APP.count('data-message-id="${m.id}"') == 6
     assert APP.count("const batch = prepareChatRenderBatch(msgsEl, items, append);") == 6
+    assert APP.count("chatMessageActionHtml(m, mine)") == 6
+    assert "chatMessageActionHtml(message, mine)" in APP
     assert "lastId = Math.max(lastId, batch.newestId)" in APP

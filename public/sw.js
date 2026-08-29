@@ -1,10 +1,10 @@
 /* Third Shot service worker: fast app-shell caching with an offline fallback. */
 // Bump the cache revision whenever an in-place v15 shell changes. The asset
 // path release guards major transitions; this revision makes existing v15
-// installs refresh the arrival and one-hour play-pulse flows instead of
-// retaining old executable bytes.
-const CACHE = 'thirdshot-v15-r5';
-const CORE_SHELL = ['/', '/styles-v15.css', '/crew-planner-v15.js', '/app-v15.js'];
+// installs refresh the simplified Play, Courts, Community, and Settings shell
+// instead of retaining old executable bytes.
+const CACHE = 'thirdshot-v15-r8';
+const CORE_SHELL = ['/', '/styles-v15.css?v=r8', '/crew-planner-v15.js?v=r8', '/app-v15.js?v=r8'];
 const OPTIONAL_SHELL = ['/manifest.webmanifest', '/icon-512.png', '/icon-maskable.png', '/logo.jpg'];
 const NAVIGATION_TIMEOUT_MS = 1200;
 

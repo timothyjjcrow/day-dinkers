@@ -51,12 +51,13 @@ def test_discovery_capability_and_capacity_survive_normalization_and_dom():
 def test_remote_rally_action_is_arrival_while_court_presence_still_joins():
     action = section("function rallyActionState", "function playerRallySummary")
     assert "isCheckedInAtCourt(rally.courtId)" in action
-    assert "label: 'Join rally'" in action
-    assert "label: 'I’m on my way'" in action
+    assert "label: 'Join this game'" in action
+    assert "label: 'Find another game'" in action
+    assert "label: 'Arrive in 5–15 min'" in action
     assert "label: 'View held spot'" in action
-    assert "label: 'Remote spot held'" in action
-    assert "label: 'Rally committed'" in action
-    assert "label: 'Rally wrapping up'" in action
+    assert "label: 'Travel spot held'" in action
+    assert "label: 'Game full'" in action
+    assert "label: 'Game wrapping up'" in action
     assert action.index("isCheckedInAtCourt(rally.courtId)") < action.index(
         "if (!rally.arrivalAvailable)"
     )
@@ -84,13 +85,13 @@ def test_eta_sheet_is_accessible_and_never_claims_physical_readiness():
     assert "<legend>When can you arrive?</legend>" in sheet
     assert 'type="radio" name="arrival-eta"' in sheet
     assert 'role="alert" tabindex="-1"' in sheet
-    assert "The server will confirm the exact expiration time" in sheet
-    assert "the hold ends sooner if the rally closes" in sheet
+    assert "We’ll hold one travel spot while you head over." in sheet
+    assert "It ends if the rally closes first." in sheet
     assert "You’re physically ready" not in sheet
     assert "data-arrival-directions" in sheet
     assert "rally.spotsLeft <= 0 || rally.onWayCount > 0" in sheet
     assert "!rally.arrivalAvailable || !rally.arrivalCapability" in sheet
-    assert "This rally is wrapping up, so remote spot holds are closed." in sheet
+    assert "This rally is wrapping up, so travel spots are closed." in sheet
     directions = section(
         "function hydrateArrivalDirections", "async function reserveRallyArrival"
     )
@@ -118,8 +119,9 @@ def test_attempt_is_account_and_game_scoped_and_ambiguous_retries_do_not_extend(
     assert "refreshPlayGamesAfterRallyMutation();" in reserve
 
     sheet = section("function openRallyArrivalSheet", "async function cancelRallyArrival")
-    assert "won’t create or extend another hold" in sheet
-    assert "Retry safely: the same request will not create or extend another hold." in sheet
+    assert "We still need to confirm your ${pending.etaMinutes}-minute arrival." in sheet
+    assert "We couldn’t confirm your spot. Try again." in sheet
+    assert "Retry safely" not in sheet
     assert "input.disabled = Number(input.value) !== saved.etaMinutes" in sheet
 
     logout = section("function logout()", "function tokenHint()")
@@ -136,7 +138,7 @@ def test_active_trip_banner_details_cancel_and_explicit_arrival_confirmation():
     assert "openArrivalCheckInConfirmation(trip)" in banner
 
     copy = section("function arrivalReservationCopy", "function rallyCourtForDirections")
-    assert "A spot is held until ${fmtTimeShort(arrival.expiresAt)}, as long as the rally stays active. Check in when you arrive." in copy
+    assert "We’ll hold one spot until ${fmtTimeShort(arrival.expiresAt)}. Check in when you arrive." in copy
 
     detail = section("function openArrivalDetails", "function openArrivalCheckInConfirmation")
     assert 'id="arrival-im-here"' in detail
@@ -148,7 +150,7 @@ def test_active_trip_banner_details_cancel_and_explicit_arrival_confirmation():
         "function openArrivalCheckInConfirmation",
         "function clearArrivalAfterConfirmedMembership",
     )
-    assert "Only continue once you’re physically at this court." in checkin
+    assert "Only continue once you’re at this court." in checkin
     assert "Check in &amp; join" in checkin
     assert "api(`/courts/${rally.courtId}/checkin`" in checkin
     assert "JSON.stringify({ looking_for_game: false })" in checkin
@@ -228,14 +230,14 @@ def test_stale_reservation_presence_recovery_is_private_and_actionable_offline()
 def test_wrapping_rally_disables_only_remote_hold_and_detail_cta_requires_capability():
     detail = section("function gameScreenHtml", "async function openGameScreen")
     assert "rally.arrivalAvailable && rally.arrivalCapability" in detail
-    assert "This rally is wrapping up, so remote spot holds are closed." in detail
+    assert "This rally is wrapping up, so travel spots are closed." in detail
     assert detail.index("isCheckedInAtCourt(rally.courtId) && (rally.spotsLeft > 0 || myArrival)") < detail.index(
         "rally.arrivalAvailable && rally.arrivalCapability"
     )
 
     banner = section("async function refreshLookingBanner", "// ---------- Search suggestions")
     assert "el.dataset.rallyArrivalAvailable = String(rally.arrivalAvailable)" in banner
-    assert "Remote holds are closed because this rally is wrapping up." in banner
+    assert "Travel spots are closed because this rally is wrapping up." in banner
 
 
 def test_server_capacity_ceiling_and_modal_titles_are_not_rewritten_or_double_escaped():
@@ -258,13 +260,13 @@ def test_server_capacity_ceiling_and_modal_titles_are_not_rewritten_or_double_es
     assert "modalHead(`📍 You’re at ${esc(rally.courtName)}`)" not in checkin
 
 
-def test_ready_and_traveling_counts_and_roster_eta_are_separate_everywhere():
+def test_at_court_arriving_and_spots_left_language_is_consistent_everywhere():
     counts = section("function rallyCountsText", "function arrivalEtaLabel")
-    assert "rally?.rosterCount" in counts
-    assert "roster > ready" in counts
-    assert "physically ready" in counts
-    assert "joined" in counts
-    assert "on the way" in counts
+    assert "at the court" in counts
+    assert "arriving" in counts
+    assert "spot${spots === 1 ? '' : 's'} left" in counts
+    assert "physically ready" not in counts
+    assert "on the way" not in counts
 
     banner = section("async function refreshLookingBanner", "// ---------- Search suggestions")
     assert "rallyCountsText(rally)" in banner
@@ -273,7 +275,7 @@ def test_ready_and_traveling_counts_and_roster_eta_are_separate_everywhere():
 
     nearby = section("async function renderNearbyPlayers", "async function renderFriends")
     assert "rallyCountsText(rally)" in nearby
-    assert "I’m on my way" not in nearby  # centralized in rallyActionState
+    assert "I’m on my way" not in nearby
     assert "data-rally-action" in nearby
 
     cards = section("function gameCardHtml", "function bindGameButtons")
@@ -281,15 +283,15 @@ def test_ready_and_traveling_counts_and_roster_eta_are_separate_everywhere():
     assert "rallyActionState(rally)" in cards
 
     detail = section("function gameScreenHtml", "async function openGameScreen")
-    assert "Joined roster (${rosterCount}/${game.max_players})" in detail
-    assert "On the way (${rally.onWayCount})" in detail
+    assert "At the court (${readyCount}/${game.max_players})" in detail
+    assert "Arriving (${rally.onWayCount})" in detail
     assert "game.arrivals" in detail
     assert "ETA ${esc(fmtTimeShort(arrival.arrivesAt))}" in detail
     assert "Their identity is visible only to the current court roster." in detail
     assert "Your spot is held" in detail
     invite = section("function openRosterBoostSheet", "function crewSummaryFrom")
     assert "rallyCountsText(rallySummaryFromValue(game))" in invite
-    assert "traveling player’s held spot" in invite
+    assert "A player who is arriving keeps the travel spot" in invite
 
     assembly = section("function instantRallyAssembly", "function instantRallyScorePending")
     assert "const readyCount = Number.isFinite(aggregateReadyCount)" in assembly

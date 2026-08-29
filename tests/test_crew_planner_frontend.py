@@ -115,10 +115,11 @@ def test_uncertain_create_recovery_replays_immutable_payload_across_reload():
     assert "submittedPayload: status === 'submitting' ? frozenSubmitPayload : null" in APP
     assert "persistent.setItem(key, value);" in APP
     assert "fallback.setItem(key, value);" in APP
-    assert 'id="ng-retry-exact">Finish safely</button>' in APP
+    assert 'id="ng-retry-exact">Try again</button>' in APP
     assert "body: JSON.stringify(requestPayload)" in APP
     assert "const exactPayload = exactRetry" in APP
-    assert "if (!exactRetry && !nowMode && scheduledAt.getTime() <= Date.now())" in APP
+    assert "if (!exactRetry && scheduledAt.getTime() <= Date.now())" in APP
+    assert 'data-mode="now"' not in APP
     assert "Number(err.status) === 429" in APP
     assert "err.data && err.data.existing_game_id" in APP
     assert "plannerAttemptId = newGameAttemptId()" not in APP
@@ -139,7 +140,7 @@ def test_rematch_attempt_and_success_receipt_survive_game_sheet_reopen():
     assert "client_attempt_id: rematchClientAttemptId(gameId)" in APP
     assert "REMATCH_ATTEMPT_TTL" not in APP
     assert "if (rematchAttempt && rematchAttempt.gameId) return '↗ Open the rematch';" in APP
-    assert "if (rematchAttempt && rematchAttempt.payload) return '↻ Finish starting the rematch safely';" in APP
+    assert "if (rematchAttempt && rematchAttempt.payload) return '↻ Continue starting the rematch';" in APP
     assert "clearRematchAttempts(accountId);" in APP
     assert 'rematchAttemptId' not in APP
     assert 'rematchScheduledAt' not in APP
