@@ -61,11 +61,14 @@ def auth_headers(token):
 # ---------- Auth ----------
 
 def test_versioned_executable_shell_assets_are_served(client):
-    script = client.get('/app-v13.js')
-    styles = client.get('/styles-v13.css')
+    script = client.get('/app-v15.js')
+    crew_planner = client.get('/crew-planner-v15.js')
+    styles = client.get('/styles-v15.css')
     assert script.status_code == 200
     assert script.mimetype in {'application/javascript', 'text/javascript'}
     assert b'function applyMe' in script.data
+    assert crew_planner.status_code == 200
+    assert b'function bestSlot' in crew_planner.data
     assert styles.status_code == 200
     assert styles.mimetype == 'text/css'
     assert b'.boot-screen' in styles.data
@@ -596,6 +599,38 @@ def test_game_reminder_fires_in_window(client, app):
     # The reminder reaches the player through the notifications feed.
     feed = client.get('/api/notifications', headers=auth_headers(b['token'])).get_json()
     assert any(n['kind'] == 'game_reminder' for n in feed['items'])
+
+
+def test_instant_rally_never_sends_scheduled_game_reminders(client, app):
+    from datetime import timedelta
+
+    from backend.app import db
+    from backend.models import Game, Notification, utcnow
+    from backend.routes.games import send_game_reminders
+
+    player = register(client, 'instant-reminder@example.com', 'Player')
+    headers = auth_headers(player['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
+    instant = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(minutes=5)).isoformat() + 'Z',
+        'client_attempt_id': 'instant-no-reminder-attempt',
+    }, headers=headers)
+    assert instant.status_code == 201
+
+    ordinary = make_game(
+        client, player['token'], court_id, hours_ahead=1,
+    )
+    ordinary_row = db.session.get(Game, ordinary['id'])
+    ordinary_row.scheduled_at = utcnow() + timedelta(minutes=30)
+    db.session.commit()
+    send_game_reminders()
+
+    reminders = Notification.query.filter_by(kind='game_reminder').all()
+    assert {notification.related_game_id for notification in reminders} == {
+        ordinary['id'],
+    }
 
 
 def test_day_before_reminder(client, app):
@@ -1220,19 +1255,25 @@ def test_court_busy_times(client, app):
             hour=2, minute=0, second=0, microsecond=0) + timedelta(days=1)
         mon = (now - timedelta(days=now.weekday())).replace(
             hour=21, minute=0, second=0, microsecond=0)  # local Mon 1pm
+        def historical_visit(checked_in_at):
+            return CheckInModel(
+                user_id=a['user']['id'], court_id=court_id,
+                checked_in_at=checked_in_at,
+                checked_out_at=checked_in_at + timedelta(hours=1),
+                last_presence_ping_at=checked_in_at + timedelta(hours=1),
+            )
+
         rows = []
         for weeks in (1, 2, 3):  # three Saturday mornings
-            rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
-                                     checked_in_at=sat - timedelta(days=7 * weeks)))
+            rows.append(historical_visit(sat - timedelta(days=7 * weeks)))
         for weeks in (1, 2):     # two Wednesday evenings
-            rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
-                                     checked_in_at=wed_eve - timedelta(days=7 * weeks)))
+            rows.append(historical_visit(wed_eve - timedelta(days=7 * weeks)))
         # One Monday afternoon (below the 2-visit bar) and one Sat 3am local
         # (UTC 11:00 — night hours are excluded, so Sat mornings stays at 3).
-        rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
-                                 checked_in_at=mon - timedelta(days=7)))
-        rows.append(CheckInModel(user_id=a['user']['id'], court_id=court_id,
-                                 checked_in_at=sat.replace(hour=11) - timedelta(days=7)))
+        rows.append(historical_visit(mon - timedelta(days=7)))
+        rows.append(historical_visit(
+            sat.replace(hour=11) - timedelta(days=7),
+        ))
         db.session.add_all(rows)
         db.session.commit()
 
@@ -1252,7 +1293,10 @@ def test_players_looking_nearby(client):
 
     # Nobody looking yet.
     r = client.get(f'/api/players/looking?lat={larson["latitude"]}&lng={larson["longitude"]}', headers=ah)
-    assert r.get_json() == {'count': 0, 'players': []}
+    assert r.get_json() == {
+        'count': 0, 'players': [], 'rally_count': 0, 'rallies': [],
+        'pulse_count': 0, 'pulses': [],
+    }
 
     # Ben checks in looking; Cam checks in but NOT looking.
     client.post(f'/api/courts/{larson["id"]}/checkin', json={'looking_for_game': True}, headers=bh)
@@ -2564,9 +2608,12 @@ def test_block_user_flow(client):
     assert client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah).status_code == 403
     assert client.post('/api/friends/request', json={'user_id': a['user']['id']}, headers=bh).status_code == 403
 
-    # Profile shows the block to the blocker only.
-    assert client.get(f"/api/users/{b['user']['id']}", headers=ah).get_json()['is_blocked'] is True
-    assert client.get(f"/api/users/{a['user']['id']}", headers=bh).get_json()['is_blocked'] is False
+    # A block is a two-way profile privacy boundary. The blocker can still
+    # unblock from the dedicated blocked-users settings list.
+    assert client.get(f"/api/users/{b['user']['id']}", headers=ah).status_code == 404
+    assert client.get(f"/api/users/{a['user']['id']}", headers=bh).status_code == 404
+    blocked = client.get('/api/users/blocked', headers=ah).get_json()['items']
+    assert [item['id'] for item in blocked] == [b['user']['id']]
 
     # Self-block rejected.
     assert client.post(f"/api/users/{a['user']['id']}/block", headers=ah).status_code == 400
@@ -2592,6 +2639,141 @@ def test_block_hides_from_players_nearby(client):
     assert not any(p['id'] == b['user']['id'] for p in near['items'])
     # And Ben doesn't see Ana either (she'd need a location; just check no crash + empty)
     assert client.get('/api/players/nearby?lat=33.66&lng=-117.91', headers=bh).status_code == 200
+
+
+def test_block_is_two_way_profile_court_notification_and_game_boundary(client):
+    host = register(client, 'blocked-host@example.com', 'Host')
+    viewer = register(client, 'blocked-viewer@example.com', 'Viewer')
+    hh, vh = auth_headers(host['token']), auth_headers(viewer['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    client.post(f'/api/courts/{court_id}/checkin', json={
+        'looking_for_game': True,
+    }, headers=hh)
+    client.post(f'/api/courts/{court_id}/reviews', json={
+        'rating': 5, 'comment': 'Fresh nets',
+    }, headers=hh)
+    game = make_game(client, host['token'], court_id, visibility='open')
+    client.post('/api/friends/request', json={
+        'user_id': viewer['user']['id'],
+    }, headers=hh)
+    assert client.get('/api/me', headers=vh).get_json()['pending_friend_requests'] == 1
+    assert any(
+        item['related_user_id'] == host['user']['id']
+        for item in client.get('/api/notifications', headers=vh).get_json()['items']
+    )
+    before = client.get(f'/api/courts/{court_id}', headers=vh).get_json()
+    assert any(item['id'] == host['user']['id'] for item in before['players_here'])
+    assert any(item['id'] == game['id'] for item in before['games'])
+    assert any(item['user_id'] == host['user']['id'] for item in before['reviews'])
+
+    assert client.post(
+        f"/api/users/{host['user']['id']}/block", headers=vh,
+    ).status_code == 200
+    assert client.get(
+        f"/api/users/{host['user']['id']}", headers=vh,
+    ).status_code == 404
+    assert client.get(
+        f"/api/users/{viewer['user']['id']}", headers=hh,
+    ).status_code == 404
+
+    me = client.get('/api/me', headers=vh).get_json()
+    assert me['pending_friend_requests'] == 0
+    assert me['latest_notification'] is None
+    assert client.get('/api/notifications', headers=vh).get_json()['items'] == []
+    court = client.get(f'/api/courts/{court_id}', headers=vh).get_json()
+    assert all(item['id'] != host['user']['id'] for item in court['players_here'])
+    assert all(item['id'] != game['id'] for item in court['games'])
+    assert all(item['user_id'] != host['user']['id'] for item in court['reviews'])
+    feed = client.get(
+        '/api/games?lat=33.66&lng=-117.91', headers=vh,
+    ).get_json()['items']
+    assert all(item['id'] != game['id'] for item in feed)
+    assert client.get(f"/api/games/{game['id']}", headers=vh).status_code == 404
+    assert client.post(f"/api/games/{game['id']}/join", headers=vh).status_code == 404
+
+    # Once the only block is removed, normal discovery returns; no hidden
+    # friendship or stale request is resurrected.
+    client.post(f"/api/users/{host['user']['id']}/unblock", headers=vh)
+    assert client.get(
+        f"/api/users/{host['user']['id']}", headers=vh,
+    ).status_code == 200
+    assert client.get('/api/friends', headers=vh).get_json() == {
+        'friends': [], 'incoming': [], 'outgoing': [],
+    }
+    assert client.post(f"/api/games/{game['id']}/join", headers=vh).status_code == 200
+
+
+def test_reciprocal_friend_request_is_one_atomic_accepted_relationship(client):
+    ana = register(client, 'pair-ana@example.com', 'Ana')
+    ben = register(client, 'pair-ben@example.com', 'Ben')
+    ah, bh = auth_headers(ana['token']), auth_headers(ben['token'])
+
+    first = client.post('/api/friends/request', json={
+        'user_id': ben['user']['id'],
+    }, headers=ah)
+    assert first.status_code == 201
+    reciprocal = client.post('/api/friends/request', json={
+        'user_id': ana['user']['id'],
+    }, headers=bh)
+    assert reciprocal.status_code == 200
+    assert reciprocal.get_json()['status'] == 'accepted'
+
+    from backend.models import Friendship
+    rows = Friendship.query.all()
+    assert len(rows) == 1 and rows[0].status == 'accepted'
+    assert [item['id'] for item in client.get('/api/friends', headers=ah).get_json()['friends']] == [
+        ben['user']['id'],
+    ]
+    assert [item['id'] for item in client.get('/api/friends', headers=bh).get_json()['friends']] == [
+        ana['user']['id'],
+    ]
+    assert client.post('/api/friends/request', json={
+        'user_id': ben['user']['id'],
+    }, headers=ah).status_code == 409
+
+
+def test_blocked_pair_cannot_be_assembled_into_the_same_new_game(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+
+    host = register(client, 'pair-host@example.com', 'Host')
+    player = register(client, 'pair-player@example.com', 'Player')
+    target = register(client, 'pair-target@example.com', 'Target')
+    hh = auth_headers(host['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = make_game(client, host['token'], court_id, visibility='open')
+    assert client.post(
+        f"/api/games/{game['id']}/join", headers=auth_headers(player['token']),
+    ).status_code == 200
+    assert client.post(
+        f"/api/users/{target['user']['id']}/block",
+        headers=auth_headers(player['token']),
+    ).status_code == 200
+
+    invite = client.post(f"/api/games/{game['id']}/invite", json={
+        'user_ids': [target['user']['id']],
+    }, headers=hh)
+    assert invite.status_code == 200
+    assert invite.get_json()['invited'] == 0
+    assert invite.get_json()['skipped'] == [{
+        'user_id': target['user']['id'], 'reason': 'user_blocked',
+    }]
+    assert client.post(
+        f"/api/games/{game['id']}/join", headers=auth_headers(target['token']),
+    ).status_code == 404
+
+    atomic = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(days=1)).isoformat() + 'Z',
+        'visibility': 'private',
+        'invite_user_ids': [player['user']['id'], target['user']['id']],
+        'require_all_invitees': True,
+        'client_attempt_id': 'blocked-pair-atomic-550e8400-e29b-41d4-a716',
+    }, headers=hh)
+    assert atomic.status_code == 409
+    assert atomic.get_json()['error'] == 'crew_changed'
+    assert atomic.get_json()['unavailable_user_ids'] == [target['user']['id']]
 
 
 def test_head_to_head_on_profile(client):
@@ -3180,6 +3362,1487 @@ def make_game(client, token, court_id, game_type='casual', hours_ahead=24, visib
     return res.get_json()
 
 
+def test_instant_rally_creates_once_and_invites_only_ready_same_court_players(client):
+    from datetime import timedelta
+    from backend.app import db
+    from backend.models import CheckIn, Game, GameInvite, utcnow
+
+    host = register(client, 'rally-host@example.com', 'Host')
+    ready = register(client, 'rally-ready@example.com', 'Ready')
+    not_looking = register(client, 'rally-not-looking@example.com', 'Not Looking')
+    elsewhere = register(client, 'rally-elsewhere@example.com', 'Elsewhere')
+    blocked = register(client, 'rally-blocked@example.com', 'Blocked')
+    stale = register(client, 'rally-stale@example.com', 'Stale')
+    headers = {u['user']['display_name']: auth_headers(u['token']) for u in (
+        host, ready, not_looking, elsewhere, blocked, stale,
+    )}
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+
+    client.post(f'/api/courts/{larson}/checkin', json={'looking_for_game': False}, headers=headers['Host'])
+    client.post(f'/api/courts/{larson}/checkin', json={'looking_for_game': True}, headers=headers['Ready'])
+    client.post(f'/api/courts/{larson}/checkin', json={'looking_for_game': False}, headers=headers['Not Looking'])
+    client.post(f'/api/courts/{adorni}/checkin', json={'looking_for_game': True}, headers=headers['Elsewhere'])
+    client.post(f'/api/courts/{larson}/checkin', json={'looking_for_game': True}, headers=headers['Blocked'])
+    client.post(f'/api/courts/{larson}/checkin', json={'looking_for_game': True}, headers=headers['Stale'])
+    client.post(f"/api/users/{blocked['user']['id']}/block", headers=headers['Host'])
+    stale_checkin = CheckIn.query.filter_by(user_id=stale['user']['id'], checked_out_at=None).one()
+    stale_checkin.last_presence_ping_at = utcnow() - timedelta(hours=3)
+    db.session.commit()
+
+    attempt = 'rally-550e8400-e29b-41d4-a716-446655440000'
+    scheduled_at = utcnow().isoformat() + 'Z'
+    payload = {
+        'court_id': larson,
+        'scheduled_at': scheduled_at,
+        'client_attempt_id': attempt,
+    }
+    first = client.post('/api/games/rally', json=payload, headers=headers['Host'])
+    assert first.status_code == 201, first.get_json()
+    result = first.get_json()
+    assert result['outcome'] == 'created'
+    assert result['invited_count'] == 1
+    game = result['game']
+    assert game['court']['id'] == larson
+    assert game['visibility'] == 'open'
+    assert game['max_players'] == 4
+    assert game['notes'] == '⚡ Instant rally'
+    assert [p['user_id'] for p in game['players']] == [host['user']['id']]
+
+    invitees = {row.user_id for row in GameInvite.query.filter_by(game_id=game['id']).all()}
+    assert invitees == {ready['user']['id']}
+    for user, expected in ((ready, 1), (not_looking, 0), (elsewhere, 0), (blocked, 0), (stale, 0)):
+        notes = client.get('/api/notifications', headers=auth_headers(user['token'])).get_json()['items']
+        direct = [item for item in notes if item['kind'] == 'game_invite_direct'
+                  and item['related_game_id'] == game['id']]
+        assert len(direct) == expected
+
+    # A response-lost retry is a read of the same resource: no game, invite,
+    # or notification side effect repeats. If the client repeated its check-in
+    # step first, authoritative membership clears that reasserted LFG flag.
+    client.post(
+        f'/api/courts/{larson}/checkin',
+        json={'looking_for_game': True}, headers=headers['Host'],
+    )
+    replay = client.post('/api/games/rally', json=payload, headers=headers['Host'])
+    assert replay.status_code == 200
+    assert replay.get_json()['game']['id'] == game['id']
+    assert Game.query.filter_by(client_attempt_id=attempt).count() == 1
+    assert GameInvite.query.filter_by(game_id=game['id']).count() == 1
+    assert CheckIn.query.filter_by(
+        user_id=host['user']['id'], checked_out_at=None,
+    ).one().looking_for_game is False
+    ready_notes = client.get('/api/notifications', headers=headers['Ready']).get_json()['items']
+    assert len([n for n in ready_notes if n['kind'] == 'game_invite_direct'
+                and n['related_game_id'] == game['id']]) == 1
+
+    changed = client.post('/api/games/rally', json={
+        **payload,
+        'scheduled_at': (utcnow() + timedelta(minutes=1)).isoformat() + 'Z',
+    }, headers=headers['Host'])
+    assert changed.status_code == 409
+    assert changed.get_json() == {'error': 'client_attempt_id_conflict'}
+
+    joined = client.post(f"/api/games/{game['id']}/join", headers=headers['Ready'])
+    assert joined.status_code == 200
+    assert {p['user_id'] for p in joined.get_json()['players']} == {
+        host['user']['id'], ready['user']['id'],
+    }
+    assert CheckIn.query.filter_by(user_id=ready['user']['id'], checked_out_at=None).one().looking_for_game is False
+
+
+def test_expired_rally_replay_preserves_lfg_and_requires_a_fresh_key(client):
+    from datetime import timedelta
+
+    from backend.app import db
+    from backend.models import CheckIn, Game, utcnow
+    from backend.routes.games import expire_abandoned_instant_rallies
+
+    host = register(client, 'expired-replay-host@example.com', 'Host')
+    headers = auth_headers(host['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
+    payload = {
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'expired-rally-replay-key',
+    }
+    created = client.post('/api/games/rally', json=payload, headers=headers)
+    assert created.status_code == 201
+    game_id = created.get_json()['game']['id']
+
+    row = db.session.get(Game, game_id)
+    row.scheduled_at = utcnow() - timedelta(minutes=91)
+    db.session.commit()
+    expire_abandoned_instant_rallies()
+    assert db.session.get(Game, game_id).status == 'expired'
+
+    client.post(
+        f'/api/courts/{court_id}/checkin',
+        json={'looking_for_game': True}, headers=headers,
+    )
+    replay = client.post('/api/games/rally', json=payload, headers=headers)
+    assert replay.status_code == 409
+    assert replay.get_json()['error'] == 'rally_no_longer_active'
+    assert replay.get_json()['game_id'] == game_id
+    assert replay.get_json()['retry_with_new_attempt'] is True
+    assert CheckIn.query.filter_by(
+        user_id=host['user']['id'], checked_out_at=None,
+    ).one().looking_for_game is True
+
+    fresh = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'expired-rally-fresh-key',
+    }, headers=headers)
+    assert fresh.status_code == 201, fresh.get_json()
+    assert fresh.get_json()['game']['id'] != game_id
+
+
+def test_instant_rally_joins_existing_live_game_instead_of_creating_a_duplicate(client):
+    from backend.models import Game, GameInvite, utcnow
+
+    ana = register(client, 'rally-ana@example.com', 'Ana')
+    ben = register(client, 'rally-ben@example.com', 'Ben')
+    ah, bh = auth_headers(ana['token']), auth_headers(ben['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{court_id}/checkin', json={'looking_for_game': False}, headers=ah)
+    client.post(f'/api/courts/{court_id}/checkin', json={'looking_for_game': True}, headers=bh)
+
+    first = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-ana-550e8400-e29b-41d4-a716',
+    }, headers=ah).get_json()
+    game_id = first['game']['id']
+    assert GameInvite.query.filter_by(game_id=game_id, user_id=ben['user']['id']).count() == 1
+
+    payload = {
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-ben-550e8400-e29b-41d4-a716',
+    }
+    joined = client.post('/api/games/rally', json=payload, headers=bh)
+    assert joined.status_code == 200, joined.get_json()
+    assert joined.get_json()['outcome'] == 'joined'
+    assert joined.get_json()['game']['id'] == game_id
+    assert {p['user_id'] for p in joined.get_json()['game']['players']} == {
+        ana['user']['id'], ben['user']['id'],
+    }
+    assert Game.query.count() == 1
+    assert GameInvite.query.filter_by(game_id=game_id, user_id=ben['user']['id']).count() == 0
+
+    # Even if other players fill the game before a lost-response retry, Ben's
+    # existing membership wins over the capacity check and no duplicate opens.
+    cam = register(client, 'rally-cam@example.com', 'Cam')
+    dee = register(client, 'rally-dee@example.com', 'Dee')
+    client.post(f'/api/courts/{court_id}/checkin', json={},
+                headers=auth_headers(cam['token']))
+    client.post(f'/api/courts/{court_id}/checkin', json={},
+                headers=auth_headers(dee['token']))
+    assert client.post(f'/api/games/{game_id}/join', headers=auth_headers(cam['token'])).status_code == 200
+    assert client.post(f'/api/games/{game_id}/join', headers=auth_headers(dee['token'])).status_code == 200
+    replay = client.post('/api/games/rally', json=payload, headers=bh)
+    assert replay.status_code == 200
+    assert replay.get_json()['game']['id'] == game_id
+    assert replay.get_json()['game']['spots_left'] == 0
+    assert Game.query.count() == 1
+    host_notes = client.get('/api/notifications', headers=ah).get_json()['items']
+    assert len([n for n in host_notes if n['kind'] == 'game_join'
+                and n['related_game_id'] == game_id
+                and n['related_user_id'] == ben['user']['id']]) == 1
+
+
+def test_instant_rally_requires_checkin_and_batch_invites_are_deduplicated(client):
+    from backend.models import utcnow
+
+    host = register(client, 'rally-guard-host@example.com', 'Host')
+    one = register(client, 'rally-batch-one@example.com', 'One')
+    two = register(client, 'rally-batch-two@example.com', 'Two')
+    hh = auth_headers(host['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    no_checkin = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-guard-550e8400-e29b-41d4-a716',
+    }, headers=hh)
+    assert no_checkin.status_code == 409
+    assert no_checkin.get_json() == {'error': 'active_checkin_required'}
+
+    game = make_game(client, host['token'], court_id, visibility='open')
+    batch = client.post(f"/api/games/{game['id']}/invite", json={
+        'user_ids': [one['user']['id'], two['user']['id'], one['user']['id'], host['user']['id'], 999999],
+    }, headers=hh)
+    assert batch.status_code == 200
+    assert set(batch.get_json()['invited_user_ids']) == {one['user']['id'], two['user']['id']}
+    assert batch.get_json()['invited'] == 2
+    assert {row['reason'] for row in batch.get_json()['skipped']} == {
+        'cannot_invite_self', 'user_not_found',
+    }
+    replay = client.post(f"/api/games/{game['id']}/invite", json={
+        'user_ids': [one['user']['id'], two['user']['id']],
+    }, headers=hh)
+    assert replay.status_code == 200
+    assert replay.get_json()['invited'] == 0
+    for user in (one, two):
+        notes = client.get('/api/notifications', headers=auth_headers(user['token'])).get_json()['items']
+        assert len([n for n in notes if n['kind'] == 'game_invite_direct'
+                    and n['related_game_id'] == game['id']]) == 1
+
+
+def test_instant_rally_binds_retry_to_the_selected_court(client):
+    from backend.models import CheckIn, Game, utcnow
+
+    player = register(client, 'rally-court-binding@example.com', 'Player')
+    headers = auth_headers(player['token'])
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+
+    missing = client.post('/api/games/rally', json={
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-court-binding-missing',
+    }, headers=headers)
+    assert missing.status_code == 400
+    assert missing.get_json() == {'error': 'invalid_court_id'}
+
+    # The UI captured Larson, but another tab moved the active check-in to
+    # Adorni before the rally request arrived. The stale request cannot create,
+    # join, close, or otherwise mutate any rally.
+    client.post(f'/api/courts/{larson}/checkin', json={}, headers=headers)
+    client.post(
+        f'/api/courts/{adorni}/checkin',
+        json={'looking_for_game': True}, headers=headers,
+    )
+    mismatch = client.post('/api/games/rally', json={
+        'court_id': larson,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-court-binding-stale-tab',
+    }, headers=headers)
+    assert mismatch.status_code == 409
+    assert mismatch.get_json() == {
+        'error': 'active_checkin_court_mismatch',
+        'checked_in_court_id': adorni,
+        'requested_court_id': larson,
+    }
+    assert Game.query.count() == 0
+    active = CheckIn.query.filter_by(
+        user_id=player['user']['id'], checked_out_at=None,
+    ).one()
+    assert active.court_id == adorni
+    assert active.looking_for_game is True
+
+    payload = {
+        'court_id': adorni,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-court-binding-normal',
+    }
+    created = client.post('/api/games/rally', json=payload, headers=headers)
+    assert created.status_code == 201, created.get_json()
+    game_id = created.get_json()['game']['id']
+    assert created.get_json()['game']['court']['id'] == adorni
+
+    replay = client.post('/api/games/rally', json=payload, headers=headers)
+    assert replay.status_code == 200, replay.get_json()
+    assert replay.get_json()['game']['id'] == game_id
+    assert Game.query.count() == 1
+
+    changed_court = client.post('/api/games/rally', json={
+        **payload,
+        'court_id': larson,
+    }, headers=headers)
+    assert changed_court.status_code == 409
+    assert changed_court.get_json() == {
+        'error': 'client_attempt_id_conflict',
+    }
+    assert Game.query.count() == 1
+
+
+def test_instant_rally_cannot_be_rescheduled_or_future_dated_live(client):
+    from datetime import timedelta
+
+    from backend.app import db
+    from backend.models import Game, utcnow
+
+    host = register(client, 'instant-reschedule-host@example.com', 'Host')
+    headers = auth_headers(host['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
+    created = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'instant-reschedule-attempt',
+    }, headers=headers).get_json()['game']
+    row = db.session.get(Game, created['id'])
+    original_time = row.scheduled_at
+
+    rejected = client.post(
+        f"/api/games/{created['id']}/reschedule",
+        json={'scheduled_at': (utcnow() + timedelta(hours=2)).isoformat() + 'Z'},
+        headers=headers,
+    )
+    assert rejected.status_code == 409
+    assert rejected.get_json() == {
+        'error': 'instant_rally_not_reschedulable',
+    }
+    db.session.refresh(row)
+    assert row.scheduled_at == original_time
+    assert row.assembly_closed_at is None
+
+    # Defense in depth for a corrupt/admin-edited row: a far-future instant
+    # timestamp is not a live assembly and cannot occupy the active banner.
+    row.scheduled_at = utcnow() + timedelta(hours=2)
+    db.session.commit()
+    assert client.get('/api/me', headers=headers).get_json()['active_game'] is None
+
+
+def test_play_now_provenance_summary_assembly_capacity_and_deep_links(client):
+    from datetime import timedelta
+
+    from backend.models import Game, utcnow
+
+    host = register(client, 'play-now-host@example.com', 'Host')
+    ready = register(client, 'play-now-ready@example.com', 'Ready')
+    third = register(client, 'play-now-third@example.com', 'Third')
+    fourth = register(client, 'play-now-fourth@example.com', 'Fourth')
+    overflow = register(client, 'play-now-overflow@example.com', 'Overflow')
+    viewer = register(client, 'play-now-viewer@example.com', 'Viewer')
+    court = client.get('/api/courts?q=larson').get_json()['items'][0]
+    other_court = client.get('/api/courts?q=adorni').get_json()['items'][0]
+    host_headers = auth_headers(host['token'])
+    ready_headers = auth_headers(ready['token'])
+
+    client.post(
+        f"/api/courts/{court['id']}/checkin",
+        json={'looking_for_game': False}, headers=host_headers,
+    )
+    client.post(
+        f"/api/courts/{court['id']}/checkin",
+        json={'looking_for_game': True}, headers=ready_headers,
+    )
+
+    # Clients cannot forge instant provenance, and a normal open game near
+    # now must never be absorbed into the rally assembler.
+    ordinary = client.post('/api/games', json={
+        'court_id': court['id'],
+        'scheduled_at': (utcnow() + timedelta(minutes=5)).isoformat() + 'Z',
+        'game_type': 'casual',
+        'visibility': 'open',
+        'notes': '⚡ Instant rally',
+        'is_instant': True,
+    }, headers=host_headers)
+    assert ordinary.status_code == 201, ordinary.get_json()
+    assert ordinary.get_json()['is_instant'] is False
+
+    created = client.post('/api/games/rally', json={
+        'court_id': court['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'play-now-provenance-attempt-1',
+    }, headers=host_headers)
+    assert created.status_code == 201, created.get_json()
+    game = created.get_json()['game']
+    assert game['id'] != ordinary.get_json()['id']
+    assert game['is_instant'] is True
+    assert game['assembly_state'] == 'finding'
+    assert game['can_enter_score'] is False
+    assert Game.query.count() == 2
+
+    host_me = client.get('/api/me', headers=host_headers).get_json()
+    assert host_me['active_game']['id'] == game['id']
+    assert host_me['active_game']['banner_state'] == 'assembling'
+
+    looking = client.get(
+        f"/api/players/looking?lat={court['latitude']}&lng={court['longitude']}",
+        headers=auth_headers(viewer['token']),
+    ).get_json()
+    assert looking['rally_count'] == 1
+    assert looking['rallies'][0] == {
+        'game_id': game['id'],
+        'court_id': court['id'],
+        'court_name': court['name'],
+        'court_city': court['city'],
+        'court_latitude': court['latitude'],
+        'court_longitude': court['longitude'],
+        'max_players': 4,
+        'ready_count': 1,
+        'roster_count': 1,
+        'on_the_way_count': 0,
+        'committed_count': 1,
+        'physical_spots_left': 3,
+        'spots_left': 3,
+        'distance_miles': 0.0,
+        'expires_at': looking['rallies'][0]['expires_at'],
+        'arrival_available': True,
+        'arrival_capability': looking['rallies'][0]['arrival_capability'],
+        'assembly_state': 'finding',
+        'is_joined': False,
+    }
+    ready_entry = next(
+        player for player in looking['players']
+        if player['id'] == ready['user']['id']
+    )
+    assert ready_entry['game_id'] == game['id']
+    assert ready_entry['looking_expires_at']
+
+    invite = next(
+        item for item in client.get(
+            '/api/notifications', headers=ready_headers,
+        ).get_json()['items']
+        if item['kind'] == 'game_invite_direct'
+        and item['related_game_id'] == game['id']
+    )
+    assert invite['action_url'] == f"/#game/{game['id']}"
+
+    joined = client.post('/api/games/rally', json={
+        'court_id': court['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'play-now-provenance-attempt-2',
+    }, headers=ready_headers)
+    assert joined.status_code == 200, joined.get_json()
+    assert joined.get_json()['game']['assembly_state'] == 'ready'
+    assert joined.get_json()['game']['can_enter_score'] is True
+    host_me = client.get('/api/me', headers=host_headers).get_json()
+    assert host_me['active_game']['banner_state'] == 'ready'
+
+    join_notice = next(
+        item for item in client.get(
+            '/api/notifications', headers=host_headers,
+        ).get_json()['items']
+        if item['kind'] == 'game_join'
+        and item['related_user_id'] == ready['user']['id']
+    )
+    assert join_notice['action_url'] == f"/#game/{game['id']}"
+
+    for person, expected_state in ((third, 'ready'), (fourth, 'full')):
+        headers = auth_headers(person['token'])
+        client.post(f"/api/courts/{court['id']}/checkin", json={}, headers=headers)
+        response = client.post(f"/api/games/{game['id']}/join", headers=headers)
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()['assembly_state'] == expected_state
+
+    # Capacity does not end a member's one-live-roster invariant. A player in
+    # a full rally cannot move courts and silently start a second assembly.
+    third_headers = auth_headers(third['token'])
+    client.post(
+        f"/api/courts/{other_court['id']}/checkin", json={},
+        headers=third_headers,
+    )
+    full_elsewhere = client.post('/api/games/rally', json={
+        'court_id': other_court['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'full-rally-member-elsewhere',
+    }, headers=third_headers)
+    assert full_elsewhere.status_code == 409
+    assert full_elsewhere.get_json()['error'] == 'active_rally_elsewhere'
+    assert full_elsewhere.get_json()['game_id'] == game['id']
+
+    overflow_headers = auth_headers(overflow['token'])
+    client.post(
+        f"/api/courts/{court['id']}/checkin", json={},
+        headers=overflow_headers,
+    )
+    full = client.post(f"/api/games/{game['id']}/join", headers=overflow_headers)
+    assert full.status_code == 400
+    assert full.get_json() == {'error': 'game_full'}
+    # Membership is authoritative before capacity/presence on a retry.
+    client.post('/api/checkout', headers=auth_headers(fourth['token']))
+    assert client.post(
+        f"/api/games/{game['id']}/join",
+        headers=auth_headers(fourth['token']),
+    ).status_code == 200
+
+
+def test_instant_join_requires_exact_presence_and_one_active_rally(client):
+    from backend.models import utcnow
+
+    first_host = register(client, 'rally-one-host@example.com', 'First Host')
+    second_host = register(client, 'rally-two-host@example.com', 'Second Host')
+    actor = register(client, 'rally-actor@example.com', 'Actor')
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+
+    def launch(host, court_id, attempt):
+        headers = auth_headers(host['token'])
+        client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
+        response = client.post('/api/games/rally', json={
+            'court_id': court_id,
+            'scheduled_at': utcnow().isoformat() + 'Z',
+            'client_attempt_id': attempt,
+        }, headers=headers)
+        assert response.status_code == 201, response.get_json()
+        return response.get_json()['game']
+
+    first = launch(first_host, larson, 'one-active-rally-host-one')
+    second = launch(second_host, adorni, 'one-active-rally-host-two')
+    actor_headers = auth_headers(actor['token'])
+
+    # A friend may discover the rally, so presence failures are actionable;
+    # an unrelated remote caller is covered by the privacy regression below.
+    friendship = client.post('/api/friends/request', json={
+        'user_id': first_host['user']['id'],
+    }, headers=actor_headers).get_json()['friendship_id']
+    client.post(
+        f'/api/friends/{friendship}/respond', json={'accept': True},
+        headers=auth_headers(first_host['token']),
+    )
+
+    no_presence = client.post(
+        f"/api/games/{first['id']}/join", headers=actor_headers,
+    )
+    assert no_presence.status_code == 409
+    assert no_presence.get_json() == {
+        'error': 'active_checkin_required', 'court_id': larson,
+    }
+
+    client.post(f'/api/courts/{adorni}/checkin', json={}, headers=actor_headers)
+    mismatch = client.post(
+        f"/api/games/{first['id']}/join", headers=actor_headers,
+    )
+    assert mismatch.status_code == 409
+    assert mismatch.get_json() == {
+        'error': 'active_checkin_court_mismatch',
+        'court_id': larson,
+        'checked_in_court_id': adorni,
+    }
+
+    client.post(f'/api/courts/{larson}/checkin', json={}, headers=actor_headers)
+    assert client.post(
+        f"/api/games/{first['id']}/join", headers=actor_headers,
+    ).status_code == 200
+    client.post('/api/checkout', headers=actor_headers)
+    # Exact target membership is an idempotent read even after presence ends.
+    assert client.post(
+        f"/api/games/{first['id']}/join", headers=actor_headers,
+    ).status_code == 200
+
+    client.post(f'/api/courts/{adorni}/checkin', json={}, headers=actor_headers)
+    conflict = client.post(
+        f"/api/games/{second['id']}/join", headers=actor_headers,
+    )
+    assert conflict.status_code == 409
+    assert conflict.get_json()['error'] == 'active_rally_elsewhere'
+    assert conflict.get_json()['game_id'] == first['id']
+    assert conflict.get_json()['game']['id'] == first['id']
+
+    rally_conflict = client.post('/api/games/rally', json={
+        'court_id': adorni,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'one-active-rally-actor-elsewhere',
+    }, headers=actor_headers)
+    assert rally_conflict.status_code == 409
+    assert rally_conflict.get_json()['error'] == 'active_rally_elsewhere'
+    assert rally_conflict.get_json()['game_id'] == first['id']
+
+    client.post(f'/api/courts/{larson}/checkin', json={}, headers=actor_headers)
+    same_court = client.post('/api/games/rally', json={
+        'court_id': larson,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'one-active-rally-actor-same-court',
+    }, headers=actor_headers)
+    assert same_court.status_code == 200, same_court.get_json()
+    assert same_court.get_json()['outcome'] == 'existing'
+    assert same_court.get_json()['game']['id'] == first['id']
+
+
+def test_presence_privacy_and_freshness_are_query_time_truth(client):
+    from datetime import timedelta
+
+    from backend.app import db
+    from backend.models import CheckIn, utcnow
+
+    viewer = register(client, 'presence-viewer@example.com', 'Viewer')
+    friend = register(client, 'presence-friend@example.com', 'Friend')
+    looking = register(client, 'presence-looking@example.com', 'Looking')
+    private = register(client, 'presence-private@example.com', 'Private')
+    stale = register(client, 'presence-stale@example.com', 'Stale')
+    viewer_headers = auth_headers(viewer['token'])
+    court = client.get('/api/courts?q=larson').get_json()['items'][0]
+
+    def befriend(person):
+        request_result = client.post('/api/friends/request', json={
+            'user_id': person['user']['id'],
+        }, headers=viewer_headers)
+        friendship_id = request_result.get_json()['friendship_id']
+        client.post(
+            f'/api/friends/{friendship_id}/respond', json={'accept': True},
+            headers=auth_headers(person['token']),
+        )
+
+    befriend(friend)
+    befriend(stale)
+    for person, is_looking in (
+        (friend, False), (looking, True), (private, False), (stale, True),
+    ):
+        client.post(
+            f"/api/courts/{court['id']}/checkin",
+            json={'looking_for_game': is_looking},
+            headers=auth_headers(person['token']),
+        )
+    stale_row = CheckIn.query.filter_by(
+        user_id=stale['user']['id'], checked_out_at=None,
+    ).one()
+    stale_row.last_presence_ping_at = utcnow() - timedelta(hours=3)
+    db.session.commit()
+
+    anonymous = client.get(f"/api/courts/{court['id']}").get_json()
+    assert anonymous['players_here'] == []
+    assert anonymous['players_here_count'] == 3
+
+    detail = client.get(
+        f"/api/courts/{court['id']}", headers=viewer_headers,
+    ).get_json()
+    assert {player['id'] for player in detail['players_here']} == {
+        friend['user']['id'], looking['user']['id'],
+    }
+    assert detail['players_here_count'] == 3
+
+    nearby = client.get(
+        f"/api/players/nearby?lat={court['latitude']}&lng={court['longitude']}",
+        headers=viewer_headers,
+    ).get_json()['items']
+    by_id = {player['id']: player for player in nearby}
+    assert nearby[0]['id'] == looking['user']['id']
+    assert by_id[looking['user']['id']]['checked_in_court']['id'] == court['id']
+    assert by_id[friend['user']['id']]['checked_in_court']['id'] == court['id']
+    assert by_id[private['user']['id']]['checked_in_court'] is None
+    assert by_id[stale['user']['id']]['checked_in_court'] is None
+
+    looking_payload = client.get(
+        f"/api/players/looking?lat={court['latitude']}&lng={court['longitude']}",
+        headers=viewer_headers,
+    ).get_json()
+    assert [player['id'] for player in looking_payload['players']] == [
+        looking['user']['id'],
+    ]
+    assert looking_payload['players'][0]['looking_expires_at']
+    assert client.get(
+        '/api/me', headers=auth_headers(stale['token']),
+    ).get_json()['presence'] == {'checked_in': False}
+    unavailable = client.post(
+        f"/api/players/{stale['user']['id']}/coming",
+        headers=viewer_headers,
+    )
+    assert unavailable.status_code == 409
+    assert unavailable.get_json() == {'error': 'intent_unavailable'}
+
+
+def test_presence_heartbeat_cannot_extend_an_exact_court_signal_past_four_hours(
+    client, app,
+):
+    from datetime import timedelta
+
+    from backend.app import db
+    from backend.models import CheckIn, Game, utcnow
+
+    player = register(client, 'presence-cap-player@example.com', 'Player')
+    viewer = register(client, 'presence-cap-viewer@example.com', 'Viewer')
+    headers = auth_headers(player['token'])
+    viewer_headers = auth_headers(viewer['token'])
+    court = client.get('/api/courts?q=larson').get_json()['items'][0]
+    app.config['PRESENCE_MAX_AGE_SECONDS'] = 4 * 60 * 60
+    client.post(
+        f"/api/courts/{court['id']}/checkin",
+        json={'looking_for_game': True}, headers=headers,
+    )
+    rally = client.post('/api/games/rally', json={
+        'court_id': court['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'absolute-presence-cap-rally',
+    }, headers=headers).get_json()['game']
+
+    row = CheckIn.query.filter_by(
+        user_id=player['user']['id'], checked_out_at=None,
+    ).one()
+    row.checked_in_at = utcnow() - timedelta(hours=4, minutes=1)
+    row.last_presence_ping_at = utcnow()
+    row.looking_for_game = True
+    db.session.commit()
+
+    ping = client.post('/api/presence/ping', headers=headers)
+    assert ping.status_code == 200
+    assert ping.get_json()['presence'] == {'checked_in': False}
+    capped = db.session.get(CheckIn, row.id)
+    assert capped.checked_out_at is not None
+    assert capped.looking_for_game is False
+    assert client.get('/api/me', headers=headers).get_json()['presence'] == {
+        'checked_in': False,
+    }
+
+    looking = client.get(
+        f"/api/players/looking?lat={court['latitude']}&lng={court['longitude']}",
+        headers=viewer_headers,
+    ).get_json()
+    assert looking['players'] == []
+    assert all(item['game_id'] != rally['id'] for item in looking['rallies'])
+    detail = client.get(f"/api/courts/{court['id']}").get_json()
+    assert detail['players_here'] == []
+    assert detail['players_here_count'] == 0
+    assert db.session.get(Game, rally['id']).assembly_closed_at is not None
+
+    # Only an explicit check-in starts a new four-hour confirmation window.
+    renewed = client.post(
+        f"/api/courts/{court['id']}/checkin", json={}, headers=headers,
+    ).get_json()['presence']
+    assert renewed['checked_in'] is True
+    assert renewed['checked_in_at'] != capped.checked_in_at.isoformat() + 'Z'
+
+
+def test_closed_real_rally_stays_scoreable_but_never_resurrects(client):
+    from datetime import timedelta
+
+    from backend.app import db
+    from backend.models import Game, utcnow
+    from backend.routes.games import expire_abandoned_instant_rallies
+
+    host = register(client, 'old-rally-host@example.com', 'Host')
+    mate = register(client, 'old-rally-mate@example.com', 'Mate')
+    newcomer = register(client, 'old-rally-new@example.com', 'Newcomer')
+    viewer = register(client, 'old-rally-viewer@example.com', 'Viewer')
+    ghost_host = register(client, 'ghost-rally-host@example.com', 'Ghost Host')
+    ghost_new = register(client, 'ghost-rally-new@example.com', 'Ghost New')
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]
+
+    for person, looking in ((host, False), (mate, True)):
+        client.post(
+            f"/api/courts/{larson['id']}/checkin",
+            json={'looking_for_game': looking},
+            headers=auth_headers(person['token']),
+        )
+    launched = client.post('/api/games/rally', json={
+        'court_id': larson['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'old-real-rally-host',
+    }, headers=auth_headers(host['token'])).get_json()['game']
+    joined = client.post('/api/games/rally', json={
+        'court_id': larson['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'old-real-rally-mate',
+    }, headers=auth_headers(mate['token']))
+    assert joined.status_code == 200
+    old_real = db.session.get(Game, launched['id'])
+    old_real.scheduled_at = utcnow() - timedelta(hours=2)
+    db.session.commit()
+
+    client.post(
+        f"/api/courts/{larson['id']}/checkin", json={},
+        headers=auth_headers(newcomer['token']),
+    )
+    replacement = client.post('/api/games/rally', json={
+        'court_id': larson['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'old-real-rally-newcomer',
+    }, headers=auth_headers(newcomer['token']))
+    assert replacement.status_code == 201, replacement.get_json()
+    replacement_game = replacement.get_json()['game']
+    assert replacement_game['id'] != old_real.id
+    assert db.session.get(Game, old_real.id).assembly_closed_at is not None
+
+    old_card = next(
+        item for item in client.get(
+            '/api/games?mine=true', headers=auth_headers(host['token']),
+        ).get_json()['items']
+        if item['id'] == old_real.id
+    )
+    assert old_card['assembly_active'] is False
+    assert old_card['assembly_state'] == 'score_pending'
+    assert old_card['can_enter_score'] is True
+
+    ordinary_next = make_game(
+        client, host['token'], larson['id'], hours_ahead=3,
+    )
+    active_after_close = client.get(
+        '/api/me', headers=auth_headers(host['token']),
+    ).get_json()['active_game']
+    assert active_after_close['id'] == ordinary_next['id']
+    assert active_after_close['banner_state'] == 'upcoming'
+
+    # Even a roster member explicitly re-checking at the old court cannot
+    # revive a one-way-closed assembly beside its replacement.
+    client.post(
+        f"/api/courts/{larson['id']}/checkin", json={},
+        headers=auth_headers(host['token']),
+    )
+    rejoined = client.post('/api/games/rally', json={
+        'court_id': larson['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'old-real-rally-host-fresh-attempt',
+    }, headers=auth_headers(host['token']))
+    assert rejoined.status_code == 200, rejoined.get_json()
+    assert rejoined.get_json()['game']['id'] == replacement_game['id']
+
+    summary = client.get(
+        f"/api/players/looking?lat={larson['latitude']}&lng={larson['longitude']}",
+        headers=auth_headers(viewer['token']),
+    ).get_json()
+    assert summary['count'] == 0
+    assert summary['rally_count'] == 1
+    assert summary['rallies'][0]['game_id'] == replacement_game['id']
+    assert summary['rallies'][0]['ready_count'] == 2
+
+    ghost_headers = auth_headers(ghost_host['token'])
+    client.post(
+        f"/api/courts/{adorni['id']}/checkin", json={},
+        headers=ghost_headers,
+    )
+    ghost = client.post('/api/games/rally', json={
+        'court_id': adorni['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'ghost-rally-original',
+    }, headers=ghost_headers).get_json()['game']
+    client.post('/api/checkout', headers=ghost_headers)
+
+    # A presence-less solo roster is not an "active rally elsewhere". Its
+    # member can physically move courts and join a real roster there.
+    client.post(
+        f"/api/courts/{larson['id']}/checkin", json={},
+        headers=ghost_headers,
+    )
+    moved = client.post(
+        f"/api/games/{replacement_game['id']}/join", headers=ghost_headers,
+    )
+    assert moved.status_code == 200, moved.get_json()
+    assert moved.get_json()['assembly_state'] == 'ready'
+
+    hidden = client.get(
+        f"/api/players/looking?lat={adorni['latitude']}&lng={adorni['longitude']}",
+        headers=auth_headers(viewer['token']),
+    ).get_json()
+    assert hidden['rallies'] == []
+
+    ghost_new_headers = auth_headers(ghost_new['token'])
+    client.post(
+        f"/api/courts/{adorni['id']}/checkin", json={},
+        headers=ghost_new_headers,
+    )
+    recent_ghost = client.post(
+        f"/api/games/{ghost['id']}/join", headers=ghost_new_headers,
+    )
+    assert recent_ghost.status_code == 404
+    assert recent_ghost.get_json() == {'error': 'game_not_found'}
+
+    ghost_row = db.session.get(Game, ghost['id'])
+    ghost_row.scheduled_at = utcnow() - timedelta(minutes=91)
+    db.session.commit()
+    expired_tap = client.post(
+        f"/api/games/{ghost['id']}/join", headers=ghost_new_headers,
+    )
+    assert expired_tap.status_code == 404
+    assert expired_tap.get_json() == {'error': 'game_not_found'}
+
+    replacement = client.post('/api/games/rally', json={
+        'court_id': adorni['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'ghost-rally-replacement',
+    }, headers=ghost_new_headers)
+    assert replacement.status_code == 201, replacement.get_json()
+    assert replacement.get_json()['game']['id'] != ghost['id']
+
+    expire_abandoned_instant_rallies()
+    assert db.session.get(Game, ghost['id']).status == 'expired'
+    assert db.session.get(Game, old_real.id).status == 'upcoming'
+
+
+def test_presence_lapse_closes_assembly_before_replacement_and_blocks_invites(client):
+    from backend.app import db
+    from backend.models import Game, GameInvite, Notification, utcnow
+    from backend.routes.games import expire_abandoned_instant_rallies
+
+    host = register(client, 'lapse-host@example.com', 'Host')
+    mate = register(client, 'lapse-mate@example.com', 'Mate')
+    replacement_host = register(client, 'lapse-new@example.com', 'New Host')
+    invitee = register(client, 'lapse-invitee@example.com', 'Invitee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    host_headers = auth_headers(host['token'])
+    mate_headers = auth_headers(mate['token'])
+    replacement_headers = auth_headers(replacement_host['token'])
+
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=host_headers)
+    old = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'lapse-old-host',
+    }, headers=host_headers).get_json()['game']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=mate_headers)
+    assert client.post(
+        f"/api/games/{old['id']}/join", headers=mate_headers,
+    ).status_code == 200
+    client.post('/api/checkout', headers=host_headers)
+    client.post('/api/checkout', headers=mate_headers)
+    expire_abandoned_instant_rallies()
+    assert db.session.get(Game, old['id']).assembly_closed_at is not None
+
+    blocked_invite = client.post(
+        f"/api/games/{old['id']}/invite",
+        json={'user_id': invitee['user']['id']}, headers=host_headers,
+    )
+    assert blocked_invite.status_code == 409
+    assert blocked_invite.get_json()['error'] == 'rally_no_longer_active'
+    assert GameInvite.query.filter_by(
+        game_id=old['id'], user_id=invitee['user']['id'],
+    ).count() == 0
+    assert Notification.query.filter_by(
+        user_id=invitee['user']['id'], related_game_id=old['id'],
+    ).count() == 0
+
+    client.post(
+        f'/api/courts/{court_id}/checkin', json={},
+        headers=replacement_headers,
+    )
+    replacement = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'lapse-replacement-host',
+    }, headers=replacement_headers)
+    assert replacement.status_code == 201
+    replacement_id = replacement.get_json()['game']['id']
+
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=host_headers)
+    resumed = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'lapse-old-host-new-key',
+    }, headers=host_headers)
+    assert resumed.status_code == 200, resumed.get_json()
+    assert resumed.get_json()['game']['id'] == replacement_id
+    assert resumed.get_json()['game']['id'] != old['id']
+
+
+def test_explicit_checkout_closes_solo_rally_before_immediate_recheck(client):
+    from backend.app import db
+    from backend.models import Game, utcnow
+
+    host = register(client, 'checkout-close-host@example.com', 'Host')
+    headers = auth_headers(host['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
+    old = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'checkout-close-old',
+    }, headers=headers).get_json()['game']
+
+    # No feed/discovery sweep occurs between the observed departure and the
+    # explicit reconfirmation. Checkout itself must persist one-way closure.
+    client.post('/api/checkout', headers=headers)
+    closed_row = db.session.get(Game, old['id'])
+    assert closed_row.assembly_closed_at is not None
+    assert closed_row.status == 'expired'
+    closed_payload = client.get(
+        f"/api/games/{old['id']}", headers=headers,
+    ).get_json()
+    assert closed_payload['status'] == 'expired'
+    assert closed_payload['assembly_state'] == 'closed'
+    assert closed_payload['assembly_active'] is False
+    assert client.get('/api/me', headers=headers).get_json()['active_game'] is None
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
+    fresh = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'checkout-close-fresh',
+    }, headers=headers)
+    assert fresh.status_code == 201, fresh.get_json()
+    assert fresh.get_json()['game']['id'] != old['id']
+
+
+def test_roster_removal_closes_instant_rally_when_no_present_member_remains(client):
+    from backend.app import db
+    from backend.models import Game, utcnow
+
+    host = register(client, 'removal-close-host@example.com', 'Host')
+    mate = register(client, 'removal-close-mate@example.com', 'Mate')
+    host_headers = auth_headers(host['token'])
+    mate_headers = auth_headers(mate['token'])
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{larson}/checkin', json={}, headers=host_headers)
+    old = client.post('/api/games/rally', json={
+        'court_id': larson,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'removal-close-leave-old',
+    }, headers=host_headers).get_json()['game']
+    client.post(f'/api/courts/{larson}/checkin', json={}, headers=mate_headers)
+    assert client.post(
+        f"/api/games/{old['id']}/join", headers=mate_headers,
+    ).status_code == 200
+
+    # Mate is the remaining roster member but is no longer physically there.
+    # Host leaving must persist closure without relying on a later feed sweep.
+    client.post('/api/checkout', headers=mate_headers)
+    left = client.post(f"/api/games/{old['id']}/leave", headers=host_headers)
+    assert left.status_code == 200, left.get_json()
+    old_row = db.session.get(Game, old['id'])
+    assert old_row.status == 'expired'
+    assert old_row.assembly_closed_at is not None
+
+    client.post(f'/api/courts/{larson}/checkin', json={}, headers=mate_headers)
+    fresh = client.post('/api/games/rally', json={
+        'court_id': larson,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'removal-close-leave-fresh',
+    }, headers=mate_headers)
+    assert fresh.status_code == 201, fresh.get_json()
+    assert fresh.get_json()['game']['id'] != old['id']
+
+    remover = register(client, 'removal-close-remover@example.com', 'Remover')
+    present = register(client, 'removal-close-present@example.com', 'Present')
+    remover_headers = auth_headers(remover['token'])
+    present_headers = auth_headers(present['token'])
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{adorni}/checkin', json={}, headers=remover_headers)
+    removable = client.post('/api/games/rally', json={
+        'court_id': adorni,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'removal-close-remove-old',
+    }, headers=remover_headers).get_json()['game']
+    client.post(f'/api/courts/{adorni}/checkin', json={}, headers=present_headers)
+    assert client.post(
+        f"/api/games/{removable['id']}/join", headers=present_headers,
+    ).status_code == 200
+
+    # The checked-out host can still manage its roster. Removing the sole
+    # fresh teammate leaves only a stale host, which permanently closes it.
+    client.post('/api/checkout', headers=remover_headers)
+    removed = client.post(
+        f"/api/games/{removable['id']}/remove/{present['user']['id']}",
+        headers=remover_headers,
+    )
+    assert removed.status_code == 200, removed.get_json()
+    assert db.session.get(Game, removable['id']).assembly_closed_at is not None
+
+    client.post(f'/api/courts/{adorni}/checkin', json={}, headers=remover_headers)
+    replacement = client.post('/api/games/rally', json={
+        'court_id': adorni,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'removal-close-remove-fresh',
+    }, headers=remover_headers)
+    assert replacement.status_code == 201, replacement.get_json()
+    assert replacement.get_json()['game']['id'] != removable['id']
+
+
+def test_account_deletion_closes_instant_rally_after_last_presence_is_removed(client):
+    from backend.app import db
+    from backend.models import Game, GamePlayer, utcnow
+
+    host = register(client, 'delete-rally-host@example.com', 'Host')
+    deleting = register(client, 'delete-rally-member@example.com', 'Deleting')
+    host_headers = auth_headers(host['token'])
+    deleting_headers = auth_headers(deleting['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=host_headers)
+    old = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'delete-rally-old',
+    }, headers=host_headers).get_json()['game']
+    client.post(
+        f'/api/courts/{court_id}/checkin', json={}, headers=deleting_headers,
+    )
+    assert client.post(
+        f"/api/games/{old['id']}/join", headers=deleting_headers,
+    ).status_code == 200
+
+    # The checked-out host is stale; deleting the sole fresh nonhost removes
+    # both that roster slot and presence, and must close in the same request.
+    client.post('/api/checkout', headers=host_headers)
+    deleted = client.delete(
+        '/api/me', json={'password': 'secret123'}, headers=deleting_headers,
+    )
+    assert deleted.status_code == 200, deleted.get_json()
+    old_row = db.session.get(Game, old['id'])
+    assert old_row.assembly_closed_at is not None
+    assert old_row.status == 'expired'
+    assert GamePlayer.query.filter_by(
+        game_id=old['id'], user_id=deleting['user']['id'],
+    ).count() == 0
+
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=host_headers)
+    replacement = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'delete-rally-fresh',
+    }, headers=host_headers)
+    assert replacement.status_code == 201, replacement.get_json()
+    assert replacement.get_json()['game']['id'] != old['id']
+
+
+def test_instant_score_submission_serializes_against_leave_and_duplicate_scores(client):
+    from backend.app import db
+    from backend.models import Game, Notification, utcnow
+
+    host = register(client, 'score-lock-host@example.com', 'Host')
+    mate = register(client, 'score-lock-mate@example.com', 'Mate')
+    host_headers = auth_headers(host['token'])
+    mate_headers = auth_headers(mate['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=host_headers)
+    game = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'score-lock-rally',
+    }, headers=host_headers).get_json()['game']
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=mate_headers)
+    client.post(f"/api/games/{game['id']}/join", headers=mate_headers)
+    score = {
+        'team1': [host['user']['id']],
+        'team2': [mate['user']['id']],
+        'score_team1': 11,
+        'score_team2': 7,
+    }
+    first = client.post(
+        f"/api/games/{game['id']}/complete", json=score,
+        headers=host_headers,
+    )
+    assert first.status_code == 200
+    assert first.get_json()['status'] == 'completed'
+
+    conflicting = client.post(
+        f"/api/games/{game['id']}/complete",
+        json={**score, 'score_team1': 4, 'score_team2': 11},
+        headers=mate_headers,
+    )
+    assert conflicting.status_code == 400
+    assert conflicting.get_json() == {'error': 'game_not_open'}
+    late_leave = client.post(
+        f"/api/games/{game['id']}/leave", headers=mate_headers,
+    )
+    assert late_leave.status_code == 400
+    assert late_leave.get_json() == {'error': 'game_not_open'}
+
+    stored = db.session.get(Game, game['id'])
+    assert stored.status == 'completed'
+    assert (stored.score_team1, stored.score_team2) == (11, 7)
+    assert {player.user_id for player in stored.players} == {
+        host['user']['id'], mate['user']['id'],
+    }
+    assert Notification.query.filter_by(
+        user_id=mate['user']['id'], kind='score_confirmed',
+        related_game_id=game['id'],
+    ).count() == 1
+
+
+def test_blocked_rally_invite_is_filtered_from_me(client):
+    from backend.models import utcnow
+
+    host = register(client, 'blocked-rally-host@example.com', 'Host')
+    invitee = register(client, 'blocked-rally-invitee@example.com', 'Invitee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    host_headers = auth_headers(host['token'])
+    invitee_headers = auth_headers(invitee['token'])
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=host_headers)
+    client.post(
+        f'/api/courts/{court_id}/checkin',
+        json={'looking_for_game': True}, headers=invitee_headers,
+    )
+    game = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'blocked-rally-host-attempt',
+    }, headers=host_headers).get_json()['game']
+    assert client.get(
+        '/api/me', headers=invitee_headers,
+    ).get_json()['active_game']['id'] == game['id']
+
+    client.post(
+        f"/api/users/{host['user']['id']}/block", headers=invitee_headers,
+    )
+    assert client.get(
+        '/api/me', headers=invitee_headers,
+    ).get_json()['active_game'] is None
+
+
+def test_closed_rally_invite_never_reappears_after_recheckin(client):
+    from backend.app import db
+    from backend.models import Game, GameInvite, utcnow
+    from backend.routes.games import expire_abandoned_instant_rallies
+
+    host = register(client, 'closed-invite-host@example.com', 'Host')
+    invitee = register(client, 'closed-invite-player@example.com', 'Invitee')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    host_headers = auth_headers(host['token'])
+    invitee_headers = auth_headers(invitee['token'])
+    client.post(
+        f'/api/courts/{court_id}/checkin',
+        json={'looking_for_game': True}, headers=invitee_headers,
+    )
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=host_headers)
+    game = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'closed-invite-host-attempt',
+    }, headers=host_headers).get_json()['game']
+    assert GameInvite.query.filter_by(
+        game_id=game['id'], user_id=invitee['user']['id'],
+    ).count() == 1
+
+    client.post('/api/checkout', headers=host_headers)
+    client.post('/api/checkout', headers=invitee_headers)
+    expire_abandoned_instant_rallies()
+    assert db.session.get(Game, game['id']).assembly_closed_at is not None
+
+    client.post(
+        f'/api/courts/{court_id}/checkin', json={}, headers=invitee_headers,
+    )
+    assert client.get(
+        '/api/me', headers=invitee_headers,
+    ).get_json()['active_game'] is None
+
+
+def test_instant_rally_discovery_redacts_live_location_and_roster(client):
+    from backend.app import db
+    from backend.models import Game, utcnow
+
+    host = register(client, 'rally-private-host@example.com', 'Host')
+    mate = register(client, 'rally-private-mate@example.com', 'Mate')
+    outsider = register(client, 'rally-private-outsider@example.com', 'Outsider')
+    blocked_viewer = register(
+        client, 'rally-private-blocked-viewer@example.com', 'Blocked Viewer',
+    )
+    court = client.get('/api/courts?q=larson').get_json()['items'][0]
+    host_headers = auth_headers(host['token'])
+    mate_headers = auth_headers(mate['token'])
+    outsider_headers = auth_headers(outsider['token'])
+    blocked_headers = auth_headers(blocked_viewer['token'])
+    client.post(f"/api/courts/{court['id']}/checkin", json={}, headers=host_headers)
+    client.post(
+        f"/api/courts/{court['id']}/checkin",
+        json={'looking_for_game': True}, headers=mate_headers,
+    )
+    game = client.post('/api/games/rally', json={
+        'court_id': court['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-private-host-attempt',
+    }, headers=host_headers).get_json()['game']
+    client.post('/api/games/rally', json={
+        'court_id': court['id'],
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-private-mate-attempt',
+    }, headers=mate_headers)
+
+    friendship = client.post('/api/friends/request', json={
+        'user_id': host['user']['id'],
+    }, headers=blocked_headers).get_json()['friendship_id']
+    client.post(
+        f'/api/friends/{friendship}/respond', json={'accept': True},
+        headers=host_headers,
+    )
+    client.post(
+        f"/api/users/{mate['user']['id']}/block", headers=blocked_headers,
+    )
+    blocked_profile = client.get(
+        f"/api/users/{host['user']['id']}", headers=blocked_headers,
+    ).get_json()
+    assert all(
+        item['id'] != game['id']
+        for item in blocked_profile['upcoming_games']
+    )
+
+    assert all(
+        item['id'] != game['id']
+        for item in client.get('/api/games').get_json()['items']
+    )
+    assert client.get(f"/api/games/{game['id']}").status_code == 404
+    assert all(
+        item['id'] != game['id']
+        for item in client.get(f"/api/courts/{court['id']}").get_json()['games']
+    )
+    live_share = client.get(f"/g/{game['id']}").get_data(as_text=True)
+    assert 'A pickleball game on Third Shot' in live_share
+    assert court['name'] not in live_share
+
+    ordinary = make_game(client, host['token'], court['id'], hours_ahead=24)
+    ordinary_share = client.get(f"/g/{ordinary['id']}").get_data(as_text=True)
+    assert f"Pickleball at {court['name']}" in ordinary_share
+
+    # Authentication alone is not a live-location oracle.
+    assert all(
+        item['id'] != game['id']
+        for item in client.get('/api/games', headers=outsider_headers).get_json()['items']
+    )
+    assert client.get(
+        f"/api/games/{game['id']}", headers=outsider_headers,
+    ).status_code == 404
+    for suffix in ('join', 'waitlist', 'waitlist/leave'):
+        hidden_mutation = client.post(
+            f"/api/games/{game['id']}/{suffix}", headers=outsider_headers,
+        )
+        assert hidden_mutation.status_code == 404
+        assert hidden_mutation.get_json() == {'error': 'game_not_found'}
+    remote_profile = client.get(
+        f"/api/users/{host['user']['id']}", headers=outsider_headers,
+    ).get_json()
+    assert all(
+        item['id'] != game['id']
+        for item in remote_profile['upcoming_games']
+    )
+    assert all(
+        item['id'] != game['id']
+        for item in client.get(
+            f"/api/courts/{court['id']}", headers=outsider_headers,
+        ).get_json()['games']
+    )
+
+    # At-court users get an actionable aggregate, while only roster members
+    # get the identified roster.
+    client.post(
+        f"/api/courts/{court['id']}/checkin", json={},
+        headers=outsider_headers,
+    )
+    aggregate = client.get(
+        f"/api/games/{game['id']}", headers=outsider_headers,
+    ).get_json()
+    assert aggregate['ready_count'] == 2
+    assert aggregate['spots_left'] == 2
+    assert aggregate['players'] == []
+    local_waitlist_leave = client.post(
+        f"/api/games/{game['id']}/waitlist/leave",
+        headers=outsider_headers,
+    )
+    assert local_waitlist_leave.status_code == 200
+    assert local_waitlist_leave.get_json()['players'] == []
+    local_profile_game = next(
+        item for item in client.get(
+            f"/api/users/{host['user']['id']}", headers=outsider_headers,
+        ).get_json()['upcoming_games']
+        if item['id'] == game['id']
+    )
+    assert local_profile_game['ready_count'] == 2
+    assert local_profile_game['players'] == []
+    member_view = client.get(
+        f"/api/games/{game['id']}", headers=host_headers,
+    ).get_json()
+    assert {player['user_id'] for player in member_view['players']} == {
+        host['user']['id'], mate['user']['id'],
+    }
+
+    local_join = client.post(
+        f"/api/games/{game['id']}/join", headers=outsider_headers,
+    )
+    assert local_join.status_code == 200, local_join.get_json()
+    assert local_join.get_json()['assembly_active'] is True
+
+    # Privacy is live-lifecycle-only: once the result is completed, the open
+    # nearby result feed and its detail route expose the same historical card.
+    completed = db.session.get(Game, game['id'])
+    completed.status = 'completed'
+    completed.score_team1 = 11
+    completed.score_team2 = 7
+    completed.completed_at = utcnow()
+    db.session.commit()
+    result_ids = {
+        item['id'] for item in client.get(
+            '/api/games/results', query_string={
+                'lat': court['latitude'], 'lng': court['longitude'],
+            },
+        ).get_json()['items']
+    }
+    assert game['id'] in result_ids
+    historical_detail = client.get(
+        f"/api/games/{game['id']}",
+    )
+    assert historical_detail.status_code == 200
+    assert historical_detail.get_json()['court']['id'] == court['id']
+    assert len(historical_detail.get_json()['players']) == 3
+    blocked_history = client.get(
+        f"/api/users/{host['user']['id']}", headers=blocked_headers,
+    ).get_json()['recent_games']
+    assert all(item['id'] != game['id'] for item in blocked_history)
+
+
+def test_instant_rally_rejects_and_clears_legacy_waitlist(client):
+    from backend.app import db
+    from backend.models import GamePlayer, GameWaitlist, utcnow
+
+    host = register(client, 'rally-wait-host@example.com', 'Host')
+    members = [
+        register(client, f'rally-wait-{index}@example.com', f'Member {index}')
+        for index in range(1, 4)
+    ]
+    waiting = register(client, 'rally-waiting@example.com', 'Waiting')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    host_headers = auth_headers(host['token'])
+    client.post(f'/api/courts/{court_id}/checkin', json={}, headers=host_headers)
+    game = client.post('/api/games/rally', json={
+        'court_id': court_id,
+        'scheduled_at': utcnow().isoformat() + 'Z',
+        'client_attempt_id': 'rally-waitlist-host-attempt',
+    }, headers=host_headers).get_json()['game']
+    for member in members:
+        headers = auth_headers(member['token'])
+        client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
+        assert client.post(
+            f"/api/games/{game['id']}/join", headers=headers,
+        ).status_code == 200
+
+    waiting_headers = auth_headers(waiting['token'])
+    client.post(
+        f'/api/courts/{court_id}/checkin', json={}, headers=waiting_headers,
+    )
+    rejected = client.post(
+        f"/api/games/{game['id']}/waitlist", headers=waiting_headers,
+    )
+    assert rejected.status_code == 409
+    assert rejected.get_json() == {'error': 'instant_rally_no_waitlist'}
+
+    # Defense in depth: a pre-migration queue row is removed, never promoted.
+    db.session.add(GameWaitlist(
+        game_id=game['id'], user_id=waiting['user']['id'],
+    ))
+    db.session.commit()
+    leave = client.post(
+        f"/api/games/{game['id']}/leave",
+        headers=auth_headers(members[-1]['token']),
+    )
+    assert leave.status_code == 200
+    assert GameWaitlist.query.filter_by(game_id=game['id']).count() == 0
+    assert GamePlayer.query.filter_by(
+        game_id=game['id'], user_id=waiting['user']['id'],
+    ).count() == 0
+
+
+def test_players_looking_bounds_before_limit(client):
+    from backend.app import db
+    from backend.models import CheckIn, User, utcnow
+
+    viewer = register(client, 'bounded-looking-viewer@example.com', 'Viewer')
+    local = register(client, 'bounded-looking-local@example.com', 'Local')
+    larson = client.get('/api/courts?q=larson').get_json()['items'][0]
+    adorni = client.get('/api/courts?q=adorni').get_json()['items'][0]
+    client.post(
+        f"/api/courts/{larson['id']}/checkin",
+        json={'looking_for_game': True},
+        headers=auth_headers(local['token']),
+    )
+
+    remote_users = [
+        User(
+            email=f'bounded-remote-{index}@example.com',
+            password_hash='not-a-login-hash',
+            display_name=f'Remote {index}',
+        )
+        for index in range(205)
+    ]
+    db.session.add_all(remote_users)
+    db.session.flush()
+    now = utcnow()
+    db.session.add_all([
+        CheckIn(
+            user_id=user.id, court_id=adorni['id'],
+            looking_for_game=True, checked_in_at=now,
+            last_presence_ping_at=now,
+        )
+        for user in remote_users
+    ])
+    db.session.commit()
+
+    payload = client.get(
+        f"/api/players/looking?lat={larson['latitude']}&lng={larson['longitude']}",
+        headers=auth_headers(viewer['token']),
+    ).get_json()
+    assert payload['count'] == 1
+    assert [player['id'] for player in payload['players']] == [
+        local['user']['id'],
+    ]
+
+
 def test_game_create_idempotent_per_creator(client, app, monkeypatch):
     from datetime import timedelta
     from backend.models import Game as GameModel, GameInvite, GamePlayer, utcnow
@@ -3251,7 +4914,10 @@ def test_game_create_idempotent_per_creator(client, app, monkeypatch):
         headers=ah,
     )
     assert conflict.status_code == 409
-    assert conflict.get_json() == {'error': 'client_attempt_id_conflict'}
+    assert conflict.get_json() == {
+        'error': 'client_attempt_id_conflict',
+        'existing_game_id': first_game['id'],
+    }
 
     # Migrated rows from the interim idempotency rollout had no fingerprint.
     # Their original request is unknowable (and game state may have changed),
@@ -3375,6 +5041,72 @@ def test_game_attempt_unique_index_repair_is_exact(app):
     options = repaired.get('dialect_options') or {}
     assert options.get('sqlite_where') is None
     assert options.get('postgresql_where') is None
+
+
+def test_friendship_pair_migration_coalesces_reciprocals_and_removes_blocked(app):
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+    from backend.app import (
+        FRIENDSHIP_PAIR_INDEX_NAME,
+        _ensure_friendship_pair_index,
+        _friendship_pair_index_definition,
+        _friendship_pair_index_is_exact,
+    )
+    from backend.models import Friendship, User
+
+    users = [
+        User(email=f'pair-migration-{index}@example.com', display_name=f'User {index}')
+        for index in range(4)
+    ]
+    for user in users:
+        user.set_password('secret123')
+        db.session.add(user)
+    db.session.commit()
+    ana, ben, cam, dee = users
+
+    # Recreate the legacy state where reversed directions were both legal.
+    with db.engine.begin() as connection:
+        connection.execute(text(f'DROP INDEX "{FRIENDSHIP_PAIR_INDEX_NAME}"'))
+        for requester, addressee in ((ana.id, ben.id), (ben.id, ana.id)):
+            connection.execute(text('''
+                INSERT INTO friendship
+                    (requester_id, addressee_id, status, created_at, updated_at)
+                VALUES (:requester, :addressee, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            '''), {'requester': requester, 'addressee': addressee})
+        connection.execute(text('''
+            INSERT INTO blocked_user
+                (blocker_id, blocked_id, created_at, updated_at)
+            VALUES (:blocker, :blocked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        '''), {'blocker': cam.id, 'blocked': dee.id})
+        connection.execute(text('''
+            INSERT INTO friendship
+                (requester_id, addressee_id, status, created_at, updated_at)
+            VALUES (:requester, :addressee, 'accepted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        '''), {'requester': cam.id, 'addressee': dee.id})
+
+    db.session.remove()
+    _ensure_friendship_pair_index(app)
+    reciprocal = Friendship.query.filter(db.or_(
+        db.and_(Friendship.requester_id == ana.id, Friendship.addressee_id == ben.id),
+        db.and_(Friendship.requester_id == ben.id, Friendship.addressee_id == ana.id),
+    )).all()
+    assert len(reciprocal) == 1
+    assert reciprocal[0].status == 'accepted'
+    assert Friendship.query.filter(db.or_(
+        db.and_(Friendship.requester_id == cam.id, Friendship.addressee_id == dee.id),
+        db.and_(Friendship.requester_id == dee.id, Friendship.addressee_id == cam.id),
+    )).count() == 0
+    with db.engine.connect() as connection:
+        assert _friendship_pair_index_is_exact(
+            _friendship_pair_index_definition(connection),
+        )
+
+    db.session.add(Friendship(
+        requester_id=ben.id, addressee_id=ana.id, status='pending',
+    ))
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
 
 
 def test_message_attempt_unique_index_repair_is_exact(app):
@@ -5586,8 +7318,8 @@ def test_decline_game_invite(client):
     notifs = client.get('/api/notifications', headers=auth_headers(a['token'])).get_json()['items']
     assert any(n['kind'] == 'invite_declined' and "can't make your game" in n['title'] for n in notifs)
     # The private game is no longer visible to Ben, and a second decline 404s
-    detail = client.get(f"/api/games/{game['id']}", headers=auth_headers(b['token'])).get_json()
-    assert detail.get('is_joined') is False
+    detail = client.get(f"/api/games/{game['id']}", headers=auth_headers(b['token']))
+    assert detail.status_code == 404
     assert client.post(f"/api/games/{game['id']}/invites/decline",
                        headers=auth_headers(b['token'])).status_code == 404
 
@@ -7619,6 +9351,40 @@ def test_competition_result_serialization_permissions_and_history(client, app):
     assert league_view['dispute_reason'] == 'Score entered backwards'
 
 
+def test_instant_provenance_upgrade_never_trusts_user_authored_notes(app):
+    from sqlalchemy import inspect, text
+
+    from backend.app import _upgrade_schema
+
+    with app.app_context():
+        db.session.remove()
+        db.drop_all()
+        with db.engine.begin() as connection:
+            connection.execute(text('''
+                CREATE TABLE game (
+                    id INTEGER PRIMARY KEY,
+                    notes VARCHAR(500) NOT NULL DEFAULT '',
+                    status VARCHAR(32) NOT NULL DEFAULT 'upcoming'
+                )
+            '''))
+            connection.execute(text('''
+                INSERT INTO game (id, notes, status)
+                VALUES (1, '⚡ Instant rally', 'upcoming')
+            '''))
+
+        _upgrade_schema(app)
+
+        columns = {
+            column['name'] for column in inspect(db.engine).get_columns('game')
+        }
+        assert {'is_instant', 'assembly_closed_at'} <= columns
+        migrated = db.session.execute(text(
+            'SELECT is_instant, assembly_closed_at FROM game WHERE id = 1'
+        )).one()
+        assert bool(migrated.is_instant) is False
+        assert migrated.assembly_closed_at is None
+
+
 def test_competition_result_schema_upgrade_backfills_legacy_matches(app):
     from sqlalchemy import inspect, text
 
@@ -7712,3 +9478,221 @@ def test_competition_result_schema_upgrade_backfills_legacy_matches(app):
         ]
         assert league_rows[0].reported_at is not None
         assert league_rows[0].confirmed_at is not None
+
+
+# ---------- Post-game crew continuity ----------
+
+def test_atomic_crew_create_rejects_roster_changes_before_any_side_effect(client, app):
+    from datetime import timedelta
+    from backend.app import db
+    from backend.models import Game, GameInvite, Notification, utcnow
+
+    host = register(client, 'crew-host@example.com', 'Host')
+    ready = register(client, 'crew-ready@example.com', 'Ready')
+    blocked = register(client, 'crew-blocked@example.com', 'Blocked')
+    deleted = register(client, 'crew-deleted@example.com', 'Deleted')
+    host_headers = auth_headers(host['token'])
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+
+    # A block in either direction removes the pair from crew actions.
+    assert client.post(
+        f"/api/users/{host['user']['id']}/block",
+        headers=auth_headers(blocked['token']),
+    ).status_code == 200
+    assert client.delete(
+        '/api/me', json={'password': 'secret123'},
+        headers=auth_headers(deleted['token']),
+    ).status_code == 200
+
+    attempt_id = 'crew-atomic-attempt-0001'
+    payload = {
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(days=2)).isoformat() + 'Z',
+        'visibility': 'private',
+        'invite_user_ids': [
+            ready['user']['id'], blocked['user']['id'], deleted['user']['id'],
+        ],
+        'require_all_invitees': True,
+        'client_attempt_id': attempt_id,
+    }
+    failed = client.post('/api/games', json=payload, headers=host_headers)
+    assert failed.status_code == 409
+    assert failed.get_json()['error'] == 'crew_changed'
+    assert set(failed.get_json()['unavailable_user_ids']) == {
+        blocked['user']['id'], deleted['user']['id'],
+    }
+    assert client.post('/api/friends/request', json={
+        'user_id': deleted['user']['id'],
+    }, headers=host_headers).status_code == 404
+    with app.app_context():
+        assert Game.query.filter_by(creator_id=host['user']['id']).count() == 0
+        assert GameInvite.query.count() == 0
+        assert Notification.query.filter_by(kind='game_invite_direct').count() == 0
+
+    # No keyed row was written, so reviewing the roster and resubmitting with
+    # the same attempt key is safe. Exact replays remain side-effect free.
+    reviewed_payload = {**payload, 'invite_user_ids': [ready['user']['id']]}
+    created = client.post('/api/games', json=reviewed_payload, headers=host_headers)
+    assert created.status_code == 201
+    replay = client.post('/api/games', json=reviewed_payload, headers=host_headers)
+    assert replay.status_code == 200
+    assert replay.get_json()['id'] == created.get_json()['id']
+    with app.app_context():
+        assert Game.query.filter_by(creator_id=host['user']['id']).count() == 1
+        assert GameInvite.query.filter_by(game_id=created.get_json()['id']).count() == 1
+        assert Notification.query.filter_by(
+            kind='game_invite_direct', related_game_id=created.get_json()['id'],
+        ).count() == 1
+
+    # Replay lookup precedes eligibility revalidation: a lost response still
+    # recovers the committed game if the relationship changes afterward.
+    assert client.post(
+        f"/api/users/{host['user']['id']}/block",
+        headers=auth_headers(ready['token']),
+    ).status_code == 200
+    late_replay = client.post('/api/games', json=reviewed_payload, headers=host_headers)
+    assert late_replay.status_code == 200
+    assert late_replay.get_json()['id'] == created.get_json()['id']
+
+
+def test_completed_game_crew_is_actual_roster_scoped_and_connection_aware(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+
+    host = register(client, 'postgame-host@example.com', 'Host')
+    friend = register(client, 'postgame-friend@example.com', 'Friend')
+    incoming = register(client, 'postgame-incoming@example.com', 'Incoming')
+    outgoing = register(client, 'postgame-outgoing@example.com', 'Outgoing')
+    no_show = register(client, 'postgame-noshow@example.com', 'No Show')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    host_headers = auth_headers(host['token'])
+    game = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(hours=1)).isoformat() + 'Z',
+        'game_type': 'casual',
+        'max_players': 6,
+    }, headers=host_headers).get_json()
+    for person in (friend, incoming, outgoing, no_show):
+        assert client.post(
+            f"/api/games/{game['id']}/join", headers=auth_headers(person['token']),
+        ).status_code == 200
+
+    assert client.patch('/api/me', json={
+        'availability': ['sat-am', 'wed-eve'],
+    }, headers=auth_headers(friend['token'])).status_code == 200
+    completed = client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [host['user']['id'], friend['user']['id']],
+        'team2': [incoming['user']['id'], outgoing['user']['id']],
+        'score_team1': 11,
+        'score_team2': 7,
+    }, headers=host_headers)
+    assert completed.status_code == 200
+    assert completed.get_json()['status'] == 'completed'
+
+    suggestions = client.get('/api/friends/suggestions', headers=host_headers).get_json()['items']
+    assert {item['id'] for item in suggestions} == {
+        friend['user']['id'], incoming['user']['id'], outgoing['user']['id'],
+    }
+    assert client.post(
+        f"/api/games/{game['id']}/mvp",
+        json={'user_id': friend['user']['id']},
+        headers=auth_headers(no_show['token']),
+    ).status_code == 403
+    invalid_votee = client.post(
+        f"/api/games/{game['id']}/mvp",
+        json={'user_id': no_show['user']['id']}, headers=host_headers,
+    )
+    assert invalid_votee.status_code == 400
+    assert invalid_votee.get_json()['error'] == 'votee_not_in_game'
+
+    accepted_id = client.post('/api/friends/request', json={
+        'user_id': friend['user']['id'],
+    }, headers=host_headers).get_json()['friendship_id']
+    client.post(f'/api/friends/{accepted_id}/respond', json={'accept': True},
+                headers=auth_headers(friend['token']))
+    client.post('/api/friends/request', json={'user_id': host['user']['id']},
+                headers=auth_headers(incoming['token']))
+    client.post('/api/friends/request', json={'user_id': outgoing['user']['id']},
+                headers=host_headers)
+
+    crew = client.get(f"/api/games/{game['id']}/crew", headers=host_headers)
+    assert crew.status_code == 200
+    items = {item['id']: item for item in crew.get_json()['items']}
+    assert set(items) == {
+        friend['user']['id'], incoming['user']['id'], outgoing['user']['id'],
+    }
+    assert items[friend['user']['id']]['friendship_status'] == 'accepted'
+    assert items[friend['user']['id']]['availability'] == ['sat-am', 'wed-eve']
+    assert items[incoming['user']['id']]['friendship_status'] == 'pending'
+    assert items[incoming['user']['id']]['friendship_outgoing'] is False
+    assert items[outgoing['user']['id']]['friendship_status'] == 'pending'
+    assert items[outgoing['user']['id']]['friendship_outgoing'] is True
+
+    # An RSVP who was not assigned to the score did not play and cannot use the
+    # crew endpoint as a back door into the actual participants.
+    assert client.get(
+        f"/api/games/{game['id']}/crew", headers=auth_headers(no_show['token']),
+    ).status_code == 404
+
+    # Later blocks and account deletion disappear from connection and planner
+    # results without mutating the historical scorecard.
+    client.post(f"/api/users/{outgoing['user']['id']}/block", headers=host_headers)
+    client.delete('/api/me', json={'password': 'secret123'},
+                  headers=auth_headers(incoming['token']))
+    filtered = client.get(f"/api/games/{game['id']}/crew", headers=host_headers).get_json()['items']
+    assert [item['id'] for item in filtered] == [friend['user']['id']]
+
+
+def test_private_game_details_and_profile_history_require_visibility(client):
+    from datetime import timedelta
+    from backend.models import utcnow
+
+    host = register(client, 'private-host@example.com', 'Private Host')
+    invitee = register(client, 'private-invitee@example.com', 'Invitee')
+    outsider = register(client, 'private-outsider@example.com', 'Outsider')
+    court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
+    game = client.post('/api/games', json={
+        'court_id': court_id,
+        'scheduled_at': (utcnow() + timedelta(hours=1)).isoformat() + 'Z',
+        'game_type': 'casual',
+        'max_players': 2,
+        'visibility': 'private',
+        'invite_user_ids': [invitee['user']['id']],
+    }, headers=auth_headers(host['token'])).get_json()
+
+    assert client.get(f"/api/games/{game['id']}").status_code == 404
+    assert client.get(
+        f"/api/games/{game['id']}", headers=auth_headers(outsider['token']),
+    ).status_code == 404
+    assert client.get(
+        f"/api/games/{game['id']}", headers=auth_headers(invitee['token']),
+    ).status_code == 200
+    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(invitee['token']))
+    completed = client.post(f"/api/games/{game['id']}/complete", json={
+        'team1': [host['user']['id']],
+        'team2': [invitee['user']['id']],
+        'score_team1': 11,
+        'score_team2': 8,
+    }, headers=auth_headers(host['token']))
+    assert completed.get_json()['status'] == 'completed'
+    assert client.post(
+        f"/api/games/{game['id']}/mvp",
+        json={'user_id': invitee['user']['id']},
+        headers=auth_headers(host['token']),
+    ).status_code == 200
+
+    outsider_profile = client.get(
+        f"/api/users/{host['user']['id']}", headers=auth_headers(outsider['token']),
+    ).get_json()
+    assert all(item['id'] != game['id'] for item in outsider_profile['recent_games'])
+    invitee_profile = client.get(
+        f"/api/users/{host['user']['id']}", headers=auth_headers(invitee['token']),
+    ).get_json()
+    visible_game = next(
+        item for item in invitee_profile['recent_games'] if item['id'] == game['id']
+    )
+    assert visible_game['you_won'] is True
+    assert 'my_mvp_vote' not in visible_game
+    assert client.get(
+        f"/api/games/{game['id']}/crew", headers=auth_headers(outsider['token']),
+    ).status_code == 404

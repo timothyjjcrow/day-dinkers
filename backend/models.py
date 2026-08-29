@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.exc import IntegrityError
@@ -225,6 +225,20 @@ class Court(TimestampMixin, db.Model):
 
 
 class CheckIn(TimestampMixin, db.Model):
+    __table_args__ = (
+        # A player can have historical visits at many courts, but only one
+        # current physical presence.  The predicate keeps checked-out history
+        # unconstrained while making concurrent/serverless check-ins converge
+        # on a database-enforced invariant.
+        db.Index(
+            'uq_check_in_active_user',
+            'user_id',
+            unique=True,
+            postgresql_where=db.text('checked_out_at IS NULL'),
+            sqlite_where=db.text('checked_out_at IS NULL'),
+        ),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
@@ -243,6 +257,7 @@ FRIENDSHIP_STATUSES = ['pending', 'accepted']
 class Friendship(TimestampMixin, db.Model):
     __table_args__ = (
         db.UniqueConstraint('requester_id', 'addressee_id', name='uq_friendship_pair'),
+        db.CheckConstraint('requester_id <> addressee_id', name='ck_friendship_not_self'),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -255,6 +270,23 @@ class Friendship(TimestampMixin, db.Model):
 
     def other_user(self, user_id):
         return self.addressee if self.requester_id == user_id else self.requester
+
+
+# Direction records who initiated a pending request, while this expression
+# index defines the relationship's true identity: one unordered pair. CASE is
+# portable across both SQLite and PostgreSQL (unlike LEAST/GREATEST on SQLite).
+db.Index(
+    'uq_friendship_unordered_pair',
+    db.case(
+        (Friendship.requester_id < Friendship.addressee_id, Friendship.requester_id),
+        else_=Friendship.addressee_id,
+    ),
+    db.case(
+        (Friendship.requester_id < Friendship.addressee_id, Friendship.addressee_id),
+        else_=Friendship.requester_id,
+    ),
+    unique=True,
+)
 
 
 class BlockedUser(TimestampMixin, db.Model):
@@ -464,7 +496,8 @@ def blocked_pair_ids(user_id):
 class Message(TimestampMixin, db.Model):
     """A direct message (recipient_id), court-room message (court_id),
     game-thread message (game_id), tournament-thread message
-    (tournament_id), or club-room message (club_id)."""
+    (tournament_id), club-room message (club_id), or private crew-room
+    message (crew_id)."""
     __table_args__ = (
         db.Index(
             'uq_message_sender_attempt',
@@ -481,6 +514,7 @@ class Message(TimestampMixin, db.Model):
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), index=True)
     tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'), index=True)
     club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
+    crew_id = db.Column(db.Integer, db.ForeignKey('crew.id'), index=True)
     league_id = db.Column(db.Integer, db.ForeignKey('league.id'), index=True)
     body = db.Column(db.Text, nullable=False, default='')
     # Optional photo (JPEG data URL, DM-only for now). Served via its own
@@ -510,6 +544,7 @@ class Message(TimestampMixin, db.Model):
             'game_id': self.game_id,
             'tournament_id': self.tournament_id,
             'club_id': self.club_id,
+            'crew_id': self.crew_id,
             'league_id': self.league_id,
             'body': self.body,
             'has_image': bool(self.image_data),
@@ -550,7 +585,6 @@ class MessageSendAttempt(TimestampMixin, db.Model):
         db.Integer,
         db.ForeignKey('message.id', ondelete='SET NULL'),
         nullable=True,
-        unique=True,
     )
     deleted_at = db.Column(db.DateTime)
 
@@ -664,6 +698,10 @@ class Game(TimestampMixin, db.Model):
     # Set when the game is hosted on behalf of a club — members get pinged
     # and the game carries the club's tag.
     club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
+    # Immutable provenance for a private game assembled from an accepted Crew
+    # roster. Later roster edits never rewrite the game's players or invites.
+    crew_id = db.Column(db.Integer, db.ForeignKey('crew.id'), index=True)
+    crew_roster_version = db.Column(db.Integer)
     scheduled_at = db.Column(db.DateTime, nullable=False, index=True)
     game_type = db.Column(db.String(20), nullable=False, default='casual')
     visibility = db.Column(db.String(16), nullable=False, default='open', index=True)
@@ -672,6 +710,15 @@ class Game(TimestampMixin, db.Model):
     notes = db.Column(db.String(500), nullable=False, default='')
     # Expectation-setting for open games: 'any' or one of SKILL_LEVELS.
     preferred_level = db.Column(db.String(16), nullable=False, default='any')
+    # Server-owned provenance for the one-tap, at-court assembly flow.  It is
+    # deliberately separate from notes and scheduled_at: ordinary open games
+    # must never be absorbed into an instant rally merely because they happen
+    # to start around the same time.
+    is_instant = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    # One-way close for the physical assembly phase. Multi-player rows remain
+    # upcoming so their participants can enter a result, but can never be
+    # resurrected into Play Now discovery after presence lapses/replacement.
+    assembly_closed_at = db.Column(db.DateTime)
     # 32 chars: must fit 'awaiting_confirmation' (Postgres enforces this, SQLite doesn't)
     status = db.Column(db.String(32), nullable=False, default='upcoming', index=True)
     score_team1 = db.Column(db.Integer)
@@ -683,6 +730,7 @@ class Game(TimestampMixin, db.Model):
     court = db.relationship('Court', back_populates='games')
     creator = db.relationship('User', foreign_keys=[creator_id])
     club = db.relationship('Club', foreign_keys=[club_id])
+    crew = db.relationship('Crew', foreign_keys=[crew_id])
     score_submitted_by = db.relationship('User', foreign_keys=[score_submitted_by_id])
     players = db.relationship(
         'GamePlayer', back_populates='game', lazy='selectin',
@@ -696,6 +744,15 @@ class Game(TimestampMixin, db.Model):
         'GameWaitlist', back_populates='game', lazy='selectin',
         order_by='GameWaitlist.id', cascade='all, delete-orphan',
     )
+    open_calls = db.relationship(
+        'GameOpenCall', back_populates='game', lazy='selectin',
+        order_by='GameOpenCall.id', cascade='all, delete-orphan',
+        passive_deletes=True,
+    )
+    arrival_intents = db.relationship(
+        'GameArrivalIntent', back_populates='game', lazy='dynamic',
+        order_by='GameArrivalIntent.id', cascade='all, delete-orphan',
+    )
     mvp_votes = db.relationship(
         'GameMvpVote', back_populates='game', lazy='selectin',
         cascade='all, delete-orphan',
@@ -703,6 +760,17 @@ class Game(TimestampMixin, db.Model):
 
     def invited_user_ids(self):
         return {inv.user_id for inv in self.invites}
+
+    def active_open_call(self):
+        """The one durable court call currently attached to this game.
+
+        Ended rows remain as retry/audit history, so callers must not assume
+        the newest historical row is still the live call.
+        """
+        return next(
+            (call for call in reversed(self.open_calls) if call.active),
+            None,
+        )
 
     def visible_to(self, user_id, friend_ids=None):
         """Whether this game should appear to a given viewer in public/nearby feeds."""
@@ -717,9 +785,27 @@ class Game(TimestampMixin, db.Model):
             return bool(user_id and user_id in self.invited_user_ids())
         return False
 
-    def to_dict(self, current_user_id=None):
+    def to_dict(self, viewer_id=None, perspective_user_id=None):
+        """Serialize a game for ``viewer_id``.
+
+        Most callers want the viewer's own result perspective, so it remains
+        the default. Public profiles are the exception: privacy-sensitive
+        fields still belong to the requester while win/rating fields describe
+        the profile owner.
+        """
+        if perspective_user_id is None:
+            perspective_user_id = viewer_id
         players = sorted(self.players, key=lambda p: p.id)
-        me = next((p for p in players if p.user_id == current_user_id), None)
+        visible_crew = bool(
+            self.crew
+            and not self.crew.archived_at
+            and viewer_id
+            and self.crew.is_member(viewer_id)
+        )
+        viewer = next((p for p in players if p.user_id == viewer_id), None)
+        perspective = next(
+            (p for p in players if p.user_id == perspective_user_id), None,
+        )
         submitter = next(
             (p for p in players if p.user_id == self.score_submitted_by_id), None,
         )
@@ -727,22 +813,50 @@ class Game(TimestampMixin, db.Model):
         # If the reporter wasn't on a team (scorekeeper), any other assigned player can.
         awaiting_mine = bool(
             self.status == 'awaiting_confirmation'
-            and me and submitter and me.team
-            and me.user_id != submitter.user_id
-            and (not submitter.team or me.team != submitter.team)
+            and viewer and submitter and viewer.team
+            and viewer.user_id != submitter.user_id
+            and (not submitter.team or viewer.team != submitter.team)
         )
         you_won = None
         if (
-            self.status == 'completed' and me and me.team
+            self.status == 'completed' and perspective and perspective.team
             and self.score_team1 is not None and self.score_team2 is not None
         ):
-            you_won = (self.score_team1 > self.score_team2) == (me.team == 1)
+            you_won = (
+                (self.score_team1 > self.score_team2) == (perspective.team == 1)
+            )
+        spots_left = max(0, self.max_players - len(players))
+        assembly_state = None
+        if self.is_instant:
+            if self.status != 'upcoming':
+                assembly_state = 'closed'
+            elif len(players) < 2:
+                assembly_state = 'finding'
+            elif spots_left:
+                # A singles game can start with two people while the same
+                # rally remains recruitable for doubles.
+                assembly_state = 'ready'
+            else:
+                assembly_state = 'full'
+        can_enter_score = bool(
+            viewer
+            and self.status == 'upcoming'
+            and self.recurrence == 'none'
+            and len(players) >= 2
+            # Instant games are happening now by provenance, not by comparing
+            # a client clock to their scheduled timestamp.
+            and (self.is_instant or self.scheduled_at <= utcnow())
+        )
+        open_call = self.active_open_call()
         return {
             'id': self.id,
             'court': self.court.to_summary_dict() if self.court else None,
             'creator_id': self.creator_id,
             'club_id': self.club_id,
             'club_name': self.club.name if self.club else None,
+            'crew_id': self.crew_id if visible_crew else None,
+            'crew_name': self.crew.name if visible_crew else None,
+            'crew_roster_version': self.crew_roster_version if visible_crew else None,
             'scheduled_at': iso(self.scheduled_at),
             'game_type': self.game_type,
             'visibility': self.visibility,
@@ -750,6 +864,9 @@ class Game(TimestampMixin, db.Model):
             'max_players': self.max_players,
             'notes': self.notes,
             'preferred_level': self.preferred_level,
+            'is_instant': bool(self.is_instant),
+            'assembly_state': assembly_state,
+            'can_enter_score': can_enter_score,
             'status': self.status,
             'score_team1': self.score_team1,
             'score_team2': self.score_team2,
@@ -758,20 +875,23 @@ class Game(TimestampMixin, db.Model):
                 submitter.user.display_name if submitter and submitter.user else None
             ),
             'awaiting_your_confirmation': awaiting_mine,
-            'your_rating_delta': me.rating_delta if me else None,
+            'your_rating_delta': perspective.rating_delta if perspective else None,
             'you_won': you_won,
             'completed_at': iso(self.completed_at),
             'players': [p.to_dict() for p in players],
-            'spots_left': max(0, self.max_players - len(players)),
-            'is_joined': me is not None,
-            'is_creator': self.creator_id == current_user_id,
+            'spots_left': spots_left,
+            'is_joined': viewer is not None,
+            'is_creator': self.creator_id == viewer_id,
             'waitlist_count': len(self.waitlist),
             'waitlist_position': next(
-                (i + 1 for i, w in enumerate(self.waitlist) if w.user_id == current_user_id),
+                (i + 1 for i, w in enumerate(self.waitlist) if w.user_id == viewer_id),
                 None,
             ),
+            'open_call': (
+                open_call.to_dict(viewer_id) if open_call else None
+            ),
             'my_mvp_vote': next(
-                (v.votee_id for v in self.mvp_votes if v.voter_id == current_user_id),
+                (v.votee_id for v in self.mvp_votes if v.voter_id == viewer_id),
                 None,
             ),
             'mvp': self._mvp_summary(),
@@ -862,6 +982,281 @@ class GameInvite(TimestampMixin, db.Model):
 
     game = db.relationship('Game', back_populates='invites')
     user = db.relationship('User')
+
+
+class GameOpenCall(TimestampMixin, db.Model):
+    """A typed, game-linked recruiting card posted into one court room.
+
+    The call never reserves capacity and never grants visibility by itself.
+    Its linked ``Game`` remains authoritative for time, roster, joinability,
+    and waitlist state. Ended rows are retained so a lost-response retry can
+    never create a second court message.
+    """
+    __table_args__ = (
+        db.Index(
+            'uq_game_open_call_active_game',
+            'game_id',
+            unique=True,
+            postgresql_where=db.text('active IS TRUE'),
+            sqlite_where=db.text('active = 1'),
+        ),
+        db.UniqueConstraint(
+            'created_by_id', 'client_attempt_id',
+            name='uq_game_open_call_creator_attempt',
+        ),
+        db.UniqueConstraint(
+            'game_id', 'created_by_id',
+            name='uq_game_open_call_game_creator',
+        ),
+        db.UniqueConstraint(
+            'court_message_id', name='uq_game_open_call_message',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(
+        db.Integer, db.ForeignKey('game.id', ondelete='CASCADE'),
+        nullable=False, index=True,
+    )
+    created_by_id = db.Column(
+        db.Integer, db.ForeignKey('user.id'), nullable=False, index=True,
+    )
+    court_message_id = db.Column(
+        db.Integer,
+        db.ForeignKey('message.id', ondelete='SET NULL'),
+        nullable=True,
+    )
+    client_attempt_id = db.Column(db.String(64), nullable=False)
+    client_attempt_fingerprint = db.Column(db.String(64), nullable=False)
+    active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    ended_at = db.Column(db.DateTime)
+    end_reason = db.Column(db.String(32), nullable=False, default='')
+
+    game = db.relationship('Game', back_populates='open_calls')
+    created_by = db.relationship('User', foreign_keys=[created_by_id])
+    court_message = db.relationship('Message', foreign_keys=[court_message_id])
+
+    def live_state(self, now=None):
+        """Return the query-time card state without mutating history."""
+        now = now or utcnow()
+        game = self.game
+        if not self.active or self.ended_at is not None:
+            return 'withdrawn' if self.end_reason in {
+                'host_withdrew', 'message_deleted',
+            } else 'closed'
+        if (
+            not game
+            or game.creator_id != self.created_by_id
+            or game.status != 'upcoming'
+            or game.visibility != 'open'
+            or game.is_instant
+            or game.recurrence != 'none'
+            or not game.court
+            or game.court.closed
+            or game.scheduled_at < now - timedelta(hours=2)
+        ):
+            return 'closed'
+        if len(game.players) >= game.max_players:
+            return 'full'
+        return 'open'
+
+    def to_dict(self, viewer_id=None, now=None):
+        now = now or utcnow()
+        game = self.game
+        state = self.live_state(now)
+        player_count = len(game.players) if game else 0
+        spots_left = max(0, game.max_players - player_count) if game else 0
+        viewer_joined = bool(
+            viewer_id and game
+            and any(player.user_id == viewer_id for player in game.players)
+        )
+        viewer_waitlisted = bool(
+            viewer_id and game
+            and any(entry.user_id == viewer_id for entry in game.waitlist)
+        )
+        return {
+            'id': self.id,
+            'game_id': self.game_id,
+            'court_message_id': self.court_message_id,
+            'created_by_id': self.created_by_id,
+            'created_at': iso(self.created_at),
+            'state': state,
+            'active': state in {'open', 'full'},
+            'end_reason': self.end_reason or '',
+            'ended_at': iso(self.ended_at),
+            'scheduled_at': iso(game.scheduled_at) if game else None,
+            'game_type': game.game_type if game else None,
+            'preferred_level': game.preferred_level if game else None,
+            'max_players': game.max_players if game else 0,
+            'player_count': player_count,
+            'spots_left': spots_left,
+            'waitlist_count': len(game.waitlist) if game else 0,
+            'is_joined': viewer_joined,
+            'can_join': bool(
+                viewer_id and state == 'open'
+                and not viewer_joined and not viewer_waitlisted
+            ),
+            'can_waitlist': bool(
+                viewer_id and state == 'full'
+                and not viewer_joined and not viewer_waitlisted
+            ),
+            'can_withdraw': bool(
+                state in {'open', 'full'} and game
+                and viewer_id == game.creator_id == self.created_by_id
+            ),
+        }
+
+
+class GameArrivalIntent(TimestampMixin, db.Model):
+    """A short, remote reservation while somebody travels to a live rally.
+
+    Arrival is intentionally separate from both ``GamePlayer`` and ``CheckIn``:
+    it protects one remote spot, but never claims that somebody is physically
+    present or makes an assembly live/ready.  Ended rows remain as a compact
+    idempotency ledger; the partial indexes enforce at most one active intent
+    for a person and exactly one protected remote spot for a rally.
+    """
+    __table_args__ = (
+        db.Index(
+            'uq_game_arrival_active_user',
+            'user_id',
+            unique=True,
+            postgresql_where=db.text('active IS TRUE'),
+            sqlite_where=db.text('active = 1'),
+        ),
+        db.Index(
+            'uq_game_arrival_active_game',
+            'game_id',
+            unique=True,
+            postgresql_where=db.text('active IS TRUE'),
+            sqlite_where=db.text('active = 1'),
+        ),
+        db.UniqueConstraint(
+            'user_id', 'client_attempt_id',
+            name='uq_game_arrival_user_attempt',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(
+        db.Integer, db.ForeignKey('game.id'), nullable=False, index=True,
+    )
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('user.id'), nullable=False, index=True,
+    )
+    eta_minutes = db.Column(db.Integer, nullable=False)
+    declared_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    arrives_at = db.Column(db.DateTime, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    ended_at = db.Column(db.DateTime)
+    end_reason = db.Column(db.String(32), nullable=False, default='')
+    client_attempt_id = db.Column(db.String(64), nullable=False)
+    client_attempt_fingerprint = db.Column(db.String(64), nullable=False)
+    last_announced_at = db.Column(db.DateTime)
+
+    game = db.relationship('Game', back_populates='arrival_intents')
+    user = db.relationship('User')
+
+    def to_dict(self, now=None):
+        now = now or utcnow()
+        public_end_reason = self.end_reason or ''
+        if public_end_reason in {'blocked', 'creator_deleted'}:
+            # The durable ledger keeps the operational reason, but an owned
+            # idempotency replay must not become an oracle for another user's
+            # block or account action.
+            public_end_reason = 'rally_closed'
+        return {
+            'id': self.id,
+            'game_id': self.game_id,
+            'eta_minutes': self.eta_minutes,
+            'declared_at': iso(self.declared_at),
+            'arrives_at': iso(self.arrives_at),
+            'expires_at': iso(self.expires_at),
+            'active': bool(
+                self.active and not self.ended_at and self.expires_at > now
+            ),
+            'end_reason': public_end_reason,
+        }
+
+
+class PlayAvailabilityPulse(TimestampMixin, db.Model):
+    """A short, remote promise that a player can start a local game soon.
+
+    A pulse is deliberately not a ``CheckIn`` (physical presence), a
+    ``GamePlayer`` (a committed roster), or an arrival reservation.  The active
+    row is discovery state; ended rows are the retry ledger that lets a lost
+    publish or acceptance response converge without extending the original
+    hour or creating a second game.
+    """
+    __table_args__ = (
+        db.Index(
+            'uq_play_availability_pulse_active_user',
+            'user_id',
+            unique=True,
+            postgresql_where=db.text('active IS TRUE'),
+            sqlite_where=db.text('active = 1'),
+        ),
+        db.UniqueConstraint(
+            'user_id', 'client_attempt_id',
+            name='uq_play_availability_pulse_user_attempt',
+        ),
+        db.UniqueConstraint(
+            'accepted_by_id', 'accept_client_attempt_id',
+            name='uq_play_availability_pulse_accept_attempt',
+        ),
+        db.CheckConstraint(
+            'expires_at > declared_at',
+            name='ck_play_availability_pulse_positive_window',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('user.id'), nullable=False, index=True,
+    )
+    court_id = db.Column(
+        db.Integer, db.ForeignKey('court.id'), nullable=False, index=True,
+    )
+    declared_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    ended_at = db.Column(db.DateTime)
+    end_reason = db.Column(db.String(32), nullable=False, default='')
+    client_attempt_id = db.Column(db.String(64), nullable=False)
+    client_attempt_fingerprint = db.Column(db.String(64), nullable=False)
+
+    # Acceptance is recorded on the pulse as well as on Game's creator-scoped
+    # idempotency key.  This makes exact retries recoverable after the pulse is
+    # no longer discoverable and makes a reused key on another pulse conflict.
+    accepted_by_id = db.Column(
+        db.Integer, db.ForeignKey('user.id'), index=True,
+    )
+    accept_client_attempt_id = db.Column(db.String(64))
+    accept_client_attempt_fingerprint = db.Column(db.String(64))
+    accepted_game_id = db.Column(
+        db.Integer, db.ForeignKey('game.id'), index=True,
+    )
+
+    user = db.relationship('User', foreign_keys=[user_id])
+    court = db.relationship('Court', foreign_keys=[court_id])
+    accepted_by = db.relationship('User', foreign_keys=[accepted_by_id])
+    accepted_game = db.relationship('Game', foreign_keys=[accepted_game_id])
+
+    def to_dict(self, now=None):
+        now = now or utcnow()
+        return {
+            'id': self.id,
+            'court': self.court.to_summary_dict() if self.court else None,
+            'declared_at': iso(self.declared_at),
+            'expires_at': iso(self.expires_at),
+            'active': bool(
+                self.active and not self.ended_at and self.expires_at > now
+            ),
+            'ended_at': iso(self.ended_at),
+            'end_reason': self.end_reason or '',
+            'accepted_game_id': self.accepted_game_id,
+        }
 
 
 class FavoriteCourt(TimestampMixin, db.Model):
@@ -979,6 +1374,7 @@ class Notification(TimestampMixin, db.Model):
     related_game_id = db.Column(db.Integer, db.ForeignKey('game.id'))
     related_tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id'))
     related_club_id = db.Column(db.Integer, db.ForeignKey('club.id'))
+    related_crew_id = db.Column(db.Integer, db.ForeignKey('crew.id'))
     related_league_id = db.Column(db.Integer, db.ForeignKey('league.id'))
     # Same-origin app destination. Result notifications use a match-level hash
     # so both the activity feed and web push can open the exact action needed.
@@ -998,6 +1394,7 @@ class Notification(TimestampMixin, db.Model):
             'related_game_id': self.related_game_id,
             'related_tournament_id': self.related_tournament_id,
             'related_club_id': self.related_club_id,
+            'related_crew_id': self.related_crew_id,
             'related_league_id': self.related_league_id,
             'action_url': self.action_url or '',
             'created_at': iso(self.created_at),
@@ -1009,9 +1406,11 @@ class Notification(TimestampMixin, db.Model):
 MUTEABLE_NOTIFICATIONS = {
     'court_game': 'New games at courts you saved',
     'friend_checkin': 'Friends checking in to play',
+    'rally_arrival': 'Players on their way to your live rallies',
     'game_message': 'Game chat messages',
     'tournament_message': 'Tournament chat messages',
     'club_message': 'Club chat messages',
+    'crew_message': 'Crew chat messages',
     'club_game': 'New games from your clubs',
     'league_message': 'League chat messages',
     'session_rsvp': 'Weekly session re-RSVP reminders',
@@ -1022,8 +1421,12 @@ MUTEABLE_NOTIFICATIONS = {
 
 
 def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=None,
-           related_tournament_id=None, related_club_id=None, related_league_id=None,
-           action_url='', unread_dedupe_key=''):
+           related_tournament_id=None, related_club_id=None, related_crew_id=None,
+           related_league_id=None, action_url='', unread_dedupe_key=''):
+    # A block is a two-way privacy boundary, including background/push paths.
+    if related_user_id and related_user_id != user_id \
+            and is_blocked_between(user_id, related_user_id):
+        return None
     # Respect the recipient's mute preferences for optional kinds.
     if kind in MUTEABLE_NOTIFICATIONS:
         recipient = db.session.get(User, user_id)
@@ -1050,6 +1453,7 @@ def notify(user_id, kind, title, body='', related_user_id=None, related_game_id=
         related_game_id=related_game_id,
         related_tournament_id=related_tournament_id,
         related_club_id=related_club_id,
+        related_crew_id=related_crew_id,
         related_league_id=related_league_id,
         action_url=destination[:500],
         unread_dedupe_key=dedupe_key,
@@ -1533,6 +1937,105 @@ class ClubChatRead(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     club_id = db.Column(db.Integer, db.ForeignKey('club.id'), nullable=False, index=True)
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
+
+
+class Crew(TimestampMixin, db.Model):
+    """A small, private, consent-based group formed from a real scored game.
+
+    Unlike a Club, a Crew is never discoverable or open-join. ``owner_id`` is
+    the single management authority; accepted non-owner players live in
+    CrewMember and pending consent lives separately in CrewInvite.
+    """
+    __table_args__ = (
+        db.UniqueConstraint('source_game_id', name='uq_crew_source_game'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    name = db.Column(db.String(80), nullable=False)
+    # Kept as an integer rather than a circular FK: Game already points back to
+    # Crew for immutable provenance and create routes validate the source row.
+    source_game_id = db.Column(db.Integer, nullable=True, index=True)
+    default_court_id = db.Column(db.Integer, db.ForeignKey('court.id'), index=True)
+    roster_version = db.Column(db.Integer, nullable=False, default=1)
+    archived_at = db.Column(db.DateTime, index=True)
+
+    owner = db.relationship('User', foreign_keys=[owner_id])
+    default_court = db.relationship('Court', foreign_keys=[default_court_id])
+    members = db.relationship(
+        'CrewMember', back_populates='crew', lazy='selectin',
+        cascade='all, delete-orphan',
+    )
+    invites = db.relationship(
+        'CrewInvite', back_populates='crew', lazy='selectin',
+        cascade='all, delete-orphan',
+    )
+
+    def member_ids(self):
+        return {self.owner_id} | {member.user_id for member in self.members}
+
+    def is_member(self, user_id):
+        return user_id in self.member_ids()
+
+    def to_summary_dict(self, current_user_id=None):
+        member_ids = self.member_ids()
+        return {
+            'id': self.id,
+            'name': self.name,
+            'owner_id': self.owner_id,
+            'is_owner': current_user_id == self.owner_id,
+            'joined': current_user_id in member_ids if current_user_id else False,
+            'member_count': len(member_ids),
+            'pending_count': sum(1 for invite in self.invites if invite.status == 'pending'),
+            'source_game_id': self.source_game_id,
+            'default_court_id': self.default_court_id,
+            'default_court_name': self.default_court.name if self.default_court else None,
+            'default_court_city': self.default_court.city if self.default_court else None,
+            'roster_version': self.roster_version,
+            'created_at': iso(self.created_at),
+        }
+
+
+class CrewMember(TimestampMixin, db.Model):
+    __table_args__ = (
+        db.UniqueConstraint('crew_id', 'user_id', name='uq_crew_member'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    crew_id = db.Column(db.Integer, db.ForeignKey('crew.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+
+    crew = db.relationship('Crew', back_populates='members')
+    user = db.relationship('User')
+
+
+class CrewInvite(TimestampMixin, db.Model):
+    """Durable Crew consent; notification rows are only delivery hints."""
+    __table_args__ = (
+        db.UniqueConstraint('crew_id', 'invitee_id', name='uq_crew_invitee'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    crew_id = db.Column(db.Integer, db.ForeignKey('crew.id'), nullable=False, index=True)
+    invitee_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    invited_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    status = db.Column(db.String(16), nullable=False, default='pending', index=True)
+    resolved_at = db.Column(db.DateTime)
+
+    crew = db.relationship('Crew', back_populates='invites')
+    invitee = db.relationship('User', foreign_keys=[invitee_id])
+    invited_by = db.relationship('User', foreign_keys=[invited_by_id])
+
+
+class CrewChatRead(TimestampMixin, db.Model):
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'crew_id', name='uq_crew_chat_read'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    crew_id = db.Column(db.Integer, db.ForeignKey('crew.id'), nullable=False, index=True)
     last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
 
 

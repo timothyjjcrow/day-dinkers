@@ -1,6 +1,7 @@
 """Authentication: register, login, current-user profile."""
 import re
 import time
+from datetime import timedelta
 from functools import wraps
 
 import jwt
@@ -16,13 +17,17 @@ from backend.models import (
     FavoriteCourt,
     Friendship,
     Game,
+    GameArrivalIntent,
     GameInvite,
     GamePlayer,
     Message,
     Notification,
     MUTEABLE_NOTIFICATIONS,
+    PlayAvailabilityPulse,
     SKILL_LEVELS,
     User,
+    blocked_pair_ids,
+    is_blocked_between,
     notify,
     utcnow,
 )
@@ -86,19 +91,101 @@ def login_required(view):
     return wrapped
 
 
-def active_checkin_for(user_id):
+def _users_for_update_query(user_ids):
+    """Build the canonical ordered User lock used before Crew mutations.
+
+    ``populate_existing`` is essential when authentication already placed a
+    User instance in the identity map: a request that waited behind account
+    deletion must observe the winner's ``deleted_at`` value, not stale state.
+    """
+    ids = sorted({int(user_id) for user_id in user_ids})
     return (
-        CheckIn.query.filter_by(user_id=user_id, checked_out_at=None)
-        .order_by(CheckIn.checked_in_at.desc(), CheckIn.id.desc())
-        .first()
+        User.query.filter(User.id.in_(ids))
+        .order_by(User.id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
 
 
+def _lock_users_for_update(user_ids):
+    """Lock User rows in ascending id order and refresh identity-map state."""
+    ids = sorted({int(user_id) for user_id in user_ids})
+    if not ids:
+        return []
+    return _users_for_update_query(ids).all()
+
+
+def presence_stale_cutoff(now=None):
+    """Query-time presence boundary used by every live discovery surface."""
+    now = now or utcnow()
+    seconds = int(
+        current_app.config.get('PRESENCE_STALE_AFTER_SECONDS', 7200) or 7200
+    )
+    return now - timedelta(seconds=max(1, seconds))
+
+
+def presence_absolute_cutoff(now=None):
+    """Oldest check-in that may be renewed without explicit reconfirmation."""
+    now = now or utcnow()
+    seconds = int(
+        current_app.config.get('PRESENCE_MAX_AGE_SECONDS', 4 * 60 * 60)
+        or 4 * 60 * 60
+    )
+    return now - timedelta(seconds=max(1, seconds))
+
+
+def checkin_expires_at(checkin):
+    if (
+        not checkin
+        or not checkin.last_presence_ping_at
+        or not checkin.checked_in_at
+    ):
+        return None
+    stale_seconds = int(
+        current_app.config.get('PRESENCE_STALE_AFTER_SECONDS', 7200) or 7200
+    )
+    max_seconds = int(
+        current_app.config.get('PRESENCE_MAX_AGE_SECONDS', 4 * 60 * 60)
+        or 4 * 60 * 60
+    )
+    return min(
+        checkin.last_presence_ping_at + timedelta(
+            seconds=max(1, stale_seconds),
+        ),
+        checkin.checked_in_at + timedelta(seconds=max(1, max_seconds)),
+    )
+
+
+def checkin_is_fresh(checkin, now=None):
+    return bool(
+        checkin
+        and checkin.checked_out_at is None
+        and checkin.checked_in_at
+        and checkin.checked_in_at >= presence_absolute_cutoff(now)
+        and checkin.last_presence_ping_at
+        and checkin.last_presence_ping_at >= presence_stale_cutoff(now)
+    )
+
+
+def active_checkin_for(user_id, *, fresh=False, now=None, for_update=False):
+    query = CheckIn.query.filter_by(user_id=user_id, checked_out_at=None)
+    if fresh:
+        query = query.filter(
+            CheckIn.checked_in_at >= presence_absolute_cutoff(now),
+            CheckIn.last_presence_ping_at >= presence_stale_cutoff(now)
+        )
+    query = query.order_by(CheckIn.checked_in_at.desc(), CheckIn.id.desc())
+    if for_update:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    return query.first()
+
+
 def presence_payload(user_id):
-    checkin = active_checkin_for(user_id)
+    checkin = active_checkin_for(user_id, fresh=True)
     if not checkin:
         return {'checked_in': False}
     court = checkin.court
+    expires_at = checkin_expires_at(checkin)
     return {
         'checked_in': True,
         'court_id': checkin.court_id,
@@ -106,6 +193,10 @@ def presence_payload(user_id):
         'court_latitude': court.latitude if court else None,
         'court_longitude': court.longitude if court else None,
         'looking_for_game': bool(checkin.looking_for_game),
+        'looking_expires_at': (
+            expires_at.isoformat() + 'Z'
+            if checkin.looking_for_game and expires_at else None
+        ),
         'checked_in_at': checkin.checked_in_at.isoformat() + 'Z' if checkin.checked_in_at else None,
     }
 
@@ -135,7 +226,15 @@ def _active_game_payload(user):
     Priority: live game you're in > incoming challenge > score waiting on you
     > your score waiting on opponents > your next upcoming game."""
     now = utcnow()
+    # Runtime import avoids the auth/games blueprint import cycle.
+    from backend.routes.games import (
+        _game_payload,
+        _instant_nonmember_game_payload,
+        _instant_rally_assembly_active,
+    )
     candidates = []
+    hidden_ids = blocked_pair_ids(user.id)
+    fresh_checkin = active_checkin_for(user.id, fresh=True, now=now)
 
     games = (
         Game.query.join(GamePlayer)
@@ -149,8 +248,22 @@ def _active_game_payload(user):
     )
     from datetime import timedelta
     for game in games:
-        data = game.to_dict(user.id)
-        if game.status == 'upcoming' and game.scheduled_at <= now:
+        if game.is_instant and game.status == 'upcoming':
+            # Keep a multi-player row available for result entry, but never
+            # let a closed/no-presence roster suppress the next real event.
+            if not _instant_rally_assembly_active(game, now):
+                continue
+        data = _game_payload(game, user.id, now=now)
+        if game.is_instant and game.status == 'upcoming':
+            # An instant game's primary job is to assemble real people at its
+            # court. Do not infer that scoring is the next action merely from
+            # its timestamp.
+            rank = 0
+            banner_state = (
+                'assembling'
+                if data['assembly_state'] == 'finding' else 'ready'
+            )
+        elif game.status == 'upcoming' and game.scheduled_at <= now:
             # A game hours past its start isn't "live" — the Play tab's
             # enter-the-score section owns the nagging from there.
             if game.scheduled_at < now - timedelta(hours=4):
@@ -175,7 +288,19 @@ def _active_game_payload(user):
         .all()
     )
     for game in invited_games:
-        data = game.to_dict(user.id)
+        if any(player.user_id in hidden_ids for player in game.players):
+            continue
+        if game.is_instant and (
+            not fresh_checkin
+            or fresh_checkin.court_id != game.court_id
+            or not _instant_rally_assembly_active(game, now)
+        ):
+            # A rally invitation is a live at-court action, not a durable
+            # remote RSVP. It becomes irrelevant when physical presence does.
+            continue
+        data = _game_payload(game, user.id, now=now)
+        if game.is_instant:
+            data = _instant_nonmember_game_payload(data)
         if data['is_joined'] or data['spots_left'] <= 0:
             continue
         is_challenge = game.notes.startswith('⚔️')
@@ -190,6 +315,90 @@ def _active_game_payload(user):
         return None
     candidates.sort(key=lambda c: (c[0], c[1]['scheduled_at'] or ''))
     return candidates[0][1]
+
+
+def _active_arrival_payload(user):
+    """The caller's live remote reservation, never physical presence."""
+    now = utcnow()
+    intent = (
+        GameArrivalIntent.query.filter_by(user_id=user.id, active=True)
+        .filter(
+            GameArrivalIntent.ended_at.is_(None),
+            GameArrivalIntent.expires_at > now,
+        )
+        .order_by(GameArrivalIntent.id.desc())
+        .first()
+    )
+    if not intent or not intent.game:
+        return None
+    from backend.routes.games import (
+        _arrival_capacity,
+        _instant_rally_assembly_active,
+    )
+    game = intent.game
+    if not _instant_rally_assembly_active(game, now):
+        return None
+    member_ids = {player.user_id for player in game.players}
+    if any(is_blocked_between(user.id, member_id) for member_id in member_ids):
+        return None
+    capacity = _arrival_capacity(game, now)
+    if not any(item.id == intent.id for item in capacity['arrivals']):
+        return None
+    return {
+        **intent.to_dict(now),
+        'max_players': game.max_players,
+        'court': game.court.to_summary_dict() if game.court else None,
+        **{
+            key: capacity[key]
+            for key in (
+                'ready_count', 'roster_count', 'on_the_way_count',
+                'committed_count', 'physical_spots_left', 'spots_left',
+            )
+        },
+    }
+
+
+def _active_play_pulse_payload(user):
+    """The caller's query-time-valid remote availability signal."""
+    now = utcnow()
+    pulse = (
+        PlayAvailabilityPulse.query.filter(
+            PlayAvailabilityPulse.user_id == user.id,
+            PlayAvailabilityPulse.active.is_(True),
+            PlayAvailabilityPulse.ended_at.is_(None),
+            PlayAvailabilityPulse.expires_at > now,
+        )
+        .order_by(PlayAvailabilityPulse.id.desc())
+        .first()
+    )
+    if (
+        not pulse
+        or not pulse.court
+        or pulse.court.closed
+        or pulse.court.latitude is None
+        or pulse.court.longitude is None
+        or active_checkin_for(user.id, fresh=True, now=now)
+    ):
+        return None
+    if GameArrivalIntent.query.filter(
+        GameArrivalIntent.user_id == user.id,
+        GameArrivalIntent.active.is_(True),
+        GameArrivalIntent.ended_at.is_(None),
+        GameArrivalIntent.expires_at > now,
+    ).first():
+        return None
+    if Game.query.join(GamePlayer).filter(
+        GamePlayer.user_id == user.id,
+        Game.status == 'upcoming',
+        Game.is_instant.is_(False),
+        Game.scheduled_at >= pulse.declared_at,
+        Game.scheduled_at <= pulse.expires_at,
+    ).first():
+        return None
+    from backend.routes.games import _active_live_rally_for_user
+    if _active_live_rally_for_user(user.id, now):
+        return None
+    return pulse.to_dict(now)
 
 
 def _active_tournament_payload(user):
@@ -250,18 +459,34 @@ def _me_payload(user):
     # Lazy import avoids the auth/chat blueprint import cycle at startup.
     from backend.routes.chat import community_room_unread_count
 
-    unread_messages = Message.query.filter_by(recipient_id=user.id, read_at=None).count()
-    pending_requests = Friendship.query.filter_by(
+    hidden_ids = blocked_pair_ids(user.id)
+    unread_message_query = Message.query.filter_by(recipient_id=user.id, read_at=None)
+    pending_request_query = Friendship.query.filter_by(
         addressee_id=user.id, status='pending',
-    ).count()
-    unread_notifications = Notification.query.filter_by(
-        user_id=user.id, read=False,
-    ).count()
-    latest = (
-        Notification.query.filter_by(user_id=user.id)
-        .order_by(Notification.id.desc())
-        .first()
     )
+    unread_notification_query = Notification.query.filter_by(
+        user_id=user.id, read=False,
+    )
+    latest_query = Notification.query.filter_by(user_id=user.id)
+    if hidden_ids:
+        unread_message_query = unread_message_query.filter(
+            Message.sender_id.notin_(hidden_ids),
+        )
+        pending_request_query = pending_request_query.filter(
+            Friendship.requester_id.notin_(hidden_ids),
+        )
+        unread_notification_query = unread_notification_query.filter(db.or_(
+            Notification.related_user_id.is_(None),
+            Notification.related_user_id.notin_(hidden_ids),
+        ))
+        latest_query = latest_query.filter(db.or_(
+            Notification.related_user_id.is_(None),
+            Notification.related_user_id.notin_(hidden_ids),
+        ))
+    unread_messages = unread_message_query.count()
+    pending_requests = pending_request_query.count()
+    unread_notifications = unread_notification_query.count()
+    latest = latest_query.order_by(Notification.id.desc()).first()
     return {
         'user': user.to_dict(),
         'presence': presence_payload(user.id),
@@ -272,6 +497,8 @@ def _me_payload(user):
         'games_to_confirm': _games_to_confirm_count(user.id),
         'latest_notification': latest.to_dict() if latest else None,
         'active_game': _active_game_payload(user),
+        'active_arrival': _active_arrival_payload(user),
+        'active_play_pulse': _active_play_pulse_payload(user),
         'active_tournament': _active_tournament_payload(user),
         'muteable_notifications': MUTEABLE_NOTIFICATIONS,
     }
@@ -548,6 +775,167 @@ def change_password():
     return jsonify({'ok': True})
 
 
+def _account_deletion_crew_lock_snapshot(user_id):
+    """Discover the Crew/User closure deletion may mutate, without row locks.
+
+    Crew creation locks every participant User before inserting its Crew and
+    all existing Crew mutations follow the same User-before-Crew order. This
+    read-only snapshot can therefore be stabilized by locking its complete
+    User set, checking once more for an expansion, and retrying if a creator
+    committed while the deletion request was waiting.
+    """
+    from backend.models import Crew, CrewChatRead, CrewInvite, CrewMember
+
+    crew_ids = {
+        row[0] for row in db.session.query(Crew.id).filter(
+            Crew.owner_id == user_id,
+        ).all()
+    }
+    crew_ids.update(
+        row[0] for row in db.session.query(CrewMember.crew_id).filter(
+            CrewMember.user_id == user_id,
+        ).all()
+    )
+    crew_ids.update(
+        row[0] for row in db.session.query(CrewInvite.crew_id).filter(db.or_(
+            CrewInvite.invitee_id == user_id,
+            CrewInvite.invited_by_id == user_id,
+        )).all()
+    )
+    # A stale marker is personal data too. Normally leave/remove already
+    # deletes it, but including it keeps deletion's defensive cleanup under
+    # the same Crew lock protocol.
+    crew_ids.update(
+        row[0] for row in db.session.query(CrewChatRead.crew_id).filter(
+            CrewChatRead.user_id == user_id,
+        ).all()
+    )
+
+    user_ids = {user_id}
+    if crew_ids:
+        user_ids.update(
+            row[0] for row in db.session.query(Crew.owner_id).filter(
+                Crew.id.in_(crew_ids),
+            ).all()
+        )
+        user_ids.update(
+            row[0] for row in db.session.query(CrewMember.user_id).filter(
+                CrewMember.crew_id.in_(crew_ids),
+            ).all()
+        )
+        for invitee_id, invited_by_id in db.session.query(
+            CrewInvite.invitee_id, CrewInvite.invited_by_id,
+        ).filter(CrewInvite.crew_id.in_(crew_ids)).all():
+            user_ids.update((invitee_id, invited_by_id))
+
+    return frozenset(crew_ids), frozenset(user_ids)
+
+
+def _lock_stable_account_deletion_crew_users(user_id, max_attempts=5):
+    """Lock a stable Crew-related User closure before any Crew row lock."""
+    for _ in range(max_attempts):
+        crew_ids, user_ids = _account_deletion_crew_lock_snapshot(user_id)
+        locked_users = _lock_users_for_update(user_ids)
+        current_crew_ids, current_user_ids = (
+            _account_deletion_crew_lock_snapshot(user_id)
+        )
+        if (
+            current_crew_ids.issubset(crew_ids)
+            and current_user_ids.issubset(user_ids)
+        ):
+            return locked_users, current_crew_ids
+
+        # A creator that locked the deleting User first may have committed a
+        # new Crew while this request waited. Release the partial lock set and
+        # retry from the expanded snapshot so every transaction keeps the same
+        # ascending User -> Crew order.
+        db.session.rollback()
+
+    raise RuntimeError(
+        'Could not stabilize account-deletion Crew lock snapshot'
+    )
+
+
+def _reconcile_crews_for_account_deletion(user_id, affected_crew_ids):
+    """Remove personal crew state while retaining durable crew/game history."""
+    # Lazy imports avoid coupling auth startup to the crew route module.
+    from backend.models import Crew, CrewChatRead, CrewInvite, CrewMember
+
+    now = utcnow()
+    crews = (
+        Crew.query
+        .filter(Crew.id.in_(affected_crew_ids))
+        .order_by(Crew.id.asc())
+        .with_for_update()
+        .all()
+    )
+
+    # Invitations addressed to or authored by the deleted account are personal
+    # data. Any other pending invitations on an owned crew are revoked below
+    # before ownership transfers.
+    CrewInvite.query.filter(db.or_(
+        CrewInvite.invitee_id == user_id,
+        CrewInvite.invited_by_id == user_id,
+    )).delete(
+        synchronize_session=False,
+    )
+    for crew in crews:
+        # Crew.invites is select-in loaded; invalidate the collection after the
+        # bulk privacy delete so pending_count cannot serialize stale consent.
+        db.session.expire(crew, ['invites'])
+
+    for crew in crews:
+        roster_changed = False
+        membership = CrewMember.query.filter_by(
+            crew_id=crew.id, user_id=user_id,
+        ).first()
+        if membership is not None:
+            crew.members.remove(membership)
+            roster_changed = True
+
+        CrewChatRead.query.filter_by(
+            crew_id=crew.id, user_id=user_id,
+        ).delete(synchronize_session=False)
+
+        if crew.owner_id == user_id:
+            for invite in CrewInvite.query.filter_by(
+                crew_id=crew.id, status='pending',
+            ).order_by(CrewInvite.id.asc()).all():
+                invite.status = 'revoked'
+                invite.resolved_at = now
+
+            replacement = (
+                CrewMember.query
+                .join(User, User.id == CrewMember.user_id)
+                .filter(
+                    CrewMember.crew_id == crew.id,
+                    CrewMember.user_id != user_id,
+                    User.deleted_at.is_(None),
+                )
+                .order_by(CrewMember.created_at.asc(), CrewMember.id.asc())
+                .first()
+            )
+            if replacement is not None:
+                crew.owner_id = replacement.user_id
+                # The owner is implicit in Crew.owner_id and must not also
+                # remain in the accepted non-owner membership table.
+                crew.members.remove(replacement)
+            else:
+                # Keep the row so historical Game.crew_id references remain
+                # valid; an empty crew is retired rather than hard-deleted.
+                crew.archived_at = crew.archived_at or now
+            roster_changed = True
+
+        if roster_changed:
+            crew.roster_version = int(crew.roster_version or 0) + 1
+
+    # Defense in depth for stale read markers whose crew was already removed or
+    # otherwise absent from the affected-row query above.
+    CrewChatRead.query.filter_by(user_id=user_id).delete(
+        synchronize_session=False,
+    )
+
+
 @auth_bp.delete('/me')
 @rate_limit(5, 3600)
 @login_required
@@ -560,30 +948,130 @@ def delete_me():
 
     user = g.current_user
     payload = request.get_json(silent=True) or {}
+    password = str(payload.get('password') or '')
     # 403, not 401: the client treats 401 as an expired session and logs out,
     # which would swallow a simple wrong-password mistake.
-    if not user.check_password(str(payload.get('password') or '')):
+    if not user.check_password(password):
+        return jsonify({'error': 'invalid_credentials'}), 403
+    user_id = user.id
+
+    # Discover and lock every affected Crew's complete User closure in one
+    # canonical ascending order before reconciliation locks any Crew row. If a
+    # creator committed while this request waited, the helper rolls back and
+    # retries from the expanded closure.
+    try:
+        locked_users, affected_crew_ids = (
+            _lock_stable_account_deletion_crew_users(user_id)
+        )
+    except RuntimeError:
+        current_app.logger.warning(
+            'Account deletion Crew lock snapshot kept changing for user %s',
+            user_id,
+        )
+        return jsonify({'error': 'account_changed_retry'}), 409
+    locked_by_id = {locked_user.id: locked_user for locked_user in locked_users}
+    user = locked_by_id.get(user_id)
+    if user is None or user.deleted_at is not None:
+        return jsonify({'error': 'authentication_required'}), 401
+    g.current_user = user
+    # A concurrent password change may have committed between the initial
+    # inexpensive rejection and the row lock. Never authorize deletion using
+    # credentials that no longer match the canonical locked row.
+    if not user.check_password(password):
         return jsonify({'error': 'invalid_credentials'}), 403
 
-    # Cancel upcoming games they host, letting joiners know.
-    hosted = Game.query.filter_by(creator_id=user.id, status='upcoming').all()
-    for game in hosted:
-        game.status = 'cancelled'
-        for player in game.players:
-            if player.user_id != user.id:
-                notify(
-                    player.user_id,
-                    'game_cancelled',
-                    f'Game at {game.court.name if game.court else "court"} was cancelled',
-                    related_game_id=game.id,
-                )
-    # Free up their spot in other people's upcoming games.
-    GamePlayer.query.filter(
-        GamePlayer.user_id == user.id,
-        GamePlayer.game_id.in_(
-            db.session.query(Game.id).filter(Game.status == 'upcoming'),
-        ),
-    ).delete(synchronize_session='fetch')
+    # Serialize upcoming roster removal with join/leave/score mutations. The
+    # deleting User is already locked, so this follows the shared User -> Game
+    # -> CheckIn order. Instant assemblies are closed one-way when deleting
+    # the last physically present member; a later re-check-in cannot revive
+    # an abandoned roster before a discovery cleanup happens to run.
+    from backend.routes.games import (
+        _close_instant_assembly_without_fresh_members,
+        _end_game_arrivals,
+        _end_game_open_calls,
+    )
+
+    deletion_now = utcnow()
+    affected_games = (
+        Game.query
+        .filter(
+            Game.status == 'upcoming',
+            or_(
+                Game.creator_id == user.id,
+                Game.id.in_(
+                    db.session.query(GamePlayer.game_id).filter(
+                        GamePlayer.user_id == user.id,
+                    ),
+                ),
+                Game.id.in_(
+                    db.session.query(GameArrivalIntent.game_id).filter(
+                        GameArrivalIntent.user_id == user.id,
+                        GameArrivalIntent.active.is_(True),
+                    ),
+                ),
+            ),
+        )
+        .order_by(Game.id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .all()
+    )
+    for game in affected_games:
+        db.session.expire(game, ['players'])
+        if game.creator_id == user.id:
+            game.status = 'cancelled'
+            _end_game_open_calls(game, 'creator_deleted', deletion_now)
+            if game.is_instant and game.assembly_closed_at is None:
+                game.assembly_closed_at = deletion_now
+            _end_game_arrivals(game, 'creator_deleted', deletion_now)
+            for player in game.players:
+                if player.user_id != user.id:
+                    notify(
+                        player.user_id,
+                        'game_cancelled',
+                        f'Game at {game.court.name if game.court else "court"} was cancelled',
+                        related_game_id=game.id,
+                    )
+            continue
+
+        membership = next(
+            (player for player in game.players if player.user_id == user.id),
+            None,
+        )
+        if membership is not None:
+            game.players.remove(membership)
+
+    # Presence is personal data and must disappear before the remaining
+    # instant rosters are evaluated under their Game locks.
+    db.session.flush()
+    CheckIn.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+    GameArrivalIntent.query.filter_by(user_id=user.id).delete(
+        synchronize_session=False,
+    )
+    db.session.flush()
+    for game in affected_games:
+        _close_instant_assembly_without_fresh_members(game, deletion_now)
+
+    # Availability is precise short-lived location intent. Remove owned rows
+    # entirely, and detach this actor from anybody else's ended acceptance
+    # ledger. The associated ordinary Game remains the durable play record.
+    pulse_rows = (
+        PlayAvailabilityPulse.query.filter(or_(
+            PlayAvailabilityPulse.user_id == user.id,
+            PlayAvailabilityPulse.accepted_by_id == user.id,
+        ))
+        .order_by(PlayAvailabilityPulse.id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .all()
+    )
+    for pulse in pulse_rows:
+        if pulse.user_id == user.id:
+            db.session.delete(pulse)
+        else:
+            pulse.accepted_by_id = None
+            pulse.accept_client_attempt_id = None
+            pulse.accept_client_attempt_fingerprint = None
 
     # Social graph, messages, and activity are personal data — remove them.
     Friendship.query.filter(or_(
@@ -592,10 +1080,26 @@ def delete_me():
     BlockedUser.query.filter(or_(
         BlockedUser.blocker_id == user.id, BlockedUser.blocked_id == user.id,
     )).delete(synchronize_session=False)
-    from backend.models import MessageSendAttempt
+    from backend.models import GameOpenCall, MessageHeart, MessageSendAttempt
+    for open_call in (
+        GameOpenCall.query.filter_by(created_by_id=user.id)
+        .order_by(GameOpenCall.id.asc())
+        .with_for_update()
+        .all()
+    ):
+        if open_call.active:
+            open_call.active = False
+            open_call.ended_at = deletion_now
+            open_call.end_reason = 'creator_deleted'
+        # Keep the retry ledger after its user-authored court message is
+        # removed as personal data; a later exact retry cannot resurrect it.
+        open_call.court_message_id = None
     MessageSendAttempt.query.filter_by(
         sender_id=user.id,
     ).delete(synchronize_session=False)
+    MessageHeart.query.filter_by(user_id=user.id).delete(
+        synchronize_session=False,
+    )
     Message.query.filter(or_(
         Message.sender_id == user.id, Message.recipient_id == user.id,
     )).delete(synchronize_session=False)
@@ -640,8 +1144,8 @@ def delete_me():
                 continue
         club.members.remove(membership)  # delete-orphan keeps the collection in sync
     ClubChatRead.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+    _reconcile_crews_for_account_deletion(user.id, affected_crew_ids)
     CourtReview.query.filter_by(user_id=user.id).delete(synchronize_session=False)
-    CheckIn.query.filter_by(user_id=user.id).delete(synchronize_session=False)
     Notification.query.filter(or_(
         Notification.user_id == user.id, Notification.related_user_id == user.id,
     )).delete(synchronize_session=False)

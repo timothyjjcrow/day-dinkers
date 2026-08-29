@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.app import db
 from backend.models import (
-    Court, CourtChatRead, Game, GameChatRead, GamePlayer, League,
+    Court, CourtChatRead, Game, GameChatRead, GameOpenCall, GamePlayer, League,
     LeagueChatRead, LeagueMember, Message, MessageSendAttempt, Notification,
     Tournament, TournamentChatRead, TournamentEntry, User,
     blocked_pair_ids, is_blocked_between, iso, notify, utcnow,
@@ -73,7 +73,7 @@ def _stored_message_attempt_fingerprint(message):
         column: getattr(message, column)
         for column in (
             'recipient_id', 'court_id', 'game_id', 'tournament_id',
-            'club_id', 'league_id',
+            'club_id', 'crew_id', 'league_id',
         )
         if getattr(message, column) is not None
     }
@@ -246,7 +246,125 @@ def chat_messages_page(query, since_id, initial_limit=60):
     )), False
 
 
-def room_heart_counts(column_name, value):
+def _game_open_call_visible_to(call, viewer_id, hidden_ids=None):
+    """Whether a typed court card is safe in this viewer's public room."""
+    if not call or not call.court_message_id or not viewer_id:
+        return False
+    game = call.game
+    message = call.court_message
+    if (
+        not game
+        or not message
+        or message.court_id != game.court_id
+        or game.visibility != 'open'
+        or game.is_instant
+        or game.recurrence != 'none'
+    ):
+        return False
+    roster_ids = {player.user_id for player in game.players}
+    hidden_ids = (
+        blocked_pair_ids(viewer_id) if hidden_ids is None else set(hidden_ids)
+    )
+    return not bool(roster_ids & hidden_ids)
+
+
+def _game_open_calls_by_message(messages, viewer_id, hidden_ids=None):
+    message_ids = [message.id for message in messages]
+    if not message_ids:
+        return {}
+    calls = GameOpenCall.query.filter(
+        GameOpenCall.court_message_id.in_(message_ids),
+    ).all()
+    return {
+        call.court_message_id: call
+        for call in calls
+        if _game_open_call_visible_to(call, viewer_id, hidden_ids)
+    }
+
+
+def _hidden_game_open_call_message_ids(viewer_id, court_ids, hidden_ids=None):
+    court_ids = {int(court_id) for court_id in court_ids if court_id}
+    if not court_ids:
+        return set()
+    calls = (
+        GameOpenCall.query.join(Game, Game.id == GameOpenCall.game_id)
+        .filter(
+            GameOpenCall.court_message_id.isnot(None),
+            Game.court_id.in_(court_ids),
+        )
+        .all()
+    )
+    return {
+        call.court_message_id
+        for call in calls
+        if not _game_open_call_visible_to(call, viewer_id, hidden_ids)
+    }
+
+
+def _court_message_payload(
+    message, viewer_id, calls_by_message=None, hidden_ids=None, now=None,
+):
+    payload = message.to_dict()
+    calls_by_message = calls_by_message or _game_open_calls_by_message(
+        [message], viewer_id, hidden_ids,
+    )
+    call = calls_by_message.get(message.id)
+    if call:
+        payload['open_call'] = call.to_dict(viewer_id, now)
+    return payload
+
+
+def _court_open_call_snapshot(
+    court_id, viewer_id, hidden_ids=None, now=None, limit=CHAT_DELTA_LIMIT,
+):
+    calls = (
+        GameOpenCall.query.join(Game, Game.id == GameOpenCall.game_id)
+        .filter(
+            Game.court_id == court_id,
+            GameOpenCall.court_message_id.isnot(None),
+        )
+        .order_by(GameOpenCall.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        call.to_dict(viewer_id, now)
+        for call in calls
+        if _game_open_call_visible_to(call, viewer_id, hidden_ids)
+    ]
+
+
+def room_message_payload(message, allowed_heart_user_ids=None):
+    """Serialize a room message, optionally applying a live reaction ACL."""
+    payload = message.to_dict()
+    if allowed_heart_user_ids is None:
+        return payload
+    allowed = set(allowed_heart_user_ids)
+    heart_user_ids = [
+        heart.user_id for heart in message.hearts if heart.user_id in allowed
+    ]
+    payload['heart_user_ids'] = heart_user_ids
+    payload['heart_count'] = len(heart_user_ids)
+    return payload
+
+
+def visible_crew_reactor_ids(crew, viewer_id):
+    """Current, active Crew members whose reactions this viewer may see."""
+    member_ids = crew.member_ids()
+    if not member_ids:
+        return set()
+    active_ids = {
+        user_id for user_id, in db.session.query(User.id).filter(
+            User.id.in_(member_ids), User.deleted_at.is_(None),
+        ).all()
+    }
+    return active_ids - blocked_pair_ids(viewer_id)
+
+
+def room_heart_counts(
+    column_name, value, allowed_heart_user_ids=None,
+    excluded_message_ids=None,
+):
     """Authoritative heart counts for the room's newest bounded window.
 
     Include zeroes so an idle poll can remove a badge after the last heart is
@@ -254,11 +372,21 @@ def room_heart_counts(column_name, value):
     response bounded without erasing older, out-of-window badges in the UI.
     """
     from backend.models import MessageHeart
-    rows = (
+    join_condition = MessageHeart.message_id == Message.id
+    if allowed_heart_user_ids is not None:
+        join_condition = and_(
+            join_condition,
+            MessageHeart.user_id.in_(set(allowed_heart_user_ids)),
+        )
+    query = (
         db.session.query(Message.id, db.func.count(MessageHeart.id))
-        .outerjoin(MessageHeart, MessageHeart.message_id == Message.id)
+        .outerjoin(MessageHeart, join_condition)
         .filter(getattr(Message, column_name) == value)
-        .group_by(Message.id)
+    )
+    if excluded_message_ids:
+        query = query.filter(Message.id.notin_(set(excluded_message_ids)))
+    rows = (
+        query.group_by(Message.id)
         .order_by(Message.id.desc())
         .limit(CHAT_DELTA_LIMIT)
         .all()
@@ -274,7 +402,19 @@ def court_chat(court_id):
         return jsonify({'error': 'court_not_found'}), 404
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(Message.court_id == court_id)
+    hidden_ids = blocked_pair_ids(g.current_user.id)
+    if hidden_ids:
+        query = query.filter(Message.sender_id.notin_(hidden_ids))
+    request_now = utcnow()
+    hidden_call_message_ids = _hidden_game_open_call_message_ids(
+        g.current_user.id, {court_id}, hidden_ids,
+    )
+    if hidden_call_message_ids:
+        query = query.filter(Message.id.notin_(hidden_call_message_ids))
     messages, has_more = chat_messages_page(query, since_id)
+    calls_by_message = _game_open_calls_by_message(
+        messages, g.current_user.id, hidden_ids,
+    )
 
     # Reading the room marks it read — powers the unread badge on court detail.
     latest_id = messages[-1].id if since_id and has_more else (
@@ -297,8 +437,20 @@ def court_chat(court_id):
 
     return jsonify({
         'court': {'id': court.id, 'name': court.name},
-        'items': [m.to_dict() for m in messages],
-        'heart_counts': room_heart_counts('court_id', court_id),
+        'items': [
+            _court_message_payload(
+                message, g.current_user.id, calls_by_message,
+                hidden_ids, request_now,
+            )
+            for message in messages
+        ],
+        'open_calls': _court_open_call_snapshot(
+            court.id, g.current_user.id, hidden_ids, request_now,
+        ),
+        'heart_counts': room_heart_counts(
+            'court_id', court_id,
+            excluded_message_ids=hidden_call_message_ids,
+        ),
         'has_more': has_more,
     })
 
@@ -341,6 +493,9 @@ def game_chat(game_id):
         return err
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(Message.game_id == game_id)
+    hidden_ids = blocked_pair_ids(g.current_user.id)
+    if hidden_ids:
+        query = query.filter(Message.sender_id.notin_(hidden_ids))
     messages, has_more = chat_messages_page(query, since_id)
 
     # Reading the thread marks it read — powers unread badges on game cards.
@@ -429,6 +584,9 @@ def tournament_chat(tournament_id):
         return err
     since_id = request.args.get('since_id', type=int)
     query = Message.query.filter(Message.tournament_id == tournament_id)
+    hidden_ids = blocked_pair_ids(g.current_user.id)
+    if hidden_ids:
+        query = query.filter(Message.sender_id.notin_(hidden_ids))
     messages, has_more = chat_messages_page(query, since_id)
 
     # Reading the thread marks it read — powers the tournament-screen badge.
@@ -511,6 +669,20 @@ def delete_message(message_id):
         return jsonify({'error': 'message_not_found'}), 404
     if message.sender_id != g.current_user.id:
         return jsonify({'error': 'not_your_message'}), 403
+    open_call = (
+        GameOpenCall.query.filter_by(court_message_id=message.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if open_call is not None:
+        # Keep the retry ledger but detach the user-authored message. Deleting
+        # the generic chat row can never revive or silently orphan its card.
+        if open_call.active:
+            open_call.active = False
+            open_call.ended_at = utcnow()
+            open_call.end_reason = 'message_deleted'
+        open_call.court_message_id = None
     if message.client_attempt_id:
         fingerprint = _stored_message_attempt_fingerprint(message)
         attempt = MessageSendAttempt.query.filter_by(
@@ -575,7 +747,13 @@ def heart_message(message_id):
         db.session.add(MessageHeart(message_id=message.id, user_id=me))
         hearted = True
     db.session.commit()
-    count = MessageHeart.query.filter_by(message_id=message.id).count()
+    count_query = MessageHeart.query.filter_by(message_id=message.id)
+    if message.crew_id is not None:
+        from backend.models import Crew
+        crew = db.session.get(Crew, message.crew_id)
+        allowed_ids = visible_crew_reactor_ids(crew, me) if crew else set()
+        count_query = count_query.filter(MessageHeart.user_id.in_(allowed_ids))
+    count = count_query.count()
     return jsonify({'hearted': hearted, 'heart_count': count})
 
 
@@ -586,6 +764,7 @@ def my_court_rooms():
     marker exists) plus favorited courts with any chatter. Newest-message
     first, with unread counts."""
     me = g.current_user.id
+    hidden_ids = blocked_pair_ids(me)
     from backend.models import FavoriteCourt
     marker_rows = CourtChatRead.query.filter_by(user_id=me).all()
     markers = {m.court_id: m.last_read_message_id for m in marker_rows}
@@ -596,26 +775,47 @@ def my_court_rooms():
     if not court_ids:
         return jsonify({'items': []})
 
+    request_now = utcnow()
+    hidden_call_message_ids = _hidden_game_open_call_message_ids(
+        me, court_ids, hidden_ids,
+    )
+
     latest_ids = (
         db.session.query(db.func.max(Message.id))
         .filter(Message.court_id.in_(court_ids))
         .group_by(Message.court_id)
     )
+    if hidden_ids:
+        latest_ids = latest_ids.filter(Message.sender_id.notin_(hidden_ids))
+    if hidden_call_message_ids:
+        latest_ids = latest_ids.filter(
+            Message.id.notin_(hidden_call_message_ids),
+        )
     latest = Message.query.filter(Message.id.in_(latest_ids)).all()
     by_court = {message.court_id: message for message in latest}
+    calls_by_message = _game_open_calls_by_message(latest, me, hidden_ids)
     items = []
     for court_id, last in by_court.items():
         court = db.session.get(Court, court_id)
         if not court:
             continue
-        unread = Message.query.filter(
+        unread_query = Message.query.filter(
             Message.court_id == court_id,
             Message.id > markers.get(court_id, 0),
             Message.sender_id != me,
-        ).count()
+        )
+        if hidden_ids:
+            unread_query = unread_query.filter(Message.sender_id.notin_(hidden_ids))
+        if hidden_call_message_ids:
+            unread_query = unread_query.filter(
+                Message.id.notin_(hidden_call_message_ids),
+            )
+        unread = unread_query.count()
         items.append({
             'court': court.to_summary_dict(),
-            'last_message': last.to_dict(),
+            'last_message': _court_message_payload(
+                last, me, calls_by_message, hidden_ids, request_now,
+            ),
             'unread': unread,
         })
     items.sort(key=lambda item: -(item['last_message']['id']))
@@ -633,7 +833,7 @@ def _competition_room_unread(scope_column, marker_model, marker_scope_column,
     """Count unread messages for many rooms without one query per entity."""
     if not room_ids:
         return {}
-    rows = (
+    query = (
         db.session.query(scope_column, db.func.count(Message.id))
         .outerjoin(marker_model, and_(
             marker_scope_column == scope_column,
@@ -647,8 +847,11 @@ def _competition_room_unread(scope_column, marker_model, marker_scope_column,
             ),
         )
         .group_by(scope_column)
-        .all()
     )
+    hidden_ids = blocked_pair_ids(user_id)
+    if hidden_ids:
+        query = query.filter(Message.sender_id.notin_(hidden_ids))
+    rows = query.all()
     return {room_id: count for room_id, count in rows}
 
 
@@ -823,7 +1026,7 @@ def competition_rooms():
 def community_room_unread_count(user_id):
     """Unread total for every room shown in Community, suitable for /me."""
     from backend.models import (
-        ClubChatRead, ClubMember, FavoriteCourt,
+        ClubChatRead, ClubMember, Crew, CrewChatRead, CrewMember, FavoriteCourt,
     )
 
     marker_courts = {
@@ -845,6 +1048,22 @@ def community_room_unread_count(user_id):
         Message.club_id, ClubChatRead, ClubChatRead.club_id,
         club_ids, user_id,
     ).values())
+    crew_ids = {
+        row.crew_id for row in CrewMember.query.join(
+            Crew, Crew.id == CrewMember.crew_id,
+        ).filter(
+            CrewMember.user_id == user_id,
+            Crew.archived_at.is_(None),
+        ).all()
+    } | {
+        row.id for row in Crew.query.filter(
+            Crew.owner_id == user_id, Crew.archived_at.is_(None),
+        ).all()
+    }
+    crew_unread = sum(_competition_room_unread(
+        Message.crew_id, CrewChatRead, CrewChatRead.crew_id,
+        crew_ids, user_id,
+    ).values())
     game_ids, tournament_ids, league_ids = _competition_room_ids(user_id)
     competition_unread = sum(_competition_room_unread(
         Message.game_id, GameChatRead, GameChatRead.game_id,
@@ -858,7 +1077,7 @@ def community_room_unread_count(user_id):
         Message.league_id, LeagueChatRead, LeagueChatRead.league_id,
         league_ids, user_id,
     ).values())
-    return int(court_unread + club_unread + competition_unread)
+    return int(court_unread + club_unread + crew_unread + competition_unread)
 
 
 @chat_bp.get('/chat')
@@ -873,6 +1092,7 @@ def conversations():
             Message.game_id.is_(None),
             Message.tournament_id.is_(None),
             Message.club_id.is_(None),
+            Message.crew_id.is_(None),
             Message.league_id.is_(None),
             or_(Message.sender_id == me, Message.recipient_id == me),
         )
@@ -986,7 +1206,7 @@ def send_message(user_id):
 @login_required
 def message_image(message_id):
     """The photo attached to a message — visible to exactly whoever can read
-    that thread (DM pair, game players, tournament/club/league members;
+    that thread (DM pair, game players, tournament/club/crew/league members;
     court rooms are open to any signed-in player)."""
     message = db.session.get(Message, message_id)
     if not message or not message.image_data:
@@ -998,9 +1218,19 @@ def message_image(message_id):
 
 def _can_read_message(message, me):
     """Thread-scoped read access — shared by image fetches and reactions."""
+    # Room list endpoints already hide messages from either side of a block.
+    # Apply that same boundary to separately fetched image payloads and heart
+    # actions so a cached message id cannot bypass the filtered thread.
+    if message.sender_id != me and is_blocked_between(me, message.sender_id):
+        return False
     if message.recipient_id is not None:
         return me in (message.sender_id, message.recipient_id)
     if message.court_id is not None:
+        open_call = GameOpenCall.query.filter_by(
+            court_message_id=message.id,
+        ).first()
+        if open_call is not None:
+            return _game_open_call_visible_to(open_call, me)
         return True  # court rooms are readable by any signed-in player
     if message.game_id is not None:
         return GamePlayer.query.filter_by(
@@ -1016,6 +1246,17 @@ def _can_read_message(message, me):
         return ClubMember.query.filter_by(
             club_id=message.club_id, user_id=me,
         ).first() is not None
+    if message.crew_id is not None:
+        from backend.models import Crew, CrewMember
+        crew = Crew.query.filter(
+            Crew.id == message.crew_id, Crew.archived_at.is_(None),
+        ).first()
+        return crew is not None and (
+            crew.owner_id == me
+            or CrewMember.query.filter_by(
+                crew_id=message.crew_id, user_id=me,
+            ).first() is not None
+        )
     if message.league_id is not None:
         from backend.models import LeagueMember
         return LeagueMember.query.filter_by(

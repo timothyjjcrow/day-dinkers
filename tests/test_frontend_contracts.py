@@ -5,9 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = (ROOT / "public" / "index.html").read_text()
-APP = (ROOT / "public" / "app-v13.js").read_text()
+APP = (ROOT / "public" / "app-v15.js").read_text()
 SERVICE_WORKER = (ROOT / "public" / "sw.js").read_text()
-STYLES = (ROOT / "public" / "styles-v13.css").read_text()
+STYLES = (ROOT / "public" / "styles-v15.css").read_text()
 
 
 def test_map_assets_are_lazy_loaded():
@@ -16,6 +16,16 @@ def test_map_assets_are_lazy_loaded():
     assert "markercluster" not in INDEX.lower()
     assert "function ensureMapAssets()" in APP
     assert "function ensureMapReady()" in APP
+    assert "existing?.remove();" in APP
+    assert "link.dataset.loaded = '1'" in APP
+    assert "link.remove();" in APP
+    assert "script.remove();" in APP
+
+
+def test_map_tiles_work_without_a_provider_api_key():
+    assert "https://tile.openstreetmap.org/{z}/{x}/{y}.png" in APP
+    assert "basemaps.cartocdn.com" not in APP
+    assert "OpenStreetMap</a> contributors" in APP
 
 
 def test_primary_mobile_views_keep_accessible_tab_contracts():
@@ -25,6 +35,8 @@ def test_primary_mobile_views_keep_accessible_tab_contracts():
     assert 'id="chat-content" class="tab-scroll" role="tabpanel"' in INDEX
     assert "setupTablistKeyboard($('#play-segments'))" in APP
     assert "setupTablistKeyboard($('#chat-segments'))" in APP
+    assert "liveEl.setAttribute('aria-labelledby', `play-tab-${seg}`);" in APP
+    assert "liveEl.setAttribute('aria-labelledby', `chat-tab-${seg}`);" in APP
 
 
 def test_profile_uses_one_guarded_dashboard_round_trip():
@@ -59,13 +71,78 @@ def test_location_and_invite_controls_preserve_explicit_user_choice():
     assert 'id="use-map-area"' in INDEX
     assert 'id="active-game-banner" class="active-game-banner hidden"></div>' in INDEX
     assert 'class="agb-dismiss"' in APP
+    assert 'class="agb-join"' in APP
     assert 'aria-label="Decline game invite"' in APP
+
+    auto = APP[APP.index("async function maybeAutoCheckIn()") : APP.index("function courtRowHtml")]
+    assert "const callerSession = instantRallySession();" in auto
+    assert "const callerLocation = [Number(state.userLoc[0]), Number(state.userLoc[1])];" in auto
+    assert "const requestIsCurrent = () => instantRallySessionMatches(callerSession)" in auto
+    assert "`/courts?lat=${callerLocation[0]}&lng=${callerLocation[1]}" in auto
+    assert auto.index("if (!requestIsCurrent()) return;") < auto.index(
+        "await api(`/courts/${nearest.id}/checkin`"
+    )
+    assert auto.count("if (!requestIsCurrent()) return;") >= 4
+
+
+def test_checked_in_players_can_launch_and_fill_an_instant_rally():
+    assert "data-goto=\"${here ? 'instant-rally' : 'play-now'}\"" in APP
+    assert "async function startInstantRally(button, options = {})" in APP
+    assert "openPlayNowCourtPicker();" in APP
+    assert "api('/games/rally'" in APP
+    assert "id: `rally-${newGameAttemptId()}`" in APP
+    assert "liveEl.innerHTML = rallyLauncherHtml() + skeletonHtml(4);" in APP
+    assert "previousPresenceView !== nextPresenceView" in APP
+    assert "renderPlay({ useCachedData: true });" in APP
+    assert "result.outcome === 'joined'" in APP
+    assert "openGameScreen(game.id);" in APP
+
+
+def test_game_creation_flows_directly_into_multi_person_roster_fill():
+    assert "const createdGame = await api('/games'" in APP
+    assert "openGameScreen(createdGame.id);" in APP
+    assert "A live, underfilled rally still needs recruiting" in APP
+    assert "JSON.stringify({ user_ids: requested })" in APP
+    assert "Send ${selected.size} invite" in APP
+
+
+def test_underfilled_games_use_one_live_roster_boost_sheet():
+    assert 'id="gs-fill-roster"' in APP
+    assert 'id="gs-invite"' not in APP
+    assert 'id="gs-post-court"' not in APP
+    for selector in (
+        'id="rb-summary"', 'id="rb-friends"', 'data-rb-friend=',
+        'id="rb-invite-send"', 'id="rb-post-court"',
+        'id="rb-share"', 'id="rb-status"',
+    ):
+        assert selector in APP
+    assert "Invites don’t reserve a spot. First joins fill the roster." in APP
+    assert "pendingGameOpenCallAttempt(accountId, game.id)" in APP
+    assert "clearGameOpenCallAttempts(accountId);" in APP
+    assert "body: JSON.stringify({ client_attempt_id: attempt.id })" in APP
+    assert "return 'shared';" in APP
+    assert "return 'copied';" in APP
+    assert ".roster-boost-channel" in STYLES
+
+
+def test_court_chat_renders_live_joinable_game_cards():
+    assert "function courtOpenCallCardHtml(call)" in APP
+    assert "function applyCourtOpenCallSnapshots(" in APP
+    assert 'data-open-call-action="join"' in APP
+    assert 'data-open-call-action="waitlist"' in APP
+    assert 'data-open-call-action="withdraw"' in APP
+    assert "applyCourtOpenCallSnapshots(msgsEl, fresh.open_calls)" in APP
+    assert "message.open_call" in APP
+    assert ".court-open-call.is-full" in STYLES
+    assert ".court-open-call.is-closed" in STYLES
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CORE_SHELL = ['/', '/styles-v13.css', '/app-v13.js'];" in SERVICE_WORKER
-    assert 'href="/styles-v13.css"' in INDEX
-    assert 'src="/app-v13.js"' in INDEX
+    assert "const CACHE = 'thirdshot-v15-r5';" in SERVICE_WORKER
+    assert "const CORE_SHELL = ['/', '/styles-v15.css', '/crew-planner-v15.js', '/app-v15.js'];" in SERVICE_WORKER
+    assert 'href="/styles-v15.css"' in INDEX
+    assert 'src="/crew-planner-v15.js"' in INDEX
+    assert 'src="/app-v15.js"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -115,7 +192,7 @@ def test_court_results_render_progressively_without_collapsing_list_context():
 
 def test_rankings_and_fab_always_offer_the_contextual_next_action():
     assert APP.count('data-goto="new-ranked-game"') >= 2
-    assert "openNewGameModal(null, 'ranked');" in APP
+    assert "openNewGameModal({ gameType: 'ranked' });" in APP
     assert "state.playSeg === 'brackets' ? 'Create a competition'" in APP
     assert "function openCompetitionCreateSheet()" in APP
 
@@ -223,8 +300,9 @@ def test_logout_is_a_hard_account_privacy_boundary():
     assert "purgeAccountChatDrafts(accountId);" in APP
     assert "profileRenderGeneration += 1;" in APP
     assert "panel.replaceChildren();" in APP
-    assert "`${state.me?.id || 'signed-out'}:play:${seg}`" in APP
-    assert "`${state.me?.id || 'signed-out'}:chat:${seg}`" in APP
+    assert "function areaViewKey()" in APP
+    assert "`${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}`" in APP
+    assert "`${state.me?.id || 'signed-out'}:chat:${seg}:${areaViewKey()}`" in APP
     assert "const CHAT_DRAFT_TTL = 24 * 60 * 60 * 1000;" in APP
     assert "const requestToken = state.token;" in APP
     assert "state.token === requestToken" in APP

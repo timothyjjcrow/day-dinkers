@@ -61,8 +61,14 @@
     connectionState: navigator.onLine ? 'online' : 'offline',
     playGamesCache: null,
     chatFriendsCache: null,
+    activeArrival: null,
+    activePlayPulse: null,
   };
   const pageNotifications = new Set();
+  let meRequestGeneration = 0;
+  let rallyArrivalInFlight = null;
+  let playPulseCreateInFlight = null;
+  const playPulseAcceptInFlight = new Map();
 
   function stopThreadPolling() {
     if (state.threadPollTimer && typeof state.threadPollTimer.stop === 'function') {
@@ -78,8 +84,10 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 
-  // Game plans are deliberately session-only: enough continuity for an
-  // accidental close/reload, without leaving social plans on a shared device.
+  // Game plans are account-scoped. Editable drafts expire quickly, while an
+  // unresolved POST is retained until the server gives a definitive answer.
+  // The login token already persists on this device, so keeping recovery state
+  // through a PWA/browser restart does not extend access beyond the login.
   const GAME_DRAFT_VERSION = 1;
   const GAME_DRAFT_TTL = 24 * 60 * 60 * 1000;
   const gameDraftKey = (userId = state.me && state.me.id) => userId ? `pp_game_draft_v1:${userId}` : null;
@@ -90,53 +98,575 @@
     else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
     return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
   }
+  const INSTANT_RALLY_ATTEMPT_TTL = 2 * 60 * 60 * 1000;
+  const INSTANT_RALLY_ATTEMPT_PREFIX = 'pp_instant_rally_v2:';
+  const RALLY_ARRIVAL_ATTEMPT_PREFIX = 'pp_rally_arrival_v1:';
+  const PLAY_PULSE_CREATE_ATTEMPT_PREFIX = 'pp_play_pulse_create_v1:';
+  const PLAY_PULSE_ACCEPT_ATTEMPT_PREFIX = 'pp_play_pulse_accept_v1:';
+  const GAME_OPEN_CALL_ATTEMPT_PREFIX = 'pp_game_open_call_v1:';
+  const legacyInstantRallyAttemptKey = (userId = state.me && state.me.id) =>
+    userId ? `pp_instant_rally_v1:${userId}` : null;
+  const instantRallyAttemptKey = (userId = state.me && state.me.id, courtId = null) => {
+    const accountId = Number(userId);
+    const expectedCourtId = Number(courtId);
+    return Number.isSafeInteger(accountId) && accountId > 0
+      && Number.isSafeInteger(expectedCourtId) && expectedCourtId > 0
+      ? `${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:${expectedCourtId}` : null;
+  };
+  function pendingInstantRallyAttempt(userId = state.me && state.me.id, courtId = null) {
+    const expectedCourtId = Number(courtId);
+    if (!Number.isSafeInteger(expectedCourtId) || expectedCourtId <= 0) return null;
+    const key = instantRallyAttemptKey(userId, expectedCourtId);
+    if (!key) return null;
+    const isRecoverable = (saved) => saved && typeof saved.id === 'string'
+      && typeof saved.scheduledAt === 'string'
+      && Number(saved.courtId) === expectedCourtId
+      && Number.isFinite(saved.createdAt)
+      && Date.now() - saved.createdAt <= INSTANT_RALLY_ATTEMPT_TTL;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+      if (isRecoverable(saved)) return saved;
+      // Recover an unresolved attempt written by the prior single-court-key
+      // release, but only when it was already bound to this exact court.
+      const legacyKey = legacyInstantRallyAttemptKey(userId);
+      const legacy = JSON.parse(sessionStorage.getItem(legacyKey) || 'null');
+      if (isRecoverable(legacy)) {
+        sessionStorage.setItem(key, JSON.stringify(legacy));
+        sessionStorage.removeItem(legacyKey);
+        return legacy;
+      }
+      const fresh = {
+        id: `rally-${newGameAttemptId()}`,
+        scheduledAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        courtId: expectedCourtId,
+      };
+      sessionStorage.setItem(key, JSON.stringify(fresh));
+      return fresh;
+    } catch {
+      return {
+        id: `rally-${newGameAttemptId()}`,
+        scheduledAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        courtId: expectedCourtId,
+      };
+    }
+  }
+  function clearInstantRallyAttempt(
+    userId = state.me && state.me.id, courtId = null, attemptId = null,
+  ) {
+    const accountId = Number(userId);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) return;
+    try {
+      const removeOwned = (key) => {
+        if (!key) return;
+        if (attemptId) {
+          const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+          if (!saved || saved.id !== attemptId) return;
+        }
+        sessionStorage.removeItem(key);
+      };
+      const expectedCourtId = Number(courtId);
+      if (Number.isSafeInteger(expectedCourtId) && expectedCourtId > 0) {
+        removeOwned(instantRallyAttemptKey(accountId, expectedCourtId));
+        const legacyKey = legacyInstantRallyAttemptKey(accountId);
+        const legacy = JSON.parse(sessionStorage.getItem(legacyKey) || 'null');
+        if (legacy && Number(legacy.courtId) === expectedCourtId
+            && (!attemptId || legacy.id === attemptId)) sessionStorage.removeItem(legacyKey);
+        return;
+      }
+      const prefix = `${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:`;
+      const keys = [];
+      for (let index = 0; index < sessionStorage.length; index += 1) {
+        const key = sessionStorage.key(index);
+        if (key?.startsWith(prefix)) keys.push(key);
+      }
+      keys.forEach((key) => sessionStorage.removeItem(key));
+      sessionStorage.removeItem(legacyInstantRallyAttemptKey(accountId));
+    } catch { /* storage unavailable */ }
+  }
+  const rallyArrivalAttemptKey = (userId = state.me && state.me.id, gameId = null) => {
+    const accountId = Number(userId);
+    const expectedGameId = Number(gameId);
+    return Number.isSafeInteger(accountId) && accountId > 0
+      && Number.isSafeInteger(expectedGameId) && expectedGameId > 0
+      ? `${RALLY_ARRIVAL_ATTEMPT_PREFIX}${accountId}:${expectedGameId}` : null;
+  };
+  function readRallyArrivalAttempt(userId = state.me && state.me.id, gameId = null) {
+    const key = rallyArrivalAttemptKey(userId, gameId);
+    if (!key) return null;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+      const etaMinutes = Number(saved && saved.etaMinutes);
+      const valid = saved && typeof saved.id === 'string'
+        && /^[a-zA-Z0-9_-]{16,80}$/.test(saved.id)
+        && [5, 10, 15].includes(etaMinutes)
+        && Number.isFinite(Number(saved.createdAt));
+      if (valid) return { ...saved, etaMinutes };
+      sessionStorage.removeItem(key);
+    } catch { /* malformed or unavailable storage is handled by the caller */ }
+    return null;
+  }
+  function pendingRallyArrivalAttempt(
+    userId = state.me && state.me.id, gameId = null, etaMinutes = 10,
+  ) {
+    const key = rallyArrivalAttemptKey(userId, gameId);
+    const eta = Number(etaMinutes);
+    if (!key || ![5, 10, 15].includes(eta)) return null;
+    const existing = readRallyArrivalAttempt(userId, gameId);
+    // A retry always reuses the original ETA and id. It must never silently
+    // mint a second hold or extend the first one after an ambiguous response.
+    if (existing) return existing;
+    const fresh = {
+      id: `arrival-${newGameAttemptId()}`,
+      etaMinutes: eta,
+      createdAt: Date.now(),
+    };
+    try {
+      sessionStorage.setItem(key, JSON.stringify(fresh));
+      return fresh;
+    } catch { return null; }
+  }
+  function clearRallyArrivalAttempt(
+    userId = state.me && state.me.id, gameId = null, attemptId = null,
+  ) {
+    const accountId = Number(userId);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) return;
+    try {
+      const removeOwned = (key) => {
+        if (!key) return;
+        if (attemptId) {
+          const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+          if (!saved || saved.id !== attemptId) return;
+        }
+        sessionStorage.removeItem(key);
+      };
+      const expectedGameId = Number(gameId);
+      if (Number.isSafeInteger(expectedGameId) && expectedGameId > 0) {
+        removeOwned(rallyArrivalAttemptKey(accountId, expectedGameId));
+        return;
+      }
+      const prefix = `${RALLY_ARRIVAL_ATTEMPT_PREFIX}${accountId}:`;
+      const keys = [];
+      for (let index = 0; index < sessionStorage.length; index += 1) {
+        const key = sessionStorage.key(index);
+        if (key?.startsWith(prefix)) keys.push(key);
+      }
+      keys.forEach((key) => sessionStorage.removeItem(key));
+    } catch { /* storage unavailable */ }
+  }
+  const playPulseCreateAttemptKey = (
+    userId = state.me && state.me.id, courtId = null,
+  ) => {
+    const accountId = Number(userId);
+    const expectedCourtId = Number(courtId);
+    return Number.isSafeInteger(accountId) && accountId > 0
+      && Number.isSafeInteger(expectedCourtId) && expectedCourtId > 0
+      ? `${PLAY_PULSE_CREATE_ATTEMPT_PREFIX}${accountId}:${expectedCourtId}` : null;
+  };
+  function readPlayPulseCreateAttempt(userId = state.me && state.me.id, courtId = null) {
+    const key = playPulseCreateAttemptKey(userId, courtId);
+    if (!key) return null;
+    const expectedCourtId = Number(courtId);
+    const storages = [availableStorage('localStorage'), availableStorage('sessionStorage')];
+    const candidates = storages.map((storage) => readStoredJson(storage, key)).filter((saved) => (
+      saved && typeof saved.id === 'string' && /^[a-zA-Z0-9_-]{16,80}$/.test(saved.id)
+      && Number(saved.courtId) === expectedCourtId && Number.isFinite(Number(saved.createdAt))
+    )).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+    if (candidates.length) return { ...candidates[0], courtId: expectedCourtId };
+    storages.forEach((storage) => removeStoredValue(storage, key));
+    return null;
+  }
+  function pendingPlayPulseCreateAttempt(
+    userId = state.me && state.me.id, courtId = null,
+  ) {
+    const key = playPulseCreateAttemptKey(userId, courtId);
+    if (!key) return null;
+    const existing = readPlayPulseCreateAttempt(userId, courtId);
+    // An ambiguous retry keeps both the destination and id immutable. The
+    // server's exact replay returns the original one-hour window without
+    // extending it.
+    if (existing) return existing;
+    const fresh = {
+      id: `pulse-create-${newGameAttemptId()}`,
+      courtId: Number(courtId),
+      createdAt: Date.now(),
+    };
+    return persistRecoveryValue(key, JSON.stringify(fresh)) ? fresh : null;
+  }
+  function clearPlayPulseCreateAttempt(
+    userId = state.me && state.me.id, courtId = null, attemptId = null,
+  ) {
+    const key = playPulseCreateAttemptKey(userId, courtId);
+    if (!key) return;
+    for (const storage of [availableStorage('localStorage'), availableStorage('sessionStorage')]) {
+      const saved = readStoredJson(storage, key);
+      if (!attemptId || !saved || saved.id === attemptId) removeStoredValue(storage, key);
+    }
+  }
+  function clearPlayPulseCreateAttempts(userId = state.me && state.me.id) {
+    const accountId = Number(userId);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) return;
+    const prefix = `${PLAY_PULSE_CREATE_ATTEMPT_PREFIX}${accountId}:`;
+    for (const storage of [availableStorage('localStorage'), availableStorage('sessionStorage')]) {
+      if (!storage) continue;
+      try {
+        const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
+          .filter((key) => key && key.startsWith(prefix));
+        keys.forEach((key) => storage.removeItem(key));
+      } catch { /* storage unavailable */ }
+    }
+  }
+  const playPulseAcceptAttemptKey = (
+    userId = state.me && state.me.id, pulseId = null,
+  ) => {
+    const accountId = Number(userId);
+    const expectedPulseId = Number(pulseId);
+    return Number.isSafeInteger(accountId) && accountId > 0
+      && Number.isSafeInteger(expectedPulseId) && expectedPulseId > 0
+      ? `${PLAY_PULSE_ACCEPT_ATTEMPT_PREFIX}${accountId}:${expectedPulseId}` : null;
+  };
+  function readPlayPulseAcceptAttempt(userId = state.me && state.me.id, pulseId = null) {
+    const key = playPulseAcceptAttemptKey(userId, pulseId);
+    if (!key) return null;
+    const expectedPulseId = Number(pulseId);
+    const storages = [availableStorage('localStorage'), availableStorage('sessionStorage')];
+    const candidates = storages.map((storage) => readStoredJson(storage, key)).filter((saved) => (
+      saved && typeof saved.id === 'string' && /^[a-zA-Z0-9_-]{16,80}$/.test(saved.id)
+      && Number(saved.pulseId) === expectedPulseId
+      && typeof saved.acceptCapability === 'string' && saved.acceptCapability.length >= 16
+      && Number.isFinite(Number(saved.createdAt))
+    )).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+    if (candidates.length) return { ...candidates[0], pulseId: expectedPulseId };
+    storages.forEach((storage) => removeStoredValue(storage, key));
+    return null;
+  }
+  function pendingPlayPulseAcceptAttempt(
+    userId = state.me && state.me.id, pulseId = null, acceptCapability = '',
+  ) {
+    const key = playPulseAcceptAttemptKey(userId, pulseId);
+    if (!key) return null;
+    const existing = readPlayPulseAcceptAttempt(userId, pulseId);
+    // A refreshed feed may rotate its short-lived viewer capability while the
+    // unresolved mutation keeps the same id. Exact server replay is keyed by
+    // that id, so replacing only the capability cannot create a second game.
+    if (existing) {
+      if (typeof acceptCapability === 'string' && acceptCapability.length >= 16
+          && acceptCapability !== existing.acceptCapability) {
+        const refreshed = {
+          ...existing,
+          acceptCapability,
+          capabilityRefreshedAt: Date.now(),
+        };
+        return persistRecoveryValue(key, JSON.stringify(refreshed)) ? refreshed : existing;
+      }
+      return existing;
+    }
+    if (typeof acceptCapability !== 'string' || acceptCapability.length < 16) return null;
+    const fresh = {
+      id: `pulse-accept-${newGameAttemptId()}`,
+      pulseId: Number(pulseId),
+      acceptCapability,
+      createdAt: Date.now(),
+    };
+    return persistRecoveryValue(key, JSON.stringify(fresh)) ? fresh : null;
+  }
+  function clearPlayPulseAcceptAttempt(
+    userId = state.me && state.me.id, pulseId = null, attemptId = null,
+  ) {
+    const key = playPulseAcceptAttemptKey(userId, pulseId);
+    if (!key) return;
+    for (const storage of [availableStorage('localStorage'), availableStorage('sessionStorage')]) {
+      const saved = readStoredJson(storage, key);
+      if (!attemptId || !saved || saved.id === attemptId) removeStoredValue(storage, key);
+    }
+  }
+  function clearPlayPulseAcceptAttempts(userId = state.me && state.me.id) {
+    const accountId = Number(userId);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) return;
+    const prefix = `${PLAY_PULSE_ACCEPT_ATTEMPT_PREFIX}${accountId}:`;
+    for (const storage of [availableStorage('localStorage'), availableStorage('sessionStorage')]) {
+      if (!storage) continue;
+      try {
+        const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
+          .filter((key) => key && key.startsWith(prefix));
+        keys.forEach((key) => storage.removeItem(key));
+      } catch { /* storage unavailable */ }
+    }
+  }
+  const gameOpenCallAttemptKey = (
+    userId = state.me && state.me.id, gameId = null,
+  ) => {
+    const accountId = Number(userId);
+    const expectedGameId = Number(gameId);
+    return Number.isSafeInteger(accountId) && accountId > 0
+      && Number.isSafeInteger(expectedGameId) && expectedGameId > 0
+      ? `${GAME_OPEN_CALL_ATTEMPT_PREFIX}${accountId}:${expectedGameId}` : null;
+  };
+  function readGameOpenCallAttempt(
+    userId = state.me && state.me.id, gameId = null,
+  ) {
+    const key = gameOpenCallAttemptKey(userId, gameId);
+    if (!key) return null;
+    const expectedGameId = Number(gameId);
+    const storages = [availableStorage('localStorage'), availableStorage('sessionStorage')];
+    const candidates = storages.map((storage) => readStoredJson(storage, key)).filter((saved) => (
+      saved && typeof saved.id === 'string'
+      && /^[a-zA-Z0-9._:-]{1,64}$/.test(saved.id)
+      && Number(saved.gameId) === expectedGameId
+      && Number.isFinite(Number(saved.createdAt))
+    )).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+    if (candidates.length) return { ...candidates[0], gameId: expectedGameId };
+    storages.forEach((storage) => removeStoredValue(storage, key));
+    return null;
+  }
+  function pendingGameOpenCallAttempt(
+    userId = state.me && state.me.id, gameId = null,
+  ) {
+    const key = gameOpenCallAttemptKey(userId, gameId);
+    if (!key) return null;
+    const existing = readGameOpenCallAttempt(userId, gameId);
+    // Keep this exact key even after acknowledgement. The server retains the
+    // matching receipt, so an interrupted retry can never create new speech.
+    if (existing) return existing;
+    const fresh = {
+      id: `open-call-${newGameAttemptId()}`,
+      gameId: Number(gameId),
+      createdAt: Date.now(),
+    };
+    return persistRecoveryValue(key, JSON.stringify(fresh)) ? fresh : null;
+  }
+  function clearGameOpenCallAttempts(userId = state.me && state.me.id) {
+    const accountId = Number(userId);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) return;
+    const prefix = `${GAME_OPEN_CALL_ATTEMPT_PREFIX}${accountId}:`;
+    for (const storage of [availableStorage('localStorage'), availableStorage('sessionStorage')]) {
+      if (!storage) continue;
+      try {
+        const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
+          .filter((key) => key && key.startsWith(prefix));
+        keys.forEach((key) => storage.removeItem(key));
+      } catch { /* storage unavailable */ }
+    }
+  }
+  function sanitizePlannerInvitee(value) {
+    if (!value || typeof value !== 'object') return null;
+    const id = Number(value.id ?? value.user_id);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    return {
+      id,
+      display_name: String(value.display_name || 'Player').slice(0, 80),
+      avatar_color: String(value.avatar_color || '').slice(0, 24),
+      avatar_url: String(value.avatar_url || '').slice(0, 500),
+      availability: [...new Set(Array.isArray(value.availability)
+        ? value.availability.filter((slot) => /^(sun|mon|tue|wed|thu|fri|sat)-(am|pm|eve)$/.test(slot))
+        : [])],
+      skill_level: ['beginner', 'intermediate', 'advanced', 'pro'].includes(value.skill_level)
+        ? value.skill_level : 'intermediate',
+      rating: Number.isFinite(Number(value.rating)) ? Number(value.rating) : 1200,
+    };
+  }
+  function sanitizeGameCreatePayload(value, expectedAttemptId = null) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const positiveId = (raw) => Number.isSafeInteger(Number(raw)) && Number(raw) > 0
+      ? Number(raw) : null;
+    const courtId = positiveId(value.court_id);
+    const scheduled = typeof value.scheduled_at === 'string' ? new Date(value.scheduled_at) : null;
+    const attemptId = typeof value.client_attempt_id === 'string'
+      && /^[a-zA-Z0-9_-]{16,80}$/.test(value.client_attempt_id)
+      ? value.client_attempt_id : null;
+    if (!courtId || !scheduled || !Number.isFinite(scheduled.getTime()) || !attemptId
+        || (expectedAttemptId && attemptId !== expectedAttemptId)) return null;
+    const inviteIds = [...new Set((Array.isArray(value.invite_user_ids)
+      ? value.invite_user_ids : []).map(positiveId).filter(Boolean))].slice(0, 20);
+    const crewVersion = value.expected_crew_version == null || value.expected_crew_version === ''
+      ? null : Number(value.expected_crew_version);
+    const crewId = positiveId(value.crew_id);
+    const visibility = ['open', 'friends', 'private'].includes(value.visibility)
+      ? value.visibility : (inviteIds.length ? 'private' : 'open');
+    return {
+      court_id: courtId,
+      scheduled_at: scheduled.toISOString(),
+      game_type: value.game_type === 'ranked' ? 'ranked' : 'casual',
+      visibility,
+      recurrence: crewId ? 'none' : (value.recurrence === 'weekly' ? 'weekly' : 'none'),
+      max_players: [2, 4, 6, 8, 10, 12].includes(Number(value.max_players))
+        ? Number(value.max_players) : 4,
+      preferred_level: ['any', 'beginner', 'intermediate', 'advanced', 'pro'].includes(value.preferred_level)
+        ? value.preferred_level : 'any',
+      notes: String(value.notes || '').trim().slice(0, 500),
+      invite_user_ids: inviteIds,
+      require_all_invitees: value.require_all_invitees === true,
+      source_game_id: positiveId(value.source_game_id),
+      club_id: positiveId(value.club_id),
+      crew_id: positiveId(value.crew_id),
+      expected_crew_version: Number.isSafeInteger(crewVersion) && crewVersion >= 0
+        ? crewVersion : null,
+      client_attempt_id: attemptId,
+    };
+  }
+  function availableStorage(name) {
+    try { return globalThis[name] || null; } catch { return null; }
+  }
+  function readStoredJson(storage, key) {
+    if (!storage) return null;
+    try {
+      const value = storage.getItem(key);
+      if (!value) return null;
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch { return null; }
+  }
+  function removeStoredValue(storage, key) {
+    if (!storage) return;
+    try { storage.removeItem(key); } catch { /* storage unavailable */ }
+  }
+  function persistRecoveryValue(key, value) {
+    const persistent = availableStorage('localStorage');
+    const fallback = availableStorage('sessionStorage');
+    try {
+      if (persistent) {
+        persistent.setItem(key, value);
+        removeStoredValue(fallback, key);
+        return true;
+      }
+    } catch { /* use the per-tab fallback */ }
+    try {
+      if (fallback) {
+        fallback.setItem(key, value);
+        return true;
+      }
+    } catch { /* caller must not POST without recovery */ }
+    return false;
+  }
+  function safeGameDraftRecord(raw) {
+    if (!raw || raw.v !== GAME_DRAFT_VERSION || !Number.isFinite(raw.updatedAt)
+        || raw.updatedAt > Date.now() + 60000) return null;
+    const status = raw.status === 'submitting' ? 'submitting' : 'editing';
+    // A response may have been lost after commit. Never age out the only exact
+    // idempotency key; editable, never-submitted drafts can still expire.
+    if (status !== 'submitting' && Date.now() - raw.updatedAt > GAME_DRAFT_TTL) return null;
+    const allowed = (value, values, fallback) => values.includes(value) ? value : fallback;
+    const id = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
+    const clientAttemptId = typeof raw.clientAttemptId === 'string'
+      && /^[a-zA-Z0-9_-]{16,80}$/.test(raw.clientAttemptId) ? raw.clientAttemptId : null;
+    const crewId = id(raw.crewId);
+    const submittedPayload = sanitizeGameCreatePayload(raw.submittedPayload, clientAttemptId);
+    // Pre-immutable builds stored the attempt key and planner fields but not a
+    // submittedPayload. Keep those unresolved reservations: scheduled plans
+    // are reconstructed below, while legacy "right now" plans stay locked and
+    // point the player to My games instead of risking a fresh-key duplicate.
+    if (status === 'submitting' && !clientAttemptId) return null;
+    return {
+      v: GAME_DRAFT_VERSION,
+      updatedAt: raw.updatedAt,
+      status,
+      submitStartedAt: Number.isFinite(raw.submitStartedAt) ? raw.submitStartedAt : null,
+      clientAttemptId,
+      mode: allowed(raw.mode, ['now', 'later'], 'later'),
+      courtId: id(raw.courtId),
+      scheduledAt: typeof raw.scheduledAt === 'string' ? raw.scheduledAt : null,
+      timeKind: allowed(raw.timeKind, ['preset', 'custom'], 'preset'),
+      visibility: allowed(raw.visibility, ['open', 'friends', 'private'], 'open'),
+      inviteUserIds: [...new Set(Array.isArray(raw.inviteUserIds) ? raw.inviteUserIds.map(id).filter(Boolean) : [])].slice(0, 20),
+      invitees: (Array.isArray(raw.invitees) ? raw.invitees : [])
+        .map(sanitizePlannerInvitee).filter(Boolean).slice(0, 20),
+      requireAllInvitees: raw.requireAllInvitees === true,
+      sourceLabel: String(raw.sourceLabel || '').slice(0, 80),
+      availabilityLabel: String(raw.availabilityLabel || '').slice(0, 120),
+      sourceGameId: id(raw.sourceGameId),
+      crewId,
+      crewVersion: raw.crewVersion != null && Number.isSafeInteger(Number(raw.crewVersion)) && Number(raw.crewVersion) >= 0
+        ? Number(raw.crewVersion) : null,
+      gameType: allowed(raw.gameType, ['casual', 'ranked'], 'casual'),
+      maxPlayers: [2, 4, 6, 8, 10, 12].includes(Number(raw.maxPlayers)) ? Number(raw.maxPlayers) : 4,
+      preferredLevel: allowed(raw.preferredLevel, ['any', 'beginner', 'intermediate', 'advanced', 'pro'], 'any'),
+      clubId: id(raw.clubId),
+      recurrence: crewId ? 'none' : allowed(raw.recurrence, ['none', 'weekly'], 'none'),
+      notes: String(raw.notes || '').slice(0, 200),
+      advancedOpen: !!raw.advancedOpen,
+      submittedPayload,
+    };
+  }
   function readGameDraft() {
     const key = gameDraftKey();
     if (!key) return null;
-    try {
-      const raw = JSON.parse(sessionStorage.getItem(key) || 'null');
-      if (!raw || raw.v !== GAME_DRAFT_VERSION || !Number.isFinite(raw.updatedAt)
-          || raw.updatedAt > Date.now() + 60000 || Date.now() - raw.updatedAt > GAME_DRAFT_TTL) {
-        sessionStorage.removeItem(key);
-        return null;
-      }
-      const allowed = (value, values, fallback) => values.includes(value) ? value : fallback;
-      const id = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
-      return {
-        v: GAME_DRAFT_VERSION,
-        updatedAt: raw.updatedAt,
-        status: raw.status === 'submitting' ? 'submitting' : 'editing',
-        submitStartedAt: Number.isFinite(raw.submitStartedAt) ? raw.submitStartedAt : null,
-        clientAttemptId: typeof raw.clientAttemptId === 'string' && /^[a-zA-Z0-9_-]{16,80}$/.test(raw.clientAttemptId)
-          ? raw.clientAttemptId : null,
-        mode: allowed(raw.mode, ['now', 'later'], 'later'),
-        courtId: id(raw.courtId),
-        scheduledAt: typeof raw.scheduledAt === 'string' ? raw.scheduledAt : null,
-        timeKind: allowed(raw.timeKind, ['preset', 'custom'], 'preset'),
-        visibility: allowed(raw.visibility, ['open', 'friends', 'private'], 'open'),
-        inviteUserIds: [...new Set(Array.isArray(raw.inviteUserIds) ? raw.inviteUserIds.map(id).filter(Boolean) : [])].slice(0, 20),
-        gameType: allowed(raw.gameType, ['casual', 'ranked'], 'casual'),
-        maxPlayers: [2, 4, 6, 8].includes(Number(raw.maxPlayers)) ? Number(raw.maxPlayers) : 4,
-        preferredLevel: allowed(raw.preferredLevel, ['any', 'beginner', 'intermediate', 'advanced', 'pro'], 'any'),
-        clubId: id(raw.clubId),
-        recurrence: allowed(raw.recurrence, ['none', 'weekly'], 'none'),
-        notes: String(raw.notes || '').slice(0, 200),
-        advancedOpen: !!raw.advancedOpen,
-      };
-    } catch {
-      try { sessionStorage.removeItem(key); } catch { /* storage unavailable */ }
-      return null;
-    }
+    const storages = [availableStorage('localStorage'), availableStorage('sessionStorage')];
+    const candidates = storages
+      .map((storage) => safeGameDraftRecord(readStoredJson(storage, key)))
+      .filter(Boolean)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    if (candidates.length) return candidates[0];
+    storages.forEach((storage) => removeStoredValue(storage, key));
+    return null;
   }
   function writeGameDraft(draft) {
     const key = gameDraftKey();
-    if (!key) return;
-    try { sessionStorage.setItem(key, JSON.stringify({ ...draft, v: GAME_DRAFT_VERSION, updatedAt: Date.now() })); } catch { /* planner still works */ }
+    if (!key) return false;
+    const value = JSON.stringify({ ...draft, v: GAME_DRAFT_VERSION, updatedAt: Date.now() });
+    return persistRecoveryValue(key, value);
   }
   function clearGameDraft(userId = state.me && state.me.id) {
     const key = gameDraftKey(userId);
     if (!key) return;
-    try { sessionStorage.removeItem(key); } catch { /* storage unavailable */ }
+    removeStoredValue(availableStorage('localStorage'), key);
+    removeStoredValue(availableStorage('sessionStorage'), key);
+  }
+  const REMATCH_ATTEMPT_VERSION = 1;
+  const rematchAttemptKey = (sourceGameId, userId = state.me && state.me.id) =>
+    userId && sourceGameId ? `pp_rematch_attempt_v1:${userId}:${sourceGameId}` : null;
+  const rematchClientAttemptId = (sourceGameId) => `rematch-source-v1-${Number(sourceGameId)}`;
+  function safeRematchAttemptRecord(raw, sourceGameId) {
+    if (!raw || raw.v !== REMATCH_ATTEMPT_VERSION || !Number.isFinite(raw.updatedAt)
+        || raw.updatedAt > Date.now() + 60000
+        || Number(raw.sourceGameId) !== Number(sourceGameId)) return null;
+    const payload = sanitizeGameCreatePayload(raw.payload);
+    if (!payload || Number(payload.source_game_id) !== Number(sourceGameId)) return null;
+    const gameId = Number.isSafeInteger(Number(raw.gameId)) && Number(raw.gameId) > 0
+      ? Number(raw.gameId) : null;
+    return { sourceGameId: Number(sourceGameId), payload, gameId, updatedAt: raw.updatedAt };
+  }
+  function readRematchAttempt(sourceGameId) {
+    const key = rematchAttemptKey(sourceGameId);
+    if (!key) return null;
+    const storages = [availableStorage('localStorage'), availableStorage('sessionStorage')];
+    const candidates = storages
+      .map((storage) => safeRematchAttemptRecord(readStoredJson(storage, key), sourceGameId))
+      .filter(Boolean)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    if (candidates.length) return candidates[0];
+    storages.forEach((storage) => removeStoredValue(storage, key));
+    return null;
+  }
+  function writeRematchAttempt(sourceGameId, payload, gameId = null) {
+    const key = rematchAttemptKey(sourceGameId);
+    const safePayload = sanitizeGameCreatePayload(payload);
+    if (!key || !safePayload || Number(safePayload.source_game_id) !== Number(sourceGameId)) return null;
+    const value = JSON.stringify({
+      v: REMATCH_ATTEMPT_VERSION,
+      sourceGameId: Number(sourceGameId),
+      payload: safePayload,
+      gameId: Number.isSafeInteger(Number(gameId)) && Number(gameId) > 0 ? Number(gameId) : null,
+      updatedAt: Date.now(),
+    });
+    return persistRecoveryValue(key, value) ? safePayload : null;
+  }
+  function clearRematchAttempt(sourceGameId, userId = state.me && state.me.id) {
+    const key = rematchAttemptKey(sourceGameId, userId);
+    if (!key) return;
+    removeStoredValue(availableStorage('localStorage'), key);
+    removeStoredValue(availableStorage('sessionStorage'), key);
+  }
+  function clearRematchAttempts(userId = state.me && state.me.id) {
+    if (!userId) return;
+    const prefix = `pp_rematch_attempt_v1:${userId}:`;
+    for (const storage of [availableStorage('localStorage'), availableStorage('sessionStorage')].filter(Boolean)) {
+      try {
+        const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
+          .filter((key) => key && key.startsWith(prefix));
+        keys.forEach((key) => storage.removeItem(key));
+      } catch { /* storage unavailable */ }
+    }
   }
 
   // ---------- API ----------
@@ -197,6 +727,33 @@
     email_taken: 'That email is already registered.',
     invalid_credentials: 'Wrong email or password.',
     game_full: 'That game is already full.',
+    rally_no_longer_active: 'That rally ended. Refresh nearby rallies to find the current one.',
+    rally_full: 'That rally is fully committed.',
+    arrival_slot_taken: 'Another player is already on the way, so the remote spot is held.',
+    active_arrival_elsewhere: 'You already have a held spot at another rally.',
+    arrival_already_active: 'Your spot is already held for this rally.',
+    already_at_court: 'You’re already checked in at this court. Joining the rally instead.',
+    active_checkin_elsewhere: 'You’re checked in at another court. Confirm this court before joining.',
+    invalid_payload: 'That request could not be read. Refresh and try again.',
+    invalid_court_id: 'Choose a valid court.',
+    court_not_found: 'That court is no longer available.',
+    court_closed: 'That court is marked closed right now. Choose another destination.',
+    court_location_unavailable: 'That court needs a map location before it can be used as a destination.',
+    active_checkin_present: 'You’re already checked in. Start or join a live rally at your current court instead.',
+    active_arrival: 'You already have a spot held while heading to another rally.',
+    active_rally: 'You already have a live rally in progress.',
+    active_game: 'You already have a game starting during this hour.',
+    pulse_already_active: 'Your one-hour availability is already active.',
+    pulse_conflict: 'Couldn’t confirm that availability window. Retry safely.',
+    pulse_not_found: 'That one-hour availability is no longer active.',
+    pulse_start_window_closed: 'There is not enough time left to start this quick game.',
+    invalid_accept_capability: 'That one-hour availability is no longer active.',
+    invalid_eta_minutes: 'Choose a 5, 10, or 15 minute arrival time.',
+    invalid_client_attempt_id: 'This saved action expired. Close this sheet and try again.',
+    client_attempt_id_conflict: 'That saved action conflicts with an earlier request. Close this sheet and try again.',
+    open_call_not_available: 'This game can no longer be posted to the court room.',
+    open_call_not_found: 'There is no active court post for this game.',
+    open_call_conflict: 'Couldn’t confirm the court post. Retry safely.',
     scheduled_in_past: 'Pick a time in the future.',
     already_friends: 'You are already friends.',
     request_already_sent: 'Request already sent.',
@@ -222,9 +779,14 @@
     score_missing: 'The submitted score is missing. Refresh and try again.',
     match_not_ready: 'This match is not ready for a score yet.',
     game_not_open: 'This game is no longer open.',
+    active_checkin_required: 'Check in at a court before starting a live rally.',
+    active_checkin_court_mismatch: 'Confirm the court where you are playing now.',
+    active_rally_elsewhere: 'You already have another live rally in progress.',
+    rally_time_out_of_range: 'That rally attempt expired. Tap again to start a fresh one.',
     game_already_started: 'Too late — the game already has players.',
     already_joined: "You're already in this game.",
     user_blocked: "You can't interact with this player.",
+    crew_changed: 'Someone in this crew is no longer available. Review the roster and try again.',
   };
   const humanError = (code) => ERROR_TEXT[code] || code.replace(/_/g, ' ');
 
@@ -680,6 +1242,9 @@
   function resetPrivateUiForLogout(accountId) {
     purgeAccountChatDrafts(accountId);
     purgeAccountChatOutbox(accountId);
+    clearPlayPulseCreateAttempts(accountId);
+    clearPlayPulseAcceptAttempts(accountId);
+    clearGameOpenCallAttempts(accountId);
     state.playRenderSeq += 1;
     state.chatRenderSeq += 1;
     profileRenderGeneration += 1;
@@ -693,6 +1258,8 @@
     state.communityRoomUnread = 0;
     state.gamesToConfirm = 0;
     state.activeGame = null;
+    state.activeArrival = null;
+    state.activePlayPulse = null;
     state.presence = null;
     state.favIds = null;
     state.lastAutoCheckAt = 0;
@@ -712,6 +1279,7 @@
     Object.keys(state.courtFilters).forEach((key) => { state.courtFilters[key] = false; });
     state.courtFetchSeq += 1;
     state.nearbySkill = '';
+    clearLookingBanner();
     state.searchQ = '';
     state.tab = 'play';
     state.playSeg = 'games';
@@ -775,8 +1343,18 @@
 
   function logout() {
     const accountId = state.me && state.me.id;
+    invalidateMeRequests();
+    // Detach this account's request dedupe record. Its fetch may still settle,
+    // but captured session ownership prevents it from touching the next login.
+    instantRallyInFlight = null;
+    rallyArrivalInFlight = null;
+    playPulseCreateInFlight = null;
+    playPulseAcceptInFlight.clear();
     revokePushSubscription(state.token);
     clearGameDraft(accountId);
+    clearInstantRallyAttempt(accountId);
+    clearRallyArrivalAttempt(accountId);
+    clearRematchAttempts(accountId);
     resetPrivateUiForLogout(accountId);
     stopLocationWatch();
     state.token = null;
@@ -822,13 +1400,40 @@
     } catch { return null; }
   }
 
+  function invalidateMeRequests() {
+    meRequestGeneration += 1;
+    return meRequestGeneration;
+  }
+
   function applyMe(data, {
     persist = true,
     provisional = false,
     reconcileSnapshot = false,
+    fromRefresh = false,
   } = {}) {
+    // Mutation/login/snapshot responses are authoritative and retire any
+    // slower /me request that began against the state they replaced.
+    if (!fromRefresh) invalidateMeRequests();
     const hadProvisionalArea = state.snapshotAreaProvisional;
     const previousArea = state.areaLoc ? [...state.areaLoc] : null;
+    const previousPresenceView = JSON.stringify([
+      !!state.presence?.checked_in,
+      state.presence?.court_id || null,
+      state.presence?.court_name || '',
+    ]);
+    const previousPlayPulseView = JSON.stringify([
+      state.activePlayPulse?.id || null,
+      state.activePlayPulse?.courtId || null,
+      state.activePlayPulse?.expiresAt || '',
+    ]);
+    const previousAccountId = safePositiveId(state.me && state.me.id);
+    const nextAccountId = safePositiveId(data.user && data.user.id);
+    if (previousAccountId && previousAccountId !== nextAccountId) {
+      rallyArrivalInFlight = null;
+      playPulseCreateInFlight = null;
+      playPulseAcceptInFlight.clear();
+      clearRallyArrivalAttempt(previousAccountId);
+    }
     state.me = data.user;
     // Catalog of muteable kinds rides alongside the user for the settings UI.
     if (data.muteable_notifications) state.me.muteable_notifications = data.muteable_notifications;
@@ -843,12 +1448,21 @@
     // Live updates: pop a toast when something new lands while the app is open.
     state.unreadNotifications = data.unread_notifications || 0;
     state.activeGame = data.active_game || null;
+    state.activeArrival = normalizeActiveArrival(data.active_arrival);
+    if (state.activeArrival && nextAccountId) {
+      clearRallyArrivalAttempt(nextAccountId, state.activeArrival.gameId);
+    }
+    state.activePlayPulse = normalizeActivePlayPulse(data.active_play_pulse);
+    if (state.activePlayPulse && nextAccountId) {
+      clearPlayPulseCreateAttempt(nextAccountId, state.activePlayPulse.courtId);
+    }
     state.activeTournament = data.active_tournament || null;
     const latest = data.latest_notification;
     if (latest) {
       if (state.lastNotifId !== null && latest.id > state.lastNotifId && !latest.read) {
-        const coveredByBanner = latest.related_game_id && state.activeGame
-          && state.activeGame.id === latest.related_game_id;
+        const coveredByBanner = latest.related_game_id
+          && ((state.activeGame && state.activeGame.id === latest.related_game_id)
+            || (state.activeArrival && state.activeArrival.gameId === latest.related_game_id));
         if (!coveredByBanner) toast(`🔔 ${latest.title}`);
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
           try {
@@ -885,10 +1499,30 @@
       state.areaLoc = [state.me.home_lat, state.me.home_lng];
     }
     updatePlayHeader();
+    const nextPresenceView = JSON.stringify([
+      !!state.presence?.checked_in,
+      state.presence?.court_id || null,
+      state.presence?.court_name || '',
+    ]);
+    const nextPlayPulseView = JSON.stringify([
+      state.activePlayPulse?.id || null,
+      state.activePlayPulse?.courtId || null,
+      state.activePlayPulse?.expiresAt || '',
+    ]);
+    if (!areaChanged && (previousPresenceView !== nextPresenceView
+        || previousPlayPulseView !== nextPlayPulseView)
+        && state.tab === 'play' && state.playSeg === 'games'
+        && !$('#main-screen').classList.contains('hidden')) {
+      // Check-in/out and one-hour availability can change in another tab.
+      // Reuse cached discovery data while immediately swapping the hero.
+      renderPlay({ useCachedData: true });
+    }
     if (reconcileSnapshot) {
       if (areaChanged) {
         state.playGamesCache = null;
         state.chatFriendsCache = null;
+        clearLookingBanner();
+        refreshLookingBanner();
         if (state.map && state.areaLoc) {
           moveCourtMapWithoutRefresh(() => state.map.setView(state.areaLoc, 12, { animate: false }));
         }
@@ -908,8 +1542,110 @@
     catch { return []; }
   }
 
+  function instantRallyAssembly(game) {
+    if (!game || !game.is_instant || game.status !== 'upcoming') return null;
+    // The server owns whether an instant rally is still recruiting. A rally
+    // can remain `upcoming` after play so its participants can enter a score;
+    // never turn that durable score-pending row back into a live signal.
+    const serverAssemblyState = String(game.assembly_state || '');
+    if (game.assembly_active === false || (serverAssemblyState
+        && !['finding', 'ready', 'full'].includes(serverAssemblyState))) return null;
+    const visibleRosterCount = Array.isArray(game.players) ? game.players.length : 0;
+    const aggregateReadyCount = Number(game.ready_count);
+    const readyCount = Number.isFinite(aggregateReadyCount)
+      ? Math.max(0, aggregateReadyCount) : visibleRosterCount;
+    const aggregateRosterCount = Number(game.roster_count);
+    const rosterCount = Number.isFinite(aggregateRosterCount)
+      ? Math.max(0, aggregateRosterCount) : visibleRosterCount;
+    const onWayCount = Math.max(0, Number(game.on_the_way_count) || 0);
+    const aggregateCommittedCount = Number(game.committed_count);
+    const committedCount = Number.isFinite(aggregateCommittedCount)
+      ? Math.max(0, aggregateCommittedCount)
+      : Math.max(readyCount, rosterCount) + onWayCount;
+    const maxPlayers = Math.max(1, Number(game.max_players) || 4);
+    const physicalSpotsLeft = Math.max(0, Number.isFinite(Number(game.physical_spots_left))
+      ? Number(game.physical_spots_left) : maxPlayers - readyCount);
+    const spotsLeft = Math.max(0, Number.isFinite(Number(game.spots_left))
+      ? Number(game.spots_left) : maxPlayers - committedCount);
+    const counts = rallyCountsText({
+      readyCount, rosterCount, onWayCount, spotsLeft, maxPlayers,
+    });
+    if (readyCount <= 1) {
+      return {
+        icon: '⚡',
+        title: 'Finding players',
+        sub: counts,
+        banner: `⚡ Finding players · ${counts}`,
+        readyCount, rosterCount, onWayCount, committedCount, maxPlayers,
+        physicalSpotsLeft, spotsLeft,
+      };
+    }
+    if (spotsLeft > 0) {
+      return {
+        icon: '🏓',
+        title: 'Ready to play',
+        sub: counts,
+        banner: `🏓 Ready to play · ${counts}`,
+        readyCount, rosterCount, onWayCount, committedCount, maxPlayers,
+        physicalSpotsLeft, spotsLeft,
+      };
+    }
+    if (physicalSpotsLeft > 0 && onWayCount > 0) {
+      return {
+        icon: '🚗',
+        title: 'Remote spot held',
+        sub: counts,
+        banner: `🚗 Remote spot held · ${counts}`,
+        readyCount, rosterCount, onWayCount, committedCount, maxPlayers,
+        physicalSpotsLeft, spotsLeft,
+      };
+    }
+    return {
+      icon: '🏓',
+      title: 'Rally full — ready to play',
+      sub: counts,
+      banner: `🏓 Rally full · ${counts}`,
+      readyCount, rosterCount, onWayCount, committedCount, maxPlayers,
+      physicalSpotsLeft, spotsLeft,
+    };
+  }
+
+  function instantRallyScorePending(game) {
+    return !!(game && game.is_instant && game.status === 'upcoming'
+      && game.can_enter_score && !instantRallyAssembly(game));
+  }
+
+  function instantRallyClosed(game) {
+    if (!game || !game.is_instant || game.status !== 'upcoming' || game.can_enter_score) return false;
+    const assemblyState = String(game.assembly_state || '');
+    return game.assembly_active === false
+      || (assemblyState && !['finding', 'ready', 'full'].includes(assemblyState));
+  }
+
   function renderActiveGameBanner() {
     const el = $('#active-game-banner');
+    const trip = normalizeActiveArrival(state.activeArrival);
+    if (state.activeArrival && !trip) state.activeArrival = null;
+    if (trip) {
+      el.className = 'active-game-banner state-arrival';
+      el.innerHTML = `
+        <button type="button" class="agb-open" aria-label="${esc(arrivalEtaLabel(trip))} to ${esc(trip.courtName)}. ${esc(rallyCountsText(arrivalRallySummary(trip), { includeOpen: false }))}. Spot held until ${esc(fmtTimeShort(trip.expiresAt))}. View details.">
+          <span class="agb-arrival-icon" aria-hidden="true">🚗</span>
+          <span class="agb-main">
+            <span class="agb-title">Heading to ${esc(trip.courtName)}</span>
+            <span class="agb-sub">${esc(arrivalEtaLabel(trip))} · ${esc(rallyCountsText(arrivalRallySummary(trip), { includeOpen: false }))}</span>
+          </span>
+        </button>
+        <button type="button" class="agb-arrived" id="agb-arrived" aria-label="I’m here at ${esc(trip.courtName)}">I’m here</button>`;
+      el.querySelector('.agb-open').onclick = () => openArrivalDetails(trip);
+      el.querySelector('#agb-arrived').onclick = (event) => {
+        event.stopPropagation();
+        openArrivalCheckInConfirmation(trip);
+      };
+      el.classList.remove('hidden');
+      $('#app').classList.add('has-banner');
+      return;
+    }
     const game = state.activeGame;
     // A merely-upcoming game yields the slot to a live tournament, or to one
     // starting before it — action states (live/challenge/confirm…) always win.
@@ -926,7 +1662,12 @@
       return;
     }
     const court = game.court || {};
-    const stateCfg = {
+    const assembly = instantRallyAssembly(game);
+    const stateCfg = assembly && game.banner_state !== 'invited' ? {
+      icon: assembly.icon,
+      title: `${assembly.title} at ${esc(court.name || 'the court')}`,
+      sub: assembly.sub,
+    } : {
       challenge: {
         icon: '⚔️',
         title: `${esc((game.players[0] || {}).display_name || 'Someone')} challenged you!`,
@@ -935,7 +1676,9 @@
       invited: {
         icon: '📨',
         title: `${esc((game.players.find((p) => p.user_id === game.creator_id) || {}).display_name || 'A friend')} invited you to play`,
-        sub: `${fmtDateTime(game.scheduled_at)} · ${esc(court.name || '')} · tap to join`,
+        sub: game.is_instant
+          ? `${esc(court.name || '')} · ${esc(rallyCountsText(rallySummaryFromValue(game)))}`
+          : `${fmtDateTime(game.scheduled_at)} · ${esc(court.name || '')} · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} open`,
       },
       live: {
         icon: '<span class="agb-dot"></span>',
@@ -958,9 +1701,18 @@
         sub: `${esc(court.name || '')} · ${game.players.length}/${game.max_players} players`,
       },
     }[game.banner_state] || null;
-    if (!stateCfg) { el.classList.add('hidden'); return; }
+    if (!stateCfg) {
+      el.classList.add('hidden');
+      $('#app').classList.remove('has-banner');
+      return;
+    }
 
-    el.className = `active-game-banner state-${game.banner_state}`;
+    el.className = `active-game-banner state-${assembly && game.banner_state !== 'invited' ? 'rally' : game.banner_state}`;
+    const inviteRally = game.banner_state === 'invited' && game.is_instant
+      ? rallySummaryFromValue(game) : null;
+    const inviteRallyAction = inviteRally ? rallyActionState(inviteRally) : null;
+    const inviteCanAct = !inviteRally || game.is_joined || inviteRallyAction.enabled;
+    const inviteActionLabel = inviteRallyAction ? inviteRallyAction.label : 'Join';
     el.innerHTML = `
       <button type="button" class="agb-open">
         ${stateCfg.icon.startsWith('<') ? stateCfg.icon : `<span style="font-size:17px">${stateCfg.icon}</span>`}
@@ -970,7 +1722,32 @@
         </span>
         ${game.banner_state === 'invited' ? '' : '<span class="agb-chev">›</span>'}
       </button>
-      ${game.banner_state === 'invited' ? '<button type="button" class="agb-dismiss" id="agb-dismiss" aria-label="Decline game invite">✕</button>' : ''}`;
+      ${game.banner_state === 'invited' ? `${inviteCanAct ? `<button type="button" class="agb-join" id="agb-join" aria-label="${esc(inviteActionLabel)} at ${esc(court.name || 'this court')}">${esc(inviteActionLabel)}</button>` : '<span class="agb-unavailable">Remote spot held</span>'}<button type="button" class="agb-dismiss" id="agb-dismiss" aria-label="Decline game invite">✕</button>` : ''}`;
+    const joinBtn = el.querySelector('#agb-join');
+    if (joinBtn) {
+      joinBtn.onclick = async (e) => {
+        e.stopPropagation();
+        if (game.is_instant) {
+          await openReadyRally(inviteRally, joinBtn);
+          return;
+        }
+        if (joinBtn.disabled) return;
+        joinBtn.disabled = true;
+        joinBtn.textContent = '…';
+        try {
+          await api(`/games/${game.id}/join`, { method: 'POST' });
+          toast("You're in! 🏓");
+          state.playGamesCache = null;
+          await refreshMe();
+          openGameScreen(game.id);
+        } catch (err) {
+          toast(err.message);
+          joinBtn.disabled = false;
+          joinBtn.textContent = inviteActionLabel;
+          refreshMe().catch(() => {});
+        }
+      };
+    }
     const dismissBtn = el.querySelector('#agb-dismiss');
     if (dismissBtn) {
       dismissBtn.onclick = (e) => {
@@ -986,7 +1763,7 @@
       };
     }
     el.querySelector('.agb-open').onclick = () => {
-      if (game.banner_state === 'live' && game.players.length >= 2) {
+      if (!assembly && game.banner_state === 'live' && game.players.length >= 2) {
         const modalLoad = beginRoutedOverlayLoad(null);
         api(`/games/${game.id}`).then((fresh) => {
           if (!routedOverlayLoadIsCurrent(modalLoad)) return;
@@ -1071,10 +1848,18 @@
   }
 
   async function refreshMe() {
+    const generation = invalidateMeRequests();
+    const requestToken = state.token;
     try {
       const data = await api('/me');
-      applyMe(data, { reconcileSnapshot: state.snapshotAreaProvisional });
+      if (generation !== meRequestGeneration || state.token !== requestToken) return false;
+      applyMe(data, {
+        reconcileSnapshot: state.snapshotAreaProvisional,
+        fromRefresh: true,
+      });
+      return true;
     } catch { /* logged out */ }
+    return false;
   }
 
   // ---------- Tabs ----------
@@ -1170,18 +1955,28 @@
   function setupEmptyStateCtas() {
     document.addEventListener('click', (e) => {
       if (e.target.closest('[data-invite-share]')) shareInviteLink();
+      const pulseDetails = e.target.closest('[data-play-pulse-details]');
+      if (pulseDetails) openPlayPulseDetails();
+      const pulseCancel = e.target.closest('[data-play-pulse-cancel]');
+      if (pulseCancel) cancelPlayPulse(state.activePlayPulse, pulseCancel);
     });
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-goto]');
       if (!btn) return;
       const target = btn.dataset.goto;
       dismissAllModals(() => {
-        if (target === 'play-now') {
+        if (target === 'instant-rally') {
           if (state.tab !== 'play') switchTab('play');
-          openNewGameModal(null, 'casual', true);
+          startInstantRally(btn);
+        } else if (target === 'play-now') {
+          if (state.tab !== 'play') switchTab('play');
+          openPlayNowCourtPicker();
+        } else if (target === 'play-pulse') {
+          if (state.tab !== 'play') switchTab('play');
+          openPlayPulseCourtPicker();
         } else if (target === 'new-ranked-game') {
           if (state.tab !== 'play') switchTab('play');
-          openNewGameModal(null, 'ranked');
+          openNewGameModal({ gameType: 'ranked' });
         } else if (target === 'new-game') {
           if (state.tab !== 'play') switchTab('play');
           openNewGameModal();
@@ -1226,15 +2021,20 @@
   let mapReadyPromise = null;
 
   function loadStylesheet(src, integrity) {
-    if (document.querySelector(`link[href="${src}"]`)) return Promise.resolve();
+    const existing = document.querySelector(`link[href="${src}"]`);
+    if (existing && existing.dataset.loaded === '1') return Promise.resolve();
+    existing?.remove();
     return new Promise((resolve, reject) => {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = src;
       link.crossOrigin = '';
       if (integrity) link.integrity = integrity;
-      link.onload = resolve;
-      link.onerror = () => reject(new Error('Could not load the court map'));
+      link.onload = () => { link.dataset.loaded = '1'; resolve(); };
+      link.onerror = () => {
+        link.remove();
+        reject(new Error('Could not load the court map'));
+      };
       document.head.appendChild(link);
     });
   }
@@ -1242,14 +2042,18 @@
   function loadScript(src, integrity) {
     const existing = document.querySelector(`script[src="${src}"]`);
     if (existing && existing.dataset.loaded === '1') return Promise.resolve();
+    existing?.remove();
     return new Promise((resolve, reject) => {
-      const script = existing || document.createElement('script');
+      const script = document.createElement('script');
       script.src = src;
       script.crossOrigin = '';
       if (integrity) script.integrity = integrity;
       script.onload = () => { script.dataset.loaded = '1'; resolve(); };
-      script.onerror = () => reject(new Error('Could not load the court map'));
-      if (!existing) document.head.appendChild(script);
+      script.onerror = () => {
+        script.remove();
+        reject(new Error('Could not load the court map'));
+      };
+      document.head.appendChild(script);
     });
   }
 
@@ -1392,9 +2196,10 @@
     }
     state.map = L.map('map', { zoomControl: false }).setView(center, zoom);
     state.tileLayer = L.tileLayer(themeTileUrl(), {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
     }).addTo(state.map);
+    syncMapTileTheme();
     state.markers = (typeof L.markerClusterGroup === 'function')
       ? L.markerClusterGroup({
           maxClusterRadius: 46,
@@ -1458,8 +2263,10 @@
       state.snapshotAreaProvisional = false;
       state.playGamesCache = null;
       state.chatFriendsCache = null;
+      clearLookingBanner();
       btn.classList.add('hidden');
       updatePlayHeader();
+      refreshLookingBanner();
       toast('Games and players now follow this map area 📍');
       try {
         const geo = await api(`/geocode/reverse?lat=${c.lat}&lng=${c.lng}`);
@@ -1473,7 +2280,13 @@
     // NB: don't pass the click event through — locateMe's arg is the `silent` flag.
     $('#locate-btn').addEventListener('click', () => locateMe(false));
     $('#bell-btn').addEventListener('click', openActivity);
-    $('#looking-banner').addEventListener('click', () => {
+    $('#looking-banner').addEventListener('click', (event) => {
+      const banner = event.currentTarget;
+      const rally = rallySummaryFromDataset(banner);
+      if (rally) {
+        openReadyRally(rally, banner);
+        return;
+      }
       state.chatSeg = 'nearby';
       document.querySelectorAll('#chat-segments button').forEach((b) => b.classList.toggle('active', b.dataset.seg === 'nearby'));
       switchTab('chat');
@@ -1574,9 +2387,13 @@
       || (pref === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
   }
   function themeTileUrl() {
-    return themeIsDark()
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+    // CARTO's formerly anonymous raster endpoints began returning tiles
+    // watermarked "API KEY REQUIRED". OSM's standard endpoint needs no key
+    // for normal interactive web use and keeps the provider easy to replace.
+    return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  }
+  function syncMapTileTheme() {
+    state.map?.getContainer()?.classList.toggle('map-tiles-dark', themeIsDark());
   }
   function applyTheme() {
     const pref = themePref();
@@ -1585,7 +2402,7 @@
     const dark = themeIsDark();
     document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', dark ? 'dark' : 'light');
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111614' : '#14532d');
-    if (state.tileLayer) state.tileLayer.setUrl(themeTileUrl());
+    syncMapTileTheme();
   }
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     if (themePref() === 'auto') applyTheme();
@@ -1607,6 +2424,8 @@
         state.snapshotAreaProvisional = false;
         state.playGamesCache = null;
         state.chatFriendsCache = null;
+        clearLookingBanner();
+        refreshLookingBanner();
         state.searchQ = '';
         const search = $('#court-search');
         if (search) search.value = '';
@@ -1641,12 +2460,19 @@
     return { lat: c.lat, lng: c.lng };
   }
 
+  function areaViewKey() {
+    const area = areaLatLng();
+    return `${Number(area.lat).toFixed(4)},${Number(area.lng).toFixed(4)}`;
+  }
+
   function jumpToPlace(lat, lng, label) {
     state.areaLoc = [lat, lng];
     state.areaLabel = label || 'Selected area';
     state.snapshotAreaProvisional = false;
     state.playGamesCache = null;
     state.chatFriendsCache = null;
+    clearLookingBanner();
+    refreshLookingBanner();
     const search = $('#court-search');
     if (search) { search.value = ''; search.blur(); }
     state.searchQ = '';
@@ -1841,20 +2667,530 @@
     refreshLookingBanner();
   }
 
-  // "N players near you want to play" — a nudge toward a spontaneous game.
+  function safePositiveId(value) {
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  }
+
+  function playPulseFromValue(value) {
+    if (!value || typeof value !== 'object') return null;
+    const id = safePositiveId(value.id ?? value.pulse_id ?? value.pulseId);
+    const court = value.court && typeof value.court === 'object' ? value.court : {};
+    const courtId = safePositiveId(value.court_id ?? value.courtId ?? court.id);
+    const expiresAt = String(value.expires_at ?? value.expiresAt ?? '');
+    const expires = new Date(expiresAt).getTime();
+    if (!id || !courtId || !Number.isFinite(expires)) return null;
+    const numberOrNull = (raw) => raw != null && raw !== '' && Number.isFinite(Number(raw))
+      ? Number(raw) : null;
+    const user = value.user && typeof value.user === 'object' ? value.user : null;
+    return {
+      id,
+      courtId,
+      courtName: String(value.court_name ?? value.courtName ?? court.name ?? 'this court'),
+      courtCity: String(value.court_city ?? value.courtCity ?? court.city ?? ''),
+      courtAddress: String(value.court_address ?? value.courtAddress ?? court.address ?? ''),
+      courtLatitude: numberOrNull(value.court_latitude ?? value.courtLatitude
+        ?? court.latitude ?? court.lat),
+      courtLongitude: numberOrNull(value.court_longitude ?? value.courtLongitude
+        ?? court.longitude ?? court.lng ?? court.lon),
+      distanceMiles: numberOrNull(value.distance_miles ?? value.distanceMiles),
+      declaredAt: String(value.declared_at ?? value.declaredAt ?? ''),
+      expiresAt,
+      active: value.active !== false,
+      acceptCapability: String(value.accept_capability ?? value.acceptCapability ?? ''),
+      user,
+      court: {
+        ...court,
+        id: courtId,
+        name: String(value.court_name ?? value.courtName ?? court.name ?? 'this court'),
+        city: String(value.court_city ?? value.courtCity ?? court.city ?? ''),
+        address: String(value.court_address ?? value.courtAddress ?? court.address ?? ''),
+        latitude: numberOrNull(value.court_latitude ?? value.courtLatitude
+          ?? court.latitude ?? court.lat),
+        longitude: numberOrNull(value.court_longitude ?? value.courtLongitude
+          ?? court.longitude ?? court.lng ?? court.lon),
+      },
+    };
+  }
+
+  function normalizeActivePlayPulse(value) {
+    const pulse = playPulseFromValue(value);
+    if (!pulse || !pulse.active || new Date(pulse.expiresAt).getTime() <= Date.now()) return null;
+    return pulse;
+  }
+
+  function normalizeLookingPulses(data) {
+    const values = Array.isArray(data?.pulses) ? data.pulses : [];
+    const seen = new Set();
+    return values.map(playPulseFromValue).filter((pulse) => {
+      if (!pulse || !pulse.active || !pulse.acceptCapability
+          || new Date(pulse.expiresAt).getTime() <= Date.now() || seen.has(pulse.id)) return false;
+      seen.add(pulse.id);
+      return !state.me || safePositiveId(pulse.user && pulse.user.id) !== safePositiveId(state.me.id);
+    }).sort((a, b) => (a.distanceMiles ?? Infinity) - (b.distanceMiles ?? Infinity)
+      || new Date(a.expiresAt) - new Date(b.expiresAt));
+  }
+
+  function rallySummaryFromValue(value, player = null) {
+    if (!value || typeof value !== 'object') return null;
+    const game = value.game && typeof value.game === 'object' ? value.game : {};
+    const court = value.court && typeof value.court === 'object' ? value.court
+      : (game.court && typeof game.court === 'object' ? game.court
+        : (player && player.checked_in_court) || {});
+    const gameId = safePositiveId(
+      value.game_id ?? value.gameId ?? value.rally_game_id ?? value.rally_id ?? game.id
+        ?? (value.kind === 'rally' || value.is_instant ? value.id : null),
+    );
+    const courtId = safePositiveId(value.court_id ?? value.courtId ?? court.id
+      ?? game.court_id ?? (game.court || {}).id);
+    if (!courtId) return null;
+    const gamePlayers = Array.isArray(game.players) ? game.players : [];
+    const valuePlayers = Array.isArray(value.players) ? value.players : [];
+    const readyCount = Math.max(0, Number(
+      value.ready_count ?? value.readyCount ?? value.player_count ?? value.players_count
+        ?? (valuePlayers.length || null) ?? (gamePlayers.length || null) ?? 0,
+    ) || 0);
+    const rosterCount = Math.max(0, Number(
+      value.roster_count ?? value.rosterCount ?? game.roster_count
+        ?? (valuePlayers.length || null) ?? (gamePlayers.length || null) ?? readyCount,
+    ) || 0);
+    const maxPlayers = Math.max(1, Number(
+      value.max_players ?? value.maxPlayers ?? game.max_players,
+    ) || 4);
+    const onWayCount = Math.max(0, Number(
+      value.on_the_way_count ?? value.onWayCount ?? game.on_the_way_count ?? 0,
+    ) || 0);
+    const committedCount = Math.max(0, Number(
+      value.committed_count ?? value.committedCount ?? game.committed_count
+        ?? Math.max(readyCount, rosterCount) + onWayCount,
+    ) || 0);
+    const physicalSpotsLeft = Math.max(0, Number(
+      value.physical_spots_left ?? value.physicalSpotsLeft ?? game.physical_spots_left
+        ?? Math.max(0, maxPlayers - readyCount),
+    ) || 0);
+    const spotsLeft = Math.max(0, Number(
+      value.spots_left ?? value.spotsLeft ?? game.spots_left
+        ?? Math.max(0, maxPlayers - committedCount),
+    ) || 0);
+    const arrivalCapability = String(
+      value.arrival_capability ?? value.arrivalCapability ?? value.discovery_token
+        ?? game.arrival_capability ?? game.discovery_token ?? '',
+    );
+    const rawArrivalAvailable = value.arrival_available ?? value.arrivalAvailable
+      ?? game.arrival_available ?? game.arrivalAvailable;
+    const arrivalAvailable = !!arrivalCapability && (rawArrivalAvailable == null
+      ? true
+      : rawArrivalAvailable === true || rawArrivalAvailable === 1
+        || rawArrivalAvailable === 'true' || rawArrivalAvailable === '1');
+    const numberOrNull = (raw) => raw != null && raw !== '' && Number.isFinite(Number(raw))
+      ? Number(raw) : null;
+    return {
+      gameId,
+      courtId,
+      courtName: String(value.court_name ?? value.courtName ?? court.name ?? (game.court || {}).name ?? 'this court'),
+      courtCity: String(value.court_city ?? value.courtCity ?? court.city ?? (game.court || {}).city ?? ''),
+      courtAddress: String(value.court_address ?? value.courtAddress ?? court.address ?? (game.court || {}).address ?? ''),
+      courtLatitude: numberOrNull(value.court_latitude ?? value.courtLatitude
+        ?? value.latitude ?? value.lat ?? court.latitude ?? court.lat
+        ?? (game.court || {}).latitude ?? (game.court || {}).lat),
+      courtLongitude: numberOrNull(value.court_longitude ?? value.courtLongitude
+        ?? value.longitude ?? value.lng ?? value.lon ?? court.longitude ?? court.lng ?? court.lon
+        ?? (game.court || {}).longitude ?? (game.court || {}).lng ?? (game.court || {}).lon),
+      readyCount,
+      rosterCount,
+      onWayCount,
+      committedCount,
+      physicalSpotsLeft,
+      spotsLeft,
+      maxPlayers,
+      distanceMiles: Number.isFinite(Number(value.distance_miles ?? value.distanceMiles))
+        ? Number(value.distance_miles ?? value.distanceMiles) : null,
+      arrivalCapability,
+      arrivalAvailable,
+      myArrival: value.my_arrival ?? value.myArrival ?? game.my_arrival ?? null,
+    };
+  }
+
+  function arrivalSummaryFromValue(value, rally = null) {
+    if (!value || typeof value !== 'object') return null;
+    const game = value.game && typeof value.game === 'object' ? value.game : {};
+    const base = rally && rally.courtId ? rally : rallySummaryFromValue({
+      ...game,
+      game_id: value.game_id ?? value.gameId ?? game.id,
+      court: value.court ?? game.court,
+      court_id: value.court_id ?? value.courtId ?? game.court_id,
+      court_name: value.court_name ?? value.courtName,
+      court_city: value.court_city ?? value.courtCity,
+      court_address: value.court_address ?? value.courtAddress,
+      court_latitude: value.court_latitude ?? value.courtLatitude,
+      court_longitude: value.court_longitude ?? value.courtLongitude,
+      ready_count: value.ready_count ?? value.readyCount,
+      roster_count: value.roster_count ?? value.rosterCount,
+      on_the_way_count: value.on_the_way_count ?? value.onWayCount,
+      committed_count: value.committed_count ?? value.committedCount,
+      physical_spots_left: value.physical_spots_left ?? value.physicalSpotsLeft,
+      spots_left: value.spots_left ?? value.spotsLeft,
+      max_players: value.max_players ?? value.maxPlayers,
+      arrival_capability: value.arrival_capability ?? value.arrivalCapability
+        ?? value.discovery_token,
+    });
+    const gameId = safePositiveId(value.game_id ?? value.gameId
+      ?? value.rally_game_id ?? game.id ?? base?.gameId);
+    const courtId = safePositiveId(value.court_id ?? value.courtId ?? (value.court || {}).id
+      ?? game.court_id ?? (game.court || {}).id ?? base?.courtId);
+    if (!gameId || !courtId) return null;
+    const etaMinutes = Number(value.eta_minutes ?? value.etaMinutes);
+    const expiresAt = String(value.expires_at ?? value.expiresAt ?? '');
+    const latitudeValue = value.court_latitude ?? value.courtLatitude
+      ?? (value.court || {}).latitude ?? (value.court || {}).lat
+      ?? (game.court || {}).latitude ?? (game.court || {}).lat ?? base?.courtLatitude;
+    const longitudeValue = value.court_longitude ?? value.courtLongitude
+      ?? (value.court || {}).longitude ?? (value.court || {}).lng ?? (value.court || {}).lon
+      ?? (game.court || {}).longitude ?? (game.court || {}).lng ?? (game.court || {}).lon
+      ?? base?.courtLongitude;
+    const arrivalCapability = String(value.arrival_capability ?? value.arrivalCapability
+      ?? value.discovery_token ?? base?.arrivalCapability ?? '');
+    const rawArrivalAvailable = value.arrival_available ?? value.arrivalAvailable
+      ?? game.arrival_available ?? game.arrivalAvailable ?? base?.arrivalAvailable;
+    const arrivalAvailable = !!arrivalCapability && (rawArrivalAvailable == null
+      ? true
+      : rawArrivalAvailable === true || rawArrivalAvailable === 1
+        || rawArrivalAvailable === 'true' || rawArrivalAvailable === '1');
+    return {
+      id: safePositiveId(value.id),
+      gameId,
+      courtId,
+      courtName: String(value.court_name ?? value.courtName ?? (value.court || {}).name
+        ?? (game.court || {}).name ?? base?.courtName ?? 'this court'),
+      courtCity: String(value.court_city ?? value.courtCity ?? (value.court || {}).city
+        ?? (game.court || {}).city ?? base?.courtCity ?? ''),
+      courtAddress: String(value.court_address ?? value.courtAddress ?? (value.court || {}).address
+        ?? (game.court || {}).address ?? base?.courtAddress ?? ''),
+      courtLatitude: latitudeValue != null && latitudeValue !== ''
+        && Number.isFinite(Number(latitudeValue)) ? Number(latitudeValue) : null,
+      courtLongitude: longitudeValue != null && longitudeValue !== ''
+        && Number.isFinite(Number(longitudeValue)) ? Number(longitudeValue) : null,
+      etaMinutes: [5, 10, 15].includes(etaMinutes) ? etaMinutes : null,
+      declaredAt: String(value.declared_at ?? value.declaredAt ?? ''),
+      arrivesAt: String(value.arrives_at ?? value.arrivesAt ?? ''),
+      expiresAt,
+      active: value.active !== false,
+      endReason: value.end_reason ?? value.endReason ?? null,
+      readyCount: Math.max(0, Number(value.ready_count ?? value.readyCount
+        ?? base?.readyCount ?? 0) || 0),
+      rosterCount: Math.max(0, Number(value.roster_count ?? value.rosterCount
+        ?? base?.rosterCount ?? value.ready_count ?? value.readyCount ?? 0) || 0),
+      onWayCount: Math.max(0, Number(value.on_the_way_count ?? value.onWayCount
+        ?? base?.onWayCount ?? 1) || 0),
+      committedCount: Math.max(0, Number(value.committed_count ?? value.committedCount
+        ?? base?.committedCount ?? 0) || 0),
+      physicalSpotsLeft: Math.max(0, Number(
+        value.physical_spots_left ?? value.physicalSpotsLeft ?? base?.physicalSpotsLeft ?? 0,
+      ) || 0),
+      spotsLeft: Math.max(0, Number(value.spots_left ?? value.spotsLeft
+        ?? base?.spotsLeft ?? 0) || 0),
+      maxPlayers: Math.max(1, Number(value.max_players ?? value.maxPlayers
+        ?? base?.maxPlayers ?? 4) || 4),
+      arrivalCapability,
+      arrivalAvailable,
+      user: value.user && typeof value.user === 'object' ? value.user : value,
+    };
+  }
+
+  function normalizeActiveArrival(value, rally = null) {
+    const arrival = arrivalSummaryFromValue(value, rally);
+    if (!arrival || !arrival.active) return null;
+    const expires = new Date(arrival.expiresAt).getTime();
+    if (!Number.isFinite(expires) || expires <= Date.now()) return null;
+    return arrival;
+  }
+
+  function activeArrivalForGame(gameId, ownValue = null, rally = null) {
+    const own = normalizeActiveArrival(ownValue, rally);
+    if (own && own.gameId === Number(gameId)) return own;
+    return state.activeArrival && state.activeArrival.gameId === Number(gameId)
+      ? state.activeArrival : null;
+  }
+
+  function rallyCountsText(rally, { includeOpen = true } = {}) {
+    const ready = Math.max(0, Number(rally?.readyCount) || 0);
+    // Keep the server's configured ceiling visible even if a bad/stale payload
+    // reports more commitments than capacity (for example, 5/4). Open counts
+    // are clamped separately; rewriting the denominator would hide the fault.
+    const max = Math.max(1, Number(rally?.maxPlayers) || 4);
+    const roster = Math.max(0, Number(rally?.rosterCount) || ready);
+    const onWay = Math.max(0, Number(rally?.onWayCount) || 0);
+    const parts = roster > ready
+      ? [`${ready} physically ready`, `${roster > max ? `${roster}/${max}` : roster} joined`, `${onWay} on the way`]
+      : [`${ready}/${max} physically ready`, `${onWay} on the way`];
+    if (includeOpen) {
+      const spots = Math.max(0, Number(rally?.spotsLeft) || 0);
+      parts.push(`${spots} spot${spots === 1 ? '' : 's'} open`);
+    }
+    return parts.join(' · ');
+  }
+
+  function arrivalEtaLabel(arrival) {
+    const arrives = new Date(arrival && arrival.arrivesAt).getTime();
+    if (!Number.isFinite(arrives)) return `${arrival?.etaMinutes || 10} min ETA`;
+    const minutes = Math.max(0, Math.ceil((arrives - Date.now()) / 60000));
+    return minutes ? `${minutes} min away` : 'Arriving now';
+  }
+
+  function arrivalReservationCopy(arrival) {
+    return `A spot is held until ${fmtTimeShort(arrival.expiresAt)}, as long as the rally stays active. Check in when you arrive.`;
+  }
+
+  function rallyCourtForDirections(rally) {
+    return {
+      id: rally.courtId,
+      name: rally.courtName,
+      city: rally.courtCity,
+      address: rally.courtAddress,
+      latitude: rally.courtLatitude,
+      longitude: rally.courtLongitude,
+    };
+  }
+
+  function rallyDatasetAttributes(rally) {
+    if (!rally) return '';
+    const attrs = [
+      ['data-rally-game-id', rally.gameId || ''],
+      ['data-rally-court-id', rally.courtId || ''],
+      ['data-rally-court-name', rally.courtName || 'this court'],
+      ['data-rally-court-city', rally.courtCity || ''],
+      ['data-rally-court-address', rally.courtAddress || ''],
+      ['data-rally-court-latitude', rally.courtLatitude ?? ''],
+      ['data-rally-court-longitude', rally.courtLongitude ?? ''],
+      ['data-rally-ready-count', rally.readyCount || 0],
+      ['data-rally-roster-count', rally.rosterCount || 0],
+      ['data-rally-on-way-count', rally.onWayCount || 0],
+      ['data-rally-committed-count', rally.committedCount || 0],
+      ['data-rally-physical-spots-left', rally.physicalSpotsLeft || 0],
+      ['data-rally-spots-left', rally.spotsLeft || 0],
+      ['data-rally-max-players', rally.maxPlayers || 4],
+      ['data-rally-arrival-capability', rally.arrivalCapability || ''],
+      ['data-rally-arrival-available', String(!!rally.arrivalAvailable)],
+    ];
+    return attrs.map(([name, value]) => `${name}="${esc(value)}"`).join(' ');
+  }
+
+  function rallySummaryFromDataset(element) {
+    const dataset = element && element.dataset;
+    if (!dataset) return null;
+    return rallySummaryFromValue({
+      game_id: dataset.rallyGameId,
+      court_id: dataset.rallyCourtId,
+      court_name: dataset.rallyCourtName,
+      court_city: dataset.rallyCourtCity,
+      court_address: dataset.rallyCourtAddress,
+      court_latitude: dataset.rallyCourtLatitude,
+      court_longitude: dataset.rallyCourtLongitude,
+      ready_count: dataset.rallyReadyCount,
+      roster_count: dataset.rallyRosterCount,
+      on_the_way_count: dataset.rallyOnWayCount,
+      committed_count: dataset.rallyCommittedCount,
+      physical_spots_left: dataset.rallyPhysicalSpotsLeft,
+      spots_left: dataset.rallySpotsLeft,
+      max_players: dataset.rallyMaxPlayers,
+      arrival_capability: dataset.rallyArrivalCapability,
+      arrival_available: dataset.rallyArrivalAvailable,
+    });
+  }
+
+  function rallyActionState(rally) {
+    if (!rally) return { enabled: false, label: 'Rally unavailable', kind: 'committed' };
+    const ownArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
+    if (isCheckedInAtCourt(rally.courtId)) {
+      return (rally.spotsLeft > 0 || ownArrival)
+        ? { enabled: true, label: 'Join rally', kind: 'join' }
+        : { enabled: true, label: 'Find next rally', kind: 'next' };
+    }
+    if (ownArrival) return { enabled: true, label: 'View held spot', kind: 'held' };
+    if (rally.onWayCount > 0) {
+      return { enabled: false, label: 'Remote spot held', kind: 'committed' };
+    }
+    if (rally.spotsLeft <= 0) {
+      return { enabled: false, label: 'Rally committed', kind: 'committed' };
+    }
+    if (!rally.arrivalAvailable) {
+      return { enabled: false, label: 'Rally wrapping up', kind: 'wrapping' };
+    }
+    return { enabled: true, label: 'I’m on my way', kind: 'arrival' };
+  }
+
+  function playerRallySummary(player) {
+    if (!player || typeof player !== 'object') return null;
+    const nested = player.rally || player.open_rally || player.instant_rally;
+    const fromNested = rallySummaryFromValue(nested, player);
+    if (fromNested) return fromNested;
+    const court = player.checked_in_court || {};
+    return rallySummaryFromValue({
+      rally_game_id: player.rally_game_id ?? player.game_id ?? court.rally_game_id ?? court.game_id,
+      court_id: player.court_id ?? court.id,
+      court_name: player.court_name ?? court.name,
+      ready_count: player.ready_count ?? court.ready_count,
+      roster_count: player.roster_count ?? court.roster_count,
+      on_the_way_count: player.on_the_way_count ?? court.on_the_way_count,
+      committed_count: player.committed_count ?? court.committed_count,
+      physical_spots_left: player.physical_spots_left ?? court.physical_spots_left,
+      spots_left: player.spots_left ?? court.spots_left,
+      max_players: player.max_players ?? court.max_players,
+      distance_miles: player.distance_miles,
+      arrival_capability: player.arrival_capability ?? player.discovery_token
+        ?? court.arrival_capability ?? court.discovery_token,
+      arrival_available: player.arrival_available ?? player.arrivalAvailable
+        ?? court.arrival_available ?? court.arrivalAvailable,
+      my_arrival: player.my_arrival ?? court.my_arrival,
+    }, player);
+  }
+
+  function normalizeLookingRallies(data) {
+    if (!data || typeof data !== 'object') return [];
+    const raw = [
+      ...(Array.isArray(data.rallies) ? data.rallies : []),
+      ...(Array.isArray(data.open_rallies) ? data.open_rallies : []),
+      ...(data.rally && typeof data.rally === 'object' ? [data.rally] : []),
+    ];
+    (Array.isArray(data.players) ? data.players : []).forEach((player) => {
+      const summary = playerRallySummary(player);
+      if (summary) raw.push(summary);
+    });
+    const seen = new Set();
+    return raw.map((value) => value && value.courtId ? value : rallySummaryFromValue(value))
+      .filter(Boolean)
+      .filter((rally) => {
+        const key = rally.gameId ? `game:${rally.gameId}` : `court:${rally.courtId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => (a.distanceMiles ?? Infinity) - (b.distanceMiles ?? Infinity)
+        || b.readyCount - a.readyCount);
+  }
+
+  // "N players near you want to play" — prefer an exact rally/court action,
+  // while accepting the legacy people-only response during rollout.
+  let lookingBannerGeneration = 0;
+  let lookingBannerCommittedContext = '';
+
+  function lookingBannerContext(token, area) {
+    const coordinate = (value) => Number(value).toFixed(5);
+    return `${token || ''}:${coordinate(area.lat)}:${coordinate(area.lng)}`;
+  }
+
+  function clearLookingBanner({ invalidate = true } = {}) {
+    if (invalidate) lookingBannerGeneration += 1;
+    lookingBannerCommittedContext = '';
+    const el = $('#looking-banner');
+    if (!el) return;
+    delete el.dataset.rallyGameId;
+    delete el.dataset.rallyCourtId;
+    delete el.dataset.rallyCourtName;
+    delete el.dataset.rallyCourtCity;
+    delete el.dataset.rallyCourtAddress;
+    delete el.dataset.rallyCourtLatitude;
+    delete el.dataset.rallyCourtLongitude;
+    delete el.dataset.rallyReadyCount;
+    delete el.dataset.rallyRosterCount;
+    delete el.dataset.rallyOnWayCount;
+    delete el.dataset.rallyCommittedCount;
+    delete el.dataset.rallyPhysicalSpotsLeft;
+    delete el.dataset.rallySpotsLeft;
+    delete el.dataset.rallyMaxPlayers;
+    delete el.dataset.rallyArrivalCapability;
+    delete el.dataset.rallyArrivalAvailable;
+    el.replaceChildren();
+    el.removeAttribute('aria-label');
+    el.classList.add('hidden');
+    el.classList.remove('below');
+  }
+
   async function refreshLookingBanner() {
+    const generation = ++lookingBannerGeneration;
     const el = $('#looking-banner');
     if (!el || !state.token) return;
     const c = areaLatLng();
+    const token = state.token;
+    const context = lookingBannerContext(token, c);
+    if (lookingBannerCommittedContext && lookingBannerCommittedContext !== context) {
+      clearLookingBanner({ invalidate: false });
+    }
+    const isCurrent = () => generation === lookingBannerGeneration
+      && state.token === token
+      && lookingBannerContext(state.token, areaLatLng()) === context;
     try {
       const data = await api(`/players/looking?lat=${c.lat}&lng=${c.lng}&radius=25`);
-      if (!data.count) { el.classList.add('hidden'); return; }
-      const names = data.players.map((p) => esc(p.display_name.split(' ')[0]));
-      const who = data.count === 1 ? `${names[0]} wants` : `${data.count} players near you want`;
-      el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> ${who} to play now <span class="chev">›</span>`;
+      if (!isCurrent()) return;
+      const rallies = normalizeLookingRallies(data);
+      const rally = rallies[0] || null;
+      const pulses = normalizeLookingPulses(data);
+      const pulse = pulses[0] || null;
+      const players = Array.isArray(data.players) ? data.players : [];
+      const count = Math.max(0, Number(data.count) || 0);
+      lookingBannerCommittedContext = context;
+      if (!rally && !count && !pulse) { clearLookingBanner({ invalidate: false }); return; }
+      delete el.dataset.rallyGameId;
+      delete el.dataset.rallyCourtId;
+      delete el.dataset.rallyCourtName;
+      delete el.dataset.rallyCourtCity;
+      delete el.dataset.rallyCourtAddress;
+      delete el.dataset.rallyCourtLatitude;
+      delete el.dataset.rallyCourtLongitude;
+      delete el.dataset.rallyReadyCount;
+      delete el.dataset.rallyRosterCount;
+      delete el.dataset.rallyOnWayCount;
+      delete el.dataset.rallyCommittedCount;
+      delete el.dataset.rallyPhysicalSpotsLeft;
+      delete el.dataset.rallySpotsLeft;
+      delete el.dataset.rallyMaxPlayers;
+      delete el.dataset.rallyArrivalCapability;
+      delete el.dataset.rallyArrivalAvailable;
+      if (rally) {
+        if (rally.gameId) el.dataset.rallyGameId = String(rally.gameId);
+        el.dataset.rallyCourtId = String(rally.courtId);
+        el.dataset.rallyCourtName = rally.courtName;
+        el.dataset.rallyCourtCity = rally.courtCity;
+        el.dataset.rallyCourtAddress = rally.courtAddress;
+        if (rally.courtLatitude != null) el.dataset.rallyCourtLatitude = String(rally.courtLatitude);
+        if (rally.courtLongitude != null) el.dataset.rallyCourtLongitude = String(rally.courtLongitude);
+        el.dataset.rallyReadyCount = String(rally.readyCount);
+        el.dataset.rallyRosterCount = String(rally.rosterCount);
+        el.dataset.rallyOnWayCount = String(rally.onWayCount);
+        el.dataset.rallyCommittedCount = String(rally.committedCount);
+        el.dataset.rallyPhysicalSpotsLeft = String(rally.physicalSpotsLeft);
+        el.dataset.rallySpotsLeft = String(rally.spotsLeft);
+        el.dataset.rallyMaxPlayers = String(rally.maxPlayers);
+        el.dataset.rallyArrivalCapability = rally.arrivalCapability;
+        el.dataset.rallyArrivalAvailable = String(rally.arrivalAvailable);
+        const fill = rallyCountsText(rally);
+        const checkedIn = isCheckedInAtCourt(rally.courtId);
+        const ownArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
+        const action = checkedIn
+          ? (rally.spotsLeft > 0 || ownArrival ? 'Join rally.' : 'Find the next rally at this court.')
+          : ownArrival ? 'View your held spot.'
+            : !rally.arrivalAvailable ? 'Remote holds are closed because this rally is wrapping up.'
+              : rally.spotsLeft > 0 && rally.onWayCount === 0 ? 'Say you are on your way.'
+                : 'The remote spot is already held.';
+        el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> <span><b>${esc(rally.courtName)}</b> · ${fill}</span><span class="chev">›</span>`;
+        el.setAttribute('aria-label', `${fill} at ${rally.courtName}. ${action}`);
+      } else if (count) {
+        const firstName = players[0] && String(players[0].display_name || '').split(' ')[0];
+        const who = count === 1 && firstName
+          ? `${esc(firstName)} wants` : `${count} player${count === 1 ? '' : 's'} near you want`;
+        el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> ${who} to play now <span class="chev">›</span>`;
+        el.setAttribute('aria-label', `${count} nearby player${count === 1 ? '' : 's'} want to play now. View nearby players.`);
+      } else {
+        const firstName = String(pulse.user?.display_name || 'A nearby player').split(/\s+/)[0];
+        el.innerHTML = `<svg class="pb-ic"><use href="#pb"/></svg> <span><b>${esc(firstName)}</b> can play at ${esc(pulse.courtName)} this hour</span><span class="chev">›</span>`;
+        el.setAttribute('aria-label', `${firstName} can play at ${pulse.courtName} this hour. View and confirm the intended destination.`);
+      }
       el.classList.remove('hidden');
       el.classList.toggle('below', !$('#presence-banner').classList.contains('hidden'));
-    } catch { el.classList.add('hidden'); }
+    } catch {
+      if (!isCurrent()) return;
+      clearLookingBanner({ invalidate: false });
+    }
   }
 
   // ---------- Search suggestions (typeahead under the search bar) ----------
@@ -2148,10 +3484,17 @@
   }
 
   function courtDirectionsUrl(court) {
-    const address = [court.address, court.city].filter(Boolean).join(' ');
+    const address = court.address ? [court.address, court.city].filter(Boolean).join(' ') : '';
+    const latitude = court.latitude ?? court.lat;
+    const longitude = court.longitude ?? court.lng ?? court.lon;
+    const hasCoordinates = latitude != null && longitude != null
+      && latitude !== '' && longitude !== ''
+      && Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude));
+    const destination = address || (hasCoordinates ? `${latitude},${longitude}` : '');
+    if (!destination) return '';
     return /iPhone|iPad|Macintosh/.test(navigator.userAgent)
-      ? `https://maps.apple.com/?daddr=${encodeURIComponent(address || `${court.latitude},${court.longitude}`)}`
-      : `https://www.google.com/maps/dir/?api=1&destination=${court.latitude},${court.longitude}`;
+      ? `https://maps.apple.com/?daddr=${encodeURIComponent(destination)}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
   }
 
   function selectCourtOnMap(court, { preserveList = false } = {}) {
@@ -2182,8 +3525,9 @@
         </div>`;
       preview.classList.remove('hidden');
       preview.querySelector('[data-preview-detail]').addEventListener('click', () => openCourtDetail(court.id));
-      preview.querySelector('[data-preview-play]').addEventListener('click', () => {
-        openNewGameModal({ id: court.id, name: court.name }, 'casual', true);
+      preview.querySelector('[data-preview-play]').addEventListener('click', (event) => {
+        if (isCheckedInAtCourt(court.id)) startInstantRally(event.currentTarget);
+        else openPlayNowCourtPicker({ court: { id: court.id, name: court.name, city: court.city } });
       });
     }
     document.querySelectorAll('#court-list-items [data-court]').forEach((row) => {
@@ -2292,6 +3636,13 @@
   async function maybeAutoCheckIn() {
     if (!state.me || !state.userLoc) return;
     if (!autoCheckInEnabled()) return;
+    const callerSession = instantRallySession();
+    if (!callerSession) return;
+    const callerLocation = [Number(state.userLoc[0]), Number(state.userLoc[1])];
+    const requestIsCurrent = () => instantRallySessionMatches(callerSession)
+      && Array.isArray(state.userLoc)
+      && Number(state.userLoc[0]) === callerLocation[0]
+      && Number(state.userLoc[1]) === callerLocation[1];
     const now = Date.now();
     if (now - (state.lastAutoCheckAt || 0) < 45000) return;
     state.lastAutoCheckAt = now;
@@ -2304,8 +3655,10 @@
         if (dist > AUTO_CHECKOUT_MILES) {
           try {
             await api('/checkout', { method: 'POST' });
+            if (!requestIsCurrent()) return;
             toast(`👋 Auto checked out of ${presence.court_name}`);
             await refreshMe();
+            if (!requestIsCurrent()) return;
             fetchCourtsInView();
           } catch { /* ignore */ }
         }
@@ -2314,15 +3667,18 @@
     }
 
     try {
-      const data = await api(`/courts?lat=${state.userLoc[0]}&lng=${state.userLoc[1]}&radius=1&limit=3`);
+      const data = await api(`/courts?lat=${callerLocation[0]}&lng=${callerLocation[1]}&radius=1&limit=3`);
+      if (!requestIsCurrent()) return;
       const nearest = data.items[0];
       if (nearest && nearest.distance_miles != null && nearest.distance_miles <= AUTO_CHECKIN_MILES) {
         await api(`/courts/${nearest.id}/checkin`, {
           method: 'POST',
           body: JSON.stringify({ looking_for_game: false }),
         });
+        if (!requestIsCurrent()) return;
         toast(`📍 Auto checked in at ${nearest.name}`);
         await refreshMe();
+        if (!requestIsCurrent()) return;
         fetchCourtsInView();
       }
     } catch { /* offline */ }
@@ -2559,7 +3915,7 @@
 
   // ---------- Modal helpers ----------
   const OVERLAY_NAV_KEY = 'ppOverlayV1';
-  const OVERLAY_ROUTE_KINDS = new Set(['court', 'game', 'tournament', 'club', 'league']);
+  const OVERLAY_ROUTE_KINDS = new Set(['court', 'game', 'tournament', 'club', 'crew', 'league']);
   const previousOverlayNav = history.state && history.state[OVERLAY_NAV_KEY];
   const overlaySession = previousOverlayNav && previousOverlayNav.v === 1 && previousOverlayNav.session
     ? previousOverlayNav.session
@@ -2579,7 +3935,7 @@
   const normalizeOverlayRoute = (route) => {
     if (!route) return null;
     if (typeof route === 'string') {
-      const match = route.match(/^#(court|game|tournament|club|league)\/(\d+)(?:\/match\/(\d+))?$/);
+      const match = route.match(/^#(court|game|tournament|club|crew|league)\/(\d+)(?:\/match\/(\d+))?$/);
       if (!match) return null;
       const normalized = { kind: match[1], id: Number(match[2]) };
       if (match[3] && (normalized.kind === 'league' || normalized.kind === 'tournament')) {
@@ -2793,7 +4149,9 @@
       modalBox.setAttribute('aria-label', fallback);
     }
     modalBox.querySelectorAll('.modal-close:not([aria-label])').forEach((btn) => {
-      btn.setAttribute('aria-label', btn.textContent.includes('‹') ? 'Back' : 'Close');
+      const visibleText = btn.textContent.trim();
+      if (visibleText.includes('‹')) btn.setAttribute('aria-label', 'Back');
+      else if (!visibleText || /^[✕×]$/.test(visibleText)) btn.setAttribute('aria-label', 'Close');
     });
   }
 
@@ -3183,12 +4541,12 @@
   }
 
   function chatEndpointForChannel(channelKey) {
-    const match = String(channelKey || '').match(/^(dm|court|game|tournament|club|league):([1-9]\d*)$/);
+    const match = String(channelKey || '').match(/^(dm|court|game|tournament|club|crew|league):([1-9]\d*)$/);
     if (!match) return null;
     const [, kind, id] = match;
     if (kind === 'dm') return `/chat/${id}`;
     const collections = {
-      court: 'courts', game: 'games', tournament: 'tournaments', club: 'clubs', league: 'leagues',
+      court: 'courts', game: 'games', tournament: 'tournaments', club: 'clubs', crew: 'crews', league: 'leagues',
     };
     return `/${collections[kind]}/${id}/chat`;
   }
@@ -3471,7 +4829,8 @@
         });
         const terminalDeleted = delivered && delivered.deleted === true;
         delivered = { ...delivered, client_attempt_id: delivered.client_attempt_id || item.attemptId };
-        if (sessionRevision !== chatOutboxSessionRevision) {
+        if (sessionRevision !== chatOutboxSessionRevision
+            || chatOutboxCancelledAttempts.has(item.id)) {
           await chatOutboxStore.remove(item.id).catch(() => {});
           return null;
         }
@@ -3489,8 +4848,18 @@
         // logout() purges this account while an in-flight request unwinds; never
         // recreate private data after that purge.
         if (sessionRevision !== chatOutboxSessionRevision
-            || !state.token || state.me?.id !== item.accountId) {
+            || !state.token || state.me?.id !== item.accountId
+            || chatOutboxCancelledAttempts.has(item.id)) {
           await chatOutboxStore.remove(item.id).catch(() => {});
+          return null;
+        }
+        if (Number(error.status) === 404 && item.channelKey.startsWith('crew:')) {
+          chatOutboxCancelledAttempts.add(item.id);
+          clearChatOutboxRetry(item.id);
+          await chatOutboxStore.remove(item.id).catch(() => {});
+          notifyChatOutboxBindings(item.accountId, item.channelKey, {
+            announcement: 'This Crew conversation is no longer available. The unsent message was removed.',
+          });
           return null;
         }
         const retryCount = sending.retryCount + 1;
@@ -3621,6 +4990,24 @@
     if (state.me?.id === accountId) notifyChatOutboxBindings(accountId, channelKey, {
       announcement: 'Unsent message removed.',
     });
+  }
+
+  async function purgeChatOutboxChannel(rawAccountId, channelKey) {
+    const accountId = chatOutboxAccountId(rawAccountId);
+    if (!accountId || !channelKey) return;
+    let items = [];
+    try { items = await listChatOutbox(accountId, channelKey); } catch { /* best-effort cleanup */ }
+    items.forEach((item) => {
+      chatOutboxCancelledAttempts.add(item.id);
+      clearChatOutboxRetry(item.id);
+    });
+    await Promise.all(items.map((item) => chatOutboxStore.remove(item.id).catch(() => {})));
+    chatOutboxBindings.delete(chatOutboxBindingKey(accountId, channelKey));
+    try {
+      sessionStorage.removeItem(
+        `pp_chat_draft_v${CHAT_DRAFT_VERSION}:${accountId}:${encodeURIComponent(channelKey)}`,
+      );
+    } catch { /* storage unavailable */ }
   }
 
   function purgeAccountChatOutbox(rawAccountId) {
@@ -4539,8 +5926,11 @@
       ? `https://maps.apple.com/?daddr=${encodeURIComponent(addrForMaps || `${court.latitude},${court.longitude}`)}&ll=${court.latitude},${court.longitude}`
       : `https://www.google.com/maps/dir/?api=1&destination=${court.latitude},${court.longitude}`;
 
-    const playersHtml = court.players_here.length
-      ? court.players_here.map((p) => {
+    const visiblePlayersHere = Array.isArray(court.players_here) ? court.players_here : [];
+    const nHere = Math.max(visiblePlayersHere.length, Number(court.players_here_count) || 0);
+    const privatePlayersHere = Math.max(0, nHere - visiblePlayersHere.length);
+    const playersHtml = visiblePlayersHere.length
+      ? visiblePlayersHere.map((p) => {
           const badges = [];
           if (p.is_me) badges.push('<span class="tag" style="margin:0 0 0 6px">You</span>');
           else if (p.is_friend) badges.push('<span class="tag" style="margin:0 0 0 6px">🤝 Friend</span>');
@@ -4548,7 +5938,7 @@
           const record = (p.ranked_wins + p.ranked_losses) > 0 ? ` · ${p.ranked_wins}W–${p.ranked_losses}L` : '';
           const actions = p.is_me ? '' : `
             <button class="btn btn-sm" data-challenge="${p.id}" title="Challenge to a ranked match" style="background:var(--violet-100);color:var(--violet-700)">⚔️</button>
-            <button class="btn btn-secondary btn-sm" data-msg-user="${p.id}" title="Message">💬</button>
+            <button class="btn btn-secondary btn-sm" data-msg-user="${p.id}" title="Message" aria-label="Message ${esc(p.display_name)}">💬</button>
             ${!p.is_friend ? `<button class="btn btn-primary btn-sm" data-add-friend-inline="${p.id}" title="Add friend">＋</button>` : ''}`;
           return `
           <div class="card row" style="padding:11px">
@@ -4559,8 +5949,11 @@
             </div>
             ${actions}
           </div>`;
-        }).join('')
-      : '<div class="empty-state" style="padding:14px">No one checked in right now — be the first!</div>';
+        }).join('') + (privatePlayersHere
+          ? `<div class="row-sub" style="padding:2px 8px 10px">＋ ${privatePlayersHere} other checked-in player${privatePlayersHere === 1 ? '' : 's'} not shown here.</div>` : '')
+      : nHere
+        ? `<div class="empty-state" style="padding:14px">${nHere} player${nHere === 1 ? ' is' : 's are'} checked in. Their profiles aren’t shared here.</div>`
+        : '<div class="empty-state" style="padding:14px">No one checked in right now — be the first!</div>';
 
     let gamesHtml = '';
     // Group by day (backend sends them sorted by scheduled_at).
@@ -4598,7 +5991,6 @@
     const distMi = state.userLoc && court.latitude != null
       ? milesBetween(state.userLoc, [court.latitude, court.longitude]) : null;
     const nGames = court.games.length;
-    const nHere = court.players_here.length;
     const statCells = [
       {
         v: court.rating_avg ? `⭐ ${court.rating_avg}` : '☆ —',
@@ -4681,7 +6073,7 @@
           <p>${esc(court.open_play_schedule)}</p>
         </details>` : ''}
       ${linkParts.length ? `<div class="cd-links">${linkParts.join('')}</div>` : ''}
-      <div class="section-label" id="cd-sec-players">Playing now (${court.players_here.length})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
+      <div class="section-label" id="cd-sec-players">Playing now (${nHere})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
       ${playersHtml}
       ${(court.regulars || []).length ? `
         <div class="section-label">Court regulars</div>
@@ -4907,14 +6299,18 @@
       } catch { /* user cancelled share */ }
     });
 
-    modal.querySelector('#cd-play-now').addEventListener('click', () => {
-      transitionModal(modal, () => openNewGameModal(court, 'casual', true));
+    modal.querySelector('#cd-play-now').addEventListener('click', (event) => {
+      if (isCheckedInAtCourt(court.id)) {
+        startInstantRally(event.currentTarget, { fromModal: modal });
+      } else {
+        transitionModal(modal, () => openPlayNowCourtPicker({ court }));
+      }
     });
     modal.querySelector('#cd-schedule').addEventListener('click', () => {
-      transitionModal(modal, () => openNewGameModal(court, 'casual'));
+      transitionModal(modal, () => openNewGameModal({ court }));
     });
     modal.querySelector('#cd-schedule-empty')?.addEventListener('click', () => {
-      transitionModal(modal, () => openNewGameModal(court, 'casual'));
+      transitionModal(modal, () => openNewGameModal({ court }));
     });
 
     modal.querySelector('#cd-favorite').addEventListener('click', async (e) => {
@@ -5038,38 +6434,1289 @@
     });
   }
 
+  function isCheckedInAtCourt(courtId) {
+    return !!(state.presence && state.presence.checked_in
+      && Number(state.presence.court_id) === Number(courtId));
+  }
+
+  function playNowCourt(value, tag = '') {
+    if (!value || typeof value !== 'object') return null;
+    const id = safePositiveId(value.id ?? value.court_id);
+    if (!id) return null;
+    return {
+      id,
+      name: String(value.name ?? value.court_name ?? 'Pickleball court').slice(0, 120),
+      city: String(value.city || '').slice(0, 120),
+      distanceMiles: Number.isFinite(Number(value.distance_miles)) ? Number(value.distance_miles) : null,
+      tag: String(tag || value.tag || '').slice(0, 40),
+    };
+  }
+
+  function playPulseRequestIsAmbiguous(error) {
+    const status = Number(error && error.status) || 0;
+    return !!(error && (error.isNetworkError || error.data?.retryable === true))
+      || status === 408 || status === 425
+      || status === 429 || status >= 500;
+  }
+
+  function playPulseDirectionsUrl(pulse) {
+    if (!pulse) return '';
+    return courtDirectionsUrl(pulse.court || {
+      id: pulse.courtId,
+      name: pulse.courtName,
+      city: pulse.courtCity,
+      address: pulse.courtAddress,
+      latitude: pulse.courtLatitude,
+      longitude: pulse.courtLongitude,
+    });
+  }
+
+  function refreshPlayPulseSurfaces() {
+    state.playGamesCache = null;
+    refreshLookingBanner();
+    if (state.tab === 'play' && state.playSeg === 'games') renderPlay();
+    if (state.tab === 'chat' && state.chatSeg === 'nearby') renderChat();
+  }
+
+  async function declarePlayPulse(court, modal, button, errorEl = null) {
+    const selected = playNowCourt(court);
+    if (!selected || !button || button.dataset.playPulseCreating === 'true') return null;
+    const callerSession = instantRallySession();
+    const showError = (message) => {
+      if (!errorEl || !document.body.contains(errorEl)) return;
+      errorEl.textContent = message;
+      errorEl.classList.remove('hidden');
+      errorEl.focus({ preventScroll: true });
+    };
+    if (!callerSession) {
+      showError('Sign in again before sharing your availability.');
+      return null;
+    }
+    const attempt = pendingPlayPulseCreateAttempt(callerSession.userId, selected.id);
+    if (!attempt) {
+      showError('This device could not save a safe retry. Free some browser storage and try again.');
+      return null;
+    }
+    const original = button.textContent;
+    const modalBox = modal && modal.querySelector('.modal');
+    button.dataset.playPulseCreating = 'true';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = 'Sharing availability…';
+    modalBox?.setAttribute('aria-busy', 'true');
+    errorEl?.classList.add('hidden');
+    let record = playPulseCreateInFlight;
+    if (!record || record.token !== callerSession.token || record.userId !== callerSession.userId
+        || record.courtId !== selected.id || record.attemptId !== attempt.id) {
+      record = {
+        token: callerSession.token,
+        userId: callerSession.userId,
+        courtId: selected.id,
+        attemptId: attempt.id,
+        promise: api('/play/pulse', {
+          method: 'PUT',
+          body: JSON.stringify({ court_id: selected.id, client_attempt_id: attempt.id }),
+        }),
+      };
+      playPulseCreateInFlight = record;
+    }
+    try {
+      const response = await record.promise;
+      if (!instantRallySessionMatches(callerSession)) return null;
+      const responsePulse = playPulseFromValue(response && response.pulse);
+      if (!responsePulse) {
+        const malformed = new Error('The server did not confirm the availability window. Retry safely.');
+        malformed.isNetworkError = true;
+        throw malformed;
+      }
+      const pulse = normalizeActivePlayPulse(responsePulse);
+      clearPlayPulseCreateAttempt(callerSession.userId, selected.id, attempt.id);
+      if (!pulse) {
+        invalidateMeRequests();
+        state.activePlayPulse = null;
+        if (modal && document.body.contains(modal)) closeModal(modal);
+        refreshPlayPulseSurfaces();
+        refreshMe().catch(() => {});
+        toast('Your saved one-hour window already ended. Start a new one when you’re still free.');
+        return null;
+      }
+      invalidateMeRequests();
+      state.activePlayPulse = pulse;
+      refreshPlayPulseSurfaces();
+      refreshMe().catch(() => {});
+      toast(`Available to play at ${pulse.courtName} until ${fmtTimeShort(pulse.expiresAt)}`);
+      if (modal && document.body.contains(modal) && currentOverlayEntry()?.el === modal) {
+        transitionModal(modal, () => openPlayPulseDetails(pulse));
+      }
+      return pulse;
+    } catch (error) {
+      if (!instantRallySessionMatches(callerSession)) return null;
+      const active = normalizeActivePlayPulse(error?.data?.pulse);
+      if (error.code === 'pulse_already_active' && active) {
+        invalidateMeRequests();
+        state.activePlayPulse = active;
+        clearPlayPulseCreateAttempt(callerSession.userId, selected.id, attempt.id);
+        refreshPlayPulseSurfaces();
+        if (modal && document.body.contains(modal) && currentOverlayEntry()?.el === modal) {
+          transitionModal(modal, () => openPlayPulseDetails(active));
+        }
+        return active;
+      }
+      const ambiguous = playPulseRequestIsAmbiguous(error);
+      if (!ambiguous) {
+        clearPlayPulseCreateAttempt(callerSession.userId, selected.id, attempt.id);
+      }
+      showError(ambiguous
+        ? 'Couldn’t confirm the window. Retry safely: the same request will not create or extend another hour.'
+        : error.message);
+      return null;
+    } finally {
+      if (playPulseCreateInFlight === record) playPulseCreateInFlight = null;
+      if (button && document.body.contains(button)) {
+        delete button.dataset.playPulseCreating;
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = errorEl && !errorEl.classList.contains('hidden')
+          ? 'Retry safely' : original;
+        modalBox?.removeAttribute('aria-busy');
+      }
+    }
+  }
+
+  async function cancelPlayPulse(pulseValue, button = null, modal = null) {
+    const pulse = normalizeActivePlayPulse(pulseValue) || playPulseFromValue(pulseValue);
+    if (!pulse || (button && button.dataset.playPulseCancelling === 'true')) return false;
+    const callerSession = instantRallySession();
+    if (!callerSession) return false;
+    const original = button && button.textContent;
+    if (button) {
+      button.dataset.playPulseCancelling = 'true';
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = 'Cancelling…';
+    }
+    try {
+      const response = await api(`/play/pulses/${pulse.id}`, { method: 'DELETE' });
+      if (!instantRallySessionMatches(callerSession)) return false;
+      invalidateMeRequests();
+      if (state.activePlayPulse?.id === pulse.id) state.activePlayPulse = null;
+      clearPlayPulseCreateAttempt(callerSession.userId, pulse.courtId);
+      if (modal && document.body.contains(modal)) closeModal(modal);
+      if (response?.cancelled === false && response?.pulse?.end_reason === 'matched') {
+        toast('A player already accepted — your quick game was not cancelled.');
+      } else if (response?.cancelled === false) {
+        toast('That one-hour availability had already ended.');
+      } else {
+        toast('One-hour availability cancelled');
+      }
+      refreshPlayPulseSurfaces();
+      refreshMe().catch(() => {});
+      return true;
+    } catch (error) {
+      if (!instantRallySessionMatches(callerSession)) return false;
+      if (error.code === 'pulse_not_found') {
+        invalidateMeRequests();
+        if (state.activePlayPulse?.id === pulse.id) state.activePlayPulse = null;
+        if (modal && document.body.contains(modal)) closeModal(modal);
+        refreshPlayPulseSurfaces();
+        refreshMe().catch(() => {});
+        toast('That availability window already ended');
+        return true;
+      }
+      toast(error.message);
+      return false;
+    } finally {
+      if (button && document.body.contains(button)) {
+        delete button.dataset.playPulseCancelling;
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = original;
+      }
+    }
+  }
+
+  function playPulseCommitmentCopy(pulse) {
+    const first = String(pulse?.user?.display_name || 'This player').split(/\s+/)[0];
+    return `${first} chose ${pulse?.courtName || 'this court'} as an intended destination, not a current location. Confirming creates an open quick game starting in about 15 minutes for both of you and notifies ${first}; it does not check either player in.`;
+  }
+
+  async function refreshPlayPulseAcceptAttempt(pulse, attempt, callerSession) {
+    const loc = areaLatLng();
+    const looking = await api(`/players/looking?lat=${encodeURIComponent(loc.lat)}&lng=${encodeURIComponent(loc.lng)}&radius=50`);
+    if (!instantRallySessionMatches(callerSession)) return null;
+    const refreshedPulse = normalizeLookingPulses(looking).find((item) => item.id === pulse.id);
+    if (!refreshedPulse || !refreshedPulse.acceptCapability
+        || refreshedPulse.courtId !== pulse.courtId) return null;
+    const refreshedAttempt = {
+      ...attempt,
+      acceptCapability: refreshedPulse.acceptCapability,
+      capabilityRefreshedAt: Date.now(),
+    };
+    const storageKey = playPulseAcceptAttemptKey(callerSession.userId, pulse.id);
+    if (!storageKey || !persistRecoveryValue(storageKey, JSON.stringify(refreshedAttempt))) {
+      const storageError = new Error('This device could not save a safe retry. Free some browser storage and try again.');
+      storageError.code = 'retry_storage_unavailable';
+      throw storageError;
+    }
+    return refreshedAttempt;
+  }
+
+  async function postPlayPulseAcceptance(pulse, attempt, callerSession) {
+    const send = (record) => api(`/play/pulses/${pulse.id}/accept`, {
+      method: 'POST',
+      body: JSON.stringify({
+        accept_capability: record.acceptCapability,
+        client_attempt_id: record.id,
+      }),
+    });
+    try {
+      return await send(attempt);
+    } catch (error) {
+      // Exact replay is attempted first. A 404 therefore proves this request
+      // did not already create a game; refresh a stale discovery capability
+      // and retry once with the same id if the pulse is still discoverable.
+      if (error.code !== 'pulse_not_found') throw error;
+      const refreshedAttempt = await refreshPlayPulseAcceptAttempt(
+        pulse, attempt, callerSession,
+      );
+      if (!refreshedAttempt) throw error;
+      return send(refreshedAttempt);
+    }
+  }
+
+  async function acceptPlayPulse(pulseValue, button, modal = null, errorEl = null) {
+    const pulseRecord = playPulseFromValue(pulseValue);
+    const savedAttempt = pulseRecord && readPlayPulseAcceptAttempt(
+      state.me && state.me.id, pulseRecord.id,
+    );
+    // Once an acceptance POST may have crossed the wire, local expiry must not
+    // block exact replay: the server can still return the already-created game.
+    const activePulse = normalizeActivePlayPulse(pulseRecord);
+    const pulse = activePulse || (savedAttempt && pulseRecord
+      ? { ...pulseRecord, acceptCapability: savedAttempt.acceptCapability }
+      : null);
+    if (!pulse || !pulse.acceptCapability || !button
+        || button.dataset.playPulseAccepting === 'true') return null;
+    const callerSession = instantRallySession();
+    const showError = (message) => {
+      if (errorEl && document.body.contains(errorEl)) {
+        errorEl.textContent = message;
+        errorEl.classList.remove('hidden');
+        errorEl.focus({ preventScroll: true });
+      } else toast(message);
+    };
+    if (!callerSession) {
+      showError('Sign in again before creating the quick game.');
+      return null;
+    }
+    const attempt = pendingPlayPulseAcceptAttempt(
+      callerSession.userId, pulse.id, pulse.acceptCapability,
+    );
+    if (!attempt) {
+      showError('This device could not save a safe retry. Free some browser storage and try again.');
+      return null;
+    }
+    const original = button.textContent;
+    button.dataset.playPulseAccepting = 'true';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = 'Creating game…';
+    modal?.querySelector('.modal')?.setAttribute('aria-busy', 'true');
+    errorEl?.classList.add('hidden');
+    const key = `${callerSession.userId}:${pulse.id}`;
+    let record = playPulseAcceptInFlight.get(key);
+    if (!record || record.token !== callerSession.token || record.attemptId !== attempt.id) {
+      record = {
+        token: callerSession.token,
+        attemptId: attempt.id,
+        promise: postPlayPulseAcceptance(pulse, attempt, callerSession),
+      };
+      playPulseAcceptInFlight.set(key, record);
+    }
+    try {
+      const response = await record.promise;
+      if (!instantRallySessionMatches(callerSession)) return null;
+      const gameId = safePositiveId(response && response.game && response.game.id);
+      if (!gameId) {
+        const malformed = new Error('The server did not confirm the quick game. Retry safely.');
+        malformed.isNetworkError = true;
+        throw malformed;
+      }
+      clearPlayPulseAcceptAttempt(callerSession.userId, pulse.id, attempt.id);
+      invalidateMeRequests();
+      state.playGamesCache = null;
+      refreshLookingBanner();
+      refreshMe().catch(() => {});
+      toast(`Quick game created at ${pulse.courtName}`);
+      if (modal && document.body.contains(modal) && currentOverlayEntry()?.el === modal) {
+        transitionModal(modal, () => openGameScreen(gameId));
+      } else openGameScreen(gameId);
+      if (state.tab === 'chat' && state.chatSeg === 'nearby') renderChat();
+      return response;
+    } catch (error) {
+      if (!instantRallySessionMatches(callerSession)) return null;
+      const ambiguous = playPulseRequestIsAmbiguous(error);
+      if (!ambiguous) {
+        clearPlayPulseAcceptAttempt(callerSession.userId, pulse.id, attempt.id);
+      }
+      if (['pulse_not_found', 'pulse_start_window_closed', 'invalid_accept_capability'].includes(error.code)) {
+        refreshLookingBanner();
+        if (state.tab === 'chat' && state.chatSeg === 'nearby') renderChat();
+      }
+      showError(ambiguous
+        ? 'Couldn’t confirm the game. Retry safely: the same request will not create a second game.'
+        : error.message);
+      return null;
+    } finally {
+      if (playPulseAcceptInFlight.get(key) === record) playPulseAcceptInFlight.delete(key);
+      if (button && document.body.contains(button)) {
+        delete button.dataset.playPulseAccepting;
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = errorEl && !errorEl.classList.contains('hidden')
+          ? 'Retry safely' : original;
+        modal?.querySelector('.modal')?.removeAttribute('aria-busy');
+      }
+    }
+  }
+
+  function openPlayPulseAcceptConfirmation(pulseValue) {
+    const pulseRecord = playPulseFromValue(pulseValue);
+    const retry = pulseRecord && readPlayPulseAcceptAttempt(
+      state.me && state.me.id, pulseRecord.id,
+    );
+    const pulse = normalizeActivePlayPulse(pulseRecord) || (retry ? pulseRecord : null);
+    if (!pulse) {
+      toast('That one-hour availability is no longer active.');
+      if (state.tab === 'chat' && state.chatSeg === 'nearby') renderChat();
+      return null;
+    }
+    const first = String(pulse.user?.display_name || 'This player').split(/\s+/)[0];
+    const modal = openModal(`
+      ${modalHead(`🏓 Play at ${pulse.courtName}`)}
+      <div class="play-pulse-confirm-person">
+        ${pulse.user ? avatarHtml(pulse.user, 'sm') : '<span class="play-pulse-avatar" aria-hidden="true">🏓</span>'}
+        <div><b>${esc(first)} can play at ${esc(pulse.courtName)} this hour</b><span>Available until ${esc(fmtTimeShort(pulse.expiresAt))}</span></div>
+      </div>
+      <p class="play-pulse-commitment">${esc(playPulseCommitmentCopy(pulse))}</p>
+      <p class="form-error hidden" id="play-pulse-accept-error" role="alert" tabindex="-1"></p>
+      <button type="button" class="btn btn-primary btn-block" id="play-pulse-accept-confirm">${retry ? 'Retry safely' : 'Create quick game'}</button>
+      <button type="button" class="btn-link modal-close btn-block">Not now</button>
+    `, { label: `Create a quick game with ${first} at ${pulse.courtName}` });
+    const button = modal.querySelector('#play-pulse-accept-confirm');
+    button.addEventListener('click', () => acceptPlayPulse(
+      pulse, button, modal, modal.querySelector('#play-pulse-accept-error'),
+    ));
+    return modal;
+  }
+
+  function openPlayPulseDetails(pulseValue = state.activePlayPulse) {
+    const pulse = normalizeActivePlayPulse(pulseValue);
+    if (!pulse) {
+      state.activePlayPulse = null;
+      toast('Your one-hour availability has ended.');
+      refreshPlayPulseSurfaces();
+      return null;
+    }
+    const directions = playPulseDirectionsUrl(pulse);
+    const modal = openModal(`
+      ${modalHead('Available this hour')}
+      <div class="play-pulse-detail-card">
+        <span aria-hidden="true">📍</span>
+        <div><b>${esc(pulse.courtName)}</b><span>Available until ${esc(fmtTimeShort(pulse.expiresAt))}</span></div>
+      </div>
+      <p class="play-pulse-commitment">This court is your intended destination, not your current location or a check-in. The first nearby player who accepts creates an open quick game starting in about 15 minutes for both of you and you’ll be notified.</p>
+      ${directions ? `<a class="btn btn-secondary btn-block play-pulse-directions" href="${directions}" target="_blank" rel="noopener" aria-label="Directions to ${esc(pulse.courtName)} (opens Maps)">Directions</a>` : ''}
+      <button type="button" class="btn btn-danger btn-block" id="play-pulse-cancel-detail">Cancel availability</button>
+      <button type="button" class="btn-link modal-close btn-block">Done</button>
+    `, { label: `Availability at ${pulse.courtName}` });
+    modal.querySelector('#play-pulse-cancel-detail').addEventListener('click', (event) => {
+      cancelPlayPulse(pulse, event.currentTarget, modal);
+    });
+    return modal;
+  }
+
+  function activePlayPulseBannerHtml(pulseValue = state.activePlayPulse) {
+    const pulse = normalizeActivePlayPulse(pulseValue);
+    if (!pulse) return '';
+    const directions = playPulseDirectionsUrl(pulse);
+    return `
+      <section class="play-pulse-active" aria-label="Available to play at ${esc(pulse.courtName)} until ${esc(fmtTimeShort(pulse.expiresAt))}. This is an intended destination, not a check-in.">
+        <button type="button" class="play-pulse-active-main" data-play-pulse-details>
+          <span class="play-pulse-active-icon" aria-hidden="true">📍</span>
+          <span><b>Available to play at ${esc(pulse.courtName)}</b><small>Until ${esc(fmtTimeShort(pulse.expiresAt))} · intended destination</small></span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+        <div class="play-pulse-active-actions">
+          ${directions ? `<a href="${directions}" target="_blank" rel="noopener" aria-label="Directions to ${esc(pulse.courtName)} (opens Maps)">Directions</a>` : '<button type="button" data-play-pulse-details>Details</button>'}
+          <button type="button" data-play-pulse-cancel>Cancel</button>
+        </div>
+      </section>`;
+  }
+
+  async function checkInAndStartRally(court, modal, button, errorEl = null) {
+    const selected = playNowCourt(court);
+    if (!selected || !button || button.dataset.playNowStarting === 'true') return null;
+    const original = button.textContent;
+    const modalBox = modal && modal.querySelector('.modal');
+    const showError = (message) => {
+      if (!errorEl || !document.body.contains(errorEl)) return;
+      errorEl.textContent = message;
+      errorEl.classList.remove('hidden');
+      errorEl.focus({ preventScroll: true });
+    };
+    const callerSession = instantRallySession();
+    if (!callerSession) {
+      showError('Sign in again before checking in.');
+      return null;
+    }
+    button.dataset.playNowStarting = 'true';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = 'Checking you in…';
+    modalBox?.setAttribute('aria-busy', 'true');
+    errorEl?.classList.add('hidden');
+    try {
+      const checkedIn = await api(`/courts/${selected.id}/checkin`, {
+        method: 'POST',
+        body: JSON.stringify({ looking_for_game: true }),
+      });
+      if (!instantRallySessionMatches(callerSession)) return null;
+      // The check-in POST is authoritative even before the next /me poll. This
+      // lets the rally request follow immediately without a redundant round trip.
+      const fallbackPresence = {
+        ...(state.presence || {}),
+        checked_in: true,
+        court_id: selected.id,
+        court_name: selected.name,
+        looking_for_game: true,
+      };
+      // The POST response is newer than any background /me already in flight.
+      invalidateMeRequests();
+      state.presence = checkedIn && checkedIn.presence
+        ? checkedIn.presence : fallbackPresence;
+      renderPresenceBanner();
+      button.textContent = 'Finding your rally…';
+      const result = await startInstantRally(null, {
+        presenceConfirmed: true,
+        expectedCourtId: selected.id,
+        fromModal: modal,
+        onError: (error, retrySafely) => {
+          showError(retrySafely
+            ? 'We could not confirm the rally. Your check-in is saved; retrying safely will not create a duplicate.'
+            : error.message);
+        },
+      });
+      if (!instantRallySessionMatches(callerSession)) return null;
+      if (!result) {
+        refreshMe().catch(() => { /* keep the confirmed local presence while offline */ });
+        return null;
+      }
+      fetchCourtsInView();
+      return result;
+    } catch (error) {
+      if (!instantRallySessionMatches(callerSession)) return null;
+      showError(error.message);
+      return null;
+    } finally {
+      if (button && document.body.contains(button)) {
+        delete button.dataset.playNowStarting;
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = errorEl && !errorEl.classList.contains('hidden')
+          ? 'Retry safely' : original;
+        modalBox?.removeAttribute('aria-busy');
+      }
+    }
+  }
+
+  async function openPlayNowCourtPicker({ court = null, rally = null, intent = 'play-now' } = {}) {
+    const pulseIntent = intent === 'play-pulse';
+    const preset = playNowCourt(court || (rally && {
+      id: rally.courtId,
+      name: rally.courtName,
+      city: rally.courtCity,
+    }), rally ? `${rally.readyCount || 1} ready now` : 'Selected court');
+    let selected = preset;
+    const modal = openModal(`
+      ${modalHead(pulseIntent ? 'Available this hour' : '⚡ Play now')}
+      <form id="play-now-form" novalidate>
+        <p class="play-now-intro">${pulseIntent
+          ? 'Choose where you could play during the next hour. This is an intended destination, not your current location or a check-in. The first player who accepts creates an open quick game starting in about 15 minutes for both of you.'
+          : 'Choose the court where you are physically playing. We’ll check you in, then join or start its live rally.'}</p>
+        <div class="form-field">
+          <label for="play-now-search">Court</label>
+          <input type="search" id="play-now-search" placeholder="Search courts…" autocomplete="off" />
+        </div>
+        <div class="play-now-courts" id="play-now-courts" role="listbox" aria-label="Court choices" aria-busy="true">
+          <div class="play-now-loading" role="status"><span class="spinner"></span><span>Finding current, saved, home, and nearby courts…</span></div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm hidden" id="play-now-retry-courts">Retry court suggestions</button>
+        <div class="play-now-selection ${preset ? '' : 'hidden'}" id="play-now-selection" role="status">
+          <span aria-hidden="true">📍</span><span><b id="play-now-selected-name">${preset ? esc(preset.name) : ''}</b><small>${pulseIntent ? 'Intended destination · not a check-in' : 'I am at this court now'}</small></span>
+        </div>
+        <p class="play-now-privacy"><span aria-hidden="true">👀</span> ${pulseIntent
+          ? 'Signed-in players nearby may see that you can play at this destination. The server starts one fixed one-hour window when it confirms; retries never extend it.'
+          : 'Signed-in players nearby may see your fresh ready status at this court. It expires automatically.'}</p>
+        <p class="form-error hidden" id="play-now-error" role="alert" tabindex="-1"></p>
+        <button type="submit" class="btn btn-primary btn-block" id="play-now-confirm" ${preset ? '' : 'disabled'}>${pulseIntent ? 'Available this hour' : 'I’m here &amp; ready'}</button>
+        <button type="button" class="btn-link modal-close btn-block">Cancel</button>
+      </form>
+    `, { label: pulseIntent ? 'Share one-hour availability at a court' : 'Play now at a court' });
+    const resultsEl = modal.querySelector('#play-now-courts');
+    const searchEl = modal.querySelector('#play-now-search');
+    const confirmButton = modal.querySelector('#play-now-confirm');
+    const retryButton = modal.querySelector('#play-now-retry-courts');
+    const errorEl = modal.querySelector('#play-now-error');
+    const suggestionsById = new Map();
+    let suggestionRows = [];
+    let searchTimer = null;
+    let searchSeq = 0;
+    let suggestionLoadSeq = 0;
+
+    const addSuggestion = (value, tag = '') => {
+      const item = playNowCourt(value, tag);
+      if (!item || suggestionsById.has(item.id)) return;
+      suggestionsById.set(item.id, item);
+      suggestionRows.push(item);
+    };
+    if (preset) addSuggestion(preset, preset.tag);
+    if (state.presence && state.presence.checked_in) addSuggestion({
+      id: state.presence.court_id,
+      name: state.presence.court_name,
+    }, '📍 Current check-in');
+    if (state.me && state.me.home_court_id) addSuggestion({
+      id: state.me.home_court_id,
+      name: state.me.home_court_name || 'Home court',
+    }, '🏠 Home');
+
+    const syncSelection = () => {
+      modal.querySelector('#play-now-selection').classList.toggle('hidden', !selected);
+      modal.querySelector('#play-now-selected-name').textContent = selected ? selected.name : '';
+      confirmButton.disabled = !selected;
+      errorEl.classList.add('hidden');
+      resultsEl.querySelectorAll('[data-play-now-court]').forEach((row) => {
+        const active = !!selected && Number(row.dataset.playNowCourt) === selected.id;
+        row.classList.toggle('selected', active);
+        row.setAttribute('aria-selected', String(active));
+        const pin = row.querySelector('.play-now-court-pin');
+        if (pin) pin.textContent = active ? '✓' : '📍';
+      });
+    };
+    const renderCourtRows = (items = suggestionRows) => {
+      resultsEl.setAttribute('aria-busy', 'false');
+      resultsEl.innerHTML = items.length ? items.map((item) => `
+        <button type="button" class="play-now-court${selected && selected.id === item.id ? ' selected' : ''}"
+          role="option" aria-selected="${!!selected && selected.id === item.id}" data-play-now-court="${item.id}">
+          <span class="play-now-court-pin" aria-hidden="true">${selected && selected.id === item.id ? '✓' : '📍'}</span>
+          <span class="row-main"><span class="row-title">${esc(item.name)}</span><span class="row-sub">${esc(item.city || 'Pickleball court')}</span></span>
+          ${item.tag || item.distanceMiles != null ? `<span class="tag">${esc(item.tag || `${item.distanceMiles} mi`)}</span>` : ''}
+        </button>`).join('') : '<div class="empty-state" style="padding:14px">No suggested courts yet. Search by court or city.</div>';
+      resultsEl.querySelectorAll('[data-play-now-court]').forEach((row) => row.addEventListener('click', () => {
+        selected = items.find((item) => item.id === Number(row.dataset.playNowCourt))
+          || suggestionsById.get(Number(row.dataset.playNowCourt));
+        syncSelection();
+        confirmButton.focus({ preventScroll: true });
+      }));
+      syncSelection();
+    };
+
+    const loadSuggestions = async () => {
+      const loadSeq = ++suggestionLoadSeq;
+      retryButton.classList.add('hidden');
+      resultsEl.setAttribute('aria-busy', 'true');
+      resultsEl.innerHTML = '<div class="play-now-loading" role="status"><span class="spinner"></span><span>Finding current, saved, home, and nearby courts…</span></div>';
+      const loc = areaLatLng();
+      const [saved, nearby] = await Promise.all([
+        api('/courts/favorites').catch(() => null),
+        api(`/courts?lat=${loc.lat}&lng=${loc.lng}&radius=30&limit=8`).catch(() => null),
+      ]);
+      if (loadSeq !== suggestionLoadSeq || !document.body.contains(modal)) return;
+      (saved && saved.items || []).forEach((item) => addSuggestion(item, '⭐ Saved'));
+      (nearby && nearby.items || []).forEach((item) => addSuggestion(
+        item, item.distance_miles != null ? `${item.distance_miles} mi` : 'Nearby',
+      ));
+      if (searchEl.value.trim().length < 2) renderCourtRows();
+      if (!saved && !nearby && searchEl.value.trim().length < 2) {
+        retryButton.classList.remove('hidden');
+        errorEl.textContent = 'Court suggestions could not load. Search for a court or retry.';
+        errorEl.classList.remove('hidden');
+      }
+    };
+
+    retryButton.addEventListener('click', loadSuggestions);
+    searchEl.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const query = searchEl.value.trim();
+      if (query.length < 2) {
+        searchSeq += 1;
+        renderCourtRows();
+        return;
+      }
+      searchTimer = setTimeout(async () => {
+        const seq = ++searchSeq;
+        resultsEl.setAttribute('aria-busy', 'true');
+        resultsEl.innerHTML = '<div class="play-now-loading" role="status"><span class="spinner"></span><span>Searching courts…</span></div>';
+        let url = `/courts?q=${encodeURIComponent(query)}&limit=8`;
+        if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
+        try {
+          const response = await api(url);
+          if (seq !== searchSeq || !document.body.contains(modal)) return;
+          const items = (response.items || []).map((item) => playNowCourt(
+            item, item.distance_miles != null ? `${item.distance_miles} mi` : '',
+          )).filter(Boolean);
+          items.forEach((item) => {
+            if (!suggestionsById.has(item.id)) suggestionsById.set(item.id, item);
+          });
+          renderCourtRows(items);
+        } catch (error) {
+          if (seq !== searchSeq || !document.body.contains(modal)) return;
+          resultsEl.setAttribute('aria-busy', 'false');
+          resultsEl.innerHTML = `<div class="empty-state" style="padding:14px">${esc(error.message)}<br>Change the search or try again.</div>`;
+        }
+      }, 250);
+    });
+    modal._cleanupFns.push(() => clearTimeout(searchTimer));
+    modal.querySelector('#play-now-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!selected) {
+        errorEl.textContent = pulseIntent
+          ? 'Choose the court where you could play this hour.'
+          : 'Choose the court where you are playing.';
+        errorEl.classList.remove('hidden');
+        errorEl.focus({ preventScroll: true });
+        return;
+      }
+      if (pulseIntent) await declarePlayPulse(selected, modal, confirmButton, errorEl);
+      else await checkInAndStartRally(selected, modal, confirmButton, errorEl);
+    });
+    loadSuggestions();
+    return modal;
+  }
+
+  function openPlayPulseCourtPicker(options = {}) {
+    return openPlayNowCourtPicker({ ...options, intent: 'play-pulse' });
+  }
+
+  function arrivalRequestIsAmbiguous(error) {
+    const status = Number(error && error.status) || 0;
+    return !!(error && error.isNetworkError) || status === 408 || status === 425
+      || status === 429 || status >= 500;
+  }
+
+  function arrivalRallySummary(arrival) {
+    if (!arrival) return null;
+    return rallySummaryFromValue({
+      game_id: arrival.gameId,
+      court_id: arrival.courtId,
+      court_name: arrival.courtName,
+      court_city: arrival.courtCity,
+      court_address: arrival.courtAddress,
+      court_latitude: arrival.courtLatitude,
+      court_longitude: arrival.courtLongitude,
+      ready_count: arrival.readyCount,
+      roster_count: arrival.rosterCount,
+      on_the_way_count: arrival.onWayCount,
+      committed_count: arrival.committedCount,
+      physical_spots_left: arrival.physicalSpotsLeft,
+      spots_left: arrival.spotsLeft,
+      max_players: arrival.maxPlayers,
+      arrival_capability: arrival.arrivalCapability,
+      arrival_available: arrival.arrivalAvailable,
+      my_arrival: arrival,
+    });
+  }
+
+  function hydrateArrivalDirections(modal, rally) {
+    const link = modal && modal.querySelector('[data-arrival-directions]');
+    if (!link) return;
+    const applyCourt = (court) => {
+      const href = courtDirectionsUrl(court);
+      if (!href || !document.body.contains(link)) return false;
+      link.href = href;
+      link.removeAttribute('aria-disabled');
+      link.classList.remove('is-disabled');
+      return true;
+    };
+    if (applyCourt(rallyCourtForDirections(rally))) return;
+    link.setAttribute('aria-disabled', 'true');
+    link.classList.add('is-disabled');
+    const callerSession = instantRallySession();
+    if (!callerSession) return;
+    api(`/courts/${rally.courtId}`).then((court) => {
+      if (!instantRallySessionMatches(callerSession) || !document.body.contains(modal)) return;
+      applyCourt(court);
+    }).catch(() => { /* the court detail remains available if Maps cannot be resolved */ });
+  }
+
+  async function reserveRallyArrival(rally, etaMinutes) {
+    const callerSession = instantRallySession();
+    const gameId = safePositiveId(rally && rally.gameId);
+    if (!callerSession || !gameId) {
+      const error = new Error('Sign in again before holding a rally spot.');
+      error.code = 'invalid_session';
+      throw error;
+    }
+    const knownArrival = activeArrivalForGame(gameId, rally.myArrival, rally);
+    if (knownArrival) {
+      clearRallyArrivalAttempt(callerSession.userId, gameId);
+      return { outcome: 'existing', arrival: knownArrival };
+    }
+    const attempt = pendingRallyArrivalAttempt(callerSession.userId, gameId, etaMinutes);
+    if (!attempt) {
+      const error = new Error('Nothing was sent because this browser could not save a safe retry.');
+      error.code = 'arrival_attempt_unavailable';
+      throw error;
+    }
+    const shared = rallyArrivalInFlight;
+    if (shared && shared.token === callerSession.token && shared.userId === callerSession.userId
+        && shared.gameId === gameId && shared.attemptId === attempt.id) return shared.promise;
+    const body = {
+      eta_minutes: attempt.etaMinutes,
+      client_attempt_id: attempt.id,
+    };
+    if (rally.arrivalCapability) body.arrival_capability = rally.arrivalCapability;
+    const promise = (async () => {
+      try {
+        const result = await api(`/games/${gameId}/arrival`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        });
+        if (!instantRallySessionMatches(callerSession)) return { abandoned: true };
+        clearRallyArrivalAttempt(callerSession.userId, gameId, attempt.id);
+        const freshRally = rallySummaryFromValue(result && result.game) || rally;
+        const arrival = normalizeActiveArrival(result && result.arrival, freshRally);
+        if (!arrival) {
+          const ended = new Error('That saved arrival has already ended. Refresh nearby rallies and try again.');
+          ended.code = 'arrival_no_longer_active';
+          ended.status = 409;
+          throw ended;
+        }
+        invalidateMeRequests();
+        state.activeArrival = arrival;
+        refreshPlayGamesAfterRallyMutation();
+        renderActiveGameBanner();
+        refreshLookingBanner();
+        refreshMe().catch(() => {});
+        return { ...result, arrival };
+      } catch (error) {
+        if (instantRallySessionMatches(callerSession) && !arrivalRequestIsAmbiguous(error)) {
+          clearRallyArrivalAttempt(callerSession.userId, gameId, attempt.id);
+        }
+        throw error;
+      }
+    })();
+    const record = {
+      token: callerSession.token,
+      userId: callerSession.userId,
+      gameId,
+      attemptId: attempt.id,
+      promise,
+    };
+    rallyArrivalInFlight = record;
+    try { return await promise; }
+    finally { if (rallyArrivalInFlight === record) rallyArrivalInFlight = null; }
+  }
+
+  function openRallyArrivalSheet(value, { fromModal = null } = {}) {
+    const rally = value && value.courtId ? value : rallySummaryFromValue(value);
+    if (!rally || !rally.gameId) {
+      toast('This rally needs a fresh nearby update before it can hold a spot.');
+      refreshLookingBanner();
+      return null;
+    }
+    const existingArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
+    if (existingArrival) return openArrivalDetails(existingArrival);
+    if (!rally.arrivalAvailable || !rally.arrivalCapability) {
+      toast('This rally is wrapping up, so remote spot holds are closed. Refresh nearby rallies for the next one.');
+      refreshLookingBanner();
+      return null;
+    }
+    if (rally.spotsLeft <= 0 || rally.onWayCount > 0) {
+      toast(rally.onWayCount > 0
+        ? 'Another player is already on the way, so the remote spot is held.'
+        : 'That rally is fully committed.');
+      return null;
+    }
+    const callerSession = instantRallySession();
+    if (!callerSession) return null;
+    const pending = readRallyArrivalAttempt(callerSession.userId, rally.gameId);
+    const initialEta = pending ? pending.etaMinutes : 10;
+    const modal = openModal(`
+      ${modalHead(`🚗 Head to ${rally.courtName}`)}
+      <div class="arrival-summary${rally.rosterCount > rally.readyCount ? ' has-roster' : ''}" aria-label="${esc(rallyCountsText(rally))}">
+        <span><b>${rally.readyCount}/${rally.maxPlayers}</b><small>physically ready</small></span>
+        ${rally.rosterCount > rally.readyCount ? `<span><b>${rally.rosterCount}</b><small>joined</small></span>` : ''}
+        <span><b>${rally.onWayCount}</b><small>on the way</small></span>
+        <span><b>${rally.spotsLeft}</b><small>spot${rally.spotsLeft === 1 ? '' : 's'} open</small></span>
+      </div>
+      <form id="arrival-eta-form" novalidate>
+        <fieldset class="arrival-eta-fieldset">
+          <legend>When can you arrive?</legend>
+          <div class="arrival-eta-options">
+            ${[5, 10, 15].map((eta) => `
+              <label class="arrival-eta-option">
+                <input type="radio" name="arrival-eta" value="${eta}" ${eta === initialEta ? 'checked' : ''} ${pending && eta !== initialEta ? 'disabled' : ''}>
+                <span>${eta}<small>min</small></span>
+              </label>`).join('')}
+          </div>
+        </fieldset>
+        <p class="arrival-hold-explainer">One remote spot can be held. The server will confirm the exact expiration time, and the hold ends sooner if the rally closes.</p>
+        ${pending ? `<p class="arrival-retry-note" role="status">Retrying the same ${pending.etaMinutes}-minute hold request won’t create or extend another hold.</p>` : ''}
+        <p class="form-error hidden" id="arrival-error" role="alert" tabindex="-1"></p>
+        <button type="submit" class="btn btn-primary btn-block" id="arrival-confirm">Hold my spot · ${initialEta} min</button>
+        <a class="btn btn-secondary btn-block arrival-directions" data-arrival-directions target="_blank" rel="noopener" aria-label="Directions to ${esc(rally.courtName)} (opens Maps)">Directions</a>
+        <button type="button" class="btn-link modal-close btn-block">Not now</button>
+      </form>
+    `, { label: `Arrival time for ${rally.courtName}` });
+    hydrateArrivalDirections(modal, rally);
+    const form = modal.querySelector('#arrival-eta-form');
+    const button = modal.querySelector('#arrival-confirm');
+    const errorEl = modal.querySelector('#arrival-error');
+    const syncEta = () => {
+      const eta = Number(form.elements['arrival-eta'].value) || initialEta;
+      button.textContent = pending ? `Retry same request · ${eta} min` : `Hold my spot · ${eta} min`;
+    };
+    form.addEventListener('change', syncEta);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (button.disabled) return;
+      const eta = Number(form.elements['arrival-eta'].value);
+      if (![5, 10, 15].includes(eta)) {
+        errorEl.textContent = ERROR_TEXT.invalid_eta_minutes;
+        errorEl.classList.remove('hidden');
+        errorEl.focus({ preventScroll: true });
+        return;
+      }
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = pending ? 'Retrying the same hold…' : 'Holding your spot…';
+      errorEl.classList.add('hidden');
+      try {
+        const result = await reserveRallyArrival(rally, eta);
+        if (!result || result.abandoned || !document.body.contains(modal)) return;
+        toast(result.outcome === 'existing' ? 'Your held spot is confirmed' : 'Spot held — head to the court 🚗');
+        refreshMe().catch(() => {});
+        transitionModal(modal, () => openArrivalDetails(result.arrival));
+      } catch (error) {
+        if (!instantRallySessionMatches(callerSession) || !document.body.contains(errorEl)) return;
+        if (error.code === 'already_joined') {
+          clearArrivalAfterConfirmedMembership(callerSession, rally.gameId);
+          transitionModal(modal, () => openGameScreen(rally.gameId));
+          refreshMe().catch(() => {});
+          return;
+        }
+        if (['already_at_court', 'active_checkin_elsewhere'].includes(error.code)) {
+          // Presence errors are authoritative even if the follow-up /me read
+          // is offline. Keep routing the player to an explicit, private
+          // court-confirmation path instead of escaping this submit handler.
+          await refreshMe().catch(() => false);
+          if (!instantRallySessionMatches(callerSession) || !document.body.contains(modal)) return;
+          let atTargetCourt = isCheckedInAtCourt(rally.courtId);
+          if (error.code === 'already_at_court' && !atTargetCourt) {
+            // The failed reservation is itself an authoritative same-court
+            // presence check. Keep it private while handing off to direct join.
+            invalidateMeRequests();
+            state.presence = {
+              ...(state.presence || {}),
+              checked_in: true,
+              court_id: rally.courtId,
+              court_name: rally.courtName,
+              looking_for_game: false,
+            };
+            renderPresenceBanner();
+            atTargetCourt = true;
+          }
+          if (atTargetCourt) {
+            transitionModal(modal, () => openAtCourtRallyJoinSheet(rally));
+          } else {
+            transitionModal(modal, () => openArrivalCheckInConfirmation(rally));
+          }
+          return;
+        }
+        if (['active_arrival_elsewhere', 'arrival_already_active'].includes(error.code)) {
+          await refreshMe().catch(() => {});
+          if (state.activeArrival && document.body.contains(modal)) {
+            transitionModal(modal, () => openArrivalDetails(state.activeArrival));
+            return;
+          }
+        }
+        if (['rally_no_longer_active', 'rally_full', 'arrival_slot_taken', 'game_not_found'].includes(error.code)) {
+          state.playGamesCache = null;
+          refreshLookingBanner();
+        }
+        const ambiguous = arrivalRequestIsAmbiguous(error);
+        errorEl.textContent = ambiguous
+          ? 'We could not confirm the response. Retry safely: the same request will not create or extend another hold.'
+          : error.message;
+        errorEl.classList.remove('hidden');
+        errorEl.focus({ preventScroll: true });
+        const saved = readRallyArrivalAttempt(callerSession.userId, rally.gameId);
+        if (saved) {
+          form.querySelectorAll('input[name="arrival-eta"]').forEach((input) => {
+            input.checked = Number(input.value) === saved.etaMinutes;
+            input.disabled = Number(input.value) !== saved.etaMinutes;
+          });
+        }
+      } finally {
+        if (document.body.contains(button)) {
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          syncEta();
+        }
+      }
+    });
+    return modal;
+  }
+
+  async function cancelRallyArrival(arrival, modal, button, errorEl) {
+    const callerSession = instantRallySession();
+    if (!callerSession || !arrival || button.disabled) return;
+    const original = button.textContent;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = 'Cancelling…';
+    errorEl?.classList.add('hidden');
+    try {
+      await api(`/games/${arrival.gameId}/arrival`, { method: 'DELETE' });
+      if (!instantRallySessionMatches(callerSession)) return;
+      clearRallyArrivalAttempt(callerSession.userId, arrival.gameId);
+      invalidateMeRequests();
+      state.activeArrival = null;
+      refreshPlayGamesAfterRallyMutation();
+      renderActiveGameBanner();
+      refreshLookingBanner();
+      closeModal(modal);
+      toast('Your held spot was released');
+      refreshMe().catch(() => {});
+    } catch (error) {
+      if (!instantRallySessionMatches(callerSession) || !document.body.contains(button)) return;
+      if (errorEl) {
+        errorEl.textContent = error.message;
+        errorEl.classList.remove('hidden');
+        errorEl.focus({ preventScroll: true });
+      } else toast(error.message);
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      button.textContent = original;
+    }
+  }
+
+  function openArrivalDetails(value) {
+    const arrival = normalizeActiveArrival(value);
+    if (!arrival) {
+      state.activeArrival = null;
+      renderActiveGameBanner();
+      toast('That held spot has ended. Refresh nearby rallies to try again.');
+      refreshMe().catch(() => {});
+      return null;
+    }
+    const rally = arrivalRallySummary(arrival);
+    const modal = openModal(`
+      ${modalHead('🚗 Your trip to the rally')}
+      <div class="arrival-held-card" role="status">
+        <span class="arrival-held-icon" aria-hidden="true">✓</span>
+        <div><b>Spot held at ${esc(arrival.courtName)}</b><span>${esc(arrivalEtaLabel(arrival))}</span></div>
+      </div>
+      <p class="arrival-reservation-copy">${esc(arrivalReservationCopy(arrival))}</p>
+      <div class="arrival-summary${arrival.rosterCount > arrival.readyCount ? ' has-roster' : ''}" aria-label="${esc(rallyCountsText(rally))}">
+        <span><b>${arrival.readyCount}/${arrival.maxPlayers}</b><small>physically ready</small></span>
+        ${arrival.rosterCount > arrival.readyCount ? `<span><b>${arrival.rosterCount}</b><small>joined</small></span>` : ''}
+        <span><b>${arrival.onWayCount}</b><small>on the way</small></span>
+        <span><b>${arrival.physicalSpotsLeft}</b><small>physical spot${arrival.physicalSpotsLeft === 1 ? '' : 's'}</small></span>
+      </div>
+      <a class="btn btn-secondary btn-block arrival-directions" data-arrival-directions target="_blank" rel="noopener" aria-label="Directions to ${esc(arrival.courtName)} (opens Maps)">Directions</a>
+      <button type="button" class="btn btn-primary btn-block" id="arrival-im-here">I’m here</button>
+      <button type="button" class="btn btn-danger btn-block" id="arrival-cancel">Cancel trip</button>
+      <p class="form-error hidden" id="arrival-detail-error" role="alert" tabindex="-1"></p>
+      <button type="button" class="btn-link modal-close btn-block">Close</button>
+    `, { label: `Held spot at ${arrival.courtName}` });
+    hydrateArrivalDirections(modal, rally);
+    modal.querySelector('#arrival-im-here').addEventListener('click', () => {
+      transitionModal(modal, () => openArrivalCheckInConfirmation(arrival));
+    });
+    modal.querySelector('#arrival-cancel').addEventListener('click', (event) => {
+      cancelRallyArrival(arrival, modal, event.currentTarget, modal.querySelector('#arrival-detail-error'));
+    });
+    return modal;
+  }
+
+  function openAtCourtRallyJoinSheet(rally) {
+    if (!rally || !rally.courtId) return null;
+    const modal = openModal(`
+      ${modalHead(`📍 You’re at ${rally.courtName}`)}
+      <p class="arrival-checkin-copy">Your court check-in is private. Join the rally to appear physically ready to its players.</p>
+      <p class="form-error hidden" id="at-court-join-error" role="alert" tabindex="-1"></p>
+      <button type="button" class="btn btn-primary btn-block" id="at-court-join">Join rally</button>
+      <button type="button" class="btn btn-secondary btn-block modal-close">Not now</button>
+    `, { label: `Join the rally at ${rally.courtName}` });
+    const button = modal.querySelector('#at-court-join');
+    const errorEl = modal.querySelector('#at-court-join-error');
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      const callerSession = instantRallySession();
+      if (!callerSession) return;
+      errorEl.classList.add('hidden');
+      const result = await openReadyRally(rally, button);
+      if (!instantRallySessionMatches(callerSession) || !document.body.contains(errorEl)) return;
+      if (!result) {
+        errorEl.textContent = 'We could not confirm the join. Your private court check-in is saved; tap Join rally to retry.';
+        errorEl.classList.remove('hidden');
+        errorEl.focus({ preventScroll: true });
+      }
+    });
+    return modal;
+  }
+
+  function openArrivalCheckInConfirmation(value) {
+    const arrival = normalizeActiveArrival(value);
+    const resemblesArrival = !!(value && (value.expires_at || value.expiresAt));
+    if (!arrival && resemblesArrival) return openArrivalDetails(value);
+    const rally = arrival ? arrivalRallySummary(arrival)
+      : (value && value.courtId ? value : rallySummaryFromValue(value));
+    if (!rally) {
+      toast('Refresh nearby rallies before confirming this court.');
+      return null;
+    }
+    const modal = openModal(`
+      ${modalHead(`📍 Are you at ${rally.courtName}?`)}
+      <p class="arrival-checkin-copy">Only continue once you’re physically at this court. This checks you in privately, then joins the current rally without broadcasting a ready signal first.</p>
+      <p class="form-error hidden" id="arrival-checkin-error" role="alert" tabindex="-1"></p>
+      <button type="button" class="btn btn-primary btn-block" id="arrival-checkin-confirm">Check in &amp; join</button>
+      <button type="button" class="btn btn-secondary btn-block modal-close">Not there yet</button>
+    `, { label: `Confirm arrival at ${rally.courtName}` });
+    const button = modal.querySelector('#arrival-checkin-confirm');
+    const errorEl = modal.querySelector('#arrival-checkin-error');
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      const callerSession = instantRallySession();
+      if (!callerSession) return;
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = 'Checking you in…';
+      errorEl.classList.add('hidden');
+      try {
+        const checkedIn = await api(`/courts/${rally.courtId}/checkin`, {
+          method: 'POST',
+          body: JSON.stringify({ looking_for_game: false }),
+        });
+        if (!instantRallySessionMatches(callerSession)) return;
+        invalidateMeRequests();
+        state.presence = checkedIn && checkedIn.presence ? checkedIn.presence : {
+          ...(state.presence || {}),
+          checked_in: true,
+          court_id: rally.courtId,
+          court_name: rally.courtName,
+          looking_for_game: false,
+        };
+        renderPresenceBanner();
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = 'Joining your rally…';
+        const joined = await openReadyRally(rally, button);
+        if (!instantRallySessionMatches(callerSession)) return;
+        refreshMe().catch(() => {});
+        fetchCourtsInView();
+        return joined;
+      } catch (error) {
+        if (!instantRallySessionMatches(callerSession) || !document.body.contains(errorEl)) return;
+        errorEl.textContent = error.message;
+        errorEl.classList.remove('hidden');
+        errorEl.focus({ preventScroll: true });
+      } finally {
+        if (document.body.contains(button) && !button.dataset.joiningRally) {
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          button.textContent = 'Check in & join';
+        }
+      }
+    });
+    return modal;
+  }
+
+  function refreshPlayGamesAfterRallyMutation() {
+    state.playGamesCache = null;
+    if (state.tab === 'play' && state.playSeg === 'games') renderPlay();
+  }
+
+  function clearArrivalAfterConfirmedMembership(callerSession, arrivalGameId) {
+    if (!instantRallySessionMatches(callerSession)) return;
+    const gameId = safePositiveId(arrivalGameId);
+    invalidateMeRequests();
+    if (gameId) clearRallyArrivalAttempt(callerSession.userId, gameId);
+    if (!state.activeArrival || !gameId || state.activeArrival.gameId === gameId) {
+      state.activeArrival = null;
+      renderActiveGameBanner();
+    }
+    refreshPlayGamesAfterRallyMutation();
+  }
+
+  async function recoverRallyAfterConfirmedArrival(
+    button, options, callerSession, arrivalGameId,
+  ) {
+    const result = await startInstantRally(button, options);
+    if (!instantRallySessionMatches(callerSession)) return null;
+    if (safePositiveId(result && result.game && result.game.id)) {
+      clearArrivalAfterConfirmedMembership(callerSession, arrivalGameId);
+    }
+    return result;
+  }
+
+  async function openReadyRally(rally, button = null) {
+    const summary = rally && rally.courtId ? rally : rallySummaryFromValue(rally);
+    const courtId = safePositiveId(summary && summary.courtId);
+    const sourceModal = button && button.closest('.modal-backdrop');
+    if (!courtId) {
+      state.chatSeg = 'nearby';
+      switchTab('chat');
+      return null;
+    }
+    const ownArrival = activeArrivalForGame(summary.gameId, summary.myArrival, summary);
+    if (!isCheckedInAtCourt(courtId)) {
+      const openConfirmation = () => ownArrival
+        ? openArrivalDetails(ownArrival)
+        : openRallyArrivalSheet(summary);
+      if (sourceModal && currentOverlayEntry()?.el === sourceModal) {
+        transitionModal(sourceModal, openConfirmation);
+        return null;
+      }
+      return openConfirmation();
+    }
+    if (summary.spotsLeft <= 0 && !ownArrival) {
+      toast(summary.onWayCount > 0
+        ? 'That rally is committed — finding the next rally at this court.'
+        : 'That rally is full — finding the next rally at this court.');
+      return startInstantRally(button, {
+        fromModal: sourceModal || null,
+        expectedCourtId: courtId,
+      });
+    }
+    const gameId = safePositiveId(summary.gameId);
+    const callerSession = instantRallySession();
+    if (!callerSession) return null;
+    if (!gameId) return startInstantRally(button, {
+      fromModal: sourceModal || null,
+      expectedCourtId: courtId,
+    });
+    if (button?.dataset.joiningRally === 'true') return null;
+    const original = button?.innerHTML;
+    if (button) {
+      button.dataset.joiningRally = 'true';
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = 'Joining…';
+    }
+    try {
+      await api(`/games/${gameId}/join`, { method: 'POST' });
+      if (!instantRallySessionMatches(callerSession)) return null;
+      clearArrivalAfterConfirmedMembership(callerSession, gameId);
+      toast("You're in the rally! 🏓");
+      refreshMe().catch(() => {});
+      openResolvedRallyGame(gameId, sourceModal || null);
+      return gameId;
+    } catch (error) {
+      if (!instantRallySessionMatches(callerSession)) return null;
+      const staleCodes = ['game_full', 'game_not_open', 'game_not_found', 'rally_no_longer_active'];
+      if (staleCodes.includes(error.code)) {
+        toast('That rally just changed — finding the current one');
+        return recoverRallyAfterConfirmedArrival(button, {
+          fromModal: sourceModal || null,
+          expectedCourtId: courtId,
+        }, callerSession, gameId);
+      }
+      if (error.code === 'already_joined') {
+        clearArrivalAfterConfirmedMembership(callerSession, gameId);
+        openResolvedRallyGame(gameId, sourceModal || null);
+        return gameId;
+      }
+      // A direct join only owns another game when the server explicitly says
+      // this player already has an active rally. Do not open arbitrary IDs
+      // embedded in stale/privacy errors.
+      const recoveredGame = error.code === 'active_rally_elsewhere'
+        ? authoritativeRallyGame(error) : null;
+      if (recoveredGame) {
+        clearInstantRallyAttempt();
+        clearArrivalAfterConfirmedMembership(callerSession, gameId);
+        toast('You already have a rally in progress — opening it now');
+        openResolvedRallyGame(recoveredGame.id, sourceModal || null);
+        return recoveredGame.id;
+      }
+      if (['active_checkin_required', 'active_checkin_court_mismatch'].includes(error.code)) {
+        const openConfirmation = () => {
+          if (!instantRallySessionMatches(callerSession)) return;
+          if (sourceModal) {
+            if (!document.body.contains(sourceModal)
+                || currentOverlayEntry()?.el !== sourceModal) return;
+            transitionModal(sourceModal, () => openPlayNowCourtPicker());
+          } else {
+            openPlayNowCourtPicker();
+          }
+        };
+        refreshMe().finally(openConfirmation);
+        return null;
+      }
+      toast(error.message);
+      return null;
+    } finally {
+      if (button && document.body.contains(button)) {
+        delete button.dataset.joiningRally;
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.innerHTML = original;
+      }
+    }
+  }
+
   function openCheckInSheet(court) {
     const modal = openModal(`
       <div class="checkin-sheet">
         <div class="celebrate-emoji" style="font-size:46px">📍</div>
         <h3 style="margin:6px 0 2px">Check in at ${esc(court.name)}</h3>
-        <p class="row-sub" style="margin-bottom:18px">Friends will see you're here.</p>
+        <p class="row-sub" style="margin-bottom:10px">Choose what you’re doing at this court.</p>
         <button class="btn btn-primary btn-block" id="ci-lfg" style="margin-bottom:10px;padding:16px">
-          <svg class="pb-ic"><use href="#pb"/></svg> I'm looking for players
+          <svg class="pb-ic"><use href="#pb"/></svg> I’m here &amp; ready — find a game
         </button>
         <button class="btn btn-secondary btn-block" id="ci-play" style="padding:16px">
           👍 Just playing with my group
         </button>
+        <p class="play-now-privacy"><span aria-hidden="true">👀</span> If you’re ready, signed-in players nearby may see that fresh status until it expires automatically.</p>
+        <p class="form-error hidden" id="ci-error" role="alert" tabindex="-1"></p>
         <button class="btn-link modal-close btn-block" style="margin-top:8px">Cancel</button>
       </div>
     `);
-    const doCheckIn = async (looking) => {
+    const errorEl = modal.querySelector('#ci-error');
+    const doGroupCheckIn = async (button) => {
+      if (button.dataset.submitting === 'true') return;
+      const original = button.textContent;
+      button.dataset.submitting = 'true';
+      button.disabled = true;
+      button.textContent = 'Checking in…';
+      errorEl.classList.add('hidden');
       try {
         await api(`/courts/${court.id}/checkin`, {
           method: 'POST',
-          body: JSON.stringify({ looking_for_game: looking }),
+          body: JSON.stringify({ looking_for_game: false }),
         });
         const followupLoad = beginFollowupAfterClosingModal(modal);
-        toast(looking ? `You're in — players can find you 🏓` : `Checked in at ${court.name}`);
+        toast(`Checked in at ${court.name}`);
         await refreshMe();
         fetchCourtsInView();
         if (followupLoad && routedOverlayLoadIsCurrent(followupLoad)) {
           maybeAskHours(court);
         }
-      } catch (e) { toast(e.message); }
+      } catch (error) {
+        errorEl.textContent = error.message;
+        errorEl.classList.remove('hidden');
+        errorEl.focus({ preventScroll: true });
+        delete button.dataset.submitting;
+        button.disabled = false;
+        button.textContent = original;
+      }
     };
-    modal.querySelector('#ci-lfg').addEventListener('click', () => doCheckIn(true));
-    modal.querySelector('#ci-play').addEventListener('click', () => doCheckIn(false));
+    modal.querySelector('#ci-lfg').addEventListener('click', (event) => {
+      checkInAndStartRally(court, modal, event.currentTarget, errorEl);
+    });
+    modal.querySelector('#ci-play').addEventListener('click', (event) => doGroupCheckIn(event.currentTarget));
   }
 
   // ---------- Games ----------
@@ -5088,7 +7735,10 @@
 
   function gameCardHtml(game, { compact = false } = {}) {
     const court = game.court || {};
-    const typeTag = game.game_type === 'ranked'
+    const assembly = instantRallyAssembly(game);
+    const typeTag = game.is_instant
+      ? `<span class="tag${assembly ? ' live' : ''}" style="margin:0 0 0 8px">⚡ Rally</span>`
+      : game.game_type === 'ranked'
       ? '<span class="tag ranked" style="margin:0 0 0 8px">🏆 Ranked</span>'
       : '<span class="tag" style="margin:0 0 0 8px">Casual</span>';
     const visTag = game.visibility === 'private'
@@ -5126,7 +7776,24 @@
     let banner = '';
     let cardStyle = '';
 
-    if (game.status === 'upcoming') {
+    if (game.status === 'upcoming' && assembly) {
+      cardStyle = 'border:2px solid var(--green-600)';
+      banner = `<div class="status-banner rally-banner">${assembly.banner}</div>`;
+      if (!game.is_joined) {
+        const rally = rallySummaryFromValue(game);
+        const rallyAction = rallyActionState(rally);
+        action = rallyAction.enabled
+          ? `<button class="btn btn-primary btn-sm" data-game-join="${game.id}" data-instant-rally="true" ${rallyDatasetAttributes(rally)}>${esc(rallyAction.label)}</button>`
+          : `<span class="tag warn" style="margin:0">${esc(rallyAction.label)}</span>`;
+      }
+    } else if (instantRallyScorePending(game)) {
+      banner = '<div class="status-banner">📝 Played? Tap to enter the score.</div>';
+      if (game.is_creator) {
+        action = `<button class="btn btn-secondary btn-sm" data-game-dismiss="${game.id}">Didn't happen</button>`;
+      }
+    } else if (instantRallyClosed(game)) {
+      banner = '<div class="status-banner">😴 This rally ended without enough players.</div>';
+    } else if (game.status === 'upcoming') {
       const startMs = new Date(game.scheduled_at).getTime();
       const inProgress = startMs <= Date.now();
       // Hours past its start a game isn't "live" anymore — nag for the score
@@ -5182,7 +7849,7 @@
       <div class="card" style="${cardStyle};cursor:pointer" data-open-game="${game.id}">
         <div class="row" style="margin-bottom:8px">
           <div class="row-main">
-            <div class="row-title">${esc(game.recurrence === 'weekly' && game.status === 'upcoming'
+            <div class="row-title">${game.is_instant && game.status === 'upcoming' ? (assembly ? 'Right now' : 'Played recently') : esc(game.recurrence === 'weekly' && game.status === 'upcoming'
               ? `${new Date(game.scheduled_at).toLocaleDateString([], { weekday: 'long' })}s · ${new Date(game.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
               : fmtDateTime(game.scheduled_at))}${typeTag}${visTag}${recurTag}${clubTag}${levelTag}${chatTag}</div>
             <div class="row-sub">${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</div>
@@ -5190,10 +7857,10 @@
           <span class="chev">›</span>
         </div>
         ${banner}
-        ${game.notes ? `<div class="row-sub" style="margin-bottom:8px">“${esc(game.notes)}”</div>` : ''}
+        ${game.notes && !(game.is_instant && game.notes === '⚡ Instant rally') ? `<div class="row-sub" style="margin-bottom:8px">“${esc(game.notes)}”</div>` : ''}
         <div class="row">
           <div class="avatar-stack">${avatars}</div>
-          <span class="row-sub">${game.players.length}/${game.max_players} players${game.spots_left && game.status === 'upcoming' ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}${(() => { const n = game.status === 'upcoming' ? game.players.filter((p) => p.attending).length : 0; return n ? ` · 👋 ${n} coming` : ''; })()}</span>
+          <span class="row-sub">${assembly ? esc(rallyCountsText(assembly)) : `${game.players.length}/${game.max_players} players${game.spots_left && game.status === 'upcoming' ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}`}${(() => { const n = game.status === 'upcoming' ? game.players.filter((p) => p.attending).length : 0; return n ? ` · 👋 ${n} coming` : ''; })()}</span>
           <div style="margin-left:auto;display:flex;gap:6px;align-items:center">${action}</div>
         </div>
       </div>`;
@@ -5207,6 +7874,10 @@
     }));
     rootEl.querySelectorAll('[data-game-join]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (b.dataset.instantRally === 'true') {
+        await openReadyRally(rallySummaryFromDataset(b), b);
+        return;
+      }
       try { await api(`/games/${b.dataset.gameJoin}/join`, { method: 'POST' }); toast('You joined the game! \u{1F3BE}'); refreshMe(); refresh(); }
       catch (err) { toast(err.message); }
     }));
@@ -5259,16 +7930,508 @@
       if (game.you_won === false) return `Battled to ${score}${courtName ? ` at ${courtName}` : ''} — rematch soon 🏓`;
       return `Final: ${score}${courtName ? ` at ${courtName}` : ''} on Third Shot 🏓`;
     }
+    if (instantRallyScorePending(game)) {
+      return `We played a pickleball rally${courtName ? ` at ${courtName}` : ''} — score coming soon on Third Shot`;
+    }
+    if (instantRallyClosed(game)) {
+      return `That pickleball rally${courtName ? ` at ${courtName}` : ''} has ended — start a fresh one on Third Shot`;
+    }
+    if (game.is_instant) {
+      return `Join our live pickleball rally${courtName ? ` at ${courtName}` : ''} — we're finding players now`;
+    }
     return `Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${fmtDateTime(game.scheduled_at)}`;
   }
 
-  async function shareGame(game) {
+  async function shareGame(game, { notify = true } = {}) {
     const url = `${location.origin}/g/${game.id}`; // short link → OG preview in chat apps
     const text = gameShareText(game);
     try {
-      if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
-      else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Copied to share 📋'); }
-    } catch { /* user cancelled */ }
+      if (navigator.share) {
+        await navigator.share({ title: 'Third Shot', text, url });
+        return 'shared';
+      }
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      if (notify) toast('Copied to share 📋');
+      return 'copied';
+    } catch (error) {
+      if (error && error.name === 'AbortError') return 'cancelled';
+      if (notify) toast('Couldn’t open sharing — try again');
+      return 'failed';
+    }
+  }
+
+  function rosterBoostSummaryHtml(game) {
+    const players = Array.isArray(game.players) ? game.players : [];
+    const spotsLeft = Math.max(0, Number(game.spots_left) || 0);
+    const full = spotsLeft === 0;
+    const roster = players.slice(0, 6).map((player) => `
+      <span class="roster-boost-person" title="${esc(player.display_name)}">
+        ${avatarHtml(player, 'sm')}<span>${esc((player.display_name || 'Player').split(' ')[0])}</span>
+      </span>`).join('');
+    return `
+      <div class="roster-boost-summary${full ? ' is-full' : ''}">
+        <div class="roster-boost-count"><b>${full ? 'Roster full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</b>
+          <span>${players.length}/${game.max_players} players · ${esc(fmtDateTime(game.scheduled_at))}</span>
+        </div>
+        <div class="roster-boost-people">${roster}</div>
+      </div>`;
+  }
+
+  function gameOpenCallCanBeCreated(game) {
+    if (!game || !game.is_creator || game.status !== 'upcoming'
+        || game.visibility !== 'open' || game.is_instant
+        || game.recurrence !== 'none' || !game.court
+        || Number(game.spots_left) <= 0) return false;
+    const startsAt = new Date(game.scheduled_at).getTime();
+    return Number.isFinite(startsAt) && startsAt >= Date.now() - 15 * 60 * 1000;
+  }
+
+  function openRosterBoostSheet(initialGame, { onGameUpdated } = {}) {
+    const accountId = Number(state.me && state.me.id);
+    let game = initialGame;
+    let openCall = game.open_call || null;
+    let friends = [];
+    let friendsReady = false;
+    let friendsError = false;
+    let busy = false;
+    let inviteReceipt = null;
+    let postReceipt = null;
+    let shareReceipt = null;
+    const selected = new Set();
+    const sentInviteIds = new Set();
+
+    const sheet = openModal(`
+      ${modalHead('＋ Fill the game')}
+      <div class="roster-boost">
+        <div id="rb-summary"></div>
+        <p class="roster-boost-trust">Invites don’t reserve a spot. First joins fill the roster.</p>
+        ${game.is_instant ? `<p class="arrival-retry-note">${esc(rallyCountsText(rallySummaryFromValue(game)))}. Invitations do not replace the traveling player’s held spot.</p>` : ''}
+        <section class="roster-boost-channel" aria-labelledby="rb-friends-title">
+          <div class="roster-boost-channel-head">
+            <span class="roster-boost-channel-icon">👥</span>
+            <div><b id="rb-friends-title">Invite friends</b><span>Pick several and send once.</span></div>
+          </div>
+          <div class="invite-chips" id="rb-friends" aria-live="polite"></div>
+          <button type="button" class="btn btn-primary btn-block" id="rb-invite-send" disabled>Loading friends…</button>
+        </section>
+        <section class="roster-boost-channel hidden" id="rb-court-channel" aria-labelledby="rb-court-title">
+          <div class="roster-boost-channel-head">
+            <span class="roster-boost-channel-icon">📣</span>
+            <div><b id="rb-court-title">Ask the court</b><span>Post one live card in ${esc(game.court?.name || 'court')} chat.</span></div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-block" id="rb-post-court">Post to court chat</button>
+          <button type="button" class="roster-boost-withdraw hidden" id="rb-withdraw-court">Withdraw court post</button>
+        </section>
+        <section class="roster-boost-channel" aria-labelledby="rb-share-title">
+          <div class="roster-boost-channel-head">
+            <span class="roster-boost-channel-icon">📤</span>
+            <div><b id="rb-share-title">Share anywhere</b><span>Text the live game link to any group.</span></div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-block" id="rb-share">Share game link</button>
+        </section>
+        <div class="roster-boost-receipts" id="rb-receipts"></div>
+        <div class="roster-boost-status" id="rb-status" role="status" aria-live="polite" aria-atomic="true"></div>
+      </div>
+    `, { label: 'Fill the game' });
+
+    const summaryEl = sheet.querySelector('#rb-summary');
+    const friendsEl = sheet.querySelector('#rb-friends');
+    const sendButton = sheet.querySelector('#rb-invite-send');
+    const courtSection = sheet.querySelector('#rb-court-channel');
+    const postButton = sheet.querySelector('#rb-post-court');
+    const withdrawButton = sheet.querySelector('#rb-withdraw-court');
+    const shareButton = sheet.querySelector('#rb-share');
+    const receiptsEl = sheet.querySelector('#rb-receipts');
+    const statusEl = sheet.querySelector('#rb-status');
+
+    const announce = (message, tone = '') => {
+      statusEl.textContent = message || '';
+      statusEl.className = `roster-boost-status${tone ? ` is-${tone}` : ''}`;
+    };
+    const currentPlayerIds = () => new Set(
+      (game.players || []).map((player) => Number(player.user_id)),
+    );
+    const invitableFriends = () => {
+      const inGame = currentPlayerIds();
+      return friends.filter((friend) => !inGame.has(Number(friend.id)));
+    };
+    const syncSendButton = () => {
+      const full = Number(game.spots_left) <= 0 || game.status !== 'upcoming';
+      sendButton.disabled = busy || full || selected.size === 0;
+      if (busy) return;
+      if (full) sendButton.textContent = 'Roster is full';
+      else if (selected.size) sendButton.textContent = `Send ${selected.size} invite${selected.size === 1 ? '' : 's'}`;
+      else sendButton.textContent = 'Select players to invite';
+    };
+    const renderFriends = () => {
+      if (!friendsReady) {
+        friendsEl.innerHTML = friendsError
+          ? '<button type="button" class="btn btn-secondary btn-block" id="rb-friends-retry">Retry loading friends</button>'
+          : '<div class="roster-boost-loading">Loading your crew…</div>';
+        sendButton.textContent = friendsError ? 'Friends unavailable' : 'Loading friends…';
+        sendButton.disabled = true;
+        return;
+      }
+      const candidates = invitableFriends();
+      const candidateIds = new Set(candidates.map((friend) => Number(friend.id)));
+      [...selected].forEach((userId) => { if (!candidateIds.has(userId)) selected.delete(userId); });
+      friendsEl.innerHTML = candidates.length ? candidates.map((friend) => {
+        const userId = Number(friend.id);
+        const active = selected.has(userId);
+        const sent = sentInviteIds.has(userId);
+        return `<button type="button" class="invite-chip${active ? ' active' : ''}${sent ? ' is-sent' : ''}"
+          data-rb-friend="${userId}" aria-pressed="${active}" ${sent ? 'disabled' : ''}>
+          ${avatarHtml(friend, 'sm')} ${esc((friend.display_name || 'Player').split(' ')[0])}${sent ? ' ✓' : ''}
+        </button>`;
+      }).join('') : `<div class="empty-state roster-boost-empty">${friends.length
+        ? 'Everyone in your friends list is already on this roster.'
+        : 'No friends here yet — the share link still works for any group.'}</div>`;
+      syncSendButton();
+    };
+    const renderCourtAction = () => {
+      const relevant = !!(game && game.is_creator && game.visibility === 'open'
+        && !game.is_instant && game.recurrence === 'none' && game.court);
+      courtSection.classList.toggle('hidden', !relevant);
+      if (!relevant) return;
+      const stateName = String(openCall && openCall.state || '');
+      const liveCall = ['open', 'full'].includes(stateName);
+      withdrawButton.classList.toggle('hidden', !liveCall || !openCall.can_withdraw);
+      if (liveCall) {
+        postButton.disabled = true;
+        postButton.textContent = stateName === 'full'
+          ? '✓ Court post live · roster full'
+          : '✓ Live in court chat';
+      } else if (openCall && ['closed', 'withdrawn'].includes(stateName)) {
+        postButton.disabled = true;
+        postButton.textContent = stateName === 'withdrawn' ? 'Court post withdrawn' : 'Court post closed';
+      } else if (Number(game.spots_left) <= 0) {
+        postButton.disabled = true;
+        postButton.textContent = 'Roster is full';
+      } else {
+        postButton.disabled = busy || !gameOpenCallCanBeCreated(game);
+        postButton.textContent = gameOpenCallCanBeCreated(game)
+          ? `Post ${game.spots_left} open spot${game.spots_left === 1 ? '' : 's'} to court chat`
+          : 'Court posting is no longer available';
+      }
+    };
+    const renderReceipts = () => {
+      const receipts = [];
+      if (inviteReceipt) receipts.push(`<span>✓ ${esc(inviteReceipt)}</span>`);
+      if (postReceipt) receipts.push(`<span>✓ ${esc(postReceipt)}</span>`);
+      if (shareReceipt) receipts.push(`<span>✓ ${esc(shareReceipt)}</span>`);
+      receiptsEl.innerHTML = receipts.join('');
+    };
+    const renderAll = () => {
+      summaryEl.innerHTML = rosterBoostSummaryHtml(game);
+      renderFriends();
+      renderCourtAction();
+      renderReceipts();
+      shareButton.disabled = busy;
+      if (Number(game.spots_left) <= 0 && !statusEl.textContent) {
+        announce('Roster full — game on! 🏓', 'success');
+      }
+    };
+    const acceptFreshGame = (fresh, nextOpenCall = undefined) => {
+      if (!fresh || Number(fresh.id) !== Number(game.id)) return false;
+      const changed = gameFingerprint(fresh) !== gameFingerprint(game);
+      game = fresh;
+      if (nextOpenCall !== undefined) openCall = nextOpenCall;
+      else if (fresh.open_call) openCall = fresh.open_call;
+      else if (openCall && ['open', 'full'].includes(openCall.state)) {
+        openCall = { ...openCall, state: 'closed', active: false, can_withdraw: false };
+      }
+      if (changed && typeof onGameUpdated === 'function') onGameUpdated(fresh);
+      renderAll();
+      return changed;
+    };
+    const loadFriends = async () => {
+      friendsReady = false;
+      friendsError = false;
+      renderFriends();
+      try {
+        const response = await api('/friends');
+        if (!document.body.contains(sheet) || Number(state.me && state.me.id) !== accountId) return;
+        friends = response.friends || [];
+        friendsReady = true;
+      } catch {
+        if (!document.body.contains(sheet)) return;
+        friendsError = true;
+      }
+      renderFriends();
+    };
+    const refreshGame = async () => {
+      const fresh = await api(`/games/${game.id}`);
+      if (!document.body.contains(sheet) || Number(state.me && state.me.id) !== accountId) return false;
+      return acceptFreshGame(fresh);
+    };
+
+    friendsEl.addEventListener('click', (event) => {
+      const retry = event.target.closest('#rb-friends-retry');
+      if (retry) { loadFriends(); return; }
+      const chip = event.target.closest('[data-rb-friend]');
+      if (!chip || chip.disabled || busy) return;
+      const userId = Number(chip.dataset.rbFriend);
+      if (selected.has(userId)) selected.delete(userId); else selected.add(userId);
+      renderFriends();
+    });
+    sendButton.addEventListener('click', async () => {
+      if (!selected.size || busy || Number(game.spots_left) <= 0) return;
+      busy = true;
+      syncSendButton();
+      const requested = [...selected];
+      announce(`Sending ${requested.length} invite${requested.length === 1 ? '' : 's'}…`);
+      try {
+        const response = await api(`/games/${game.id}/invite`, {
+          method: 'POST', body: JSON.stringify({ user_ids: requested }),
+        });
+        (response.invited_user_ids || []).forEach((userId) => sentInviteIds.add(Number(userId)));
+        const delivered = Number(response.invited) || 0;
+        requested.forEach((userId) => selected.delete(userId));
+        inviteReceipt = delivered
+          ? `${delivered} invite${delivered === 1 ? '' : 's'} sent`
+          : 'Invites already sent';
+        announce(inviteReceipt, 'success');
+      } catch (error) {
+        announce(error.message, 'error');
+      } finally {
+        busy = false;
+        renderAll();
+      }
+    });
+    postButton.addEventListener('click', async () => {
+      if (postButton.disabled || busy) return;
+      const attempt = pendingGameOpenCallAttempt(accountId, game.id);
+      if (!attempt) {
+        announce('Nothing was posted because this browser could not save a safe retry.', 'error');
+        return;
+      }
+      busy = true;
+      renderAll();
+      announce('Posting one live card to the court room…');
+      try {
+        const response = await api(`/games/${game.id}/open-call`, {
+          method: 'POST',
+          body: JSON.stringify({ client_attempt_id: attempt.id }),
+        });
+        openCall = response.open_call;
+        postReceipt = response.open_call.state === 'withdrawn'
+          ? 'Court post already withdrawn'
+          : 'Court room post is live';
+        if (response.game) acceptFreshGame(response.game, response.open_call);
+        announce(postReceipt, 'success');
+      } catch (error) {
+        announce(error.isNetworkError
+          ? 'Confirmation was interrupted — tap Post again to recover safely.'
+          : error.message, 'error');
+      } finally {
+        busy = false;
+        renderAll();
+      }
+    });
+    withdrawButton.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      renderAll();
+      announce('Withdrawing the court post…');
+      try {
+        const response = await api(`/games/${game.id}/open-call`, { method: 'DELETE' });
+        openCall = response.open_call;
+        postReceipt = 'Court post withdrawn';
+        if (response.game) acceptFreshGame(response.game, response.open_call);
+        announce(postReceipt, 'success');
+      } catch (error) {
+        announce(error.message, 'error');
+      } finally {
+        busy = false;
+        renderAll();
+      }
+    });
+    shareButton.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      renderAll();
+      const outcome = await shareGame(game, { notify: false });
+      busy = false;
+      if (outcome === 'shared' || outcome === 'copied') {
+        shareReceipt = outcome === 'copied' ? 'Game link copied' : 'Game link shared';
+        announce(shareReceipt, 'success');
+      } else if (outcome === 'failed') announce('Couldn’t open sharing — try again.', 'error');
+      else announce('');
+      renderAll();
+    });
+
+    renderAll();
+    loadFriends();
+    refreshGame().catch(() => { /* the initial snapshot keeps every action usable */ });
+    const pollTimer = setInterval(async () => {
+      if (!document.body.contains(sheet)) { clearInterval(pollTimer); return; }
+      if (document.hidden || state.connectionState === 'offline'
+          || currentOverlayEntry()?.el !== sheet || busy) return;
+      try { await refreshGame(); } catch { /* retry on the next live interval */ }
+    }, LIVE_DETAIL_POLL_INTERVAL_MS);
+    sheet._cleanupFns?.push(() => clearInterval(pollTimer));
+    return sheet;
+  }
+
+  function crewSummaryFrom(value) {
+    if (!value || typeof value !== 'object') return null;
+    const candidate = value.crew && typeof value.crew === 'object' ? value.crew
+      : value.saved_crew && typeof value.saved_crew === 'object' ? value.saved_crew : value;
+    const id = Number(candidate.id ?? candidate.crew_id);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    const rawVersion = candidate.roster_version ?? candidate.crew_version;
+    const version = rawVersion == null || rawVersion === '' ? null : Number(rawVersion);
+    return {
+      ...candidate,
+      id,
+      name: String(candidate.name || candidate.crew_name || 'Your crew').slice(0, 80),
+      roster_version: Number.isSafeInteger(version) && version >= 0 ? version : null,
+      member_count: Math.max(1, Number(candidate.member_count) || 1),
+      pending_count: Math.max(0, Number(candidate.pending_count) || 0),
+      default_court_id: Number(candidate.default_court_id) || null,
+      default_court_name: String(candidate.default_court_name || '').slice(0, 120),
+    };
+  }
+
+  function completedGameCrewSummary(game, response = null) {
+    return crewSummaryFrom(response)
+      || crewSummaryFrom(game && game.crew)
+      || crewSummaryFrom(game && game.saved_crew)
+      || (game && game.crew_id ? crewSummaryFrom({
+        id: game.crew_id,
+        name: game.crew_name,
+        roster_version: game.crew_roster_version,
+      }) : null);
+  }
+
+  function completedCrewPlannerOptions(game, crew, crewContext = null) {
+    const invitees = (crew || []).map(sanitizePlannerInvitee).filter(Boolean);
+    const savedCrew = crewSummaryFrom(crewContext);
+    const attachCrew = !!savedCrew && (!crewContext || crewContext.attachCrew !== false);
+    const suggestion = window.CrewPlanner && window.CrewPlanner.bestSlot
+      ? window.CrewPlanner.bestSlot([state.me, ...invitees], {
+          hostId: state.me && state.me.id,
+          fallbackScheduledAt: game.scheduled_at,
+          minLeadMinutes: 50,
+        })
+      : null;
+    let availabilityLabel = `${invitees.length} teammate${invitees.length === 1 ? '' : 's'} selected`;
+    if (suggestion && window.CrewPlanner) {
+      const slot = window.CrewPlanner.slotLabel(suggestion.slot);
+      availabilityLabel = suggestion.usedFallback
+        ? `Same rhythm: ${slot}`
+        : `Best overlap: ${slot} · ${suggestion.coverage} of ${suggestion.total} available`;
+    }
+    const sourceLabel = savedCrew
+      ? `${savedCrew.name} · ${invitees.length} teammate${invitees.length === 1 ? '' : 's'}`
+      : `Same crew · ${invitees.length} teammate${invitees.length === 1 ? '' : 's'}`;
+    return {
+      court: game.court ? { ...game.court } : null,
+      gameType: game.game_type,
+      maxPlayers: game.max_players,
+      preferredLevel: game.preferred_level || 'any',
+      visibility: 'private',
+      invitees,
+      inviteUserIds: invitees.map((person) => person.id),
+      scheduledAt: suggestion && suggestion.scheduledAt,
+      sourceGameId: Number(game.id) || null,
+      crewId: attachCrew ? savedCrew.id : null,
+      crewVersion: attachCrew ? savedCrew.roster_version : null,
+      crewName: savedCrew && savedCrew.name,
+      sourceLabel,
+      availabilityLabel,
+      requireAllInvitees: true,
+    };
+  }
+
+  async function openCompletedCrewPlanner(game, fromModal, button, crewRequest = null) {
+    const intentButtons = [...fromModal.querySelectorAll('#cel-plan-crew, #gs-plan-crew, #gs-rematch')];
+    const originalLabels = new Map(intentButtons.map((item) => [item, item.textContent]));
+    const restoreIntents = () => intentButtons.forEach((item) => {
+      item.disabled = false;
+      item.textContent = originalLabels.get(item);
+    });
+    intentButtons.forEach((item) => { item.disabled = true; });
+    if (button) {
+      button.textContent = 'Getting the crew ready…';
+    }
+    try {
+      const [response, saved] = await Promise.all([
+        crewRequest || api(`/games/${game.id}/crew`),
+        api(`/games/${game.id}/crew`, { method: 'POST' }),
+      ]);
+      const crew = response.items || [];
+      if (!crew.length) {
+        toast('No eligible teammates are available to invite from this game');
+        restoreIntents();
+        return;
+      }
+      let savedCrew = completedGameCrewSummary(game, saved);
+      if (!savedCrew) throw new Error('Crew could not be opened');
+      if (savedCrew.joined === false || savedCrew.invitation_pending) {
+        const joined = await api(`/crews/${savedCrew.id}/respond`, {
+          method: 'POST', body: JSON.stringify({ accept: true }),
+        });
+        savedCrew = completedGameCrewSummary(game, joined) || savedCrew;
+        toast(`Joined ${savedCrew.name} 🏓`);
+      }
+      game.crew = savedCrew;
+      const invitedCount = Math.max(0, Number(saved.invited_count) || 0);
+      if (!(saved.crew && (saved.crew.joined === false || saved.crew.invitation_pending))) toast(saved.created
+        ? `Crew created${invitedCount ? ` — ${invitedCount} invitation${invitedCount === 1 ? '' : 's'} sent` : ''}`
+        : `${savedCrew.name} is ready`);
+      let options = null;
+      if (!saved.created) {
+        // Once a Crew already exists, its accepted member list is the privacy
+        // boundary. A detail failure must never downgrade this into an
+        // editable source-game invite plan with different people or cadence.
+        const detail = await api(`/crews/${savedCrew.id}`);
+        options = crewPlannerOptions({ ...detail, ...crewSummaryFrom(detail) });
+        if (!options.inviteUserIds.length) {
+          toast('At least one teammate needs to join before this Crew can plan a game');
+          restoreIntents();
+          return;
+        }
+      }
+      if (!options) {
+        // On the first create, everyone else is still pending. The immediate
+        // plan remains a normal private rematch and does not impersonate an
+        // accepted Crew roster.
+        options = completedCrewPlannerOptions(game, crew, { ...savedCrew, attachCrew: false });
+      }
+      transitionModal(fromModal, () => openNewGameModal(options));
+    } catch (err) {
+      toast(err.message);
+      restoreIntents();
+    }
+  }
+
+  function completedCrewConnectionsHtml(crew) {
+    const people = crew || [];
+    const actions = people.filter((person) => person.friendship_status !== 'accepted');
+    if (!people.length) {
+      return '<div class="postgame-connection-loading">No eligible connection actions are available from this game.</div>';
+    }
+    if (!actions.length) {
+      return `<div class="postgame-connected"><span>✓</span><div><b>Your crew is connected</b><div class="row-sub">Friends can coordinate the next game anytime.</div></div></div>`;
+    }
+    return `<div class="section-label" style="margin-top:16px">Stay connected</div>
+      <div class="postgame-connections">
+        ${actions.map((person) => {
+          const pending = person.friendship_status === 'pending';
+          const outgoing = pending && person.friendship_outgoing;
+          const shared = sharedAvailabilityText(state.me && state.me.availability, person.availability);
+          return `<div class="postgame-person">
+            <button type="button" class="postgame-person-profile" data-view-user="${person.id}">
+              ${avatarHtml(person, 'sm')}
+              <span><b>${esc(person.display_name)}</b>${shared ? `<small>Also plays ${esc(shared)}</small>` : '<small>Played this game with you</small>'}</span>
+            </button>
+            ${outgoing
+              ? '<button type="button" class="btn btn-secondary btn-sm" disabled>Requested</button>'
+              : `<button type="button" class="btn btn-secondary btn-sm" data-connect-crew="${person.id}" data-friendship-id="${person.friendship_id || ''}" data-connect-kind="${pending ? 'accept' : 'request'}">${pending ? 'Accept' : '＋ Add'}</button>`}
+          </div>`;
+        }).join('')}
+      </div>`;
   }
 
   function showCelebration(game) {
@@ -5283,6 +8446,11 @@
       ? 'That one goes in the books.'
       : won === false ? 'They got you this time — rematch?' : 'Nice playing!';
 
+    const savedCrew = completedGameCrewSummary(game);
+    const crewInvitePending = !!savedCrew && (savedCrew.joined === false || savedCrew.invitation_pending);
+    const planLabel = savedCrew
+      ? crewInvitePending ? `👥 Join ${esc(savedCrew.name)} &amp; plan next game` : `📅 Plan next game with ${esc(savedCrew.name)}`
+      : '👥 Create crew &amp; plan next game';
     const modal = openModal(`
       <div class="celebrate">
         <div class="celebrate-emoji">${emoji}</div>
@@ -5294,11 +8462,23 @@
             ${delta >= 0 ? '+' : ''}${delta} rating
           </div>` : ''}
         ${streak >= 2 ? `<div class="tag live" style="font-size:14px;padding:6px 14px">🔥 ${streak} win streak!</div>` : ''}
-        ${won === true ? '<button class="btn btn-secondary btn-block" id="cel-share" style="margin-top:18px">📤 Share the win</button>' : ''}
-        <button class="btn btn-primary btn-block modal-close" style="margin-top:${won === true ? '10' : '18'}px">Keep playing</button>
+        <button class="btn btn-primary btn-block" id="cel-plan-crew" style="margin-top:18px">${planLabel}</button>
+        ${savedCrew && !crewInvitePending ? '<button class="btn btn-secondary btn-block" id="cel-open-crew" style="margin-top:10px">👥 Open crew</button>' : ''}
+        ${won === true ? '<button class="btn btn-secondary btn-block" id="cel-share" style="margin-top:10px">📤 Share the win</button>' : ''}
+        <button class="btn btn-secondary btn-block" id="cel-view-game" style="margin-top:10px">See game &amp; connect</button>
+        <button class="btn btn-ghost btn-block modal-close" style="margin-top:6px">Done</button>
       </div>
     `);
     modal.querySelector('#cel-share')?.addEventListener('click', () => shareGame(game));
+    modal.querySelector('#cel-plan-crew')?.addEventListener('click', (event) => {
+      openCompletedCrewPlanner(game, modal, event.currentTarget);
+    });
+    modal.querySelector('#cel-open-crew')?.addEventListener('click', () => {
+      transitionModal(modal, () => openCrewScreen(savedCrew.id));
+    });
+    modal.querySelector('#cel-view-game')?.addEventListener('click', () => {
+      transitionModal(modal, () => openGameScreen(game.id));
+    });
   }
 
   function bindUserButtons(rootEl) {
@@ -5384,37 +8564,290 @@
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
+  let instantRallyInFlight = null;
+
+  function instantRallySession() {
+    const userId = safePositiveId(state.me && state.me.id);
+    return state.token && userId ? { token: state.token, userId } : null;
+  }
+
+  function instantRallySessionMatches(session) {
+    return !!session && state.token === session.token
+      && safePositiveId(state.me && state.me.id) === session.userId;
+  }
+
+  function authoritativeRallyGame(error) {
+    const data = error && error.data;
+    if (!data || typeof data !== 'object') return null;
+    const embedded = data.game && typeof data.game === 'object' ? data.game : null;
+    const id = safePositiveId((embedded && embedded.id) ?? data.game_id
+      ?? data.rally_game_id ?? data.existing_game_id);
+    return id ? { id, ...(embedded || {}) } : null;
+  }
+
+  function openResolvedRallyGame(gameId, fromModal = null) {
+    if (fromModal) {
+      // Do not resurrect a sheet the player already dismissed, and do not
+      // replace a newer child sheet that now owns their attention.
+      if (!document.body.contains(fromModal) || currentOverlayEntry()?.el !== fromModal) return false;
+      return transitionModal(fromModal, () => openGameScreen(gameId));
+    }
+    openGameScreen(gameId);
+    return true;
+  }
+
+  function setInstantRallyButtonBusy(button, busy) {
+    if (!button) return;
+    if (busy) {
+      if (button.dataset.rallyStarting === 'true') return;
+      button.dataset.rallyStarting = 'true';
+      button.dataset.rallyOriginalHtml = button.innerHTML;
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.innerHTML = button.classList.contains('rally-action')
+        ? '<span class="rally-action-icon">⚡</span><span><b>Finding your rally…</b><small>Checking this court first</small></span>'
+        : 'Finding your rally…';
+      return;
+    }
+    if (button.dataset.rallyStarting !== 'true') return;
+    const original = button.dataset.rallyOriginalHtml;
+    delete button.dataset.rallyStarting;
+    delete button.dataset.rallyOriginalHtml;
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    if (original != null) button.innerHTML = original;
+  }
+
+  async function startInstantRally(button, options = {}) {
+    if ((!state.presence || !state.presence.checked_in) && !options.presenceConfirmed) {
+      openPlayNowCourtPicker();
+      return null;
+    }
+    const callerSession = instantRallySession();
+    if (!callerSession) {
+      const error = new Error('Sign in again before starting a rally.');
+      if (options.onError) options.onError(error, false); else toast(error.message);
+      return null;
+    }
+    const expectedCourtId = safePositiveId(
+      options.expectedCourtId ?? state.presence?.court_id,
+    );
+    if (!expectedCourtId) {
+      openPlayNowCourtPicker();
+      return null;
+    }
+    const sharedRecord = instantRallyInFlight;
+    if (sharedRecord && sharedRecord.token === callerSession.token
+        && sharedRecord.userId === callerSession.userId
+        && sharedRecord.courtId === expectedCourtId) {
+      setInstantRallyButtonBusy(button, true);
+      let resolution;
+      try {
+        resolution = await sharedRecord.promise;
+      }
+      finally { if (button && document.body.contains(button)) setInstantRallyButtonBusy(button, false); }
+      return continueInstantRallyCall(resolution, button, options, callerSession);
+    }
+    const attempt = pendingInstantRallyAttempt(callerSession.userId, expectedCourtId);
+    if (!attempt) {
+      const error = new Error('Sign in again before starting a rally.');
+      if (options.onError) options.onError(error, false); else toast(error.message);
+      return null;
+    }
+    setInstantRallyButtonBusy(button, true);
+    const operation = (async () => {
+      try {
+        const result = await api('/games/rally', {
+          method: 'POST',
+          body: JSON.stringify({
+            scheduled_at: attempt.scheduledAt,
+            client_attempt_id: attempt.id,
+            court_id: attempt.courtId,
+          }),
+        });
+        if (!instantRallySessionMatches(callerSession)) return { abandoned: true };
+        const game = result && result.game;
+        if (!game || !safePositiveId(game.id)) {
+          const malformed = new Error('The rally may have started, but its game could not be confirmed. Retry safely.');
+          malformed.isNetworkError = true;
+          throw malformed;
+        }
+        if (game.is_instant
+            && (game.status !== 'upcoming' || game.assembly_active === false)) {
+          const stale = new Error('That rally is no longer assembling players.');
+          stale.code = 'rally_no_longer_active';
+          clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+          return { staleRally: true, error: stale };
+        }
+        clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+        state.playGamesCache = null;
+        if (result.outcome === 'joined') {
+          toast(`You're in the live rally at ${(game.court || {}).name || 'this court'} 🏓`);
+        } else if (result.invited_count > 0) {
+          toast(`Rally started — ${result.invited_count} ready player${result.invited_count === 1 ? '' : 's'} invited ⚡`);
+        } else {
+          toast(result.outcome === 'existing'
+            ? 'Your live rally is ready ⚡'
+            : 'Rally started — invite or share to fill it ⚡');
+        }
+        refreshMe().catch(() => { /* the game screen is already authoritative */ });
+        return { result };
+      } catch (error) {
+        if (!instantRallySessionMatches(callerSession)) return { abandoned: true };
+        if (['rally_no_longer_active', 'rally_time_out_of_range'].includes(error.code)) {
+          // The server has definitively retired this attempt's old assembly.
+          // Forget that key before resolving once more, so a lost response can
+          // never revive an expired solo shell or erase the new ready signal.
+          clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+          return { staleRally: true, error };
+        }
+        const recoveredGame = authoritativeRallyGame(error);
+        if (recoveredGame) {
+          clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+          state.playGamesCache = null;
+          toast(error.code === 'active_rally_elsewhere'
+            ? 'You already have a rally in progress — opening it now'
+            : 'That rally already exists — opening it safely');
+          refreshMe().catch(() => {});
+          return {
+            result: { outcome: 'existing', recovered: true, game: recoveredGame },
+          };
+        }
+        // A network/429/5xx response can be lost after commit. Keep the exact
+        // attempt so another tap retrieves the same game instead of duplicating it.
+        const retrySafely = !!(error.isNetworkError || Number(error.status) === 429
+          || Number(error.status) >= 500);
+        if (!retrySafely) {
+          clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+        }
+        if (error.code === 'active_checkin_required') refreshMe().catch(() => {});
+        return { error, retrySafely };
+      }
+    })();
+    const record = {
+      token: callerSession.token,
+      userId: callerSession.userId,
+      courtId: expectedCourtId,
+      promise: operation,
+    };
+    instantRallyInFlight = record;
+    let resolution;
+    try {
+      resolution = await operation;
+    }
+    finally {
+      if (instantRallyInFlight === record) instantRallyInFlight = null;
+      if (button && document.body.contains(button)) setInstantRallyButtonBusy(button, false);
+    }
+    return continueInstantRallyCall(resolution, button, options, callerSession);
+  }
+
+  function continueInstantRallyCall(resolution, button, options = {}, callerSession = null) {
+    if (!instantRallySessionMatches(callerSession) || resolution?.abandoned) return null;
+    if (resolution && resolution.staleRally && !options.staleRallyRestarted) {
+      return startInstantRally(button, { ...options, staleRallyRestarted: true });
+    }
+    if (resolution && resolution.staleRally) {
+      return finishInstantRallyCall(
+        { error: resolution.error, retrySafely: false }, options, callerSession,
+      );
+    }
+    return finishInstantRallyCall(resolution, options, callerSession);
+  }
+
+  function finishInstantRallyCall(resolution, options = {}, callerSession = null) {
+    if (!resolution) return null;
+    if (resolution.error) {
+      if (['active_checkin_required', 'active_checkin_court_mismatch'].includes(
+        resolution.error.code,
+      )) {
+        const sourceModal = options.fromModal || null;
+        const reopenConfirmation = () => {
+          if (!instantRallySessionMatches(callerSession)) return;
+          if (sourceModal) {
+            if (!document.body.contains(sourceModal)
+                || currentOverlayEntry()?.el !== sourceModal) return;
+            transitionModal(sourceModal, () => openPlayNowCourtPicker());
+          } else {
+            openPlayNowCourtPicker();
+          }
+        };
+        // Learn the court that won any other-tab race before asking the player
+        // to explicitly confirm where they are now.
+        refreshMe().finally(reopenConfirmation);
+        return null;
+      }
+      const message = resolution.retrySafely
+        ? 'Couldn’t confirm the rally — tap again to safely check it'
+        : resolution.error.message;
+      if (options.onError) options.onError(resolution.error, resolution.retrySafely);
+      else toast(message);
+      return null;
+    }
+    const result = resolution.result;
+    const gameId = safePositiveId(result && result.game && result.game.id);
+    if (gameId && options.openGame !== false) {
+      // Each caller owns its own current sheet/navigation intent. The shared
+      // promise only deduplicates the network mutation, so a dismissed first
+      // sheet cannot strand a later, still-visible confirmation sheet.
+      openResolvedRallyGame(gameId, options.fromModal || null);
+    }
+    return result || null;
+  }
+
   function rallyLauncherHtml() {
     const here = state.presence && state.presence.checked_in;
-    const title = here ? `Ready at ${esc(state.presence.court_name)}` : 'How do you want to play?';
+    const pulse = here ? null : normalizeActivePlayPulse(state.activePlayPulse);
+    if (!here && state.activePlayPulse && !pulse) state.activePlayPulse = null;
+    const title = here ? `Ready at ${esc(state.presence.court_name)}`
+      : pulse ? 'Your hour is live' : 'How do you want to play?';
     const sub = here
       ? 'Start a pickup game in seconds, or make a plan for later.'
-      : 'Jump into play now or build a plan around your court, time, and people.';
+      : pulse ? 'Nearby players can turn your destination into a real quick game.'
+        : 'Share where you could play this hour, jump in now, or make a plan.';
+    const actions = here || pulse ? `
+          <button type="button" class="rally-action primary" data-goto="${here ? 'instant-rally' : 'play-now'}">
+            <span class="rally-action-icon">⚡</span>
+            <span><b>${here ? 'Start a rally here' : 'Play now'}</b><small>${here ? 'Join one or create one' : 'Confirm where you are'}</small></span>
+          </button>
+          <button type="button" class="rally-action" data-goto="new-game">
+            <span class="rally-action-icon">📅</span>
+            <span><b>Plan ahead</b><small>Pick a time &amp; crew</small></span>
+          </button>` : `
+          <button type="button" class="rally-action primary" data-goto="play-pulse">
+            <span class="rally-action-icon">📣</span>
+            <span><b>Available this hour</b><small>Pick an intended court</small></span>
+          </button>
+          <button type="button" class="rally-action" data-goto="play-now">
+            <span class="rally-action-icon">⚡</span>
+            <span><b>Play now</b><small>Confirm where you are</small></span>
+          </button>
+          <button type="button" class="rally-action" data-goto="new-game">
+            <span class="rally-action-icon">📅</span>
+            <span><b>Plan ahead</b><small>Pick a time &amp; crew</small></span>
+          </button>`;
     return `
       <section class="rally-launch" aria-labelledby="rally-title">
         <div class="rally-kicker">Get on court</div>
         <h3 id="rally-title">${title}</h3>
         <p>${sub}</p>
-        <div class="rally-actions">
-          <button type="button" class="rally-action primary" data-goto="play-now">
-            <span class="rally-action-icon">⚡</span>
-            <span><b>Play now</b><small>Start a live game</small></span>
-          </button>
-          <button type="button" class="rally-action" data-goto="new-game">
-            <span class="rally-action-icon">📅</span>
-            <span><b>Plan ahead</b><small>Pick a time & crew</small></span>
-          </button>
-        </div>
+        ${pulse ? activePlayPulseBannerHtml(pulse) : ''}
+        <div class="rally-actions ${!here && !pulse ? 'three' : ''}">${actions}</div>
       </section>`;
   }
 
   async function renderPlay({ reuseFresh = false, useCachedData = false } = {}) {
     const seg = state.playSeg;
     const liveEl = $('#play-content');
-    const viewKey = `${state.me?.id || 'signed-out'}:play:${seg}`;
+    liveEl.setAttribute('aria-labelledby', `play-tab-${seg}`);
+    const viewKey = `${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}`;
     if (reuseFresh && viewIsFresh(liveEl, viewKey)) return;
     const renderSeq = ++state.playRenderSeq;
     const hadUsableContent = beginViewRender(liveEl, viewKey, 5);
+    if (seg === 'games' && !hadUsableContent) {
+      // The checked-in action is useful before discovery feeds finish.
+      liveEl.innerHTML = rallyLauncherHtml() + skeletonHtml(4);
+    }
     const el = document.createElement('div');
     const commit = () => {
       if (renderSeq !== state.playRenderSeq || state.playSeg !== seg) return false;
@@ -5532,16 +8965,22 @@
       const [mine, friends, nearby, tMine, tNear] = gameBundle;
       const nowMs = Date.now();
       const toScore = mine.items.filter((g) =>
-        g.status === 'upcoming' && new Date(g.scheduled_at).getTime() <= nowMs && g.players.length >= 2);
+        g.status === 'upcoming' && g.can_enter_score
+          && (g.is_instant
+            ? instantRallyScorePending(g)
+            : new Date(g.scheduled_at).getTime() <= nowMs));
       const toConfirm = mine.items.filter((g) => g.awaiting_your_confirmation);
       const waiting = mine.items.filter((g) =>
         g.status === 'awaiting_confirmation' && !g.awaiting_your_confirmation);
       const upcoming = mine.items.filter((g) =>
-        !toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g));
+        !toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g)
+          && !instantRallyClosed(g));
       const mineIds = new Set(mine.items.map((g) => g.id));
-      const friendsGames = (friends.items || []).filter((g) => !mineIds.has(g.id));
+      const friendsGames = (friends.items || []).filter((g) =>
+        !mineIds.has(g.id) && !instantRallyClosed(g));
       const friendsIds = new Set(friendsGames.map((g) => g.id));
-      const nearbyOpen = nearby.items.filter((g) => !mineIds.has(g.id) && !friendsIds.has(g.id));
+      const nearbyOpen = nearby.items.filter((g) =>
+        !mineIds.has(g.id) && !friendsIds.has(g.id) && !instantRallyClosed(g));
 
       // --- "This week" planner: one strip answering "when is there play?" ---
       const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -5553,7 +8992,8 @@
       const events = [];
       const evSeen = new Set();
       const addGameEvent = (g) => {
-        if (g.status !== 'upcoming' || evSeen.has(`g${g.id}`)) return;
+        if (g.status !== 'upcoming' || instantRallyScorePending(g)
+            || instantRallyClosed(g) || evSeen.has(`g${g.id}`)) return;
         evSeen.add(`g${g.id}`);
         events.push({ when: new Date(g.scheduled_at), type: 'game', item: g });
       };
@@ -5696,7 +9136,7 @@
       renderPlay({ reuseFresh: !changed });
     });
     $('#new-game-fab').addEventListener('click', () => {
-      if (state.playSeg === 'scores') openNewGameModal(null, 'ranked');
+      if (state.playSeg === 'scores') openNewGameModal({ gameType: 'ranked' });
       else if (state.playSeg === 'brackets') openCompetitionCreateSheet();
       else openNewGameModal();
     });
@@ -5867,8 +9307,36 @@
     });
   }
 
-  async function openNewGameModal(court, defaultType = 'casual', startNow = false, preferredSlot = null, presetFriendId = null) {
-    const plannerTitle = startNow ? 'Play now' : 'Plan a game';
+  async function openNewGameModal(options = {}) {
+    const plannerOptions = options && typeof options === 'object' ? options : {};
+    const plannerId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0
+      ? Number(value) : null;
+    let court = plannerOptions.court || null;
+    const defaultType = plannerOptions.gameType === 'ranked' ? 'ranked' : 'casual';
+    const startNow = plannerOptions.startNow === true;
+    const preferredSlot = typeof plannerOptions.preferredSlot === 'string' ? plannerOptions.preferredSlot : null;
+    const preferredScheduledAt = typeof plannerOptions.scheduledAt === 'string' ? plannerOptions.scheduledAt : null;
+    const requestedMaxPlayers = [2, 4, 6, 8, 10, 12].includes(Number(plannerOptions.maxPlayers))
+      ? Number(plannerOptions.maxPlayers) : 4;
+    let presetMaxPlayers = defaultType === 'ranked' ? Math.min(requestedMaxPlayers, 4) : requestedMaxPlayers;
+    const presetPreferredLevel = ['any', 'beginner', 'intermediate', 'advanced', 'pro'].includes(plannerOptions.preferredLevel)
+      ? plannerOptions.preferredLevel : 'any';
+    const presetVisibility = ['open', 'friends', 'private'].includes(plannerOptions.visibility)
+      ? plannerOptions.visibility : null;
+    const presetCrewId = plannerId(plannerOptions.crewId);
+    const presetCrewVersion = plannerOptions.crewVersion != null
+      && Number.isSafeInteger(Number(plannerOptions.crewVersion))
+      && Number(plannerOptions.crewVersion) >= 0 ? Number(plannerOptions.crewVersion) : null;
+    const presetCrewName = String(plannerOptions.crewName || '').slice(0, 80);
+    const presetInvitees = (Array.isArray(plannerOptions.invitees) ? plannerOptions.invitees : [])
+      .map(sanitizePlannerInvitee).filter(Boolean).slice(0, 20);
+    const presetInviteUserIds = [...new Set([
+      ...(Array.isArray(plannerOptions.inviteUserIds) ? plannerOptions.inviteUserIds : []),
+      ...presetInvitees.map((person) => person.id),
+    ].map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 20);
+    const plannerTitle = startNow ? 'Play now'
+      : presetCrewId ? `Plan with ${presetCrewName || 'your crew'}`
+        : plannerOptions.sourceGameId ? 'Plan the next game' : 'Plan a game';
     const plannerShell = openModal(`
       ${modalHead(plannerTitle)}
       <div class="planner-loading">
@@ -5877,9 +9345,23 @@
       </div>
     `, { label: plannerTitle });
     const modalLoad = beginRoutedOverlayLoad(null);
-    const explicitPlannerIntent = !!court || defaultType !== 'casual' || startNow || !!preferredSlot || presetFriendId != null;
+    const explicitPlannerIntent = Object.keys(plannerOptions).length > 0;
     const savedDraft = readGameDraft();
     const restoredDraft = !explicitPlannerIntent ? savedDraft : null;
+    const protectedSubmittingDraft = !!(
+      savedDraft && explicitPlannerIntent && savedDraft.status === 'submitting'
+    );
+    let requireAllInvitees = restoredDraft
+      ? restoredDraft.requireAllInvitees : plannerOptions.requireAllInvitees === true;
+    let sourceLabel = restoredDraft ? restoredDraft.sourceLabel : String(plannerOptions.sourceLabel || '').slice(0, 80);
+    let availabilityLabel = restoredDraft
+      ? restoredDraft.availabilityLabel : String(plannerOptions.availabilityLabel || '').slice(0, 120);
+    const sourceGameId = restoredDraft ? restoredDraft.sourceGameId : Number(plannerOptions.sourceGameId) || null;
+    const crewId = restoredDraft ? restoredDraft.crewId : presetCrewId;
+    let crewVersion = restoredDraft ? restoredDraft.crewVersion : presetCrewVersion;
+    let crewName = restoredDraft && restoredDraft.crewId
+      ? String(restoredDraft.sourceLabel || '').split(' · ')[0].slice(0, 80)
+      : presetCrewName;
     let restoredCourt = null;
     let restoredCourtMissing = false;
     const restoredCourtRequest = restoredDraft && restoredDraft.courtId
@@ -5922,6 +9404,32 @@
     await restoredCourtRequest;
     if (!routedOverlayLoadIsCurrent(modalLoad)) return;
 
+    // Invitees from a completed game are legitimate private-game invitees even
+    // when they are not friends yet. Keep their public snapshots ahead of the
+    // general friend list so the exact crew remains visible and recoverable.
+    const invitePeopleById = new Map();
+    const plannerPeople = [
+      ...presetInvitees,
+      ...((restoredDraft && restoredDraft.invitees) || []),
+      ...(crewId ? [] : friends),
+    ];
+    plannerPeople
+      .map(sanitizePlannerInvitee).filter(Boolean)
+      .forEach((person) => {
+        if (!state.me || person.id !== state.me.id) invitePeopleById.set(person.id, person);
+      });
+    const invitePeople = [...invitePeopleById.values()];
+    const requestedInviteIds = restoredDraft ? restoredDraft.inviteUserIds : presetInviteUserIds;
+    const invitePeopleIds = new Set(invitePeople.map((person) => person.id));
+    const initialInviteIds = new Set(requestedInviteIds.filter((id) => invitePeopleIds.has(id)));
+    if (crewId) {
+      const acceptedCrewSize = initialInviteIds.size + 1;
+      presetMaxPlayers = [2, 4, 6, 8, 10, 12].find((count) => count >= acceptedCrewSize) || 12;
+    }
+    const initialVisibility = crewId ? 'private' : (restoredDraft
+      ? restoredDraft.visibility
+      : (presetVisibility || (initialInviteIds.size ? 'private' : 'open')));
+
     // Smart default: a player already at a court should not have to pick it
     // again. Otherwise use their home court, while keeping Change available.
     if (!court && restoredCourt) {
@@ -5934,7 +9442,9 @@
 
     // Day & time presets
     const days = [];
-    for (let i = 0; i < 7; i++) {
+    // Include the same weekday next week. This lets a passed Monday-evening
+    // habit resolve to next Monday rather than an already-past time today.
+    for (let i = 0; i < 8; i++) {
       const d = new Date(); d.setDate(d.getDate() + i); d.setHours(0, 0, 0, 0);
       days.push(d);
     }
@@ -5961,16 +9471,28 @@
         selHour = { am: 10, pm: 14, eve: 18 }[slotPart] || selHour;
       }
     }
+    if (preferredScheduledAt) {
+      const preferredDate = new Date(preferredScheduledAt);
+      const dayIdx = days.findIndex((day) => day.toDateString() === preferredDate.toDateString());
+      if (Number.isFinite(preferredDate.getTime())
+          && preferredDate.getTime() > Date.now() + 50 * 60000
+          && dayIdx >= 0 && preferredDate.getMinutes() === 0
+          && timePresets.includes(preferredDate.getHours())) {
+        selDayIdx = dayIdx;
+        selHour = preferredDate.getHours();
+      }
+    }
 
     const dayChips = days.map((d, i) =>
       `<button type="button" data-day="${i}" aria-pressed="${i === selDayIdx}" class="${i === selDayIdx ? 'active' : ''}">${dayLabel(d, i)}</button>`).join('');
     const timeChips = timePresets.map((h) =>
       `<button type="button" data-hour="${h}" aria-pressed="${h === selHour}" class="${h === selHour ? 'active' : ''}">${timeLabel(h)}</button>`).join('');
 
-    const friendChips = friends.map((f) => `
-      <button type="button" class="invite-chip ${Number(presetFriendId) === f.id ? 'active' : ''}" data-fid="${f.id}" aria-pressed="${Number(presetFriendId) === f.id}">
+    const inviteChipHtml = (f, selected = false) => `
+      <button type="button" class="invite-chip ${selected ? 'active' : ''}" data-fid="${f.id}" aria-pressed="${selected}" ${crewId ? 'disabled aria-disabled="true" title="The accepted Crew roster is locked for this plan"' : ''}>
         ${avatarHtml(f, 'sm')} ${esc(f.display_name.split(' ')[0])}
-      </button>`).join('');
+      </button>`;
+    const friendChips = invitePeople.map((f) => inviteChipHtml(f, initialInviteIds.has(f.id))).join('');
 
     const suggestionRows = suggestions.map((c) => `
       <button type="button" class="court-suggestion" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}">
@@ -5981,22 +9503,27 @@
         <span class="tag" style="margin:0">${esc(c.tag)}</span>
       </button>`).join('');
 
-    const pickedFriend = friends.find((f) => f.id === Number(presetFriendId));
+    const hasPresetInvites = initialInviteIds.size > 0;
+    const plannerCrewHtml = sourceLabel ? `<div class="planner-crew-preset" id="ng-crew-preset" role="status">
+      <div class="planner-crew-avatars">${invitePeople.filter((person) => initialInviteIds.has(person.id)).slice(0, 4).map((person) => avatarHtml(person, 'sm')).join('')}</div>
+      <div class="row-main"><b id="ng-crew-title">${esc(sourceLabel)}</b><div class="row-sub" id="ng-crew-copy">${esc(availabilityLabel || `${initialInviteIds.size} teammate${initialInviteIds.size === 1 ? '' : 's'} selected`)}</div></div>
+    </div>` : '';
     const plannerRecoveryHtml = restoredDraft
       ? `<div class="planner-recovery ${restoredDraft.status === 'submitting' ? 'warn' : ''}" role="status">
           <div class="row-main">
-            <b>${restoredDraft.status === 'submitting' ? 'Was this game created?' : 'Continuing your saved plan'}</b>
+            <b>${restoredDraft.status === 'submitting' ? 'Finish this exact game safely' : 'Continuing your saved plan'}</b>
             <div class="row-sub">${restoredDraft.status === 'submitting'
-              ? 'We lost the confirmation. Check My games before you try again.'
+              ? 'The confirmation was interrupted. This retry cannot create a duplicate or change the plan.'
               : 'Review the time and people, then schedule when ready.'}</div>
           </div>
           ${restoredDraft.status === 'submitting'
-            ? '<button type="button" class="btn btn-secondary btn-sm" id="ng-check-games">Check</button><button type="button" class="btn btn-primary btn-sm" id="ng-review-retry">Retry</button>'
+            ? '<button type="button" class="btn btn-secondary btn-sm" id="ng-check-games">My games</button><button type="button" class="btn btn-primary btn-sm" id="ng-retry-exact">Finish safely</button>'
             : '<button type="button" class="btn btn-secondary btn-sm" id="ng-start-over">Start over</button>'}
         </div>`
       : (savedDraft && explicitPlannerIntent
-        ? `<div class="planner-recovery" role="status">
-            <div class="row-main"><b>You have a saved plan</b><div class="row-sub">This new plan will stay separate until you edit it.</div></div>
+        ? `<div class="planner-recovery ${protectedSubmittingDraft ? 'warn' : ''}" role="status">
+            <div class="row-main"><b>${protectedSubmittingDraft ? 'Resolve the game awaiting confirmation' : 'You have a saved plan'}</b><div class="row-sub">${protectedSubmittingDraft ? 'Check whether it was created before starting another plan.' : 'This new plan will stay separate until you edit it.'}</div></div>
+            ${protectedSubmittingDraft ? '<button type="button" class="btn btn-secondary btn-sm" id="ng-check-games">Check</button>' : ''}
             <button type="button" class="btn btn-secondary btn-sm" id="ng-resume-draft">Resume</button>
           </div>` : '');
     const modal = plannerShell;
@@ -6004,6 +9531,7 @@
     plannerBox.innerHTML = `
       ${modalHead(plannerTitle)}
       ${plannerRecoveryHtml}
+      ${plannerCrewHtml}
 
       <section class="planner-step" aria-labelledby="planner-where-title">
         <div class="planner-step-head">
@@ -6046,23 +9574,25 @@
       <section class="planner-step" aria-labelledby="planner-who-title">
         <div class="planner-step-head">
           <span class="planner-step-num">3</span>
-          <div><div class="planner-step-title" id="planner-who-title">Who should see it?</div><div class="planner-step-sub">Keep it open, share with friends, or invite your crew.</div></div>
+          <div><div class="planner-step-title" id="planner-who-title">Who should see it?</div><div class="planner-step-sub">${crewId ? 'This private game uses the full accepted Crew roster snapshot.' : 'Keep it open, share with friends, or invite your crew.'}</div></div>
         </div>
         <div class="type-cards vis-cards" id="ng-vis" role="group" aria-label="Who can join">
-          <button type="button" data-vis="open" aria-pressed="${!pickedFriend}" class="${pickedFriend ? '' : 'active'}"><span style="font-size:19px">🌍</span><b>Anyone</b><small>Nearby players</small></button>
-          <button type="button" data-vis="friends" aria-pressed="false"><span style="font-size:19px">🤝</span><b>Friends</b><small>All your friends</small></button>
-          <button type="button" data-vis="private" aria-pressed="${!!pickedFriend}" class="${pickedFriend ? 'active' : ''}"><span style="font-size:19px">🔒</span><b>Specific</b><small>Only who you pick</small></button>
+          <button type="button" data-vis="open" ${crewId ? 'disabled' : ''} aria-pressed="${initialVisibility === 'open'}" class="${initialVisibility === 'open' ? 'active' : ''}"><span style="font-size:19px">🌍</span><b>Anyone</b><small>Nearby players</small></button>
+          <button type="button" data-vis="friends" ${crewId ? 'disabled' : ''} aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}"><span style="font-size:19px">🤝</span><b>Friends</b><small>All your friends</small></button>
+          <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}"><span style="font-size:19px">🔒</span><b>${crewId ? 'Accepted Crew' : 'Specific'}</b><small>${crewId ? 'Full roster' : 'Only who you pick'}</small></button>
         </div>
-        <div id="ng-friends-wrap" class="${pickedFriend ? '' : 'hidden'}" style="margin-top:10px">
-          ${friends.length
+        <div id="ng-friends-wrap" class="${initialVisibility === 'private' ? '' : 'hidden'}" style="margin-top:10px">
+          ${invitePeople.length
             ? `<div class="invite-chips" id="ng-invites">${friendChips}</div>
-               <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">${pickedFriend ? `${esc(pickedFriend.display_name.split(' ')[0])} is invited — only selected players will see this game.` : 'Pick who to invite — only they will see this game.'}</p>`
+               <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">${crewId
+                 ? `${initialInviteIds.size} accepted teammate${initialInviteIds.size === 1 ? '' : 's'} — everyone shown is included.`
+                 : (hasPresetInvites ? `${initialInviteIds.size} invited — only selected players will see this game.` : 'Pick who to invite — only they will see this game.')}</p>`
             : '<p class="row-sub">Add friends first to invite specific people.</p>'}
         </div>
       </section>
 
       <details class="planner-advanced" id="ng-advanced">
-        <summary><span>Game options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · Doubles · Any level</span></summary>
+        <summary><span>Game options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${crewId ? `${initialInviteIds.size + 1} accepted Crew players` : (presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`)} · ${presetPreferredLevel === 'any' ? 'Any level' : skillLabel(presetPreferredLevel)}</span></summary>
         <div class="planner-advanced-body">
           <div class="form-grid">
             <div class="form-field">
@@ -6071,34 +9601,36 @@
                 <button type="button" data-val="casual" aria-pressed="${defaultType === 'casual'}" class="${defaultType === 'casual' ? 'active' : ''}">
                   <span style="font-size:20px"><svg class="pb-ic"><use href="#pb"/></svg></span><b>Casual</b><small>Just for fun</small>
                 </button>
-                <button type="button" data-val="ranked" aria-pressed="${defaultType === 'ranked'}" class="${defaultType === 'ranked' ? 'active' : ''}">
+                <button type="button" data-val="ranked" aria-pressed="${defaultType === 'ranked'}" class="${defaultType === 'ranked' ? 'active' : ''}" ${crewId && ![2, 4].includes(initialInviteIds.size + 1) ? 'disabled title="Ranked Crew games need exactly 2 or 4 accepted players"' : ''}>
                   <span style="font-size:20px">🏆</span><b>Ranked</b><small>Counts for rating</small>
                 </button>
               </div>
             </div>
-            <div class="form-field">
+            <div class="form-field ${crewId ? 'hidden' : ''}">
               <label for="ng-max">Players needed</label>
               <select id="ng-max">
-                <option value="2">2 (singles)</option>
-                <option value="4" selected>4 (doubles)</option>
-                <option value="6">6</option>
-                <option value="8">8</option>
+                <option value="2" ${presetMaxPlayers === 2 ? 'selected' : ''}>2 (singles)</option>
+                <option value="4" ${presetMaxPlayers === 4 ? 'selected' : ''}>4 (doubles)</option>
+                <option value="6" ${presetMaxPlayers === 6 ? 'selected' : ''}>6</option>
+                <option value="8" ${presetMaxPlayers === 8 ? 'selected' : ''}>8</option>
+                <option value="10" ${presetMaxPlayers === 10 ? 'selected' : ''}>10</option>
+                <option value="12" ${presetMaxPlayers === 12 ? 'selected' : ''}>12</option>
               </select>
             </div>
+            ${crewId ? `<div class="form-field">
+              <label>Accepted Crew snapshot</label>
+              <div class="crew-roster-lock" id="ng-crew-capacity">All ${initialInviteIds.size + 1} accepted players are included. Capacity is fixed to this roster.</div>
+            </div>` : ''}
           </div>
 
           <div class="form-field">
             <label>Level <span class="row-sub">(a hint, not a gate)</span></label>
             <div class="quick-times" id="ng-level" style="margin-top:2px">
-              <button type="button" data-level="any" class="active" aria-pressed="true">Anyone</button>
-              <button type="button" data-level="beginner" aria-pressed="false">Beginner</button>
-              <button type="button" data-level="intermediate" aria-pressed="false">Intermediate</button>
-              <button type="button" data-level="advanced" aria-pressed="false">Advanced</button>
-              <button type="button" data-level="pro" aria-pressed="false">Pro</button>
+              ${['any', 'beginner', 'intermediate', 'advanced', 'pro'].map((level) => `<button type="button" data-level="${level}" class="${presetPreferredLevel === level ? 'active' : ''}" aria-pressed="${presetPreferredLevel === level}">${level === 'any' ? 'Anyone' : skillLabel(level)}</button>`).join('')}
             </div>
           </div>
 
-          ${myClubs.length ? `
+          ${myClubs.length && !crewId ? `
           <div class="form-field">
             <label>Host under a club banner?</label>
             <div class="quick-times" id="ng-club">
@@ -6108,8 +9640,8 @@
             <div class="row-sub" id="ng-club-hint" style="margin-top:6px"></div>
           </div>` : ''}
 
-          <label class="row" id="ng-recurring-row" style="margin-bottom:14px;cursor:pointer;gap:10px">
-            <input type="checkbox" id="ng-recurring" style="width:22px;height:22px;flex:0 0 auto" />
+          <label class="row ${crewId ? 'hidden' : ''}" id="ng-recurring-row" style="margin-bottom:14px;cursor:pointer;gap:10px">
+            <input type="checkbox" id="ng-recurring" ${crewId ? 'disabled' : ''} style="width:22px;height:22px;flex:0 0 auto" />
             <span><span style="font-weight:700">🔁 Repeats weekly</span><br><span class="row-sub">Open-play session — players re-RSVP each week</span></span>
           </label>
 
@@ -6130,13 +9662,17 @@
     `;
     setDialogLabel(plannerBox, plannerTitle);
 
-    let plannerDirty = false;
+    // A completed-game preset is already valuable user work. Save it on an
+    // accidental dismiss unless another draft must remain untouched.
+    let plannerDirty = !!sourceGameId && !savedDraft;
+    if (crewId && !savedDraft) plannerDirty = true;
     let plannerSubmitted = false;
     let plannerSubmitting = !!(restoredDraft && restoredDraft.status === 'submitting');
     let plannerSubmitStartedAt = plannerSubmitting ? restoredDraft.submitStartedAt : null;
-    const plannerAttemptId = (restoredDraft && restoredDraft.clientAttemptId) || newGameAttemptId();
+    let plannerAttemptId = (restoredDraft && restoredDraft.clientAttemptId) || newGameAttemptId();
+    let frozenSubmitPayload = plannerSubmitting ? restoredDraft.submittedPayload : null;
     let plannerSaveTimer = null;
-    let ambiguousDraftAccepted = !(restoredDraft && restoredDraft.status === 'submitting');
+    let exactRetryRequested = false;
     const plannerScheduledIso = () => {
       if (nowMode) return null;
       let value;
@@ -6159,20 +9695,29 @@
       timeKind: customMode ? 'custom' : 'preset',
       visibility,
       inviteUserIds: [...inviteIds],
+      invitees: invitePeople.filter((person) => inviteIds.has(person.id)).map(sanitizePlannerInvitee),
+      requireAllInvitees,
+      sourceLabel,
+      availabilityLabel,
+      sourceGameId,
+      crewId,
+      crewVersion,
       gameType,
       maxPlayers: Number(modal.querySelector('#ng-max').value),
       preferredLevel,
       clubId,
-      recurrence: recurringBox.checked ? 'weekly' : 'none',
+      recurrence: crewId ? 'none' : (recurringBox.checked ? 'weekly' : 'none'),
       notes: modal.querySelector('#ng-notes').value.trim(),
       advancedOpen: modal.querySelector('#ng-advanced').open,
+      submittedPayload: status === 'submitting' ? frozenSubmitPayload : null,
     });
     const flushPlannerDraft = (status = 'editing') => {
       clearTimeout(plannerSaveTimer);
       plannerSaveTimer = null;
-      writeGameDraft(plannerSnapshot(status));
+      return writeGameDraft(plannerSnapshot(status));
     };
     const markPlannerDirty = () => {
+      if (protectedSubmittingDraft || plannerSubmitting) return;
       modal.querySelector('#ng-resume-draft')?.closest('.planner-recovery')?.remove();
       plannerDirty = true;
       clearTimeout(plannerSaveTimer);
@@ -6358,6 +9903,11 @@
       else loadBusyHint(court.id);
     }
 
+    // Crew roster state is shared by the options summary and the visibility
+    // section. Attached Crew plans keep this snapshot locked.
+    let visibility = initialVisibility;
+    const inviteIds = new Set(initialInviteIds);
+
     // --- Type ---
     let gameType = defaultType;
     const recurringRow = modal.querySelector('#ng-recurring-row');
@@ -6365,14 +9915,22 @@
     const syncRecurring = () => {
       // Recurring weekly sessions are open-play only (ranked games don't repeat).
       const isRanked = gameType === 'ranked';
-      recurringRow.classList.toggle('hidden', isRanked);
-      if (isRanked) recurringBox.checked = false;
+      const recurringAllowed = !crewId && !isRanked;
+      recurringRow.classList.toggle('hidden', !recurringAllowed);
+      recurringBox.disabled = !recurringAllowed;
+      if (!recurringAllowed) recurringBox.checked = false;
+      modal.querySelectorAll('#ng-max option').forEach((option) => {
+        option.disabled = isRanked && Number(option.value) > 4;
+      });
     };
     syncRecurring();
     modal.querySelector('#ng-type').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
-      if (!btn) return;
+      if (!btn || btn.disabled) return;
       gameType = btn.dataset.val;
+      if (gameType === 'ranked' && Number(modal.querySelector('#ng-max').value) > 4) {
+        modal.querySelector('#ng-max').value = '4';
+      }
       modal.querySelectorAll('#ng-type button').forEach((b) => {
         const active = b === btn;
         b.classList.toggle('active', active);
@@ -6384,7 +9942,7 @@
     });
 
     // --- Preferred level ---
-    let preferredLevel = 'any';
+    let preferredLevel = presetPreferredLevel;
     modal.querySelector('#ng-level').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
@@ -6399,7 +9957,9 @@
     });
     const updateOptionsSummary = () => {
       const players = Number(modal.querySelector('#ng-max').value);
-      const size = players === 2 ? 'Singles' : players === 4 ? 'Doubles' : `${players} players`;
+      const size = crewId
+        ? `${inviteIds.size + 1} accepted Crew players`
+        : (players === 2 ? 'Singles' : players === 4 ? 'Doubles' : `${players} players`);
       const level = preferredLevel === 'any' ? 'Any level' : skillLabel(preferredLevel);
       modal.querySelector('#ng-options-summary').textContent = `${gameType === 'ranked' ? 'Ranked' : 'Casual'} · ${size} · ${level}`;
     };
@@ -6424,12 +9984,39 @@
     });
 
     // --- Visibility / invites ---
-    let visibility = pickedFriend ? 'private' : 'open';
-    const inviteIds = new Set(pickedFriend ? [pickedFriend.id] : []);
     const friendsWrap = modal.querySelector('#ng-friends-wrap');
+    const updateCrewPresetBanner = () => {
+      const title = modal.querySelector('#ng-crew-title');
+      const copy = modal.querySelector('#ng-crew-copy');
+      if (!title || !copy) return;
+      if (crewId) {
+        title.textContent = `${crewName || 'Your Crew'} · ${inviteIds.size + 1} accepted player${inviteIds.size === 0 ? '' : 's'}`;
+        copy.textContent = `Accepted roster snapshot${crewVersion == null ? '' : ` v${crewVersion}`} · everyone shown is included.`;
+        return;
+      }
+      if (visibility !== 'private') {
+        if (crewName) title.textContent = crewName;
+        else title.textContent = 'Crew selection saved';
+        copy.textContent = crewId
+          ? 'Crew games stay private. Switch back to Specific to invite these teammates.'
+          : 'Switch back to Specific to invite these teammates directly.';
+        return;
+      }
+      title.textContent = inviteIds.size
+        ? `${crewName || 'Same crew'} · ${inviteIds.size} teammate${inviteIds.size === 1 ? '' : 's'}`
+        : 'No teammates selected';
+      const matchesOriginal = inviteIds.size === initialInviteIds.size
+        && [...inviteIds].every((id) => initialInviteIds.has(id));
+      copy.textContent = matchesOriginal && availabilityLabel
+        ? availabilityLabel
+        : (inviteIds.size
+            ? `${inviteIds.size} teammate${inviteIds.size === 1 ? '' : 's'} will get a direct invite.`
+            : 'Select at least one available teammate to keep this private.');
+    };
     modal.querySelector('#ng-vis').addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
+      if (crewId && btn.dataset.vis !== 'private') return;
       visibility = btn.dataset.vis;
       modal.querySelectorAll('#ng-vis button').forEach((b) => {
         const active = b === btn;
@@ -6437,13 +10024,14 @@
         b.setAttribute('aria-pressed', String(active));
       });
       friendsWrap.classList.toggle('hidden', visibility !== 'private');
+      updateCrewPresetBanner();
       markPlannerDirty();
     });
     const invitesEl = modal.querySelector('#ng-invites');
     if (invitesEl) {
       invitesEl.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-fid]');
-        if (!btn) return;
+        if (!btn || btn.disabled || crewId) return;
         const fid = Number(btn.dataset.fid);
         if (inviteIds.has(fid)) inviteIds.delete(fid); else inviteIds.add(fid);
         btn.classList.toggle('active', inviteIds.has(fid));
@@ -6451,9 +10039,64 @@
         modal.querySelector('#ng-invite-hint').textContent = inviteIds.size
           ? `${inviteIds.size} invited — only they will see this game.`
           : 'Pick who to invite — only they will see this game.';
+        updateCrewPresetBanner();
         markPlannerDirty();
       });
     }
+
+    const applyFreshCrewRoster = (detail) => {
+      if (!crewId || !detail || !Array.isArray(detail.members)) return false;
+      const summary = crewSummaryFrom(detail);
+      const freshInvitees = detail.members
+        .map(sanitizePlannerInvitee).filter(Boolean)
+        .filter((person) => !state.me || person.id !== state.me.id);
+      invitePeople.splice(0, invitePeople.length, ...freshInvitees);
+      initialInviteIds.clear();
+      inviteIds.clear();
+      freshInvitees.forEach((person) => {
+        initialInviteIds.add(person.id);
+        inviteIds.add(person.id);
+      });
+      if (summary) {
+        crewVersion = summary.roster_version;
+        crewName = summary.name;
+      }
+      sourceLabel = `${crewName || 'Your Crew'} · ${freshInvitees.length} accepted teammate${freshInvitees.length === 1 ? '' : 's'}`;
+      availabilityLabel = `Accepted Crew roster snapshot${crewVersion == null ? '' : ` v${crewVersion}`}`;
+
+      if (invitesEl) {
+        invitesEl.innerHTML = freshInvitees.map((person) => inviteChipHtml(person, true)).join('');
+      }
+      const avatars = modal.querySelector('.planner-crew-avatars');
+      if (avatars) avatars.innerHTML = freshInvitees.slice(0, 4).map((person) => avatarHtml(person, 'sm')).join('');
+      const inviteHint = modal.querySelector('#ng-invite-hint');
+      if (inviteHint) inviteHint.textContent = `${freshInvitees.length} accepted teammate${freshInvitees.length === 1 ? '' : 's'} — everyone shown is included.`;
+
+      const playerCount = freshInvitees.length + 1;
+      const nextCapacity = [2, 4, 6, 8, 10, 12].find((count) => count >= playerCount) || 12;
+      modal.querySelector('#ng-max').value = String(nextCapacity);
+      const capacity = modal.querySelector('#ng-crew-capacity');
+      if (capacity) capacity.textContent = `All ${playerCount} accepted players are included. Capacity is fixed to this roster.`;
+      const rankedButton = modal.querySelector('#ng-type button[data-val="ranked"]');
+      const rankedEligible = [2, 4].includes(playerCount);
+      if (rankedButton) {
+        rankedButton.disabled = !rankedEligible;
+        rankedButton.title = rankedEligible ? '' : 'Ranked Crew games need exactly 2 or 4 accepted players';
+      }
+      if (!rankedEligible && gameType === 'ranked') {
+        gameType = 'casual';
+        modal.querySelectorAll('#ng-type button').forEach((button) => {
+          const active = button.dataset.val === 'casual';
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-pressed', String(active));
+        });
+      }
+      syncRecurring();
+      updateOptionsSummary();
+      updateCrewPresetBanner();
+      modal.querySelector('#ng-invite-warning')?.remove();
+      return playerCount >= 2 && playerCount <= 12;
+    };
 
     modal.querySelector('#ng-recurring').addEventListener('change', markPlannerDirty);
     modal.querySelector('#ng-notes').addEventListener('input', markPlannerDirty);
@@ -6514,7 +10157,9 @@
         });
       }
 
-      gameType = restoredDraft.gameType;
+      const restoredCrewSize = crewId ? initialInviteIds.size + 1 : null;
+      gameType = crewId && ![2, 4].includes(restoredCrewSize) && restoredDraft.gameType === 'ranked'
+        ? 'casual' : restoredDraft.gameType;
       modal.querySelectorAll('#ng-type button').forEach((btn) => {
         const active = btn.dataset.val === gameType;
         btn.classList.toggle('active', active);
@@ -6526,32 +10171,41 @@
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', String(active));
       });
-      const restoredMax = gameType === 'ranked' && ![2, 4].includes(restoredDraft.maxPlayers)
-        ? 4 : restoredDraft.maxPlayers;
+      const restoredMax = crewId
+        ? ([2, 4, 6, 8, 10, 12].find((count) => count >= restoredCrewSize) || 12)
+        : (gameType === 'ranked' && ![2, 4].includes(restoredDraft.maxPlayers)
+            ? 4 : restoredDraft.maxPlayers);
       modal.querySelector('#ng-max').value = String(restoredMax);
 
-      visibility = restoredDraft.visibility;
+      visibility = crewId ? 'private' : restoredDraft.visibility;
       modal.querySelectorAll('#ng-vis button').forEach((btn) => {
         const active = btn.dataset.vis === visibility;
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', String(active));
       });
       friendsWrap.classList.toggle('hidden', visibility !== 'private');
-      const currentFriendIds = new Set(friends.map((friend) => friend.id));
+      const currentInviteeIds = new Set(invitePeople.map((person) => person.id));
       inviteIds.clear();
-      restoredDraft.inviteUserIds.filter((id) => currentFriendIds.has(id)).forEach((id) => inviteIds.add(id));
+      const restoredInviteIds = crewId
+        ? [...currentInviteeIds]
+        : restoredDraft.inviteUserIds.filter((id) => currentInviteeIds.has(id));
+      restoredInviteIds.forEach((id) => inviteIds.add(id));
       invitesEl?.querySelectorAll('[data-fid]').forEach((btn) => {
         const active = inviteIds.has(Number(btn.dataset.fid));
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', String(active));
       });
       if (visibility === 'private' && restoredDraft.inviteUserIds.length !== inviteIds.size) {
-        setPlannerWarning('ng-invite-warning', 'Some saved invitees are no longer available. Review who can see this game.', friendsWrap);
+        setPlannerWarning('ng-invite-warning', crewId
+          ? 'This saved Crew snapshot is incomplete. The roster will refresh before it can be scheduled.'
+          : 'Some saved invitees are no longer available. Review who can see this game.', friendsWrap);
       }
       if (modal.querySelector('#ng-invite-hint')) {
-        modal.querySelector('#ng-invite-hint').textContent = inviteIds.size
-          ? `${inviteIds.size} invited — only they will see this game.`
-          : 'Pick who to invite — only they will see this game.';
+        modal.querySelector('#ng-invite-hint').textContent = crewId
+          ? `${inviteIds.size} accepted teammate${inviteIds.size === 1 ? '' : 's'} — everyone shown is included.`
+          : (inviteIds.size
+              ? `${inviteIds.size} invited — only they will see this game.`
+              : 'Pick who to invite — only they will see this game.');
       }
 
       const restoredClub = myClubs.find((item) => item.id === restoredDraft.clubId);
@@ -6564,11 +10218,12 @@
           ? 'This private game will be hosted by you, not a club.'
           : 'That club is no longer available, so this game will be hosted by you.', modal.querySelector('#ng-club')?.parentElement);
       }
-      recurringBox.checked = gameType !== 'ranked' && restoredDraft.recurrence === 'weekly';
+      recurringBox.checked = !crewId && gameType !== 'ranked' && restoredDraft.recurrence === 'weekly';
       modal.querySelector('#ng-notes').value = restoredDraft.notes;
       modal.querySelector('#ng-advanced').open = restoredDraft.advancedOpen;
       syncRecurring();
       updateOptionsSummary();
+      updateCrewPresetBanner();
       updateBusyHint();
       updatePlannerSummary();
     }
@@ -6594,16 +10249,47 @@
       state.playSeg = 'games';
       switchTab('play');
     });
-    modal.querySelector('#ng-review-retry')?.addEventListener('click', () => {
-      ambiguousDraftAccepted = true;
-      plannerSubmitting = false;
-      plannerSubmitStartedAt = null;
-      modal.querySelector('#ng-submit').disabled = false;
-      modal.querySelector('#ng-review-retry')?.closest('.planner-recovery')?.remove();
-      writeGameDraft(plannerSnapshot('editing'));
-      toast('Review the details, then schedule when ready');
+    if (plannerSubmitting && !frozenSubmitPayload && restoredDraft && restoredDraft.scheduledAt) {
+      // Pre-immutable scheduled drafts can be reconstructed canonically. Old
+      // "right now" drafts did not retain their generated timestamp and must
+      // never manufacture a different request under the original key.
+      frozenSubmitPayload = sanitizeGameCreatePayload({
+        court_id: restoredDraft.courtId,
+        scheduled_at: restoredDraft.scheduledAt,
+        game_type: restoredDraft.gameType,
+        visibility: restoredDraft.visibility,
+        recurrence: restoredDraft.recurrence,
+        max_players: restoredDraft.maxPlayers,
+        preferred_level: restoredDraft.preferredLevel,
+        notes: restoredDraft.notes,
+        invite_user_ids: restoredDraft.visibility === 'private' ? restoredDraft.inviteUserIds : [],
+        require_all_invitees: restoredDraft.visibility === 'private' && restoredDraft.requireAllInvitees,
+        source_game_id: restoredDraft.sourceGameId,
+        club_id: restoredDraft.clubId,
+        crew_id: restoredDraft.crewId,
+        expected_crew_version: restoredDraft.crewVersion,
+        client_attempt_id: plannerAttemptId,
+      }, plannerAttemptId);
+    }
+    if (plannerSubmitting) {
+      modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+        .forEach((section) => section.setAttribute('inert', ''));
+      const retry = modal.querySelector('#ng-retry-exact');
+      if (retry && !frozenSubmitPayload) {
+        retry.disabled = true;
+        retry.textContent = 'Exact retry unavailable';
+      }
+    }
+    if (plannerSubmitting || protectedSubmittingDraft) modal.querySelector('#ng-submit').disabled = true;
+    modal.querySelector('#ng-retry-exact')?.addEventListener('click', () => {
+      if (!frozenSubmitPayload) return;
+      exactRetryRequested = true;
+      modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+        .forEach((section) => section.removeAttribute('inert'));
+      const submit = modal.querySelector('#ng-submit');
+      submit.disabled = false;
+      submit.click();
     });
-    if (!ambiguousDraftAccepted) modal.querySelector('#ng-submit').disabled = true;
 
     const showPlannerSubmitError = (message, target) => {
       const error = modal.querySelector('#ng-submit-error');
@@ -6626,14 +10312,24 @@
     // --- Submit ---
     modal.querySelector('#ng-submit').addEventListener('click', async (e) => {
       clearPlannerSubmitError();
-      if (!ambiguousDraftAccepted) {
-        showPlannerSubmitError('Check My games before retrying this plan.');
+      const exactRetry = exactRetryRequested;
+      exactRetryRequested = false;
+      if (protectedSubmittingDraft) {
+        showPlannerSubmitError('Check the unconfirmed game before starting another plan.');
         return;
       }
-      const courtId = modal.querySelector('#ng-court-id').value;
-      if (!courtId) { showPlannerSubmitError('Pick a court first.', modal.querySelector('#ng-court-search')); return; }
+      const exactPayload = exactRetry
+        ? sanitizeGameCreatePayload(frozenSubmitPayload, plannerAttemptId) : null;
+      if (exactRetry && !exactPayload) {
+        showPlannerSubmitError('That exact retry is unavailable. Check My games before starting a new plan.');
+        return;
+      }
+      const courtId = exactRetry ? exactPayload.court_id : modal.querySelector('#ng-court-id').value;
+      if (!exactRetry && !courtId) { showPlannerSubmitError('Pick a court first.', modal.querySelector('#ng-court-search')); return; }
       let scheduledAt;
-      if (nowMode) {
+      if (exactRetry) {
+        scheduledAt = new Date(exactPayload.scheduled_at);
+      } else if (nowMode) {
         scheduledAt = new Date();
       } else if (customMode) {
         const v = modal.querySelector('#ng-when').value;
@@ -6645,17 +10341,53 @@
         scheduledAt = new Date(days[selDayIdx]);
         scheduledAt.setHours(selHour, 0, 0, 0);
       }
-      if (!nowMode && scheduledAt.getTime() <= Date.now()) {
+      if (!exactRetry && !nowMode && scheduledAt.getTime() <= Date.now()) {
         setPlannerWarning('ng-time-warning', 'That time has passed. Choose a future time.');
         showPlannerSubmitError('Choose a future time.', customMode ? modal.querySelector('#ng-when') : modal.querySelector('#ng-hours button.active'));
         return;
       }
-      if (visibility === 'private' && inviteIds.size === 0) {
+      if (!exactRetry && visibility === 'private' && inviteIds.size === 0) {
         showPlannerSubmitError('Pick at least one person to invite.', modal.querySelector('#ng-invites button'));
         return;
       }
-      if (clubId && visibility === 'private') {
+      const chosenCapacity = Number(modal.querySelector('#ng-max').value);
+      const effectiveCapacity = gameType === 'ranked' ? (chosenCapacity <= 2 ? 2 : 4) : chosenCapacity;
+      const plannedPlayerCount = crewId ? invitePeople.length + 1 : inviteIds.size + 1;
+      const selectedInviteesExceedCapacity = inviteIds.size + 1 > effectiveCapacity;
+      const plannedRosterExceedsCapacity = crewId
+        ? plannedPlayerCount > effectiveCapacity : selectedInviteesExceedCapacity;
+      if (!exactRetry && visibility === 'private' && plannedRosterExceedsCapacity) {
+        showPlannerSubmitError(
+          crewId
+            ? `This Crew has ${plannedPlayerCount} accepted players. Crew games support up to 12 players.`
+            : `This crew needs room for ${plannedPlayerCount} players. Increase Players needed or remove someone.`,
+          modal.querySelector('#ng-max'),
+        );
+        return;
+      }
+      if (!exactRetry && clubId && visibility === 'private') {
         showPlannerSubmitError("Club games can't be invite-only — the club needs to see it.", modal.querySelector('#ng-vis button[data-vis="friends"]'));
+        return;
+      }
+      const requestPayload = exactPayload || sanitizeGameCreatePayload({
+        court_id: Number(courtId),
+        scheduled_at: scheduledAt.toISOString(),
+        game_type: gameType,
+        visibility,
+        recurrence: crewId ? 'none' : (recurringBox.checked ? 'weekly' : 'none'),
+        max_players: Number(modal.querySelector('#ng-max').value),
+        preferred_level: preferredLevel,
+        notes: modal.querySelector('#ng-notes').value.trim(),
+        invite_user_ids: visibility === 'private' ? [...inviteIds] : [],
+        require_all_invitees: visibility === 'private' && requireAllInvitees,
+        source_game_id: sourceGameId,
+        club_id: clubId,
+        crew_id: crewId,
+        expected_crew_version: crewVersion,
+        client_attempt_id: plannerAttemptId,
+      }, plannerAttemptId);
+      if (!requestPayload) {
+        showPlannerSubmitError('Review the court and time, then try again.');
         return;
       }
       const btn = e.currentTarget;
@@ -6663,34 +10395,32 @@
       btn.disabled = true;
       btn.textContent = nowMode ? 'Starting game…' : 'Scheduling…';
       plannerSubmitting = true;
-      plannerSubmitStartedAt = Date.now();
+      plannerSubmitStartedAt ||= Date.now();
+      frozenSubmitPayload = requestPayload;
+      if (!flushPlannerDraft('submitting')) {
+        plannerSubmitting = false;
+        plannerSubmitStartedAt = null;
+        frozenSubmitPayload = null;
+        btn.disabled = false;
+        btn.textContent = nowMode ? 'Start game now' : 'Schedule game';
+        showPlannerSubmitError('Nothing was sent because this browser could not save a safe retry. Free up browser storage, then try again.');
+        return;
+      }
       modal.classList.add('planner-submitting');
       modal.querySelector('.modal')?.setAttribute('aria-busy', 'true');
       modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
         .forEach((section) => section.setAttribute('inert', ''));
-      flushPlannerDraft('submitting');
       try {
-        await api('/games', {
+        const createdGame = await api('/games', {
           method: 'POST',
-          body: JSON.stringify({
-            court_id: Number(courtId),
-            scheduled_at: scheduledAt.toISOString(),
-            game_type: gameType,
-            visibility,
-            recurrence: recurringBox.checked ? 'weekly' : 'none',
-            max_players: Number(modal.querySelector('#ng-max').value),
-            preferred_level: preferredLevel,
-            notes: modal.querySelector('#ng-notes').value.trim(),
-            invite_user_ids: visibility === 'private' ? [...inviteIds] : [],
-            club_id: clubId,
-            client_attempt_id: plannerAttemptId,
-          }),
+          body: JSON.stringify(requestPayload),
         });
         plannerSubmitting = false;
         plannerSubmitted = true;
         clearGameDraft();
         closeModal(modal);
-        toast(nowMode ? "Game on! It's live in My games 🏓" : 'Game scheduled! 🏓');
+        toast(nowMode ? "Game on — let's fill the roster 🏓" : "Game scheduled — let's fill the roster 🏓");
+        state.playGamesCache = null;
         if (state.tab === 'play') {
           state.playSeg = 'games';
           syncPlayFab();
@@ -6702,15 +10432,196 @@
           b.setAttribute('aria-selected', String(active));
         });
         refreshMe();
+        // Creation is the start of assembling the game, not the end. Keep the
+        // host on the roster where invite/share/court-post actions are visible.
+        openGameScreen(createdGame.id);
       } catch (err) {
+        if (err.code === 'crew_not_found' && crewId) {
+          plannerSubmitting = false;
+          plannerSubmitStartedAt = null;
+          frozenSubmitPayload = null;
+          plannerDirty = false;
+          plannerSubmitted = true;
+          clearGameDraft();
+          modal.classList.remove('planner-submitting');
+          modal.querySelector('.modal')?.removeAttribute('aria-busy');
+          modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+            .forEach((section) => section.removeAttribute('inert'));
+          const submitButton = modal.querySelector('#ng-submit');
+          submitButton.disabled = true;
+          submitButton.textContent = 'Crew unavailable';
+          const message = 'You no longer have access to this Crew. This saved plan was cleared.';
+          setPlannerWarning('ng-invite-warning', message, friendsWrap);
+          showPlannerSubmitError(message, null);
+          return;
+        }
+        if (err.code === 'crew_changed' && crewId) {
+          plannerSubmitting = false;
+          plannerSubmitStartedAt = null;
+          frozenSubmitPayload = null;
+          exactRetryRequested = false;
+          const refreshedAttemptId = newGameAttemptId();
+          plannerAttemptId = refreshedAttemptId;
+          plannerDirty = true;
+          modal.querySelector('.planner-recovery.warn')?.remove();
+          modal.classList.remove('planner-submitting');
+          modal.querySelector('.modal')?.removeAttribute('aria-busy');
+          modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+            .forEach((section) => section.removeAttribute('inert'));
+          const submitButton = modal.querySelector('#ng-submit');
+          submitButton.disabled = true;
+          submitButton.textContent = 'Refreshing Crew roster…';
+          try {
+            // Never trust only the version returned by the 409: the accepted
+            // names and IDs are the privacy boundary. Refresh the full detail
+            // before this planner is allowed to submit a different attempt.
+            const detail = await api(`/crews/${crewId}`);
+            if (!document.body.contains(modal)) return;
+            const schedulable = applyFreshCrewRoster(detail);
+            const playerCount = invitePeople.length + 1;
+            const message = schedulable
+              ? `Crew roster refreshed to ${playerCount} accepted player${playerCount === 1 ? '' : 's'}. Review the full snapshot, then schedule again.`
+              : (playerCount < 2
+                  ? 'This Crew needs another accepted player before it can plan a game.'
+                  : 'This Crew is too large to schedule as one game.');
+            setPlannerWarning('ng-invite-warning', message, friendsWrap);
+            submitButton.disabled = !schedulable;
+            submitButton.textContent = nowMode ? 'Start game now' : 'Schedule game';
+            showPlannerSubmitError(message, null);
+            flushPlannerDraft('editing');
+          } catch (refreshError) {
+            if (!document.body.contains(modal)) return;
+            const message = 'The Crew changed, but the accepted roster could not be refreshed. Close this planner and try again when connected.';
+            setPlannerWarning('ng-invite-warning', message, friendsWrap);
+            submitButton.disabled = true;
+            submitButton.textContent = 'Crew refresh needed';
+            showPlannerSubmitError(message, null);
+            flushPlannerDraft('editing');
+          }
+          return;
+        }
+        if (err.code === 'crew_changed') {
+          const unavailableIds = new Set((err.data && err.data.unavailable_user_ids || []).map(Number));
+          const unavailableNames = invitePeople
+            .filter((person) => unavailableIds.has(person.id))
+            .map((person) => person.display_name.split(' ')[0]);
+          unavailableIds.forEach((id) => inviteIds.delete(id));
+          invitesEl?.querySelectorAll('[data-fid]').forEach((chip) => {
+            if (!unavailableIds.has(Number(chip.dataset.fid))) return;
+            chip.classList.remove('active');
+            chip.setAttribute('aria-pressed', 'false');
+            chip.disabled = true;
+            chip.title = 'No longer available for this invite';
+          });
+          const message = unavailableNames.length
+            ? `${unavailableNames.join(', ')} ${unavailableNames.length === 1 ? 'is' : 'are'} no longer available for this invite. Review the crew, then schedule again.`
+            : 'The crew changed while this plan was open. Review the selected players, then schedule again.';
+          setPlannerWarning('ng-invite-warning', message, friendsWrap);
+          if (modal.querySelector('#ng-invite-hint')) {
+            modal.querySelector('#ng-invite-hint').textContent = inviteIds.size
+              ? `${inviteIds.size} invited — only they will see this game.`
+              : 'Pick at least one available player to continue.';
+          }
+          updateCrewPresetBanner();
+          plannerSubmitting = false;
+          plannerSubmitStartedAt = null;
+          frozenSubmitPayload = null;
+          plannerDirty = true;
+          modal.querySelector('.planner-recovery.warn')?.remove();
+          modal.classList.remove('planner-submitting');
+          modal.querySelector('.modal')?.removeAttribute('aria-busy');
+          modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+            .forEach((section) => section.removeAttribute('inert'));
+          const btn = modal.querySelector('#ng-submit');
+          btn.disabled = false;
+          btn.textContent = nowMode ? 'Start game now' : 'Schedule game';
+          showPlannerSubmitError(message, inviteIds.size ? null : modal.querySelector('#ng-invites button:not(:disabled)'));
+          flushPlannerDraft('editing');
+          return;
+        }
+        if (err.isStaleSession) return;
+        if (err.code === 'client_attempt_id_conflict') {
+          const existingGameId = Number(err.data && err.data.existing_game_id);
+          if (Number.isSafeInteger(existingGameId) && existingGameId > 0) {
+            plannerSubmitting = false;
+            plannerSubmitted = true;
+            clearGameDraft();
+            closeModal(modal);
+            toast('That safety key already belongs to a game — opening it');
+            state.playGamesCache = null;
+            refreshMe();
+            openGameScreen(existingGameId);
+            return;
+          }
+          // Older servers may not include the creator-owned game id. Keep the
+          // exact key frozen and never manufacture a second create attempt.
+          plannerDirty = true;
+          flushPlannerDraft('submitting');
+          closeModal(modal);
+          toast('This retry already belongs to a game — check My games');
+          return;
+        }
+        const ambiguous = err.isNetworkError || Number(err.status) === 429 || Number(err.status) >= 500;
+        if (ambiguous) {
+          plannerDirty = true;
+          // A timeout or interrupted response may still have created the game.
+          // Keep the exact request frozen; reopening can only replay this body.
+          flushPlannerDraft('submitting');
+          closeModal(modal);
+          toast('Confirmation was interrupted — reopen Plan ahead to finish safely');
+          return;
+        }
+
+        // A known non-conflict 4xx means this request did not create a new game. Return to
+        // editing in place instead of trapping the player in an ambiguity loop.
+        plannerSubmitting = false;
+        plannerSubmitStartedAt = null;
+        frozenSubmitPayload = null;
         plannerDirty = true;
-        // A timeout or interrupted response may still have created the game.
-        // Preserve the guard instead of enabling a duplicate one-tap retry.
-        flushPlannerDraft('submitting');
-        closeModal(modal);
-        toast('Couldn’t confirm the game — check My games before retrying');
+        modal.querySelector('.planner-recovery.warn')?.remove();
+        modal.classList.remove('planner-submitting');
+        modal.querySelector('.modal')?.removeAttribute('aria-busy');
+        modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+          .forEach((section) => section.removeAttribute('inert'));
+        const submit = modal.querySelector('#ng-submit');
+        submit.disabled = false;
+        submit.textContent = nowMode ? 'Start game now' : 'Schedule game';
+        showPlannerSubmitError(err.message);
+        flushPlannerDraft('editing');
       }
     });
+
+    // Editable restored Crew drafts refresh opportunistically before the next
+    // submit. A submitting draft stays frozen so an interrupted, already-
+    // committed request can still replay byte-for-byte first.
+    if (crewId && restoredDraft && !plannerSubmitting) {
+      api(`/crews/${crewId}`).then((detail) => {
+        if (!document.body.contains(modal) || plannerSubmitting || plannerSubmitted) return;
+        const schedulable = applyFreshCrewRoster(detail);
+        if (!schedulable) {
+          const count = invitePeople.length + 1;
+          const message = count < 2
+            ? 'This Crew needs another accepted player before it can plan a game.'
+            : 'This Crew is too large to schedule as one game.';
+          setPlannerWarning('ng-invite-warning', message, friendsWrap);
+          modal.querySelector('#ng-submit').disabled = true;
+        }
+        plannerDirty = true;
+        flushPlannerDraft('editing');
+      }).catch((error) => {
+        if (!document.body.contains(modal) || plannerSubmitting || plannerSubmitted) return;
+        if (error.code !== 'crew_not_found') return;
+        plannerDirty = false;
+        plannerSubmitted = true;
+        clearGameDraft();
+        const message = 'You no longer have access to this Crew. This saved plan was cleared.';
+        setPlannerWarning('ng-invite-warning', message, friendsWrap);
+        const submit = modal.querySelector('#ng-submit');
+        submit.disabled = true;
+        submit.textContent = 'Crew unavailable';
+        showPlannerSubmitError(message, null);
+      });
+    }
   }
 
   function openScoreModal(game, refresh) {
@@ -8497,6 +12408,12 @@
   function inboxMessagePreview(item) {
     const message = item.lastMessage;
     if (!message) return item.emptyText || 'Start the conversation';
+    if (message.open_call) {
+      const call = message.open_call;
+      if (call.state === 'open') return `🏓 ${call.spots_left} spot${call.spots_left === 1 ? '' : 's'} open · ${esc(fmtDateTime(call.scheduled_at))}`;
+      if (call.state === 'full') return `✓ Roster full · ${esc(fmtDateTime(call.scheduled_at))}`;
+      return call.state === 'withdrawn' ? 'Court game post withdrawn' : 'Court game post closed';
+    }
     const body = message.body ? esc(message.body.slice(0, 72))
       : message.has_image ? '📷 Photo' : 'New message';
     if (message.sender_id === state.me.id) return `You: ${body}`;
@@ -8516,7 +12433,7 @@
     return details.join(' · ');
   }
 
-  function universalInboxHtml(data, rooms, clubs, competitions) {
+  function universalInboxHtml(data, rooms, clubs, competitions, crews = { items: [], invitations: [] }) {
     const items = [];
     (data.items || []).forEach((chat) => items.push({
       kind: 'dm', id: chat.user.id, title: chat.user.display_name,
@@ -8530,6 +12447,17 @@
       emptyText: club.announcement ? `📣 ${esc(club.announcement.slice(0, 72))}`
         : `${club.member_count} member${club.member_count === 1 ? '' : 's'}${club.home_court_name ? ` · ${esc(club.home_court_name)}` : ''}`,
     }));
+    (crews.items || []).forEach((value) => {
+      const crew = crewSummaryFrom(value);
+      if (!crew) return;
+      items.push({
+        kind: 'crew', id: crew.id, title: crew.name,
+        iconHtml: '<span class="inbox-room-icon crew">👥</span>',
+        lastMessage: value.last_message || crew.last_message || null,
+        unread: Number(value.unread ?? crew.unread) || 0,
+        emptyText: `${crew.member_count} player${crew.member_count === 1 ? '' : 's'}${crew.pending_count ? ` · ${crew.pending_count} invited` : ''}${crew.default_court_name ? ` · ${esc(crew.default_court_name)}` : ''}`,
+      });
+    });
     (rooms.items || []).forEach((room) => items.push({
       kind: 'court', id: room.court.id, title: room.court.name,
       iconHtml: '<span class="inbox-room-icon">🏓</span>', lastMessage: room.last_message,
@@ -8549,7 +12477,7 @@
         if (a.eventAt && b.eventAt) return new Date(a.eventAt) - new Date(b.eventAt);
         return a.eventAt ? -1 : b.eventAt ? 1 : a.title.localeCompare(b.title);
       });
-    const kindLabel = { dm: 'Direct', club: 'Club', court: 'Court', game: 'Game', tournament: 'Tournament', league: 'League' };
+    const kindLabel = { dm: 'Direct', club: 'Club', crew: 'Crew', court: 'Court', game: 'Game', tournament: 'Tournament', league: 'League' };
     const rowHtml = (item, extraClass = '') => {
       const attention = item.unread
         ? `, ${item.unread} unread message${item.unread === 1 ? '' : 's'}` : '';
@@ -8565,7 +12493,30 @@
       </button>`;
     };
 
+    const invitations = (crews.invitations || []).map((invitation) => ({
+      invitation,
+      crew: crewSummaryFrom(invitation),
+    })).filter((entry) => entry.crew);
     let html = '';
+    if (invitations.length) {
+      html += '<div class="section-label" style="margin-top:4px">Crew invitations</div>';
+      html += invitations.map(({ invitation, crew }) => {
+        const inviter = invitation.inviter && invitation.inviter.display_name
+          ? invitation.inviter.display_name
+          : invitation.invited_by_name || invitation.creator_name || 'A player';
+        const playedAt = invitation.source_court_name || crew.default_court_name;
+        return `<div class="card crew-invite-card" data-crew-invitation="${crew.id}">
+          <div class="row crew-invite-main">
+            <span class="inbox-room-icon crew">👥</span>
+            <span class="row-main"><span class="row-title">${esc(crew.name)}</span><span class="row-sub">${esc(inviter)} invited you${playedAt ? ` · You played together at ${esc(playedAt)}` : ''}</span></span>
+          </div>
+          <div class="crew-invite-actions">
+            <button type="button" class="btn btn-secondary" data-crew-response="decline" data-crew-id="${crew.id}">Decline</button>
+            <button type="button" class="btn btn-primary" data-crew-response="accept" data-crew-id="${crew.id}">Join crew</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
     if (recent.length) {
       html += '<div class="section-label" style="margin-top:4px">Recent conversations</div>';
       html += recent.map((item) => rowHtml(item)).join('');
@@ -8577,7 +12528,7 @@
         html += `<button type="button" class="btn btn-secondary btn-block" id="inbox-show-ready">Show ${ready.length - 8} more active chats</button>`;
       }
     }
-    if (!items.length) {
+    if (!items.length && !invitations.length) {
       html = `<div class="empty-state"><span class="big">💬</span><b>Your conversations will live here.</b><br>Find your crew or start a game to open a shared chat.
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
           <button class="btn btn-secondary" data-goto="chat-friends">🤝 Find friends</button>
@@ -8595,7 +12546,8 @@
   async function renderChat({ reuseFresh = false, useCachedData = false } = {}) {
     const seg = state.chatSeg;
     const liveEl = $('#chat-content');
-    const viewKey = `${state.me?.id || 'signed-out'}:chat:${seg}`;
+    liveEl.setAttribute('aria-labelledby', `chat-tab-${seg}`);
+    const viewKey = `${state.me?.id || 'signed-out'}:chat:${seg}:${areaViewKey()}`;
     if (reuseFresh && viewIsFresh(liveEl, viewKey)) return;
     const renderSeq = ++state.chatRenderSeq;
     const hadUsableContent = beginViewRender(liveEl, viewKey, 5);
@@ -8607,18 +12559,19 @@
     };
     try {
       if (seg === 'chats') {
-        const [data, rooms, clubs, competitions] = await Promise.all([
+        const [data, rooms, clubs, competitions, crews] = await Promise.all([
           api('/chat'),
           api('/chat/courts'),
           api('/clubs/mine'),
           api('/chat/competitions'),
+          api('/crews/mine').catch(() => ({ items: [], invitations: [] })),
         ]);
         if (renderSeq !== state.chatRenderSeq || state.chatSeg !== seg) return;
-        state.communityRoomUnread = [rooms, clubs, competitions]
+        state.communityRoomUnread = [rooms, clubs, competitions, crews]
           .flatMap((group) => group.items || [])
           .reduce((total, item) => total + Number(item.unread || 0), 0);
         renderBadges();
-        el.innerHTML = universalInboxHtml(data, rooms, clubs, competitions);
+        el.innerHTML = universalInboxHtml(data, rooms, clubs, competitions, crews);
         el.querySelectorAll('[data-inbox-kind]').forEach((row) => row.addEventListener('click', async () => {
           if (row.disabled) return;
           row.disabled = true;
@@ -8628,6 +12581,7 @@
             if (kind === 'dm') await openThread(id);
             else if (kind === 'court') await openCourtChat({ id, name: row.dataset.inboxTitle });
             else if (kind === 'club') await openClubScreen(id);
+            else if (kind === 'crew') await openCrewChatById(id);
             else if (kind === 'game') await openGameChat({ id });
             else if (kind === 'tournament') await openTournamentChat({ id });
             else if (kind === 'league') await openLeagueChat({ id, name: row.dataset.inboxTitle });
@@ -8636,6 +12590,27 @@
             // The room GET is the authoritative read action. Re-fetching the
             // inbox keeps counts exact on success and unchanged on failure.
             if (state.tab === 'chat' && state.chatSeg === 'chats') renderChat();
+          }
+        }));
+        el.querySelectorAll('[data-crew-response]').forEach((button) => button.addEventListener('click', async () => {
+          const crewId = Number(button.dataset.crewId);
+          const accept = button.dataset.crewResponse === 'accept';
+          const card = button.closest('[data-crew-invitation]');
+          const buttons = [...(card?.querySelectorAll('[data-crew-response]') || [])];
+          buttons.forEach((item) => { item.disabled = true; });
+          button.textContent = accept ? 'Joining…' : 'Declining…';
+          try {
+            await api(`/crews/${crewId}/respond`, {
+              method: 'POST', body: JSON.stringify({ accept }),
+            });
+            toast(accept ? 'Joined the crew 🏓' : 'Crew invitation declined');
+            renderChat();
+            refreshMe();
+            if (accept) openCrewScreen(crewId);
+          } catch (error) {
+            toast(error.message);
+            buttons.forEach((item) => { item.disabled = false; });
+            button.textContent = accept ? 'Join crew' : 'Decline';
           }
         }));
         el.querySelector('#inbox-show-ready')?.addEventListener('click', (event) => {
@@ -8667,22 +12642,89 @@
     const loc = areaLatLng();
     const skill = state.nearbySkill || '';
     let data;
+    let looking;
     try {
-      data = await api(`/players/nearby?lat=${loc.lat}&lng=${loc.lng}&radius=50${skill ? `&skill=${skill}` : ''}`);
+      [data, looking] = await Promise.all([
+        api(`/players/nearby?lat=${loc.lat}&lng=${loc.lng}&radius=50${skill ? `&skill=${skill}` : ''}`),
+        api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=50`).catch(() => null),
+      ]);
     } catch (e) { el.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; return; }
 
     const skills = [['', 'All levels'], ['beginner', 'Beginner'], ['intermediate', 'Intermediate'], ['advanced', 'Advanced'], ['pro', 'Pro']];
+    const rallies = normalizeLookingRallies(looking);
+    const pulses = normalizeLookingPulses(looking).filter((pulse) => (
+      !skill || pulse.user?.skill_level === skill
+    ));
+    const pulsesById = new Map(pulses.map((pulse) => [pulse.id, pulse]));
+    const players = [...(Array.isArray(data.items) ? data.items : [])].sort((a, b) => {
+      const rank = (player) => {
+        const playerRally = playerRallySummary(player);
+        if (playerRally && playerRally.gameId) return 4;
+        if (player.checked_in_court && player.checked_in_court.looking_for_game) return 3;
+        if (player.checked_in_court) return 2;
+        return player.active_now ? 1 : 0;
+      };
+      return rank(b) - rank(a)
+        || Number(a.distance_miles ?? Infinity) - Number(b.distance_miles ?? Infinity)
+        || String(a.display_name || '').localeCompare(String(b.display_name || ''));
+    });
     let html = `
       <div class="form-field" style="margin-top:4px">
         <div class="quick-times" id="nearby-skill">
-          ${skills.map(([v, label]) => `<button type="button" data-skill="${v}" class="${v === skill ? 'active' : ''}">${label}</button>`).join('')}
+          ${skills.map(([v, label]) => `<button type="button" data-skill="${v}" class="${v === skill ? 'active' : ''}" aria-pressed="${v === skill}">${label}</button>`).join('')}
         </div>
       </div>`;
 
-    html += data.items.length
-      ? data.items.map((p) => {
-          let action;
-          if (p.is_friend) action = '<span class="tag" style="margin:0">Friends ✓</span>';
+    if (pulses.length) {
+      html += '<div class="section-label">📣 Can play this hour</div><div class="nearby-play-pulses">';
+      html += pulses.map((pulse) => {
+        const person = pulse.user || {};
+        const first = String(person.display_name || 'A nearby player').split(/\s+/)[0];
+        const proximity = pulse.distanceMiles == null ? '' : `${pulse.distanceMiles} mi to court · `;
+        return `
+          <div class="card play-pulse-nearby-card">
+            <div class="play-pulse-nearby-person" ${safePositiveId(person.id) ? `data-view-user="${safePositiveId(person.id)}"` : ''}>
+              ${pulse.user ? avatarHtml(person, 'sm') : '<span class="play-pulse-avatar" aria-hidden="true">🏓</span>'}
+            </div>
+            <div class="play-pulse-nearby-copy">
+              <b>${esc(first)} can play at ${esc(pulse.courtName)} this hour</b>
+              <span>${esc(proximity)}available until ${esc(fmtTimeShort(pulse.expiresAt))} · intended destination, not current presence</span>
+              <small>Confirming creates an open quick game starting in about 15 minutes and notifies ${esc(first)}.</small>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" data-play-pulse-accept="${pulse.id}" aria-label="Play with ${esc(first)} at ${esc(pulse.courtName)}">Play there</button>
+          </div>`;
+      }).join('');
+      html += '</div>';
+    }
+
+    if (rallies.length) {
+      html += '<div class="section-label">⚡ Ready now</div><div class="nearby-rallies">';
+      html += rallies.map((rally) => {
+        const action = rallyActionState(rally);
+        return `
+          <div class="card nearby-rally-card">
+            <div class="nearby-rally-copy"><b>${esc(rally.courtName)}</b><span>${esc(rallyCountsText(rally))}</span></div>
+            ${action.enabled
+              ? `<button type="button" class="btn btn-primary btn-sm" data-rally-action="${action.kind}" ${rallyDatasetAttributes(rally)}>${esc(action.label)}</button>`
+              : `<span class="tag warn nearby-rally-unavailable">${esc(action.label)}</span>`}
+          </div>`;
+      }).join('');
+      html += '</div>';
+    }
+
+    html += players.length
+      ? players.map((p) => {
+          const playerRally = playerRallySummary(p);
+          const readyAtCourt = !!(p.checked_in_court && p.checked_in_court.looking_for_game);
+          let action = '';
+          if (playerRally && playerRally.gameId) {
+            const rallyAction = rallyActionState(playerRally);
+            action = rallyAction.enabled
+              ? `<button type="button" class="btn btn-primary btn-sm" data-rally-action="${rallyAction.kind}" ${rallyDatasetAttributes(playerRally)}>${esc(rallyAction.label)}</button>`
+              : `<span class="tag warn" style="margin:0">${esc(rallyAction.label)}</span>`;
+          } else if (readyAtCourt) {
+            action = `<button type="button" class="btn btn-secondary btn-sm" data-nearby-court="${p.checked_in_court.id}">View court</button>`;
+          } else if (p.is_friend) action = '<span class="tag" style="margin:0">Friends ✓</span>';
           else if (p.friendship_status === 'pending') action = p.outgoing
             ? '<span class="tag" style="margin:0">Pending</span>'
             : `<button class="btn btn-primary btn-sm" data-respond-inline="${p.friendship_id}">Accept</button>`;
@@ -8695,17 +12737,20 @@
             sub += ' · <b style="color:var(--green-accent)">⏰ plays your times</b>';
           }
           return `
-            <div class="card row">
+            <div class="card row nearby-player${readyAtCourt || playerRally ? ' is-ready' : ''}">
               <div data-view-user="${p.id}" style="cursor:pointer">${avatarHtml(p)}</div>
               <div class="row-main" data-view-user="${p.id}" style="cursor:pointer">
                 <div class="row-title">${esc(p.display_name)}${p.current_streak >= 2 ? ' 🔥' : ''}</div>
                 <div class="row-sub">${sub}</div>
               </div>
-              <button class="btn btn-secondary btn-sm" data-msg="${p.id}">💬</button>
+              <button class="btn btn-secondary btn-sm" data-msg="${p.id}" aria-label="Message ${esc(p.display_name)}">💬</button>
               ${action}
             </div>`;
         }).join('')
-      : '<div class="empty-state"><span class="big">📍</span>No players near you yet.<br>Check in at a court so others can find you!<br><button class="btn btn-primary" data-goto="courts" style="margin-top:10px">🗺 Browse courts</button></div>';
+      : pulses.length || rallies.length ? ''
+        : '<div class="empty-state"><span class="big">📍</span>No players near you yet.<br>Check in at a court so others can find you!<br><button class="btn btn-primary" data-goto="courts" style="margin-top:10px">🗺 Browse courts</button></div>';
+
+    html += '<p class="nearby-privacy"><span aria-hidden="true">👀</span> Court check-ins show current presence. One-hour availability shows only an intended destination, expires at the server time shown, and never checks someone in.</p>';
 
     el.innerHTML = html;
     el.querySelector('#nearby-skill').addEventListener('click', (e) => {
@@ -8714,6 +12759,16 @@
       state.nearbySkill = btn.dataset.skill;
       renderChat();
     });
+    el.querySelectorAll('[data-rally-action]').forEach((button) => button.addEventListener('click', () => {
+      openReadyRally(rallySummaryFromDataset(button), button);
+    }));
+    el.querySelectorAll('[data-play-pulse-accept]').forEach((button) => button.addEventListener('click', () => {
+      const pulse = pulsesById.get(Number(button.dataset.playPulseAccept));
+      if (pulse) openPlayPulseAcceptConfirmation(pulse);
+    }));
+    el.querySelectorAll('[data-nearby-court]').forEach((button) => button.addEventListener('click', () => {
+      openCourtDetail(Number(button.dataset.nearbyCourt));
+    }));
     el.querySelectorAll('[data-msg]').forEach((b) => b.addEventListener('click', () => openThread(Number(b.dataset.msg))));
     el.querySelectorAll('[data-add-friend]').forEach((b) => b.addEventListener('click', async () => {
       try { await api('/friends/request', { method: 'POST', body: JSON.stringify({ user_id: Number(b.dataset.addFriend) }) }); toast('Friend request sent!'); renderChat(); }
@@ -8813,7 +12868,7 @@
             ${f.checked_in_court && f.checked_in_court.looking_for_game
               ? `<button class="btn btn-primary btn-sm" data-coming="${f.id}" title="Tell them you're on your way"><svg class="pb-ic"><use href="#pb"/></svg> On my way</button>`
               : `<button class="btn btn-secondary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" title="Schedule a game"><svg class="pb-ic"><use href="#pb"/></svg></button>`}
-            <button class="btn btn-secondary btn-sm" data-msg="${f.id}">💬</button>
+            <button class="btn btn-secondary btn-sm" data-msg="${f.id}" aria-label="Message ${esc(f.display_name)}">💬</button>
           </div>`).join('')
       : (wantedSlots ? '' : '<div class="empty-state" style="padding:18px">No friends yet — search above to find players.</div>');
 
@@ -8872,7 +12927,7 @@
       const court = b.dataset.inviteCourt
         ? { id: Number(b.dataset.inviteCourt), name: b.dataset.inviteCourtName }
         : null;
-      openNewGameModal(court, 'casual', false, null, Number(b.dataset.invite));
+      openNewGameModal({ court, inviteUserIds: [Number(b.dataset.invite)], visibility: 'private' });
     }));
     el.querySelectorAll('[data-coming]').forEach((b) => b.addEventListener('click', async () => {
       b.disabled = true;
@@ -9063,6 +13118,82 @@
     });
   }
 
+  function courtOpenCallFingerprint(call) {
+    return JSON.stringify([
+      call.id, call.state, call.active, call.scheduled_at, call.player_count,
+      call.max_players, call.spots_left, call.waitlist_count, call.is_joined,
+      call.can_join, call.can_waitlist, call.can_withdraw,
+    ]);
+  }
+
+  function courtOpenCallCardHtml(call) {
+    const stateName = ['open', 'full', 'closed', 'withdrawn'].includes(call.state)
+      ? call.state : 'closed';
+    const stateLabel = {
+      open: 'Open', full: 'Full', closed: 'Closed', withdrawn: 'Withdrawn',
+    }[stateName];
+    const title = stateName === 'open'
+      ? `${call.spots_left} spot${call.spots_left === 1 ? '' : 's'} open`
+      : stateName === 'full' ? 'Roster is full'
+        : stateName === 'withdrawn' ? 'Court post withdrawn' : 'Game closed';
+    const skill = call.preferred_level && call.preferred_level !== 'any'
+      ? ` · ${skillLabel(call.preferred_level)}` : '';
+    const primary = call.can_join
+      ? `<button type="button" class="btn btn-primary" data-open-call-action="join" data-open-call-game="${call.game_id}">Join game</button>`
+      : call.can_waitlist
+        ? `<button type="button" class="btn btn-primary" data-open-call-action="waitlist" data-open-call-game="${call.game_id}">Join waitlist</button>`
+        : `<button type="button" class="btn btn-secondary" data-open-call-action="open" data-open-call-game="${call.game_id}">${call.is_joined ? 'Open your game' : 'View game'}</button>`;
+    return `<article class="court-open-call is-${stateName}" data-open-call-id="${call.id}"
+      data-open-call-fingerprint="${esc(courtOpenCallFingerprint(call))}">
+      <div class="court-open-call-head">
+        <span class="court-open-call-icon">${stateName === 'full' ? '✓' : stateName === 'open' ? '🏓' : '—'}</span>
+        <div class="court-open-call-title"><b>${esc(title)}</b>
+          <span>${esc(fmtDateTime(call.scheduled_at))} · ${call.game_type === 'ranked' ? 'Ranked' : 'Casual'}${esc(skill)}</span>
+        </div>
+        <span class="court-open-call-state">${stateLabel}</span>
+      </div>
+      <div class="court-open-call-capacity">
+        <span><b>${call.player_count}/${call.max_players}</b> players</span>
+        <span><b>${call.waitlist_count || 0}</b> waiting</span>
+      </div>
+      <div class="court-open-call-actions">${primary}
+        ${call.can_withdraw ? `<button type="button" class="court-open-call-withdraw" data-open-call-action="withdraw" data-open-call-game="${call.game_id}" aria-label="Withdraw court post">Withdraw</button>` : ''}
+      </div>
+    </article>`;
+  }
+
+  function courtOpenCallMessageHtml(message) {
+    return `<div data-message-id="${message.id}" class="court-open-call-message">
+      <div class="court-open-call-byline">
+        <div class="avatar sm" style="background:${esc(message.sender_color)}">${esc(initials(message.sender_name))}</div>
+        <span>${esc(message.sender_name)} · ${fmtTimeShort(message.created_at)}</span>
+      </div>
+      ${courtOpenCallCardHtml(message.open_call)}
+    </div>`;
+  }
+
+  function applyCourtOpenCallSnapshots(msgsEl, rawCalls, { prune = true } = {}) {
+    const calls = Array.isArray(rawCalls) ? rawCalls : [];
+    const byId = new Map(calls.map((call) => [Number(call.id), call]));
+    let changed = false;
+    msgsEl.querySelectorAll('[data-open-call-id]').forEach((card) => {
+      const call = byId.get(Number(card.dataset.openCallId));
+      if (!call) {
+        if (prune) {
+          card.closest('[data-message-id]')?.remove();
+          changed = true;
+        }
+        return;
+      }
+      if (card.dataset.openCallFingerprint !== courtOpenCallFingerprint(call)) {
+        card.outerHTML = courtOpenCallCardHtml(call);
+        changed = true;
+      }
+      byId.delete(Number(call.id));
+    });
+    return changed;
+  }
+
   async function openCourtChat(court) {
     const modalLoad = beginRoutedOverlayLoad(null);
     let data;
@@ -9102,6 +13233,7 @@
       if (append && !items.length) return;
       const snapshot = chatUX.captureScroll();
       const html = items.map((m) => {
+        if (m.open_call) return courtOpenCallMessageHtml(m);
         const mine = m.sender_id === state.me.id;
         return `
         <div data-message-id="${m.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
@@ -9128,7 +13260,40 @@
       const fresh = await api(`/courts/${court.id}/chat?since_id=${lastId}`);
       if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
       applyRoomHearts(msgsEl, fresh.heart_counts);
-      return fresh.items.length > 0;
+      const callChanged = applyCourtOpenCallSnapshots(msgsEl, fresh.open_calls);
+      return fresh.items.length > 0 || callChanged;
+    });
+
+    msgsEl.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-open-call-action]');
+      if (!button || button.disabled) return;
+      const gameId = Number(button.dataset.openCallGame);
+      const action = button.dataset.openCallAction;
+      if (!gameId) return;
+      if (action === 'open') { openGameScreen(gameId); return; }
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = action === 'join' ? 'Joining…'
+        : action === 'waitlist' ? 'Joining waitlist…' : 'Withdrawing…';
+      try {
+        const response = action === 'withdraw'
+          ? await api(`/games/${gameId}/open-call`, { method: 'DELETE' })
+          : await api(`/games/${gameId}/${action === 'join' ? 'join' : 'waitlist'}`, { method: 'POST' });
+        const nextCall = response.open_call || (response.game && response.game.open_call);
+        if (nextCall) applyCourtOpenCallSnapshots(msgsEl, [nextCall], { prune: false });
+        toast(action === 'join' ? "You're in! 🏓"
+          : action === 'waitlist' ? "You're on the waitlist ⏳" : 'Court post withdrawn');
+        refreshMe();
+      } catch (error) {
+        toast(error.message);
+        button.disabled = false;
+        button.textContent = originalText;
+        try {
+          const fresh = await api(`/courts/${court.id}/chat?since_id=${lastId}`);
+          if (fresh.items.length) renderMsgs(fresh.items, true);
+          applyCourtOpenCallSnapshots(msgsEl, fresh.open_calls);
+        } catch { /* the adaptive poll will recover */ }
+      }
     });
 
     modal.querySelector('#cc-form').addEventListener('submit', async (e) => {
@@ -9138,6 +13303,259 @@
       try {
         await chatUX.send(body);
       } catch (err) { toast(err.message); }
+    });
+  }
+
+  // ---------- Crews ----------
+  function showCommunityInbox() {
+    state.chatSeg = 'chats';
+    document.querySelectorAll('#chat-segments button').forEach((button) => {
+      const active = button.dataset.seg === 'chats';
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+    });
+    switchTab('chat');
+    renderChat();
+  }
+
+
+  function crewIsOwner(crew) {
+    return !!(crew && (
+      crew.is_owner === true || crew.owner === true || crew.my_role === 'owner' || crew.role === 'owner'
+      || Number(crew.owner_id || crew.creator_id) === Number(state.me && state.me.id)
+    ));
+  }
+
+  function crewPlannerOptions(crew) {
+    const members = (crew.members || []).map(sanitizePlannerInvitee).filter(Boolean);
+    const invitees = members.filter((person) => !state.me || person.id !== state.me.id);
+    const total = invitees.length + 1;
+    const maxPlayers = [2, 4, 6, 8, 10, 12].find((count) => count >= total) || 12;
+    const game = {
+      id: null,
+      court: crew.default_court_id ? {
+        id: crew.default_court_id, name: crew.default_court_name || 'Crew court',
+      } : null,
+      game_type: 'casual',
+      max_players: maxPlayers,
+      preferred_level: 'any',
+      scheduled_at: null,
+    };
+    return completedCrewPlannerOptions(game, invitees, crew);
+  }
+
+  async function openCrewScreen(crewId) {
+    const routeLoad = beginRoutedOverlayLoad({ kind: 'crew', id: crewId });
+    let detail;
+    try { detail = await api(`/crews/${crewId}`); } catch (error) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+      if (Number(error.status) === 404) {
+        try {
+          const mine = await api('/crews/mine');
+          if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+          const pending = (mine.invitations || []).some(
+            (invitation) => Number(crewSummaryFrom(invitation)?.id) === Number(crewId),
+          );
+          if (pending) {
+            clearDeadDeepLink(`#crew/${crewId}`);
+            showCommunityInbox();
+            toast('Crew invitation ready — choose Join crew or Decline');
+            return;
+          }
+        } catch { /* preserve the original member-only error below */ }
+      }
+      toast(error.message); clearDeadDeepLink(`#crew/${crewId}`); return;
+    }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+    const summary = crewSummaryFrom(detail);
+    if (!summary) { toast('Crew is unavailable'); return; }
+    const members = Array.isArray(detail.members) ? detail.members : [];
+    const crew = { ...detail, ...summary, members };
+    crew.member_count = Math.max(1, Number(detail.member_count) || members.length || summary.member_count);
+    const owner = crewIsOwner(crew);
+    const heroContent = `
+      <div class="crew-avatar-stack">${crew.members.slice(0, 4).map((member) => avatarHtml(member, 'sm')).join('')}</div>
+      <div class="row-main">
+        <b>${crew.member_count} player${crew.member_count === 1 ? '' : 's'}${crew.pending_count ? ` · ${crew.pending_count} invited` : ''}</b>
+        <span class="row-sub">${crew.default_court_name ? `📍 ${esc(crew.default_court_name)}` : 'Private crew · invite only'}</span>
+      </div>`;
+    const heroHtml = crew.default_court_id
+      ? `<button type="button" class="crew-hero" id="crew-court" aria-label="Open ${esc(crew.default_court_name || 'Crew court')} details">${heroContent}</button>`
+      : `<div class="crew-hero">${heroContent}</div>`;
+    const membersHtml = crew.members.map((member) => `
+      <button type="button" class="card row crew-member" data-view-user="${Number(member.id ?? member.user_id)}">
+        ${avatarHtml(member, 'sm')}
+        <span class="row-main"><span class="row-title">${esc(member.display_name || 'Player')}${member.role === 'owner' || Number(member.id ?? member.user_id) === Number(crew.owner_id || crew.creator_id) ? ' 👑' : ''}</span><span class="row-sub">${skillLabel(member.skill_level)} · ${Number(member.rating) || 1200}</span></span>
+        <span class="chev">›</span>
+      </button>`).join('');
+    const modal = openModal(`
+      ${modalHead(`👥 ${crew.name}`)}
+      ${heroHtml}
+      <div class="crew-primary-actions">
+        <button type="button" class="btn btn-primary" id="crew-plan">📅 Plan a game</button>
+        <button type="button" class="btn btn-secondary" id="crew-chat">💬 Crew chat</button>
+      </div>
+      ${crew.pending_count ? `<div class="crew-pending-note">${crew.pending_count} invitation${crew.pending_count === 1 ? '' : 's'} pending. They choose whether to join.</div>` : ''}
+      <div class="section-label">Players</div>
+      <div class="crew-roster">${membersHtml || '<div class="empty-state" style="padding:18px">No players available.</div>'}</div>
+      <div class="crew-manage-actions">
+        ${owner ? '<button type="button" class="btn btn-secondary" id="crew-rename">✏️ Rename</button><button type="button" class="btn btn-secondary danger-text" id="crew-delete">🗑 Disband</button>'
+          : '<button type="button" class="btn btn-secondary" id="crew-leave">🚪 Leave crew</button>'}
+      </div>
+    `, { route: { kind: 'crew', id: crew.id }, label: crew.name });
+    bindUserButtons(modal);
+    modal.querySelector('#crew-court')?.addEventListener('click', () => {
+      transitionModal(modal, () => openCourtDetail(crew.default_court_id));
+    });
+    modal.querySelector('#crew-plan')?.addEventListener('click', () => {
+      const options = crewPlannerOptions(crew);
+      if (!options.inviteUserIds.length) {
+        toast('At least one teammate needs to join before you can plan a crew game');
+        return;
+      }
+      transitionModal(modal, () => openNewGameModal(options));
+    });
+    modal.querySelector('#crew-chat')?.addEventListener('click', () => {
+      transitionModal(modal, () => openCrewChat(crew));
+    });
+    modal.querySelector('#crew-rename')?.addEventListener('click', () => {
+      transitionModal(modal, () => openRenameCrewSheet(crew));
+    });
+    modal.querySelector('#crew-leave')?.addEventListener('click', async (event) => {
+      if (!window.confirm(`Leave ${crew.name}?`)) return;
+      event.currentTarget.disabled = true;
+      try {
+        await api(`/crews/${crew.id}/leave`, { method: 'POST' });
+        await purgeChatOutboxChannel(state.me?.id, `crew:${crew.id}`);
+        toast('You left the crew');
+        closeModal(modal); renderChat(); refreshMe();
+      } catch (error) { toast(error.message); event.currentTarget.disabled = false; }
+    });
+    modal.querySelector('#crew-delete')?.addEventListener('click', async (event) => {
+      if (!window.confirm(`Disband ${crew.name}? This deletes its crew chat for everyone.`)) return;
+      event.currentTarget.disabled = true;
+      try {
+        await api(`/crews/${crew.id}`, { method: 'DELETE' });
+        await purgeChatOutboxChannel(state.me?.id, `crew:${crew.id}`);
+        toast('Crew disbanded');
+        closeModal(modal); renderChat(); refreshMe();
+      } catch (error) { toast(error.message); event.currentTarget.disabled = false; }
+    });
+  }
+
+  function openRenameCrewSheet(crew) {
+    const modal = openModal(`
+      ${modalHead('Rename crew')}
+      <form id="crew-rename-form" novalidate>
+        <div class="form-field"><label for="crew-name">Crew name</label><input id="crew-name" type="text" maxlength="80" value="${esc(crew.name)}" autocomplete="off" /></div>
+        <button type="submit" class="btn btn-primary btn-block" id="crew-name-save">Save name</button>
+      </form>
+    `);
+    const formUX = bindModalFormUX(modal, '#crew-name-save', { draftKey: `rename-crew-${crew.id}` });
+    modal.querySelector('#crew-rename-form').addEventListener('submit', async (event) => {
+      event.preventDefault(); formUX.clearError();
+      const name = modal.querySelector('#crew-name').value.trim();
+      if (name.length < 3) { formUX.showError('Crew name needs 3+ characters.', modal.querySelector('#crew-name')); return; }
+      const finish = formUX.startSubmitting('Saving name…');
+      if (!finish) return;
+      try {
+        await api(`/crews/${crew.id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+        formUX.clearDraft({ disable: true });
+        toast('Crew renamed');
+        transitionModal(modal, () => openCrewScreen(crew.id));
+        renderChat();
+      } catch (error) { finish(); formUX.showError(error.message); }
+    });
+  }
+
+  async function openCrewChatById(crewId) {
+    const routeLoad = beginRoutedOverlayLoad({ kind: 'crew', id: crewId });
+    let detail;
+    try { detail = await api(`/crews/${crewId}`); } catch (error) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+      toast(error.message);
+      return;
+    }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+    const summary = crewSummaryFrom(detail);
+    if (!summary) { toast('Crew is unavailable'); return; }
+    return openCrewChat({ ...detail, ...summary });
+  }
+
+  async function openCrewChat(crew) {
+    const routeLoad = beginRoutedOverlayLoad({ kind: 'crew', id: crew.id });
+    let data;
+    try { data = await api(`/crews/${crew.id}/chat`); } catch (error) {
+      if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+      toast(error.message); return;
+    }
+    if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+    refreshMe();
+    const modal = openModal(`
+      <div class="thread">
+        <div class="thread-head">
+          <button class="modal-close" style="font-size:18px">‹</button>
+          <span class="inbox-room-icon crew" aria-hidden="true">👥</span>
+          <button type="button" class="row-main crew-chat-head" id="crew-chat-head">
+            <span class="row-title">${esc(crew.name)}</span>
+            <span class="row-sub">${crew.member_count} player${crew.member_count === 1 ? '' : 's'} · tap for crew info ›</span>
+          </button>
+        </div>
+        <div class="thread-msgs" id="crew-msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="${esc(crew.name)} crew conversation"></div>
+        <form class="thread-input" id="crew-form">
+          <input type="text" id="crew-text" aria-label="Message the crew" placeholder="Message the crew…" autocomplete="off" maxlength="2000" />
+          <button type="submit" aria-label="Send">➤</button>
+        </form>
+      </div>
+    `, { chat: true, route: { kind: 'crew', id: crew.id } });
+    const msgsEl = modal.querySelector('#crew-msgs');
+    const input = modal.querySelector('#crew-text');
+    const chatUX = bindChatContinuity(modal, msgsEl, input, `crew:${crew.id}`);
+    let lastId = 0;
+    const renderMessages = (rawItems, append, { forceBottom = false, newMessages = false } = {}) => {
+      const batch = prepareChatRenderBatch(msgsEl, rawItems || [], append);
+      if (batch.newestId) lastId = Math.max(lastId, batch.newestId);
+      const items = batch.items;
+      if (append && !items.length) return;
+      const snapshot = chatUX.captureScroll();
+      const html = items.map((message) => {
+        const mine = message.sender_id === state.me.id;
+        const actionAttrs = mine
+          ? `data-del-msg="${message.id}" role="button" tabindex="0" aria-label="Delete your message" title="Delete message"`
+          : `data-room-heart="${message.id}" role="button" tabindex="0" aria-label="React to ${esc(message.sender_name || 'this player')} with a heart" title="React with a heart"`;
+        return `<div data-message-id="${message.id}" style="display:flex;gap:8px;align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%">
+          ${mine ? '' : `<div class="avatar sm" style="background:${esc(message.sender_color)}">${esc(initials(message.sender_name))}</div>`}
+          <div class="bubble ${mine ? 'me' : 'them'}" style="max-width:100%" ${actionAttrs}>${message.heart_count ? `<span class="bubble-heart" data-heart-badge>❤️${message.heart_count > 1 ? ` ${message.heart_count}` : ''}</span>` : ''}
+            ${mine ? '' : `<div style="font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px">${esc(message.sender_name)}</div>`}
+            ${message.has_image ? `<div data-img-id="${message.id}" style="min-height:60px;min-width:120px;margin-bottom:${message.body ? '6px' : '0'}">⏳</div>` : ''}
+            ${esc(message.body)}<div class="bubble-time">${fmtTimeShort(message.created_at)}</div>
+          </div>
+        </div>`;
+      }).join('');
+      if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
+      else if (append) msgsEl.innerHTML = html;
+      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — pick the next time! 👋</div>';
+      chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0 });
+      hydrateChatImages(msgsEl, chatUX);
+    };
+    renderMessages(data.items || data.messages || [], false, { forceBottom: true });
+    chatUX.activateOutbox?.((message) => renderMessages([message], true, { forceBottom: true }));
+    addPhotoToComposer(modal, '#crew-form', '#crew-text', chatUX);
+    startAdaptiveChatPoll(modal, msgsEl, async () => {
+      const fresh = await api(`/crews/${crew.id}/chat?since_id=${lastId}`);
+      const items = fresh.items || fresh.messages || [];
+      if (items.length) renderMessages(items, true, { newMessages: true });
+      applyRoomHearts(msgsEl, fresh.heart_counts);
+      return items.length > 0;
+    });
+    modal.querySelector('#crew-chat-head').addEventListener('click', () => {
+      transitionModal(modal, () => openCrewScreen(crew.id));
+    });
+    modal.querySelector('#crew-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const body = input.value.trim();
+      if (!body) return;
+      try { await chatUX.send?.(body); } catch (error) { toast(error.message); }
     });
   }
 
@@ -9937,7 +14355,12 @@
       const today = new Date().getDay();
       const daysUntil = (s) => ((dow[s.split('-')[0]] - today) + 7) % 7;
       const slot = shared.sort((x, y) => daysUntil(x) - daysUntil(y))[0];
-      transitionModal(modal, () => openNewGameModal(null, 'casual', false, slot, userId));
+      transitionModal(modal, () => openNewGameModal({
+        preferredSlot: slot,
+        invitees: [user],
+        inviteUserIds: [userId],
+        visibility: 'private',
+      }));
     });
   }
 
@@ -10226,11 +14649,16 @@
       const mine = mineResult.status === 'fulfilled' ? mineResult.value : null;
       if (!mine) throw mineResult.reason;
       const nowMs = Date.now();
+      const scorePending = (mine.items || []).filter((game) => instantRallyScorePending(game));
       const up = (mine.items || []).filter((game) =>
-        game.status === 'upcoming' && new Date(game.scheduled_at).getTime() > nowMs);
-      if (up.length) {
-        upcomingEl.innerHTML = '<div class="section-label">My upcoming games</div>'
-          + up.map((game) => gameCardHtml(game)).join('');
+        game.status === 'upcoming' && !scorePending.includes(game) && !instantRallyClosed(game)
+          && (instantRallyAssembly(game) || new Date(game.scheduled_at).getTime() > nowMs));
+      if (scorePending.length || up.length) {
+        upcomingEl.innerHTML = (scorePending.length
+          ? '<div class="section-label">Played — enter the score</div>'
+            + scorePending.map((game) => gameCardHtml(game)).join('') : '')
+          + (up.length ? '<div class="section-label">My upcoming games</div>'
+            + up.map((game) => gameCardHtml(game)).join('') : '');
         bindGameButtons(upcomingEl, renderProfile);
       }
     } catch { /* ignore */ }
@@ -10661,19 +15089,41 @@
 
   function gameFingerprint(game) {
     return JSON.stringify([
-      game.status, game.score_team1, game.score_team2, game.score_submitted_by,
-      game.players.map((p) => [p.user_id, p.team]).sort((x, y) => x[0] - y[0]),
+      game.status, game.is_instant, game.assembly_active, game.ready_count, game.roster_count,
+      game.on_the_way_count, game.committed_count, game.physical_spots_left, game.spots_left,
+      game.arrival_available, !!(game.arrival_capability || game.discovery_token),
+      game.assembly_state, game.score_team1, game.score_team2, game.score_submitted_by,
+      game.my_arrival && [game.my_arrival.id, game.my_arrival.active, game.my_arrival.arrives_at,
+        game.my_arrival.expires_at, game.my_arrival.end_reason],
+      (game.arrivals || []).map((arrival) => [arrival.id, arrival.user_id,
+        arrival.arrives_at, arrival.expires_at, arrival.active]),
+      game.waitlist_count, game.waitlist_position,
+      game.open_call && [game.open_call.id, game.open_call.state, game.open_call.active,
+        game.open_call.player_count, game.open_call.spots_left, game.open_call.waitlist_count,
+        game.open_call.scheduled_at, game.open_call.can_withdraw],
+      game.players.map((p) => [p.user_id, p.team, p.attending]).sort((x, y) => x[0] - y[0]),
     ]);
   }
 
   function gameScreenHtml(game) {
     const court = game.court || {};
-    const isChallenge = game.notes.startsWith('⚔️');
-    const live = game.status === 'upcoming' && new Date(game.scheduled_at).getTime() <= Date.now();
+    const isChallenge = String(game.notes || '').startsWith('⚔️');
+    const assembly = instantRallyAssembly(game);
+    const rally = assembly ? rallySummaryFromValue(game) : null;
+    const myArrival = rally ? activeArrivalForGame(game.id, game.my_arrival, rally) : null;
+    const closedRally = instantRallyClosed(game);
+    const readyCount = assembly ? assembly.readyCount : game.players.length;
+    const rosterCount = assembly ? assembly.rosterCount : game.players.length;
+    const live = game.status === 'upcoming' && !closedRally
+      && new Date(game.scheduled_at).getTime() <= Date.now();
+    const completedParticipant = game.status === 'completed' && game.is_joined && state.me
+      && game.players.some((player) => player.user_id === state.me.id && [1, 2].includes(player.team));
+    const canFillRoster = game.status === 'upcoming' && game.is_joined
+      && !closedRally && game.spots_left > 0 && (!game.is_instant || assembly);
 
     let emoji = '🏓';
     let headline = fmtDateTime(game.scheduled_at);
-    let subline = `${game.players.length}/${game.max_players} players`;
+    let subline = `${readyCount}/${game.max_players} players`;
     if (game.status === 'completed') {
       emoji = game.you_won === true ? '🏆' : game.you_won === false ? '🤝' : '✅';
       headline = `Final: ${game.score_team1}–${game.score_team2}`;
@@ -10688,6 +15138,18 @@
       subline = game.awaiting_your_confirmation
         ? `${esc(game.score_submitted_by_name || 'Opponent')} reported — confirm or dispute`
         : 'Waiting for opponents to confirm';
+    } else if (assembly) {
+      emoji = assembly.icon;
+      headline = assembly.title;
+      subline = assembly.sub;
+    } else if (instantRallyScorePending(game)) {
+      emoji = '📝';
+      headline = 'Played? Enter the score';
+      subline = 'This rally is closed to new players.';
+    } else if (closedRally) {
+      emoji = '😴';
+      headline = 'Rally ended';
+      subline = 'This rally closed without enough players.';
     } else if (isChallenge && !game.is_joined && game.spots_left > 0) {
       emoji = '⚔️'; headline = "You've been challenged!";
       subline = `Ranked singles vs ${esc((game.players[0] || {}).display_name || 'a player')}`;
@@ -10699,7 +15161,8 @@
     const team1 = game.players.filter((p) => p.team === 1);
     const team2 = game.players.filter((p) => p.team === 2);
     // Host can remove other players from an upcoming game (no-show swap).
-    const canRemove = (p) => game.is_creator && game.status === 'upcoming' && p.user_id !== game.creator_id;
+    const canRemove = (p) => game.is_creator && game.status === 'upcoming'
+      && !closedRally && p.user_id !== game.creator_id;
     const playerRow = (p) => `
       <div class="row" style="margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer" data-view-user="${p.user_id}">
@@ -10711,43 +15174,86 @@
         </div>
         ${canRemove(p) ? `<button class="btn btn-secondary btn-sm" data-remove-player="${p.user_id}" title="Remove from game" aria-label="Remove ${esc(p.display_name)}">✕</button>` : ''}
       </div>`;
-    const playersHtml = (team1.length && team2.length)
+    let playersHtml = (team1.length && team2.length)
       ? `<div class="form-grid">
           <div><div class="section-label" style="margin-top:0">Team 1</div>${team1.map(playerRow).join('')}</div>
           <div><div class="section-label" style="margin-top:0">Team 2</div>${team2.map(playerRow).join('')}</div>
         </div>`
       : game.players.map(playerRow).join('');
+    if (!playersHtml && assembly && rosterCount > 0) {
+      playersHtml = '<div class="empty-state" style="padding:12px">Joined-player identities stay private until you join this rally at the court.</div>';
+    }
+    const arrivals = rally ? (Array.isArray(game.arrivals) ? game.arrivals : [])
+      .map((value) => normalizeActiveArrival(value, rally)).filter(Boolean) : [];
+    const arrivalsHtml = rally && rally.onWayCount > 0 ? `
+      <div class="section-label">On the way (${rally.onWayCount})</div>
+      <div class="arrival-roster">
+        ${arrivals.length ? arrivals.map((arrival) => {
+          const person = arrival.user || {};
+          const userId = safePositiveId(person.user_id ?? person.id);
+          return `<div class="row arrival-roster-row"${userId ? ` data-view-user="${userId}"` : ''}>
+            ${avatarHtml(person, 'sm')}
+            <div class="row-main"><div class="row-title">${esc(person.display_name || 'Player')}</div>
+              <div class="row-sub">ETA ${esc(fmtTimeShort(arrival.arrivesAt))} · spot held until ${esc(fmtTimeShort(arrival.expiresAt))}</div>
+            </div><span class="tag live">On the way</span>
+          </div>`;
+        }).join('') : '<div class="empty-state" style="padding:12px">One player is on the way. Their identity is visible only to the current court roster.</div>'}
+      </div>` : '';
 
     let actions = '';
     if (game.status === 'upcoming') {
-      if (!game.is_joined && game.spots_left > 0) {
+      if (closedRally) {
+        actions = '<div class="empty-state" style="padding:12px">This rally is no longer accepting players. Start a new one when you’re ready.</div>';
+      } else if (!game.is_joined && game.is_instant && assembly) {
+        if (myArrival && !isCheckedInAtCourt(rally.courtId)) {
+          actions = `<div class="arrival-inline-held"><b>✓ Your spot is held</b><span>${esc(arrivalReservationCopy(myArrival))}</span></div>
+            <button class="btn btn-primary btn-block" id="gs-arrival-details" style="padding:16px">View trip details</button>`;
+        } else if (isCheckedInAtCourt(rally.courtId) && (rally.spotsLeft > 0 || myArrival)) {
+          actions = '<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px"><svg class="pb-ic"><use href="#pb"/></svg> Join this rally</button>';
+        } else if (isCheckedInAtCourt(rally.courtId)) {
+          actions = '<div class="empty-state" style="padding:12px">This rally is committed. Your court check-in stays active while we find the next rally here.</div><button class="btn btn-primary btn-block" id="gs-join" style="margin-top:10px;padding:16px">Find next rally at this court</button>';
+        } else if (!isCheckedInAtCourt(rally.courtId)
+            && rally.arrivalAvailable && rally.arrivalCapability
+            && rally.spotsLeft > 0 && rally.onWayCount === 0) {
+          actions = `<button class="btn btn-primary btn-block" id="gs-arrival" style="padding:16px">I’m on my way</button>
+            <p class="arrival-action-note">Choose a 5, 10, or 15 minute ETA. You are not counted physically ready until you check in at the court.</p>`;
+        } else {
+          actions = `<div class="empty-state" style="padding:12px">${!rally.arrivalAvailable
+            ? '⌛ This rally is wrapping up, so remote spot holds are closed. Refresh Nearby for the next rally.'
+            : rally.onWayCount > 0
+              ? '🚗 The one remote spot is held by another player. No additional spot is promised.'
+              : '🏓 This rally is fully committed.'}</div>`;
+        }
+      } else if (!game.is_joined && game.spots_left > 0) {
         actions = `<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${isChallenge ? '⚔️ Accept challenge' : '<svg class="pb-ic"><use href="#pb"/></svg> Join this game'}</button>`;
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
         }
       } else if (!game.is_joined) {
         actions = game.waitlist_position
-          ? `<div class="empty-state" style="padding:12px">⏳ You're #${game.waitlist_position} on the waitlist — we'll notify you when a spot opens.</div>
-             <button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button>`
-          : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">⏳ Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
+            ? `<div class="empty-state" style="padding:12px">⏳ You're #${game.waitlist_position} on the waitlist — we'll notify you when a spot opens.</div>
+               <button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button>`
+            : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">⏳ Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
       } else if (game.is_joined) {
         const startsAhead = new Date(game.scheduled_at).getTime() > Date.now();
-        if (!startsAhead && game.players.length >= 2) {
-          actions = `<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">📝 Enter the score</button>`;
+        if (game.is_instant && game.players.length >= 2) {
+          actions = '<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">✓ We finished — enter score</button>';
+        } else if (!game.is_instant && !startsAhead && game.players.length >= 2) {
+          actions = '<button class="btn btn-primary btn-block" id="gs-score" style="padding:16px">📝 Enter the score</button>';
         }
-        if (startsAhead) {
+        if (!game.is_instant && startsAhead) {
           const mine = game.players.find((p) => p.user_id === (state.me && state.me.id));
           if (mine && !mine.attending) {
             // Vouching you'll show up is the main ask before a game starts.
             actions += `<button class="btn ${actions ? 'btn-secondary' : 'btn-primary'} btn-block" id="gs-attend" style="margin-top:${actions ? '10px' : '0'};padding:15px">👋 I'm coming — count me in</button>`;
           }
-          if (game.spots_left > 0) {
-            actions += `<button class="btn btn-secondary btn-block" id="gs-invite" style="margin-top:10px">＋ Invite a friend${game.spots_left ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}</button>`;
-            // Hosts can flag the game to the court room's regulars.
-            if (game.is_creator && game.visibility === 'open' && game.court) {
-              actions += '<button class="btn btn-secondary btn-block" id="gs-post-court" style="margin-top:10px">📣 Post to court chat</button>';
-            }
-          }
+        }
+        // A live, underfilled rally still needs recruiting; hiding these once
+        // its start time passed was the sharpest post-create dead end.
+        if (canFillRoster) {
+          actions += `<button class="btn ${actions ? 'btn-secondary' : 'btn-primary'} btn-block roster-boost-launch" id="gs-fill-roster" style="margin-top:${actions ? '10px' : '0'};padding:15px">＋ Fill the game · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left</button>`;
+        }
+        if (!game.is_instant && startsAhead) {
           actions += '<button class="btn btn-secondary btn-block" id="gs-calendar" style="margin-top:10px">📅 Add to calendar</button>';
           if (game.is_creator && game.recurrence !== 'weekly') {
             actions += '<button class="btn btn-secondary btn-block" id="gs-reschedule" style="margin-top:10px">🕑 Reschedule</button>';
@@ -10762,29 +15268,38 @@
       actions = `
         <button class="btn btn-primary btn-block" id="gs-confirm" style="padding:16px">✓ Confirm ${game.score_team1}–${game.score_team2}</button>
         <button class="btn btn-danger btn-block" id="gs-dispute" style="margin-top:10px">✕ That score is wrong</button>`;
-    } else if (game.status === 'completed' && game.is_joined) {
+    } else if (completedParticipant) {
+      const savedCrew = completedGameCrewSummary(game);
+      const crewInvitePending = !!savedCrew && (savedCrew.joined === false || savedCrew.invitation_pending);
       const mvpBanner = game.mvp ? `
         <div class="card" style="text-align:center;padding:10px 14px;margin-bottom:10px">
           <b>🌟 MVP: ${esc(game.mvp.display_name)}</b>
           <div class="row-sub">${game.mvp.votes} vote${game.mvp.votes === 1 ? '' : 's'} from the game</div>
         </div>` : '';
-      const votables = game.players.filter((p) => p.user_id !== (state.me && state.me.id));
+      const votables = game.players.filter((p) => [1, 2].includes(p.team) && p.user_id !== (state.me && state.me.id));
       const voteChips = votables.length ? `
         <div class="row-sub" style="margin:0 0 6px 2px">${game.my_mvp_vote ? 'Your MVP vote:' : 'Who carried the game? Vote MVP:'}</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
           ${votables.map((p) => `<button class="btn btn-sm ${game.my_mvp_vote === p.user_id ? 'btn-primary' : 'btn-secondary'}" data-mvp="${p.user_id}">🌟 ${esc(p.display_name.split(' ')[0])}</button>`).join('')}
         </div>` : '';
-      actions = `${mvpBanner}${voteChips}<button class="btn btn-secondary btn-block" id="gs-rematch">↺ Rematch at ${esc(court.name || 'this court')}</button>`;
+      actions = `${mvpBanner}${voteChips}
+        <div class="postgame-next">
+          <div class="postgame-next-copy"><b>${savedCrew ? crewInvitePending ? 'You’re invited to this crew' : 'Your crew is ready' : 'Keep this crew going'}</b><span>${savedCrew ? crewInvitePending ? `Join ${esc(savedCrew.name)}, then pick the next time.` : `Plan with ${esc(savedCrew.name)} or open the crew chat.` : 'Create a private crew, then pick the next time. Everyone chooses whether to join.'}</span></div>
+          <button class="btn btn-primary btn-block" id="gs-plan-crew">${savedCrew ? crewInvitePending ? `👥 Join ${esc(savedCrew.name)} &amp; plan next game` : `📅 Plan next game with ${esc(savedCrew.name)}` : '👥 Create crew &amp; plan next game'}</button>
+          ${savedCrew && !crewInvitePending ? `<button class="btn btn-secondary btn-block" id="gs-open-crew" data-crew-id="${savedCrew.id}">👥 Open crew</button>` : ''}
+          <button class="btn btn-secondary btn-block" id="gs-rematch">⚡ Play again now at ${esc(court.name || 'this court')}</button>
+        </div>
+        <div id="gs-crew-connect" aria-live="polite"><div class="postgame-connection-loading">Checking who you still need to connect with…</div></div>`;
     }
 
     return `
       <div class="modal-head">
         <div style="flex:1">
-          <h3>${emoji} ${headline} ${game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}${game.preferred_level && game.preferred_level !== 'any' ? `<span class="tag" style="margin:0 0 0 6px">🎚 ${skillLabel(game.preferred_level)}</span>` : ''}${game.club_name ? `<span class="tag" style="margin:0 0 0 6px">🏛 ${esc(game.club_name)}</span>` : ''}</h3>
+          <h3>${emoji} ${headline} ${game.is_instant ? `<span class="tag${assembly ? ' live' : ''}" style="margin:0 0 0 6px">${assembly ? 'Rally now' : 'Rally'}</span>` : game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}${game.preferred_level && game.preferred_level !== 'any' ? `<span class="tag" style="margin:0 0 0 6px">🎚 ${skillLabel(game.preferred_level)}</span>` : ''}${game.club_name ? `<span class="tag" style="margin:0 0 0 6px">🏛 ${esc(game.club_name)}</span>` : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
-        ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="Game chat" aria-label="Game chat" style="box-shadow:none;font-size:17px;position:relative">💬${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
-        <button class="icon-btn" id="gs-share" title="Share game" aria-label="Share game" style="box-shadow:none;font-size:17px">📤</button>
+        ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="Game chat — current players only" aria-label="Game chat — current players only" style="box-shadow:none;font-size:17px;position:relative">💬${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
+        ${canFillRoster ? '' : '<button class="icon-btn" id="gs-share" title="Share game" aria-label="Share game" style="box-shadow:none;font-size:17px">📤</button>'}
         <button class="modal-close" aria-label="Close">✕</button>
       </div>
       <div class="card row" id="gs-court" style="cursor:pointer">
@@ -10795,11 +15310,14 @@
         </div>
         <span class="chev">›</span>
       </div>
+      ${game.is_instant && courtDirectionsUrl(court)
+        ? `<a class="btn btn-secondary btn-block gs-directions" href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name || 'the court')} (opens Maps)">Directions</a>` : ''}
       <div id="gs-weather"></div>
       <div id="gs-stakes"></div>
-      ${game.notes ? `<div class="row-sub" style="margin:0 0 12px 4px">“${esc(game.notes)}”</div>` : ''}
-      <div class="section-label">Players (${game.players.length}/${game.max_players})</div>
+      ${game.notes && !(game.is_instant && game.notes === '⚡ Instant rally') ? `<div class="row-sub" style="margin:0 0 12px 4px">“${esc(game.notes)}”</div>` : ''}
+      <div class="section-label">${assembly ? `Joined roster (${rosterCount}/${game.max_players})` : `Players (${readyCount}/${game.max_players})`}</div>
       ${playersHtml}
+      ${arrivalsHtml}
       <div style="margin-top:16px">${actions}</div>`;
   }
 
@@ -10817,8 +15335,29 @@
     const modal = openModal('', { route: { kind: 'game', id: gameId }, label: 'Game details' });
     const box = modal.querySelector('.modal');
     let fingerprint = '';
-    let rematchAttemptId = null;
-    let rematchScheduledAt = null;
+    let rematchAttempt = readRematchAttempt(gameId);
+    let crewPromise = null;
+    const loadCrew = (refresh = false) => {
+      if (refresh) crewPromise = null;
+      if (!crewPromise) {
+        crewPromise = Promise.all([
+          api(`/games/${gameId}/crew`),
+          api('/crews/mine').catch(() => ({ items: [] })),
+        ]).then(([response, mine]) => {
+          if (!completedGameCrewSummary(game, response)) {
+            const savedCrew = (mine.items || []).find((item) => Number(
+              item.source_game_id ?? (item.source_game && item.source_game.id),
+            ) === Number(gameId));
+            if (savedCrew) response.saved_crew = savedCrew;
+          }
+          return response;
+        }).catch((error) => {
+          crewPromise = null;
+          throw error;
+        });
+      }
+      return crewPromise;
+    };
 
     const render = (fresh) => {
       game = fresh;
@@ -10833,50 +15372,94 @@
 
     function bind() {
       const court = game.court || {};
-      const isChallenge = game.notes.startsWith('⚔️');
+      const isChallenge = String(game.notes || '').startsWith('⚔️');
+      const bindSavedCrewButton = () => {
+        const openButton = box.querySelector('#gs-open-crew');
+        if (!openButton || openButton.dataset.bound === 'true') return;
+        openButton.dataset.bound = 'true';
+        openButton.addEventListener('click', () => {
+          transitionModal(modal, () => openCrewScreen(Number(openButton.dataset.crewId)));
+        });
+      };
+      const showSavedCrew = (value) => {
+        const savedCrew = crewSummaryFrom(value);
+        const next = box.querySelector('.postgame-next');
+        const plan = box.querySelector('#gs-plan-crew');
+        if (!savedCrew || !next || !plan) return;
+        game.crew = savedCrew;
+        const pending = savedCrew.joined === false || savedCrew.invitation_pending;
+        const copy = next.querySelector('.postgame-next-copy');
+        if (copy) copy.innerHTML = pending
+          ? `<b>You’re invited to this crew</b><span>Join ${esc(savedCrew.name)}, then pick the next time.</span>`
+          : `<b>Your crew is ready</b><span>Plan with ${esc(savedCrew.name)} or open the crew chat.</span>`;
+        plan.textContent = pending
+          ? `👥 Join ${savedCrew.name} & plan next game`
+          : `📅 Plan next game with ${savedCrew.name}`;
+        let openButton = next.querySelector('#gs-open-crew');
+        if (pending) { openButton?.remove(); return; }
+        if (!openButton) {
+          openButton = document.createElement('button');
+          openButton.type = 'button';
+          openButton.id = 'gs-open-crew';
+          openButton.className = 'btn btn-secondary btn-block';
+          next.insertBefore(openButton, next.querySelector('#gs-rematch'));
+        }
+        openButton.dataset.crewId = String(savedCrew.id);
+        openButton.textContent = '👥 Open crew';
+        bindSavedCrewButton();
+      };
+      bindSavedCrewButton();
+      const crewTarget = box.querySelector('#gs-crew-connect');
+      if (crewTarget) {
+        const hydrateCrewConnections = async (refresh = false) => {
+          try {
+            const response = await loadCrew(refresh);
+            if (!document.body.contains(crewTarget)) return;
+            showSavedCrew(response.crew || response.saved_crew);
+            crewTarget.innerHTML = completedCrewConnectionsHtml(response.items || []);
+            bindUserButtons(crewTarget);
+            crewTarget.querySelectorAll('[data-connect-crew]').forEach((connectButton) => {
+              connectButton.addEventListener('click', async () => {
+                const userId = Number(connectButton.dataset.connectCrew);
+                const kind = connectButton.dataset.connectKind;
+                connectButton.disabled = true;
+                connectButton.textContent = kind === 'accept' ? 'Accepting…' : 'Sending…';
+                try {
+                  if (kind === 'accept') {
+                    await api(`/friends/${connectButton.dataset.friendshipId}/respond`, {
+                      method: 'POST', body: JSON.stringify({ accept: true }),
+                    });
+                    toast('You’re connected! 🤝');
+                  } else {
+                    await api('/friends/request', {
+                      method: 'POST', body: JSON.stringify({ user_id: userId }),
+                    });
+                    toast('Friend request sent');
+                  }
+                } catch (error) {
+                  if (!['request_already_sent', 'already_friends', 'not_pending'].includes(error.code)) {
+                    toast(error.message);
+                    connectButton.disabled = false;
+                    connectButton.textContent = kind === 'accept' ? 'Accept' : '＋ Add';
+                    return;
+                  }
+                }
+                hydrateCrewConnections(true);
+              });
+            });
+          } catch (error) {
+            if (!document.body.contains(crewTarget)) return;
+            crewTarget.innerHTML = '<button type="button" class="btn btn-secondary btn-block" id="gs-crew-retry">Retry connection check</button>';
+            crewTarget.querySelector('#gs-crew-retry').addEventListener('click', () => hydrateCrewConnections(true));
+          }
+        };
+        hydrateCrewConnections();
+      }
       box.querySelector('#gs-court')?.addEventListener('click', () => transitionModal(modal, () => openCourtDetail(court.id)));
       box.querySelector('#gs-chat')?.addEventListener('click', () => openGameChat(game));
       box.querySelector('#gs-calendar')?.addEventListener('click', () => downloadIcs(game));
-      box.querySelector('#gs-post-court')?.addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        try {
-          const spots = game.spots_left;
-          await api(`/courts/${game.court.id}/chat`, {
-            method: 'POST',
-            body: JSON.stringify({
-              body: `Open game ${fmtDateTime(game.scheduled_at)} — ${spots} spot${spots === 1 ? '' : 's'} left! Join: ${location.origin}/g/${game.id}`,
-            }),
-          });
-          btn.textContent = '📣 Posted to court chat ✓';
-          toast(`Posted to the ${game.court.name} room 📣`);
-        } catch (err) { toast(err.message); btn.disabled = false; }
-      });
-      box.querySelector('#gs-invite')?.addEventListener('click', async () => {
-        const modalLoad = beginRoutedOverlayLoad(null);
-        let friends = [];
-        try { friends = (await api('/friends')).friends || []; } catch { /* offline */ }
-        if (!routedOverlayLoadIsCurrent(modalLoad)) return;
-        const inGame = new Set(game.players.map((p) => p.user_id));
-        const invitable = friends.filter((f) => !inGame.has(f.id));
-        const sheet = openModal(`
-          ${modalHead('＋ Invite a friend')}
-          <p class="row-sub" style="margin-bottom:12px">They'll get an invite with a link to join.</p>
-          <div id="gi-list">${invitable.length
-            ? invitable.map((f) => `
-                <button class="btn btn-secondary btn-block" data-invite-friend="${f.id}" style="margin-bottom:8px;text-align:left;display:flex;align-items:center;gap:8px">
-                  ${avatarHtml(f, 'sm')} ${esc(f.display_name)}
-                </button>`).join('')
-            : `<div class="empty-state" style="padding:18px">${friends.length ? 'All your friends are already in this game <svg class="pb-ic"><use href="#pb"/></svg>' : 'Add friends first to invite them.'}</div>`}</div>
-        `);
-        sheet.querySelectorAll('[data-invite-friend]').forEach((b) => b.addEventListener('click', async () => {
-          b.disabled = true;
-          try {
-            await api(`/games/${game.id}/invite`, { method: 'POST', body: JSON.stringify({ user_id: Number(b.dataset.inviteFriend) }) });
-            closeModal(sheet);
-            toast('Invite sent 📨');
-          } catch (e) { toast(e.message); b.disabled = false; }
-        }));
+      box.querySelector('#gs-fill-roster')?.addEventListener('click', () => {
+        openRosterBoostSheet(game, { onGameUpdated: render });
       });
       box.querySelector('#gs-attend')?.addEventListener('click', async () => {
         try {
@@ -10955,7 +15538,21 @@
         } catch (e) { toast(e.message); reopenFresh(); }
       });
       box.querySelector('#gs-share')?.addEventListener('click', () => shareGame(game));
-      box.querySelector('#gs-join')?.addEventListener('click', async () => {
+      box.querySelector('#gs-arrival')?.addEventListener('click', () => {
+        const gameRally = rallySummaryFromValue(game);
+        transitionModal(modal, () => openRallyArrivalSheet(gameRally));
+      });
+      box.querySelector('#gs-arrival-details')?.addEventListener('click', () => {
+        const gameRally = rallySummaryFromValue(game);
+        const arrival = activeArrivalForGame(game.id, game.my_arrival, gameRally);
+        if (arrival) transitionModal(modal, () => openArrivalDetails(arrival));
+        else reopenFresh();
+      });
+      box.querySelector('#gs-join')?.addEventListener('click', async (event) => {
+        if (game.is_instant) {
+          await openReadyRally(rallySummaryFromValue(game), event.currentTarget);
+          return;
+        }
         try {
           await api(`/games/${gameId}/join`, { method: 'POST' });
           toast(isChallenge ? 'Challenge accepted! ⚔️' : "You're in! 🏓");
@@ -10988,31 +15585,101 @@
           refreshMe(); reopenFresh();
         } catch (e) { toast(e.message); reopenFresh(); }
       });
-      box.querySelector('#gs-rematch')?.addEventListener('click', async (e) => {
+      box.querySelector('#gs-plan-crew')?.addEventListener('click', (event) => {
+        openCompletedCrewPlanner(game, modal, event.currentTarget, loadCrew());
+      });
+      const rematchButton = box.querySelector('#gs-rematch');
+      const rematchLabel = () => {
+        rematchAttempt = readRematchAttempt(gameId);
+        if (rematchAttempt && rematchAttempt.gameId) return '↗ Open the rematch';
+        if (rematchAttempt && rematchAttempt.payload) return '↻ Finish starting the rematch safely';
+        return `⚡ Play again now at ${court.name || 'this court'}`;
+      };
+      if (rematchButton) rematchButton.textContent = rematchLabel();
+      rematchButton?.addEventListener('click', async (e) => {
         const btn = e.currentTarget;
         if (btn.disabled) return;
-        btn.disabled = true;
-        rematchAttemptId ||= newGameAttemptId();
-        rematchScheduledAt ||= new Date().toISOString();
-        const others = game.players.map((p) => p.user_id).filter((id) => id !== state.me.id);
+        rematchAttempt = readRematchAttempt(gameId);
+        if (rematchAttempt && rematchAttempt.gameId) {
+          transitionModal(modal, () => openGameScreen(rematchAttempt.gameId));
+          return;
+        }
+        const planButton = box.querySelector('#gs-plan-crew');
+        [btn, planButton].filter(Boolean).forEach((item) => { item.disabled = true; });
+        const restoreIntents = () => {
+          btn.disabled = false;
+          btn.textContent = rematchLabel();
+          if (planButton) planButton.disabled = false;
+        };
+        btn.textContent = rematchAttempt ? 'Finishing the rematch safely…' : 'Starting the rematch…';
+        let requestPayload = rematchAttempt && rematchAttempt.payload;
+        let postStarted = false;
         try {
-          const rematch = await api('/games', {
-            method: 'POST',
-            body: JSON.stringify({
+          if (!requestPayload) {
+            const crew = (await loadCrew()).items || [];
+            const others = crew.map((person) => person.id);
+            if (!others.length) {
+              toast('No eligible teammates are available for this rematch');
+              restoreIntents();
+              return;
+            }
+            requestPayload = writeRematchAttempt(gameId, {
               court_id: court.id,
-              scheduled_at: rematchScheduledAt,
+              scheduled_at: new Date().toISOString(),
               game_type: game.game_type,
               max_players: game.max_players,
-              visibility: others.length ? 'private' : 'open',
+              preferred_level: game.preferred_level || 'any',
+              visibility: 'private',
+              recurrence: 'none',
               invite_user_ids: others,
+              require_all_invitees: true,
+              source_game_id: game.id,
               notes: '↺ Rematch!',
-              client_attempt_id: rematchAttemptId,
-            }),
+              client_attempt_id: rematchClientAttemptId(gameId),
+            });
+            if (!requestPayload) {
+              toast('Nothing was sent because this browser could not save a safe rematch retry');
+              restoreIntents();
+              return;
+            }
+            rematchAttempt = readRematchAttempt(gameId);
+          }
+          postStarted = true;
+          const rematch = await api('/games', {
+            method: 'POST',
+            body: JSON.stringify(requestPayload),
           });
-          toast(others.length ? 'Rematch is on — invites sent ⚔️' : 'Rematch is on ⚔️');
+          writeRematchAttempt(gameId, requestPayload, rematch.id);
+          rematchAttempt = readRematchAttempt(gameId);
+          toast('Rematch is on — the crew is invited ⚔️');
           refreshMe();
           transitionModal(modal, () => openGameScreen(rematch.id));
-        } catch (err) { toast(err.message); btn.disabled = false; }
+        } catch (err) {
+          if (postStarted && err.code === 'client_attempt_id_conflict') {
+            const existingGameId = Number(err.data && err.data.existing_game_id);
+            if (Number.isSafeInteger(existingGameId) && existingGameId > 0) {
+              writeRematchAttempt(gameId, requestPayload, existingGameId);
+              rematchAttempt = readRematchAttempt(gameId);
+              toast('That rematch already exists — opening it');
+              refreshMe();
+              transitionModal(modal, () => openGameScreen(existingGameId));
+              return;
+            }
+          }
+          const ambiguous = postStarted && (
+            err.isNetworkError || Number(err.status) === 429 || Number(err.status) >= 500
+            || err.code === 'client_attempt_id_conflict'
+          );
+          if (err.code === 'crew_changed' || (!ambiguous && postStarted)) {
+            clearRematchAttempt(gameId);
+            rematchAttempt = null;
+          }
+          if (err.code === 'crew_changed') loadCrew(true);
+          toast(ambiguous
+            ? 'Confirmation was interrupted — tap Finish rematch safely to recover it'
+            : err.message);
+          restoreIntents();
+        }
       });
       box.querySelector('#gs-leave')?.addEventListener('click', async (e) => {
         if (!confirm("Leave this game? The host and other players will see that your spot opened.")) return;
@@ -11109,12 +15776,13 @@
     const enableBtn = (typeof Notification !== 'undefined' && Notification.permission === 'default')
       ? '<button class="btn btn-secondary btn-block" id="act-enable" style="margin-bottom:12px">🔔 Enable phone notifications</button>'
       : '';
-    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🏓', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🏓', player_left: '🚪', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣', league_update: '📦', league_match: '🎯', league_message: '💬', nearby_games: '🗓', streak_nag: '🔥' };
+    const icons = { friend_request: '🤝', friend_accept: '🎉', game_join: '🏓', game_cancelled: '🚫', ranked_result: '🏆', game_invite: '📅', game_invite_direct: '📨', score_submitted: '📝', score_confirmed: '✅', score_disputed: '⚠️', challenge: '⚔️', challenge_declined: '🙅', game_reminder: '⏰', game_message: '💬', session_rsvp: '🔁', friend_checkin: '📍', court_game: '⭐', weekly_recap: '📊', game_logged: '✍️', badge_earned: '🏅', player_coming: '🏓', player_left: '🚪', rally_arrival: '🚗', rally_arrival_ended: '⚠️', rally_arrival_cancelled: '↩️', rally_arrival_expired: '⌛', player_arriving: '🚗', arrival_cancelled: '↩️', tournament_join: '📥', tournament_invite: '🎽', tournament_withdraw: '↩️', tournament_start: '🏁', tournament_match: '🎯', tournament_score: '🆚', tournament_result: '👑', tournament_cancelled: '🚫', tournament_message: '💬', tournament_update: '🕑', tournament_reminder: '⏰', invite_declined: '🙅', club_join: '🙌', club_message: '💬', club_update: '🏛', club_invite: '🎟', club_game: '📣', crew_invite: '👥', crew_message: '💬', crew_update: '👥', league_update: '📦', league_match: '🎯', league_message: '💬', nearby_games: '🗓', streak_nag: '🔥' };
     // Where each notification taps to: game if it references one, else the other user for friend events.
     const targetFor = (n) => {
       const actionRoute = safeNotificationOverlayRoute(n.action_url);
       if (actionRoute) return { type: 'route', ...actionRoute };
       const relatedMatchId = Number(n.related_match_id || n.match_id || 0) || null;
+      if (n.related_crew_id) return { type: 'crew', id: n.related_crew_id };
       if (n.related_league_id) return { type: 'league', id: n.related_league_id, matchId: relatedMatchId };
       if (n.related_club_id) return { type: 'club', id: n.related_club_id };
       if (n.related_tournament_id) return { type: 'tournament', id: n.related_tournament_id, matchId: relatedMatchId };
@@ -11136,7 +15804,7 @@
       const t = targetFor(n);
       const time = new Date(n.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       listHtml += `
-        <div class="card row" ${t ? `data-notif-type="${t.type}" data-notif-kind="${t.kind || ''}" data-notif-id="${t.id}" data-notif-match="${t.matchId || ''}" style="cursor:pointer"` : ''}>
+        <div class="card row" ${t ? `data-notif-type="${t.type}" data-notif-kind="${esc(n.kind || t.kind || '')}" data-notif-id="${t.id}" data-notif-match="${t.matchId || ''}" style="cursor:pointer"` : ''}>
           ${n.read ? '' : '<span class="notif-dot"></span>'}
           <span style="font-size:20px">${icons[n.kind] || '🔔'}</span>
           <div class="row-main">
@@ -11175,6 +15843,8 @@
         const matchId = Number(row.dataset.notifMatch || 0) || null;
         if (kind === 'tournament') openTournamentScreen(Number(row.dataset.notifId), matchId);
         else if (kind === 'game') openGameScreen(Number(row.dataset.notifId));
+        else if (kind === 'crew' && row.dataset.notifKind === 'crew_message') openCrewChatById(Number(row.dataset.notifId));
+        else if (kind === 'crew') openCrewScreen(Number(row.dataset.notifId));
         else if (kind === 'club') openClubScreen(Number(row.dataset.notifId));
         else if (kind === 'league') openLeagueScreen(Number(row.dataset.notifId), matchId);
         else if (kind === 'court') openCourtDetail(Number(row.dataset.notifId));
@@ -11238,6 +15908,8 @@
       state.snapshotAreaProvisional = false;
       state.playGamesCache = null;
       state.chatFriendsCache = null;
+      clearLookingBanner();
+      refreshLookingBanner();
       if (state.map) {
         beginCourtContextRefresh(`Finding courts near ${label || 'your home area'}…`);
         moveCourtMapWithoutRefresh(
@@ -11458,7 +16130,41 @@
       refreshMe();
       tick += 1;
       if (tick % 3 === 0 && state.presence && state.presence.checked_in) {
-        api('/presence/ping', { method: 'POST' }).catch(() => {});
+        const pingToken = state.token;
+        const pingPresenceIdentity = JSON.stringify([
+          true,
+          state.presence.court_id || null,
+          state.presence.checked_in_at || null,
+        ]);
+        api('/presence/ping', { method: 'POST' }).then((data) => {
+          if (state.token !== pingToken || !data || !data.presence) return;
+          const currentPresenceIdentity = JSON.stringify([
+            !!state.presence?.checked_in,
+            state.presence?.court_id || null,
+            state.presence?.checked_in_at || null,
+          ]);
+          if (currentPresenceIdentity !== pingPresenceIdentity) return;
+          const wasCheckedIn = !!state.presence?.checked_in;
+          const nextPresence = data.presence;
+          const changed = JSON.stringify([
+            wasCheckedIn, state.presence?.court_id || null,
+          ]) !== JSON.stringify([
+            !!nextPresence.checked_in, nextPresence.court_id || null,
+          ]);
+          if (!changed) return;
+          // A heartbeat can hit the absolute privacy cap. Its mutation result
+          // is newer than any in-flight /me snapshot and owns presence now.
+          invalidateMeRequests();
+          state.presence = nextPresence;
+          state.playGamesCache = null;
+          renderPresenceBanner();
+          if (wasCheckedIn && !nextPresence.checked_in) {
+            toast('Your court check-in expired — confirm again if you’re still there.');
+          }
+          if (state.tab === 'play') renderPlay({ useCachedData: true });
+          refreshLookingBanner();
+          refreshMe();
+        }).catch(() => {});
       }
     }, ME_POLL_INTERVAL_MS);
   }
@@ -11612,6 +16318,7 @@
     else if (route.kind === 'game') openGameScreen(route.id);
     else if (route.kind === 'tournament') openTournamentScreen(route.id, route.matchId || null);
     else if (route.kind === 'club') openClubScreen(route.id);
+    else if (route.kind === 'crew') openCrewScreen(route.id);
     else if (route.kind === 'league') openLeagueScreen(route.id, route.matchId || null);
     else return false;
     return true;
@@ -11649,7 +16356,7 @@
     const shortcut = new URLSearchParams(location.search).get('tab');
     if (['courts', 'play', 'chat', 'profile'].includes(shortcut)) return shortcut;
     if (/^#court\//.test(location.hash)) return 'courts';
-    if (/^#(?:club|invite)\//.test(location.hash)) return 'chat';
+    if (/^#(?:club|crew|invite)\//.test(location.hash)) return 'chat';
     return state.tab || 'play';
   }
 
@@ -11689,6 +16396,8 @@
     if (tournamentMatch) { const id = Number(tournamentMatch[1]); prepareRoute('tournament', id); openTournamentScreen(id); return true; }
     const clubMatch = location.hash.match(/^#club\/(\d+)$/);
     if (clubMatch) { const id = Number(clubMatch[1]); prepareRoute('club', id); openClubScreen(id); return true; }
+    const crewMatch = location.hash.match(/^#crew\/(\d+)$/);
+    if (crewMatch) { const id = Number(crewMatch[1]); prepareRoute('crew', id); openCrewScreen(id); return true; }
     const leagueMatchRoute = location.hash.match(/^#league\/(\d+)\/match\/(\d+)$/);
     if (leagueMatchRoute) {
       const id = Number(leagueMatchRoute[1]);
@@ -11827,6 +16536,15 @@
       (bubble.closest('[style*="align-self"]') || bubble).remove();
       toast('Message deleted');
     } catch (err) { toast(err.message); }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const bubble = event.target.closest(
+      '.bubble[role="button"][data-room-heart], .bubble[role="button"][data-del-msg]',
+    );
+    if (!bubble) return;
+    event.preventDefault();
+    bubble.click();
   });
   window.addEventListener('unhandledrejection', (e) => {
     const reason = e.reason || {};

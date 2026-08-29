@@ -9,8 +9,16 @@ import pytest
 
 from backend import app as app_module
 from backend import config as config_module
-from backend.app import db
-from backend.models import Message, RateLimitBucket
+from backend.app import (
+    _active_checkin_index_is_exact,
+    _ensure_active_checkin_index,
+    _upgrade_schema,
+    db,
+)
+from backend.models import (
+    CheckIn, Court, GameArrivalIntent, GameOpenCall, Message, PlayAvailabilityPulse,
+    RateLimitBucket, utcnow,
+)
 
 
 SCRIPT_PATH = (
@@ -88,6 +96,7 @@ def test_schema_management_disabled_skips_every_startup_mutation(monkeypatch):
         '_migrate_legacy_schema',
         '_clear_conflicting_legacy_indexes',
         '_upgrade_schema',
+        '_ensure_active_checkin_index',
         '_ensure_game_attempt_index',
         '_ensure_message_attempt_index',
         '_ensure_message_send_attempt_schema',
@@ -112,6 +121,166 @@ def test_schema_management_disabled_skips_every_startup_mutation(monkeypatch):
 
     assert app.config['SCHEMA_MANAGEMENT_ENABLED'] is False
     assert calls == []
+
+
+def test_additive_upgrade_creates_arrival_history_without_create_all(testing_app):
+    """AUTO_CREATE_DB=false deployments still receive the reservation table."""
+    from sqlalchemy import inspect
+
+    with testing_app.app_context():
+        GameArrivalIntent.__table__.drop(db.engine)
+        assert 'game_arrival_intent' not in inspect(db.engine).get_table_names()
+
+        _upgrade_schema(testing_app)
+
+        inspector = inspect(db.engine)
+        assert 'game_arrival_intent' in inspector.get_table_names()
+        indexes = {
+            item['name']: item
+            for item in inspector.get_indexes('game_arrival_intent')
+        }
+        assert indexes['uq_game_arrival_active_user']['unique'] == 1
+        assert indexes['uq_game_arrival_active_user']['column_names'] == ['user_id']
+        assert indexes['uq_game_arrival_active_game']['unique'] == 1
+        assert indexes['uq_game_arrival_active_game']['column_names'] == ['game_id']
+
+
+def test_additive_upgrade_creates_play_pulse_ledger_without_create_all(testing_app):
+    """Availability retry state is present even when broad DDL is disabled."""
+    from sqlalchemy import inspect
+
+    with testing_app.app_context():
+        PlayAvailabilityPulse.__table__.drop(db.engine)
+        assert (
+            'play_availability_pulse'
+            not in inspect(db.engine).get_table_names()
+        )
+
+        _upgrade_schema(testing_app)
+
+        inspector = inspect(db.engine)
+        assert 'play_availability_pulse' in inspector.get_table_names()
+        indexes = {
+            item['name']: item
+            for item in inspector.get_indexes('play_availability_pulse')
+        }
+        active = indexes['uq_play_availability_pulse_active_user']
+        assert active['unique'] == 1
+        assert active['column_names'] == ['user_id']
+
+
+def test_additive_upgrade_creates_game_open_call_ledger_without_create_all(testing_app):
+    """Roster-fill receipts are present even when broad DDL is disabled."""
+    from sqlalchemy import inspect
+
+    with testing_app.app_context():
+        GameOpenCall.__table__.drop(db.engine)
+        assert 'game_open_call' not in inspect(db.engine).get_table_names()
+
+        _upgrade_schema(testing_app)
+
+        inspector = inspect(db.engine)
+        assert 'game_open_call' in inspector.get_table_names()
+        indexes = {
+            item['name']: item
+            for item in inspector.get_indexes('game_open_call')
+        }
+        active = indexes['uq_game_open_call_active_game']
+        assert active['unique'] == 1
+        assert active['column_names'] == ['game_id']
+        uniques = {
+            item['name']
+            for item in inspector.get_unique_constraints('game_open_call')
+        }
+        assert {
+            'uq_game_open_call_creator_attempt',
+            'uq_game_open_call_game_creator',
+            'uq_game_open_call_message',
+        } <= uniques
+
+
+def test_active_checkin_index_repairs_duplicates_and_keeps_freshest(testing_app):
+    from datetime import timedelta
+
+    from sqlalchemy import inspect, text
+    from sqlalchemy.exc import IntegrityError
+
+    client = testing_app.test_client()
+    registration = client.post(
+        '/api/auth/register', json=_registration_payload('presence-index'),
+    ).get_json()
+    with testing_app.app_context():
+        court = Court(
+            name='Index Court', city='Costa Mesa', state='CA',
+            county_slug='test', latitude=33.6, longitude=-117.9,
+        )
+        db.session.add(court)
+        db.session.commit()
+        user_id = registration['user']['id']
+        with db.engine.begin() as connection:
+            connection.execute(text('DROP INDEX uq_check_in_active_user'))
+        older = CheckIn(
+            user_id=user_id, court_id=court.id,
+            checked_in_at=utcnow() - timedelta(minutes=10),
+            last_presence_ping_at=utcnow() - timedelta(minutes=5),
+        )
+        freshest = CheckIn(
+            user_id=user_id, court_id=court.id,
+            checked_in_at=utcnow() - timedelta(minutes=2),
+            last_presence_ping_at=utcnow(),
+        )
+        db.session.add_all([older, freshest])
+        db.session.commit()
+
+        _ensure_active_checkin_index(testing_app)
+        db.session.expire_all()
+
+        active = CheckIn.query.filter_by(
+            user_id=user_id, checked_out_at=None,
+        ).all()
+        assert [row.id for row in active] == [freshest.id]
+        assert db.session.get(CheckIn, older.id).checked_out_at is not None
+        reflected = next(
+            index for index in inspect(db.engine).get_indexes('check_in')
+            if index['name'] == 'uq_check_in_active_user'
+        )
+        assert reflected['unique'] == 1
+        assert reflected['column_names'] == ['user_id']
+
+        db.session.add(CheckIn(user_id=user_id, court_id=court.id))
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
+
+
+@pytest.mark.parametrize(
+    ('definition', 'expected'),
+    (
+        (
+            'CREATE UNIQUE INDEX uq_check_in_active_user ON check_in '
+            '(user_id) WHERE checked_out_at IS NULL',
+            True,
+        ),
+        (
+            'CREATE UNIQUE INDEX uq_check_in_active_user ON '
+            'picklepals.check_in USING btree (user_id) '
+            'WHERE (checked_out_at IS NULL)',
+            True,
+        ),
+        (
+            'CREATE UNIQUE INDEX uq_check_in_active_user ON check_in '
+            '(user_id) WHERE checked_out_at IS NULL AND court_id > 0',
+            False,
+        ),
+        (
+            'CREATE INDEX uq_check_in_active_user ON check_in '
+            '(user_id) WHERE checked_out_at IS NULL',
+            False,
+        ),
+    ),
+)
+def test_active_checkin_index_definition_must_be_exact(definition, expected):
+    assert _active_checkin_index_is_exact(definition) is expected
 
 
 def test_database_rate_limit_is_shared_across_clients_on_sqlite(testing_app):

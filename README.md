@@ -44,10 +44,27 @@ Demo accounts: `dana@example.com`, `marcus@example.com`, `priya@example.com`,
 - **Location** — first-run onboarding sets a **home area**; the map and feeds
   open there. **Players Near You** discovery (by last check-in / home court)
   with skill filter and add-friend / message / challenge actions.
-- **Play** — action-first mobile home with **Play now / Plan ahead**, a guided
-  Where → When → Who rally planner with smart court/time/friend defaults, nearby
+- **Play** — action-first mobile home with **Play now / Plan ahead**. Play Now
+  confirms the court where you are physically ready, checks you in, and safely
+  joins or starts one live rally in a single flow; nearby ready players see the
+  underfilled rally until it fills or expires. Remote players can tap **I'm on
+  my way** for a bounded 5/10/15-minute hold on one spot, get Directions, and
+  convert it only after a private exact-court check-in. Rally surfaces keep
+  physically ready, joined-roster, and on-the-way counts distinct; outsiders
+  see only the aggregate while roster members see the traveler's ETA. Players
+  who are not at a court can publish **Available this hour** at a selected
+  court. The server fixes the signal to 60 minutes; a nearby player can accept
+  it through expiry to atomically create one ordinary open casual game about
+  15 minutes ahead, with retry-safe publish and acceptance keys and no false
+  check-in presence. Plan Ahead keeps the guided
+  Where → When → Who planner with smart court/time/friend defaults, nearby
   games feed, and scheduling at any court (casual or ranked),
   **recurring weekly open-play sessions**, join/leave, and an active-game banner.
+  Every underfilled roster has one **Fill the game** sheet that combines batch
+  friend invites, link sharing, and—when the host chose a public one-off
+  game—a retry-safe live card in the court room. The card follows the real
+  roster from open → full → open, offers join or waitlist without reserving a
+  spot, and closes with the game instead of leaving stale recruiting text.
   Casual scores finalize instantly; ranked scores need an opposing player's
   one-tap confirmation (auto-confirm after 24h; disputes clear for re-entry)
   before ELO moves (K=32, team-average for doubles). Results feed, win streaks,
@@ -65,6 +82,11 @@ Demo accounts: `dana@example.com`, `marcus@example.com`, `priya@example.com`,
   across every room. Every text/photo send enters a durable, account-scoped
   outbox first, retries safely after offline/reload failures, and remains
   visibly retryable or removable without duplicate delivery.
+- **Crews** — turn the people from a completed scored game into a private,
+  consent-based group with durable invitations, a shared chat, and a one-tap
+  next-game planner. Accepted membership is the server-owned roster: Crew games
+  are private, one-off, versioned snapshots, so a stale screen cannot invite a
+  removed player or silently expose the group.
 - **Profile** — rating / record / streak, match history with rating deltas,
   editable profile (photo, skill level, bio, avatar color, home court/area),
   activity feed, install-to-home-screen hint.
@@ -159,6 +181,34 @@ Render activity.
    recovered account and spot-check court search, profiles, friendships, games,
    and messages. These checks supplement the migration's exact verification.
 
+### Applying additive schema upgrades to an existing deployment
+
+Serverless production deliberately sets `SCHEMA_MANAGEMENT_ENABLED=false`, so
+new tables and columns must be installed once through Neon's direct/unpooled
+connection **before** deploying application code that uses them. The command is
+idempotent, refuses pooled or unexpected databases, and verifies the required
+release schema after applying the app's additive migrations. That includes the
+Crew tables, instant-rally provenance, the one-active-check-in constraint, and
+the arrival-intent table with its one-active-user and one-active-rally partial
+unique indexes, plus the availability-pulse publish/accept retry ledger and its
+one-active-pulse-per-user partial unique index. It also installs the durable
+game-open-call ledger linking one host-authored recruiting card to one court
+message, with active-game and retry uniqueness constraints:
+
+```bash
+read -rs TARGET_DATABASE_URL
+export TARGET_DATABASE_URL
+python3 scripts/migrate_production_schema.py
+# Later, verify without applying DDL:
+# python3 scripts/migrate_production_schema.py --check-only
+unset TARGET_DATABASE_URL
+```
+
+Run the final command from a trusted operator machine. Never place the direct
+URL in a tracked file, command argument, chat message, or screenshot. Leave the
+deployed `DATABASE_URL` on the pooled endpoint and keep runtime schema
+management disabled.
+
 ### Explicit fallback: start over with a fresh database
 
 Use a fresh database only after deliberately deciding that
@@ -216,7 +266,7 @@ backend/
   app.py            Flask bootstrap, local frontend + /api blueprints
   config.py         env-driven config (dev / staging / production / testing)
   models.py         User, Court, CheckIn, Friendship, Message, Game, GamePlayer,
-                    GameInvite, FavoriteCourt, Notification
+                    GameInvite, GameOpenCall, FavoriteCourt, Notification
   security.py       shared PostgreSQL / local-memory fixed-window rate limiter
   routes/           auth, courts (+ geocode), games, social (+ players/nearby), chat
   seed.py           court data importer (dir or bundled .json.gz) + demo seed

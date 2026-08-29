@@ -9,15 +9,24 @@ import urllib.request
 from datetime import timedelta
 
 from flask import Blueprint, Response, current_app, g, jsonify, request
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from backend.app import db
 from backend.models import (
     COURT_CONDITIONS, CheckIn, Court, CourtChatRead, CourtCondition,
     CourtEditSuggestion, CourtPhoto, CourtReview, FavoriteCourt, Game,
-    GamePlayer, Message, Notification, iso, notify, utcnow,
+    GamePlayer, Message, Notification, User, blocked_pair_ids, iso, notify,
+    utcnow,
 )
-from backend.routes.auth import active_checkin_for, login_required, optional_current_user, presence_payload
+from backend.routes.auth import (
+    active_checkin_for,
+    checkin_is_fresh,
+    login_required,
+    optional_current_user,
+    presence_absolute_cutoff,
+    presence_payload,
+    presence_stale_cutoff,
+)
 from backend.routes.social import friend_ids
 from backend.security import rate_limit
 
@@ -29,6 +38,61 @@ MAX_COURT_RESULTS = 300
 _GEOCODE_CACHE = {}
 _GEOCODE_CACHE_TTL = 60 * 60 * 24  # 24h — place coordinates don't move
 _GEOCODE_MAX_CACHE = 500
+
+
+def _lock_open_instant_games_for_user(user_id):
+    """Lock this member's live assembly rows in canonical id order."""
+    games = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user_id,
+            Game.is_instant.is_(True),
+            Game.status == 'upcoming',
+            Game.assembly_closed_at.is_(None),
+        )
+        .order_by(Game.id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .all()
+    )
+    for game in games:
+        db.session.expire(game, ['players'])
+    return games
+
+
+def _close_departed_instant_assemblies(games, user_id, court_id, now):
+    """Persist one-way closure when the last fresh member leaves a court."""
+    from backend.routes.games import _end_game_arrivals
+
+    stale_cutoff = presence_stale_cutoff(now)
+    absolute_cutoff = presence_absolute_cutoff(now)
+    for game in games:
+        if game.court_id != court_id or game.assembly_closed_at is not None:
+            continue
+        other_member_ids = {
+            player.user_id for player in game.players
+            if player.user_id != user_id
+        }
+        other_fresh = None
+        if other_member_ids:
+            other_fresh = (
+                CheckIn.query.filter(
+                    CheckIn.user_id.in_(sorted(other_member_ids)),
+                    CheckIn.court_id == court_id,
+                    CheckIn.checked_out_at.is_(None),
+                    CheckIn.checked_in_at >= absolute_cutoff,
+                    CheckIn.last_presence_ping_at >= stale_cutoff,
+                )
+                .order_by(CheckIn.user_id.asc(), CheckIn.id.asc())
+                .with_for_update()
+                .execution_options(populate_existing=True)
+                .first()
+            )
+        if other_fresh is None:
+            game.assembly_closed_at = now
+            if len(game.players) <= 1:
+                game.status = 'expired'
+            _end_game_arrivals(game, 'presence_ended', now)
 
 
 def _nominatim_fetch(query):
@@ -127,16 +191,40 @@ def geocode_reverse():
 
 def cleanup_stale_presence():
     """Auto check-out anyone whose presence ping is older than the staleness window."""
-    cutoff = utcnow() - timedelta(
-        seconds=int(current_app.config.get('PRESENCE_STALE_AFTER_SECONDS', 7200) or 7200),
-    )
-    stale = CheckIn.query.filter(
-        CheckIn.checked_out_at.is_(None),
-        CheckIn.last_presence_ping_at < cutoff,
-    ).all()
-    for checkin in stale:
-        checkin.checked_out_at = cutoff
-    if stale:
+    now = utcnow()
+    cutoff = presence_stale_cutoff(now)
+    absolute_cutoff = presence_absolute_cutoff(now)
+    stale_user_ids = [
+        row[0] for row in db.session.query(CheckIn.user_id).filter(
+            CheckIn.checked_out_at.is_(None),
+            or_(
+                CheckIn.last_presence_ping_at < cutoff,
+                CheckIn.checked_in_at < absolute_cutoff,
+            ),
+        ).order_by(CheckIn.user_id.asc()).all()
+    ]
+    for user_id in stale_user_ids:
+        user = (
+            User.query.filter(User.id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+            .first()
+        )
+        if not user:
+            continue
+        games = _lock_open_instant_games_for_user(user_id)
+        checkin = active_checkin_for(user_id, for_update=True)
+        if not checkin or not (
+            checkin.last_presence_ping_at < cutoff
+            or checkin.checked_in_at < absolute_cutoff
+        ):
+            db.session.commit()
+            continue
+        _close_departed_instant_assemblies(
+            games, user_id, checkin.court_id, now,
+        )
+        checkin.checked_out_at = now
+        checkin.looking_for_game = False
         db.session.commit()
 
 
@@ -174,7 +262,12 @@ def _active_counts_for(court_ids):
         return {}, {}
     rows = (
         db.session.query(CheckIn.court_id, func.count(CheckIn.id))
-        .filter(CheckIn.court_id.in_(court_ids), CheckIn.checked_out_at.is_(None))
+        .filter(
+            CheckIn.court_id.in_(court_ids),
+            CheckIn.checked_out_at.is_(None),
+            CheckIn.checked_in_at >= presence_absolute_cutoff(),
+            CheckIn.last_presence_ping_at >= presence_stale_cutoff(),
+        )
         .group_by(CheckIn.court_id)
         .all()
     )
@@ -341,15 +434,36 @@ def court_detail(court_id):
 
     current_user = optional_current_user()
     viewer_friends = friend_ids(current_user.id) if current_user else set()
+    hidden_ids = blocked_pair_ids(current_user.id) if current_user else set()
     active = (
-        CheckIn.query.filter_by(court_id=court.id, checked_out_at=None)
+        CheckIn.query.filter(
+            CheckIn.court_id == court.id,
+            CheckIn.checked_out_at.is_(None),
+            CheckIn.checked_in_at >= presence_absolute_cutoff(),
+            CheckIn.last_presence_ping_at >= presence_stale_cutoff(),
+        )
         .order_by(CheckIn.checked_in_at.asc())
         .all()
     )
     now = utcnow()
     players_here = []
+    visible_player_count = 0
     for checkin in active:
-        if not checkin.user:
+        if (
+            not checkin.user or checkin.user.deleted_at
+            or checkin.user_id in hidden_ids
+        ):
+            continue
+        visible_player_count += 1
+        # A public court page may show live aggregate activity, never the
+        # identities of people physically present. Signed-in viewers see
+        # themselves, friends, and people who explicitly opted into local
+        # discovery by selecting "looking for a game."
+        if not current_user:
+            continue
+        is_friend = checkin.user_id in viewer_friends
+        is_me = checkin.user_id == current_user.id
+        if not (is_me or is_friend or checkin.looking_for_game):
             continue
         entry = checkin.user.to_public_dict()
         entry['looking_for_game'] = bool(checkin.looking_for_game)
@@ -358,8 +472,8 @@ def court_detail(court_id):
             max(0, int((now - checkin.checked_in_at).total_seconds() // 60))
             if checkin.checked_in_at else 0
         )
-        entry['is_friend'] = checkin.user_id in viewer_friends
-        entry['is_me'] = bool(current_user and checkin.user_id == current_user.id)
+        entry['is_friend'] = is_friend
+        entry['is_me'] = is_me
         players_here.append(entry)
     # Friends first, then players looking for a game
     players_here.sort(key=lambda p: (not p['is_friend'], not p['looking_for_game']))
@@ -429,10 +543,10 @@ def court_detail(court_id):
     )
     payload['regulars'] = [
         {**user.to_public_dict(), 'visits': int(visits)}
-        for user, visits in regular_rows
+        for user, visits in regular_rows if user.id not in hidden_ids
     ]
     payload['busy_times'] = _busy_times(court)
-    payload['court_leaders'] = _court_leaders(court)
+    payload['court_leaders'] = _court_leaders(court, hidden_ids)
     # Court-chat unread count — only once they've opened that chat before,
     # so untouched chat rooms don't nag.
     payload['chat_unread'] = 0
@@ -441,11 +555,15 @@ def court_detail(court_id):
             user_id=current_user.id, court_id=court.id,
         ).first()
         if marker:
-            payload['chat_unread'] = Message.query.filter(
+            unread_query = Message.query.filter(
                 Message.court_id == court.id,
                 Message.id > marker.last_read_message_id,
-            ).count()
+            )
+            if hidden_ids:
+                unread_query = unread_query.filter(Message.sender_id.notin_(hidden_ids))
+            payload['chat_unread'] = unread_query.count()
     payload['players_here'] = players_here
+    payload['players_here_count'] = visible_player_count
     payload['friends_here'] = sum(1 for p in players_here if p['is_friend'])
     viewer_id = current_user.id if current_user else None
     # Tournaments hosted here — anything open for registration or under way.
@@ -481,8 +599,34 @@ def court_detail(court_id):
         }
         for t in past
     ]
-    payload['games'] = [game.to_dict(viewer_id) for game in upcoming]
-    payload['recent_results'] = [game.to_dict(viewer_id) for game in recent_completed]
+    # Runtime import avoids the games -> courts module cycle while sharing the
+    # exact privacy contract used by the public game feed/detail routes.
+    from backend.routes.games import (
+        _discovery_game_payload,
+        _instant_game_discovery_allowed,
+    )
+
+    def game_visible(game):
+        player_ids = {player.user_id for player in game.players}
+        blocked_game = bool(
+            viewer_id and viewer_id not in player_ids and player_ids & hidden_ids
+        )
+        return (
+            game.visible_to(viewer_id, viewer_friends)
+            and not blocked_game
+            and _instant_game_discovery_allowed(
+                game, current_user, viewer_friends,
+            )
+        )
+
+    payload['games'] = [
+        _discovery_game_payload(game, current_user, viewer_friends)
+        for game in upcoming if game_visible(game)
+    ]
+    payload['recent_results'] = [
+        _discovery_game_payload(game, current_user, viewer_friends)
+        for game in recent_completed if game_visible(game)
+    ]
     payload['is_checked_in'] = bool(
         current_user and any(c.user_id == current_user.id for c in active)
     )
@@ -501,7 +645,10 @@ def court_detail(court_id):
         .limit(10)
         .all()
     )
-    payload['reviews'] = [r.to_dict() for r in recent_reviews]
+    payload['reviews'] = [
+        review.to_dict() for review in recent_reviews
+        if review.user_id not in hidden_ids
+    ]
     my_review = (
         CourtReview.query.filter_by(court_id=court.id, user_id=current_user.id).first()
         if current_user else None
@@ -521,9 +668,11 @@ def court_reviews(court_id):
         .limit(50)
         .all()
     )
+    current_user = optional_current_user()
+    hidden_ids = blocked_pair_ids(current_user.id) if current_user else set()
     summary = _rating_summary_for([court.id]).get(court.id)
     return jsonify({
-        'items': [r.to_dict() for r in reviews],
+        'items': [r.to_dict() for r in reviews if r.user_id not in hidden_ids],
         'rating_avg': summary['rating_avg'] if summary else None,
         'rating_count': summary['rating_count'] if summary else 0,
     })
@@ -965,7 +1114,7 @@ def favorite_courts_payload(user):
     return {'items': items}
 
 
-def _court_leaders(court):
+def _court_leaders(court, hidden_ids=None):
     """Top winners at this court — most wins across completed scored games,
     ranked by wins then win rate. The local 'court champions' board."""
     from backend.models import User as UserModel
@@ -980,11 +1129,12 @@ def _court_leaders(court):
         .limit(300)
         .all()
     )
+    hidden_ids = set(hidden_ids or ())
     tally = {}
     for game in games:
         team1_won = game.score_team1 > game.score_team2
         for p in game.players:
-            if not p.team:
+            if not p.team or p.user_id in hidden_ids:
                 continue
             rec = tally.setdefault(p.user_id, {'wins': 0, 'losses': 0})
             rec['wins' if (p.team == 1) == team1_won else 'losses'] += 1
@@ -1065,25 +1215,60 @@ def check_in(court_id):
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    elif not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
     looking = bool(payload.get('looking_for_game'))
 
-    existing = active_checkin_for(g.current_user.id)
+    user = (
+        User.query.filter(User.id == g.current_user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if not user or user.deleted_at:
+        return jsonify({'error': 'authentication_required'}), 401
+    g.current_user = user
+    now = utcnow()
+    instant_games = _lock_open_instant_games_for_user(g.current_user.id)
+    existing = active_checkin_for(g.current_user.id, for_update=True)
+    existing_was_fresh = checkin_is_fresh(existing, now)
     # Only a fresh "wants a game" (not a re-ping of an existing one) pings friends.
     started_looking = looking and not (
-        existing and existing.court_id == court.id and existing.looking_for_game
+        existing_was_fresh
+        and existing.court_id == court.id
+        and existing.looking_for_game
     )
     if existing and existing.court_id == court.id:
+        if not existing_was_fresh:
+            _close_departed_instant_assemblies(
+                instant_games, g.current_user.id, existing.court_id, now,
+            )
+            existing.checked_in_at = now
         existing.looking_for_game = looking
-        existing.last_presence_ping_at = utcnow()
+        existing.last_presence_ping_at = now
     else:
         if existing:
-            existing.checked_out_at = utcnow()
+            _close_departed_instant_assemblies(
+                instant_games, g.current_user.id, existing.court_id, now,
+            )
+            existing.checked_out_at = now
+            # The partial unique index is immediate. Flush the retirement
+            # before inserting the replacement presence row.
+            db.session.flush()
         db.session.add(CheckIn(
             user_id=g.current_user.id,
             court_id=court.id,
             looking_for_game=looking,
+            checked_in_at=now,
+            last_presence_ping_at=now,
         ))
+    # Physical presence supersedes the separate remote "available this hour"
+    # signal. User -> Game -> CheckIn -> pulse is the shared lock order.
+    from backend.routes.games import _end_active_play_pulse_for_user
+    _end_active_play_pulse_for_user(g.current_user.id, 'checked_in', now)
     if started_looking:
         _notify_friends_looking(court)
 
@@ -1091,7 +1276,7 @@ def check_in(court_id):
     if court.latitude is not None and court.longitude is not None:
         g.current_user.last_lat = court.latitude
         g.current_user.last_lng = court.longitude
-        g.current_user.last_location_at = utcnow()
+        g.current_user.last_location_at = now
 
     db.session.commit()
     return jsonify({'presence': presence_payload(g.current_user.id)})
@@ -1101,9 +1286,24 @@ def check_in(court_id):
 @rate_limit(60, 60)
 @login_required
 def check_out():
-    checkin = active_checkin_for(g.current_user.id)
+    user = (
+        User.query.filter(User.id == g.current_user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if not user or user.deleted_at:
+        return jsonify({'error': 'authentication_required'}), 401
+    g.current_user = user
+    instant_games = _lock_open_instant_games_for_user(g.current_user.id)
+    checkin = active_checkin_for(g.current_user.id, for_update=True)
     if checkin:
-        checkin.checked_out_at = utcnow()
+        now = utcnow()
+        _close_departed_instant_assemblies(
+            instant_games, g.current_user.id, checkin.court_id, now,
+        )
+        checkin.checked_out_at = now
+        checkin.looking_for_game = False
         db.session.commit()
     return jsonify({'presence': presence_payload(g.current_user.id)})
 
@@ -1112,8 +1312,38 @@ def check_out():
 @rate_limit(60, 60)
 @login_required
 def presence_ping():
-    checkin = active_checkin_for(g.current_user.id)
+    user = (
+        User.query.filter(User.id == g.current_user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if not user or user.deleted_at:
+        return jsonify({'error': 'authentication_required'}), 401
+    g.current_user = user
+    instant_games = _lock_open_instant_games_for_user(g.current_user.id)
+    checkin = active_checkin_for(g.current_user.id, for_update=True)
     if checkin:
-        checkin.last_presence_ping_at = utcnow()
+        now = utcnow()
+        was_fresh = checkin_is_fresh(checkin, now)
+        if (
+            not checkin.checked_in_at
+            or checkin.checked_in_at < presence_absolute_cutoff(now)
+        ):
+            # A heartbeat can maintain a short live session, never an
+            # indefinite exact-location/LFG signal. Explicit check-in starts a
+            # new confirmed session after this hard cap.
+            _close_departed_instant_assemblies(
+                instant_games, g.current_user.id, checkin.court_id, now,
+            )
+            checkin.checked_out_at = now
+            checkin.looking_for_game = False
+        else:
+            if not was_fresh:
+                _close_departed_instant_assemblies(
+                    instant_games, g.current_user.id,
+                    checkin.court_id, now,
+                )
+            checkin.last_presence_ping_at = now
         db.session.commit()
     return jsonify({'presence': presence_payload(g.current_user.id)})

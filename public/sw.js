@@ -1,9 +1,10 @@
 /* Third Shot service worker: fast app-shell caching with an offline fallback. */
-// Keep this release number in sync with index.html's executable asset paths.
-// Distinct pathnames guarantee even an older ignoreSearch worker cannot mix
-// old JS/CSS with new HTML during a release transition.
-const CACHE = 'thirdshot-v13';
-const CORE_SHELL = ['/', '/styles-v13.css', '/app-v13.js'];
+// Bump the cache revision whenever an in-place v15 shell changes. The asset
+// path release guards major transitions; this revision makes existing v15
+// installs refresh the arrival and one-hour play-pulse flows instead of
+// retaining old executable bytes.
+const CACHE = 'thirdshot-v15-r5';
+const CORE_SHELL = ['/', '/styles-v15.css', '/crew-planner-v15.js', '/app-v15.js'];
 const OPTIONAL_SHELL = ['/manifest.webmanifest', '/icon-512.png', '/icon-maskable.png', '/logo.jpg'];
 const NAVIGATION_TIMEOUT_MS = 1200;
 

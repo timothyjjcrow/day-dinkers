@@ -150,6 +150,8 @@ def _upgrade_schema(app):
                 statements.append('ALTER TABLE message ADD COLUMN tournament_id INTEGER')
             if 'club_id' not in columns:
                 statements.append('ALTER TABLE message ADD COLUMN club_id INTEGER')
+            if 'crew_id' not in columns:
+                statements.append('ALTER TABLE message ADD COLUMN crew_id INTEGER')
             if 'league_id' not in columns:
                 statements.append('ALTER TABLE message ADD COLUMN league_id INTEGER')
             if 'image_data' not in columns:
@@ -167,6 +169,9 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE message ADD COLUMN client_attempt_fingerprint VARCHAR(64)'
                 )
+            statements.append(
+                'CREATE INDEX IF NOT EXISTS ix_message_crew_id ON message (crew_id)'
+            )
 
         if 'user' in tables:
             user_cols = {c['name'] for c in inspector.get_columns('user')}
@@ -213,9 +218,26 @@ def _upgrade_schema(app):
                 )
             if 'club_id' not in game_cols:
                 statements.append('ALTER TABLE game ADD COLUMN club_id INTEGER')
+            if 'crew_id' not in game_cols:
+                statements.append('ALTER TABLE game ADD COLUMN crew_id INTEGER')
+            if 'crew_roster_version' not in game_cols:
+                statements.append('ALTER TABLE game ADD COLUMN crew_roster_version INTEGER')
             if 'preferred_level' not in game_cols:
                 statements.append(
                     "ALTER TABLE game ADD COLUMN preferred_level VARCHAR(16) NOT NULL DEFAULT 'any'"
+                )
+            if 'is_instant' not in game_cols:
+                statements.append(
+                    'ALTER TABLE game ADD COLUMN is_instant BOOLEAN NOT NULL DEFAULT '
+                    + ('FALSE' if is_postgres else '0')
+                )
+                # Provenance is server-owned. Notes have always been
+                # user-editable, so no text heuristic may promote an ordinary
+                # scheduled game into the instant-rally lifecycle.
+            if 'assembly_closed_at' not in game_cols:
+                statements.append(
+                    'ALTER TABLE game ADD COLUMN assembly_closed_at '
+                    + ('TIMESTAMP' if is_postgres else 'DATETIME')
                 )
             if 'client_attempt_id' not in game_cols:
                 statements.append(
@@ -225,6 +247,12 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE game ADD COLUMN client_attempt_fingerprint VARCHAR(64)'
                 )
+            statements.append(
+                'CREATE INDEX IF NOT EXISTS ix_game_crew_id ON game (crew_id)'
+            )
+            statements.append(
+                'CREATE INDEX IF NOT EXISTS ix_game_is_instant ON game (is_instant)'
+            )
 
         if 'court' in tables:
             court_cols = {c['name'] for c in inspector.get_columns('court')}
@@ -323,6 +351,10 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE notification ADD COLUMN related_club_id INTEGER'
                 )
+            if 'related_crew_id' not in notif_cols:
+                statements.append(
+                    'ALTER TABLE notification ADD COLUMN related_crew_id INTEGER'
+                )
             if 'related_league_id' not in notif_cols:
                 statements.append(
                     'ALTER TABLE notification ADD COLUMN related_league_id INTEGER'
@@ -341,6 +373,10 @@ def _upgrade_schema(app):
                 'CREATE UNIQUE INDEX IF NOT EXISTS '
                 'uq_notification_user_unread_topic '
                 'ON notification (user_id, unread_dedupe_key)'
+            )
+            statements.append(
+                'CREATE INDEX IF NOT EXISTS ix_notification_related_crew_id '
+                'ON notification (related_crew_id)'
             )
 
         if 'league' in tables:
@@ -470,7 +506,7 @@ def _upgrade_schema(app):
                     column: getattr(message, column)
                     for column in (
                         'recipient_id', 'court_id', 'game_id', 'tournament_id',
-                        'club_id', 'league_id',
+                        'club_id', 'crew_id', 'league_id',
                     )
                     if getattr(message, column) is not None
                 }
@@ -488,9 +524,152 @@ def _upgrade_schema(app):
                     message_id=message.id,
                 ))
             db.session.commit()
+
+        # Crews are additive private-community tables. Explicitly create them
+        # for installations that run schema upgrades without AUTO_CREATE_DB;
+        # fresh databases still receive them through create_all below.
+        if 'user' in tables and 'court' in tables:
+            from backend.models import Crew, CrewChatRead, CrewInvite, CrewMember
+            Crew.__table__.create(db.engine, checkfirst=True)
+            CrewMember.__table__.create(db.engine, checkfirst=True)
+            CrewInvite.__table__.create(db.engine, checkfirst=True)
+            CrewChatRead.__table__.create(db.engine, checkfirst=True)
+            # These nullable references were added to long-lived tables before
+            # the Crew table existed, so create_all cannot retrofit their
+            # foreign keys. Add them only after Crew has been created.
+            _ensure_crew_reference_foreign_keys(app)
+
+        # Arrival reservations retain an idempotency history, so they need a
+        # dedicated table (including partial active-slot indexes) even when an
+        # operator intentionally disables broad create_all behavior.
+        if 'user' in tables and 'game' in tables:
+            from backend.models import GameArrivalIntent
+            GameArrivalIntent.__table__.create(db.engine, checkfirst=True)
+
+        # Remote availability is neither CheckIn nor an arrival reservation.
+        # Its ended rows form the publish/accept retry ledger, so installations
+        # with broad create_all disabled still need the complete table and its
+        # partial active-user uniqueness index.
+        if {'user', 'court', 'game'} <= set(tables):
+            from backend.models import PlayAvailabilityPulse
+            PlayAvailabilityPulse.__table__.create(
+                db.engine, checkfirst=True,
+            )
+
+        # A game open call is a durable recruiting ledger linked to one court
+        # chat Message. Create it explicitly for production installations that
+        # keep broad create_all disabled.
+        if {'user', 'game', 'message'} <= set(tables):
+            from backend.models import GameOpenCall
+            GameOpenCall.__table__.create(db.engine, checkfirst=True)
     except Exception:
         db.session.rollback()
         app.logger.exception('Schema upgrade failed')
+
+
+CREW_REFERENCE_FOREIGN_KEYS = (
+    ('message', 'crew_id', 'message_crew_id_fkey'),
+    ('game', 'crew_id', 'game_crew_id_fkey'),
+    (
+        'notification', 'related_crew_id',
+        'notification_related_crew_id_fkey',
+    ),
+)
+
+
+def _foreign_key_matches(foreign_key, local_column, referred_table='crew',
+                         referred_column='id', referred_schema=None):
+    """Return whether an inspected FK has the exact single-column shape."""
+    return (
+        tuple(foreign_key.get('constrained_columns') or ()) == (local_column,)
+        and foreign_key.get('referred_table') == referred_table
+        and tuple(foreign_key.get('referred_columns') or ())
+        == (referred_column,)
+        and (
+            foreign_key.get('referred_schema') is None
+            or referred_schema is None
+            or foreign_key.get('referred_schema') == referred_schema
+        )
+    )
+
+
+def _missing_crew_reference_foreign_keys(inspector):
+    """Return canonical Crew FKs that inspection proves are still absent."""
+    tables = set(inspector.get_table_names())
+    if 'crew' not in tables:
+        return []
+    expected_schema = getattr(inspector, 'default_schema_name', None)
+    missing = []
+    for table, local_column, constraint_name in CREW_REFERENCE_FOREIGN_KEYS:
+        if table not in tables:
+            continue
+        columns = {column['name'] for column in inspector.get_columns(table)}
+        if local_column not in columns:
+            continue
+        foreign_keys = inspector.get_foreign_keys(table)
+        if any(
+            _foreign_key_matches(
+                foreign_key, local_column, referred_schema=expected_schema,
+            )
+            for foreign_key in foreign_keys
+        ):
+            continue
+        if any(
+            foreign_key.get('name') == constraint_name
+            for foreign_key in foreign_keys
+        ):
+            raise RuntimeError(
+                f'Foreign key {constraint_name} exists with the wrong shape'
+            )
+        missing.append((table, local_column, constraint_name))
+    return missing
+
+
+def _ensure_crew_reference_foreign_keys(app):
+    """Install the Crew references omitted by additive ``ADD COLUMN`` DDL.
+
+    PostgreSQL has no ``ADD CONSTRAINT IF NOT EXISTS``. A transaction-scoped
+    advisory lock serializes concurrent operator/app upgrade attempts, then a
+    fresh inspection checks both the canonical name and constrained columns
+    before issuing DDL. Re-running this function is therefore safe, while a
+    legacy constraint that hijacks a canonical name with the wrong shape fails
+    closed instead of being silently trusted.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+
+    if db.engine.dialect.name != 'postgresql':
+        return
+
+    with db.engine.begin() as connection:
+        connection.execute(text(
+            "SELECT pg_advisory_xact_lock(hashtext("
+            "'third-shot:crew-reference-foreign-keys'))"
+        ))
+        inspector = sa_inspect(connection)
+        for table, local_column, constraint_name in (
+            _missing_crew_reference_foreign_keys(inspector)
+        ):
+            preparer = connection.dialect.identifier_preparer
+            connection.execute(text(
+                f'ALTER TABLE {preparer.quote(table)} '
+                f'ADD CONSTRAINT {preparer.quote(constraint_name)} '
+                f'FOREIGN KEY ({preparer.quote(local_column)}) '
+                f'REFERENCES {preparer.quote("crew")} '
+                f'({preparer.quote("id")})'
+            ))
+            # Inspector caches reflection results; refresh after each DDL so a
+            # second requirement cannot reason from stale catalog state.
+            inspector = sa_inspect(connection)
+
+        inspector = sa_inspect(connection)
+        missing = [
+            requirement[2]
+            for requirement in _missing_crew_reference_foreign_keys(inspector)
+        ]
+        if missing:
+            raise RuntimeError(
+                'Crew foreign-key verification failed: ' + ', '.join(missing)
+            )
 
 
 GAME_ATTEMPT_INDEX_NAME = 'uq_game_creator_attempt'
@@ -505,6 +684,282 @@ MESSAGE_SEND_ATTEMPT_COLUMNS = {
 MESSAGE_SEND_ATTEMPT_UNIQUE_COLUMNS = ('sender_id', 'client_attempt_id')
 NOTIFICATION_DEDUPE_INDEX_NAME = 'uq_notification_user_unread_topic'
 NOTIFICATION_DEDUPE_INDEX_COLUMNS = ('user_id', 'unread_dedupe_key')
+FRIENDSHIP_PAIR_INDEX_NAME = 'uq_friendship_unordered_pair'
+ACTIVE_CHECKIN_INDEX_NAME = 'uq_check_in_active_user'
+
+
+def _active_checkin_index_definition(connection):
+    """Return the canonical active-presence index DDL, if installed."""
+    from sqlalchemy import text
+
+    if db.engine.dialect.name == 'postgresql':
+        return connection.execute(text('''
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND tablename = 'check_in'
+              AND indexname = :name
+        '''), {'name': ACTIVE_CHECKIN_INDEX_NAME}).scalar() or ''
+    return connection.execute(text('''
+        SELECT sql FROM sqlite_master
+        WHERE type = 'index' AND name = :name
+    '''), {'name': ACTIVE_CHECKIN_INDEX_NAME}).scalar() or ''
+
+
+def _active_checkin_index_is_exact(definition):
+    normalized = ' '.join(
+        str(definition or '').lower().replace('"', '').split()
+    )
+    where_parts = normalized.split(' where ')
+    predicate = (
+        ' '.join(
+            where_parts[1].replace('(', ' ').replace(')', ' ').split()
+        )
+        if len(where_parts) == 2 else ''
+    )
+    return (
+        normalized.startswith('create unique index')
+        and ACTIVE_CHECKIN_INDEX_NAME in normalized
+        and (
+            ' on check_in ' in f' {normalized} '
+            or '.check_in ' in f' {normalized} '
+        )
+        and where_parts[0].replace(' ', '').endswith('(user_id)')
+        and predicate == 'checked_out_at is null'
+    )
+
+
+def _ensure_active_checkin_index(app):
+    """Coalesce legacy duplicate presence and enforce one active row/user.
+
+    PostgreSQL locks the table while repairing and installing the partial
+    unique index. SQLite's write transaction provides the corresponding local
+    migration safety. Checked-out history remains untouched.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+
+    if 'check_in' not in sa_inspect(db.engine).get_table_names():
+        return
+    try:
+        with db.engine.begin() as connection:
+            if db.engine.dialect.name == 'postgresql':
+                connection.execute(text(
+                    'LOCK TABLE check_in IN SHARE ROW EXCLUSIVE MODE'
+                ))
+
+            rows = connection.execute(text('''
+                SELECT id, user_id, last_presence_ping_at, checked_in_at
+                FROM check_in
+                WHERE checked_out_at IS NULL
+                ORDER BY user_id ASC,
+                         CASE WHEN last_presence_ping_at IS NULL
+                                   AND checked_in_at IS NULL
+                              THEN 1 ELSE 0 END ASC,
+                         COALESCE(last_presence_ping_at, checked_in_at) DESC,
+                         id DESC
+            ''')).mappings().all()
+            seen_users = set()
+            duplicate_ids = []
+            for row in rows:
+                if row['user_id'] in seen_users:
+                    duplicate_ids.append(row['id'])
+                else:
+                    seen_users.add(row['user_id'])
+            for checkin_id in duplicate_ids:
+                connection.execute(text('''
+                    UPDATE check_in
+                    SET checked_out_at = COALESCE(
+                        last_presence_ping_at, checked_in_at, CURRENT_TIMESTAMP
+                    )
+                    WHERE id = :id AND checked_out_at IS NULL
+                '''), {'id': checkin_id})
+
+            definition = _active_checkin_index_definition(connection)
+            if not _active_checkin_index_is_exact(definition):
+                if definition:
+                    connection.execute(text(
+                        f'DROP INDEX "{ACTIVE_CHECKIN_INDEX_NAME}"'
+                    ))
+                connection.execute(text(
+                    f'CREATE UNIQUE INDEX "{ACTIVE_CHECKIN_INDEX_NAME}" '
+                    'ON check_in (user_id) WHERE checked_out_at IS NULL'
+                ))
+
+            duplicates = connection.execute(text('''
+                SELECT COUNT(*) FROM (
+                    SELECT user_id FROM check_in
+                    WHERE checked_out_at IS NULL
+                    GROUP BY user_id HAVING COUNT(*) > 1
+                ) AS duplicate_active_checkins
+            ''')).scalar()
+            verified = _active_checkin_index_definition(connection)
+            if duplicates or not _active_checkin_index_is_exact(verified):
+                raise RuntimeError(
+                    'Active CheckIn verification failed: expected one partial '
+                    'unique row per user'
+                )
+    except Exception:
+        app.logger.exception('Active CheckIn migration failed')
+        raise
+
+
+def _friendship_pair_expressions():
+    low = (
+        'CASE WHEN requester_id < addressee_id '
+        'THEN requester_id ELSE addressee_id END'
+    )
+    high = (
+        'CASE WHEN requester_id < addressee_id '
+        'THEN addressee_id ELSE requester_id END'
+    )
+    return low, high
+
+
+def _friendship_pair_index_definition(connection):
+    """Return the database's canonical index DDL, or an empty string."""
+    from sqlalchemy import text
+
+    if db.engine.dialect.name == 'postgresql':
+        return connection.execute(text('''
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND tablename = 'friendship'
+              AND indexname = :name
+        '''), {'name': FRIENDSHIP_PAIR_INDEX_NAME}).scalar() or ''
+    return connection.execute(text('''
+        SELECT sql FROM sqlite_master
+        WHERE type = 'index' AND name = :name
+    '''), {'name': FRIENDSHIP_PAIR_INDEX_NAME}).scalar() or ''
+
+
+def _friendship_pair_index_is_exact(definition):
+    normalized = ' '.join(
+        str(definition or '').lower().replace('"', '')
+        .replace('(', '').replace(')', '').split()
+    )
+    low, high = _friendship_pair_expressions()
+    low = ' '.join(low.lower().replace('(', '').replace(')', '').split())
+    high = ' '.join(high.lower().replace('(', '').replace(')', '').split())
+    return (
+        normalized.startswith('create unique index')
+        and FRIENDSHIP_PAIR_INDEX_NAME in normalized
+        and low in normalized
+        and high in normalized
+        and ' where ' not in normalized
+    )
+
+
+def _ensure_friendship_pair_index(app):
+    """Coalesce legacy duplicates and enforce one unordered friendship pair.
+
+    Reciprocal pending rows represent mutual intent, so migration promotes the
+    survivor to accepted. Pairs involving a deleted account or an active block
+    are removed rather than allowing a ghost relationship to reappear later.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+
+    if 'friendship' not in sa_inspect(db.engine).get_table_names():
+        return
+    low_expr, high_expr = _friendship_pair_expressions()
+    try:
+        with db.engine.begin() as connection:
+            if db.engine.dialect.name == 'postgresql':
+                connection.execute(text('LOCK TABLE friendship IN SHARE ROW EXCLUSIVE MODE'))
+
+            active_users = {
+                row[0]
+                for row in connection.execute(text(
+                    'SELECT id FROM "user" WHERE deleted_at IS NULL'
+                ))
+            }
+            blocked_pairs = {
+                tuple(sorted((row[0], row[1])))
+                for row in connection.execute(text(
+                    'SELECT blocker_id, blocked_id FROM blocked_user'
+                ))
+                if row[0] != row[1]
+            }
+            grouped = {}
+            for row in connection.execute(text('''
+                SELECT id, requester_id, addressee_id, status
+                FROM friendship ORDER BY id
+            ''')).mappings():
+                pair = tuple(sorted((row['requester_id'], row['addressee_id'])))
+                grouped.setdefault(pair, []).append(dict(row))
+
+            for pair, rows in grouped.items():
+                invalid = (
+                    pair[0] == pair[1]
+                    or pair[0] not in active_users
+                    or pair[1] not in active_users
+                    or pair in blocked_pairs
+                )
+                if invalid:
+                    for row in rows:
+                        connection.execute(
+                            text('DELETE FROM friendship WHERE id = :id'),
+                            {'id': row['id']},
+                        )
+                    continue
+
+                accepted = [row for row in rows if row['status'] == 'accepted']
+                directions = {
+                    (row['requester_id'], row['addressee_id']) for row in rows
+                }
+                keeper = min(accepted or rows, key=lambda row: row['id'])
+                final_status = 'accepted' if accepted or len(directions) > 1 else 'pending'
+                for row in rows:
+                    if row['id'] != keeper['id']:
+                        connection.execute(
+                            text('DELETE FROM friendship WHERE id = :id'),
+                            {'id': row['id']},
+                        )
+                connection.execute(text('''
+                    UPDATE friendship SET status = :status
+                    WHERE id = :id
+                '''), {'status': final_status, 'id': keeper['id']})
+
+            definition = _friendship_pair_index_definition(connection)
+            if not _friendship_pair_index_is_exact(definition):
+                if definition:
+                    connection.execute(text(
+                        f'DROP INDEX "{FRIENDSHIP_PAIR_INDEX_NAME}"'
+                    ))
+                # PostgreSQL requires non-function expression-index columns to
+                # be wrapped individually.  SQLite accepts the unwrapped CASE
+                # form used by the local migration path.
+                index_columns = (
+                    f'({low_expr}), ({high_expr})'
+                    if db.engine.dialect.name == 'postgresql'
+                    else f'{low_expr}, {high_expr}'
+                )
+                connection.execute(text(
+                    f'CREATE UNIQUE INDEX "{FRIENDSHIP_PAIR_INDEX_NAME}" '
+                    f'ON friendship ({index_columns})'
+                ))
+
+            duplicates = connection.execute(text(f'''
+                SELECT COUNT(*) FROM (
+                    SELECT pair_low, pair_high, COUNT(*) AS pair_count
+                    FROM (
+                        SELECT {low_expr} AS pair_low,
+                               {high_expr} AS pair_high
+                        FROM friendship
+                    ) AS normalized_pairs
+                    GROUP BY pair_low, pair_high
+                ) AS grouped_pairs
+                WHERE pair_count > 1 OR pair_low = pair_high
+            ''')).scalar()
+            verified = _friendship_pair_index_definition(connection)
+            if duplicates or not _friendship_pair_index_is_exact(verified):
+                raise RuntimeError(
+                    'Friendship pair verification failed: expected one unique '
+                    'unordered row per two users'
+                )
+    except Exception:
+        app.logger.exception('Friendship pair migration failed')
+        raise
 
 
 def _game_attempt_index_is_exact(index):
@@ -838,6 +1293,8 @@ def create_app(config_name=None):
                 db.create_all()
             elif app.config.get('AUTO_CREATE_DB'):
                 db.create_all()
+            _ensure_active_checkin_index(app)
+            _ensure_friendship_pair_index(app)
             _ensure_game_attempt_index(app)
             _ensure_message_attempt_index(app)
             _ensure_message_send_attempt_schema(app)
@@ -892,8 +1349,13 @@ def create_app(config_name=None):
         game = db.session.get(Game, game_id)
         if not game:
             return 'not found', 404
-        if game.visibility == 'private':
-            # Don't leak details of invite-only games to link crawlers.
+        if game.visibility == 'private' or (
+            game.is_instant and game.status != 'completed'
+        ):
+            # Don't leak invite-only details or a live rally's exact physical
+            # location to anonymous link crawlers / enumerable share URLs.
+            # Cancelled/expired instant IDs remain protected; only completed
+            # results transition to ordinary historical visibility.
             return _share_page('A pickleball game on Third Shot',
                                'Open the link to see the details.', f'#game/{game_id}')
         court = game.court.name if game.court else 'the court'
@@ -955,13 +1417,13 @@ def create_app(config_name=None):
     # Executable shell assets use release-specific pathnames. The previous
     # service worker ignored query strings during offline fallback, so a query
     # alone could mix an old bundle with new HTML during deployment.
-    @app.get('/app-v13.js')
-    def frontend_app_v13():
-        return send_from_directory(PUBLIC_DIR, 'app-v13.js')
+    @app.get('/app-v15.js')
+    def frontend_app_v15():
+        return send_from_directory(PUBLIC_DIR, 'app-v15.js')
 
-    @app.get('/styles-v13.css')
-    def frontend_styles_v13():
-        return send_from_directory(PUBLIC_DIR, 'styles-v13.css')
+    @app.get('/styles-v15.css')
+    def frontend_styles_v15():
+        return send_from_directory(PUBLIC_DIR, 'styles-v15.css')
 
     @app.get('/<path:filename>')
     def frontend_assets(filename):
@@ -974,6 +1436,7 @@ def _register_blueprints(app):
     from backend.routes.auth import auth_bp
     from backend.routes.chat import chat_bp
     from backend.routes.clubs import clubs_bp
+    from backend.routes.crews import crews_bp
     from backend.routes.leagues import leagues_bp
     from backend.routes.push import push_bp
     from backend.routes.courts import courts_bp
@@ -988,6 +1451,7 @@ def _register_blueprints(app):
     app.register_blueprint(chat_bp, url_prefix='/api')
     app.register_blueprint(tournaments_bp, url_prefix='/api')
     app.register_blueprint(clubs_bp, url_prefix='/api')
+    app.register_blueprint(crews_bp, url_prefix='/api')
     app.register_blueprint(push_bp, url_prefix='/api')
     app.register_blueprint(leagues_bp, url_prefix='/api')
 
