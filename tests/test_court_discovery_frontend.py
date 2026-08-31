@@ -5,6 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = (ROOT / "public" / "app-v15.js").read_text()
+INDEX = (ROOT / "public" / "index.html").read_text()
+STYLES = (ROOT / "public" / "styles-v15.css").read_text()
 
 
 def section(start: str, end: str) -> str:
@@ -71,6 +73,58 @@ def test_quiet_cards_hide_zero_metrics_and_zero_results_hide_sorting():
     summary = section("function syncCourtSheetSummary", "function openCourtListPanel")
     assert "sort?.classList.toggle('hidden', n === 0)" in summary
     assert "sortLabel?.classList.toggle('hidden', n === 0)" in summary
+    assert "syncAppSelect(sort)" in summary
+
+
+def test_court_sort_uses_the_shared_app_picker_with_explanatory_choices():
+    assert 'id="court-sort"' in INDEX
+    assert 'data-select-title="Sort courts"' in INDEX
+    assert 'data-select-prefix="Sort"' in INDEX
+    for value in ("distance", "active", "rating", "courts"):
+        assert f'value="{value}"' in INDEX
+    for description in (
+        "Shortest trip from the center of your map",
+        "Players here and open games rise to the top",
+        "Highest community ratings first",
+        "Largest pickleball facilities first",
+    ):
+        assert description in INDEX
+
+    picker = section("function openAppSelectSheet", "function enhanceAppSelect")
+    assert 'role="listbox"' in picker
+    assert 'role="option"' in picker
+    assert 'aria-selected="${selected}"' in picker
+    assert 'tabindex="${selected ? \'0\' : \'-1\'}"' in picker
+    assert "select.dispatchEvent(new Event('change', { bubbles: true }))" in picker
+    assert "closeModal(sheet)" in picker
+    assert "sheet._returnFocus = trigger" in picker
+    assert "['ArrowDown', 'ArrowUp', 'Home', 'End']" in picker
+    assert "['Enter', ' '].includes(event.key)" in picker
+    assert "choose(choice);" in picker
+    assert "candidate.setAttribute('aria-selected', String(active))" in picker
+    assert "const activeChoices = () =>" in picker
+    assert "const roving = visible.find((choice) => choice.tabIndex === 0)" in picker
+    assert "search.addEventListener('keydown'" in picker
+    assert "setActiveChoice(target, { focus: true })" in picker
+    assert "select._refreshAppSelectSheet = renderChoices" in picker
+    assert ".app-select-option.is-selected" in STYLES
+    assert ".app-select-option:focus-visible" in STYLES
+
+
+def test_all_native_selects_are_presented_through_one_branded_picker():
+    enhancement = section("function enhanceAppSelect", "function enhanceAppSelects")
+    assert "select.classList.add('app-select-native')" in enhancement
+    assert "select.setAttribute('aria-hidden', 'true')" in enhancement
+    assert "button.setAttribute('aria-haspopup', 'dialog')" in enhancement
+    assert "button.setAttribute('aria-expanded', 'false')" in enhancement
+    assert "new MutationObserver" in enhancement
+    assert "select._refreshAppSelectSheet?.()" in enhancement
+    assert "setupAppSelects();" in APP
+    assert "enhanceAppSelects(backdrop);" in APP
+    assert ".app-select-trigger" in STYLES
+    assert "min-height: 48px" in STYLES
+    assert ".app-select-search" in STYLES
+    assert ".app-select-trigger-chevron" in STYLES
 
 
 def test_court_cards_expose_the_visible_decision_data_in_their_accessible_name():

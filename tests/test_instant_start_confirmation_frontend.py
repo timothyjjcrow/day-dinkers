@@ -28,17 +28,21 @@ def test_instant_start_confirms_at_the_trigger_before_showing_management():
     assert "event.stopImmediatePropagation()" in management
 
 
-def test_instant_start_cancel_is_direct_during_confirmation_then_moves_under_more():
+def test_instant_start_cancel_uses_the_shared_confirmation_then_moves_under_more():
     management = section(
         "function showInstantRallyManagement",
         "async function startInstantRally",
     )
-    assert "api(`/games/${gameId}/cancel`, { method: 'POST' })" in management
+    assert "openGameCancellationConfirmation({" in management
+    assert "variant: 'instant'" in management
+    assert "api(`/games/${gameId}/cancel`" not in management
     assert "button.dataset.instantRallyAction = 'cancel'" in management
     assert "<summary>More</summary>" in management
     assert "Cancel game" in management
+    assert "requestRallyCancellation(event.currentTarget)" in management
+    assert "requestRallyCancellation(button)" in management
     assert "button.dataset.instantRallyAction = 'open'" in management
-    assert "Game cancelled ✓" in management
+    assert "Game ended ✓" in management
     assert ".instant-rally-management { width: 100%; grid-column: 1 / -1; }" in STYLES
 
 

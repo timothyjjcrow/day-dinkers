@@ -158,6 +158,82 @@ select[aria-invalid="true"]:focus-visible,
 textarea[aria-invalid="true"]:focus-visible {
   outline-color: var(--red-700);
 }
+
+/* App-native select: the real select keeps form state while a branded trigger
+   and picker sheet replace the browser/OS menu on every surface. */
+.app-select-shell { position: relative; display: block; width: 100%; min-width: 0; }
+.app-select-native {
+  position: absolute !important; width: 1px !important; height: 1px !important;
+  margin: -1px !important; padding: 0 !important; overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important; clip-path: inset(50%) !important;
+  white-space: nowrap !important; border: 0 !important; opacity: 0; pointer-events: none;
+}
+.app-select-trigger {
+  width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px 10px 13px; border: 1.5px solid var(--line); border-radius: 13px;
+  background: linear-gradient(180deg, var(--card), color-mix(in srgb, var(--card) 88%, var(--green-50)));
+  box-shadow: 0 1px 2px rgba(15, 42, 24, .06); color: var(--ink); text-align: left;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .06s ease;
+}
+.app-select-trigger:hover { border-color: var(--green-600); }
+.app-select-trigger:active { transform: scale(.99); }
+.app-select-trigger:focus-visible {
+  outline: 3px solid var(--green-accent); outline-offset: 2px; border-color: var(--green-600);
+}
+.app-select-trigger:disabled { background: var(--track); color: var(--ink-soft); box-shadow: none; }
+.app-select-trigger-icon {
+  width: 28px; height: 28px; flex: 0 0 28px; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: 9px; background: var(--green-100);
+  color: var(--green-ink); font-size: 14px; font-weight: 900;
+}
+.app-select-trigger-copy { min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 5px; }
+.app-select-trigger-prefix { color: var(--ink-soft); font-size: 11px; font-weight: 750; }
+.app-select-trigger-value {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 14px; font-weight: 750;
+}
+.app-select-trigger-chevron {
+  width: 9px; height: 9px; flex: 0 0 9px; margin: -4px 3px 0 4px;
+  border-right: 2px solid var(--ink-soft); border-bottom: 2px solid var(--ink-soft);
+  transform: rotate(45deg);
+}
+.app-select-sheet { padding-bottom: 2px; }
+.app-select-search-wrap { display: block; margin-bottom: 10px; }
+.app-select-search { min-height: 46px; padding-left: 14px; background: var(--bg); }
+.app-select-options { display: grid; gap: 7px; }
+.app-select-option {
+  width: 100%; min-height: 54px; display: flex; align-items: center; gap: 11px;
+  padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 14px;
+  background: var(--card); color: var(--ink); text-align: left;
+  transition: border-color .15s ease, background .15s ease, transform .06s ease;
+}
+.app-select-option:hover { border-color: var(--green-600); background: var(--green-50); }
+.app-select-option:active { transform: scale(.99); }
+.app-select-option:focus-visible { outline: 3px solid var(--green-accent); outline-offset: 2px; }
+.app-select-option.is-selected {
+  border-color: var(--green-600); background: var(--green-50);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green-600) 18%, transparent);
+}
+.app-select-option:disabled { opacity: .42; cursor: not-allowed; }
+.app-select-option[hidden] { display: none; }
+.app-select-option-icon {
+  width: 34px; height: 34px; flex: 0 0 34px; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: 11px; background: var(--green-100);
+  color: var(--green-ink); font-size: 17px; font-weight: 900;
+}
+.app-select-option-copy { min-width: 0; flex: 1; }
+.app-select-option-copy b, .app-select-option-copy small { display: block; overflow-wrap: anywhere; }
+.app-select-option-copy b { font-size: 14px; line-height: 1.3; }
+.app-select-option-copy small { margin-top: 2px; color: var(--ink-soft); font-size: 11.5px; line-height: 1.35; }
+.app-select-option-check {
+  width: 24px; height: 24px; flex: 0 0 24px; display: inline-flex; align-items: center;
+  justify-content: center; border: 1.5px solid var(--line); border-radius: 50%;
+  color: transparent; font-size: 13px; font-weight: 900;
+}
+.app-select-option.is-selected .app-select-option-check {
+  border-color: var(--green-700); background: var(--green-700); color: #fff;
+}
+.app-select-empty { padding: 18px; color: var(--ink-soft); text-align: center; font-size: 13px; }
 .hidden { display: none !important; }
 .sr-only {
   position: absolute !important;
@@ -836,7 +912,7 @@ button.crew-member .row-title, button.crew-member .row-sub { display: block; }
 }
 .search-clear:active { background: var(--green-50); }
 .court-sheet[data-snap="peek"] .court-sort-label,
-.court-sheet[data-snap="peek"] #court-sort { display: none; }
+.court-sheet[data-snap="peek"] .court-sort-select-shell { display: none; }
 .search-spin {
   position: absolute; right: 14px; top: 50%; margin-top: -8px;
   width: 16px; height: 16px; border-radius: 50%;
@@ -1080,11 +1156,20 @@ button.crew-member .row-title, button.crew-member .row-sub { display: block; }
 .sheet-title { font-size: 16px; line-height: 1.2; margin: 0; }
 .court-sheet-summary .row-sub { margin-top: 2px; font-size: 11.5px; }
 .court-sort-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-#court-sort {
-  width: auto; max-width: 126px; min-height: 42px; flex: 0 0 auto;
-  padding: 8px 28px 8px 10px; border-radius: 11px; font-size: 12px; font-weight: 700;
-  background-color: var(--green-50); border-color: var(--green-100); color: var(--green-ink);
+.court-sort-select-shell { width: auto; max-width: 154px; flex: 0 0 auto; }
+.court-sort-select-shell .app-select-trigger {
+  min-height: 42px; gap: 7px; padding: 7px 9px; border-radius: 12px;
+  border-color: var(--green-100); background: var(--green-50); color: var(--green-ink);
+  box-shadow: none;
 }
+.court-sort-select-shell .app-select-trigger-icon {
+  width: 24px; height: 24px; flex-basis: 24px; border-radius: 8px;
+  background: color-mix(in srgb, var(--green-600) 13%, var(--green-50)); font-size: 12px;
+}
+.court-sort-select-shell .app-select-trigger-copy { display: grid; gap: 0; line-height: 1.05; }
+.court-sort-select-shell .app-select-trigger-prefix { font-size: 8.5px; letter-spacing: .04em; text-transform: uppercase; }
+.court-sort-select-shell .app-select-trigger-value { color: var(--green-ink); font-size: 11.5px; }
+.court-sort-select-shell .app-select-trigger-chevron { margin-left: 1px; border-color: var(--green-ink); }
 .court-sheet-results {
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch; padding: 10px 2px 18px;
@@ -1336,6 +1421,71 @@ button.tag, a.tag, .tag[role="button"] {
 .form-field { margin-bottom: 14px; }
 .form-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--ink-soft); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* Game cancellation is a deliberate in-app decision, not a browser confirm or
+   a disappearing toast. The summary keeps the exact game visible throughout. */
+.game-cancel-backdrop { background: rgba(27, 13, 13, .52); }
+.game-cancel-confirmation { padding-bottom: 2px; }
+.game-cancel-confirmation[aria-busy="true"] { cursor: wait; }
+.game-cancel-hero { display: flex; align-items: flex-start; gap: 13px; padding: 3px 2px 15px; }
+.game-cancel-icon {
+  width: 48px; height: 48px; flex: 0 0 48px; display: flex; align-items: center;
+  justify-content: center; border-radius: 16px; background: var(--red-50); color: var(--red-700);
+  font-size: 24px; font-weight: 900;
+}
+.game-cancel-hero > div { min-width: 0; }
+.game-cancel-eyebrow {
+  display: block; margin: 1px 0 3px; color: var(--red-700); font-size: 10px;
+  font-weight: 850; letter-spacing: .07em; text-transform: uppercase;
+}
+.game-cancel-hero h2 { font-size: 21px; line-height: 1.2; }
+.game-cancel-hero p { margin-top: 5px; color: var(--ink-soft); font-size: 12.5px; line-height: 1.45; }
+.game-cancel-summary {
+  padding: 13px; border: 1px solid var(--line); border-radius: 15px;
+  background: var(--bg); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--card) 75%, transparent);
+}
+.game-cancel-summary-court { display: flex; align-items: center; gap: 10px; }
+.game-cancel-summary-court > span { font-size: 19px; }
+.game-cancel-summary-court > div { min-width: 0; }
+.game-cancel-summary-court b, .game-cancel-summary-court span { display: block; }
+.game-cancel-summary-court b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.game-cancel-summary-court div span { margin-top: 2px; color: var(--ink-soft); font-size: 11.5px; }
+.game-cancel-summary-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.game-cancel-summary-tags span {
+  padding: 5px 8px; border-radius: 999px; background: var(--card); border: 1px solid var(--line);
+  color: var(--ink-soft); font-size: 10.5px; font-weight: 750;
+}
+.game-cancel-impact {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 11px; padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--red-700) 22%, var(--line)); border-radius: 14px;
+  background: color-mix(in srgb, var(--red-50) 65%, var(--card));
+}
+.game-cancel-impact-icon {
+  width: 24px; height: 24px; flex: 0 0 24px; display: flex; align-items: center;
+  justify-content: center; border-radius: 50%; background: var(--red-700); color: var(--card);
+  font-size: 13px; font-weight: 900;
+}
+.game-cancel-impact > div { min-width: 0; }
+.game-cancel-impact b { display: block; color: var(--red-700); font-size: 12px; }
+.game-cancel-impact p { margin-top: 3px; color: var(--ink); font-size: 11.5px; line-height: 1.45; }
+.game-cancel-error {
+  margin-top: 10px; padding: 10px 11px; border-radius: 11px; background: var(--red-50);
+  color: var(--red-700); font-size: 12.5px; font-weight: 700; line-height: 1.4;
+}
+.game-cancel-error:focus { outline: 3px solid var(--red-700); outline-offset: 2px; }
+.game-cancel-actions { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 9px; margin-top: 15px; }
+.game-cancel-actions .btn { min-height: 50px; padding: 11px 12px; }
+.game-cancel-danger { background: var(--danger-solid); color: var(--on-danger); }
+.game-cancel-danger:focus-visible { outline: 3px solid var(--red-500); outline-offset: 2px; }
+.game-cancel-success { padding: 10px 4px 2px; text-align: center; }
+.game-cancel-success-icon {
+  width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;
+  margin: 4px auto 13px; border-radius: 21px; background: var(--green-100); color: var(--green-ink);
+  font-size: 29px; font-weight: 900;
+}
+.game-cancel-success h2 { font-size: 22px; }
+.game-cancel-success p { max-width: 330px; margin: 6px auto 17px; color: var(--ink-soft); font-size: 13px; line-height: 1.45; }
+.game-cancel-success .btn { min-height: 50px; }
 
 /* ---------- Court detail ---------- */
 /* Pinned hero + scrollable body, so the name/photo/buttons stay in view. */
@@ -1992,6 +2142,7 @@ button.tag, a.tag, .tag[role="button"] {
   .cd-stats { grid-template-columns: repeat(2, 1fr) !important; }
   .cd-stat-l { white-space: normal; text-align: center; line-height: 1.15; }
   .competition-organizer-actions { grid-template-columns: 1fr; }
+  .game-cancel-actions { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

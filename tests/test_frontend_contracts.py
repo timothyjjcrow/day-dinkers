@@ -141,11 +141,11 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r12';" in SERVICE_WORKER
-    assert "const CORE_SHELL = ['/', '/styles-v15.css?v=r12', '/crew-planner-v15.js?v=r12', '/app-v15.js?v=r12'];" in SERVICE_WORKER
-    assert 'href="/styles-v15.css?v=r12"' in INDEX
-    assert 'src="/crew-planner-v15.js?v=r12"' in INDEX
-    assert 'src="/app-v15.js?v=r12"' in INDEX
+    assert "const CACHE = 'thirdshot-v15-r16';" in SERVICE_WORKER
+    assert "const CORE_SHELL = ['/', '/styles-v15.css?v=r16', '/crew-planner-v15.js?v=r16', '/app-v15.js?v=r16'];" in SERVICE_WORKER
+    assert 'href="/styles-v15.css?v=r16"' in INDEX
+    assert 'src="/crew-planner-v15.js?v=r16"' in INDEX
+    assert 'src="/app-v15.js?v=r16"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -287,7 +287,7 @@ def test_competition_live_refresh_preserves_mobile_context():
     assert "bracketScrollLeft" in APP
     assert "function competitionOverlayCanRefresh(box)" in APP
     assert "currentOverlayEntry()?.el !== box" in APP
-    assert "active.matches('input, textarea, select" in APP
+    assert "active.matches('input, textarea, select, .app-select-trigger" in APP
     assert "setDialogLabel(content, 'League')" in APP
     assert "setDialogLabel(content, 'Tournament')" in APP
     assert "const currentHead = modalBox.querySelector(':scope > .modal-head')" in APP
@@ -296,6 +296,13 @@ def test_competition_live_refresh_preserves_mobile_context():
     assert "competitionActionNeededHtml('tournament'" in APP
     assert "blocksProgression: ['awaiting_confirmation', 'disputed'].includes(stateName)" in APP
     assert 'aria-describedby="lg-unresolved-note"' in APP
+
+
+def test_log_game_court_search_keeps_the_branded_picker_in_sync():
+    search_pick = APP[APP.index("chosenCourtId = Number(row.dataset.lgPick)"):]
+    search_pick = search_pick[:search_pick.index("}, 300);")]
+    assert "sel.value = String(chosenCourtId);" in search_pick
+    assert "sel.dispatchEvent(new Event('change', { bubbles: true }));" in search_pick
 
 
 def test_match_deep_links_and_notifications_open_the_exact_result():

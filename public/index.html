@@ -7,7 +7,7 @@
   <!-- The UI is light-only; stop dark-mode browsers auto-darkening form controls. -->
   <meta name="color-scheme" content="light" />
   <title>Third Shot — Find courts, friends & games</title>
-  <link rel="stylesheet" href="/styles-v15.css?v=r12" />
+  <link rel="stylesheet" href="/styles-v15.css?v=r16" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-512.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
@@ -95,11 +95,11 @@
                 <p id="court-list-context" class="row-sub">Move the map or search an area</p>
               </div>
               <label class="court-sort-label" for="court-sort">Sort</label>
-              <select id="court-sort" aria-label="Sort courts">
-                <option value="distance">Closest</option>
-                <option value="active">Best now</option>
-                <option value="rating">Top rated</option>
-                <option value="courts">Most courts</option>
+              <select id="court-sort" aria-label="Sort courts" data-select-title="Sort courts" data-select-prefix="Sort">
+                <option value="distance" data-icon="📍" data-description="Shortest trip from the center of your map">Closest</option>
+                <option value="active" data-icon="⚡" data-description="Players here and open games rise to the top">Best now</option>
+                <option value="rating" data-icon="★" data-description="Highest community ratings first">Top rated</option>
+                <option value="courts" data-icon="▦" data-description="Largest pickleball facilities first">Most courts</option>
               </select>
             </div>
           </div>
@@ -190,7 +190,7 @@
       syncBoot();
     })();
   </script>
-  <script src="/crew-planner-v15.js?v=r12"></script>
-  <script src="/app-v15.js?v=r12"></script>
+  <script src="/crew-planner-v15.js?v=r16"></script>
+  <script src="/app-v15.js?v=r16"></script>
 </body>
 </html>

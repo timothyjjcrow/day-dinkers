@@ -1170,6 +1170,234 @@
     });
     sync();
   }
+
+  // Native select menus are visually disconnected from the rest of the app
+  // and cannot be styled consistently across iOS, Android, and desktop. Keep
+  // the real select as the source of truth for existing form code, but present
+  // every one through the same accessible, app-native picker sheet.
+  let appSelectSequence = 0;
+
+  function appSelectFieldLabel(select) {
+    const explicit = select.dataset.selectTitle || select.getAttribute('aria-label');
+    if (explicit) return explicit.trim();
+    const label = select._appSelectLabel
+      || [...(select.labels || [])][0]
+      || select.closest('.form-field')?.querySelector('label');
+    const text = label && label.textContent.replace(/\s+/g, ' ').trim();
+    return text || 'Choose an option';
+  }
+
+  function syncAppSelect(select) {
+    const wrapper = select && select._appSelectWrapper;
+    const button = select && select._appSelectButton;
+    if (!wrapper || !button) return;
+    const option = select.selectedOptions[0] || select.options[0] || null;
+    const value = option ? option.textContent.trim() : 'No options available';
+    const icon = option && option.dataset.icon;
+    const prefix = select.dataset.selectPrefix;
+    button.querySelector('.app-select-trigger-icon')?.classList.toggle('hidden', !icon);
+    const iconEl = button.querySelector('.app-select-trigger-icon');
+    if (iconEl) iconEl.textContent = icon || '';
+    const prefixEl = button.querySelector('.app-select-trigger-prefix');
+    if (prefixEl) {
+      prefixEl.textContent = prefix || '';
+      prefixEl.classList.toggle('hidden', !prefix);
+    }
+    const valueEl = button.querySelector('.app-select-trigger-value');
+    if (valueEl) valueEl.textContent = value;
+    button.disabled = select.disabled || !option;
+    button.setAttribute('aria-label', `${appSelectFieldLabel(select)}: ${value}`);
+    wrapper.classList.toggle('hidden', select.hidden
+      || select.classList.contains('hidden') || select.style.display === 'none');
+  }
+
+  function openAppSelectSheet(select) {
+    if (!select || select.disabled || !select.options.length) return null;
+    const trigger = select._appSelectButton;
+    const title = appSelectFieldLabel(select);
+    const optionRowsHtml = () => [...select.options].map((option, index) => {
+      const selected = option === select.selectedOptions[0];
+      const icon = option.dataset.icon || '';
+      const description = option.dataset.description || '';
+      return `<button type="button" class="app-select-option${selected ? ' is-selected' : ''}" role="option"
+        aria-selected="${selected}" tabindex="${selected ? '0' : '-1'}" data-app-select-index="${index}" ${option.disabled ? 'disabled' : ''}>
+        ${icon ? `<span class="app-select-option-icon" aria-hidden="true">${esc(icon)}</span>` : ''}
+        <span class="app-select-option-copy"><b>${esc(option.textContent.trim())}</b>${description ? `<small>${esc(description)}</small>` : ''}</span>
+        <span class="app-select-option-check" aria-hidden="true">✓</span>
+      </button>`;
+    }).join('');
+    const sheet = openModal(`
+      <div class="app-select-sheet">
+        ${modalHead(title)}
+        <label class="app-select-search-wrap${select.options.length >= 7 ? '' : ' hidden'}"><span class="sr-only">Search ${esc(title)}</span><input type="search" class="app-select-search" placeholder="Search choices…" autocomplete="off" /></label>
+        <div class="app-select-options" role="listbox" aria-label="${esc(title)}"></div>
+        <div class="app-select-empty hidden" role="status">No matching choices</div>
+      </div>
+    `, { label: title });
+    if (trigger) sheet._returnFocus = trigger;
+    trigger?.setAttribute('aria-expanded', 'true');
+    const group = sheet.querySelector('.app-select-options');
+    const searchWrap = sheet.querySelector('.app-select-search-wrap');
+    const search = sheet.querySelector('.app-select-search');
+    const empty = sheet.querySelector('.app-select-empty');
+    let choices = [];
+    const activeChoices = () => choices.filter((choice) => !choice.disabled && !choice.hidden);
+    const setActiveChoice = (choice, { focus = false } = {}) => {
+      choices.forEach((candidate) => {
+        const active = candidate === choice;
+        candidate.tabIndex = active ? 0 : -1;
+        candidate.setAttribute('aria-selected', String(active));
+        candidate.classList.toggle('is-selected', active);
+      });
+      if (focus) choice?.focus({ preventScroll: true });
+    };
+    const choose = (choice) => {
+      if (!choice || choice.disabled) return;
+      const option = select.options[Number(choice.dataset.appSelectIndex)];
+      if (!option || option.disabled) return;
+      select.value = option.value;
+      syncAppSelect(select);
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      closeModal(sheet);
+    };
+    const applySearch = () => {
+      const query = search.value.trim().toLocaleLowerCase();
+      let visibleCount = 0;
+      choices.forEach((choice) => {
+        const visible = !query || choice.textContent.toLocaleLowerCase().includes(query);
+        choice.hidden = !visible;
+        if (visible) visibleCount += 1;
+      });
+      const visible = activeChoices();
+      const selectedIndex = String(select.selectedIndex);
+      const roving = visible.find((choice) => choice.tabIndex === 0)
+        || visible.find((choice) => choice.dataset.appSelectIndex === selectedIndex)
+        || visible[0] || null;
+      setActiveChoice(roving);
+      empty.classList.toggle('hidden', visibleCount > 0);
+    };
+    const renderChoices = () => {
+      if (!document.body.contains(sheet)) return;
+      const optionHadFocus = group.contains(document.activeElement);
+      group.innerHTML = optionRowsHtml();
+      choices = [...group.querySelectorAll('[data-app-select-index]')];
+      choices.forEach((choice) => choice.addEventListener('click', () => choose(choice)));
+      const searchable = select.options.length >= 7;
+      searchWrap.classList.toggle('hidden', !searchable);
+      if (!searchable) search.value = '';
+      applySearch();
+      if (optionHadFocus) requestAnimationFrame(() => {
+        (choices.find((choice) => choice.getAttribute('aria-selected') === 'true')
+          || choices.find((choice) => !choice.disabled && !choice.hidden))?.focus({ preventScroll: true });
+      });
+    };
+    group?.addEventListener('keydown', (event) => {
+      if (['Enter', ' '].includes(event.key)) {
+        const choice = document.activeElement?.closest?.('[data-app-select-index]');
+        if (!choice || !group.contains(choice)) return;
+        event.preventDefault();
+        choose(choice);
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const visible = activeChoices();
+      const current = visible.indexOf(document.activeElement);
+      if (!visible.length) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? visible.length - 1
+        : event.key === 'ArrowDown' ? (current + 1 + visible.length) % visible.length
+          : (current - 1 + visible.length) % visible.length;
+      setActiveChoice(visible[next], { focus: true });
+    });
+    search.addEventListener('input', applySearch);
+    search.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+      const visible = activeChoices();
+      if (!visible.length) return;
+      event.preventDefault();
+      const target = event.key === 'ArrowUp'
+        ? visible[visible.length - 1]
+        : visible.find((choice) => choice.tabIndex === 0) || visible[0];
+      setActiveChoice(target, { focus: true });
+    });
+    select._refreshAppSelectSheet = renderChoices;
+    sheet._cleanupFns?.push(() => {
+      trigger?.setAttribute('aria-expanded', 'false');
+      if (select._refreshAppSelectSheet === renderChoices) delete select._refreshAppSelectSheet;
+    });
+    renderChoices();
+    requestAnimationFrame(() => {
+      const target = !searchWrap.classList.contains('hidden') ? search
+        : choices.find((choice) => choice.getAttribute('aria-selected') === 'true')
+        || choices.find((choice) => !choice.disabled);
+      target?.focus({ preventScroll: true });
+    });
+    return sheet;
+  }
+
+  function enhanceAppSelect(select) {
+    if (!select || select.dataset.appSelect === 'enhanced' || select.multiple) return;
+    select.dataset.appSelect = 'enhanced';
+    const wrapper = document.createElement('span');
+    wrapper.className = `app-select-shell${select.id ? ` ${select.id}-select-shell` : ''}`;
+    if (select.style.marginTop) wrapper.style.marginTop = select.style.marginTop;
+    if (select.style.marginBottom) wrapper.style.marginBottom = select.style.marginBottom;
+    if (select.style.width) wrapper.style.width = select.style.width;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = `${select.id || `app-select-${++appSelectSequence}`}-trigger`;
+    button.className = 'app-select-trigger';
+    button.setAttribute('aria-haspopup', 'dialog');
+    button.setAttribute('aria-expanded', 'false');
+    button.innerHTML = '<span class="app-select-trigger-icon hidden" aria-hidden="true"></span><span class="app-select-trigger-copy"><span class="app-select-trigger-prefix hidden"></span><span class="app-select-trigger-value"></span></span><span class="app-select-trigger-chevron" aria-hidden="true"></span>';
+    const associated = [...(select.labels || [])][0]
+      || select.closest('.form-field')?.querySelector('label') || null;
+    select._appSelectLabel = associated;
+    if (associated && (!associated.htmlFor || associated.htmlFor === select.id)) associated.htmlFor = button.id;
+    select.parentNode.insertBefore(wrapper, select);
+    wrapper.append(select, button);
+    select.classList.add('app-select-native');
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
+    select._appSelectWrapper = wrapper;
+    select._appSelectButton = button;
+    button.addEventListener('click', () => openAppSelectSheet(select));
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+      event.preventDefault();
+      openAppSelectSheet(select);
+    });
+    select.addEventListener('change', () => {
+      syncAppSelect(select);
+      select._refreshAppSelectSheet?.();
+    });
+    const optionObserver = new MutationObserver(() => {
+      syncAppSelect(select);
+      select._refreshAppSelectSheet?.();
+    });
+    optionObserver.observe(select, {
+      childList: true, subtree: true, characterData: true, attributes: true,
+      attributeFilter: ['disabled', 'hidden', 'class', 'style', 'selected', 'label'],
+    });
+    select._appSelectObserver = optionObserver;
+    syncAppSelect(select);
+  }
+
+  function enhanceAppSelects(root = document) {
+    if (root.matches?.('select')) enhanceAppSelect(root);
+    root.querySelectorAll?.('select').forEach(enhanceAppSelect);
+  }
+
+  function setupAppSelects() {
+    enhanceAppSelects(document);
+    const observer = new MutationObserver((mutations) => mutations.forEach((mutation) =>
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) enhanceAppSelects(node);
+      })));
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
   function fmtDateTime(isoStr) {
     if (!isoStr) return '';
     const d = new Date(isoStr);
@@ -3504,11 +3732,12 @@
     const context = $('#court-list-context');
     const count = $('#court-result-count');
     const sort = $('#court-sort');
-    const sortLabel = document.querySelector('label[for="court-sort"]');
+    const sortLabel = document.querySelector('.court-sort-label');
     const n = courts.length;
     if (count) count.textContent = n ? String(n) : '0';
     sort?.classList.toggle('hidden', n === 0);
     sortLabel?.classList.toggle('hidden', n === 0);
+    syncAppSelect(sort);
     if (title) title.textContent = savedOnly ? 'Saved courts'
       : searching ? 'Search results' : n ? `${n} court${n === 1 ? '' : 's'} nearby` : 'No matching courts';
     if (context) {
@@ -4308,7 +4537,11 @@
       requestAnimationFrame(() => target?.focus({ preventScroll: true }));
       return;
     }
-    const target = removed && removed._returnFocus;
+    const preferred = removed && removed._returnFocus;
+    const fallback = typeof removed?._returnFocusFallback === 'function'
+      ? removed._returnFocusFallback() : removed?._returnFocusFallback;
+    const target = preferred && preferred.isConnected && !preferred.closest('[inert]')
+      ? preferred : fallback;
     if (target && target.isConnected && !target.closest('[inert]')) {
       requestAnimationFrame(() => target.focus({ preventScroll: true }));
     }
@@ -4440,9 +4673,10 @@
     setDialogLabel(modalBox, opts.label || 'Dialog');
     backdrop._returnFocus = previousFocus;
     backdrop._cleanupFns = [];
+    enhanceAppSelects(backdrop);
     const focusable = () => [...modalBox.querySelectorAll(
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
-    )].filter((el) => !el.closest('.hidden') && el.getClientRects().length);
+    )].filter((el) => el.tabIndex >= 0 && !el.closest('.hidden') && el.getClientRects().length);
     const onKeyDown = (e) => {
       if (!document.body.contains(backdrop)) return;
       const open = [...root.querySelectorAll('.modal-backdrop')];
@@ -8703,6 +8937,172 @@
   }
 
   // ---------- Games ----------
+  function gameCancellationDataAttributes(game) {
+    const court = game.court || {};
+    const playerCount = Array.isArray(game.players) ? game.players.length : Number(game.player_count) || 0;
+    return [
+      `data-cancel-court="${esc(court.name || game.court_name || '')}"`,
+      `data-cancel-when="${esc(game.scheduled_at || '')}"`,
+      `data-cancel-type="${game.game_type === 'ranked' ? 'ranked' : 'casual'}"`,
+      `data-cancel-max="${Number(game.max_players) || 4}"`,
+      `data-cancel-players="${playerCount}"`,
+      `data-cancel-instant="${game.is_instant ? 'true' : 'false'}"`,
+    ].join(' ');
+  }
+
+  function gameCancellationFromDataset(element) {
+    return {
+      id: safePositiveId(element?.dataset.gameDismiss || element?.dataset.gameCancel),
+      court: { name: element?.dataset.cancelCourt || '' },
+      scheduled_at: element?.dataset.cancelWhen || null,
+      game_type: element?.dataset.cancelType === 'ranked' ? 'ranked' : 'casual',
+      max_players: Number(element?.dataset.cancelMax) || 4,
+      player_count: Number(element?.dataset.cancelPlayers) || 0,
+      is_instant: element?.dataset.cancelInstant === 'true',
+    };
+  }
+
+  function gameCancellationVariant(variant, game) {
+    if (variant === 'stale') return {
+      eyebrow: 'Close out this game',
+      heading: 'Mark it as not played?',
+      intro: 'Use this when the game never actually happened.',
+      impact: 'No score or rating will be recorded, and it will be cleared from everyone’s feed. This can’t be undone.',
+      action: 'Mark as not played',
+      keep: 'Keep game',
+      success: 'Game cleared',
+      successCopy: 'It’s closed with no score or rating change.',
+      icon: '—',
+    };
+    if (variant === 'instant' || game.is_instant) return {
+      eyebrow: 'Live game',
+      heading: 'End this game for everyone?',
+      intro: 'This rally is active right now, so ending it takes effect immediately.',
+      impact: 'The live game will close, held arrival spots will be released, and everyone in it will be notified. This can’t be undone.',
+      action: 'End game for everyone',
+      keep: 'Keep game going',
+      success: 'Game ended',
+      successCopy: 'The rally is closed and any held arrival spots were released.',
+      icon: '■',
+    };
+    if (variant === 'challenge') return {
+      eyebrow: 'Ranked challenge',
+      heading: 'Decline this challenge?',
+      intro: 'You won’t be added to the matchup.',
+      impact: 'The challenger will be notified and this matchup will be cancelled. No rating changes will be recorded.',
+      action: 'Decline challenge',
+      keep: 'Keep challenge',
+      success: 'Challenge declined',
+      successCopy: 'The challenger has been notified.',
+      icon: '×',
+    };
+    return {
+      eyebrow: 'Cancel for everyone',
+      heading: 'Cancel this game?',
+      intro: 'Take a second to make sure this is the game you mean.',
+      impact: 'Everyone in the game and on the waitlist will be notified, and it will be removed from upcoming play. This can’t be undone.',
+      action: 'Yes, cancel game',
+      keep: 'Keep game',
+      success: 'Game cancelled',
+      successCopy: 'Players have been notified and the game is no longer upcoming.',
+      icon: '×',
+    };
+  }
+
+  function openGameCancellationConfirmation({
+    game = {}, gameId = null, variant = 'scheduled', endpoint = null,
+    trigger = null, onCancelled = null,
+  } = {}) {
+    const resolvedGameId = safePositiveId(gameId ?? game.id);
+    if (!resolvedGameId || trigger?.dataset.cancelSheetOpen === 'true') return null;
+    const config = gameCancellationVariant(variant, game);
+    const courtName = game.court?.name || game.court_name || 'Court not listed';
+    const format = Number(game.max_players) === 2 ? 'Singles'
+      : Number(game.max_players) === 4 ? 'Doubles' : `${Number(game.max_players) || 4} players`;
+    const type = game.game_type === 'ranked' ? 'Ranked' : 'Casual';
+    const when = (variant === 'instant' || game.is_instant) ? 'Live now'
+      : game.scheduled_at ? fmtDateTime(game.scheduled_at) : 'Time not listed';
+    const playerCount = Array.isArray(game.players) ? game.players.length : Number(game.player_count) || 0;
+    const roster = playerCount ? `${playerCount} player${playerCount === 1 ? '' : 's'} joined` : '';
+    const sheet = openModal(`
+      <div class="game-cancel-confirmation">
+        ${modalHead(variant === 'challenge' ? 'Decline challenge' : 'Cancel game')}
+        <div class="game-cancel-hero">
+          <span class="game-cancel-icon" aria-hidden="true">${esc(config.icon)}</span>
+          <div><span class="game-cancel-eyebrow">${esc(config.eyebrow)}</span><h2>${esc(config.heading)}</h2><p>${esc(config.intro)}</p></div>
+        </div>
+        <div class="game-cancel-summary" aria-label="Game being cancelled">
+          <div class="game-cancel-summary-court"><span aria-hidden="true">📍</span><div><b>${esc(courtName)}</b><span>${esc(when)}</span></div></div>
+          <div class="game-cancel-summary-tags"><span>${esc(type)}</span><span>${esc(format)}</span>${roster ? `<span>${esc(roster)}</span>` : ''}</div>
+        </div>
+        <div class="game-cancel-impact"><span class="game-cancel-impact-icon" aria-hidden="true">!</span><div><b>What happens next</b><p>${esc(config.impact)}</p></div></div>
+        <div class="game-cancel-error hidden" role="alert" tabindex="-1"></div>
+        <div class="game-cancel-actions">
+          <button type="button" class="btn btn-secondary" data-game-cancel-keep>${esc(config.keep)}</button>
+          <button type="button" class="btn game-cancel-danger" data-game-cancel-confirm>${esc(config.action)}</button>
+        </div>
+      </div>
+    `, { label: config.heading });
+    sheet.classList.add('game-cancel-backdrop');
+    if (trigger) sheet._returnFocus = trigger;
+    sheet._returnFocusFallback = () => document.querySelector('#bottom-nav .nav-btn[aria-current="page"]');
+    if (trigger) trigger.dataset.cancelSheetOpen = 'true';
+    sheet._cleanupFns?.push(() => {
+      if (trigger) delete trigger.dataset.cancelSheetOpen;
+    });
+    let committing = false;
+    sheet._dismissBlocked = () => committing;
+    const keep = sheet.querySelector('[data-game-cancel-keep]');
+    const confirmButton = sheet.querySelector('[data-game-cancel-confirm]');
+    const error = sheet.querySelector('.game-cancel-error');
+    const closeButton = sheet.querySelector('.modal-close');
+    keep.addEventListener('click', () => closeModal(sheet));
+    confirmButton.addEventListener('click', async () => {
+      if (committing) return;
+      committing = true;
+      keep.disabled = true;
+      confirmButton.disabled = true;
+      closeButton.disabled = true;
+      confirmButton.setAttribute('aria-busy', 'true');
+      sheet.querySelector('.game-cancel-confirmation').setAttribute('aria-busy', 'true');
+      confirmButton.textContent = variant === 'challenge' ? 'Declining…' : 'Cancelling…';
+      error.classList.add('hidden');
+      error.textContent = '';
+      try {
+        const fresh = await api(endpoint || `/games/${resolvedGameId}/cancel`, { method: 'POST' });
+        committing = false;
+        if (!document.body.contains(sheet)) return;
+        try { onCancelled?.(fresh); } catch { /* refresh callbacks never hide a successful cancel */ }
+        const content = sheet.querySelector('.game-cancel-confirmation');
+        content.removeAttribute('aria-busy');
+        content.innerHTML = `
+          ${modalHead(config.success)}
+          <div class="game-cancel-success" role="status" aria-live="polite">
+            <span class="game-cancel-success-icon" aria-hidden="true">✓</span>
+            <h2>${esc(config.success)}</h2>
+            <p>${esc(config.successCopy)}</p>
+            <button type="button" class="btn btn-primary btn-block" data-game-cancel-done>Done</button>
+          </div>`;
+        setDialogLabel(sheet.querySelector('.modal'), config.success);
+        const done = content.querySelector('[data-game-cancel-done]');
+        done.addEventListener('click', () => closeModal(sheet));
+        requestAnimationFrame(() => done.focus({ preventScroll: true }));
+      } catch (requestError) {
+        committing = false;
+        keep.disabled = false;
+        confirmButton.disabled = false;
+        closeButton.disabled = false;
+        confirmButton.removeAttribute('aria-busy');
+        sheet.querySelector('.game-cancel-confirmation').removeAttribute('aria-busy');
+        confirmButton.textContent = config.action;
+        error.textContent = requestError.message || 'Could not cancel this game. Try again.';
+        error.classList.remove('hidden');
+        error.focus?.({ preventScroll: true });
+      }
+    });
+    return sheet;
+  }
+
   // Why a joinable game suits this player: their level, their usual slot.
   function gameMatchReasons(game) {
     if (!state.me || game.is_joined || game.status !== 'upcoming' || game.spots_left <= 0) return [];
@@ -8774,7 +9174,7 @@
     } else if (instantRallyScorePending(game)) {
       banner = '<div class="status-banner">📝 Played? Tap to enter the score.</div>';
       if (game.is_creator) {
-        action = `<button class="btn btn-secondary btn-sm" data-game-dismiss="${game.id}">Didn't happen</button>`;
+        action = `<button class="btn btn-secondary btn-sm" data-game-dismiss="${game.id}" ${gameCancellationDataAttributes(game)}>Didn't happen</button>`;
       }
     } else if (instantRallyClosed(game)) {
       banner = '<div class="status-banner">😴 This rally ended without enough players.</div>';
@@ -8790,7 +9190,7 @@
             ? '<div class="status-banner">📝 Played? Tap to enter the score.</div>'
             : '<div class="status-banner">😴 This one never filled up.</div>';
           if (game.is_creator) {
-            action = `<button class="btn btn-secondary btn-sm" data-game-dismiss="${game.id}">Didn't happen</button>`;
+            action = `<button class="btn btn-secondary btn-sm" data-game-dismiss="${game.id}" ${gameCancellationDataAttributes(game)}>Didn't happen</button>`;
           }
         } else if (inProgress) {
           cardStyle = 'border:2px solid var(--green-600)';
@@ -8959,15 +9359,18 @@
         if (routedOverlayLoadIsCurrent(modalLoad)) toast(err.message);
       }
     }));
-    rootEl.querySelectorAll('[data-game-dismiss]').forEach((b) => b.addEventListener('click', async (e) => {
+    rootEl.querySelectorAll('[data-game-dismiss]').forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (!confirm("Mark this game as never played? It'll be cleared from everyone's feed.")) return;
-      try {
-        await api(`/games/${b.dataset.gameDismiss}/cancel`, { method: 'POST' });
-        toast('Cleared 😴');
-        refreshMe();
-        refresh();
-      } catch (err) { toast(err.message); }
+      openGameCancellationConfirmation({
+        game: gameCancellationFromDataset(b),
+        gameId: Number(b.dataset.gameDismiss),
+        variant: 'stale',
+        trigger: b,
+        onCancelled: () => {
+          refreshMe();
+          refresh();
+        },
+      });
     }));
     rootEl.querySelectorAll('[data-game-dispute]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -9764,38 +10167,37 @@
       button.innerHTML = originalHtml;
     };
 
-    const cancelRally = async (trigger) => {
+    const requestRallyCancellation = (trigger) => {
       if (!instantRallySessionMatches(callerSession)) {
         clearManagement();
         return;
       }
-      clearTimeout(confirmationTimer);
-      confirmationTimer = null;
-      trigger.disabled = true;
-      trigger.setAttribute('aria-busy', 'true');
-      trigger.textContent = 'Cancelling…';
-      try {
-        await api(`/games/${gameId}/cancel`, { method: 'POST' });
-        if (!instantRallySessionMatches(callerSession)) return;
-        more?.remove();
-        more = null;
-        button.dataset.instantRallyAction = 'cancelled';
-        button.disabled = true;
-        button.removeAttribute('aria-busy');
-        button.textContent = 'Game cancelled ✓';
-        state.playGamesCache = null;
-        toast('Game cancelled');
-        refreshMe().catch(() => {});
-        fetchCourtsInView();
-        setTimeout(restoreLauncher, 1200);
-      } catch (error) {
-        if (!instantRallySessionMatches(callerSession)) return;
-        trigger.disabled = false;
-        trigger.removeAttribute('aria-busy');
-        trigger.textContent = trigger === button ? 'Game started · Cancel' : 'Cancel game';
-        button.dataset.instantRallyAction = trigger === button ? 'cancel' : 'open';
-        toast(error.message);
+      if (button.dataset.instantRallyAction === 'cancel') {
+        clearTimeout(confirmationTimer);
+        confirmationTimer = null;
+        revealManagement();
       }
+      openGameCancellationConfirmation({
+        game,
+        gameId,
+        variant: 'instant',
+        trigger,
+        onCancelled: () => {
+          if (!instantRallySessionMatches(callerSession)) return;
+          clearTimeout(confirmationTimer);
+          confirmationTimer = null;
+          more?.remove();
+          more = null;
+          button.dataset.instantRallyAction = 'cancelled';
+          button.disabled = true;
+          button.removeAttribute('aria-busy');
+          button.textContent = 'Game ended ✓';
+          state.playGamesCache = null;
+          refreshMe().catch(() => {});
+          fetchCourtsInView();
+          setTimeout(restoreLauncher, 1200);
+        },
+      });
     };
 
     const revealManagement = () => {
@@ -9812,7 +10214,7 @@
       more.querySelector('button').addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        cancelRally(event.currentTarget);
+        requestRallyCancellation(event.currentTarget);
       });
       button.insertAdjacentElement('afterend', more);
     };
@@ -9823,7 +10225,7 @@
       event.preventDefault();
       event.stopImmediatePropagation();
       if (action === 'cancel') {
-        cancelRally(button);
+        requestRallyCancellation(button);
       } else if (action === 'open') {
         openResolvedRallyGame(gameId, sourceModal);
       }
@@ -10555,6 +10957,7 @@
               sel.insertAdjacentHTML('beforeend', `<option value="${chosenCourtId}">${esc(row.dataset.lgName)}</option>`);
             }
             sel.value = String(chosenCourtId);
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
             modal.querySelector('#lg-court-search').value = row.dataset.lgName;
             modal.querySelector('#lg-court-results').innerHTML = '';
           }));
@@ -12565,7 +12968,8 @@
   function competitionOverlayCanRefresh(box) {
     if (currentOverlayEntry()?.el !== box || box.dataset.competitionMutation === 'true') return false;
     const active = document.activeElement;
-    return !(active && box.contains(active) && active.matches('input, textarea, select, [contenteditable="true"]'));
+    return !(active && box.contains(active)
+      && active.matches('input, textarea, select, .app-select-trigger, [contenteditable="true"]'));
   }
 
   function openCompetitionResultSheet(kind, parent, sourceMatch, hooks = {}) {
@@ -12908,6 +13312,7 @@
       }
 
       content.innerHTML = body;
+      enhanceAppSelects(content);
       setDialogLabel(content, 'League');
       bindCompetitionDetailTabs(
         content, snapshot?.activeCompetitionTab || (requestedMatchId ? 'lg-matches' : null),
@@ -13686,6 +14091,7 @@
       }
 
       content.innerHTML = body;
+      enhanceAppSelects(content);
       setDialogLabel(content, 'Tournament');
       bindCompetitionDetailTabs(
         content, snapshot?.activeCompetitionTab || (requestedMatchId ? 'td-matches' : null),
@@ -17400,12 +17806,19 @@
           toast(e.message);
         }
       });
-      box.querySelector('#gs-decline')?.addEventListener('click', async () => {
-        try {
-          await api(`/games/${gameId}/decline`, { method: 'POST' });
-          toast('Challenge declined');
-          closeModal(modal); refreshMe();
-        } catch (e) { toast(e.message); reopenFresh(); }
+      box.querySelector('#gs-decline')?.addEventListener('click', (event) => {
+        openGameCancellationConfirmation({
+          game,
+          gameId,
+          variant: 'challenge',
+          endpoint: `/games/${gameId}/decline`,
+          trigger: event.currentTarget,
+          onCancelled: (fresh) => {
+            render(fresh);
+            refreshMe();
+            if (state.tab === 'play') renderPlay();
+          },
+        });
       });
       box.querySelector('#gs-score')?.addEventListener('click', async () => {
         const fresh = await api(`/games/${gameId}`);
@@ -17534,17 +17947,18 @@
           if (state.tab === 'play') renderPlay();
         } catch (err) { toast(err.message); reopenFresh(); }
       });
-      box.querySelector('#gs-cancel')?.addEventListener('click', async (e) => {
-        if (!confirm('Cancel this game for everyone?')) return;
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        btn.textContent = 'Cancelling…';
-        try {
-          await api(`/games/${gameId}/cancel`, { method: 'POST' });
-          toast('Game cancelled');
-          closeModal(modal); refreshMe();
-          if (state.tab === 'play') renderPlay();
-        } catch (e) { toast(e.message); reopenFresh(); }
+      box.querySelector('#gs-cancel')?.addEventListener('click', (event) => {
+        openGameCancellationConfirmation({
+          game,
+          gameId,
+          variant: game.is_instant ? 'instant' : 'scheduled',
+          trigger: event.currentTarget,
+          onCancelled: (fresh) => {
+            render(fresh);
+            refreshMe();
+            if (state.tab === 'play') renderPlay();
+          },
+        });
       });
       box.querySelector('#gs-reschedule')?.addEventListener('click', () => {
         const cur = new Date(game.scheduled_at);
@@ -17589,6 +18003,7 @@
       if (document.hidden || state.connectionState === 'offline' || currentOverlayEntry()?.el !== modal) return;
       try {
         const fresh = await api(`/games/${gameId}`);
+        if (!document.body.contains(box) || currentOverlayEntry()?.el !== modal) return;
         if (gameFingerprint(fresh) !== fingerprint) {
           render(fresh);
           refreshMe();
@@ -18494,6 +18909,7 @@
 
   async function boot() {
     applyTheme();
+    setupAppSelects();
     if ('serviceWorker' in navigator
         && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
