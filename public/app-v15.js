@@ -104,47 +104,83 @@
     return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
   }
   const INSTANT_RALLY_ATTEMPT_TTL = 2 * 60 * 60 * 1000;
-  const INSTANT_RALLY_ATTEMPT_PREFIX = 'pp_instant_rally_v2:';
+  const INSTANT_RALLY_ATTEMPT_PREFIX = 'pp_instant_rally_v3:';
+  const LEGACY_INSTANT_RALLY_ATTEMPT_PREFIX = 'pp_instant_rally_v2:';
   const RALLY_ARRIVAL_ATTEMPT_PREFIX = 'pp_rally_arrival_v1:';
   const PLAY_PULSE_CREATE_ATTEMPT_PREFIX = 'pp_play_pulse_create_v1:';
   const PLAY_PULSE_ACCEPT_ATTEMPT_PREFIX = 'pp_play_pulse_accept_v1:';
   const GAME_OPEN_CALL_ATTEMPT_PREFIX = 'pp_game_open_call_v1:';
   const legacyInstantRallyAttemptKey = (userId = state.me && state.me.id) =>
     userId ? `pp_instant_rally_v1:${userId}` : null;
-  const instantRallyAttemptKey = (userId = state.me && state.me.id, courtId = null) => {
+  const instantRallyAttemptKey = (
+    userId = state.me && state.me.id, courtId = null,
+    gameType = 'casual', maxPlayers = 4,
+  ) => {
+    const accountId = Number(userId);
+    const expectedCourtId = Number(courtId);
+    const normalizedType = gameType === 'ranked' ? 'ranked' : 'casual';
+    const normalizedMax = Number(maxPlayers) === 2 ? 2 : 4;
+    return Number.isSafeInteger(accountId) && accountId > 0
+      && Number.isSafeInteger(expectedCourtId) && expectedCourtId > 0
+      ? `${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:${expectedCourtId}:${normalizedType}:${normalizedMax}` : null;
+  };
+  const legacyV2InstantRallyAttemptKey = (
+    userId = state.me && state.me.id, courtId = null,
+  ) => {
     const accountId = Number(userId);
     const expectedCourtId = Number(courtId);
     return Number.isSafeInteger(accountId) && accountId > 0
       && Number.isSafeInteger(expectedCourtId) && expectedCourtId > 0
-      ? `${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:${expectedCourtId}` : null;
+      ? `${LEGACY_INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:${expectedCourtId}` : null;
   };
-  function pendingInstantRallyAttempt(userId = state.me && state.me.id, courtId = null) {
+  function pendingInstantRallyAttempt(
+    userId = state.me && state.me.id, courtId = null,
+    gameType = 'casual', maxPlayers = 4,
+  ) {
     const expectedCourtId = Number(courtId);
     if (!Number.isSafeInteger(expectedCourtId) || expectedCourtId <= 0) return null;
-    const key = instantRallyAttemptKey(userId, expectedCourtId);
+    const normalizedType = gameType === 'ranked' ? 'ranked' : 'casual';
+    const normalizedMax = Number(maxPlayers) === 2 ? 2 : 4;
+    const key = instantRallyAttemptKey(
+      userId, expectedCourtId, normalizedType, normalizedMax,
+    );
     if (!key) return null;
     const isRecoverable = (saved) => saved && typeof saved.id === 'string'
       && typeof saved.scheduledAt === 'string'
       && Number(saved.courtId) === expectedCourtId
+      && (saved.gameType || 'casual') === normalizedType
+      && Number(saved.maxPlayers || 4) === normalizedMax
       && Number.isFinite(saved.createdAt)
       && Date.now() - saved.createdAt <= INSTANT_RALLY_ATTEMPT_TTL;
     try {
       const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
       if (isRecoverable(saved)) return saved;
-      // Recover an unresolved attempt written by the prior single-court-key
-      // release, but only when it was already bound to this exact court.
-      const legacyKey = legacyInstantRallyAttemptKey(userId);
-      const legacy = JSON.parse(sessionStorage.getItem(legacyKey) || 'null');
-      if (isRecoverable(legacy)) {
-        sessionStorage.setItem(key, JSON.stringify(legacy));
-        sessionStorage.removeItem(legacyKey);
-        return legacy;
+      // The older keys represented only the original Casual / Doubles rally.
+      // Migrate them only into that exact configuration; Ranked or Singles
+      // must never inherit an ambiguous request with different semantics.
+      if (normalizedType === 'casual' && normalizedMax === 4) {
+        const legacyKeys = [
+          legacyV2InstantRallyAttemptKey(userId, expectedCourtId),
+          legacyInstantRallyAttemptKey(userId),
+        ];
+        for (const legacyKey of legacyKeys) {
+          const legacy = JSON.parse(sessionStorage.getItem(legacyKey) || 'null');
+          if (!isRecoverable(legacy)) continue;
+          const migrated = {
+            ...legacy, gameType: normalizedType, maxPlayers: normalizedMax,
+          };
+          sessionStorage.setItem(key, JSON.stringify(migrated));
+          sessionStorage.removeItem(legacyKey);
+          return migrated;
+        }
       }
       const fresh = {
         id: `rally-${newGameAttemptId()}`,
         scheduledAt: new Date().toISOString(),
         createdAt: Date.now(),
         courtId: expectedCourtId,
+        gameType: normalizedType,
+        maxPlayers: normalizedMax,
       };
       sessionStorage.setItem(key, JSON.stringify(fresh));
       return fresh;
@@ -154,11 +190,14 @@
         scheduledAt: new Date().toISOString(),
         createdAt: Date.now(),
         courtId: expectedCourtId,
+        gameType: normalizedType,
+        maxPlayers: normalizedMax,
       };
     }
   }
   function clearInstantRallyAttempt(
     userId = state.me && state.me.id, courtId = null, attemptId = null,
+    gameType = null, maxPlayers = null,
   ) {
     const accountId = Number(userId);
     if (!Number.isSafeInteger(accountId) || accountId <= 0) return;
@@ -173,18 +212,34 @@
       };
       const expectedCourtId = Number(courtId);
       if (Number.isSafeInteger(expectedCourtId) && expectedCourtId > 0) {
-        removeOwned(instantRallyAttemptKey(accountId, expectedCourtId));
+        if (gameType && [2, 4].includes(Number(maxPlayers))) {
+          removeOwned(instantRallyAttemptKey(
+            accountId, expectedCourtId, gameType, maxPlayers,
+          ));
+        } else {
+          const prefix = `${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:${expectedCourtId}:`;
+          const keys = [];
+          for (let index = 0; index < sessionStorage.length; index += 1) {
+            const key = sessionStorage.key(index);
+            if (key?.startsWith(prefix)) keys.push(key);
+          }
+          keys.forEach(removeOwned);
+        }
+        removeOwned(legacyV2InstantRallyAttemptKey(accountId, expectedCourtId));
         const legacyKey = legacyInstantRallyAttemptKey(accountId);
         const legacy = JSON.parse(sessionStorage.getItem(legacyKey) || 'null');
         if (legacy && Number(legacy.courtId) === expectedCourtId
             && (!attemptId || legacy.id === attemptId)) sessionStorage.removeItem(legacyKey);
         return;
       }
-      const prefix = `${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:`;
+      const prefixes = [
+        `${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:`,
+        `${LEGACY_INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:`,
+      ];
       const keys = [];
       for (let index = 0; index < sessionStorage.length; index += 1) {
         const key = sessionStorage.key(index);
-        if (key?.startsWith(prefix)) keys.push(key);
+        if (prefixes.some((prefix) => key?.startsWith(prefix))) keys.push(key);
       }
       keys.forEach((key) => sessionStorage.removeItem(key));
       sessionStorage.removeItem(legacyInstantRallyAttemptKey(accountId));
@@ -787,7 +842,10 @@
     active_checkin_required: 'Check in at a court before starting a live rally.',
     active_checkin_court_mismatch: 'Confirm the court where you are playing now.',
     active_rally_elsewhere: 'You already have another live rally in progress.',
+    active_rally_configuration_conflict: 'You already have a different live game at this court.',
     rally_time_out_of_range: 'That rally attempt expired. Tap again to start a fresh one.',
+    invalid_game_type: 'Choose Casual or Ranked.',
+    invalid_max_players: 'Choose Singles or Doubles.',
     game_already_started: 'Too late — the game already has players.',
     already_joined: "You're already in this game.",
     user_blocked: "You can't interact with this player.",
@@ -2027,19 +2085,28 @@
           openPlaySoonFlow();
         } else if (target === 'instant-rally') {
           if (state.tab !== 'play') switchTab('play');
-          startInstantRally(btn);
+          openGameFlow({
+            mode: 'find',
+            court: state.presence && state.presence.checked_in ? {
+              id: state.presence.court_id,
+              name: state.presence.court_name,
+            } : null,
+          });
         } else if (target === 'play-now') {
           if (state.tab !== 'play') switchTab('play');
-          openPlayNowCourtPicker();
+          openGameFlow({ mode: 'find' });
         } else if (target === 'play-pulse') {
           if (state.tab !== 'play') switchTab('play');
           openPlayPulseCourtPicker();
         } else if (target === 'new-ranked-game') {
           if (state.tab !== 'play') switchTab('play');
-          openNewGameModal({ gameType: 'ranked' });
+          openGameFlow({ mode: 'schedule', gameType: 'ranked' });
         } else if (target === 'new-game') {
           if (state.tab !== 'play') switchTab('play');
-          openNewGameModal();
+          openGameFlow({ mode: 'schedule' });
+        } else if (target === 'game-flow') {
+          if (state.tab !== 'play') switchTab('play');
+          openGameFlow({ mode: 'find' });
         } else if (target === 'courts-list') {
           switchTab('courts');
           setCourtSheetSnap('half');
@@ -2863,6 +2930,8 @@
     const maxPlayers = Math.max(1, Number(
       value.max_players ?? value.maxPlayers ?? game.max_players,
     ) || 4);
+    const gameType = (value.game_type ?? value.gameType ?? game.game_type) === 'ranked'
+      ? 'ranked' : 'casual';
     const onWayCount = Math.max(0, Number(
       value.on_the_way_count ?? value.onWayCount ?? game.on_the_way_count ?? 0,
     ) || 0);
@@ -2908,6 +2977,7 @@
       committedCount,
       physicalSpotsLeft,
       spotsLeft,
+      gameType,
       maxPlayers,
       distanceMiles: Number.isFinite(Number(value.distance_miles ?? value.distanceMiles))
         ? Number(value.distance_miles ?? value.distanceMiles) : null,
@@ -2936,6 +3006,7 @@
       committed_count: value.committed_count ?? value.committedCount,
       physical_spots_left: value.physical_spots_left ?? value.physicalSpotsLeft,
       spots_left: value.spots_left ?? value.spotsLeft,
+      game_type: value.game_type ?? value.gameType,
       max_players: value.max_players ?? value.maxPlayers,
       arrival_capability: value.arrival_capability ?? value.arrivalCapability
         ?? value.discovery_token,
@@ -2995,6 +3066,8 @@
       ) || 0),
       spotsLeft: Math.max(0, Number(value.spots_left ?? value.spotsLeft
         ?? base?.spotsLeft ?? 0) || 0),
+      gameType: (value.game_type ?? value.gameType ?? game.game_type ?? base?.gameType) === 'ranked'
+        ? 'ranked' : 'casual',
       maxPlayers: Math.max(1, Number(value.max_players ?? value.maxPlayers
         ?? base?.maxPlayers ?? 4) || 4),
       arrivalCapability,
@@ -3071,6 +3144,7 @@
       ['data-rally-committed-count', rally.committedCount || 0],
       ['data-rally-physical-spots-left', rally.physicalSpotsLeft || 0],
       ['data-rally-spots-left', rally.spotsLeft || 0],
+      ['data-rally-game-type', rally.gameType || 'casual'],
       ['data-rally-max-players', rally.maxPlayers || 4],
       ['data-rally-arrival-capability', rally.arrivalCapability || ''],
       ['data-rally-arrival-available', String(!!rally.arrivalAvailable)],
@@ -3095,6 +3169,7 @@
       committed_count: dataset.rallyCommittedCount,
       physical_spots_left: dataset.rallyPhysicalSpotsLeft,
       spots_left: dataset.rallySpotsLeft,
+      game_type: dataset.rallyGameType,
       max_players: dataset.rallyMaxPlayers,
       arrival_capability: dataset.rallyArrivalCapability,
       arrival_available: dataset.rallyArrivalAvailable,
@@ -3138,6 +3213,7 @@
       committed_count: player.committed_count ?? court.committed_count,
       physical_spots_left: player.physical_spots_left ?? court.physical_spots_left,
       spots_left: player.spots_left ?? court.spots_left,
+      game_type: player.game_type ?? player.gameType ?? court.game_type ?? court.gameType,
       max_players: player.max_players ?? court.max_players,
       distance_miles: player.distance_miles,
       arrival_capability: player.arrival_capability ?? player.discovery_token
@@ -3641,7 +3717,6 @@
     }
     const preview = $('#court-preview');
     if (preview) {
-      const checkedInHere = isCheckedInAtCourt(court.id);
       const live = court.players_here
         ? `${court.players_here} playing now`
         : court.upcoming_games ? `${court.upcoming_games} open game${court.upcoming_games === 1 ? '' : 's'}` : 'Quiet right now';
@@ -3655,14 +3730,13 @@
         </div>
         <div class="court-preview-actions">
           <button type="button" class="btn btn-secondary" data-preview-detail>Details</button>
-          <button type="button" class="btn btn-primary" data-preview-play>${checkedInHere ? 'Find a game now' : 'I’m at this court'}</button>
+          <button type="button" class="btn btn-primary" data-preview-play>Find or start</button>
           <a class="btn btn-secondary" data-preview-directions href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center">Directions</a>
         </div>`;
       preview.classList.remove('hidden');
       preview.querySelector('[data-preview-detail]').addEventListener('click', () => openCourtDetail(court.id));
-      preview.querySelector('[data-preview-play]').addEventListener('click', (event) => {
-        if (checkedInHere) startInstantRally(event.currentTarget);
-        else openCheckInSheet(court);
+      preview.querySelector('[data-preview-play]').addEventListener('click', () => {
+        openGameFlow({ court, mode: 'find' });
       });
     }
     document.querySelectorAll('#court-list-items [data-court]').forEach((row) => {
@@ -4265,6 +4339,7 @@
   function dismissModal(el, afterClose) {
     const top = currentOverlayEntry();
     if (!top || top.el !== el || top.closing) return;
+    if (typeof el._dismissBlocked === 'function' && el._dismissBlocked()) return;
     if (afterClose) top.afterClose.push(afterClose);
     top.closing = true;
     const nav = history.state && history.state[OVERLAY_NAV_KEY];
@@ -4563,6 +4638,22 @@
     return beginRoutedOverlayLoad(null);
   }
 
+  function restoreBlockedOverlayTraversal(nav) {
+    const top = currentOverlayEntry();
+    if (!top || top.closing || typeof top.el._dismissBlocked !== 'function'
+        || !top.el._dismissBlocked()) return false;
+    const targetId = nav && nav.session === overlaySession ? nav.id : null;
+    if (targetId === top.id) return false;
+    const liveDepth = liveOverlayHistoryDepth();
+    const targetDepth = nav && nav.session === overlaySession
+      && Number.isFinite(Number(nav.depth)) ? Number(nav.depth) : Math.max(0, liveDepth - 1);
+    if (targetDepth >= liveDepth) return false;
+    const forwardSteps = Math.max(1, liveDepth - targetDepth);
+    try { history.go(forwardSteps); }
+    catch { normalizeHistoryToLiveOverlay(); }
+    return true;
+  }
+
   window.addEventListener('popstate', (e) => {
     const nav = e.state && e.state[OVERLAY_NAV_KEY];
     const nativeRoute = normalizeOverlayRoute(location.hash);
@@ -4624,6 +4715,10 @@
       queueMicrotask(() => navigateOverlayRoute(nativeRoute));
       return;
     }
+    // Browser/PWA Back has already moved history by the time popstate fires.
+    // During an irreversible request, restore the live confirmation entry
+    // instead of destroying its sheet while the game continues in the server.
+    if (restoreBlockedOverlayTraversal(nav)) return;
     const expectedRouteTraversal = pendingReusableTraversal
       && pendingReusableTraversal.routeLoadSeq != null
       && activeRoutedOverlayLoad
@@ -6198,12 +6293,11 @@
         </div>`;
     const primaryAction = myOpenGame
       ? `<button class="btn btn-primary btn-block cd-primary-action" id="cd-open-game" data-game-id="${myOpenGame.id}">Open your game</button>`
-      : checkedIn
-        ? '<button class="btn btn-primary btn-block cd-primary-action" id="cd-play-now">Find or start a game</button>'
-        : `<a class="btn btn-primary btn-block cd-primary-action" href="${mapsUrl}" target="_blank" rel="noopener">Get directions</a>`;
+      : '<button class="btn btn-primary btn-block cd-primary-action" id="cd-play-now">Find or start a game</button>';
     const secondaryActions = `
       <div class="cd-now-actions">
         ${checkedIn ? '' : '<button type="button" class="btn btn-secondary" id="cd-checkin">I’m at this court</button>'}
+        ${checkedIn ? '' : `<a class="btn btn-secondary" href="${mapsUrl}" target="_blank" rel="noopener">Directions</a>`}
         <button type="button" class="btn btn-secondary" id="cd-schedule">Plan a game</button>
         <button type="button" class="btn btn-secondary" id="cd-chat">${checkedIn ? 'Message players' : 'Message the court'}</button>
       </div>`;
@@ -6512,17 +6606,17 @@
       } catch { /* user cancelled share */ }
     });
 
-    modal.querySelector('#cd-play-now')?.addEventListener('click', (event) => {
-      startInstantRally(event.currentTarget, { fromModal: modal });
+    modal.querySelector('#cd-play-now')?.addEventListener('click', () => {
+      transitionModal(modal, () => openGameFlow({ court, mode: 'find' }));
     });
     modal.querySelector('#cd-open-game')?.addEventListener('click', (event) => {
       transitionModal(modal, () => openGameScreen(Number(event.currentTarget.dataset.gameId)));
     });
     modal.querySelector('#cd-schedule').addEventListener('click', () => {
-      transitionModal(modal, () => openNewGameModal({ court }));
+      transitionModal(modal, () => openGameFlow({ court, mode: 'schedule' }));
     });
     modal.querySelector('#cd-schedule-empty')?.addEventListener('click', () => {
-      transitionModal(modal, () => openNewGameModal({ court }));
+      transitionModal(modal, () => openGameFlow({ court, mode: 'schedule' }));
     });
 
     modal.querySelector('#cd-favorite').addEventListener('click', async (e) => {
@@ -6661,6 +6755,7 @@
       city: String(value.city || '').slice(0, 120),
       distanceMiles: Number.isFinite(Number(value.distance_miles)) ? Number(value.distance_miles) : null,
       tag: String(tag || value.tag || '').slice(0, 40),
+      closed: value.closed === true,
     };
   }
 
@@ -7066,6 +7161,535 @@
       </section>`;
   }
 
+  function gameTypeLabel(gameType) {
+    return gameType === 'ranked' ? 'Ranked' : 'Casual';
+  }
+
+  function gameFormatLabel(maxPlayers) {
+    return Number(maxPlayers) === 2 ? 'Singles' : 'Doubles';
+  }
+
+  function gameChoiceCardsHtml({ id, name, legend, value, options }) {
+    return `
+      <fieldset class="game-choice-field" id="${id}">
+        <legend>${esc(legend)}</legend>
+        <div class="game-choice-grid">
+          ${options.map((option) => `
+            <label class="game-choice-option">
+              <input type="radio" name="${name}" value="${esc(option.value)}" ${String(option.value) === String(value) ? 'checked' : ''} />
+              <span class="game-choice-card" data-tone="${esc(option.tone || '')}">
+                <span class="game-choice-icon" aria-hidden="true">${option.icon || ''}</span>
+                <span><b>${esc(option.label)}</b><small>${esc(option.copy)}</small></span>
+              </span>
+            </label>`).join('')}
+        </div>
+      </fieldset>`;
+  }
+
+  function gameSetupChoicesHtml(prefix, gameType = 'casual', maxPlayers = 4) {
+    return `
+      <div class="game-setup-choices" aria-label="Game setup">
+        ${gameChoiceCardsHtml({
+          id: `${prefix}-type`, name: `${prefix}-type`, legend: 'Game type', value: gameType,
+          options: [
+            { value: 'casual', icon: '🏓', label: 'Casual', copy: 'Play for fun' },
+            { value: 'ranked', icon: '🏆', label: 'Ranked', copy: 'Counts for rating', tone: 'ranked' },
+          ],
+        })}
+        ${gameChoiceCardsHtml({
+          id: `${prefix}-format`, name: `${prefix}-format`, legend: 'Format', value: Number(maxPlayers) === 2 ? 2 : 4,
+          options: [
+            { value: 2, icon: '1v1', label: 'Singles', copy: '2 players' },
+            { value: 4, icon: '2v2', label: 'Doubles', copy: '4 players' },
+          ],
+        })}
+      </div>`;
+  }
+
+  function gameCapacityChoicesHtml(prefix, value = 4) {
+    const choices = [
+      { value: 2, label: 'Singles', copy: '2 players' },
+      { value: 4, label: 'Doubles', copy: '4 players' },
+      { value: 6, label: 'Open play', copy: '6 players' },
+      { value: 8, label: 'Open play', copy: '8 players' },
+      { value: 10, label: 'Open play', copy: '10 players' },
+      { value: 12, label: 'Open play', copy: '12 players' },
+    ];
+    return `
+      <fieldset class="game-choice-field" id="${prefix}-capacity">
+        <legend>Format and players</legend>
+        <div class="game-capacity-grid">
+          ${choices.map((choice) => `
+            <label class="game-choice-option">
+              <input type="radio" name="${prefix}-capacity" value="${choice.value}" ${Number(value) === choice.value ? 'checked' : ''} />
+              <span class="game-capacity-card"><b>${choice.label}</b><small>${choice.copy}</small></span>
+            </label>`).join('')}
+        </div>
+      </fieldset>`;
+  }
+
+  function openGameFlow(options = {}) {
+    const allowedModes = ['find', 'start', 'schedule'];
+    let mode = allowedModes.includes(options.mode) ? options.mode : 'find';
+    let gameType = options.gameType === 'ranked' ? 'ranked' : 'casual';
+    let maxPlayers = Number(options.maxPlayers) === 2 ? 2 : 4;
+    const presenceCourt = state.presence && state.presence.checked_in ? {
+      id: state.presence.court_id,
+      name: state.presence.court_name,
+    } : null;
+    const preset = playNowCourt(options.court || presenceCourt, options.court ? 'Selected court' : '📍 Current check-in');
+    let selected = preset;
+    const modal = openModal(`
+      ${modalHead('Find or start a game')}
+      <p class="game-flow-intro">One setup, three clear paths. Finding never creates a game.</p>
+      <div class="game-flow-modes" id="game-flow-modes" role="tablist" aria-label="Choose what you want to do">
+        <button type="button" role="tab" id="game-flow-tab-find" data-game-flow-mode="find" aria-controls="game-flow-panel" aria-selected="${mode === 'find'}" class="${mode === 'find' ? 'active' : ''}"><span aria-hidden="true">⌕</span> Find</button>
+        <button type="button" role="tab" id="game-flow-tab-start" data-game-flow-mode="start" aria-controls="game-flow-panel" aria-selected="${mode === 'start'}" class="${mode === 'start' ? 'active' : ''}"><span aria-hidden="true">⚡</span> Start now</button>
+        <button type="button" role="tab" id="game-flow-tab-schedule" data-game-flow-mode="schedule" aria-controls="game-flow-panel" aria-selected="${mode === 'schedule'}" class="${mode === 'schedule' ? 'active' : ''}"><span aria-hidden="true">📅</span> Schedule</button>
+      </div>
+
+      <section class="game-flow-court" aria-labelledby="game-flow-court-label">
+        <div class="game-flow-section-label" id="game-flow-court-label">Court</div>
+        <div class="play-now-selection ${selected ? '' : 'hidden'}" id="game-flow-selection" role="status">
+          <span aria-hidden="true">📍</span>
+          <span class="row-main"><b id="game-flow-selected-name">${selected ? esc(selected.name) : ''}</b><small id="game-flow-selected-city">${selected ? esc(selected.city || 'Selected court') : ''}</small></span>
+          <button type="button" class="btn btn-secondary btn-sm" id="game-flow-change-court">Change</button>
+        </div>
+        <div class="game-flow-court-picker ${selected ? 'hidden' : ''}" id="game-flow-court-picker">
+          <label class="sr-only" for="game-flow-court-search">Search courts</label>
+          <input type="search" id="game-flow-court-search" placeholder="Search courts…" autocomplete="off" />
+          <fieldset class="game-flow-court-fieldset">
+            <legend class="sr-only">Choose a court</legend>
+            <div class="play-now-courts" id="game-flow-courts" aria-live="polite" aria-busy="true">
+              <div class="play-now-loading" role="status"><span class="spinner"></span><span>Finding current, saved, home, and nearby courts…</span></div>
+            </div>
+          </fieldset>
+          <button type="button" class="btn btn-secondary btn-sm hidden" id="game-flow-retry-courts">Try court suggestions again</button>
+        </div>
+      </section>
+
+      ${gameSetupChoicesHtml('game-flow', gameType, maxPlayers)}
+
+      <section id="game-flow-panel" class="game-flow-panel" role="tabpanel" aria-labelledby="game-flow-tab-${mode}">
+        <div id="game-flow-find" class="${mode === 'find' ? '' : 'hidden'}">
+          <div class="game-flow-mode-copy"><b>Games you can join</b><span>Exact matches appear first. Other open games stay visible.</span></div>
+          <div id="game-flow-results" aria-live="polite"></div>
+        </div>
+        <div id="game-flow-start" class="${mode === 'start' ? '' : 'hidden'}">
+          <div class="game-flow-mode-copy"><b>Start at this court now</b><span id="game-flow-start-copy">Choose a court to continue.</span></div>
+          <div class="game-flow-confirm-summary" id="game-flow-start-summary"></div>
+          <p class="play-now-privacy" id="game-flow-presence-copy"></p>
+        </div>
+        <div id="game-flow-schedule" class="${mode === 'schedule' ? '' : 'hidden'}">
+          <div class="game-flow-mode-copy"><b>Schedule for later</b><span>We’ll carry this setup into the shorter Where → When → Who planner.</span></div>
+          <div class="game-flow-confirm-summary" id="game-flow-schedule-summary"></div>
+        </div>
+      </section>
+      <p class="form-error hidden" id="game-flow-error" role="alert" tabindex="-1"></p>
+      <button type="button" class="btn btn-primary btn-block ${mode === 'find' ? 'hidden' : ''}" id="game-flow-primary"></button>
+      <button type="button" class="btn-link modal-close btn-block" id="game-flow-dismiss">Cancel</button>
+    `, { label: 'Find, start, or schedule a game' });
+
+    const modalBox = modal.querySelector('.modal');
+    modal._dismissBlocked = () => modal.dataset.gameFlowCommitting === 'true';
+    const modeButtons = [...modal.querySelectorAll('[data-game-flow-mode]')];
+    const resultsEl = modal.querySelector('#game-flow-results');
+    const pickerEl = modal.querySelector('#game-flow-court-picker');
+    const courtRowsEl = modal.querySelector('#game-flow-courts');
+    const searchEl = modal.querySelector('#game-flow-court-search');
+    const retryEl = modal.querySelector('#game-flow-retry-courts');
+    const primary = modal.querySelector('#game-flow-primary');
+    const errorEl = modal.querySelector('#game-flow-error');
+    const suggestionsById = new Map();
+    let suggestionRows = [];
+    let searchTimer = null;
+    let searchSeq = 0;
+    let suggestionLoadSeq = 0;
+    let findLoadSeq = 0;
+    let actionSeq = 0;
+    let lockedControls = [];
+
+    const actionIsCurrent = (seq, expectedMode) => seq === actionSeq
+      && mode === expectedMode
+      && document.body.contains(modal)
+      && currentOverlayEntry()?.el === modal;
+    const lockFlowForCommit = () => {
+      modal.dataset.gameFlowCommitting = 'true';
+      lockedControls = [...modal.querySelectorAll('button, input')]
+        .filter((control) => control !== primary)
+        .map((control) => ({ control, disabled: control.disabled }));
+      lockedControls.forEach(({ control }) => { control.disabled = true; });
+      modalBox?.setAttribute('aria-busy', 'true');
+    };
+    const unlockFlowAfterCommit = ({ completed = false } = {}) => {
+      lockedControls.forEach(({ control, disabled }) => {
+        if (document.body.contains(control)) control.disabled = disabled;
+      });
+      lockedControls = [];
+      delete modal.dataset.gameFlowCommitting;
+      modalBox?.removeAttribute('aria-busy');
+      if (completed && document.body.contains(modal)) {
+        modeButtons.forEach((button) => { button.disabled = true; });
+        modal.querySelectorAll('input[name="game-flow-type"], input[name="game-flow-format"]')
+          .forEach((input) => { input.disabled = true; });
+        modal.querySelector('#game-flow-change-court').disabled = true;
+      }
+    };
+
+    const setupLabel = () => `${gameTypeLabel(gameType)} ${gameFormatLabel(maxPlayers)}`;
+    const showError = (message) => {
+      errorEl.textContent = message;
+      errorEl.classList.remove('hidden');
+      errorEl.focus({ preventScroll: true });
+    };
+    const clearError = () => errorEl.classList.add('hidden');
+    const addSuggestion = (value, tag = '') => {
+      const item = playNowCourt(value, tag);
+      if (!item || suggestionsById.has(item.id)) return;
+      suggestionsById.set(item.id, item);
+      suggestionRows.push(item);
+    };
+    if (preset) addSuggestion(preset, preset.tag);
+    if (presenceCourt) addSuggestion(presenceCourt, '📍 Current check-in');
+    if (state.me && state.me.home_court_id) addSuggestion({
+      id: state.me.home_court_id,
+      name: state.me.home_court_name || 'Home court',
+    }, '🏠 Home');
+
+    const syncStartCopy = () => {
+      const summary = `${gameTypeLabel(gameType)} · ${gameFormatLabel(maxPlayers)} · ${maxPlayers} players`;
+      modal.querySelector('#game-flow-start-summary').innerHTML = `<b>${esc(summary)}</b><span>Open to players at this court</span>`;
+      modal.querySelector('#game-flow-schedule-summary').innerHTML = `<b>${esc(summary)}</b><span>Type and format are already set</span>`;
+      const presence = state.presence && state.presence.checked_in ? state.presence : null;
+      const sameCourt = !!(presence && selected && Number(presence.court_id) === selected.id);
+      const presenceCopy = !selected
+        ? 'Choose a court first.'
+        : selected.closed
+          ? `${selected.name} is marked permanently closed. Choose another court.`
+        : sameCourt
+          ? `You’re checked in at ${selected.name}.`
+          : presence
+            ? `Starting now will switch your check-in from ${presence.court_name} to ${selected.name}.`
+            : `Starting now will check you in at ${selected.name}.`;
+      modal.querySelector('#game-flow-presence-copy').textContent = presenceCopy;
+      modal.querySelector('#game-flow-start-copy').textContent = selected
+        ? selected.closed
+          ? 'Games can’t be started or scheduled at a closed court.'
+          : `If an identical game is already open, you’ll join it instead of splitting the court.`
+        : 'Choose a court to continue.';
+      primary.textContent = mode === 'start'
+        ? `Join or start ${setupLabel()}`
+        : 'Continue to date & players';
+      primary.disabled = !selected || !!selected.closed;
+    };
+
+    const loadFindGames = async () => {
+      const seq = ++findLoadSeq;
+      if (mode !== 'find') return;
+      if (!selected) {
+        resultsEl.innerHTML = '<div class="empty-state" style="padding:14px">Choose a court to see games you can join.</div>';
+        return;
+      }
+      resultsEl.setAttribute('aria-busy', 'true');
+      resultsEl.innerHTML = '<div class="play-now-loading" role="status"><span class="spinner"></span><span>Checking this court for open games…</span></div>';
+      try {
+        const detail = await api(`/courts/${selected.id}`);
+        if (seq !== findLoadSeq || mode !== 'find' || !document.body.contains(modal)) return;
+        selected = { ...selected, closed: !!detail.closed };
+        const nowGames = Array.isArray(detail.now_games) ? detail.now_games : (detail.games || []);
+        const openGames = nowGames.filter((game) => game.status === 'upcoming'
+          && (game.is_joined || Number(game.spots_left) > 0));
+        const exact = openGames.filter((game) => game.game_type === gameType
+          && Number(game.max_players) === maxPlayers);
+        const alternatives = openGames.filter((game) => !exact.includes(game));
+        let html = '';
+        if (detail.closed) {
+          html = '<div class="planner-inline-warning">This court is marked permanently closed, so games can’t be started here.</div>';
+        } else if (exact.length) {
+          html = `<div class="game-flow-result-label">${esc(setupLabel())} at ${esc(selected.name)}</div>${exact.map((game) => gameCardHtml(game, { compact: true })).join('')}`;
+          if (alternatives.length) html += `<details class="game-flow-alternatives"><summary>${alternatives.length} other open game${alternatives.length === 1 ? '' : 's'}</summary>${alternatives.map((game) => gameCardHtml(game, { compact: true })).join('')}</details>`;
+        } else if (alternatives.length) {
+          html = `<div class="empty-state game-flow-empty">No ${esc(setupLabel())} game is open right now.</div>
+            <button type="button" class="btn btn-primary btn-block" data-game-flow-switch-start>Start this setup</button>
+            <div class="game-flow-result-label">Other open games at ${esc(selected.name)}</div>
+            ${alternatives.map((game) => gameCardHtml(game, { compact: true })).join('')}`;
+        } else {
+          html = `<div class="empty-state game-flow-empty">No open games at ${esc(selected.name)} right now. Nothing was created.</div>
+            <button type="button" class="btn btn-primary btn-block" data-game-flow-switch-start>Start ${esc(setupLabel())}</button>`;
+        }
+        resultsEl.innerHTML = html;
+        resultsEl.setAttribute('aria-busy', 'false');
+        resultsEl.querySelectorAll('[data-game-flow-switch-start]').forEach((button) => {
+          button.addEventListener('click', () => setMode('start', { focus: true }));
+        });
+        bindGameButtons(resultsEl, loadFindGames);
+        syncStartCopy();
+      } catch (error) {
+        if (seq !== findLoadSeq || mode !== 'find' || !document.body.contains(modal)) return;
+        resultsEl.setAttribute('aria-busy', 'false');
+        resultsEl.innerHTML = `<div class="empty-state game-flow-empty">Couldn’t load games at this court.<br>${esc(error.message)}</div><button type="button" class="btn btn-secondary btn-block" id="game-flow-retry-games">Try again</button>`;
+        resultsEl.querySelector('#game-flow-retry-games')?.addEventListener('click', loadFindGames);
+      }
+    };
+
+    const selectCourt = (court) => {
+      selected = playNowCourt(court);
+      if (!selected) return;
+      actionSeq += 1;
+      addSuggestion(selected, selected.tag);
+      modal.querySelector('#game-flow-selected-name').textContent = selected.name;
+      modal.querySelector('#game-flow-selected-city').textContent = selected.city || 'Selected court';
+      modal.querySelector('#game-flow-selection').classList.remove('hidden');
+      pickerEl.classList.add('hidden');
+      clearError();
+      syncStartCopy();
+      loadFindGames();
+    };
+
+    const renderCourtRows = (items = suggestionRows) => {
+      courtRowsEl.setAttribute('aria-busy', 'false');
+      courtRowsEl.innerHTML = items.length ? items.map((item) => `
+        <label class="play-now-court game-flow-court-option">
+          <input class="sr-only" type="radio" name="game-flow-court" value="${item.id}" ${selected && selected.id === item.id ? 'checked' : ''} />
+          <span class="play-now-court-pin" aria-hidden="true">${selected && selected.id === item.id ? '✓' : '📍'}</span>
+          <span class="row-main"><span class="row-title">${esc(item.name)}</span><span class="row-sub">${esc(item.city || 'Pickleball court')}</span></span>
+          ${item.tag || item.distanceMiles != null ? `<span class="tag">${esc(item.tag || `${item.distanceMiles} mi`)}</span>` : ''}
+        </label>`).join('') : '<div class="empty-state" style="padding:14px">No suggested courts yet. Search by court or city.</div>';
+      courtRowsEl.querySelectorAll('input[name="game-flow-court"]').forEach((input) => {
+        input.addEventListener('change', () => {
+          const court = items.find((item) => item.id === Number(input.value))
+            || suggestionsById.get(Number(input.value));
+          selectCourt(court);
+        });
+      });
+    };
+
+    const loadSuggestions = async () => {
+      const seq = ++suggestionLoadSeq;
+      retryEl.classList.add('hidden');
+      courtRowsEl.setAttribute('aria-busy', 'true');
+      courtRowsEl.innerHTML = '<div class="play-now-loading" role="status"><span class="spinner"></span><span>Finding current, saved, home, and nearby courts…</span></div>';
+      const loc = areaLatLng();
+      const [saved, nearby] = await Promise.all([
+        api('/courts/favorites').catch(() => null),
+        api(`/courts?lat=${loc.lat}&lng=${loc.lng}&radius=30&limit=8`).catch(() => null),
+      ]);
+      if (seq !== suggestionLoadSeq || !document.body.contains(modal)) return;
+      (saved && saved.items || []).forEach((item) => addSuggestion(item, '⭐ Saved'));
+      (nearby && nearby.items || []).forEach((item) => addSuggestion(
+        item, item.distance_miles != null ? `${item.distance_miles} mi` : 'Nearby',
+      ));
+      if (searchEl.value.trim().length < 2) renderCourtRows();
+      if (!saved && !nearby && searchEl.value.trim().length < 2) retryEl.classList.remove('hidden');
+    };
+
+    const setMode = (nextMode, { focus = false } = {}) => {
+      if (!allowedModes.includes(nextMode)) return;
+      if (modal.dataset.gameFlowCommitting === 'true') return;
+      if (nextMode !== mode) actionSeq += 1;
+      mode = nextMode;
+      modeButtons.forEach((button) => {
+        const active = button.dataset.gameFlowMode === mode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', String(active));
+        button.tabIndex = active ? 0 : -1;
+      });
+      modal.querySelector('#game-flow-find').classList.toggle('hidden', mode !== 'find');
+      modal.querySelector('#game-flow-start').classList.toggle('hidden', mode !== 'start');
+      modal.querySelector('#game-flow-schedule').classList.toggle('hidden', mode !== 'schedule');
+      modal.querySelector('#game-flow-panel').setAttribute('aria-labelledby', `game-flow-tab-${mode}`);
+      primary.classList.toggle('hidden', mode === 'find');
+      clearError();
+      syncStartCopy();
+      if (mode === 'find') loadFindGames();
+      if (focus) {
+        const heading = modal.querySelector(`#game-flow-${mode} .game-flow-mode-copy b`);
+        heading?.setAttribute('tabindex', '-1');
+        heading?.focus({ preventScroll: true });
+      }
+    };
+
+    modeButtons.forEach((button) => button.addEventListener('click', () => setMode(button.dataset.gameFlowMode)));
+    setupTablistKeyboard(modal.querySelector('#game-flow-modes'));
+    modal.querySelector('#game-flow-change-court').addEventListener('click', () => {
+      actionSeq += 1;
+      pickerEl.classList.remove('hidden');
+      searchEl.focus({ preventScroll: true });
+    });
+    retryEl.addEventListener('click', loadSuggestions);
+    searchEl.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const query = searchEl.value.trim();
+      if (query.length < 2) {
+        searchSeq += 1;
+        renderCourtRows();
+        return;
+      }
+      searchTimer = setTimeout(async () => {
+        const seq = ++searchSeq;
+        courtRowsEl.setAttribute('aria-busy', 'true');
+        courtRowsEl.innerHTML = '<div class="play-now-loading" role="status"><span class="spinner"></span><span>Searching courts…</span></div>';
+        let url = `/courts?q=${encodeURIComponent(query)}&limit=8`;
+        if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
+        try {
+          const response = await api(url);
+          if (seq !== searchSeq || searchEl.value.trim() !== query || !document.body.contains(modal)) return;
+          const items = (response.items || []).map((item) => playNowCourt(
+            item, item.distance_miles != null ? `${item.distance_miles} mi` : '',
+          )).filter(Boolean);
+          items.forEach((item) => suggestionsById.set(item.id, item));
+          renderCourtRows(items);
+        } catch {
+          if (seq !== searchSeq || searchEl.value.trim() !== query || !document.body.contains(modal)) return;
+          courtRowsEl.setAttribute('aria-busy', 'false');
+          courtRowsEl.innerHTML = '<div class="empty-state" style="padding:14px">Couldn’t search courts. Check your connection and try again.</div>';
+        }
+      }, 250);
+    });
+    modal.querySelectorAll('input[name="game-flow-type"]').forEach((input) => input.addEventListener('change', () => {
+      actionSeq += 1;
+      gameType = input.value === 'ranked' ? 'ranked' : 'casual';
+      clearError();
+      syncStartCopy();
+      loadFindGames();
+    }));
+    modal.querySelectorAll('input[name="game-flow-format"]').forEach((input) => input.addEventListener('change', () => {
+      actionSeq += 1;
+      maxPlayers = Number(input.value) === 2 ? 2 : 4;
+      clearError();
+      syncStartCopy();
+      loadFindGames();
+    }));
+    const confirmSelectedCourtIsOpen = async () => {
+      const courtId = selected && selected.id;
+      if (!courtId) return false;
+      const detail = await api(`/courts/${courtId}`);
+      if (!selected || selected.id !== courtId || !document.body.contains(modal)) return false;
+      selected = { ...selected, closed: !!detail.closed };
+      syncStartCopy();
+      if (selected.closed) throw new Error(`${selected.name} is marked permanently closed. Choose another court.`);
+      return true;
+    };
+    primary.addEventListener('click', async () => {
+      if (!selected) {
+        showError('Choose a court first.');
+        pickerEl.classList.remove('hidden');
+        searchEl.focus({ preventScroll: true });
+        return;
+      }
+      if (mode === 'schedule') {
+        const action = ++actionSeq;
+        primary.dataset.gameFlowAction = String(action);
+        primary.disabled = true;
+        primary.setAttribute('aria-busy', 'true');
+        primary.textContent = 'Checking court…';
+        clearError();
+        try {
+          if (!await confirmSelectedCourtIsOpen()) return;
+          if (!actionIsCurrent(action, 'schedule')) return;
+          transitionModal(modal, () => openNewGameModal({
+            court: selected, gameType, maxPlayers, carriedFromGameFlow: true,
+          }));
+        } catch (error) {
+          if (actionIsCurrent(action, 'schedule')) showError(error.message);
+        } finally {
+          if (document.body.contains(primary)
+              && primary.dataset.gameFlowAction === String(action)) {
+            delete primary.dataset.gameFlowAction;
+            primary.disabled = !selected || !!selected.closed;
+            primary.removeAttribute('aria-busy');
+            syncStartCopy();
+          }
+        }
+        return;
+      }
+      if (mode !== 'start' || primary.dataset.gameFlowStarting === 'true') return;
+      if (selected.closed) {
+        showError('This court is marked permanently closed. Choose another court.');
+        return;
+      }
+      const callerSession = instantRallySession();
+      if (!callerSession) {
+        showError('Sign in again before starting a game.');
+        return;
+      }
+      const action = ++actionSeq;
+      const original = primary.textContent;
+      let commitLocked = false;
+      let completed = false;
+      primary.dataset.gameFlowAction = String(action);
+      primary.dataset.gameFlowStarting = 'true';
+      primary.disabled = true;
+      primary.setAttribute('aria-busy', 'true');
+      clearError();
+      try {
+        primary.textContent = 'Checking court…';
+        if (!await confirmSelectedCourtIsOpen()) return;
+        if (!actionIsCurrent(action, 'start')) return;
+        lockFlowForCommit();
+        commitLocked = true;
+        primary.textContent = `Starting ${setupLabel()}…`;
+        const result = await startInstantRally(null, {
+          presenceConfirmed: true,
+          confirmCourtPresence: true,
+          expectedCourtId: selected.id,
+          gameType,
+          maxPlayers,
+          fromModal: modal,
+          confirmationButton: primary,
+          confirmationOriginalHtml: original,
+          onError: (error, retrySafely) => showError(retrySafely
+            ? 'We couldn’t confirm the game. Try again — we won’t create a duplicate.'
+            : error.message),
+        });
+        if (result) {
+          completed = !!primary.dataset.instantRallyAction;
+          if (completed && document.body.contains(modal)) {
+            modal.querySelector('#game-flow-start-copy').textContent = `${setupLabel()} is live at ${selected.name}.`;
+            modal.querySelector('#game-flow-presence-copy').textContent = result.presence_confirmed
+              ? `You’re checked in at ${selected.name}.`
+              : `The game is ready, but your check-in at ${selected.name} could not be confirmed. Review the court before playing.`;
+            modal.querySelector('#game-flow-dismiss').textContent = 'Done';
+          }
+          fetchCourtsInView();
+        }
+      } catch (error) {
+        if (instantRallySessionMatches(callerSession)
+            && actionIsCurrent(action, 'start')) showError(error.message);
+      } finally {
+        if (commitLocked && document.body.contains(modal)) {
+          unlockFlowAfterCommit({ completed });
+        }
+        if (primary && document.body.contains(primary)
+            && primary.dataset.gameFlowAction === String(action)) {
+          delete primary.dataset.gameFlowAction;
+          delete primary.dataset.gameFlowStarting;
+          if (!primary.dataset.instantRallyAction) {
+            primary.disabled = !selected || !!selected.closed;
+            primary.removeAttribute('aria-busy');
+            syncStartCopy();
+            if (mode === 'start' && !errorEl.classList.contains('hidden')) {
+              primary.textContent = 'Try again';
+            }
+          }
+        }
+      }
+    });
+    modal._cleanupFns.push(() => {
+      clearTimeout(searchTimer);
+      actionSeq += 1;
+      unlockFlowAfterCommit();
+      delete modal._dismissBlocked;
+      findLoadSeq += 1;
+      suggestionLoadSeq += 1;
+      searchSeq += 1;
+    });
+    syncStartCopy();
+    setMode(mode);
+    loadSuggestions();
+    return modal;
+  }
+
   async function checkInAndStartRally(court, modal, button, errorEl = null) {
     const selected = playNowCourt(court);
     if (!selected || !button || button.dataset.playNowStarting === 'true') return null;
@@ -7157,12 +7781,12 @@
       </div>
       <button type="button" class="btn-link modal-close btn-block">Not now</button>
     `, { label: 'Choose when you can play' });
-    modal.querySelector('[data-play-soon-choice="at-court"]').addEventListener('click', (event) => {
-      if (state.presence && state.presence.checked_in) {
-        startInstantRally(event.currentTarget, { fromModal: modal });
-        return;
-      }
-      transitionModal(modal, () => openPlayNowCourtPicker());
+    modal.querySelector('[data-play-soon-choice="at-court"]').addEventListener('click', () => {
+      const currentCourt = state.presence && state.presence.checked_in ? {
+        id: state.presence.court_id,
+        name: state.presence.court_name,
+      } : null;
+      transitionModal(modal, () => openGameFlow({ court: currentCourt, mode: 'find' }));
     });
     modal.querySelector('[data-play-soon-choice="arriving"]').addEventListener('click', () => {
       transitionModal(modal, openPlaySoonArrivalChoices);
@@ -7841,17 +8465,6 @@
     refreshPlayGamesAfterRallyMutation();
   }
 
-  async function recoverRallyAfterConfirmedArrival(
-    button, options, callerSession, arrivalGameId,
-  ) {
-    const result = await startInstantRally(button, options);
-    if (!instantRallySessionMatches(callerSession)) return null;
-    if (safePositiveId(result && result.game && result.game.id)) {
-      clearArrivalAfterConfirmedMembership(callerSession, arrivalGameId);
-    }
-    return result;
-  }
-
   async function openReadyRally(rally, button = null) {
     const summary = rally && rally.courtId ? rally : rallySummaryFromValue(rally);
     const courtId = safePositiveId(summary && summary.courtId);
@@ -7862,6 +8475,24 @@
       switchTab('chat');
       return null;
     }
+    const showCurrentOptions = () => {
+      const open = () => openGameFlow({
+        mode: 'find',
+        court: {
+          id: courtId,
+          name: summary.courtName || 'Selected court',
+          city: summary.courtCity || '',
+        },
+        gameType: summary.gameType,
+        maxPlayers: summary.maxPlayers,
+      });
+      if (sourceModal && currentOverlayEntry()?.el === sourceModal) {
+        transitionModal(sourceModal, open);
+      } else {
+        open();
+      }
+      return null;
+    };
     const ownArrival = activeArrivalForGame(summary.gameId, summary.myArrival, summary);
     if (!isCheckedInAtCourt(courtId)) {
       const openConfirmation = () => ownArrival
@@ -7875,20 +8506,14 @@
     }
     if (summary.spotsLeft <= 0 && !ownArrival) {
       toast(summary.onWayCount > 0
-        ? 'That rally is committed — finding the next rally at this court.'
-        : 'That rally is full — finding the next rally at this court.');
-      return startInstantRally(button, {
-        fromModal: sourceModal || null,
-        expectedCourtId: courtId,
-      });
+        ? 'That rally is committed — showing current options at this court.'
+        : 'That rally is full — showing current options at this court.');
+      return showCurrentOptions();
     }
     const gameId = safePositiveId(summary.gameId);
     const callerSession = instantRallySession();
     if (!callerSession) return null;
-    if (!gameId) return startInstantRally(button, {
-      fromModal: sourceModal || null,
-      expectedCourtId: courtId,
-    });
+    if (!gameId) return showCurrentOptions();
     if (button?.dataset.joiningRally === 'true') return null;
     const original = button?.innerHTML;
     const originalAriaLabel = button?.getAttribute('aria-label');
@@ -7973,11 +8598,8 @@
       if (!instantRallySessionMatches(callerSession)) return null;
       const staleCodes = ['game_full', 'game_not_open', 'game_not_found', 'rally_no_longer_active'];
       if (staleCodes.includes(error.code)) {
-        toast('That rally just changed — finding the current one');
-        return recoverRallyAfterConfirmedArrival(button, {
-          fromModal: sourceModal || null,
-          expectedCourtId: courtId,
-        }, callerSession, gameId);
+        toast('That rally just changed — showing current options');
+        return showCurrentOptions();
       }
       if (error.code === 'already_joined') {
         clearArrivalAfterConfirmedMembership(callerSession, gameId);
@@ -8002,9 +8624,15 @@
           if (sourceModal) {
             if (!document.body.contains(sourceModal)
                 || currentOverlayEntry()?.el !== sourceModal) return;
-            transitionModal(sourceModal, () => openPlayNowCourtPicker());
+            transitionModal(sourceModal, () => openGameFlow({
+              mode: 'find',
+              court: { id: courtId, name: summary.courtName || 'Selected court' },
+            }));
           } else {
-            openPlayNowCourtPicker();
+            openGameFlow({
+              mode: 'find',
+              court: { id: courtId, name: summary.courtName || 'Selected court' },
+            });
           }
         };
         refreshMe().finally(openConfirmation);
@@ -8068,8 +8696,8 @@
         button.textContent = original;
       }
     };
-    modal.querySelector('#ci-lfg').addEventListener('click', (event) => {
-      checkInAndStartRally(court, modal, event.currentTarget, errorEl);
+    modal.querySelector('#ci-lfg').addEventListener('click', () => {
+      transitionModal(modal, () => openGameFlow({ court, mode: 'find' }));
     });
     modal.querySelector('#ci-play').addEventListener('click', (event) => doGroupCheckIn(event.currentTarget));
   }
@@ -8091,11 +8719,13 @@
   function gameCardHtml(game, { compact = false } = {}) {
     const court = game.court || {};
     const assembly = instantRallyAssembly(game);
+    const format = Number(game.max_players) === 2
+      ? 'Singles' : Number(game.max_players) === 4 ? 'Doubles' : `${game.max_players} players`;
     const typeTag = game.is_instant
-      ? `<span class="tag${assembly ? ' live' : ''}" style="margin:0 0 0 8px">⚡ Rally</span>`
+      ? `<span class="tag${game.game_type === 'ranked' ? ' ranked' : (assembly ? ' live' : '')}" style="margin:0 0 0 8px">⚡ ${game.game_type === 'ranked' ? 'Ranked' : 'Casual'} · ${esc(format)}</span>`
       : game.game_type === 'ranked'
-      ? '<span class="tag ranked" style="margin:0 0 0 8px">🏆 Ranked</span>'
-      : '<span class="tag" style="margin:0 0 0 8px">Casual</span>';
+      ? `<span class="tag ranked" style="margin:0 0 0 8px">🏆 Ranked · ${esc(format)}</span>`
+      : `<span class="tag" style="margin:0 0 0 8px">Casual · ${esc(format)}</span>`;
     const visTag = game.visibility === 'private'
       ? '<span class="tag" style="margin:0 0 0 6px">🔒 Invite</span>'
       : game.visibility === 'friends'
@@ -9066,7 +9696,11 @@
       // Do not resurrect a sheet the player already dismissed, and do not
       // replace a newer child sheet that now owns their attention.
       if (!document.body.contains(fromModal) || currentOverlayEntry()?.el !== fromModal) return false;
-      return transitionModal(fromModal, () => openGameScreen(gameId));
+      // Keep the source mounted while game detail loads. Once the response is
+      // ready, openGameScreen replaces it synchronously so a fast response
+      // cannot race the history slot unwind and disappear.
+      openGameScreen(gameId, { replaceModal: fromModal });
+      return true;
     }
     openGameScreen(gameId);
     return true;
@@ -9209,7 +9843,9 @@
 
   async function startInstantRally(button, options = {}) {
     if ((!state.presence || !state.presence.checked_in) && !options.presenceConfirmed) {
-      openPlayNowCourtPicker();
+      openGameFlow({
+        mode: 'start', gameType: options.gameType, maxPlayers: options.maxPlayers,
+      });
       return null;
     }
     const callerSession = instantRallySession();
@@ -9221,14 +9857,22 @@
     const expectedCourtId = safePositiveId(
       options.expectedCourtId ?? state.presence?.court_id,
     );
+    const requestedGameType = options.gameType === 'ranked' ? 'ranked' : 'casual';
+    const requestedMaxPlayers = Number(options.maxPlayers) === 2 ? 2 : 4;
+    const confirmCourtPresence = options.confirmCourtPresence === true;
     if (!expectedCourtId) {
-      openPlayNowCourtPicker();
+      openGameFlow({
+        mode: 'start', gameType: requestedGameType, maxPlayers: requestedMaxPlayers,
+      });
       return null;
     }
     const sharedRecord = instantRallyInFlight;
     if (sharedRecord && sharedRecord.token === callerSession.token
         && sharedRecord.userId === callerSession.userId
-        && sharedRecord.courtId === expectedCourtId) {
+        && sharedRecord.courtId === expectedCourtId
+        && sharedRecord.gameType === requestedGameType
+        && sharedRecord.maxPlayers === requestedMaxPlayers
+        && sharedRecord.confirmCourtPresence === confirmCourtPresence) {
       setInstantRallyButtonBusy(button, true);
       let resolution;
       try {
@@ -9237,7 +9881,10 @@
       finally { if (button && document.body.contains(button)) setInstantRallyButtonBusy(button, false); }
       return continueInstantRallyCall(resolution, button, options, callerSession);
     }
-    const attempt = pendingInstantRallyAttempt(callerSession.userId, expectedCourtId);
+    const attempt = pendingInstantRallyAttempt(
+      callerSession.userId, expectedCourtId,
+      requestedGameType, requestedMaxPlayers,
+    );
     if (!attempt) {
       const error = new Error('Sign in again before starting a rally.');
       if (options.onError) options.onError(error, false); else toast(error.message);
@@ -9252,6 +9899,9 @@
             scheduled_at: attempt.scheduledAt,
             client_attempt_id: attempt.id,
             court_id: attempt.courtId,
+            game_type: attempt.gameType,
+            max_players: attempt.maxPlayers,
+            confirm_court_presence: confirmCourtPresence,
           }),
         });
         if (!instantRallySessionMatches(callerSession)) return { abandoned: true };
@@ -9265,12 +9915,35 @@
             && (game.status !== 'upcoming' || game.assembly_active === false)) {
           const stale = new Error('That rally is no longer assembling players.');
           stale.code = 'rally_no_longer_active';
-          clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+          clearInstantRallyAttempt(
+            callerSession.userId, attempt.courtId, attempt.id,
+            attempt.gameType, attempt.maxPlayers,
+          );
           return { staleRally: true, error: stale };
         }
-        clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+        if (confirmCourtPresence) {
+          const exactPresence = !!(result.presence
+            && result.presence.checked_in === true
+            && safePositiveId(result.presence.court_id) === expectedCourtId);
+          result.presence_confirmed = result.presence_confirmed === true && exactPresence;
+          if (result.presence) {
+            invalidateMeRequests();
+            state.presence = result.presence;
+            renderPresenceBanner();
+            updatePlayHeader();
+            if (state.tab === 'play' && state.playSeg === 'games') {
+              renderPlay({ useCachedData: true });
+            }
+          }
+        }
+        clearInstantRallyAttempt(
+          callerSession.userId, attempt.courtId, attempt.id,
+          attempt.gameType, attempt.maxPlayers,
+        );
         state.playGamesCache = null;
-        if (result.outcome === 'joined') {
+        if (confirmCourtPresence && result.presence_confirmed !== true) {
+          toast('Your rally is ready, but the court check-in could not be confirmed.');
+        } else if (result.outcome === 'joined') {
           toast(`You're in the live rally at ${(game.court || {}).name || 'this court'} 🏓`);
         } else if (result.invited_count > 0) {
           toast(`Rally started — ${result.invited_count} ready player${result.invited_count === 1 ? '' : 's'} invited ⚡`);
@@ -9287,16 +9960,24 @@
           // The server has definitively retired this attempt's old assembly.
           // Forget that key before resolving once more, so a lost response can
           // never revive an expired solo shell or erase the new ready signal.
-          clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+          clearInstantRallyAttempt(
+            callerSession.userId, attempt.courtId, attempt.id,
+            attempt.gameType, attempt.maxPlayers,
+          );
           return { staleRally: true, error };
         }
         const recoveredGame = authoritativeRallyGame(error);
         if (recoveredGame) {
-          clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+          clearInstantRallyAttempt(
+            callerSession.userId, attempt.courtId, attempt.id,
+            attempt.gameType, attempt.maxPlayers,
+          );
           state.playGamesCache = null;
           toast(error.code === 'active_rally_elsewhere'
             ? 'You already have a rally in progress — opening it now'
-            : 'That rally already exists — opening it');
+            : error.code === 'active_rally_configuration_conflict'
+              ? 'You already have a different game running here — opening it'
+              : 'That rally already exists — opening it');
           refreshMe().catch(() => {});
           return {
             result: { outcome: 'existing', recovered: true, game: recoveredGame },
@@ -9307,7 +9988,10 @@
         const retrySafely = !!(error.isNetworkError || Number(error.status) === 429
           || Number(error.status) >= 500);
         if (!retrySafely) {
-          clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);
+          clearInstantRallyAttempt(
+            callerSession.userId, attempt.courtId, attempt.id,
+            attempt.gameType, attempt.maxPlayers,
+          );
         }
         if (error.code === 'active_checkin_required') refreshMe().catch(() => {});
         return { error, retrySafely };
@@ -9317,6 +10001,9 @@
       token: callerSession.token,
       userId: callerSession.userId,
       courtId: expectedCourtId,
+      gameType: requestedGameType,
+      maxPlayers: requestedMaxPlayers,
+      confirmCourtPresence,
       promise: operation,
     };
     instantRallyInFlight = record;
@@ -9359,9 +10046,13 @@
           if (sourceModal) {
             if (!document.body.contains(sourceModal)
                 || currentOverlayEntry()?.el !== sourceModal) return;
-            transitionModal(sourceModal, () => openPlayNowCourtPicker());
+            transitionModal(sourceModal, () => openGameFlow({
+              mode: 'start', gameType: options.gameType, maxPlayers: options.maxPlayers,
+            }));
           } else {
-            openPlayNowCourtPicker();
+            openGameFlow({
+              mode: 'start', gameType: options.gameType, maxPlayers: options.maxPlayers,
+            });
           }
         };
         // Learn the court that won any other-tab race before asking the player
@@ -9398,19 +10089,13 @@
     const title = here ? `At ${esc(state.presence.court_name)}`
       : pulse ? 'Your hour is live' : 'Ready to play?';
     const sub = here
-      ? 'Start or join the live rally here, or make a plan for later.'
+      ? 'Find an open game, start Casual or Ranked, or schedule one for later.'
       : pulse ? 'Nearby players can respond to the court you picked.'
-        : 'Play soon, arrive in a few minutes, or play anytime in the next hour.';
-    const immediateAction = here
-      ? `<button type="button" class="rally-action primary" data-goto="instant-rally">
-          <span class="rally-action-icon">⚡</span>
-          <span><b>Find or start a game</b><small>At ${esc(state.presence.court_name)}</small></span>
-        </button>`
-      : pulse ? ''
-        : `<button type="button" class="rally-action primary" data-goto="play-soon">
-            <span class="rally-action-icon">⚡</span>
-            <span><b>Play soon</b><small>Now, arriving, or free this hour</small></span>
-          </button>`;
+        : 'Find an open game, choose exactly what to start, or schedule one.';
+    const immediateAction = `<button type="button" class="rally-action primary" data-goto="game-flow">
+        <span class="rally-action-icon">⚡</span>
+        <span><b>Find or start a game</b><small>${here ? `At ${esc(state.presence.court_name)}` : 'Casual or Ranked · Singles or Doubles'}</small></span>
+      </button>`;
     const actions = `${immediateAction}
       <button type="button" class="rally-action" data-goto="new-game">
         <span class="rally-action-icon">📅</span>
@@ -9672,7 +10357,7 @@
       html += '<div class="section-label">Games near you</div>';
       html += featuredDiscovery.length
         ? featuredDiscovery.map((game) => gameCardHtml(game, { compact: true })).join('')
-        : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="new-game" style="margin-top:10px"><svg class="pb-ic"><use href="#pb"/></svg> Start a game</button><br><button class="btn btn-secondary btn-sm" data-invite-share style="margin-top:8px">💌 Invite friends to play</button></div>';
+        : '<div class="empty-state" style="padding:18px">No open games around you right now.<br><button class="btn btn-primary" data-goto="game-flow" style="margin-top:10px"><svg class="pb-ic"><use href="#pb"/></svg> Find or start a game</button><br><button class="btn btn-secondary btn-sm" data-invite-share style="margin-top:8px">💌 Invite friends to play</button></div>';
       const moreUpcoming = upcoming.slice(1);
       const moreDiscovery = discovery.slice(2);
       if (moreUpcoming.length || moreDiscovery.length) {
@@ -9911,6 +10596,8 @@
     const plannerOptions = options && typeof options === 'object' ? options : {};
     const plannerId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0
       ? Number(value) : null;
+    const hasExplicitCourt = !!plannerId(plannerOptions.court && plannerOptions.court.id);
+    const carriedFromGameFlow = plannerOptions.carriedFromGameFlow === true;
     let court = plannerOptions.court || null;
     const defaultType = plannerOptions.gameType === 'ranked' ? 'ranked' : 'casual';
     const preferredSlot = typeof plannerOptions.preferredSlot === 'string' ? plannerOptions.preferredSlot : null;
@@ -10153,6 +10840,23 @@
       ${plannerRecoveryHtml}
       ${plannerCrewHtml}
 
+      <section class="planner-game-setup" aria-labelledby="ng-game-setup-title">
+        <div class="planner-game-setup-head">
+          <div><b id="ng-game-setup-title">Game setup</b><span>Choose the type and format up front.</span></div>
+          ${carriedFromGameFlow ? '<span class="tag">Setup carried over</span>' : ''}
+        </div>
+        ${gameChoiceCardsHtml({
+          id: 'ng-type', name: 'ng-type', legend: 'Game type', value: defaultType,
+          options: [
+            { value: 'casual', icon: '🏓', label: 'Casual', copy: 'Play for fun' },
+            { value: 'ranked', icon: '🏆', label: 'Ranked', copy: 'Counts for rating', tone: 'ranked' },
+          ],
+        })}
+        ${gameCapacityChoicesHtml('ng', presetMaxPlayers)}
+        <input type="hidden" id="ng-max" value="${presetMaxPlayers}" />
+        ${crewId ? `<p class="planner-game-setup-note" id="ng-crew-capacity">All ${initialInviteIds.size + 1} accepted players are included. Capacity is fixed to this roster.</p>` : ''}
+      </section>
+
       <div class="court-selected hidden" id="ng-answer-where" role="group" aria-label="Where">
         <div class="row-main"><div class="row-title"><span class="row-sub">Where</span> · <span id="ng-answer-where-value">${court ? esc(court.name) : 'Choose a court'}</span></div></div>
         <button type="button" class="btn btn-secondary btn-sm" id="ng-back-where" aria-label="Change where">Change</button>
@@ -10171,7 +10875,7 @@
         </div>
         <div id="ng-court-picker" class="${court ? 'hidden' : ''}">
           <input type="search" id="ng-court-search" aria-label="Search courts" placeholder="Search courts…" />
-          <div id="ng-court-results" style="margin-top:8px">${suggestionRows}</div>
+          <div id="ng-court-results" style="margin-top:8px" aria-live="polite">${suggestionRows}</div>
         </div>
         <input type="hidden" id="ng-court-id" value="${court ? court.id : ''}" />
         <button type="button" class="btn btn-primary btn-block planner-next" id="ng-next-when" ${court ? '' : 'disabled'}>Choose when</button>
@@ -10227,31 +10931,6 @@
       <details class="planner-advanced hidden" id="ng-advanced">
         <summary><span>More options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${crewId ? `${initialInviteIds.size + 1} accepted Crew players` : (presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`)} · ${presetPreferredLevel === 'any' ? 'Any level' : skillLabel(presetPreferredLevel)}</span></summary>
         <div class="planner-advanced-body">
-          <div class="form-grid">
-            <div class="form-field">
-              <label>Type</label>
-              <div class="type-cards" id="ng-type">
-                <button type="button" data-val="casual" aria-pressed="${defaultType === 'casual'}" class="${defaultType === 'casual' ? 'active' : ''}">
-                  <span style="font-size:20px"><svg class="pb-ic"><use href="#pb"/></svg></span><b>Casual</b><small>Just for fun</small>
-                </button>
-                <button type="button" data-val="ranked" aria-pressed="${defaultType === 'ranked'}" class="${defaultType === 'ranked' ? 'active' : ''}" ${crewId && ![2, 4].includes(initialInviteIds.size + 1) ? 'disabled title="Ranked Crew games need exactly 2 or 4 accepted players"' : ''}>
-                  <span style="font-size:20px">🏆</span><b>Ranked</b><small>Counts for rating</small>
-                </button>
-              </div>
-            </div>
-            <div class="form-field ${crewId ? 'hidden' : ''}">
-              <label for="ng-max">Players needed</label>
-              <select id="ng-max">
-                <option value="2" ${presetMaxPlayers === 2 ? 'selected' : ''}>2 (singles)</option>
-                <option value="4" ${presetMaxPlayers === 4 ? 'selected' : ''}>4 (doubles)</option>
-                <option value="6" ${presetMaxPlayers === 6 ? 'selected' : ''}>6</option>
-                <option value="8" ${presetMaxPlayers === 8 ? 'selected' : ''}>8</option>
-                <option value="10" ${presetMaxPlayers === 10 ? 'selected' : ''}>10</option>
-                <option value="12" ${presetMaxPlayers === 12 ? 'selected' : ''}>12</option>
-              </select>
-            </div>
-          </div>
-
           <div class="form-field">
             <label>Level <span class="row-sub">(a hint, not a gate)</span></label>
             <div class="quick-times" id="ng-level" style="margin-top:2px">
@@ -10440,16 +11119,30 @@
     };
     bindCourtPicks();
     let searchTimer;
+    let plannerCourtSearchSeq = 0;
     modal.querySelector('#ng-court-search').addEventListener('input', (e) => {
       clearTimeout(searchTimer);
       const q = e.target.value.trim();
+      const resultsEl = modal.querySelector('#ng-court-results');
+      if (q.length < 2) {
+        plannerCourtSearchSeq += 1;
+        resultsEl.removeAttribute('aria-busy');
+        resultsEl.innerHTML = suggestionRows;
+        bindCourtPicks();
+        return;
+      }
       searchTimer = setTimeout(async () => {
-        const resultsEl = modal.querySelector('#ng-court-results');
-        if (q.length < 2) { resultsEl.innerHTML = suggestionRows; bindCourtPicks(); return; }
+        const seq = ++plannerCourtSearchSeq;
+        resultsEl.setAttribute('aria-busy', 'true');
+        resultsEl.innerHTML = '<div class="play-now-loading" role="status"><span class="spinner"></span><span>Searching courts…</span></div>';
         let url = `/courts?q=${encodeURIComponent(q)}&limit=6`;
         if (state.userLoc) url += `&lat=${state.userLoc[0]}&lng=${state.userLoc[1]}`;
         try {
           const data = await api(url);
+          if (seq !== plannerCourtSearchSeq
+              || modal.querySelector('#ng-court-search').value.trim() !== q
+              || !document.body.contains(modal)) return;
+          resultsEl.removeAttribute('aria-busy');
           resultsEl.innerHTML = data.items.map((c) => `
             <button type="button" class="court-suggestion" data-pick-court="${c.id}" data-pick-name="${esc(c.name)}">
               <div class="row-main">
@@ -10459,8 +11152,18 @@
               ${c.distance_miles != null ? `<span class="tag" style="margin:0">${c.distance_miles} mi</span>` : ''}
             </button>`).join('') || '<div class="empty-state" style="padding:10px">No courts found.</div>';
           bindCourtPicks();
-        } catch { /* ignore */ }
+        } catch (error) {
+          if (seq !== plannerCourtSearchSeq
+              || modal.querySelector('#ng-court-search').value.trim() !== q
+              || !document.body.contains(modal)) return;
+          resultsEl.removeAttribute('aria-busy');
+          resultsEl.innerHTML = `<div class="empty-state" style="padding:10px">Couldn’t search courts.<br>${esc(error.message)}</div>`;
+        }
       }, 300);
+    });
+    modal._cleanupFns.push(() => {
+      clearTimeout(searchTimer);
+      plannerCourtSearchSeq += 1;
     });
 
     // --- When ---
@@ -10513,10 +11216,36 @@
     let visibility = initialVisibility;
     const inviteIds = new Set(initialInviteIds);
 
-    // --- Type ---
-    let gameType = defaultType;
+    // --- Type and format ---
+    const initialCrewSize = crewId ? initialInviteIds.size + 1 : null;
+    let gameType = crewId && ![2, 4].includes(initialCrewSize) && defaultType === 'ranked'
+      ? 'casual' : defaultType;
+    const maxInput = modal.querySelector('#ng-max');
+    const typeInputs = [...modal.querySelectorAll('input[name="ng-type"]')];
+    const capacityInputs = [...modal.querySelectorAll('input[name="ng-capacity"]')];
+    const initialRankedInput = modal.querySelector('input[name="ng-type"][value="ranked"]');
+    if (initialRankedInput && crewId && ![2, 4].includes(initialCrewSize)) {
+      initialRankedInput.disabled = true;
+      initialRankedInput.closest('.game-choice-option')?.classList.add('disabled');
+      initialRankedInput.closest('.game-choice-option')?.setAttribute('title', 'Ranked Crew games need exactly 2 or 4 accepted players');
+    }
     const recurringRow = modal.querySelector('#ng-recurring-row');
     const recurringBox = modal.querySelector('#ng-recurring');
+    const syncTypeChoices = () => {
+      typeInputs.forEach((input) => { input.checked = input.value === gameType; });
+    };
+    const syncCapacityChoices = () => {
+      const selectedCapacity = Number(maxInput.value);
+      capacityInputs.forEach((input) => {
+        const unavailable = !!crewId || (gameType === 'ranked' && Number(input.value) > 4);
+        input.checked = Number(input.value) === selectedCapacity;
+        input.disabled = unavailable;
+        const option = input.closest('.game-choice-option');
+        option?.classList.toggle('disabled', unavailable);
+        if (unavailable && !crewId) option?.setAttribute('title', 'Ranked games support Singles or Doubles');
+        else option?.removeAttribute('title');
+      });
+    };
     const syncRecurring = () => {
       // Recurring weekly sessions are open-play only (ranked games don't repeat).
       const isRanked = gameType === 'ranked';
@@ -10524,23 +11253,15 @@
       recurringRow.classList.toggle('hidden', !recurringAllowed);
       recurringBox.disabled = !recurringAllowed;
       if (!recurringAllowed) recurringBox.checked = false;
-      modal.querySelectorAll('#ng-max option').forEach((option) => {
-        option.disabled = isRanked && Number(option.value) > 4;
-      });
+      syncTypeChoices();
+      syncCapacityChoices();
     };
     syncRecurring();
-    modal.querySelector('#ng-type').addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn || btn.disabled) return;
-      gameType = btn.dataset.val;
-      if (gameType === 'ranked' && Number(modal.querySelector('#ng-max').value) > 4) {
-        modal.querySelector('#ng-max').value = '4';
-      }
-      modal.querySelectorAll('#ng-type button').forEach((b) => {
-        const active = b === btn;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', String(active));
-      });
+    modal.querySelector('#ng-type').addEventListener('change', (e) => {
+      const input = e.target.closest('input[name="ng-type"]');
+      if (!input || input.disabled) return;
+      gameType = input.value;
+      if (gameType === 'ranked' && Number(maxInput.value) > 4) maxInput.value = '4';
       syncRecurring();
       updateOptionsSummary();
       markPlannerDirty();
@@ -10568,7 +11289,14 @@
       const level = preferredLevel === 'any' ? 'Any level' : skillLabel(preferredLevel);
       modal.querySelector('#ng-options-summary').textContent = `${gameType === 'ranked' ? 'Ranked' : 'Casual'} · ${size} · ${level}`;
     };
-    modal.querySelector('#ng-max').addEventListener('change', () => { updateOptionsSummary(); markPlannerDirty(); });
+    modal.querySelector('#ng-capacity').addEventListener('change', (e) => {
+      const input = e.target.closest('input[name="ng-capacity"]');
+      if (!input || input.disabled) return;
+      maxInput.value = input.value;
+      syncCapacityChoices();
+      updateOptionsSummary();
+      markPlannerDirty();
+    });
     updateOptionsSummary();
 
     // --- Club banner ---
@@ -10679,24 +11407,21 @@
 
       const playerCount = freshInvitees.length + 1;
       const nextCapacity = [2, 4, 6, 8, 10, 12].find((count) => count >= playerCount) || 12;
-      modal.querySelector('#ng-max').value = String(nextCapacity);
+      maxInput.value = String(nextCapacity);
       const capacity = modal.querySelector('#ng-crew-capacity');
       if (capacity) capacity.textContent = `All ${playerCount} accepted players are included. Capacity is fixed to this roster.`;
       const privateSummary = modal.querySelector('#ng-crew-private');
       if (privateSummary) privateSummary.innerHTML = `<b>🔒 Private to ${esc(crewName || 'your crew')}</b><span>All ${playerCount} accepted players are included.</span>`;
-      const rankedButton = modal.querySelector('#ng-type button[data-val="ranked"]');
+      const rankedInput = modal.querySelector('input[name="ng-type"][value="ranked"]');
       const rankedEligible = [2, 4].includes(playerCount);
-      if (rankedButton) {
-        rankedButton.disabled = !rankedEligible;
-        rankedButton.title = rankedEligible ? '' : 'Ranked Crew games need exactly 2 or 4 accepted players';
+      if (rankedInput) {
+        rankedInput.disabled = !rankedEligible;
+        rankedInput.closest('.game-choice-option')?.classList.toggle('disabled', !rankedEligible);
+        if (rankedEligible) rankedInput.closest('.game-choice-option')?.removeAttribute('title');
+        else rankedInput.closest('.game-choice-option')?.setAttribute('title', 'Ranked Crew games need exactly 2 or 4 accepted players');
       }
       if (!rankedEligible && gameType === 'ranked') {
         gameType = 'casual';
-        modal.querySelectorAll('#ng-type button').forEach((button) => {
-          const active = button.dataset.val === 'casual';
-          button.classList.toggle('active', active);
-          button.setAttribute('aria-pressed', String(active));
-        });
       }
       syncRecurring();
       updateOptionsSummary();
@@ -10753,11 +11478,7 @@
       const restoredCrewSize = crewId ? initialInviteIds.size + 1 : null;
       gameType = crewId && ![2, 4].includes(restoredCrewSize) && restoredDraft.gameType === 'ranked'
         ? 'casual' : restoredDraft.gameType;
-      modal.querySelectorAll('#ng-type button').forEach((btn) => {
-        const active = btn.dataset.val === gameType;
-        btn.classList.toggle('active', active);
-        btn.setAttribute('aria-pressed', String(active));
-      });
+      syncTypeChoices();
       preferredLevel = restoredDraft.preferredLevel;
       modal.querySelectorAll('#ng-level button').forEach((btn) => {
         const active = btn.dataset.level === preferredLevel;
@@ -10768,7 +11489,8 @@
         ? ([2, 4, 6, 8, 10, 12].find((count) => count >= restoredCrewSize) || 12)
         : (gameType === 'ranked' && ![2, 4].includes(restoredDraft.maxPlayers)
             ? 4 : restoredDraft.maxPlayers);
-      modal.querySelector('#ng-max').value = String(restoredMax);
+      maxInput.value = String(restoredMax);
+      syncCapacityChoices();
 
       visibility = crewId ? 'private' : restoredDraft.visibility;
       modal.querySelectorAll('#ng-vis button').forEach((btn) => {
@@ -10822,7 +11544,11 @@
       updatePlannerSummary();
     }
 
-    let plannerStep = restoredDraft ? (crewId ? 'when' : 'who') : 'where';
+    // The unified flow already confirmed an explicit court, so do not ask the
+    // player to confirm Where a second time. Change remains one tap away.
+    let plannerStep = restoredDraft
+      ? (crewId ? 'when' : 'who')
+      : (hasExplicitCourt ? 'when' : 'where');
     const syncPlannerStep = ({ focus = false } = {}) => {
       const whereStep = modal.querySelector('#ng-step-where');
       const whenStep = modal.querySelector('#ng-step-when');
@@ -11020,7 +11746,7 @@
           crewId
             ? `This Crew has ${plannedPlayerCount} accepted players. Crew games support up to 12 players.`
             : `This crew needs room for ${plannedPlayerCount} players. Increase Players needed or remove someone.`,
-          modal.querySelector('#ng-max'),
+          modal.querySelector('#ng-capacity'),
         );
         return;
       }
@@ -16300,10 +17026,19 @@
         <div id="gs-crew-connect" aria-live="polite"><div class="postgame-connection-loading">Checking who you still need to connect with…</div></div>`;
     }
 
+    const gameFormat = Number(game.max_players) === 2
+      ? 'Singles' : Number(game.max_players) === 4 ? 'Doubles' : `${game.max_players} players`;
+    const gameTypeAndFormat = `${game.game_type === 'ranked' ? 'Ranked' : 'Casual'} · ${gameFormat}`;
+    const gameTypeTag = game.is_instant
+      ? `<span class="tag${game.game_type === 'ranked' ? ' ranked' : (assembly ? ' live' : '')}" style="margin:0 0 0 6px">${assembly ? 'Rally now · ' : 'Rally · '}${esc(gameTypeAndFormat)}</span>`
+      : game.game_type === 'ranked'
+        ? `<span class="tag ranked" style="margin:0 0 0 6px">${esc(gameTypeAndFormat)}</span>`
+        : `<span class="tag" style="margin:0 0 0 6px">${esc(gameTypeAndFormat)}</span>`;
+
     return `
       <div class="modal-head">
         <div style="flex:1">
-          <h3>${emoji} ${headline} ${game.is_instant ? `<span class="tag${assembly ? ' live' : ''}" style="margin:0 0 0 6px">${assembly ? 'Rally now' : 'Rally'}</span>` : game.game_type === 'ranked' ? '<span class="tag ranked" style="margin:0 0 0 6px">Ranked</span>' : '<span class="tag" style="margin:0 0 0 6px">Casual</span>'}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}${game.preferred_level && game.preferred_level !== 'any' ? `<span class="tag" style="margin:0 0 0 6px">🎚 ${skillLabel(game.preferred_level)}</span>` : ''}${game.club_name ? `<span class="tag" style="margin:0 0 0 6px">🏛 ${esc(game.club_name)}</span>` : ''}</h3>
+          <h3>${emoji} ${headline} ${gameTypeTag}${game.recurrence === 'weekly' ? '<span class="tag" style="margin:0 0 0 6px">🔁 Weekly</span>' : ''}${game.preferred_level && game.preferred_level !== 'any' ? `<span class="tag" style="margin:0 0 0 6px">🎚 ${skillLabel(game.preferred_level)}</span>` : ''}${game.club_name ? `<span class="tag" style="margin:0 0 0 6px">🏛 ${esc(game.club_name)}</span>` : ''}</h3>
           <div class="row-sub">${subline}</div>
         </div>
         ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="Game chat — current players only" aria-label="Game chat — current players only" style="box-shadow:none;font-size:17px;position:relative">💬${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
@@ -16329,7 +17064,8 @@
       <div style="margin-top:16px">${actions}</div>`;
   }
 
-  async function openGameScreen(gameId) {
+  async function openGameScreen(gameId, options = {}) {
+    const replaceModal = options && options.replaceModal;
     const routeLoad = beginRoutedOverlayLoad({ kind: 'game', id: gameId });
     let game;
     try { game = await api(`/games/${gameId}`); } catch (e) {
@@ -16340,7 +17076,15 @@
     }
     if (!routedOverlayLoadIsCurrent(routeLoad)) return;
 
-    const modal = openModal('', { route: { kind: 'game', id: gameId }, label: 'Game details' });
+    let modal = null;
+    const mountGameScreen = () => {
+      modal = openModal('', { route: { kind: 'game', id: gameId }, label: 'Game details' });
+    };
+    if (replaceModal) {
+      if (!document.body.contains(replaceModal)
+          || currentOverlayEntry()?.el !== replaceModal
+          || !transitionModal(replaceModal, mountGameScreen)) return;
+    } else mountGameScreen();
     const box = modal.querySelector('.modal');
     let fingerprint = '';
     let rematchAttempt = readRematchAttempt(gameId);

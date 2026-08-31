@@ -99,9 +99,8 @@ def test_court_detail_leads_with_now_and_defers_venue_management():
     assert "const myOpenGame = nowGames.find((game) => game.is_joined && game.status === 'upcoming') || null;" in detail
     assert "const primaryAction = myOpenGame" in detail
     assert 'id="cd-open-game" data-game-id="${myOpenGame.id}">Open your game' in detail
-    assert detail.index("const primaryAction = myOpenGame") < detail.index(": checkedIn")
     assert "Find or start a game" in detail
-    assert "Get directions" in detail
+    assert ">Directions</a>" in detail
     assert 'id="cd-checkout">Check out' in detail
     assert '<summary>Court details</summary>' in detail
     assert '<summary>More at this court</summary>' in detail
@@ -109,6 +108,8 @@ def test_court_detail_leads_with_now_and_defers_venue_management():
     assert "modal.querySelector('#cd-checkin')?.addEventListener" in detail
     assert "modal.querySelector('#cd-checkout')?.addEventListener" in detail
     assert "modal.querySelector('#cd-play-now')?.addEventListener" in detail
+    assert "openGameFlow({ court, mode: 'find' })" in detail
+    assert "openGameFlow({ court, mode: 'schedule' })" in detail
 
 
 def test_court_address_copy_is_a_native_keyboard_accessible_button():

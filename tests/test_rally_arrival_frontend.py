@@ -38,10 +38,13 @@ def test_discovery_capability_and_capacity_survive_normalization_and_dom():
     assert "data-rally-roster-count" in datasets
     assert "dataset.rallyRosterCount" in datasets
     assert "data-rally-physical-spots-left" in datasets
+    assert "data-rally-game-type" in datasets
+    assert "dataset.rallyGameType" in datasets
 
     player = section("function playerRallySummary", "function normalizeLookingRallies")
     assert "arrival_available: player.arrival_available ?? player.arrivalAvailable" in player
     assert "roster_count: player.roster_count ?? court.roster_count" in player
+    assert "game_type: player.game_type ?? player.gameType" in player
 
     reserve = section("async function reserveRallyArrival", "function openRallyArrivalSheet")
     assert "if (rally.arrivalCapability) body.arrival_capability = rally.arrivalCapability;" in reserve
@@ -74,8 +77,10 @@ def test_remote_rally_action_is_arrival_while_court_presence_still_joins():
     assert gate.index("if (!isCheckedInAtCourt(courtId))") < gate.index(
         "api(`/games/${gameId}/join`"
     )
-    assert "expectedCourtId: courtId" in gate
-    assert "finding the next rally at this court" in gate
+    assert "mode: 'find'" in gate
+    assert "id: courtId" in gate
+    assert "gameType: summary.gameType" in gate
+    assert "showing current options at this court" in gate
 
 
 def test_eta_sheet_is_accessible_and_never_claims_physical_readiness():
@@ -181,14 +186,13 @@ def test_active_trip_banner_details_cancel_and_explicit_arrival_confirmation():
     assert "state.playGamesCache = null;" in surface_refresh
     assert "state.tab === 'play' && state.playSeg === 'games'" in surface_refresh
     assert "renderPlay();" in surface_refresh
-    recovery = section(
-        "async function recoverRallyAfterConfirmedArrival", "async function openReadyRally"
-    )
-    assert "safePositiveId(result && result.game && result.game.id)" in recovery
-    assert recovery.index("safePositiveId(result && result.game && result.game.id)") < recovery.index(
-        "clearArrivalAfterConfirmedMembership(callerSession, arrivalGameId)"
-    )
     direct_join = section("async function openReadyRally", "function openCheckInSheet")
+    assert "const showCurrentOptions = () =>" in direct_join
+    assert "openGameFlow({" in direct_join
+    assert "gameType: summary.gameType" in direct_join
+    assert "maxPlayers: summary.maxPlayers" in direct_join
+    assert "return showCurrentOptions();" in direct_join
+    assert "startInstantRally(" not in direct_join
     assert direct_join.index("await api(`/games/${gameId}/join`") < direct_join.index(
         "clearArrivalAfterConfirmedMembership(callerSession, gameId)"
     )

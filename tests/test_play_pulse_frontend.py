@@ -29,17 +29,17 @@ def test_me_recovers_only_a_live_server_expiring_pulse_and_refreshes_hero():
     assert "renderPlay({ useCachedData: true })" in apply_me
 
 
-def test_remote_hero_leads_with_one_play_soon_entry_without_claiming_presence():
+def test_remote_hero_leads_with_unified_game_entry_without_claiming_presence():
     hero = section("function rallyLauncherHtml", "async function renderPlay")
-    assert 'data-goto="play-soon"' in hero
-    assert "<b>Play soon</b>" in hero
-    assert "Now, arriving, or free this hour" in hero
+    assert 'data-goto="game-flow"' in hero
+    assert "<b>Find or start a game</b>" in hero
+    assert "choose exactly what to start" in hero
+    assert 'data-goto="play-soon"' not in hero
     assert 'data-goto="play-pulse"' not in hero
     assert 'data-goto="play-now"' not in hero
-    assert "const immediateAction = here" in hero
-    assert 'data-goto="instant-rally"' in hero
+    assert "const immediateAction = `<button" in hero
+    assert 'data-goto="instant-rally"' not in hero
     assert "Find or start a game" in hero
-    assert ": pulse ? ''" in hero
     assert "activePlayPulseBannerHtml(pulse)" in hero
     assert "Nearby players can respond to the court you picked." in hero
 
@@ -208,4 +208,4 @@ def test_errors_mobile_targets_and_shell_revision_are_explicit():
     assert "grid-template-columns: auto minmax(0, 1fr)" in STYLES
     assert ".play-pulse-nearby-card [data-play-pulse-accept]" in STYLES
     assert "min-width: 0" in STYLES
-    assert "thirdshot-v15-r8" in SW
+    assert "thirdshot-v15-r12" in SW

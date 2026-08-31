@@ -12,28 +12,22 @@ def section(start: str, end: str) -> str:
     return APP[begin:APP.index(end, begin)]
 
 
-def test_play_launcher_has_one_immediate_entry_and_three_plain_language_choices():
+def test_play_launcher_has_one_shared_immediate_entry_and_one_schedule_entry():
     launcher = section("function rallyLauncherHtml", "function playMoreRoutesHtml")
-    assert launcher.count('data-goto="play-soon"') == 1
+    assert launcher.count('data-goto="game-flow"') == 1
+    assert launcher.count('data-goto="new-game"') == 1
+    assert 'data-goto="play-soon"' not in launcher
     assert 'data-goto="play-now"' not in launcher
     assert 'data-goto="play-pulse"' not in launcher
-    assert "const immediateAction = here" in launcher
-    assert 'data-goto="instant-rally"' in launcher
+    assert "const immediateAction = `<button" in launcher
+    assert 'data-goto="instant-rally"' not in launcher
     assert "Find or start a game" in launcher
-    assert ": pulse ? ''" in launcher
+    assert "Casual or Ranked · Singles or Doubles" in launcher
+    assert "Plan a game" in launcher
 
-    flow = section("function openPlaySoonFlow", "async function openPlaySoonArrivalChoices")
-    for label in (
-        "I’m at a court now",
-        "I can be there in 5–15 minutes",
-        "I’m free sometime this hour",
-    ):
-        assert flow.count(label) == 1
-    assert flow.count("data-play-soon-choice=") == 6  # selector + one button per choice
-    assert "startInstantRally(event.currentTarget, { fromModal: modal })" in flow
-    assert "openPlayNowCourtPicker()" in flow
-    assert "openPlaySoonArrivalChoices" in flow
-    assert "openPlayPulseCourtPicker" in flow
+    flow = section("function openGameFlow", "async function checkInAndStartRally")
+    for label in ("Find", "Start now", "Schedule"):
+        assert f"> {label}</button>" in flow
 
 
 def test_arriving_choice_uses_live_rallies_and_existing_arrival_backend_flow():

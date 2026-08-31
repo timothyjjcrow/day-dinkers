@@ -12,19 +12,19 @@ def section(start: str, end: str) -> str:
     return APP[APP.index(start):APP.index(end, APP.index(start))]
 
 
-def test_global_play_now_uses_compact_court_confirmation_not_planner():
+def test_global_play_now_enters_unified_find_flow_not_planner_directly():
     ctas = section("function setupEmptyStateCtas()", "// ---------- Map / Courts ----------")
     play_now_branch = ctas[ctas.index("target === 'play-now'"):ctas.index("target === 'new-ranked-game'")]
-    assert "openPlayNowCourtPicker();" in play_now_branch
+    assert "openGameFlow({ mode: 'find' });" in play_now_branch
     assert "openNewGameModal" not in play_now_branch
 
-    picker = section("async function openPlayNowCourtPicker", "async function openReadyRally")
-    assert "Current check-in" in picker
-    assert "⭐ Saved" in picker
-    assert "🏠 Home" in picker
-    assert "distance_miles" in picker
-    assert 'id="play-now-search"' in picker
-    assert "Find a game now" in picker
+    flow = section("function openGameFlow", "async function checkInAndStartRally")
+    assert "📍 Current check-in" in flow
+    assert "⭐ Saved" in flow
+    assert "🏠 Home" in flow
+    assert "distance_miles" in flow
+    assert 'id="game-flow-court-search"' in flow
+    assert "Finding never creates a game" in flow
 
 
 def test_ready_confirmation_checks_in_before_durable_rally_resolution():
@@ -64,14 +64,22 @@ def test_rally_attempt_is_shared_recoverable_and_history_safe():
     assert "sharedRecord.userId === callerSession.userId" in rally
     assert "sharedRecord.courtId === expectedCourtId" in rally
     assert "resolution = await sharedRecord.promise;" in rally
-    assert "pendingInstantRallyAttempt(callerSession.userId, expectedCourtId)" in rally
+    assert "const attempt = pendingInstantRallyAttempt(" in rally
+    assert "requestedGameType, requestedMaxPlayers" in rally
     assert "Number(saved.courtId) === expectedCourtId" in APP
+    assert "pp_instant_rally_v3:" in APP
     assert "pp_instant_rally_v2:" in APP
-    assert "`${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:${expectedCourtId}`" in APP
+    assert "`${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:${expectedCourtId}:${normalizedType}:${normalizedMax}`" in APP
     assert "sessionStorage.getItem(legacyKey)" in APP
     assert "court_id: attempt.courtId" in rally
-    assert "clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id)" in rally
+    assert "attempt.gameType, attempt.maxPlayers" in rally
+    assert "game_type: attempt.gameType" in rally
+    assert "max_players: attempt.maxPlayers" in rally
+    assert "confirm_court_presence: confirmCourtPresence" in rally
     assert "courtId: expectedCourtId" in rally
+    assert "gameType: requestedGameType" in rally
+    assert "maxPlayers: requestedMaxPlayers" in rally
+    assert "confirmCourtPresence," in rally
     assert "if (instantRallyInFlight === record) instantRallyInFlight = null;" in rally
     assert "resolution?.abandoned" in rally
     assert "function finishInstantRallyCall(resolution, options = {}, callerSession = null)" in rally
@@ -83,13 +91,13 @@ def test_rally_attempt_is_shared_recoverable_and_history_safe():
     assert "authoritativeRallyGame(error)" in rally
     assert "data.game_id" in rally and "data.existing_game_id" in rally
     assert "currentOverlayEntry()?.el !== fromModal" in rally
-    assert "transitionModal(fromModal, () => openGameScreen(gameId))" in rally
+    assert "openGameScreen(gameId, { replaceModal: fromModal })" in rally
     assert "return { staleRally: true, error };" in rally
     assert "game.status !== 'upcoming' || game.assembly_active === false" in rally
     assert "return { staleRally: true, error: stale };" in rally
     assert "staleRallyRestarted: true" in rally
     assert "['rally_no_longer_active', 'rally_time_out_of_range'].includes(error.code)" in rally
-    assert rally.index("clearInstantRallyAttempt(callerSession.userId, attempt.courtId, attempt.id);\n          return { staleRally") < rally.index(
+    assert rally.index("return { staleRally: true, error: stale };") < rally.index(
         "const recoveredGame = authoritativeRallyGame(error)"
     )
 
@@ -101,7 +109,8 @@ def test_logout_detaches_inflight_rally_from_the_next_account():
     assert "if (!instantRallySessionMatches(callerSession)) return { abandoned: true };" in rally
     assert "token: callerSession.token" in rally
     assert "userId: callerSession.userId" in rally
-    assert "const prefix = `${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:`;" in APP
+    assert "`${INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:`," in APP
+    assert "`${LEGACY_INSTANT_RALLY_ATTEMPT_PREFIX}${accountId}:`," in APP
     assert "keys.forEach((key) => sessionStorage.removeItem(key));" in APP
 
 
@@ -127,7 +136,8 @@ def test_every_instant_join_uses_arrival_hold_until_at_court_confirmation():
     finish = section("function finishInstantRallyCall", "function rallyLauncherHtml")
     assert "['active_checkin_required', 'active_checkin_court_mismatch'].includes" in finish
     assert "refreshMe().finally(reopenConfirmation);" in finish
-    assert "transitionModal(sourceModal, () => openPlayNowCourtPicker())" in finish
+    assert "transitionModal(sourceModal, () => openGameFlow({" in finish
+    assert "mode: 'start', gameType: options.gameType, maxPlayers: options.maxPlayers" in finish
 
     cards = section("function bindGameButtons", "// Share text")
     assert "b.dataset.instantRally === 'true'" in cards

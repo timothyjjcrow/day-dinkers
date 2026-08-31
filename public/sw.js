@@ -3,8 +3,8 @@
 // path release guards major transitions; this revision makes existing v15
 // installs refresh the simplified Play, Courts, Community, and Settings shell
 // instead of retaining old executable bytes.
-const CACHE = 'thirdshot-v15-r8';
-const CORE_SHELL = ['/', '/styles-v15.css?v=r8', '/crew-planner-v15.js?v=r8', '/app-v15.js?v=r8'];
+const CACHE = 'thirdshot-v15-r12';
+const CORE_SHELL = ['/', '/styles-v15.css?v=r12', '/crew-planner-v15.js?v=r12', '/app-v15.js?v=r12'];
 const OPTIONAL_SHELL = ['/manifest.webmanifest', '/icon-512.png', '/icon-maskable.png', '/logo.jpg'];
 const NAVIGATION_TIMEOUT_MS = 1200;
 

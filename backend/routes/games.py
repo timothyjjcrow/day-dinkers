@@ -41,9 +41,11 @@ from backend.models import (
 )
 from backend.routes.auth import (
     active_checkin_for,
+    checkin_is_fresh,
     login_required,
     optional_current_user,
     presence_absolute_cutoff,
+    presence_payload,
     presence_stale_cutoff,
 )
 from backend.routes.courts import haversine_miles
@@ -467,36 +469,83 @@ def _rally_attempt(payload):
     else:
         expected_court_id = 0
     scheduled_at = _parse_scheduled_at(payload.get('scheduled_at'))
+
+    raw_game_type = payload.get('game_type', 'casual')
+    game_type = (
+        raw_game_type.strip().lower()
+        if isinstance(raw_game_type, str) else None
+    )
+    if game_type not in GAME_TYPES:
+        game_type = None
+
+    raw_max_players = payload.get('max_players', 4)
+    if isinstance(raw_max_players, bool):
+        max_players = None
+    elif isinstance(raw_max_players, int):
+        max_players = raw_max_players
+    elif (
+        isinstance(raw_max_players, str)
+        and raw_max_players.strip().isdigit()
+    ):
+        max_players = int(raw_max_players.strip())
+    else:
+        max_players = None
+    if max_players not in (2, 4):
+        max_players = None
+
     # Accept the short-lived pre-court-binding fingerprint only when its
-    # stored game is instant and already belongs to this exact expected court.
-    legacy_normalized = {
+    # stored game is an instant, default casual-doubles rally at this court.
+    legacy_v1_normalized = {
         'operation': 'instant_rally_v1',
         'scheduled_at': scheduled_at,
     }
-    normalized = {
+    legacy_v2_normalized = {
         'operation': 'instant_rally_v2',
         'court_id': expected_court_id,
         'scheduled_at': scheduled_at,
     }
+    normalized = {
+        'operation': 'instant_rally_v3',
+        'court_id': expected_court_id,
+        'scheduled_at': scheduled_at,
+        'game_type': game_type,
+        'max_players': max_players,
+    }
     return (
         expected_court_id,
         scheduled_at,
+        game_type,
+        max_players,
         _game_attempt_fingerprint(normalized),
-        _game_attempt_fingerprint(legacy_normalized),
+        (
+            _game_attempt_fingerprint(legacy_v2_normalized),
+            _game_attempt_fingerprint(legacy_v1_normalized),
+        ),
     )
 
 
 def _rally_attempt_matches(
-    game, expected_court_id, fingerprint, legacy_fingerprint,
+    game, expected_court_id, game_type, max_players, fingerprint,
+    legacy_fingerprints,
 ):
-    """Whether a stored keyed rally is the exact selected-court attempt."""
+    """Whether a stored keyed rally is the exact configured-court attempt."""
     if (
         not game.is_instant
         or game.court_id != expected_court_id
+        or game.game_type != game_type
+        or game.max_players != max_players
     ):
         return False
     stored = game.client_attempt_fingerprint
-    return stored is None or stored in (fingerprint, legacy_fingerprint)
+    if stored == fingerprint:
+        return True
+    # Pre-v3 requests could only create casual doubles. Preserve replay for
+    # those rows without letting a legacy key authorize a new configuration.
+    return (
+        game_type == 'casual'
+        and max_players == 4
+        and (stored is None or stored in legacy_fingerprints)
+    )
 
 
 def issue_rally_arrival_capability(user_id, game_id, court_id, now=None):
@@ -760,15 +809,74 @@ def _pulse_payload(pulse, now=None):
     return pulse.to_dict(now) if pulse else None
 
 
-def _rally_response(game, outcome, current_user_id, invited_count=0, status=200):
-    return jsonify({
+def _rally_response(
+    game, outcome, current_user_id, invited_count=0, status=200,
+    include_presence=False,
+):
+    payload = {
         'game': _game_payload(game, current_user_id),
         'outcome': outcome,
         'invited_count': invited_count,
-    }), status
+    }
+    if include_presence:
+        presence = presence_payload(current_user_id)
+        payload['presence'] = presence
+        # A rally can remain recoverable after its court is closed, while the
+        # requested atomic check-in is intentionally refused. Make that partial
+        # recovery explicit so clients never infer presence from a 200 alone.
+        payload['presence_confirmed'] = bool(
+            presence.get('checked_in')
+            and presence.get('court_id') == game.court_id
+        )
+    return jsonify(payload), status
 
 
-def _instant_rally_candidates(court_id, now):
+def _commit_instant_rally_presence(user, court, checkin, now):
+    """Make ``court`` the user's live presence inside a rally transaction."""
+    if checkin and checkin.court_id == court.id:
+        if not checkin_is_fresh(checkin, now):
+            checkin.checked_in_at = now
+        target = checkin
+    else:
+        if checkin:
+            checkin.checked_out_at = now
+            # The active-presence unique index is immediate, so retire the old
+            # row before inserting its replacement.
+            db.session.flush()
+        target = CheckIn(
+            user_id=user.id,
+            court_id=court.id,
+            looking_for_game=False,
+            checked_in_at=now,
+            last_presence_ping_at=now,
+        )
+        db.session.add(target)
+
+    target.looking_for_game = False
+    target.last_presence_ping_at = now
+    if court.latitude is not None and court.longitude is not None:
+        user.last_lat = court.latitude
+        user.last_lng = court.longitude
+        user.last_location_at = now
+    _end_active_play_pulse_for_user(user.id, 'instant_rally', now)
+    return target
+
+
+def _finalize_instant_rally_presence(
+    user, court, checkin, now, confirm_court_presence,
+):
+    """Resolve presence only after a rally outcome has been accepted."""
+    if confirm_court_presence:
+        return _commit_instant_rally_presence(user, court, checkin, now)
+    # Legacy callers reached this point only after the original fresh
+    # exact-court validation, so retain that behavior byte-for-byte.
+    checkin.looking_for_game = False
+    checkin.last_presence_ping_at = now
+    _end_active_play_pulse_for_user(user.id, 'instant_rally', now)
+    return checkin
+
+
+def _instant_rally_candidates(court_id, now, game_type, max_players):
     """Base query for a rally that can still recruit at ``court_id``.
 
     The durable game row can remain for scoring, but physical recruiting has
@@ -779,7 +887,8 @@ def _instant_rally_candidates(court_id, now):
         Game.status == 'upcoming',
         Game.is_instant.is_(True),
         Game.assembly_closed_at.is_(None),
-        Game.game_type == 'casual',
+        Game.game_type == game_type,
+        Game.max_players == max_players,
         Game.visibility == 'open',
         Game.recurrence == 'none',
         Game.scheduled_at >= now - timedelta(
@@ -1147,7 +1256,9 @@ def _instant_rally_is_actionable(game, now=None):
     )
 
 
-def _resolve_instant_rally_replay_presence(game, user_id, now=None):
+def _resolve_instant_rally_replay_presence(
+    game, user_id, now=None, confirm_court_presence=False,
+):
     """Clear a reasserted LFG flag on a response-lost create retry.
 
     The resource replay remains valid without presence. When a fresh same-court
@@ -1166,16 +1277,30 @@ def _resolve_instant_rally_replay_presence(game, user_id, now=None):
     if not user or user.deleted_at:
         return
     checkin = active_checkin_for(
-        user_id, fresh=True, now=now, for_update=True,
+        user_id,
+        fresh=not confirm_court_presence,
+        now=now,
+        for_update=True,
     )
-    if (
-        checkin
-        and checkin.court_id == game.court_id
-        and checkin.looking_for_game
-    ):
-        checkin.looking_for_game = False
-        checkin.last_presence_ping_at = now
-    _end_active_play_pulse_for_user(user_id, 'instant_rally', now)
+    court = game.court
+    if confirm_court_presence:
+        # A replay must remain readable after a court closes, but a closed
+        # court cannot be used to establish (or move) physical presence.
+        # Crucially, do not fall through to the legacy pulse mutation here:
+        # callers opted into one atomic "start + check in" operation and the
+        # check-in half cannot succeed on a closed court.
+        if not court or court.closed:
+            return
+        _commit_instant_rally_presence(user, court, checkin, now)
+    else:
+        if (
+            checkin_is_fresh(checkin, now)
+            and checkin.court_id == game.court_id
+            and checkin.looking_for_game
+        ):
+            checkin.looking_for_game = False
+            checkin.last_presence_ping_at = now
+        _end_active_play_pulse_for_user(user_id, 'instant_rally', now)
     db.session.commit()
 
 
@@ -2203,19 +2328,30 @@ def start_instant_rally():
     elif not isinstance(payload, dict):
         return jsonify({'error': 'invalid_payload'}), 400
 
+    raw_confirm_presence = payload.get('confirm_court_presence', False)
+    if not isinstance(raw_confirm_presence, bool):
+        return jsonify({'error': 'invalid_confirm_court_presence'}), 400
+    confirm_court_presence = raw_confirm_presence
+
     client_attempt_id, valid_attempt_id = _client_attempt_id(payload)
     if not valid_attempt_id or not client_attempt_id:
         return jsonify({'error': 'invalid_client_attempt_id'}), 400
     (
         expected_court_id,
         scheduled_at,
+        game_type,
+        max_players,
         attempt_fingerprint,
-        legacy_attempt_fingerprint,
+        legacy_attempt_fingerprints,
     ) = _rally_attempt(payload)
     if expected_court_id <= 0:
         return jsonify({'error': 'invalid_court_id'}), 400
     if not scheduled_at:
         return jsonify({'error': 'invalid_scheduled_at'}), 400
+    if game_type is None:
+        return jsonify({'error': 'invalid_game_type'}), 400
+    if max_players is None:
+        return jsonify({'error': 'invalid_max_players'}), 400
 
     # Probe without a lock first. Only an actual replay enters the isolated
     # User -> Game lock path; a new attempt must not carry its actor User lock
@@ -2248,8 +2384,10 @@ def start_instant_rally():
         if not _rally_attempt_matches(
             existing_attempt,
             expected_court_id,
+            game_type,
+            max_players,
             attempt_fingerprint,
-            legacy_attempt_fingerprint,
+            legacy_attempt_fingerprints,
         ):
             return jsonify({'error': 'client_attempt_id_conflict'}), 409
         stale_response = _closed_rally_replay_response(existing_attempt)
@@ -2257,35 +2395,41 @@ def start_instant_rally():
             return stale_response
         _resolve_instant_rally_replay_presence(
             existing_attempt, actor.id,
+            confirm_court_presence=confirm_court_presence,
         )
         return _rally_response(
             existing_attempt,
             'existing',
             actor.id,
             invited_count=GameInvite.query.filter_by(game_id=existing_attempt.id).count(),
+            include_presence=confirm_court_presence,
         )
 
     now = utcnow()
     if scheduled_at < now - timedelta(minutes=10) or scheduled_at > now + timedelta(minutes=10):
         return jsonify({'error': 'rally_time_out_of_range'}), 400
 
-    checkin = active_checkin_for(g.current_user.id, fresh=True, now=now)
+    # The explicit Start-now flow may atomically establish presence only
+    # after we know the rally operation will succeed.  Legacy callers retain
+    # the original fresh, exact-court prerequisite.
+    checkin = active_checkin_for(
+        g.current_user.id,
+        fresh=not confirm_court_presence,
+        now=now,
+    )
     stale_cutoff = presence_stale_cutoff(now)
     absolute_cutoff = presence_absolute_cutoff(now)
-    if not checkin:
+    if not confirm_court_presence and not checkin:
         return jsonify({'error': 'active_checkin_required'}), 409
-    if checkin.court_id != expected_court_id:
+    if (
+        not confirm_court_presence
+        and checkin.court_id != expected_court_id
+    ):
         return jsonify({
             'error': 'active_checkin_court_mismatch',
             'checked_in_court_id': checkin.court_id,
             'requested_court_id': expected_court_id,
         }), 409
-
-    # Lazy cleanup is not the freshness boundary (queries below are), but it
-    # keeps abandoned one-person rally rows from accumulating in Profile.
-    # Preflight court validation above guarantees an already-switched request
-    # returns without creating, joining, or closing a rally as a side effect.
-    expire_abandoned_instant_rallies(now)
 
     # Serialize the discover-or-create decision per court on databases that
     # support row locks. SQLite safely ignores FOR UPDATE in local tests.
@@ -2296,7 +2440,6 @@ def start_instant_rally():
     )
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
-
     # Take a bounded snapshot before User locks. Check-in, block, and account
     # deletion mutations also lock their affected Users; locking this closure
     # in ascending order makes the later eligibility decision stable.
@@ -2314,7 +2457,9 @@ def start_instant_rally():
         .all()
     )
     preliminary_games = (
-        _instant_rally_candidates(court.id, now)
+        _instant_rally_candidates(
+            court.id, now, game_type, max_players,
+        )
         .order_by(Game.scheduled_at.desc(), Game.id.desc())
         .limit(20)
         .all()
@@ -2356,14 +2501,21 @@ def start_instant_rally():
         if not _rally_attempt_matches(
             raced_attempt,
             expected_court_id,
+            game_type,
+            max_players,
             attempt_fingerprint,
-            legacy_attempt_fingerprint,
+            legacy_attempt_fingerprints,
         ):
             return jsonify({'error': 'client_attempt_id_conflict'}), 409
         stale_response = _closed_rally_replay_response(raced_attempt, now)
         if stale_response:
             return stale_response
-        _resolve_instant_rally_replay_presence(raced_attempt, actor.id, now)
+        _resolve_instant_rally_replay_presence(
+            raced_attempt,
+            actor.id,
+            now,
+            confirm_court_presence=confirm_court_presence,
+        )
         return _rally_response(
             raced_attempt,
             'existing',
@@ -2371,16 +2523,23 @@ def start_instant_rally():
             invited_count=GameInvite.query.filter_by(
                 game_id=raced_attempt.id,
             ).count(),
+            include_presence=confirm_court_presence,
         )
 
     # Re-read presence after the User lock. A checkout or court switch that
     # won while this request waited cannot create attendance at the old court.
     checkin = active_checkin_for(
-        actor.id, fresh=True, now=now, for_update=True,
+        actor.id,
+        fresh=not confirm_court_presence,
+        now=now,
+        for_update=True,
     )
-    if not checkin:
+    if not confirm_court_presence and not checkin:
         return jsonify({'error': 'active_checkin_required'}), 409
-    if checkin.court_id != expected_court_id:
+    if (
+        not confirm_court_presence
+        and checkin.court_id != expected_court_id
+    ):
         return jsonify({
             'error': 'active_checkin_court_mismatch',
             'checked_in_court_id': checkin.court_id,
@@ -2407,21 +2566,45 @@ def start_instant_rally():
         game for game in actor_rallies
         if _instant_rally_assembly_active(game, now)
     ]
+    same_court_rallies = [
+        game for game in active_actor_rallies if game.court_id == court.id
+    ]
     same_court_rally = next(
-        (game for game in active_actor_rallies if game.court_id == court.id),
+        (
+            game for game in same_court_rallies
+            if game.game_type == game_type
+            and game.max_players == max_players
+        ),
         None,
     )
     if same_court_rally:
-        checkin.looking_for_game = False
-        checkin.last_presence_ping_at = now
-        _end_active_play_pulse_for_user(actor.id, 'instant_rally', now)
+        if confirm_court_presence:
+            # Existing same-court recovery is still valid after an operator
+            # closes the court, but that closure must not manufacture a new
+            # physical check-in.
+            if not court.closed:
+                checkin = _finalize_instant_rally_presence(
+                    actor, court, checkin, now, confirm_court_presence,
+                )
+        else:
+            checkin = _finalize_instant_rally_presence(
+                actor, court, checkin, now, confirm_court_presence,
+            )
         db.session.commit()
         return _rally_response(
             same_court_rally, 'existing', actor.id,
             invited_count=GameInvite.query.filter_by(
                 game_id=same_court_rally.id,
             ).count(),
+            include_presence=confirm_court_presence,
         )
+    if same_court_rallies:
+        conflicting_rally = same_court_rallies[0]
+        return jsonify({
+            'error': 'active_rally_configuration_conflict',
+            'game_id': conflicting_rally.id,
+            'game': _game_payload(conflicting_rally, actor.id, now=now),
+        }), 409
     if active_actor_rallies:
         elsewhere = active_actor_rallies[0]
         return jsonify({
@@ -2429,6 +2612,12 @@ def start_instant_rally():
             'game_id': elsewhere.id,
             'game': _game_payload(elsewhere, actor.id, now=now),
         }), 409
+
+    # Existing same-court recovery/configuration conflicts above intentionally
+    # win over a later court closure. A genuinely new join or start cannot
+    # recruit at a court that has since been closed.
+    if court.closed:
+        return jsonify({'error': 'court_closed'}), 409
 
     # The actor User lock prevents a concurrent arrival declaration from
     # changing this probe while we establish a sorted Game lock closure. Include
@@ -2505,14 +2694,13 @@ def start_instant_rally():
                 _end_arrival_intent(reserved_arrival, 'blocked', now)
                 db.session.commit()
                 return jsonify({'error': 'game_not_found'}), 404
-            reserved_game.players.append(
-                GamePlayer(user_id=g.current_user.id),
+            checkin = _finalize_instant_rally_presence(
+                actor, court, checkin, now, confirm_court_presence,
             )
+            reserved_game.players.append(GamePlayer(user_id=actor.id))
             _end_arrival_intent(reserved_arrival, 'arrived', now)
-            checkin.looking_for_game = False
-            checkin.last_presence_ping_at = now
             personal_invite = GameInvite.query.filter_by(
-                game_id=reserved_game.id, user_id=g.current_user.id,
+                game_id=reserved_game.id, user_id=actor.id,
             ).first()
             if personal_invite:
                 db.session.delete(personal_invite)
@@ -2520,20 +2708,20 @@ def start_instant_rally():
                 notify(
                     reserved_game.creator_id,
                     'game_join',
-                    f'{g.current_user.display_name} arrived and joined your live rally',
-                    related_user_id=g.current_user.id,
+                    f'{actor.display_name} arrived and joined your live rally',
+                    related_user_id=actor.id,
                     related_game_id=reserved_game.id,
                     action_url=f'/#game/{reserved_game.id}',
                     unread_dedupe_key=(
-                        f'rally-join:{reserved_game.id}:{g.current_user.id}'
+                        f'rally-join:{reserved_game.id}:{actor.id}'
                     ),
                 )
-            _end_active_play_pulse_for_user(
-                g.current_user.id, 'instant_rally', now,
-            )
             db.session.commit()
             return _rally_response(
-                reserved_game, 'joined', g.current_user.id,
+                reserved_game,
+                'joined',
+                actor.id,
+                include_presence=confirm_court_presence,
             )
         # A current remote promise is intentionally one-rally-at-a-time. It
         # must be cancelled or expire before Play Now can assemble elsewhere.
@@ -2544,18 +2732,21 @@ def start_instant_rally():
     # Membership wins before capacity or recency: a response-lost retry must
     # return the game this player already joined even if it filled meanwhile.
     for game in live_candidates:
-        if any(player.user_id == g.current_user.id for player in game.players):
-            checkin.looking_for_game = False
-            checkin.last_presence_ping_at = now
-            _end_active_play_pulse_for_user(
-                g.current_user.id, 'instant_rally', now,
+        if any(player.user_id == actor.id for player in game.players):
+            checkin = _finalize_instant_rally_presence(
+                actor, court, checkin, now, confirm_court_presence,
             )
             db.session.commit()
-            return _rally_response(game, 'existing', g.current_user.id)
+            return _rally_response(
+                game,
+                'existing',
+                actor.id,
+                include_presence=confirm_court_presence,
+            )
 
     for game in live_candidates:
         if _active_holder_blocks_user(
-            game, g.current_user.id, now, for_update=True,
+            game, actor.id, now, for_update=True,
         ):
             continue
         if _arrival_capacity(game, now, for_update=True)['spots_left'] <= 0:
@@ -2563,16 +2754,17 @@ def start_instant_rally():
         # Blocking is mutual on social surfaces; do not silently assemble a
         # real-world game containing a player either side chose to avoid.
         if any(
-            is_blocked_between(g.current_user.id, player.user_id)
+            is_blocked_between(actor.id, player.user_id)
             for player in game.players
-            if player.user_id != g.current_user.id
+            if player.user_id != actor.id
         ):
             continue
-        checkin.looking_for_game = False
-        checkin.last_presence_ping_at = now
-        game.players.append(GamePlayer(user_id=g.current_user.id))
+        checkin = _finalize_instant_rally_presence(
+            actor, court, checkin, now, confirm_court_presence,
+        )
+        game.players.append(GamePlayer(user_id=actor.id))
         personal_invite = GameInvite.query.filter_by(
-            game_id=game.id, user_id=g.current_user.id,
+            game_id=game.id, user_id=actor.id,
         ).first()
         if personal_invite:
             db.session.delete(personal_invite)
@@ -2580,30 +2772,37 @@ def start_instant_rally():
             notify(
                 game.creator_id,
                 'game_join',
-                f'{g.current_user.display_name} joined your live rally',
-                related_user_id=g.current_user.id,
+                f'{actor.display_name} joined your live rally',
+                related_user_id=actor.id,
                 related_game_id=game.id,
                 action_url=f'/#game/{game.id}',
-                unread_dedupe_key=f'rally-join:{game.id}:{g.current_user.id}',
+                unread_dedupe_key=f'rally-join:{game.id}:{actor.id}',
             )
-        _end_active_play_pulse_for_user(
-            g.current_user.id, 'instant_rally', now,
-        )
         db.session.commit()
-        return _rally_response(game, 'joined', g.current_user.id)
+        return _rally_response(
+            game,
+            'joined',
+            actor.id,
+            include_presence=confirm_court_presence,
+        )
 
     # No usable rally exists: launch one now, then pull in only players whose
     # fresh check-in at this exact court says they are actively looking.
+    # Lazy cleanup is only housekeeping. Defer it until every failure-only
+    # guard above has passed so a rejected explicit Start-now request cannot
+    # retire an unrelated rally as a side effect.
+    expire_abandoned_instant_rallies(now)
+
     game = Game(
         court_id=court.id,
         creator_id=g.current_user.id,
         client_attempt_id=client_attempt_id,
         client_attempt_fingerprint=attempt_fingerprint,
         scheduled_at=scheduled_at,
-        game_type='casual',
+        game_type=game_type,
         visibility='open',
         recurrence='none',
-        max_players=4,
+        max_players=max_players,
         preferred_level='any',
         notes='⚡ Instant rally',
         is_instant=True,
@@ -2627,22 +2826,32 @@ def start_instant_rally():
             if not _rally_attempt_matches(
                 existing_attempt,
                 expected_court_id,
+                game_type,
+                max_players,
                 attempt_fingerprint,
-                legacy_attempt_fingerprint,
+                legacy_attempt_fingerprints,
             ):
                 return jsonify({'error': 'client_attempt_id_conflict'}), 409
             stale_response = _closed_rally_replay_response(existing_attempt)
             if stale_response:
                 return stale_response
             _resolve_instant_rally_replay_presence(
-                existing_attempt, g.current_user.id,
+                existing_attempt,
+                g.current_user.id,
+                confirm_court_presence=confirm_court_presence,
             )
-            return _rally_response(existing_attempt, 'existing', g.current_user.id)
+            return _rally_response(
+                existing_attempt,
+                'existing',
+                g.current_user.id,
+                include_presence=confirm_court_presence,
+            )
         raise
 
-    game.players.append(GamePlayer(user_id=g.current_user.id))
-    checkin.looking_for_game = False
-    checkin.last_presence_ping_at = now
+    checkin = _finalize_instant_rally_presence(
+        actor, court, checkin, now, confirm_court_presence,
+    )
+    game.players.append(GamePlayer(user_id=actor.id))
     eligible = (
         db.session.query(CheckIn, User)
         .join(User, User.id == CheckIn.user_id)
@@ -2686,16 +2895,14 @@ def start_instant_rally():
             unread_dedupe_key=f'game-invite:{game.id}',
         )
 
-    _end_active_play_pulse_for_user(
-        g.current_user.id, 'instant_rally', now,
-    )
     db.session.commit()
     return _rally_response(
         game,
         'created',
-        g.current_user.id,
+        actor.id,
         invited_count=len(invited_ids),
         status=201,
+        include_presence=confirm_court_presence,
     )
 
 
@@ -3269,6 +3476,8 @@ def create_game():
     court = db.session.get(Court, normalized_attempt['court_id'])
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
+    if court.closed:
+        return jsonify({'error': 'court_closed'}), 409
 
     scheduled_at = normalized_attempt['scheduled_at']
     if not scheduled_at:

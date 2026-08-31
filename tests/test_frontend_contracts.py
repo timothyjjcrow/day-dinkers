@@ -86,10 +86,11 @@ def test_location_and_invite_controls_preserve_explicit_user_choice():
 
 
 def test_checked_in_players_can_launch_and_fill_an_instant_rally():
-    assert 'data-goto="play-soon"' in APP
-    assert "I’m at a court now" in APP
+    assert 'data-goto="game-flow"' in APP
+    assert "function openGameFlow(options = {})" in APP
+    assert "Start now" in APP
     assert "async function startInstantRally(button, options = {})" in APP
-    assert "openPlayNowCourtPicker();" in APP
+    assert "openGameFlow({" in APP
     assert "api('/games/rally'" in APP
     assert "id: `rally-${newGameAttemptId()}`" in APP
     assert "liveEl.innerHTML = rallyLauncherHtml() + skeletonHtml(4);" in APP
@@ -140,11 +141,11 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r8';" in SERVICE_WORKER
-    assert "const CORE_SHELL = ['/', '/styles-v15.css?v=r8', '/crew-planner-v15.js?v=r8', '/app-v15.js?v=r8'];" in SERVICE_WORKER
-    assert 'href="/styles-v15.css?v=r8"' in INDEX
-    assert 'src="/crew-planner-v15.js?v=r8"' in INDEX
-    assert 'src="/app-v15.js?v=r8"' in INDEX
+    assert "const CACHE = 'thirdshot-v15-r12';" in SERVICE_WORKER
+    assert "const CORE_SHELL = ['/', '/styles-v15.css?v=r12', '/crew-planner-v15.js?v=r12', '/app-v15.js?v=r12'];" in SERVICE_WORKER
+    assert 'href="/styles-v15.css?v=r12"' in INDEX
+    assert 'src="/crew-planner-v15.js?v=r12"' in INDEX
+    assert 'src="/app-v15.js?v=r12"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -198,7 +199,7 @@ def test_court_results_render_progressively_without_collapsing_list_context():
 
 def test_rankings_and_fab_always_offer_the_contextual_next_action():
     assert APP.count('data-goto="new-ranked-game"') >= 2
-    assert "openNewGameModal({ gameType: 'ranked' });" in APP
+    assert "openGameFlow({ mode: 'schedule', gameType: 'ranked' });" in APP
     assert "state.playSeg === 'brackets' ? 'Create a competition'" in APP
     assert "function openCompetitionCreateSheet()" in APP
 
