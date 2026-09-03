@@ -167,7 +167,7 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r59';" in SERVICE_WORKER
+    assert "const CACHE = 'thirdshot-v15-r60';" in SERVICE_WORKER
     for asset in (
         "/release-assets/r58/styles-v15.min.css",
         "/release-assets/r58/crew-planner-v15.min.js",

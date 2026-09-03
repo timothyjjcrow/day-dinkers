@@ -155,6 +155,25 @@ def test_map_uses_one_context_strip_and_court_controls_meet_touch_and_type_minim
     assert '.court-sort-select-shell .app-select-trigger-value { color: var(--green-ink); font-size: var(--text-xs); }' in CSS
 
 
+def test_court_summary_reserves_a_full_title_row_and_caps_the_native_sort_control():
+    summary = section(CSS, '.court-sheet-summary {', '.sheet-title {')
+    sort_layout = section(
+        CSS,
+        '.court-sheet-summary > #court-sort,',
+        '.court-sort-select-shell .app-select-trigger {',
+    )
+
+    assert 'display: grid' in summary
+    assert 'grid-template-columns: minmax(0, 1fr) minmax(112px, 154px)' in summary
+    assert 'grid-template-areas: "summary summary" "freshness sort"' in summary
+    assert '.court-sheet-summary > .row-main { grid-area: summary; min-width: 0; }' in summary
+    assert 'grid-area: freshness' in summary
+    assert '.court-sheet-summary > #court-sort,' in sort_layout
+    assert 'grid-area: sort' in sort_layout
+    assert 'width: 100%' in sort_layout
+    assert 'max-width: 154px' in sort_layout
+
+
 def test_court_player_actions_offer_casual_play_without_exposing_ranked_stats_in_roster():
     detail = section(APP, 'async function openCourtDetail', 'function openCourtPlayerActions')
     actions = section(APP, 'function openCourtPlayerActions', 'function openChallengeSheet')

@@ -4,7 +4,7 @@
 // installs refresh the simplified Play, Courts, Community, and Settings shell
 // instead of retaining old executable bytes.
 const SHELL_CACHE_PREFIX = 'thirdshot-v15-r';
-const CACHE = 'thirdshot-v15-r59';
+const CACHE = 'thirdshot-v15-r60';
 const CORE_SHELL = [
   '/',
   '/release-assets/r58/styles-v15.min.css',

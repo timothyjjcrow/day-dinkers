@@ -207,4 +207,4 @@ def test_errors_mobile_targets_and_shell_revision_are_explicit():
     assert "grid-template-columns: auto minmax(0, 1fr)" in STYLES
     assert ".play-pulse-nearby-card [data-play-pulse-accept]" in STYLES
     assert "min-width: 0" in STYLES
-    assert "thirdshot-v15-r59" in SW
+    assert "thirdshot-v15-r60" in SW

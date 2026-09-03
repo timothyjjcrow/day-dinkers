@@ -28,7 +28,7 @@ def test_update_waits_for_an_explicit_accessible_refresh_action():
 
 
 def test_versioned_shell_and_pinned_leaflet_are_available_offline():
-    assert "const CACHE = 'thirdshot-v15-r59';" in SW
+    assert "const CACHE = 'thirdshot-v15-r60';" in SW
     for asset in (
         "/release-assets/r58/styles-v15.min.css",
         "/release-assets/r58/crew-planner-v15.min.js",
