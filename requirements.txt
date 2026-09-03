@@ -1,8 +1,9 @@
 Flask>=3.0,<4.0
 Flask-SQLAlchemy>=3.1,<4.0
-SQLAlchemy>=2.0,<3.0
+SQLAlchemy>=2.0.39,<3.0
 PyJWT>=2.8,<3.0
 gunicorn>=22.0,<23.0
 python-dotenv>=1.0,<2.0
 psycopg[binary]>=3.2,<4.0
 pywebpush>=2.0,<3.0
+cryptography>=43.0,<51.0

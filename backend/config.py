@@ -21,6 +21,25 @@ def _get_int(name, default):
         return default
 
 
+def _config_name_from_environment():
+    """Resolve the runtime tier without letting hosted deploys default to dev."""
+    explicit = os.getenv('APP_ENV') or os.getenv('FLASK_ENV')
+    if explicit:
+        return explicit.strip().lower()
+    if os.getenv('VERCEL') == '1':
+        vercel_environment = os.getenv('VERCEL_ENV', '').strip().lower()
+        if vercel_environment == 'production':
+            return 'production'
+        if vercel_environment == 'preview':
+            return 'staging'
+        if vercel_environment == 'development':
+            return 'development'
+        raise ValueError(
+            f'Unsupported VERCEL_ENV: {vercel_environment or "missing"}'
+        )
+    return 'development'
+
+
 # The app keeps all of its tables in a dedicated Postgres schema so it can
 # never collide with tables left behind by older deployments in `public`.
 PG_SCHEMA = 'picklepals'
@@ -76,6 +95,26 @@ class BaseConfig:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
     JWT_TTL_SECONDS = _get_int('JWT_TTL_SECONDS', 60 * 60 * 24 * 30)
+    JWT_REFRESH_AFTER_SECONDS = _get_int(
+        'JWT_REFRESH_AFTER_SECONDS', 60 * 60 * 24 * 7,
+    )
+    MFA_ENCRYPTION_KEY = os.getenv('MFA_ENCRYPTION_KEY', '')
+    MFA_ISSUER = os.getenv('MFA_ISSUER', 'Third Shot')
+    # Provider credentials are dark unless the encrypted SQL vault is
+    # explicitly enabled and supplied a valid Fernet key. Older key versions
+    # may remain in BUSINESS_CREDENTIAL_ENCRYPTION_KEY_V<n> only during rotation.
+    BUSINESS_CREDENTIAL_VAULT = os.getenv(
+        'BUSINESS_CREDENTIAL_VAULT', 'disabled',
+    ).strip().lower()
+    BUSINESS_CREDENTIAL_ENCRYPTION_KEY = os.getenv(
+        'BUSINESS_CREDENTIAL_ENCRYPTION_KEY', '',
+    )
+    BUSINESS_CREDENTIAL_KEY_VERSION = _get_int(
+        'BUSINESS_CREDENTIAL_KEY_VERSION', 1,
+    )
+    RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
+    TRANSACTIONAL_EMAIL_FROM = os.getenv('TRANSACTIONAL_EMAIL_FROM', '')
+    PUBLIC_APP_URL = os.getenv('PUBLIC_APP_URL', 'https://third-shot.vercel.app')
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
     PORT = _get_int('PORT', 8000)
     JSON_SORT_KEYS = False
@@ -89,12 +128,37 @@ class BaseConfig:
     )
     AUTO_SEED_COURTS = _get_bool('AUTO_SEED_COURTS', default=False)
     RESET_DB_ON_BOOT = _get_bool('RESET_DB_ON_BOOT', default=False)
-    PRESENCE_STALE_AFTER_SECONDS = _get_int('PRESENCE_STALE_AFTER_SECONDS', 7200)
+    # A closed/backgrounded client stops heartbeating. Keep exact court
+    # presence credible by retiring it after 30 minutes, not two hours.
+    PRESENCE_STALE_AFTER_SECONDS = _get_int('PRESENCE_STALE_AFTER_SECONDS', 1800)
+    # New clients must prove a fresh, accurate device fix before launching an
+    # instant rally. Tests keep legacy API fixtures compatible and turn this on
+    # explicitly in the proximity contract suite.
+    INSTANT_RALLY_PROXIMITY_REQUIRED = _get_bool(
+        'INSTANT_RALLY_PROXIMITY_REQUIRED', default=True,
+    )
+    TOURNAMENT_RESULT_AUTO_CONFIRM_HOURS = _get_int(
+        'TOURNAMENT_RESULT_AUTO_CONFIRM_HOURS', 2,
+    )
+    LEAGUE_RESULT_AUTO_CONFIRM_HOURS = _get_int(
+        'LEAGUE_RESULT_AUTO_CONFIRM_HOURS', 24,
+    )
+    COMPETITION_RESULT_NUDGE_COOLDOWN_MINUTES = _get_int(
+        'COMPETITION_RESULT_NUDGE_COOLDOWN_MINUTES', 30,
+    )
     RATE_LIMIT_ENABLED = _get_bool('RATE_LIMIT_ENABLED', default=True)
     RATE_LIMIT_BACKEND = os.getenv(
         'RATE_LIMIT_BACKEND',
         'database' if SERVERLESS_RUNTIME else 'memory',
     ).strip().lower()
+    # Only this many right-most X-Forwarded-For hops are trusted. Local/dev
+    # ignores the header; the managed serverless edge is one trusted hop.
+    TRUSTED_PROXY_HOPS = _get_int(
+        'TRUSTED_PROXY_HOPS', 1 if SERVERLESS_RUNTIME else 0,
+    )
+    RATE_LIMIT_IP_CEILING_MULTIPLIER = _get_int(
+        'RATE_LIMIT_IP_CEILING_MULTIPLIER', 10,
+    )
     # Largest legitimate request is a court-photo upload (~500KB image → ~700KB
     # base64 JSON); cap everything at 2MB so oversized bodies get 413s.
     MAX_CONTENT_LENGTH = _get_int('MAX_CONTENT_LENGTH', 2 * 1024 * 1024)
@@ -103,7 +167,7 @@ class BaseConfig:
     VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
     VAPID_CLAIMS_EMAIL = os.getenv('VAPID_CLAIMS_EMAIL', 'mailto:timothyjjcrow@gmail.com')
     PUSH_DELIVERY_ENABLED = _get_bool(
-        'PUSH_DELIVERY_ENABLED', default=not SERVERLESS_RUNTIME,
+        'PUSH_DELIVERY_ENABLED', default=True,
     )
 
 
@@ -139,6 +203,11 @@ class TestingConfig(BaseConfig):
     RATE_LIMIT_ENABLED = False
     RATE_LIMIT_BACKEND = 'memory'
     PUSH_DELIVERY_ENABLED = True
+    INSTANT_RALLY_PROXIMITY_REQUIRED = False
+    MFA_ENCRYPTION_KEY = os.getenv(
+        'MFA_ENCRYPTION_KEY',
+        'cptEwcGPWoQwTRpx7LZH3BaiGR5MbnTsyqs1PjdFGgA=',
+    )
 
 
 CONFIG_BY_NAME = {
@@ -151,6 +220,11 @@ CONFIG_BY_NAME = {
 
 def get_config(name=None):
     config_name = (
-        name or os.getenv('APP_ENV') or os.getenv('FLASK_ENV') or 'development'
-    ).strip().lower()
-    return CONFIG_BY_NAME.get(config_name, DevelopmentConfig)
+        name.strip().lower()
+        if isinstance(name, str) and name.strip()
+        else _config_name_from_environment()
+    )
+    try:
+        return CONFIG_BY_NAME[config_name]
+    except KeyError as exc:
+        raise ValueError(f'Unsupported APP_ENV: {config_name}') from exc

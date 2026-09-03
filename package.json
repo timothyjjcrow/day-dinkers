@@ -1,0 +1,12 @@
+{
+  "name": "third-shot-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:frontend": "node scripts/build_frontend_assets.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9",
+    "terser": "5.51.2"
+  }
+}

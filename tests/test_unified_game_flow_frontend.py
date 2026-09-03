@@ -1,4 +1,4 @@
-"""Regression contracts for the shared Find / Start now / Schedule game flow."""
+"""Regression contracts for live ranked discovery and the shared planner."""
 
 from pathlib import Path
 
@@ -13,22 +13,26 @@ def section(start: str, end: str) -> str:
     return APP[begin:APP.index(end, begin)]
 
 
-def test_one_shared_flow_exposes_find_start_and_schedule_as_accessible_tabs():
+def test_live_ranked_flow_exposes_only_find_and_start_as_accessible_tabs():
     flow = section("function openGameFlow(options = {})", "async function checkInAndStartRally")
 
-    assert "const allowedModes = ['find', 'start', 'schedule'];" in flow
+    assert "const allowedModes = ['find', 'start'];" in flow
     assert 'role="tablist" aria-label="Choose what you want to do"' in flow
     for mode, label in (
         ("find", "Find"),
         ("start", "Start now"),
-        ("schedule", "Schedule"),
     ):
         assert f'id="game-flow-tab-{mode}"' in flow
         assert f'data-game-flow-mode="{mode}"' in flow
         assert f"> {label}</button>" in flow
     assert 'role="tabpanel" aria-labelledby="game-flow-tab-${mode}"' in flow
     assert "setupTablistKeyboard(modal.querySelector('#game-flow-modes'))" in flow
-    assert "One setup, three clear paths. Finding never creates a game." in flow
+    assert 'id="game-flow-tab-schedule"' not in flow
+    assert 'id="game-flow-plan-later"' in flow
+    assert "Plan a ranked match for later" in flow
+    assert "Plan a ranked match for later" in flow
+    assert "Planning for later uses the same full planner everywhere." not in flow
+    assert "Find or start a game" not in flow
 
 
 def test_shared_setup_uses_native_radio_cards_for_type_and_format():
@@ -38,13 +42,15 @@ def test_shared_setup_uses_native_radio_cards_for_type_and_format():
     assert '<fieldset class="game-choice-field" id="${id}">' in choices
     assert '<legend>${esc(legend)}</legend>' in choices
     assert 'input type="radio" name="${name}"' in choices
-    assert "id: `${prefix}-type`, name: `${prefix}-type`, legend: 'Game type'" in choices
+    assert "const setupLabel = lockedType === 'ranked' ? 'Ranked match setup' : 'Game setup'" in choices
+    assert "const typeLegend = lockedType === 'ranked' ? 'Match type' : 'Game type'" in choices
+    assert "id: `${prefix}-type`, name: `${prefix}-type`, legend: typeLegend" in choices
     assert "value: 'casual'" in choices and "label: 'Casual'" in choices
     assert "value: 'ranked'" in choices and "label: 'Ranked'" in choices
     assert "id: `${prefix}-format`, name: `${prefix}-format`, legend: 'Format'" in choices
     assert "value: 2" in choices and "label: 'Singles'" in choices
     assert "value: 4" in choices and "label: 'Doubles'" in choices
-    assert "gameSetupChoicesHtml('game-flow', gameType, maxPlayers)" in flow
+    assert "gameSetupChoicesHtml('game-flow', gameType, maxPlayers, lockedGameType)" in flow
     assert 'input[name="game-flow-type"]' in flow
     assert 'input[name="game-flow-format"]' in flow
 
@@ -62,24 +68,29 @@ def test_find_only_reads_current_court_games_and_never_starts_one():
     assert "const alternatives = openGames.filter" in find
     assert "exact.map((game) => gameCardHtml" in find
     assert "alternatives.map((game) => gameCardHtml" in find
-    assert "Nothing was created." in find
+    assert "No open" in find
     assert "data-game-flow-switch-start" in find
     assert "api('/games/rally'" not in find
     assert "method: 'POST'" not in find
 
 
-def test_start_is_explicit_and_commits_presence_with_the_configured_rally():
+def test_start_requires_explicit_checkin_before_the_configured_rally():
     flow = section("function openGameFlow(options = {})", "async function checkInAndStartRally")
     start = flow[flow.index("if (mode !== 'start'"):]
 
-    assert "primary.textContent = mode === 'start'" in flow
-    assert "`Join or start ${setupLabel()}`" in flow
+    assert "`${CTA_LABELS.start} ${setupLabel()}`" in flow
     assert "If an identical game is already open" in flow
-    assert "Starting now will switch your check-in from" in flow
+    assert "Check in at ${selected.name} first." in flow
+    assert "Check in to start · ${setupLabel()}" in flow
     assert "if (!await confirmSelectedCourtIsOpen()) return;" in start
     assert "api(`/courts/${selected.id}/checkin`" not in start
-    assert "presenceConfirmed: true" in start
-    assert "confirmCourtPresence: true" in start
+    assert "if (!isCheckedInAtCourt(selected.id)" in start
+    assert "|| !currentInstantRallyPresenceProof(selected.id))" in start
+    assert "openChildModal(modal, () => openCheckInSheet(checkInCourt" in start
+    assert "{ defaultLooking: true, presenceIntent: 'instant_rally' }" in start
+    assert "primary.click();" in start
+    assert "presenceConfirmed" not in start
+    assert "confirmCourtPresence" not in start
     assert "expectedCourtId: selected.id" in start
     assert "gameType," in start
     assert "maxPlayers," in start
@@ -87,14 +98,12 @@ def test_start_is_explicit_and_commits_presence_with_the_configured_rally():
     rally = section("async function startInstantRally", "function continueInstantRallyCall")
     assert "game_type: attempt.gameType" in rally
     assert "max_players: attempt.maxPlayers" in rally
-    assert "confirm_court_presence: confirmCourtPresence" in rally
-    assert "if (confirmCourtPresence)" in rally
-    assert "result.presence.checked_in === true" in rally
-    assert "safePositiveId(result.presence.court_id) === expectedCourtId" in rally
-    assert "result.presence_confirmed = result.presence_confirmed === true && exactPresence;" in rally
-    assert "state.presence = result.presence" in rally
-    assert "updatePlayHeader();" in rally
-    assert "renderPlay({ useCachedData: true });" in rally
+    assert "presence_proof: presenceProof" in rally
+    assert "const presenceProof = currentInstantRallyPresenceProof(expectedCourtId);" in rally
+    assert "if (!isCheckedInAtCourt(expectedCourtId))" in rally
+    assert "confirm_court_presence" not in rally
+    assert "confirmCourtPresence" not in rally
+    assert "presenceConfirmed" not in rally
 
 
 def test_async_start_cannot_mutate_after_mode_change_or_visible_cancellation():
@@ -103,23 +112,20 @@ def test_async_start_cannot_mutate_after_mode_change_or_visible_cancellation():
     assert "const actionIsCurrent = (seq, expectedMode)" in flow
     assert "currentOverlayEntry()?.el === modal" in flow
     assert "if (!actionIsCurrent(action, 'start')) return;" in flow
-    assert "if (!actionIsCurrent(action, 'schedule')) return;" in flow
+    assert "actionIsCurrent(action, 'schedule')" not in flow
     assert "primary.dataset.gameFlowAction = String(action);" in flow
     assert "primary.dataset.gameFlowAction === String(action)" in flow
     assert "lockFlowForCommit();" in flow
     assert "modal.querySelectorAll('button, input')" in flow
     assert "modal._dismissBlocked = () => modal.dataset.gameFlowCommitting === 'true';" in flow
-    assert "el._dismissBlocked()) return;" in APP
+    assert "typeof el._dismissBlocked === 'function' && el._dismissBlocked()" in APP
+    assert "el._onDismissBlocked?.();" in APP
     assert "function restoreBlockedOverlayTraversal(nav)" in APP
     assert "if (restoreBlockedOverlayTraversal(nav)) return;" in APP
     assert "history.go(forwardSteps);" in APP
     assert "actionSeq += 1;" in flow
-    assert "unlockFlowAfterCommit({ completed });" in flow
-    assert "`${setupLabel()} is live at ${selected.name}.`" in flow
-    assert "result.presence_confirmed" in flow
-    assert "`You’re checked in at ${selected.name}.`" in flow
-    assert "your check-in at ${selected.name} could not be confirmed" in flow
-    assert "modal.querySelector('#game-flow-dismiss').textContent = 'Done';" in flow
+    assert "unlockFlowAfterCommit();" in flow
+    assert "showInstantRallyManagement" not in flow
 
 
 def test_programmatic_mode_changes_keep_one_tabbable_selected_tab():
@@ -129,23 +135,38 @@ def test_programmatic_mode_changes_keep_one_tabbable_selected_tab():
     assert "button.tabIndex = active ? 0 : -1;" in flow
 
 
-def test_schedule_carries_the_selected_court_type_and_format_into_planner():
+def test_plan_later_routes_directly_to_the_single_full_planner():
     flow = section("function openGameFlow(options = {})", "async function checkInAndStartRally")
-    schedule = flow[flow.index("if (mode === 'schedule') {"):flow.index("if (mode !== 'start'")]
+    plan = flow[flow.index("modal.querySelector('#game-flow-plan-later')"):flow.index("primary.addEventListener")]
 
-    assert "if (!await confirmSelectedCourtIsOpen()) return;" in schedule
-    assert "transitionModal(modal, () => openNewGameModal({" in schedule
-    assert "court: selected, gameType, maxPlayers, carriedFromGameFlow: true," in schedule
-    assert "Continue to date & players" in flow
+    assert "transitionModal(modal, () => openNewGameModal({" in plan
+    for preset in ("court: selected", "gameType: 'ranked'", "maxPlayers", "lockGameType: true", "rankedMatchMode: true"):
+        assert preset in plan
+    assert "carriedFromGameFlow" not in flow
+    assert "Continue to date & players" not in flow
+
+    planner = section("async function openNewGameModal", "async function renderTournaments")
+    assert "const plannerFeeds = await Promise.allSettled([" in planner
+    assert "api('/courts/favorites')" in planner
+    assert "plannerFeedErrors.savedCourts" in planner
+    assert "radius=30&limit=8" in planner
+    assert "addPlannerCourtSuggestion(court || restoredCourt, 'Selected court');" in planner
+    assert "state.presence && state.presence.checked_in" in planner
+    assert "state.me && state.me.home_court_id" in planner
+    assert "savedCourts.forEach" in planner
+    assert "nearbyCourts.forEach" in planner
+    assert planner.index("addPlannerCourtSuggestion(court || restoredCourt") < planner.index("savedCourts.forEach")
+    load = planner[planner.index("// Gather friends"):planner.index("// Invitees from a completed game")]
+    assert "if (!court) {" not in load
 
 
-def test_planner_keeps_type_and_capacity_visible_as_native_radio_cards():
+def test_planner_keeps_one_direct_setup_visible_for_every_entry_point():
     planner = section("async function openNewGameModal", "async function renderTournaments")
 
     setup_at = planner.index('<section class="planner-game-setup"')
     advanced_at = planner.index('<details class="planner-advanced')
     assert setup_at < advanced_at
-    assert 'id="ng-game-setup-title">Game setup' in planner
+    assert "const plannerSetupTitle = crewId || sessionMode ? 'Play session setup'" in planner
     assert "id: 'ng-type', name: 'ng-type', legend: 'Game type'" in planner
     assert "gameCapacityChoicesHtml('ng', presetMaxPlayers)" in planner
     assert '<input type="hidden" id="ng-max" value="${presetMaxPlayers}" />' in planner
@@ -154,38 +175,60 @@ def test_planner_keeps_type_and_capacity_visible_as_native_radio_cards():
     assert 'input[name="ng-capacity"]' in planner
     assert "modal.querySelector('#ng-type').addEventListener('change'" in planner
     assert "modal.querySelector('#ng-capacity').addEventListener('change'" in planner
-    assert "const carriedFromGameFlow = plannerOptions.carriedFromGameFlow === true;" in planner
-    assert "${carriedFromGameFlow ? '<span class=\"tag\">Setup carried over</span>' : ''}" in planner
+    assert "carriedFromGameFlow" not in planner
+    assert 'class="planner-carried-setup" id="ng-carried-setup"' in planner
+    assert 'id="ng-change-setup" aria-expanded="false"' in planner
+    assert '<div class="planner-game-setup-head">' in planner
+    assert planner.count("${plannerSetupControlsHtml}") == 1
 
     capacity = section("function gameCapacityChoicesHtml", "function openGameFlow")
     assert '<fieldset class="game-choice-field" id="${prefix}-capacity">' in capacity
     assert 'input type="radio" name="${prefix}-capacity"' in capacity
     assert ".game-capacity-grid" in STYLES
     assert ".game-choice-option > input:checked + .game-capacity-card" in STYLES
+    assert ".planner-game-setup.is-carried" not in STYLES
+    assert ".planner-carried-setup" in STYLES
 
 
-def test_play_map_and_court_detail_all_enter_the_same_flow_with_context():
-    launcher = section("function rallyLauncherHtml", "function playMoreRoutesHtml")
-    assert 'data-goto="game-flow"' in launcher
+def test_resumed_planner_reviews_saved_answers_before_focusing_errors():
+    planner = section("async function openNewGameModal", "async function renderTournaments")
+
+    assert "let plannerStep = restoredDraft ? 'where' : (court ? 'when' : 'where');" in planner
+    assert "target.closest('#ng-step-where, #ng-step-when, #ng-step-who')" in planner
+    assert "plannerStep = targetPlannerStep;" in planner
+    assert "syncPlannerStep();" in planner
+
+
+def test_play_launcher_is_intent_specific_while_map_and_court_keep_compatibility_flow():
+    launcher = section("function rallyLauncherHtml", "async function renderPlay")
+    assert 'data-goto="instant-rally"' in launcher
+    assert 'data-goto="on-my-way"' in launcher
+    assert 'data-goto="play-pulse"' in launcher
     assert 'data-goto="new-game"' in launcher
-    assert "Find or start a game" in launcher
+    assert 'data-goto="ranked-match"' in launcher
+    assert "At a court" in launcher
+    assert "Free this hour" in launcher
 
     ctas = section("function setupEmptyStateCtas()", "// ---------- Map / Courts ----------")
     assert "target === 'game-flow'" in ctas
-    assert "openGameFlow({ mode: 'find' });" in ctas
+    assert "openPlaySoonFlow();" in ctas
     assert "target === 'new-game'" in ctas
-    assert "openGameFlow({ mode: 'schedule' });" in ctas
-    assert "openGameFlow({ mode: 'schedule', gameType: 'ranked' });" in ctas
+    assert "openNewGameModal({" in ctas
+    assert "target === 'ranked-match' || target === 'new-ranked-game'" in ctas
+    assert "openRankedMatchFlow();" in ctas
 
     preview = section("function selectCourtOnMap", "function autoCheckInStorageKey")
-    assert "data-preview-play>Find or start</button>" in preview
-    assert "openGameFlow({ court, mode: 'find' });" in preview
+    assert "data-preview-play>Play options</button>" in preview
+    assert "openCourtPlayMenu(court);" in preview
     assert "startInstantRally" not in preview
 
     detail = section("async function openCourtDetail", "function openCheckInSheet")
-    assert 'id="cd-play-now">Find or start a game</button>' in detail
-    assert "transitionModal(modal, () => openGameFlow({ court, mode: 'find' }))" in detail
-    assert "transitionModal(modal, () => openGameFlow({ court, mode: 'schedule' }))" in detail
+    assert 'id="cd-play-now">${uiIcon(\'users\')} Find people to play here</button>' in detail
+    assert "openCheckInSheet(court" in detail
+    assert "commitLookingIntent(event.currentTarget, true);" in detail
+    assert "applyAuthoritativeCheckIn(court, response, desiredLooking);" in detail
+    assert "court, gameType: 'casual', maxPlayers: 6, lockGameType: true, sessionMode: true" in detail
+    assert "court, mode: 'start', gameType: 'ranked', community: false" in detail
     detail_play_handler = detail[
         detail.index("modal.querySelector('#cd-play-now')"):
         detail.index("modal.querySelector('#cd-open-game')")

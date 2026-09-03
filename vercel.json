@@ -3,8 +3,55 @@
   "framework": "flask",
   "functions": {
     "app.py": {
+      "maxDuration": 60,
       "excludeFiles": "{instance/**,tests/**,scripts/**,data/**,.env*,.github/**,.pytest_cache/**,frontend/**,Dockerfile,README.md,render.yaml,**/.DS_Store}"
     }
   },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/maintenance",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/push",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/business-integrations",
+      "schedule": "0 10 * * *"
+    }
+  ],
   "regions": ["iad1"]
 }

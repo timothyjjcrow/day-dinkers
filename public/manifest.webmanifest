@@ -1,7 +1,9 @@
 {
-  "name": "Third Shot — Find courts, friends & games",
+  "name": "Third Shot — Find courts, players & play",
   "short_name": "Third Shot",
-  "description": "Find pickleball courts, meet players, schedule casual and ranked games.",
+  "id": "/",
+  "description": "Find pickleball courts and players, join casual play sessions, and schedule ranked matches.",
+  "categories": ["sports", "social"],
   "start_url": "/?tab=play",
   "display": "standalone",
   "background_color": "#ffffff",
@@ -13,12 +15,12 @@
   ],
   "shortcuts": [
     {
-      "name": "Find courts",
+      "name": "Courts",
       "url": "/?tab=courts",
       "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
     },
     {
-      "name": "My games",
+      "name": "Play",
       "url": "/?tab=play",
       "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
     },
@@ -26,6 +28,27 @@
       "name": "Community",
       "url": "/?tab=chat",
       "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+    },
+    {
+      "name": "Me",
+      "url": "/?tab=profile",
+      "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/courts-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Courts map and nearby activity"
+    },
+    {
+      "src": "screenshots/play-mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Plan and join pickleball games"
     }
   ]
 }

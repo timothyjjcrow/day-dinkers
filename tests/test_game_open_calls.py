@@ -116,7 +116,7 @@ def test_host_posts_one_typed_retry_safe_open_call(client):
         message = Message.query.one()
         assert message.court_id == court
         assert message.game_id is None
-        assert message.body == 'Open game — see the live roster and join details.'
+        assert message.body == 'Open play session — see the live roster and join details.'
         assert Notification.query.count() == before_notifications
 
     room = client.get(
@@ -173,6 +173,16 @@ def test_open_call_rejects_ineligible_or_non_host_games(client):
         client, host, court, visibility='private',
         invite_user_ids=[invitee['user']['id']],
     )
+    friendship = client.post(
+        '/api/friends/request', json={'user_id': invitee['user']['id']},
+        headers=headers(host),
+    )
+    assert friendship.status_code == 201, friendship.get_json()
+    accepted = client.post(
+        f"/api/friends/{friendship.get_json()['friendship_id']}/respond",
+        json={'accept': True}, headers=headers(invitee),
+    )
+    assert accepted.status_code == 200, accepted.get_json()
     friends = create_game(client, host, court, visibility='friends')
     weekly = create_game(client, host, court, recurrence='weekly')
     full = create_game(client, host, court, max_players=2)
@@ -180,7 +190,7 @@ def test_open_call_rejects_ineligible_or_non_host_games(client):
         f"/api/games/{full['id']}/join", headers=headers(invitee),
     ).status_code == 200
     instant = create_game(client, host, court)
-    crew_game = create_game(client, host, court)
+    crew_game = create_game(client, host, court_id(client, 'adorni'))
     started = create_game(client, host, court)
     closed_court_game = create_game(client, host, court)
 
@@ -201,12 +211,16 @@ def test_open_call_rejects_ineligible_or_non_host_games(client):
 
     candidates = [
         private['id'], friends['id'], weekly['id'], full['id'],
-        instant['id'], crew_game['id'], started['id'],
+        instant['id'], started['id'],
         closed_court_game['id'],
     ]
     for index, game_id in enumerate(candidates):
         rejected = post_call(client, host, game_id, f'ineligible-{index}')
         assert rejected.status_code == 409, (game_id, rejected.get_json())
+
+    # A public casual group session may ask its court chat for players.
+    crew_call = post_call(client, host, crew_game['id'], 'eligible-group-session')
+    assert crew_call.status_code == 201, crew_call.get_json()
 
     cancelled = create_game(client, host, court_id(client, 'adorni'))
     assert client.post(
@@ -215,8 +229,8 @@ def test_open_call_rejects_ineligible_or_non_host_games(client):
     assert post_call(client, host, cancelled['id'], 'cancelled').status_code == 409
 
     with client.application.app_context():
-        assert GameOpenCall.query.count() == 0
-        assert Message.query.count() == 0
+        assert GameOpenCall.query.count() == 1
+        assert Message.query.count() == 1
 
 
 def test_live_card_tracks_roster_waitlist_and_reopens_without_reposting(client):
@@ -375,6 +389,14 @@ def test_whole_roster_block_hides_linked_court_card_everywhere(client):
         f'/api/courts/{court}/chat', headers=headers(viewer),
     ).get_json()
     assert any(item.get('open_call') for item in visible['items'])
+    assert client.put(
+        f'/api/courts/{court}/chat/subscription',
+        json={'joined': True}, headers=headers(viewer),
+    ).status_code == 200
+    detail = client.get(
+        f'/api/courts/{court}', headers=headers(viewer),
+    ).get_json()
+    assert detail['chat_last_message']['open_call']['id'] == call['id']
     listed = client.get('/api/chat/courts', headers=headers(viewer)).get_json()
     assert listed['items'][0]['last_message']['open_call']['id'] == call['id']
 
@@ -396,6 +418,11 @@ def test_whole_roster_block_hides_linked_court_card_everywhere(client):
     ).get_json()['items']
     assert room_list[0]['last_message']['id'] == generic['id']
     assert 'open_call' not in room_list[0]['last_message']
+    detail = client.get(
+        f'/api/courts/{court}', headers=headers(viewer),
+    ).get_json()
+    assert detail['chat_last_message']['id'] == generic['id']
+    assert 'open_call' not in detail['chat_last_message']
     heart = client.post(
         f"/api/messages/{call['court_message_id']}/heart",
         headers=headers(viewer),

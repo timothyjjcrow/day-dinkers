@@ -1,4 +1,4 @@
-"""Arrival reservations for live rallies stay remote, private, and bounded."""
+"""On-my-way ETA statuses for live rallies stay remote, private, and bounded."""
 
 from datetime import timedelta
 
@@ -92,12 +92,18 @@ def _discover(client, person, court, game_id):
     )
 
 
-def _arrive(client, person, game_id, capability, attempt, eta=10):
-    return client.put(f'/api/games/{game_id}/arrival', json={
+def _arrive(client, person, game_id, capability, attempt, eta=10, replaces=None):
+    payload = {
         'eta_minutes': eta,
         'client_attempt_id': attempt,
         'arrival_capability': capability,
-    }, headers=_headers(person))
+    }
+    if replaces is not None:
+        payload['replaces_client_attempt_id'] = replaces
+    return client.put(
+        f'/api/games/{game_id}/arrival', json=payload,
+        headers=_headers(person),
+    )
 
 
 def _befriend(client, first, second):
@@ -143,9 +149,9 @@ def test_arrival_is_private_idempotent_bounded_and_announced_once(client):
     assert body['game']['ready_count'] == 1
     assert body['game']['roster_count'] == 1
     assert body['game']['on_the_way_count'] == 1
-    assert body['game']['committed_count'] == 2
+    assert body['game']['committed_count'] == 1
     assert body['game']['physical_spots_left'] == 3
-    assert body['game']['spots_left'] == 2
+    assert body['game']['spots_left'] == 3
     assert body['game']['my_arrival']['id'] == body['arrival']['id']
     assert body['game']['players'] == []
     assert 'creator_id' not in body['game']
@@ -177,7 +183,9 @@ def test_arrival_is_private_idempotent_bounded_and_announced_once(client):
     ).status_code == 404
     outsider_summary = _discover(client, outsider, court, game['id'])
     assert outsider_summary['on_the_way_count'] == 1
-    assert outsider_summary['spots_left'] == 2
+    assert outsider_summary['spots_left'] == 3
+    assert outsider_summary['arrival_available'] is True
+    assert isinstance(outsider_summary['arrival_capability'], str)
     assert 'arrivals' not in outsider_summary
     assert 'user_id' not in outsider_summary
 
@@ -191,6 +199,10 @@ def test_arrival_is_private_idempotent_bounded_and_announced_once(client):
     ).get_json()['items']
     arrival_notices = [item for item in notices if item['kind'] == 'rally_arrival']
     assert len(arrival_notices) == 1
+    assert arrival_notices[0]['title'] == 'Traveler is on the way'
+    assert arrival_notices[0]['body'] == 'ETA about 10 minutes.'
+    assert 'rally' not in arrival_notices[0]['title'].lower()
+    assert 'rally' not in arrival_notices[0]['body'].lower()
     assert court['name'] not in arrival_notices[0]['title']
     assert court['name'] not in arrival_notices[0]['body']
 
@@ -213,6 +225,57 @@ def test_arrival_is_private_idempotent_bounded_and_announced_once(client):
     )
     assert changed.status_code == 409
     assert changed.get_json() == {'error': 'client_attempt_id_conflict'}
+
+
+def test_changed_eta_explicitly_retires_an_ambiguous_attempt(client):
+    host = _register(client, 'arrival-change-host', 'Host')
+    traveler = _register(client, 'arrival-change-traveler', 'Traveler')
+    court = _court(client, 'larson')
+    game = _launch(client, host, court, 'arrival-change-launch')
+    summary = _discover(client, traveler, court, game['id'])
+
+    first = _arrive(
+        client, traveler, game['id'], summary['arrival_capability'],
+        'arrival-change-first', eta=10,
+    )
+    assert first.status_code == 201, first.get_json()
+    first_body = first.get_json()
+
+    replacement = _arrive(
+        client, traveler, game['id'], summary['arrival_capability'],
+        'arrival-change-second', eta=15, replaces='arrival-change-first',
+    )
+    assert replacement.status_code == 201, replacement.get_json()
+    replacement_body = replacement.get_json()
+    assert replacement_body['arrival']['eta_minutes'] == 15
+    assert replacement_body['arrival']['id'] != first_body['arrival']['id']
+
+    replay = _arrive(
+        client, traveler, game['id'], 'expired-or-omitted-on-replay',
+        'arrival-change-second', eta=15, replaces='arrival-change-first',
+    )
+    assert replay.status_code == 200, replay.get_json()
+    assert replay.get_json()['outcome'] == 'existing'
+    assert replay.get_json()['arrival']['expires_at'] == (
+        replacement_body['arrival']['expires_at']
+    )
+
+    with client.application.app_context():
+        first_row = db.session.get(
+            GameArrivalIntent, first_body['arrival']['id'],
+        )
+        assert first_row.active is False
+        assert first_row.end_reason == 'eta_changed'
+        assert GameArrivalIntent.query.filter_by(
+            game_id=game['id'], user_id=traveler['user']['id'], active=True,
+        ).count() == 1
+
+    invalid = _arrive(
+        client, traveler, game['id'], summary['arrival_capability'],
+        'arrival-change-third', eta=5, replaces='arrival-change-third',
+    )
+    assert invalid.status_code == 400
+    assert invalid.get_json() == {'error': 'invalid_client_attempt_id'}
 
 
 def test_arrival_requires_safe_discovery_and_rejects_physical_presence(client):
@@ -302,11 +365,13 @@ def test_arrival_requires_safe_discovery_and_rejects_physical_presence(client):
         assert intent.last_announced_at is None
 
 
-def test_partial_uniques_expiry_and_owned_retry_history(client):
+def test_active_user_uniqueness_multi_arrival_capacity_and_owned_retry(client):
     host = _register(client, 'arrival-slot-host', 'Host')
     other_host = _register(client, 'arrival-slot-other-host', 'Other Host')
     first = _register(client, 'arrival-slot-first', 'First')
     second = _register(client, 'arrival-slot-second', 'Second')
+    third = _register(client, 'arrival-slot-third', 'Third')
+    overflow = _register(client, 'arrival-slot-overflow', 'Overflow')
     court = _court(client, 'larson')
     other_court = _court(client, 'adorni')
     game = _launch(client, host, court, 'arrival-slot-launch')
@@ -318,6 +383,12 @@ def test_partial_uniques_expiry_and_owned_retry_history(client):
     )['arrival_capability']
     second_capability = _discover(
         client, second, court, game['id'],
+    )['arrival_capability']
+    third_capability = _discover(
+        client, third, court, game['id'],
+    )['arrival_capability']
+    overflow_capability = _discover(
+        client, overflow, court, game['id'],
     )['arrival_capability']
 
     reserved = _arrive(
@@ -337,15 +408,34 @@ def test_partial_uniques_expiry_and_owned_retry_history(client):
         'error': 'active_arrival_elsewhere',
         'game_id': game['id'],
     }
-    occupied = _arrive(
+    second_reserved = _arrive(
         client, second, game['id'], second_capability,
         'arrival-slot-second-attempt', eta=10,
     )
-    assert occupied.status_code == 409
-    assert occupied.get_json() == {'error': 'arrival_slot_taken'}
-    held_summary = _discover(client, second, court, game['id'])
-    assert held_summary['arrival_available'] is False
-    assert 'arrival_capability' not in held_summary
+    assert second_reserved.status_code == 201, second_reserved.get_json()
+    assert second_reserved.get_json()['game']['on_the_way_count'] == 2
+    assert second_reserved.get_json()['game']['committed_count'] == 1
+    assert second_reserved.get_json()['game']['spots_left'] == 3
+    available_summary = _discover(client, third, court, game['id'])
+    assert available_summary['arrival_available'] is True
+    assert isinstance(available_summary['arrival_capability'], str)
+
+    third_reserved = _arrive(
+        client, third, game['id'], third_capability,
+        'arrival-slot-third-attempt', eta=15,
+    )
+    assert third_reserved.status_code == 201, third_reserved.get_json()
+    assert third_reserved.get_json()['game']['on_the_way_count'] == 3
+    assert third_reserved.get_json()['game']['committed_count'] == 1
+    assert third_reserved.get_json()['game']['spots_left'] == 3
+    held_summary = _discover(client, overflow, court, game['id'])
+    assert held_summary['arrival_available'] is True
+    assert isinstance(held_summary['arrival_capability'], str)
+    occupied = _arrive(
+        client, overflow, game['id'], overflow_capability,
+        'arrival-slot-overflow-attempt', eta=10,
+    )
+    assert occupied.status_code == 201, occupied.get_json()
 
     with client.application.app_context():
         row = GameArrivalIntent.query.filter_by(
@@ -355,10 +445,11 @@ def test_partial_uniques_expiry_and_owned_retry_history(client):
         db.session.commit()
 
     successor = _arrive(
-        client, second, game['id'], second_capability,
-        'arrival-slot-second-fresh', eta=10,
+        client, overflow, game['id'], overflow_capability,
+        'arrival-slot-overflow-attempt', eta=10,
     )
-    assert successor.status_code == 201, successor.get_json()
+    assert successor.status_code == 200, successor.get_json()
+    assert successor.get_json()['outcome'] == 'existing'
     replay = _arrive(
         client, first, game['id'], None,
         'arrival-slot-first-attempt', eta=5,
@@ -376,18 +467,21 @@ def test_partial_uniques_expiry_and_owned_retry_history(client):
         }
         assert reflected['uq_game_arrival_active_user']['unique'] == 1
         assert reflected['uq_game_arrival_active_user']['column_names'] == ['user_id']
-        assert reflected['uq_game_arrival_active_game']['unique'] == 1
-        assert reflected['uq_game_arrival_active_game']['column_names'] == ['game_id']
-        active = GameArrivalIntent.query.filter_by(active=True).one()
+        assert 'uq_game_arrival_active_game' not in reflected
+        active = GameArrivalIntent.query.filter_by(active=True).all()
+        assert len(active) == 3
+        assert {intent.user_id for intent in active} == {
+            second['user']['id'], third['user']['id'], overflow['user']['id'],
+        }
         db.session.add(GameArrivalIntent(
-            game_id=active.game_id,
-            user_id=first['user']['id'],
+            game_id=game['id'],
+            user_id=second['user']['id'],
             eta_minutes=5,
             declared_at=utcnow(),
             arrives_at=utcnow() + timedelta(minutes=5),
             expires_at=utcnow() + timedelta(minutes=10),
             active=True,
-            client_attempt_id='manual-duplicate-slot',
+            client_attempt_id='manual-duplicate-user-slot',
             client_attempt_fingerprint='0' * 64,
         ))
         with pytest.raises(IntegrityError):
@@ -395,7 +489,7 @@ def test_partial_uniques_expiry_and_owned_retry_history(client):
         db.session.rollback()
 
 
-def test_effective_capacity_and_exact_court_join_convert_the_hold(client):
+def test_on_my_way_status_does_not_block_walk_in_capacity(client):
     host = _register(client, 'arrival-cap-host', 'Host')
     ready_two = _register(client, 'arrival-cap-two', 'Ready Two')
     ready_three = _register(client, 'arrival-cap-three', 'Ready Three')
@@ -423,16 +517,17 @@ def test_effective_capacity_and_exact_court_join_convert_the_hold(client):
     )
     assert reserved.status_code == 201, reserved.get_json()
     assert reserved.get_json()['game']['ready_count'] == 3
-    assert reserved.get_json()['game']['committed_count'] == 4
+    assert reserved.get_json()['game']['committed_count'] == 3
     assert reserved.get_json()['game']['physical_spots_left'] == 1
-    assert reserved.get_json()['game']['spots_left'] == 0
+    assert reserved.get_json()['game']['spots_left'] == 1
 
-    # Discovery retains aggregate convergence even though its arrival CTA has
-    # no effective slot left for this outsider.
+    # An ETA is advisory: it stays visible without taking the last roster spot.
     walk_in_summary = _discover(client, walk_in, court, game['id'])
     assert walk_in_summary['ready_count'] == 3
     assert walk_in_summary['on_the_way_count'] == 1
-    assert walk_in_summary['spots_left'] == 0
+    assert walk_in_summary['spots_left'] == 1
+    assert walk_in_summary['arrival_available'] is True
+    assert isinstance(walk_in_summary['arrival_capability'], str)
 
     client.post(
         f"/api/courts/{court['id']}/checkin", json={},
@@ -441,8 +536,8 @@ def test_effective_capacity_and_exact_court_join_convert_the_hold(client):
     full = client.post(
         f"/api/games/{game['id']}/join", headers=_headers(walk_in),
     )
-    assert full.status_code == 400
-    assert full.get_json() == {'error': 'game_full'}
+    assert full.status_code == 200, full.get_json()
+    assert full.get_json()['spots_left'] == 0
 
     client.post(
         f"/api/courts/{court['id']}/checkin", json={},
@@ -451,23 +546,17 @@ def test_effective_capacity_and_exact_court_join_convert_the_hold(client):
     converted = client.post(
         f"/api/games/{game['id']}/join", headers=_headers(traveler),
     )
-    assert converted.status_code == 200, converted.get_json()
-    converted_body = converted.get_json()
-    assert converted_body['ready_count'] == 4
-    assert converted_body['on_the_way_count'] == 0
-    assert converted_body['committed_count'] == 4
-    assert converted_body['physical_spots_left'] == 0
-    assert converted_body['spots_left'] == 0
-    assert converted_body['my_arrival'] is None
+    assert converted.status_code == 400
+    assert converted.get_json() == {'error': 'game_full'}
     with client.application.app_context():
         intent = GameArrivalIntent.query.filter_by(
             client_attempt_id='arrival-cap-traveler-attempt',
         ).one()
         assert intent.active is False
-        assert intent.end_reason == 'arrived'
+        assert intent.end_reason == 'capacity_lost'
         assert GamePlayer.query.filter_by(
             game_id=game['id'], user_id=traveler['user']['id'],
-        ).count() == 1
+        ).count() == 0
 
 
 def test_partial_departure_changes_physical_ready_not_durable_occupancy(client):
@@ -496,9 +585,9 @@ def test_partial_departure_changes_physical_ready_not_durable_occupancy(client):
     before = reserved.get_json()['game']
     assert before['ready_count'] == 2
     assert before['roster_count'] == 2
-    assert before['committed_count'] == 3
+    assert before['committed_count'] == 2
     assert before['physical_spots_left'] == 2
-    assert before['spots_left'] == 1
+    assert before['spots_left'] == 2
     assert before['assembly_state'] == 'ready'
 
     checked_out = client.post('/api/checkout', headers=_headers(departing))
@@ -507,11 +596,12 @@ def test_partial_departure_changes_physical_ready_not_durable_occupancy(client):
     assert after['ready_count'] == 1
     assert after['roster_count'] == 2
     assert after['on_the_way_count'] == 1
-    assert after['committed_count'] == 3
+    assert after['committed_count'] == 2
     assert after['physical_spots_left'] == 3
-    assert after['spots_left'] == 1
+    assert after['spots_left'] == 2
     assert after['assembly_state'] == 'finding'
-    assert after['arrival_available'] is False
+    assert after['arrival_available'] is True
+    assert isinstance(after['arrival_capability'], str)
     host_detail = client.get(
         f"/api/games/{game['id']}", headers=_headers(host),
     )
@@ -523,7 +613,7 @@ def test_partial_departure_changes_physical_ready_not_durable_occupancy(client):
         assert rally.assembly_closed_at is None
 
 
-def test_rally_start_converts_hold_and_presence_loss_or_block_ends_it(client):
+def test_rally_start_converts_eta_and_presence_loss_or_block_ends_it(client):
     host = _register(client, 'arrival-life-host', 'Host')
     traveler = _register(client, 'arrival-life-traveler', 'Traveler')
     court = _court(client, 'larson')
@@ -667,7 +757,7 @@ def test_cancel_recreate_does_not_spam_roster(client):
         assert Notification.query.filter_by(kind='rally_arrival').count() == 0
 
 
-def test_cancel_score_and_account_deletion_release_arrivals(client):
+def test_cancel_score_and_account_deletion_end_arrivals(client):
     larson = _court(client, 'larson')
     adorni = _court(client, 'adorni')
 
@@ -708,7 +798,7 @@ def test_cancel_score_and_account_deletion_release_arrivals(client):
     assert larson['name'] not in ended[0]['title']
     assert larson['name'] not in ended[0]['body']
 
-    # A fresh rally can close its remote hold as soon as score entry starts.
+    # A fresh rally can close its remote ETA status as soon as score entry starts.
     score_host = _register(client, 'arrival-clean-score-host', 'Score Host')
     opponent = _register(client, 'arrival-clean-opponent', 'Opponent')
     score_traveler = _register(
@@ -806,7 +896,7 @@ def test_cancel_score_and_account_deletion_release_arrivals(client):
     ]) == 1
 
 
-def test_blocked_remote_holder_prevents_admission_and_invitation(client):
+def test_blocked_on_the_way_player_prevents_admission_and_invitation(client):
     host = _register(client, 'arrival-holder-host', 'Host')
     holder = _register(client, 'arrival-holder-reserved', 'Holder')
     blocked = _register(client, 'arrival-holder-blocked', 'Blocked')

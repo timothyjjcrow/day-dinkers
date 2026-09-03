@@ -12,7 +12,7 @@ from backend.app import (
     create_app,
     db,
 )
-from backend.models import Court, utcnow
+from backend.models import Court, Game, GamePlayer, utcnow
 
 
 @pytest.fixture()
@@ -60,7 +60,7 @@ def court_id(client):
 
 
 def completed_game(client, owner, court, team1, team2, *, no_shows=()):
-    """Create a casual game and score only the supplied team members."""
+    """Create a completed game, including legacy oversized score fixtures."""
     participants = {
         player['user']['id']: player
         for player in (*team1, *team2, *no_shows)
@@ -87,14 +87,53 @@ def completed_game(client, owner, court, team1, team2, *, no_shows=()):
         )
         assert joined.status_code == 200, joined.get_json()
 
-    scored = client.post(f"/api/games/{game['id']}/complete", json={
-        'team1': [player['user']['id'] for player in team1],
-        'team2': [player['user']['id'] for player in team2],
-        'score_team1': 11,
-        'score_team2': 7,
-    }, headers=auth_headers(owner))
+    score_size = min(len(team1), len(team2), 2)
+    assert score_size in (1, 2)
+    if len(participants) > 4:
+        # Historical compatibility fixture: old releases allowed a scored
+        # result on a >4-capacity row. New writes must use session wrap-up,
+        # so construct the legacy row directly instead of weakening the API.
+        row = db.session.get(Game, game['id'])
+        row.status = 'completed'
+        row.completed_at = utcnow()
+        row.score_team1 = 11
+        row.score_team2 = 7
+        row.score_submitted_by_id = owner_id
+        for player in row.players:
+            if player.user_id in {item['user']['id'] for item in team1[:score_size]}:
+                player.team = 1
+            elif player.user_id in {item['user']['id'] for item in team2[:score_size]}:
+                player.team = 2
+        db.session.commit()
+        scored = client.get(
+            f"/api/games/{game['id']}", headers=auth_headers(owner),
+        )
+    else:
+        scored = client.post(f"/api/games/{game['id']}/complete", json={
+            'team1': [player['user']['id'] for player in team1[:score_size]],
+            'team2': [player['user']['id'] for player in team2[:score_size]],
+            'score_team1': 11,
+            'score_team2': 7,
+        }, headers=auth_headers(owner))
     assert scored.status_code == 200, scored.get_json()
     assert scored.get_json()['status'] == 'completed'
+
+    # Some Crew tests intentionally exercise historical rows written before
+    # score entry enforced 1v1/2v2. Keep that legacy-data coverage without
+    # asking the public endpoint to create a new non-pickleball matchup.
+    if len(team1) != score_size or len(team2) != score_size:
+        for team_number, players in ((1, team1), (2, team2)):
+            for player in players:
+                row = GamePlayer.query.filter_by(
+                    game_id=game['id'], user_id=player['user']['id'],
+                ).one()
+                row.team = team_number
+        db.session.commit()
+        refreshed = client.get(
+            f"/api/games/{game['id']}", headers=auth_headers(owner),
+        )
+        assert refreshed.status_code == 200, refreshed.get_json()
+        return refreshed.get_json()
     return scored.get_json()
 
 
@@ -648,9 +687,8 @@ def test_crew_game_creation_is_private_atomic_and_replay_precedes_version_check(
         'court_id': court,
         'scheduled_at': (utcnow() + timedelta(days=2)).isoformat() + 'Z',
         'game_type': 'casual',
-        # Crew games are private regardless of a stale or malicious client
-        # visibility value, and invitees come from the server-side roster.
-        'visibility': 'open',
+        # Group-only plans are an exact immutable Crew roster snapshot.
+        'visibility': 'private',
         'crew_id': crew_id,
         'expected_crew_version': expected_version,
         'client_attempt_id': attempt_id,
@@ -733,6 +771,76 @@ def test_crew_game_creation_is_private_atomic_and_replay_precedes_version_check(
         creator_id=owner['user']['id'],
         client_attempt_id=stale_payload['client_attempt_id'],
     ).count() == 0
+
+
+def test_crew_session_accepts_selected_members_capacity_and_weekly_recurrence(client):
+    owner = register(client, 'selected-owner@example.com', 'Owner')
+    alice = register(client, 'selected-alice@example.com', 'Alice')
+    ben = register(client, 'selected-ben@example.com', 'Ben')
+    pending = register(client, 'selected-pending@example.com', 'Pending')
+    court = court_id(client)
+    source = completed_game(
+        client, owner, court, [owner, alice], [ben, pending],
+    )
+    crew_id = create_crew(client, source['id'], owner)['crew']['id']
+    accept_crew(client, crew_id, alice)
+    accept_crew(client, crew_id, ben)
+    crew = crew_detail(client, crew_id, owner)
+    scheduled = (utcnow() + timedelta(days=8)).replace(
+        hour=18, minute=0, second=0, microsecond=0,
+    )
+    weekday = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][
+        scheduled.weekday()
+    ]
+
+    created = client.post('/api/games', json={
+        'court_id': court,
+        'scheduled_at': scheduled.isoformat() + 'Z',
+        'game_type': 'casual',
+        'visibility': 'private',
+        'max_players': 4,
+        'invite_user_ids': [alice['user']['id']],
+        'require_all_invitees': True,
+        'crew_id': crew_id,
+        'expected_crew_version': crew['roster_version'],
+        'recurrence': 'weekly',
+        'recurrence_timezone': 'UTC',
+        'recurrence_weekdays': [weekday],
+        'client_attempt_id': 'crew-selected-weekly-550e8400-e29b-41d4-a716',
+    }, headers=auth_headers(owner))
+    assert created.status_code == 201, created.get_json()
+    body = created.get_json()
+    assert body['crew_id'] == crew_id
+    assert body['max_players'] == 4
+    assert body['recurrence'] == 'weekly'
+    assert body['recurrence_weekdays'] == [weekday]
+
+    from backend.models import GameInvite
+
+    assert {
+        invite.user_id
+        for invite in GameInvite.query.filter_by(game_id=body['id']).all()
+    } == {alice['user']['id']}
+    assert client.get(
+        f"/api/games/{body['id']}", headers=auth_headers(alice),
+    ).status_code == 200
+    for deselected in (ben, pending):
+        assert client.get(
+            f"/api/games/{body['id']}", headers=auth_headers(deselected),
+        ).status_code == 404
+
+    one_time = client.patch(
+        f"/api/games/{body['id']}", json={'recurrence': 'none'},
+        headers=auth_headers(owner),
+    )
+    assert one_time.status_code == 200, one_time.get_json()
+    repeated = client.patch(f"/api/games/{body['id']}", json={
+        'recurrence': 'weekly',
+        'recurrence_timezone': 'UTC',
+        'recurrence_weekdays': [weekday],
+    }, headers=auth_headers(owner))
+    assert repeated.status_code == 200, repeated.get_json()
+    assert repeated.get_json()['recurrence'] == 'weekly'
 
 
 def test_completed_private_crew_game_stays_out_of_participant_friend_results(client):

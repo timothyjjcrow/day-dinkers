@@ -282,20 +282,34 @@ def test_v3_idempotency_binds_game_type_and_capacity(client):
     assert Game.query.count() == 1
 
 
-def test_confirm_presence_creates_and_returns_the_atomic_presence(client):
-    player = _register(client, 'atomic-presence-create')
+def test_legacy_confirm_flag_cannot_create_remote_presence(client):
+    player = _register(client, 'remote-presence-create')
     court_id = _court_id(client)
-
-    response = client.post('/api/games/rally', json=_rally_payload(
+    payload = _rally_payload(
         court_id,
-        'atomic-presence-create-attempt',
+        'remote-presence-create-attempt',
         game_type='ranked',
         max_players=2,
         confirm_court_presence=True,
-    ), headers=_headers(player))
+    )
 
-    assert response.status_code == 201, response.get_json()
-    body = response.get_json()
+    refused = client.post(
+        '/api/games/rally', json=payload, headers=_headers(player),
+    )
+
+    assert refused.status_code == 409, refused.get_json()
+    assert refused.get_json() == {'error': 'active_checkin_required'}
+    assert CheckIn.query.filter_by(user_id=player['user']['id']).count() == 0
+    assert Game.query.count() == 0
+
+    # The field remains accepted for older clients after they use the explicit
+    # check-in endpoint; it only asks for presence details in the response.
+    _check_in(client, player, court_id)
+    started = client.post(
+        '/api/games/rally', json=payload, headers=_headers(player),
+    )
+    assert started.status_code == 201, started.get_json()
+    body = started.get_json()
     assert body['outcome'] == 'created'
     assert body['presence']['checked_in'] is True
     assert body['presence']['court_id'] == court_id
@@ -306,36 +320,97 @@ def test_confirm_presence_creates_and_returns_the_atomic_presence(client):
     assert checkin.checked_out_at is None
 
 
-def test_confirm_presence_switches_only_when_a_join_succeeds(client):
-    host = _register(client, 'atomic-presence-host')
-    joiner = _register(client, 'atomic-presence-joiner')
+def test_legacy_confirm_flag_cannot_switch_courts_to_join(client):
+    host = _register(client, 'remote-presence-host')
+    joiner = _register(client, 'remote-presence-joiner')
     court_id = _court_id(client)
     other_court_id = _other_court_id()
     _check_in(client, host, court_id)
     _check_in(client, joiner, other_court_id, looking=True)
     created = client.post('/api/games/rally', json=_rally_payload(
-        court_id, 'atomic-presence-host-attempt', game_type='casual',
+        court_id, 'remote-presence-host-attempt', game_type='casual',
         max_players=2,
     ), headers=_headers(host))
     assert created.status_code == 201, created.get_json()
 
     joined = client.post('/api/games/rally', json=_rally_payload(
         court_id,
-        'atomic-presence-joiner-attempt',
+        'remote-presence-joiner-attempt',
         game_type='casual',
         max_players=2,
         confirm_court_presence=True,
     ), headers=_headers(joiner))
 
-    assert joined.status_code == 200, joined.get_json()
-    assert joined.get_json()['outcome'] == 'joined'
-    assert joined.get_json()['presence']['court_id'] == court_id
+    assert joined.status_code == 409, joined.get_json()
+    assert joined.get_json() == {
+        'error': 'active_checkin_court_mismatch',
+        'checked_in_court_id': other_court_id,
+        'requested_court_id': court_id,
+    }
     active = CheckIn.query.filter_by(user_id=joiner['user']['id']).filter(
         CheckIn.checked_out_at.is_(None),
     ).one()
-    history = CheckIn.query.filter_by(user_id=joiner['user']['id']).all()
-    assert active.court_id == court_id
-    assert any(row.court_id == other_court_id and row.checked_out_at for row in history)
+    assert active.court_id == other_court_id
+    assert len(created.get_json()['game']['players']) == 1
+
+
+def test_legacy_confirm_flag_cannot_revive_a_stale_checkin(client):
+    player = _register(client, 'remote-presence-stale')
+    court_id = _court_id(client)
+    _check_in(client, player, court_id)
+    checkin = CheckIn.query.filter_by(
+        user_id=player['user']['id'], checked_out_at=None,
+    ).one()
+    stale_ping = utcnow() - timedelta(hours=3)
+    checkin.last_presence_ping_at = stale_ping
+    db.session.commit()
+
+    response = client.post('/api/games/rally', json=_rally_payload(
+        court_id,
+        'remote-presence-stale-attempt',
+        confirm_court_presence=True,
+    ), headers=_headers(player))
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json() == {'error': 'active_checkin_required'}
+    db.session.refresh(checkin)
+    assert checkin.last_presence_ping_at == stale_ping
+    assert Game.query.count() == 0
+
+
+def test_legacy_confirm_replay_never_recreates_a_checked_out_presence(client):
+    player = _register(client, 'remote-presence-replay')
+    anchor = _register(client, 'remote-presence-replay-anchor')
+    court_id = _court_id(client)
+    _check_in(client, player, court_id)
+    _check_in(client, anchor, court_id)
+    payload = _rally_payload(
+        court_id,
+        'remote-presence-replay-attempt',
+        confirm_court_presence=True,
+    )
+    created = client.post(
+        '/api/games/rally', json=payload, headers=_headers(player),
+    )
+    assert created.status_code == 201, created.get_json()
+    joined = client.post('/api/games/rally', json=_rally_payload(
+        court_id, 'remote-presence-replay-anchor-attempt',
+    ), headers=_headers(anchor))
+    assert joined.status_code == 200, joined.get_json()
+    checked_out = client.post('/api/checkout', headers=_headers(player))
+    assert checked_out.status_code == 200, checked_out.get_json()
+
+    replay = client.post(
+        '/api/games/rally', json=payload, headers=_headers(player),
+    )
+
+    assert replay.status_code == 200, replay.get_json()
+    assert replay.get_json()['outcome'] == 'existing'
+    assert replay.get_json()['presence']['checked_in'] is False
+    assert replay.get_json()['presence_confirmed'] is False
+    assert CheckIn.query.filter_by(
+        user_id=player['user']['id'], checked_out_at=None,
+    ).count() == 0
 
 
 def test_confirm_presence_failure_keeps_old_presence_pulse_and_arrival(client):
@@ -388,8 +463,9 @@ def test_confirm_presence_failure_keeps_old_presence_pulse_and_arrival(client):
 
     assert response.status_code == 409
     assert response.get_json() == {
-        'error': 'active_arrival_elsewhere',
-        'game_id': reserved_game.id,
+        'error': 'active_checkin_court_mismatch',
+        'checked_in_court_id': other_court_id,
+        'requested_court_id': court_id,
     }
     active = CheckIn.query.filter_by(user_id=player['user']['id']).filter(
         CheckIn.checked_out_at.is_(None),
@@ -404,6 +480,7 @@ def test_confirm_presence_active_rally_conflict_keeps_the_original_court(client)
     player = _register(client, 'atomic-presence-existing-rally')
     target_court_id = _court_id(client)
     original_court_id = _other_court_id()
+    _check_in(client, player, original_court_id)
     original = client.post('/api/games/rally', json=_rally_payload(
         original_court_id,
         'atomic-presence-existing-rally-original',
@@ -418,8 +495,11 @@ def test_confirm_presence_active_rally_conflict_keeps_the_original_court(client)
     ), headers=_headers(player))
 
     assert conflict.status_code == 409, conflict.get_json()
-    assert conflict.get_json()['error'] == 'active_rally_elsewhere'
-    assert conflict.get_json()['game']['id'] == original.get_json()['game']['id']
+    assert conflict.get_json() == {
+        'error': 'active_checkin_court_mismatch',
+        'checked_in_court_id': original_court_id,
+        'requested_court_id': target_court_id,
+    }
     active = CheckIn.query.filter_by(
         user_id=player['user']['id'], checked_out_at=None,
     ).one()
@@ -437,6 +517,8 @@ def test_closed_court_recovers_existing_rally_but_rejects_new_presence(client):
     roster_anchor = _register(client, 'closed-court-roster-anchor')
     newcomer = _register(client, 'closed-court-newcomer')
     court_id = _court_id(client)
+    _check_in(client, player, court_id)
+    _check_in(client, roster_anchor, court_id)
     original_payload = _rally_payload(
         court_id,
         'closed-court-recovery-original',
@@ -488,12 +570,12 @@ def test_closed_court_recovers_existing_rally_but_rejects_new_presence(client):
         max_players=4,
         confirm_court_presence=True,
     ), headers=_headers(player))
-    assert partial_recovery.status_code == 200, partial_recovery.get_json()
-    partial_body = partial_recovery.get_json()
-    assert partial_body['outcome'] == 'existing'
-    assert partial_body['game']['id'] == game['id']
-    assert partial_body['presence']['court_id'] == other_court_id
-    assert partial_body['presence_confirmed'] is False
+    assert partial_recovery.status_code == 409, partial_recovery.get_json()
+    assert partial_recovery.get_json() == {
+        'error': 'active_checkin_court_mismatch',
+        'checked_in_court_id': other_court_id,
+        'requested_court_id': court_id,
+    }
 
     conflict = client.post('/api/games/rally', json=_rally_payload(
         court_id,
@@ -503,8 +585,11 @@ def test_closed_court_recovers_existing_rally_but_rejects_new_presence(client):
         confirm_court_presence=True,
     ), headers=_headers(player))
     assert conflict.status_code == 409, conflict.get_json()
-    assert conflict.get_json()['error'] == 'active_rally_configuration_conflict'
-    assert conflict.get_json()['game']['id'] == game['id']
+    assert conflict.get_json() == {
+        'error': 'active_checkin_court_mismatch',
+        'checked_in_court_id': other_court_id,
+        'requested_court_id': court_id,
+    }
 
     new_start = client.post('/api/games/rally', json=_rally_payload(
         court_id,
@@ -512,7 +597,7 @@ def test_closed_court_recovers_existing_rally_but_rejects_new_presence(client):
         confirm_court_presence=True,
     ), headers=_headers(newcomer))
     assert new_start.status_code == 409
-    assert new_start.get_json() == {'error': 'court_closed'}
+    assert new_start.get_json() == {'error': 'active_checkin_required'}
     assert CheckIn.query.filter_by(
         user_id=newcomer['user']['id'], checked_out_at=None,
     ).count() == 0

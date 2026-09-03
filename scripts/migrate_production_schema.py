@@ -23,11 +23,160 @@ BASE_TABLES = {
     'user', 'court', 'check_in', 'game', 'message', 'notification',
 }
 REQUIRED_COLUMNS = {
-    'message': {'crew_id'},
+    'user': {
+        'auth_version', 'operator_role', 'mfa_secret_encrypted',
+        'mfa_enabled', 'mfa_enabled_at', 'mfa_recovery_codes',
+        'skill_rating', 'dupr_rating', 'dupr_id', 'email_verified_at', 'avatar_data',
+        'onboarding_completed_at',
+        'nearby_visibility',
+        'invited_by_user_id',
+        'suspended_at', 'suspension_reason', 'suspended_by_id',
+    },
+    'court': {
+        'structured_hours', 'hours_dawn_to_dusk', 'reservation_url',
+        'fee_type', 'open_play_schedule_rows',
+    },
+    'account_action_token': {
+        'id', 'created_at', 'updated_at', 'user_id', 'purpose', 'token_hash',
+        'pending_email', 'expires_at', 'consumed_at',
+    },
+    'push_subscription': {
+        'id', 'created_at', 'updated_at', 'user_id', 'endpoint', 'p256dh', 'auth',
+    },
+    'push_outbox': {
+        'id', 'created_at', 'updated_at', 'user_id', 'payload', 'attempts',
+        'available_at', 'sent_at', 'failed_at', 'last_error',
+        'delivered_subscription_ids',
+    },
+    'user_report': {
+        'id', 'created_at', 'updated_at', 'reporter_id', 'reported_id',
+        'reason', 'details', 'content_type', 'content_id', 'content_snapshot',
+        'status', 'assigned_operator_id', 'outcome', 'resolved_at',
+    },
+    'player_feedback': {
+        'id', 'created_at', 'updated_at', 'user_id', 'message', 'context',
+        'status', 'assigned_operator_id', 'outcome', 'resolved_at',
+    },
+    'moderation_action': {
+        'id', 'created_at', 'updated_at', 'actor_id', 'target_user_id',
+        'user_report_id', 'feedback_id', 'action', 'reason',
+    },
+    'business_profile': {
+        'id', 'created_at', 'updated_at', 'owner_id', 'court_id', 'name',
+        'claimant_role', 'claim_status', 'verified_at', 'published',
+        'description', 'announcement', 'contact_email', 'contact_phone',
+        'hours', 'amenities', 'website_url', 'booking_url',
+        'membership_url', 'logo_url', 'logo_data', 'organization_id',
+        'governance_status', 'suspension_reason', 'suspended_at',
+        'suspended_by', 'content_review_status', 'content_reviewed_at',
+    },
+    'business_claim': {
+        'id', 'created_at', 'updated_at', 'user_id', 'court_id',
+        'business_id', 'role', 'status', 'reviewed_at',
+        'assigned_operator_id', 'assigned_operator_identifier', 'due_at',
+        'claimant_feedback',
+    },
+    'business_claim_review_event': {
+        'id', 'claim_id', 'reviewer_identifier', 'verification_method',
+        'decision', 'review_note', 'ownership_transferred',
+        'previous_owner_id', 'created_at',
+    },
+    'business_offering': {
+        'id', 'created_at', 'updated_at', 'business_id', 'name', 'category',
+        'description', 'price_text', 'duration_minutes', 'booking_url',
+        'active', 'sort_order',
+    },
+    'business_schedule_item': {
+        'id', 'created_at', 'updated_at', 'business_id', 'title', 'kind',
+        'day_of_week', 'start_time', 'end_time', 'skill_level', 'booking_url',
+        'active', 'sort_order', 'timezone', 'recurrence', 'start_date',
+        'end_date', 'event_date', 'capacity', 'spots_remaining', 'status',
+        'location_note', 'instructor', 'source_updated_at',
+    },
+    'business_integration_request': {
+        'id', 'created_at', 'updated_at', 'business_id', 'requested_by_id',
+        'provider', 'capabilities', 'details', 'contact_email', 'status',
+        'handled_by', 'status_message', 'status_changed_at',
+        'assigned_operator_id', 'assigned_operator_identifier', 'due_at',
+    },
+    'business_organization': {
+        'id', 'name', 'created_by_id', 'created_at', 'updated_at',
+    },
+    'business_organization_member': {
+        'id', 'organization_id', 'user_id', 'role', 'accepted_at',
+        'created_at', 'updated_at',
+    },
+    'business_staff_invitation': {
+        'id', 'organization_id', 'invited_by_id', 'email', 'role',
+        'token_hash', 'status', 'expires_at', 'accepted_by_id', 'accepted_at',
+        'created_at', 'updated_at',
+    },
+    'business_verification_evidence': {
+        'id', 'claim_id', 'submitted_by_id', 'evidence_type',
+        'evidence_value', 'note', 'domain_match', 'status',
+        'challenge_token_hash', 'challenge_expires_at',
+        'challenge_verified_at', 'challenge_failed_attempts',
+        'challenge_locked_at', 'reviewed_by', 'review_note', 'reviewed_at',
+        'created_at', 'updated_at',
+    },
+    'business_profile_revision': {
+        'id', 'business_id', 'actor_user_id', 'action', 'change_summary',
+        'previous_snapshot', 'snapshot', 'sensitive', 'review_status',
+        'reviewer_identifier', 'review_note', 'reviewed_at',
+        'restored_from_id', 'created_at',
+    },
+    'business_governance_event': {
+        'id', 'business_id', 'actor_user_id', 'operator_identifier',
+        'event_type', 'details', 'created_at',
+    },
+    'business_profile_report': {
+        'id', 'business_id', 'reporter_id', 'category', 'details', 'status',
+        'handled_by', 'status_message', 'status_changed_at',
+        'assigned_operator_id', 'assigned_operator_identifier', 'due_at',
+        'created_at', 'updated_at',
+    },
+    'business_operator_action': {
+        'id', 'business_id', 'claim_id', 'action_type', 'payload', 'status',
+        'proposed_by_id', 'confirmed_by_id', 'expires_at', 'created_at',
+        'confirmed_at',
+    },
+    'operator_security_event': {
+        'id', 'actor_identifier', 'target_user_id', 'action',
+        'previous_role', 'new_role', 'reason', 'created_at',
+    },
+    'message': {'crew_id', 'conversation_id'},
+    'community_group': {
+        'id', 'created_at', 'updated_at', 'kind', 'privacy',
+        'legacy_scope_id', 'name', 'description', 'owner_id',
+        'home_court_id', 'archived_at',
+    },
+    'conversation': {
+        'id', 'created_at', 'updated_at', 'kind', 'scope_id', 'group_id',
+    },
+    'conversation_read': {
+        'id', 'created_at', 'updated_at', 'user_id', 'conversation_id',
+        'last_read_message_id',
+    },
     'game': {
-        'crew_id', 'crew_roster_version', 'is_instant',
+        'crew_id', 'crew_roster_version', 'is_challenge', 'is_instant',
         'assembly_closed_at', 'creator_id', 'client_attempt_id',
-        'client_attempt_fingerprint',
+        'client_attempt_fingerprint', 'title', 'description',
+        'duration_minutes', 'cost_cents', 'court_number', 'court_count',
+        'auto_fill_waitlist', 'score_dispute_count', 'score_dispute_reason',
+        'score_confirmation_kind', 'score_confirmed_by_id',
+        'score_confirmation_reminded_at',
+        'recurrence_timezone', 'recurrence_local_time',
+        'recurrence_weekdays', 'recurrence_ends_on',
+        'level_min', 'level_max',
+    },
+    'game_recurrence_rsvp': {
+        'id', 'created_at', 'updated_at', 'game_id', 'user_id',
+        'standing_rsvp', 'skipped_occurrence_on',
+        'last_rsvp_occurrence_on',
+    },
+    'game_score_line': {
+        'id', 'created_at', 'updated_at', 'game_id', 'game_number',
+        'score_team1', 'score_team2',
     },
     'check_in': {
         'user_id', 'court_id', 'looking_for_game', 'checked_in_at',
@@ -63,11 +212,195 @@ REQUIRED_COLUMNS = {
     },
     'crew_chat_read': {
         'id', 'created_at', 'updated_at', 'user_id', 'crew_id',
-        'last_read_message_id',
+        'last_read_message_id', 'notification_level',
+    },
+    'court_chat_subscription': {
+        'id', 'created_at', 'updated_at', 'user_id', 'court_id',
+        'joined_at', 'muted_at',
+    },
+    'direct_chat_preference': {
+        'id', 'created_at', 'updated_at', 'user_id', 'partner_id', 'muted_at',
+    },
+    'club': {
+        'id', 'announcement', 'announcement_author_id',
+        'announcement_posted_at', 'join_policy', 'archived_at',
+    },
+    'club_member': {'id', 'club_id', 'user_id', 'role', 'notification_level'},
+    'club_join_request': {
+        'id', 'created_at', 'updated_at', 'club_id', 'user_id', 'status',
+        'resolved_by_id', 'resolved_at',
+    },
+    'club_ban': {
+        'id', 'created_at', 'updated_at', 'club_id', 'user_id',
+        'banned_by_id', 'reason',
+    },
+    'tournament_entry': {
+        'id', 'tournament_id', 'player1_id', 'player2_id', 'checked_in_at',
+        'partner_invitee_id', 'partner_status', 'partner_pending_on',
+    },
+    'tournament': {
+        'id', 'division_name', 'division_min_rating', 'division_max_rating',
+        'game_format', 'court_count', 'match_minutes',
+    },
+    'tournament_match': {
+        'id', 'tournament_id', 'result_state', 'result_version',
+        'reported_by_id', 'reported_at', 'confirmed_by_id', 'confirmed_at',
+        'disputed_by_id', 'disputed_at', 'dispute_reason', 'resolution_kind',
+        'review_reminded_at', 'stall_alerted_at', 'last_nudged_at',
+        'scheduled_at', 'court_number', 'game_scores_json',
+    },
+    'league': {
+        'id', 'current_round', 'round_started_at', 'deadline_alerted_round',
+    },
+    'league_match': {
+        'id', 'league_id', 'result_state', 'result_version',
+        'reported_by_id', 'reported_at', 'confirmed_by_id', 'confirmed_at',
+        'disputed_by_id', 'disputed_at', 'dispute_reason', 'resolution_kind',
+        'review_reminded_at', 'stall_alerted_at', 'last_nudged_at',
+    },
+    'competition_result_event': {
+        'id', 'competition_type', 'match_id', 'actor_id', 'action', 'version',
+        'score1', 'score2', 'reason', 'created_at',
     },
 }
 REQUIRED_INDEXES = {
-    'message': {'ix_message_crew_id'},
+    'user': {
+        'ix_user_operator_role', 'ix_user_mfa_enabled',
+        'ix_user_suspended_at', 'ix_user_invited_by_user_id',
+        'ix_user_nearby_visibility',
+    },
+    'account_action_token': {
+        'ix_account_action_token_user_id',
+        'ix_account_action_token_purpose',
+        'ix_account_action_token_token_hash',
+        'ix_account_action_token_expires_at',
+    },
+    'push_subscription': {'ix_push_subscription_user_id'},
+    'push_outbox': {
+        'ix_push_outbox_user_id', 'ix_push_outbox_available_at',
+        'ix_push_outbox_sent_at', 'ix_push_outbox_failed_at',
+    },
+    'user_report': {
+        'ix_user_report_reporter_id', 'ix_user_report_reported_id',
+        'ix_user_report_status', 'ix_user_report_assigned_operator_id',
+        'ix_user_report_content_type', 'ix_user_report_content_id',
+    },
+    'player_feedback': {
+        'ix_player_feedback_user_id', 'ix_player_feedback_status',
+        'ix_player_feedback_assigned_operator_id',
+    },
+    'moderation_action': {
+        'ix_moderation_action_actor_id', 'ix_moderation_action_target_user_id',
+        'ix_moderation_action_user_report_id',
+        'ix_moderation_action_feedback_id', 'ix_moderation_action_action',
+    },
+    'game_recurrence_rsvp': {
+        'ix_game_recurrence_rsvp_game_id',
+        'ix_game_recurrence_rsvp_user_id',
+    },
+    'game_score_line': {'ix_game_score_line_game_id'},
+    'business_profile': {
+        'ix_business_profile_owner_id', 'ix_business_profile_court_id',
+        'ix_business_profile_claim_status', 'ix_business_profile_published',
+        'ix_business_profile_organization_id',
+        'ix_business_profile_governance_status',
+        'ix_business_profile_content_review_status',
+    },
+    'business_claim': {
+        'ix_business_claim_user_id', 'ix_business_claim_court_id',
+        'ix_business_claim_business_id', 'ix_business_claim_status',
+        'ix_business_claim_assigned_operator_id', 'ix_business_claim_due_at',
+    },
+    'business_claim_review_event': {
+        'ix_business_claim_review_event_claim_id',
+        'ix_business_claim_review_event_previous_owner_id',
+    },
+    'business_offering': {
+        'ix_business_offering_business_id', 'ix_business_offering_active',
+    },
+    'business_schedule_item': {
+        'ix_business_schedule_item_business_id',
+        'ix_business_schedule_item_active',
+        'ix_business_schedule_item_event_date',
+        'ix_business_schedule_item_status',
+    },
+    'business_integration_request': {
+        'ix_business_integration_request_business_id',
+        'ix_business_integration_request_requested_by_id',
+        'ix_business_integration_request_status',
+        'ix_business_integration_request_assigned_operator_id',
+        'ix_business_integration_request_due_at',
+    },
+    'business_organization': {'ix_business_organization_created_by_id'},
+    'business_organization_member': {
+        'ix_business_organization_member_organization_id',
+        'ix_business_organization_member_user_id',
+        'ix_business_organization_member_role',
+    },
+    'business_staff_invitation': {
+        'ix_business_staff_invitation_organization_id',
+        'ix_business_staff_invitation_invited_by_id',
+        'ix_business_staff_invitation_accepted_by_id',
+        'ix_business_staff_invitation_email',
+        'ix_business_staff_invitation_token_hash',
+        'ix_business_staff_invitation_status',
+        'ix_business_staff_invitation_expires_at',
+    },
+    'business_verification_evidence': {
+        'ix_business_verification_evidence_claim_id',
+        'ix_business_verification_evidence_submitted_by_id',
+        'ix_business_verification_evidence_status',
+    },
+    'business_profile_revision': {
+        'ix_business_profile_revision_business_id',
+        'ix_business_profile_revision_actor_user_id',
+        'ix_business_profile_revision_review_status',
+        'ix_business_profile_revision_sensitive',
+        'ix_business_profile_revision_restored_from_id',
+        'ix_business_profile_revision_created_at',
+    },
+    'business_governance_event': {
+        'ix_business_governance_event_business_id',
+        'ix_business_governance_event_actor_user_id',
+        'ix_business_governance_event_event_type',
+        'ix_business_governance_event_created_at',
+    },
+    'business_profile_report': {
+        'ix_business_profile_report_business_id',
+        'ix_business_profile_report_reporter_id',
+        'ix_business_profile_report_status',
+        'ix_business_profile_report_assigned_operator_id',
+        'ix_business_profile_report_due_at',
+    },
+    'business_operator_action': {
+        'ix_business_operator_action_business_id',
+        'ix_business_operator_action_claim_id',
+        'ix_business_operator_action_action_type',
+        'ix_business_operator_action_status',
+        'ix_business_operator_action_proposed_by_id',
+        'ix_business_operator_action_confirmed_by_id',
+        'ix_business_operator_action_expires_at',
+        'ix_business_operator_action_created_at',
+    },
+    'operator_security_event': {
+        'ix_operator_security_event_target_user_id',
+        'ix_operator_security_event_action',
+        'ix_operator_security_event_created_at',
+    },
+    'message': {'ix_message_crew_id', 'ix_message_conversation_id'},
+    'community_group': {
+        'ix_community_group_kind', 'ix_community_group_privacy',
+        'ix_community_group_legacy_scope_id', 'ix_community_group_owner_id',
+        'ix_community_group_home_court_id', 'ix_community_group_archived_at',
+    },
+    'conversation': {
+        'ix_conversation_kind', 'ix_conversation_scope_id',
+        'ix_conversation_group_id',
+    },
+    'conversation_read': {
+        'ix_conversation_read_user_id',
+        'ix_conversation_read_conversation_id',
+    },
     'game': {'ix_game_crew_id', 'ix_game_is_instant'},
     'notification': {'ix_notification_related_crew_id'},
     'game_arrival_intent': {
@@ -88,6 +421,33 @@ REQUIRED_INDEXES = {
         'ix_game_open_call_created_by_id',
         'ix_game_open_call_active',
     },
+    'court_chat_subscription': {
+        'ix_court_chat_subscription_user_id',
+        'ix_court_chat_subscription_court_id',
+    },
+    'direct_chat_preference': {
+        'ix_direct_chat_preference_user_id',
+        'ix_direct_chat_preference_partner_id',
+    },
+    'club': {'ix_club_archived_at'},
+    'club_join_request': {
+        'ix_club_join_request_club_id', 'ix_club_join_request_user_id',
+        'ix_club_join_request_status',
+    },
+    'club_ban': {'ix_club_ban_club_id', 'ix_club_ban_user_id'},
+    'tournament_match': {
+        'ix_tournament_match_result_state',
+        'ix_tournament_match_result_state_reported_at',
+    },
+    'league_match': {
+        'ix_league_match_result_state',
+        'ix_league_match_result_state_reported_at',
+    },
+    'competition_result_event': {
+        'ix_competition_result_event_competition_type',
+        'ix_competition_result_event_match_id',
+        'ix_competition_result_event_actor_id',
+    },
 }
 REQUIRED_PARTIAL_UNIQUE_INDEXES = {
     'check_in': {
@@ -98,9 +458,6 @@ REQUIRED_PARTIAL_UNIQUE_INDEXES = {
     'game_arrival_intent': {
         'uq_game_arrival_active_user': (
             ('user_id',), 'active is true',
-        ),
-        'uq_game_arrival_active_game': (
-            ('game_id',), 'active is true',
         ),
     },
     'play_availability_pulse': {
@@ -114,16 +471,36 @@ REQUIRED_PARTIAL_UNIQUE_INDEXES = {
         ),
     },
 }
+FORBIDDEN_INDEXES = {
+    # This old partial unique index limited an entire rally to one traveler.
+    # Its presence makes the multi-arrival capacity contract impossible even
+    # when the application code correctly serializes admission on the Game row.
+    'game_arrival_intent': {'uq_game_arrival_active_game'},
+}
 REQUIRED_EXACT_UNIQUE_INDEXES = {
+    'push_subscription': {
+        'uq_push_subscription_endpoint': ('endpoint',),
+    },
     'game': {
         'uq_game_creator_attempt': ('creator_id', 'client_attempt_id'),
     },
 }
 REQUIRED_UNIQUES = {
+    'business_profile': {'uq_business_profile_court'},
+    'business_claim': {'uq_business_claim_user_court'},
+    'business_organization_member': {'uq_business_organization_member'},
+    'business_staff_invitation': {'uq_business_staff_invitation_token'},
     'crew': {'uq_crew_source_game'},
     'crew_member': {'uq_crew_member'},
     'crew_invite': {'uq_crew_invitee'},
     'crew_chat_read': {'uq_crew_chat_read'},
+    'community_group': {'uq_community_group_legacy_scope'},
+    'conversation': {'uq_conversation_scope'},
+    'conversation_read': {'uq_conversation_read'},
+    'court_chat_subscription': {'uq_court_chat_subscription'},
+    'direct_chat_preference': {'uq_direct_chat_preference'},
+    'club_join_request': {'uq_club_join_request'},
+    'club_ban': {'uq_club_ban'},
     'game_arrival_intent': {'uq_game_arrival_user_attempt'},
     'play_availability_pulse': {
         'uq_play_availability_pulse_user_attempt',
@@ -134,21 +511,294 @@ REQUIRED_UNIQUES = {
         'uq_game_open_call_game_creator',
         'uq_game_open_call_message',
     },
+    'game_recurrence_rsvp': {'uq_game_recurrence_rsvp'},
+    'game_score_line': {'uq_game_score_line_number'},
+    'competition_result_event': {'uq_competition_result_event_version'},
 }
 REQUIRED_CHECK_CONSTRAINTS = {
+    'community_group': {
+        'ck_community_group_kind', 'ck_community_group_privacy',
+    },
+    'conversation': {'ck_conversation_kind'},
+    'business_profile': {
+        'ck_business_profile_claim_status',
+        'ck_business_profile_governance_status',
+        'ck_business_profile_content_review_status',
+    },
+    'business_claim': {'ck_business_claim_status'},
+    'business_claim_review_event': {
+        'ck_business_claim_review_event_decision',
+        'ck_business_claim_review_event_method',
+    },
+    'business_integration_request': {
+        'ck_business_integration_request_status',
+    },
+    'business_schedule_item': {
+        'ck_business_schedule_item_capacity',
+        'ck_business_schedule_item_spots',
+        'ck_business_schedule_item_spots_capacity',
+        'ck_business_schedule_item_status',
+    },
+    'business_organization_member': {
+        'ck_business_organization_member_role',
+    },
+    'business_staff_invitation': {
+        'ck_business_staff_invitation_role',
+        'ck_business_staff_invitation_status',
+    },
+    'business_verification_evidence': {
+        'ck_business_verification_evidence_status',
+        'ck_business_verification_evidence_type',
+    },
+    'business_profile_revision': {
+        'ck_business_profile_revision_review_status',
+    },
+    'business_profile_report': {
+        'ck_business_profile_report_category',
+        'ck_business_profile_report_status',
+    },
+    'business_operator_action': {
+        'ck_business_operator_action_status',
+        'ck_business_operator_action_type',
+    },
     'play_availability_pulse': {
         'ck_play_availability_pulse_positive_window',
     },
 }
 REQUIRED_FOREIGN_KEYS = {
+    'user': {
+        'user_invited_by_user_id_fkey': (
+            ('invited_by_user_id',), 'user', ('id',),
+        ),
+        'user_suspended_by_id_fkey': (
+            ('suspended_by_id',), 'user', ('id',),
+        ),
+    },
+    'account_action_token': {
+        'account_action_token_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+    },
+    'push_subscription': {
+        'push_subscription_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+    },
+    'push_outbox': {
+        'push_outbox_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+    },
+    'user_report': {
+        'user_report_assigned_operator_id_fkey': (
+            ('assigned_operator_id',), 'user', ('id',),
+        ),
+    },
+    'player_feedback': {
+        'player_feedback_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+        'player_feedback_assigned_operator_id_fkey': (
+            ('assigned_operator_id',), 'user', ('id',),
+        ),
+    },
+    'moderation_action': {
+        'moderation_action_actor_id_fkey': (
+            ('actor_id',), 'user', ('id',),
+        ),
+        'moderation_action_target_user_id_fkey': (
+            ('target_user_id',), 'user', ('id',),
+        ),
+        'moderation_action_user_report_id_fkey': (
+            ('user_report_id',), 'user_report', ('id',),
+        ),
+        'moderation_action_feedback_id_fkey': (
+            ('feedback_id',), 'player_feedback', ('id',),
+        ),
+    },
+    'game_recurrence_rsvp': {
+        'game_recurrence_rsvp_game_id_fkey': (
+            ('game_id',), 'game', ('id',),
+        ),
+        'game_recurrence_rsvp_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+    },
+    'game_score_line': {
+        'game_score_line_game_id_fkey': (
+            ('game_id',), 'game', ('id',),
+        ),
+    },
+    'business_profile': {
+        'business_profile_owner_id_fkey': (
+            ('owner_id',), 'user', ('id',),
+        ),
+        'business_profile_court_id_fkey': (
+            ('court_id',), 'court', ('id',),
+        ),
+        'business_profile_organization_id_fkey': (
+            ('organization_id',), 'business_organization', ('id',),
+        ),
+    },
+    'business_claim': {
+        'business_claim_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+        'business_claim_court_id_fkey': (
+            ('court_id',), 'court', ('id',),
+        ),
+        'business_claim_business_id_fkey': (
+            ('business_id',), 'business_profile', ('id',),
+        ),
+        'business_claim_assigned_operator_id_fkey': (
+            ('assigned_operator_id',), 'user', ('id',),
+        ),
+    },
+    'business_claim_review_event': {
+        'business_claim_review_event_claim_id_fkey': (
+            ('claim_id',), 'business_claim', ('id',),
+        ),
+        'business_claim_review_event_previous_owner_id_fkey': (
+            ('previous_owner_id',), 'user', ('id',),
+        ),
+    },
+    'business_offering': {
+        'business_offering_business_id_fkey': (
+            ('business_id',), 'business_profile', ('id',),
+        ),
+    },
+    'business_schedule_item': {
+        'business_schedule_item_business_id_fkey': (
+            ('business_id',), 'business_profile', ('id',),
+        ),
+    },
+    'business_integration_request': {
+        'business_integration_request_business_id_fkey': (
+            ('business_id',), 'business_profile', ('id',),
+        ),
+        'business_integration_request_requested_by_id_fkey': (
+            ('requested_by_id',), 'user', ('id',),
+        ),
+        'business_integration_request_assigned_operator_id_fkey': (
+            ('assigned_operator_id',), 'user', ('id',),
+        ),
+    },
+    'business_organization': {
+        'business_organization_creator_id_fkey': (
+            ('created_by_id',), 'user', ('id',),
+        ),
+    },
+    'business_organization_member': {
+        'business_organization_member_organization_id_fkey': (
+            ('organization_id',), 'business_organization', ('id',),
+        ),
+        'business_organization_member_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+    },
+    'business_staff_invitation': {
+        'business_staff_invitation_organization_id_fkey': (
+            ('organization_id',), 'business_organization', ('id',),
+        ),
+        'business_staff_invitation_inviter_id_fkey': (
+            ('invited_by_id',), 'user', ('id',),
+        ),
+        'business_staff_invitation_acceptor_id_fkey': (
+            ('accepted_by_id',), 'user', ('id',),
+        ),
+    },
+    'business_verification_evidence': {
+        'business_verification_evidence_claim_id_fkey': (
+            ('claim_id',), 'business_claim', ('id',),
+        ),
+        'business_verification_evidence_submitter_id_fkey': (
+            ('submitted_by_id',), 'user', ('id',),
+        ),
+    },
+    'business_profile_revision': {
+        'business_profile_revision_business_id_fkey': (
+            ('business_id',), 'business_profile', ('id',),
+        ),
+        'business_profile_revision_actor_id_fkey': (
+            ('actor_user_id',), 'user', ('id',),
+        ),
+        'business_profile_revision_restored_from_id_fkey': (
+            ('restored_from_id',), 'business_profile_revision', ('id',),
+        ),
+    },
+    'business_governance_event': {
+        'business_governance_event_business_id_fkey': (
+            ('business_id',), 'business_profile', ('id',),
+        ),
+        'business_governance_event_actor_id_fkey': (
+            ('actor_user_id',), 'user', ('id',),
+        ),
+    },
+    'business_profile_report': {
+        'business_profile_report_business_id_fkey': (
+            ('business_id',), 'business_profile', ('id',),
+        ),
+        'business_profile_report_reporter_id_fkey': (
+            ('reporter_id',), 'user', ('id',),
+        ),
+        'business_profile_report_assigned_operator_id_fkey': (
+            ('assigned_operator_id',), 'user', ('id',),
+        ),
+    },
+    'business_operator_action': {
+        'business_operator_action_business_id_fkey': (
+            ('business_id',), 'business_profile', ('id',),
+        ),
+        'business_operator_action_claim_id_fkey': (
+            ('claim_id',), 'business_claim', ('id',),
+        ),
+        'business_operator_action_proposer_id_fkey': (
+            ('proposed_by_id',), 'user', ('id',),
+        ),
+        'business_operator_action_confirmer_id_fkey': (
+            ('confirmed_by_id',), 'user', ('id',),
+        ),
+    },
+    'operator_security_event': {
+        'operator_security_event_target_user_id_fkey': (
+            ('target_user_id',), 'user', ('id',),
+        ),
+    },
     'message': {
         'message_crew_id_fkey': (
             ('crew_id',), 'crew', ('id',),
+        ),
+        'message_conversation_id_fkey': (
+            ('conversation_id',), 'conversation', ('id',),
+        ),
+    },
+    'community_group': {
+        'community_group_owner_id_fkey': (
+            ('owner_id',), 'user', ('id',),
+        ),
+        'community_group_home_court_id_fkey': (
+            ('home_court_id',), 'court', ('id',),
+        ),
+    },
+    'conversation': {
+        'conversation_group_id_fkey': (
+            ('group_id',), 'community_group', ('id',),
+        ),
+    },
+    'conversation_read': {
+        'conversation_read_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+        'conversation_read_conversation_id_fkey': (
+            ('conversation_id',), 'conversation', ('id',),
         ),
     },
     'game': {
         'game_crew_id_fkey': (
             ('crew_id',), 'crew', ('id',),
+        ),
+        'game_score_confirmed_by_id_fkey': (
+            ('score_confirmed_by_id',), 'user', ('id',),
         ),
     },
     'notification': {
@@ -187,6 +837,54 @@ REQUIRED_FOREIGN_KEYS = {
         ),
         'game_open_call_court_message_id_fkey': (
             ('court_message_id',), 'message', ('id',),
+        ),
+    },
+    'court_chat_subscription': {
+        'court_chat_subscription_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+        'court_chat_subscription_court_id_fkey': (
+            ('court_id',), 'court', ('id',),
+        ),
+    },
+    'direct_chat_preference': {
+        'direct_chat_preference_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+        'direct_chat_preference_partner_id_fkey': (
+            ('partner_id',), 'user', ('id',),
+        ),
+    },
+    'club_join_request': {
+        'club_join_request_club_id_fkey': (
+            ('club_id',), 'club', ('id',),
+        ),
+        'club_join_request_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+        'club_join_request_resolved_by_id_fkey': (
+            ('resolved_by_id',), 'user', ('id',),
+        ),
+    },
+    'club_ban': {
+        'club_ban_club_id_fkey': (
+            ('club_id',), 'club', ('id',),
+        ),
+        'club_ban_user_id_fkey': (
+            ('user_id',), 'user', ('id',),
+        ),
+        'club_ban_banned_by_id_fkey': (
+            ('banned_by_id',), 'user', ('id',),
+        ),
+    },
+    'tournament_entry': {
+        'tournament_entry_partner_invitee_id_fkey': (
+            ('partner_invitee_id',), 'user', ('id',),
+        ),
+    },
+    'club': {
+        'club_announcement_author_id_fkey': (
+            ('announcement_author_id',), 'user', ('id',),
         ),
     },
 }
@@ -246,6 +944,16 @@ def _schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
         missing = sorted(required - actual)
         if missing:
             gaps.append(f'{table} missing indexes {missing}')
+    for table, forbidden in FORBIDDEN_INDEXES.items():
+        if table not in tables:
+            continue
+        actual = {
+            index.get('name')
+            for index in inspector.get_indexes(table, schema=schema)
+        }
+        present = sorted(forbidden & actual)
+        if present:
+            gaps.append(f'{table} has obsolete indexes {present}')
     for table, required in REQUIRED_PARTIAL_UNIQUE_INDEXES.items():
         if table not in tables:
             continue
@@ -358,6 +1066,13 @@ def _schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
     return gaps
 
 
+def _integration_schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
+    """Include provider-sync tables in the release-wide migration contract."""
+    from scripts.migrate_business_integration_foundation import schema_gaps
+
+    return schema_gaps(inspector, schema)
+
+
 def _preflight_existing_app(engine) -> None:
     from sqlalchemy import inspect, text
 
@@ -409,7 +1124,11 @@ def main() -> int:
     )
     try:
         _preflight_existing_app(engine)
-        before = _schema_gaps(inspect(engine))
+        inspector = inspect(engine)
+        before = (
+            _schema_gaps(inspector)
+            + _integration_schema_gaps(inspector)
+        )
     finally:
         engine.dispose()
 
@@ -424,6 +1143,8 @@ def main() -> int:
     # local recovery tests, without creating unrelated missing application data.
     os.environ.update({
         'APP_ENV': 'production',
+        'MFA_ENCRYPTION_KEY': 'cptEwcGPWoQwTRpx7LZH3BaiGR5MbnTsyqs1PjdFGgA=',
+        'BUSINESS_CREDENTIAL_VAULT': 'disabled',
         'SERVERLESS_RUNTIME': 'false',
         'SCHEMA_MANAGEMENT_ENABLED': 'true',
         'AUTO_CREATE_DB': 'false',
@@ -436,7 +1157,16 @@ def main() -> int:
     from backend.app import app, db
 
     with app.app_context():
-        gaps = _schema_gaps(inspect(db.engine))
+        from scripts.migrate_business_integration_foundation import (
+            _upgrade_existing_foundation,
+        )
+        _upgrade_existing_foundation(db.engine, PG_SCHEMA)
+
+        inspector = inspect(db.engine)
+        gaps = (
+            _schema_gaps(inspector)
+            + _integration_schema_gaps(inspector)
+        )
         if gaps:
             raise RuntimeError(
                 'Schema verification failed after migration: ' + '; '.join(gaps)

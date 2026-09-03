@@ -6,6 +6,7 @@ import pytest
 
 from backend.app import create_app, db
 from backend.models import (
+    CheckIn,
     Court,
     Game,
     GamePlayer,
@@ -73,6 +74,153 @@ def _discover(client, person, court):
         'lat': court['latitude'],
         'lng': court['longitude'],
     }, headers=_headers(person))
+
+
+def _connect_friends(client, requester, addressee):
+    requested = client.post('/api/friends/request', json={
+        'user_id': addressee['user']['id'],
+    }, headers=_headers(requester))
+    assert requested.status_code in (200, 201), requested.get_json()
+    accepted = client.post(
+        f"/api/friends/{requested.get_json()['friendship_id']}/respond",
+        json={'accept': True}, headers=_headers(addressee),
+    )
+    assert accepted.status_code == 200, accepted.get_json()
+
+
+def test_nearby_visibility_serializes_and_hides_every_passive_presence_surface(client):
+    owner = _register(client, 'visibility-owner', 'Owner')
+    friend = _register(client, 'visibility-friend', 'Friend')
+    stranger = _register(client, 'visibility-stranger', 'Stranger')
+    court = _court(client)
+    owner_id = owner['user']['id']
+    _connect_friends(client, friend, owner)
+
+    assert owner['user']['nearby_visibility'] == 'everyone'
+    normalized = client.patch(
+        '/api/me', json={'nearby_visibility': ' Friends '},
+        headers=_headers(owner),
+    )
+    assert normalized.status_code == 200, normalized.get_json()
+    assert normalized.get_json()['user']['nearby_visibility'] == 'friends'
+    assert client.get(
+        '/api/me', headers=_headers(owner),
+    ).get_json()['user']['nearby_visibility'] == 'friends'
+
+    for invalid in ('contacts', None, [], 1):
+        rejected = client.patch(
+            '/api/me', json={'nearby_visibility': invalid},
+            headers=_headers(owner),
+        )
+        assert rejected.status_code == 400, rejected.get_json()
+        assert rejected.get_json() == {'error': 'invalid_nearby_visibility'}
+        assert client.get(
+            '/api/me', headers=_headers(owner),
+        ).get_json()['user']['nearby_visibility'] == 'friends'
+
+    pulse = _publish(
+        client, owner, court['id'], 'visibility-pulse',
+    ).get_json()['pulse']
+
+    def set_visibility(value):
+        response = client.patch(
+            '/api/me', json={'nearby_visibility': value},
+            headers=_headers(owner),
+        )
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()['user']['nearby_visibility'] == value
+
+    def pulse_owner_ids(viewer):
+        payload = _discover(client, viewer, court).get_json()
+        assert payload['pulse_count'] == len(payload['pulses'])
+        return {item['user']['id'] for item in payload['pulses']}
+
+    expected_visibility = {
+        'everyone': (True, True),
+        'friends': (True, False),
+        'hidden': (False, False),
+    }
+    for mode, (friend_sees, stranger_sees) in expected_visibility.items():
+        set_visibility(mode)
+        assert (owner_id in pulse_owner_ids(friend)) is friend_sees
+        assert (owner_id in pulse_owner_ids(stranger)) is stranger_sees
+
+    cancelled = client.delete(
+        f"/api/play/pulses/{pulse['id']}", headers=_headers(owner),
+    )
+    assert cancelled.status_code == 200, cancelled.get_json()
+
+    # Two recent completed visits make the owner a regular. The live check-in
+    # below is a third visit and is the only row counted as current occupancy.
+    with client.application.app_context():
+        now = utcnow()
+        db.session.add_all([
+            CheckIn(
+                user_id=owner_id, court_id=court['id'],
+                checked_in_at=now - timedelta(days=1),
+                checked_out_at=now - timedelta(days=1),
+            ),
+            CheckIn(
+                user_id=owner_id, court_id=court['id'],
+                checked_in_at=now - timedelta(days=2),
+                checked_out_at=now - timedelta(days=2),
+            ),
+        ])
+        db.session.commit()
+    checked_in = client.post(
+        f"/api/courts/{court['id']}/checkin",
+        json={'looking_for_game': True}, headers=_headers(owner),
+    )
+    assert checked_in.status_code == 200, checked_in.get_json()
+
+    def nearby_owner_ids(viewer):
+        response = client.get('/api/players/nearby', query_string={
+            'lat': court['latitude'], 'lng': court['longitude'],
+        }, headers=_headers(viewer))
+        assert response.status_code == 200, response.get_json()
+        return {item['id'] for item in response.get_json()['items']}
+
+    def looking_owner_ids(viewer):
+        response = _discover(client, viewer, court)
+        assert response.status_code == 200, response.get_json()
+        return {item['id'] for item in response.get_json()['players']}
+
+    def court_presence(viewer):
+        response = client.get(
+            f"/api/courts/{court['id']}", headers=_headers(viewer),
+        )
+        assert response.status_code == 200, response.get_json()
+        return response.get_json()
+
+    for mode, (friend_sees, stranger_sees) in expected_visibility.items():
+        set_visibility(mode)
+        assert (owner_id in nearby_owner_ids(friend)) is friend_sees
+        assert (owner_id in nearby_owner_ids(stranger)) is stranger_sees
+        assert (owner_id in looking_owner_ids(friend)) is friend_sees
+        assert (owner_id in looking_owner_ids(stranger)) is stranger_sees
+
+        friend_court = court_presence(friend)
+        stranger_court = court_presence(stranger)
+        # Privacy removes identities, never the safe aggregate occupancy.
+        assert friend_court['players_here_count'] == 1
+        assert stranger_court['players_here_count'] == 1
+        assert (owner_id in {p['id'] for p in friend_court['players_here']}) is friend_sees
+        assert (owner_id in {p['id'] for p in stranger_court['players_here']}) is stranger_sees
+        assert (owner_id in {p['id'] for p in friend_court['regulars']}) is friend_sees
+        assert (owner_id in {p['id'] for p in stranger_court['regulars']}) is stranger_sees
+
+        friend_row = next(
+            item for item in client.get(
+                '/api/friends', headers=_headers(friend),
+            ).get_json()['friends']
+            if item['id'] == owner_id
+        )
+        assert (friend_row['checked_in_court'] is not None) is (mode != 'hidden')
+
+        digest = client.get(
+            '/api/friends/digest', headers=_headers(friend),
+        ).get_json()
+        assert digest['checkins'] == (0 if mode == 'hidden' else 3)
 
 
 def test_publish_is_fixed_idempotent_and_visible_in_me(client):

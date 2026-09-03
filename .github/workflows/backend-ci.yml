@@ -4,12 +4,28 @@ on:
   push:
     paths:
       - 'backend/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'vercel.json'
       - 'requirements.txt'
       - 'Dockerfile'
       - '.github/workflows/backend-ci.yml'
   pull_request:
     paths:
       - 'backend/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'vercel.json'
       - 'requirements.txt'
       - 'Dockerfile'
       - '.github/workflows/backend-ci.yml'
@@ -26,6 +42,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install frontend build dependencies
+        run: npm ci
+
+      - name: Verify generated frontend release
+        run: |
+          npm run build:frontend
+          git diff --exit-code -- public/assets
+          test -z "$(git ls-files --others --exclude-standard -- public/assets)"
 
       - name: Install backend dependencies
         run: |

@@ -29,19 +29,19 @@ def test_me_recovers_only_a_live_server_expiring_pulse_and_refreshes_hero():
     assert "renderPlay({ useCachedData: true })" in apply_me
 
 
-def test_remote_hero_leads_with_unified_game_entry_without_claiming_presence():
+def test_remote_hero_exposes_play_now_intents_without_claiming_presence():
     hero = section("function rallyLauncherHtml", "async function renderPlay")
-    assert 'data-goto="game-flow"' in hero
-    assert "<b>Find or start a game</b>" in hero
-    assert "choose exactly what to start" in hero
-    assert 'data-goto="play-soon"' not in hero
-    assert 'data-goto="play-pulse"' not in hero
+    assert 'data-goto="instant-rally"' in hero
+    assert "<b>${here ? 'Play here' : 'At a court'}</b>" in hero
+    assert 'data-goto="on-my-way"' in hero
+    assert '<b>On my way</b>' in hero
+    assert 'data-goto="play-pulse"' in hero
+    assert '<b>Free this hour</b>' in hero
+    assert 'data-goto="new-game"' in hero
+    assert 'data-goto="ranked-match"' in hero
     assert 'data-goto="play-now"' not in hero
-    assert "const immediateAction = `<button" in hero
-    assert 'data-goto="instant-rally"' not in hero
-    assert "Find or start a game" in hero
     assert "activePlayPulseBannerHtml(pulse)" in hero
-    assert "Nearby players can respond to the court you picked." in hero
+    assert "Only the court is shared, not your location." in APP
 
     ctas = section("function setupEmptyStateCtas", "// ---------- Map / Courts ----------")
     assert "target === 'play-pulse'" in ctas
@@ -86,8 +86,8 @@ def test_publish_attempt_is_durable_account_and_court_scoped_and_idempotent():
 def test_active_pulse_has_directions_details_and_cancellation():
     details = section("function openPlayPulseDetails", "function activePlayPulseBannerHtml")
     assert "playPulseDirectionsUrl(pulse)" in details
-    assert "intended destination, not your current location or a check-in" in details
-    assert "first nearby player who accepts creates an open quick game" in details
+    assert "Only the court is shared, not your location." in details
+    assert "The first player who joins starts a casual game for both of you." in details
     assert "Directions" in details
     assert "End Free this hour" in details
     assert "cancelPlayPulse(pulse" in details
@@ -102,7 +102,7 @@ def test_active_pulse_has_directions_details_and_cancellation():
 
     banner = section("function activePlayPulseBannerHtml", "async function checkInAndStartRally")
     assert "Free this hour at" in banner
-    assert "intended destination, not a check-in" in banner
+    assert "Only the court is shared, not your location." in banner
     assert "data-play-pulse-details" in banner
     assert "Directions" in banner
     assert "data-play-pulse-cancel" in banner
@@ -123,34 +123,33 @@ def test_play_pulse_user_copy_consistently_uses_free_this_hour():
     assert "End Free this hour" in pulse_ui
 
     assert "court room" not in APP.lower()
-    assert "posted to court chat" in APP
-    assert "Posting one live card to court chat" in APP
+    assert "Opening posted in Court chat" in APP
+    assert "Sharing one opening in Court chat" in APP
 
 
 def test_nearby_cards_never_imply_presence_and_require_explicit_confirmation():
     nearby = section("async function renderNearbyPlayers", "async function renderFriends")
     assert "normalizeLookingPulses(looking)" in nearby
-    assert "can play at ${esc(pulse.courtName)} this hour" in nearby
-    assert "intended destination, not current presence" in nearby
-    assert "Confirming creates an open quick game starting in about 15 minutes" in nearby
+    assert "wants to play at ${esc(pulse.courtName)} until" in nearby
+    assert "intended destination" not in nearby
+    assert "Join them for a casual game." in nearby
     assert 'data-play-pulse-accept="${pulse.id}"' in nearby
-    assert ">Play there</button>" in nearby
+    assert ">I’m in</button>" in nearby
     assert "openPlayPulseAcceptConfirmation(pulse)" in nearby
 
     confirmation = section("function openPlayPulseAcceptConfirmation", "function openPlayPulseDetails")
     assert "playPulseCommitmentCopy(pulse)" in confirmation
-    assert "Create quick game" in confirmation
+    assert "I’m in" in confirmation
     assert "acceptPlayPulse(" in confirmation
     commitment = section("function playPulseCommitmentCopy", "async function acceptPlayPulse")
-    assert "intended destination, not a current location" in commitment
-    assert "creates an open quick game starting in about 15 minutes for both of you" in commitment
-    assert "it does not check either player in" in commitment
+    assert "Only the court is shared, not your location." in commitment
+    assert "we’ll set up a casual game" in commitment
 
     banner = section("async function refreshLookingBanner", "// ---------- Search suggestions")
     assert "const pulses = normalizeLookingPulses(data)" in banner
     assert "if (!rally && !count && !pulse)" in banner
     assert "can play at ${esc(pulse.courtName)} this hour" in banner
-    assert "View and confirm the intended destination" in banner
+    assert "View details" in banner
 
 
 def test_acceptance_attempt_is_durable_pulse_scoped_and_double_tap_safe():
@@ -208,4 +207,4 @@ def test_errors_mobile_targets_and_shell_revision_are_explicit():
     assert "grid-template-columns: auto minmax(0, 1fr)" in STYLES
     assert ".play-pulse-nearby-card [data-play-pulse-accept]" in STYLES
     assert "min-width: 0" in STYLES
-    assert "thirdshot-v15-r16" in SW
+    assert "thirdshot-v15-r58" in SW

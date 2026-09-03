@@ -13,9 +13,13 @@ APP = (ROOT / 'public' / 'app-v15.js').read_text()
 
 def run_planner(expression):
     script = f"""
-      const planner = require({json.dumps(str(MODULE))});
-      const result = ({expression});
-      process.stdout.write(JSON.stringify(result));
+      const {{ pathToFileURL }} = require('node:url');
+      (async () => {{
+        await import(pathToFileURL({json.dumps(str(MODULE))}).href);
+        const planner = globalThis.CrewPlanner;
+        const result = ({expression});
+        process.stdout.write(JSON.stringify(result));
+      }})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
     """
     env = {**os.environ, 'TZ': 'America/Los_Angeles'}
     result = subprocess.run(
@@ -95,19 +99,23 @@ def test_invalid_duplicate_and_unknown_availability_has_honest_fallback():
     assert fallback['usedFallback'] is True
 
 
-def test_postgame_ctas_share_the_recoverable_atomic_crew_planner():
-    assert 'id="cel-plan-crew"' in APP
-    assert 'id="gs-plan-crew"' in APP
-    assert APP.count('openCompletedCrewPlanner(') >= 3
-    assert "api(`/games/${game.id}/crew`)" in APP
+def test_postgame_ctas_open_the_reviewable_planner_before_any_mutation():
+    assert 'id="cel-play-again"' in APP
+    assert 'id="gs-play-again"' in APP
+    assert APP.count('openPostGamePlanner(') >= 3
+    planner = APP[APP.index('async function openPostGamePlanner'):APP.index('function completedCrewConnectionsHtml')]
+    assert "crewRequest || api(`/games/${game.id}/crew`)" in planner
+    assert "method: 'POST'" not in planner
     assert 'invitees: invitePeople.filter((person) => inviteIds.has(person.id))' in APP
     assert 'require_all_invitees: visibility === \'private\' && requireAllInvitees' in APP
     assert "err.code === 'crew_changed'" in APP
     assert "for (let i = 0; i < 8; i++)" in APP
-    assert 'let plannerDirty = !!sourceGameId && !savedDraft;' in APP
-    assert 'inviteIds.size + 1 > effectiveCapacity' in APP
-    assert "title.textContent = 'Crew selection saved';" in APP
-    assert "[...fromModal.querySelectorAll('#cel-plan-crew, #gs-plan-crew, #gs-rematch')]" in APP
+    assert 'let plannerDirty = false;' in APP
+    assert 'const plannedPlayerCount = inviteIds.size + 1;' in APP
+    assert 'plannedPlayerCount > effectiveCapacity' in APP
+    assert "title.textContent = 'Same players as last time';" in APP
+    assert 'id="ng-save-group"' in APP
+    assert 'Group invitations are sent only after you schedule this game.' in APP
 
 
 def test_uncertain_create_recovery_replays_immutable_payload_across_reload():
@@ -115,32 +123,33 @@ def test_uncertain_create_recovery_replays_immutable_payload_across_reload():
     assert "submittedPayload: status === 'submitting' ? frozenSubmitPayload : null" in APP
     assert "persistent.setItem(key, value);" in APP
     assert "fallback.setItem(key, value);" in APP
-    assert 'id="ng-retry-exact">Try again</button>' in APP
+    assert 'id="ng-retry-exact">Try same plan again</button>' in APP
     assert "body: JSON.stringify(requestPayload)" in APP
     assert "const exactPayload = exactRetry" in APP
     assert "if (!exactRetry && scheduledAt.getTime() <= Date.now())" in APP
     assert 'data-mode="now"' not in APP
-    assert "Number(err.status) === 429" in APP
+    assert "[408, 425, 429].includes(Number(err.status))" in APP
     assert "err.data && err.data.existing_game_id" in APP
     assert "plannerAttemptId = newGameAttemptId()" not in APP
     assert "status !== 'submitting' && Date.now() - raw.updatedAt > GAME_DRAFT_TTL" in APP
     assert "if (status === 'submitting' && !clientAttemptId) return null;" in APP
     assert "plannerSubmitting && !frozenSubmitPayload && restoredDraft && restoredDraft.scheduledAt" in APP
-    assert ".sort((a, b) => b.updatedAt - a.updatedAt)" in APP
+    assert "function readGameDrafts(userId" in APP
+    assert "if (a.status !== b.status) return a.status === 'submitting' ? -1 : 1;" in APP
     assert "if (!flushPlannerDraft('submitting'))" in APP
     assert 'ng-review-retry' not in APP
     assert 'ambiguousDraftAccepted' not in APP
+    assert "showPlannerAttemptRecovery(" in APP
+    assert "clearGameDraft(plannerAttemptId);" in APP
 
 
-def test_rematch_attempt_and_success_receipt_survive_game_sheet_reopen():
-    assert "const rematchAttemptKey = (sourceGameId" in APP
-    assert "requestPayload = writeRematchAttempt(gameId" in APP
-    assert "body: JSON.stringify(requestPayload)" in APP
-    assert "writeRematchAttempt(gameId, requestPayload, rematch.id);" in APP
-    assert "client_attempt_id: rematchClientAttemptId(gameId)" in APP
-    assert "REMATCH_ATTEMPT_TTL" not in APP
-    assert "if (rematchAttempt && rematchAttempt.gameId) return '↗ Open the rematch';" in APP
-    assert "if (rematchAttempt && rematchAttempt.payload) return '↻ Continue starting the rematch';" in APP
-    assert "clearRematchAttempts(accountId);" in APP
-    assert 'rematchAttemptId' not in APP
-    assert 'rematchScheduledAt' not in APP
+def test_play_again_never_creates_a_game_or_group_before_schedule_submit():
+    planner = APP[APP.index('async function openPostGamePlanner'):APP.index('function completedCrewConnectionsHtml')]
+    assert "crewRequest || api(`/games/${game.id}/crew`)" in planner
+    assert "method: 'POST'" not in planner
+    assert 'options.offerSaveGroup = !savedGroup;' in planner
+    assert 'openNewGameModal(options)' in planner
+    assert 'rematchAttemptKey' not in APP
+    assert 'gs-rematch' not in APP
+    assert "api(`/games/${sourceGameId}/crew`, {" in APP
+    assert "body: JSON.stringify({ name: saveGroupName })" in APP

@@ -1,4 +1,4 @@
-"""Contracts for keeping an instant-rally start anchored at its launcher."""
+"""Contracts for immediate navigation after instant-rally mutations."""
 
 from pathlib import Path
 
@@ -13,60 +13,50 @@ def section(start: str, end: str) -> str:
     return APP[begin:APP.index(end, begin)]
 
 
-def test_instant_start_confirms_at_the_trigger_before_showing_management():
-    management = section(
-        "function showInstantRallyManagement",
-        "async function startInstantRally",
+def test_instant_start_has_no_timed_launcher_management_state():
+    assert "function showInstantRallyManagement" not in APP
+    assert "instantRallyAction" not in APP
+    assert "confirmationTimer = setTimeout(revealManagement, 4000)" not in APP
+    assert "started · Cancel" not in APP
+    assert ".instant-rally-management" not in STYLES
+
+
+def test_game_detail_owns_instant_game_cancellation_after_navigation():
+    detail = section("function gameScreenHtml", "async function openGameScreen")
+    handler = section(
+        "box.querySelector('#gs-cancel')?.addEventListener",
+        "box.querySelector('#gs-reschedule')?.addEventListener",
     )
-    assert "result.outcome === 'joined'" in management
-    assert "result.recovered" in management
-    assert "game.is_creator" in management
-    assert "Game started · Cancel" in management
-    assert "confirmationTimer = setTimeout(revealManagement, 4000)" in management
-    assert "button.textContent = 'Open game'" in management
-    assert "openResolvedRallyGame(gameId, sourceModal)" in management
-    assert "event.stopImmediatePropagation()" in management
+    assert 'id="gs-cancel"' in detail
+    assert "openGameCancellationConfirmation({" in handler
+    assert "game.is_instant ? 'instant' : 'scheduled'" in handler
 
 
-def test_instant_start_cancel_uses_the_shared_confirmation_then_moves_under_more():
-    management = section(
-        "function showInstantRallyManagement",
-        "async function startInstantRally",
-    )
-    assert "openGameCancellationConfirmation({" in management
-    assert "variant: 'instant'" in management
-    assert "api(`/games/${gameId}/cancel`" not in management
-    assert "button.dataset.instantRallyAction = 'cancel'" in management
-    assert "<summary>More</summary>" in management
-    assert "Cancel game" in management
-    assert "requestRallyCancellation(event.currentTarget)" in management
-    assert "requestRallyCancellation(button)" in management
-    assert "button.dataset.instantRallyAction = 'open'" in management
-    assert "Game ended ✓" in management
-    assert ".instant-rally-management { width: 100%; grid-column: 1 / -1; }" in STYLES
-
-
-def test_success_only_opens_detail_when_no_visible_start_anchor_was_kept():
+def test_every_successful_or_recovered_start_opens_detail_immediately():
     continuation = section("function continueInstantRallyCall", "function finishInstantRallyCall")
     finish = section("function finishInstantRallyCall", "function rallyLauncherHtml")
-    assert "{ ...options, confirmationButton: button }" in continuation
-    assert "const confirmationButton = options.confirmationButton || null" in finish
-    assert "const keptAnchor = showInstantRallyManagement(" in finish
-    assert "options.openGame !== false && !keptAnchor" in finish
+    assert "confirmationButton" not in continuation
+    assert "showInstantRallyManagement" not in finish
+    assert "if (gameId && options.openGame !== false)" in finish
+    assert "openResolvedRallyGame(gameId, options.fromModal || null);" in finish
 
 
-def test_check_in_start_hands_its_real_submit_button_to_the_confirmation():
+def test_check_in_start_does_not_leave_the_submit_button_as_a_second_screen():
     flow = section("async function checkInAndStartRally", "function openPlaySoonFlow")
-    assert "confirmationButton: button" in flow
-    assert "confirmationOriginalHtml: original" in flow
-    assert "if (!button.dataset.instantRallyAction)" in flow
+    assert "confirmationButton" not in flow
+    assert "confirmationOriginalHtml" not in flow
+    assert "fromModal: modal" in flow
 
 
-def test_joining_an_existing_rally_keeps_the_trigger_for_undo_before_opening_detail():
+def test_joining_an_existing_rally_opens_detail_and_puts_undo_in_a_safe_toast():
     join = section("async function openReadyRally", "function openCheckInSheet")
-    assert "let keepConfirmation = false;" in join
-    assert "button.dataset.rallyJoinUndo = 'true'" in join
-    assert "button.textContent = 'Joined ✓ · Undo'" in join
-    assert "api(`/games/${gameId}/leave`, { method: 'POST' })" in join
-    assert "confirmationTimer = setTimeout(openJoinedGame, 4000)" in join
-    assert "if (!keepConfirmation && button && document.body.contains(button))" in join
+    helper = section("function showJoinedToast", "function bindGameButtons")
+    assert "keepConfirmation" not in join
+    assert "Joined · Undo" not in join
+    assert "showJoinedToast(gameId" in join
+    assert "label: 'Undo'" in helper
+    assert "api(`/games/${gameId}/leave`, { method: 'POST' })" in helper
+    assert ".catch((error) =>" in helper
+    assert "if (!error.isStaleSession) toast(error.message" in helper
+    assert "openResolvedRallyGame(gameId, sourceModal || null);" in join
+    assert "setTimeout(openJoinedGame, 4000)" not in join

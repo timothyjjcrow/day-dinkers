@@ -8,21 +8,17 @@ APP = (ROOT / 'public' / 'app-v15.js').read_text()
 CSS = (ROOT / 'public' / 'styles-v15.css').read_text()
 
 
-def test_completed_game_creates_crew_before_reusing_source_roster_planner():
-    assert "api(`/games/${game.id}/crew`, { method: 'POST' })" in APP
+def test_completed_game_reviews_source_roster_before_optional_group_save():
     assert "crewRequest || api(`/games/${game.id}/crew`)" in APP
-    assert "'👥 Create crew &amp; plan next game'" in APP
-    assert 'Crew created${invitedCount' in APP
-    # New Crew invitees are pending, so the first plan safely reuses the
-    # completed-game snapshots without falsely attaching an owner-only roster.
-    assert 'completedCrewPlannerOptions(game, crew, { ...savedCrew, attachCrew: false })' in APP
-    assert 'id="gs-open-crew"' in APP
-    assert 'id="cel-open-crew"' in APP
-    # A previously-created Crew must load its authoritative accepted roster;
-    # network/detail failure cannot silently become an editable normal invite.
-    assert 'Once a Crew already exists, its accepted member list is the privacy' in APP
-    assert 'options = crewPlannerOptions({ ...detail, ...crewSummaryFrom(detail) })' in APP
-    assert 'source-game invitees remain a safe fallback' not in APP
+    assert 'id="cel-play-again"' in APP
+    assert 'id="gs-play-again"' in APP
+    assert 'options.offerSaveGroup = !savedGroup;' in APP
+    assert 'id="ng-save-group"' in APP
+    assert "api(`/games/${sourceGameId}/crew`, {" in APP
+    assert "body: JSON.stringify({ name: saveGroupName })" in APP
+    assert 'id="ng-save-group-name" maxlength="80"' in APP
+    assert 'if (sourceGameId && modal.querySelector(\'#ng-save-group\')?.checked)' in APP
+    assert 'openCompletedCrewPlanner' not in APP
 
 
 def test_crew_identity_and_version_survive_editing_and_immutable_retry():
@@ -38,14 +34,21 @@ def test_crew_identity_and_version_survive_editing_and_immutable_retry():
     assert 'expected_crew_version: crewVersion' in APP
 
 
-def test_attached_crew_planner_locks_the_server_owned_roster_and_recurrence():
+def test_attached_crew_planner_selects_members_and_offers_safe_audiences():
     assert 'id="ng-crew-private"' in APP
-    assert '🔒 Private to ${esc(crewName || \'your crew\')}' in APP
-    assert 'id="ng-step-who" aria-hidden="true"' in APP
-    assert 'if (!btn || btn.disabled || crewId) return;' in APP
-    assert 'plannedPlayerCount = crewId ? invitePeople.length + 1' in APP
-    assert "recurrence: crewId ? 'none'" in APP
-    assert "const recurringAllowed = !crewId && !isRanked" in APP
+    assert "Starts with ${esc(crewName || 'your play group')}" in APP
+    for label in ('Group only', 'Friends', 'Nearby players'):
+        assert f'<b>{label}</b>' in APP
+    assert "${crewId ? 'Group players' : 'Direct invitations'}" in APP
+    assert 'if (!btn || btn.disabled || crewId) return;' not in APP
+    assert 'const plannedPlayerCount = inviteIds.size + 1;' in APP
+    assert "recurrence: recurringBox.checked ? 'weekly' : 'none'" in APP
+    assert '...(recurringBox.checked ? {' in APP
+    assert 'const recurringAllowed = !isRanked;' in APP
+    assert 'const crewMinimum = crewId ? inviteIds.size + 1 : 1;' in APP
+    assert 'capacity < crewMinimum' in APP
+    assert "friendsWrap.classList.remove('hidden');" in APP
+    assert "if (crewId && btn.dataset.vis !== 'private') return;" not in APP
 
 
 def test_stale_crew_version_refreshes_full_member_detail_before_resubmit():
@@ -54,31 +57,58 @@ def test_stale_crew_version_refreshes_full_member_detail_before_resubmit():
     assert 'const schedulable = applyFreshCrewRoster(detail)' in APP
     assert 'detail.members' in APP
     assert 'crewVersion = summary.roster_version' in APP
-    assert "submitButton.textContent = 'Refreshing Crew roster…'" in APP
+    assert "submitButton.textContent = 'Refreshing group players…'" in APP
+
+
+def test_group_friend_invite_and_member_rows_use_explicit_skill_identities():
+    create = APP[
+        APP.index('async function openCreatePlayGroupSheet'):
+        APP.index('async function openCrewInviteSheet')
+    ]
+    invite = APP[
+        APP.index('async function openCrewInviteSheet'):
+        APP.index('function crewPlannerOptions')
+    ]
+    detail = APP[
+        APP.index('async function openCrewScreen'):
+        APP.index('function openRenameCrewSheet')
+    ]
+    for source in (create, invite, detail):
+        assert 'playerSkillIdentityHtml(' in source
+        assert 'skillLabel(friend.skill_level)' not in source
+        assert 'skillLabel(member.skill_level)' not in source
 
 
 def test_community_has_crews_pending_invites_and_response_actions():
-    assert "api('/crews/mine').catch(() => ({ items: [], invitations: [] }))" in APP
+    assert "api('/crews/mine')" in APP
+    assert "Promise.allSettled([" in APP
+    assert "{ items: [], invitations: [] }" in APP
+    assert "communityPartialLoadHtml(failedLabels)" in APP
     assert "kind: 'crew', id: crew.id" in APP
-    assert '>Crew invitations<' in APP
+    assert '>Play group invitations<' in APP
     assert 'data-crew-response="accept"' in APP
     assert 'data-crew-response="decline"' in APP
     assert "api(`/crews/${crewId}/respond`" in APP
     assert 'body: JSON.stringify({ accept })' in APP
-    assert "else if (kind === 'crew') await openCrewChatById(id);" in APP
+    assert "else if (kind === 'crew') roomModal = await openCrewChatById(id);" in APP
+    assert "roomModal._cleanupFns.push" in APP
     assert '>Decline</button>' in APP
 
 
-def test_pending_invite_routes_fall_back_to_the_consent_card():
+def test_pending_invite_routes_open_the_consent_card_in_place():
     assert "const mine = await api('/crews/mine')" in APP
-    assert 'Number(crewSummaryFrom(invitation)?.id) === Number(crewId)' in APP
-    assert 'showCommunityInbox();' in APP
-    assert "toast('Crew invitation ready — choose Join crew or Decline')" in APP
+    assert 'pendingCrewInvitationEntries(mine).find' in APP
+    assert 'renderCrewInvitationConsent(shell, pending.invitation)' in APP
+    assert 'Private play group invitation' in APP
+    assert 'Only members can see this group’s player list' in APP
+    screen = APP[APP.index('async function openCrewScreen'):APP.index('function openRenameCrewSheet')]
+    assert "toast('Play group invitation ready — choose Join group or Decline')" not in screen
 
 
 def test_crew_home_management_chat_outbox_and_hash_route_are_wired():
     assert "api(`/crews/${crewId}`)" in APP
-    assert '📅 Plan a game' in APP
+    assert "uiIcon('calendar')} Plan with this group" in APP
+    assert "uiIcon('message')} Group chat" in APP
     assert "api(`/crews/${crew.id}`, { method: 'PATCH'" in APP
     assert "api(`/crews/${crew.id}/leave`, { method: 'POST' })" in APP
     assert "api(`/crews/${crew.id}`, { method: 'DELETE' })" in APP
@@ -92,9 +122,37 @@ def test_crew_home_management_chat_outbox_and_hash_route_are_wired():
     assert "item.channelKey.startsWith('crew:')" in APP
 
 
+def test_crew_chat_info_target_respects_the_actual_retained_parent():
+    screen_start = APP.index("async function openCrewScreen")
+    screen_end = APP.index("function openRenameCrewSheet", screen_start)
+    screen = APP[screen_start:screen_end]
+    chat_start = APP.index("async function openCrewChat(crew")
+    chat_end = APP.index("// ---------- Clubs ----------", chat_start)
+    chat = APP[chat_start:chat_end]
+
+    assert "modal.dataset.crewInfoId = String(crew.id);" in screen
+    assert "const modalIndex = overlayStack.findIndex((entry) => entry.el === modal);" in chat
+    assert "const parent = modalIndex > 0 ? overlayStack[modalIndex - 1]?.el : null;" in chat
+    assert "Number(parent?.dataset.crewInfoId) === Number(crew.id)" in chat
+    assert "dismissModal(modal);" in chat
+    assert "beginButtonAction(infoButton, 'Opening info…')" in chat
+    assert "openChildModal(modal, () => openCrewScreen(crew.id))" in chat
+
+
+def test_postgame_planner_cleanup_only_attaches_to_the_expected_child():
+    start = APP.index("async function openPostGamePlanner")
+    end = APP.index("function completedCrewConnectionsHtml", start)
+    planner = APP[start:end]
+
+    assert "const planner = opened ? currentOverlayEntry()?.el : null;" in planner
+    assert "planner && planner !== fromModal" in planner
+    assert "planner._cleanupFns?.push" in planner
+    assert "if (button?.isConnected) resetAction();" in planner
+
+
 def test_removed_crew_drafts_are_terminal_and_chat_actions_are_keyboard_accessible():
     assert "if (err.code === 'crew_not_found' && crewId)" in APP
-    assert "submitButton.textContent = 'Crew unavailable'" in APP
+    assert "submitButton.textContent = 'Play group unavailable'" in APP
     assert 'This saved plan was cleared.' in APP
     assert 'type="button" class="chat-message-action"' in APP
     assert 'class="chat-message-row ${mine ? \'is-mine\' : \'is-theirs\'}"' in APP
@@ -115,4 +173,39 @@ def test_crew_surfaces_keep_phone_first_layout_language():
     assert 'min-height: 46px' in CSS
     assert '#crew-court { cursor: pointer; }' in CSS
     assert 'overflow-wrap: anywhere;' in CSS
-    assert 'button.crew-member .row-title, button.crew-member .row-sub { display: block; }' in CSS
+    assert '.crew-member .row-title, .crew-member .row-sub { display: block; }' in CSS
+
+
+def test_crew_detail_consumes_upcoming_games_and_owner_removal_api():
+    screen_start = APP.index("async function openCrewScreen")
+    screen_end = APP.index("function openRenameCrewSheet", screen_start)
+    screen = APP[screen_start:screen_end]
+    assert "Array.isArray(crew.upcoming_games)" in screen
+    assert 'data-open-crew-game="${game.id}"' in screen
+    assert 'Upcoming play' in screen
+    assert 'data-crew-remove-member="${memberId}"' in screen
+    assert "api(`/crews/${crew.id}/members/${memberId}`, { method: 'DELETE' })" in screen
+    assert 'They will lose access to this private group' in screen
+
+
+def test_play_group_friend_loaders_keep_retry_and_selection_continuity():
+    create_start = APP.index("async function openCreatePlayGroupSheet")
+    create_end = APP.index("async function openCrewInviteSheet", create_start)
+    create = APP[create_start:create_end]
+    invite_start = create_end
+    invite_end = APP.index("function crewPlannerOptions", invite_start)
+    invite = APP[invite_start:invite_end]
+
+    for source in (create, invite):
+        assert "const loadFriends = async () =>" in source
+        assert "list.setAttribute('aria-busy', 'true');" in source
+        assert "list.innerHTML = skeletonHtml(3);" in source
+        assert "renderError(list, error.message || 'Friends could not load.', loadFriends);" in source
+        assert "await loadFriends();" not in source
+        assert "let friendsReady = false;" in source
+        assert "submit.disabled = true;" in source
+        assert "if (!friendsReady)" in source
+        assert source.index("addEventListener('submit'") < source.index("loadFriends();")
+        assert source.index("event.preventDefault();") < source.index("loadFriends();")
+        assert "const liveIds = new Set" in source
+        assert "[...selectedIds].forEach" in source

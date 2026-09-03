@@ -12,3 +12,4 @@ tmp/
 .claude/
 .vercel
 .env*
+node_modules/

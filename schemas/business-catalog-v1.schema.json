@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "business-catalog-v1.schema.json",
+  "title": "Third Shot business catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": 1 },
+    "source_version": { "type": "string", "maxLength": 160 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "authoritative": { "type": "boolean", "default": true },
+    "occurrences": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/occurrence" },
+      "default": []
+    },
+    "conversions": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/conversion" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "httpsUrl": {
+      "type": "string",
+      "maxLength": 500,
+      "pattern": "^https://"
+    },
+    "localTime": {
+      "type": "string",
+      "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "occurrence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["external_id", "title", "timezone"],
+      "properties": {
+        "external_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "kind": {
+          "enum": [
+            "court_rental", "lesson", "open_play", "clinic", "league",
+            "tournament", "membership", "event", "hours", "other"
+          ]
+        },
+        "timezone": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "recurrence": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "start_date": { "type": "string", "format": "date" },
+        "end_date": { "type": "string", "format": "date" },
+        "event_date": { "type": "string", "format": "date" },
+        "start_time": { "$ref": "#/$defs/localTime" },
+        "end_time": { "$ref": "#/$defs/localTime" },
+        "starts_at": { "type": "string", "format": "date-time" },
+        "ends_at": { "type": "string", "format": "date-time" },
+        "capacity": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "spots_remaining": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "status": {
+          "enum": ["scheduled", "cancelled", "sold_out", "completed"],
+          "default": "scheduled"
+        },
+        "skill_level": { "type": "string", "maxLength": 40 },
+        "location_note": { "type": "string", "maxLength": 240 },
+        "instructor": { "type": "string", "maxLength": 120 },
+        "price_text": { "type": "string", "maxLength": 120 },
+        "booking_url": {
+          "$ref": "#/$defs/httpsUrl",
+          "description": "Requires a connection booking_base_url that exactly matches an approved business-profile link; this URL must stay on that origin beneath the base path."
+        },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "oneOf": [
+        {
+          "required": ["event_date", "start_time", "end_time"],
+          "not": { "required": ["recurrence"] }
+        },
+        {
+          "required": ["starts_at", "ends_at"],
+          "not": { "required": ["recurrence"] }
+        },
+        {
+          "required": ["recurrence", "start_date", "start_time", "end_time"]
+        }
+      ],
+      "allOf": [
+        {
+          "if": { "required": ["spots_remaining"] },
+          "then": { "required": ["capacity"] }
+        }
+      ]
+    },
+    "conversion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["external_event_id", "occurred_at"],
+      "properties": {
+        "external_event_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "occurrence_external_id": { "type": "string", "maxLength": 160 },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "value_minor": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+        "currency": { "type": "string", "pattern": "^[A-Za-z]{3}$" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["value_minor"] },
+          "then": { "required": ["currency"] }
+        }
+      ]
+    }
+  }
+}

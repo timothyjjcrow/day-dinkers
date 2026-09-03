@@ -1,10 +1,11 @@
 """Friends, user search, public profiles, notifications, nearby players."""
+import json
 import math
 
 from flask import Blueprint, g, jsonify, request
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, selectinload
 
 from backend.app import db
 from backend.models import (
@@ -21,10 +22,12 @@ from backend.models import (
     SKILL_LEVELS,
     User,
     blocked_pair_ids,
+    can_direct_message,
     is_blocked_between,
     notify,
     player_badges,
     rating_history_for,
+    iso,
     utcnow,
 )
 from datetime import timedelta
@@ -39,6 +42,11 @@ from backend.security import rate_limit
 
 social_bp = Blueprint('social', __name__)
 
+NEARBY_PLAYERS_DEFAULT_LIMIT = 50
+NEARBY_PLAYERS_MAX_LIMIT = 50
+NOTIFICATIONS_DEFAULT_LIMIT = 50
+NOTIFICATIONS_MAX_LIMIT = 50
+
 
 def _haversine_miles(lat1, lng1, lat2, lng2):
     radius = 3958.8
@@ -47,6 +55,57 @@ def _haversine_miles(lat1, lng1, lat2, lng2):
     dlng = math.radians(lng2 - lng1)
     a = math.sin(dlat / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlng / 2) ** 2
     return 2 * radius * math.asin(math.sqrt(a))
+
+
+def _positive_page_arg(name, default, maximum=None):
+    value = request.args.get(name, default=default, type=int)
+    value = max(1, value or default)
+    return min(value, maximum) if maximum is not None else value
+
+
+def nearby_visibility_allows(user, viewer_id, viewer_friend_ids=None):
+    """Whether ``viewer_id`` may discover ``user`` in passive nearby UI."""
+    if not user or user.deleted_at is not None:
+        return False
+    if user.id == viewer_id:
+        return True
+    visibility = user.nearby_visibility \
+        if user.nearby_visibility in {'everyone', 'friends', 'hidden'} \
+        else 'everyone'
+    if visibility == 'hidden':
+        return False
+    if visibility == 'everyone':
+        return True
+    return user.id in (viewer_friend_ids or set())
+
+
+def _nearby_player_payload(user, *, viewer_is_friend=False):
+    """The fields the nearby-player cards actually render.
+
+    Public profiles remain available from ``/users/<id>``. Discovery should
+    not repeat bios, full win/loss records, rating peaks, and other profile
+    detail for every row in a potentially large result set.
+    """
+    return {
+        'id': user.id,
+        'display_name': user.display_name,
+        'skill_level': user.skill_level,
+        'skill_rating': user.skill_rating,
+        # Explicit alias for newer clients; keep skill_rating for compatibility.
+        'self_rating': user.skill_rating,
+        'avatar_color': user.avatar_color,
+        'avatar_url': user.avatar_url or '',
+        'rating': user.rating,
+        'current_streak': user.current_streak,
+        'home_court_name': user.home_court.name if user.home_court else None,
+        'availability': user.availability_list(),
+        'active_now': bool(
+            user.nearby_visibility == 'everyone' or viewer_is_friend
+        ) and bool(
+            user.last_active_at
+            and (utcnow() - user.last_active_at).total_seconds() < 600
+        ),
+    }
 
 
 def friend_ids(user_id):
@@ -95,10 +154,23 @@ def _friendship_between(user_a, user_b):
 def _friend_entry(friendship, viewer_id):
     other = friendship.other_user(viewer_id)
     entry = other.to_public_dict()
+    if friendship.status == 'accepted' and other.nearby_visibility != 'hidden':
+        entry['active_now'] = bool(
+            other.last_active_at
+            and (utcnow() - other.last_active_at).total_seconds() < 600
+        )
+    entry['can_message'] = can_direct_message(viewer_id, other.id)
     entry['friendship_id'] = friendship.id
     entry['status'] = friendship.status
     entry['outgoing'] = friendship.requester_id == viewer_id
-    checkin = active_checkin_for(other.id, fresh=True)
+    # Hidden is a hard identity boundary across every passive presence surface,
+    # including the accepted-friends list. The aggregate court count can still
+    # reflect activity, but the friend row must not reveal where this user is.
+    checkin = (
+        active_checkin_for(other.id, fresh=True)
+        if other.nearby_visibility != 'hidden'
+        else None
+    )
     if checkin and checkin.court:
         entry['checked_in_court'] = {
             'id': checkin.court.id,
@@ -113,7 +185,7 @@ def _friend_entry(friendship, viewer_id):
 @social_bp.get('/players/nearby')
 @login_required
 def players_nearby():
-    """Players near a location, by last check-in (or home court as fallback)."""
+    """Players near a location, by last check-in or saved home area/court."""
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
     if lat is None or lng is None:
@@ -121,6 +193,13 @@ def players_nearby():
     radius = min(max(request.args.get('radius', default=25.0, type=float), 1.0), 250.0)
     text = str(request.args.get('q') or '').strip()
     skill = str(request.args.get('skill') or '').strip().lower()
+    level = str(request.args.get('level') or '').strip()
+    if level not in ('', '3.0', '3.5', '4.0'):
+        return jsonify({'error': 'invalid_level'}), 400
+    page = _positive_page_arg('page', 1)
+    limit = _positive_page_arg(
+        'limit', NEARBY_PLAYERS_DEFAULT_LIMIT, NEARBY_PLAYERS_MAX_LIMIT,
+    )
 
     lat_delta = radius / 69.0
     lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
@@ -135,9 +214,8 @@ def players_nearby():
         .filter(User.id != g.current_user.id, User.deleted_at.is_(None))
         .filter(or_(
             and_(User.last_lat.between(lat_lo, lat_hi), User.last_lng.between(lng_lo, lng_hi)),
-            and_(User.last_lat.is_(None),
-                 home.latitude.between(lat_lo, lat_hi),
-                 home.longitude.between(lng_lo, lng_hi)),
+            and_(User.home_lat.between(lat_lo, lat_hi), User.home_lng.between(lng_lo, lng_hi)),
+            and_(home.latitude.between(lat_lo, lat_hi), home.longitude.between(lng_lo, lng_hi)),
         ))
     )
     if hidden:
@@ -146,8 +224,17 @@ def players_nearby():
         query = query.filter(User.display_name.ilike(f'%{text}%'))
     if skill in SKILL_LEVELS:
         query = query.filter(User.skill_level == skill)
+    if level == '3.0':
+        query = query.filter(User.skill_rating >= 3.0, User.skill_rating < 3.5)
+    elif level == '3.5':
+        query = query.filter(User.skill_rating >= 3.5, User.skill_rating < 4.0)
+    elif level == '4.0':
+        query = query.filter(User.skill_rating >= 4.0)
 
-    candidates = query.limit(300).all()
+    # Distance and fresh-presence rank are deliberately evaluated before the
+    # page slice, so every matching player remains reachable and page order is
+    # deterministic. The previous hard cap silently lost everyone after 300.
+    candidates = query.options(selectinload(User.home_court)).all()
 
     # One pass to know who's checked in right now.
     candidate_ids = [u.id for u in candidates]
@@ -166,49 +253,116 @@ def players_nearby():
         for ci in rows:
             active.setdefault(ci.user_id, ci)
 
-    items = []
+    ranked_candidates = []
+    recent_location_cutoff = utcnow() - timedelta(days=7)
     for user in candidates:
-        ploc = (user.last_lat, user.last_lng)
-        if ploc[0] is None and user.home_court:
+        if not nearby_visibility_allows(
+            user, g.current_user.id, my_friends,
+        ):
+            continue
+        ci = active.get(user.id)
+        can_see_live_court = bool(
+            ci and (user.id in my_friends or ci.looking_for_game)
+        )
+        if (
+            can_see_live_court and ci.court
+            and ci.court.latitude is not None and ci.court.longitude is not None
+        ):
+            ploc = (ci.court.latitude, ci.court.longitude)
+            location_source = 'checkin'
+        elif (
+            user.last_lat is not None and user.last_lng is not None
+            and user.last_location_at and user.last_location_at >= recent_location_cutoff
+        ):
+            ploc = (user.last_lat, user.last_lng)
+            location_source = 'recent'
+        elif user.home_lat is not None and user.home_lng is not None:
+            ploc = (user.home_lat, user.home_lng)
+            location_source = 'home_area'
+        elif user.home_court:
             ploc = (user.home_court.latitude, user.home_court.longitude)
+            location_source = 'home_court'
+        else:
+            ploc = (None, None)
+            location_source = None
         if ploc[0] is None or ploc[1] is None:
             continue
         distance = _haversine_miles(lat, lng, ploc[0], ploc[1])
         if distance > radius:
             continue
-        entry = user.to_public_dict()
+        presence_rank = 0 if ci and ci.looking_for_game else 1 if ci else 2
+        ranked_candidates.append((
+            presence_rank, distance, user.id, user, ci, location_source,
+            can_see_live_court,
+        ))
+
+    ranked_candidates.sort(key=lambda item: item[:3])
+    total = len(ranked_candidates)
+    start = (page - 1) * limit
+    page_candidates = ranked_candidates[start:start + limit]
+
+    page_user_ids = [item[2] for item in page_candidates]
+    friendships = {}
+    if page_user_ids:
+        rows = Friendship.query.filter(or_(
+            and_(
+                Friendship.requester_id == g.current_user.id,
+                Friendship.addressee_id.in_(page_user_ids),
+            ),
+            and_(
+                Friendship.addressee_id == g.current_user.id,
+                Friendship.requester_id.in_(page_user_ids),
+            ),
+        )).order_by(
+            db.case((Friendship.status == 'accepted', 0), else_=1),
+            Friendship.id.asc(),
+        ).all()
+        for friendship in rows:
+            other_id = (
+                friendship.addressee_id
+                if friendship.requester_id == g.current_user.id
+                else friendship.requester_id
+            )
+            friendships.setdefault(other_id, friendship)
+
+    items = []
+    for _rank, distance, user_id, user, ci, location_source, can_see_live_court in page_candidates:
+        entry = _nearby_player_payload(
+            user, viewer_is_friend=user_id in my_friends,
+        )
+        entry['can_message'] = can_direct_message(g.current_user.id, user.id)
         entry['distance_miles'] = round(distance, 1)
-        friendship = _friendship_between(g.current_user.id, user.id)
-        entry['is_friend'] = user.id in my_friends
+        entry['location_source'] = location_source
+        friendship = friendships.get(user_id)
+        entry['is_friend'] = user_id in my_friends
         entry['friendship_status'] = friendship.status if friendship else None
         entry['friendship_id'] = friendship.id if friendship else None
-        entry['outgoing'] = bool(friendship and friendship.requester_id == g.current_user.id)
-        ci = active.get(user.id)
+        entry['outgoing'] = bool(
+            friendship and friendship.requester_id == g.current_user.id
+        )
         # Nearby discovery may remain coarse for everyone, but an exact live
         # court is sensitive physical-presence data. Friends and players who
         # explicitly opted into "looking" discovery can reveal it; other
         # strangers stay discoverable without exposing where they are now.
-        can_see_live_court = bool(
-            ci and (user.id in my_friends or ci.looking_for_game)
-        )
         entry['checked_in_court'] = (
             {'id': ci.court.id, 'name': ci.court.name, 'looking_for_game': bool(ci.looking_for_game)}
             if can_see_live_court and ci.court else None
         )
-        entry['_presence_rank'] = (
-            0 if ci and ci.looking_for_game else 1 if ci else 2
-        )
         entry['last_seen_at'] = (
-            user.last_location_at.isoformat() + 'Z' if user.last_location_at else None
+            user.last_location_at.isoformat() + 'Z'
+            if location_source == 'recent' and user.last_location_at else None
         )
         items.append(entry)
 
-    # People actively looking now are the most actionable, then other fresh
-    # check-ins, then everyone else; distance breaks ties in each group.
-    items.sort(key=lambda i: (i['_presence_rank'], i['distance_miles']))
-    for item in items:
-        item.pop('_presence_rank', None)
-    return jsonify({'items': items[:60], 'count': len(items)})
+    has_more = start + len(items) < total
+    return jsonify({
+        'items': items,
+        'count': total,
+        'page': page,
+        'limit': limit,
+        'has_more': has_more,
+        'next_page': page + 1 if has_more else None,
+    })
 
 
 @social_bp.get('/players/looking')
@@ -240,11 +394,10 @@ def players_looking():
         _arrival_capacity,
         _arrival_reservation_available,
         _active_live_rally_for_user,
-        expire_abandoned_instant_rallies,
+        _close_instant_assembly_without_fresh_members,
         issue_play_pulse_accept_capability,
         issue_rally_arrival_capability,
     )
-    expire_abandoned_instant_rallies(now)
     lat_delta = radius / 69.0
     lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
 
@@ -269,7 +422,10 @@ def players_looking():
     seen = set()
     players = []
     for ci, user, court in rows:
-        if user.id in seen or user.id in hidden:
+        if (user.id in seen or user.id in hidden
+                or not nearby_visibility_allows(
+                    user, g.current_user.id, my_friends,
+                )):
             continue
         if _haversine_miles(lat, lng, court.latitude, court.longitude) > radius:
             continue
@@ -311,6 +467,7 @@ def players_looking():
         )
         .order_by(Game.scheduled_at.desc(), Game.id.desc())
         .limit(100)
+        .execution_options(populate_existing=True)
         .all()
     )
     rally_ids_seen = set()
@@ -343,6 +500,21 @@ def players_looking():
             .all()
         ) if member_ids else []
         if not fresh_member_checkins:
+            # Discovery is the lifecycle sweep for physically abandoned
+            # assemblies. Lock and re-check before making the one-way close so
+            # a concurrent presence ping cannot be erased by this GET.
+            locked_game = (
+                Game.query.filter(Game.id == game.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+                .first()
+            )
+            if locked_game:
+                db.session.expire(locked_game, ['players'])
+                if _close_instant_assembly_without_fresh_members(
+                    locked_game, now,
+                ):
+                    db.session.commit()
             continue
         capacity = _arrival_capacity(game, now)
         # A remote hold may consume the final effective spot, but the local
@@ -460,7 +632,13 @@ def players_looking():
     pulses = []
     pulse_users_seen = set()
     for pulse, user, court in pulse_rows:
-        if user.id in hidden or user.id in pulse_users_seen:
+        if (
+            user.id in hidden
+            or user.id in pulse_users_seen
+            or not nearby_visibility_allows(
+                user, g.current_user.id, my_friends,
+            )
+        ):
             continue
         distance = _haversine_miles(
             lat, lng, court.latitude, court.longitude,
@@ -511,11 +689,17 @@ def search_users():
     if len(text) < 2:
         return jsonify({'items': []})
     like = f'%{text}%'
+    identity_filters = [User.display_name.ilike(like)]
+    # Email is a private account identifier. Allow an exact address so a
+    # player can deliberately find someone they know, but never enumerate
+    # accounts through email fragments or domains.
+    if '@' in text:
+        identity_filters.append(User.email == text.lower())
     hidden = blocked_pair_ids(g.current_user.id)
     query = User.query.filter(
         User.id != g.current_user.id,
         User.deleted_at.is_(None),
-        or_(User.display_name.ilike(like), User.email.ilike(like)),
+        or_(*identity_filters),
     )
     if hidden:
         query = query.filter(User.id.notin_(hidden))
@@ -523,6 +707,7 @@ def search_users():
     items = []
     for user in users:
         entry = user.to_public_dict()
+        entry['can_message'] = can_direct_message(g.current_user.id, user.id)
         friendship = _friendship_between(g.current_user.id, user.id)
         if friendship:
             entry['friendship_status'] = friendship.status
@@ -537,16 +722,26 @@ def search_users():
 @social_bp.get('/invite/<int:user_id>')
 @rate_limit(30, 60)
 def invite_card(user_id):
-    """Minimal public card for invite links — just enough to say who's inviting.
-    Name and avatar are already visible to any signed-in user."""
+    """Minimal public card for invite links and an optional safe destination.
+
+    Keep the legacy no-query response shape unchanged. New invite pages pass a
+    ``game`` query parameter and receive a nullable, server-validated public
+    destination in addition to the inviter fields.
+    """
     user = db.session.get(User, user_id)
     if not user or user.deleted_at is not None:
         return jsonify({'error': 'user_not_found'}), 404
-    return jsonify({
+    payload = {
         'display_name': user.display_name,
         'avatar_color': user.avatar_color,
         'avatar_url': user.avatar_url or '',
-    })
+    }
+    if 'game' in request.args:
+        from backend.services.player_invites import invite_destination_payload
+        payload['destination'] = invite_destination_payload(
+            user.id, request.args.get('game'),
+        )
+    return jsonify(payload)
 
 
 @social_bp.get('/users/<int:user_id>')
@@ -562,6 +757,8 @@ def user_profile(user_id):
         # unavailable account so cached profile links cannot probe activity.
         return jsonify({'error': 'user_not_found'}), 404
     payload = user.to_public_dict()
+    payload['can_message'] = can_direct_message(g.current_user.id, user.id)
+    payload['invited_by_you'] = user.invited_by_user_id == g.current_user.id
     payload['is_blocked'] = bool(BlockedUser.query.filter_by(
         blocker_id=g.current_user.id, blocked_id=user.id,
     ).first())
@@ -573,6 +770,17 @@ def user_profile(user_id):
         payload['outgoing'] = friendship.requester_id == g.current_user.id
     else:
         payload['friendship_status'] = None
+    may_see_activity = (
+        user.id == g.current_user.id
+        or user.nearby_visibility == 'everyone'
+        or user.nearby_visibility == 'friends'
+        and friendship is not None and friendship.status == 'accepted'
+    ) and user.nearby_visibility != 'hidden'
+    payload['active_now'] = bool(
+        may_see_activity
+        and user.last_active_at
+        and (utcnow() - user.last_active_at).total_seconds() < 600
+    )
 
     # Mutual friends — "people you both know", for trust and connection.
     payload['mutual_friends'] = []
@@ -593,6 +801,33 @@ def user_profile(user_id):
         .limit(30)
         .all()
     )
+    # Casual-only players need a meaningful public identity too. Keep these
+    # broad totals separate from the visibility-filtered activity cards below:
+    # they reveal only aggregate play, never a private game's details.
+    completed_rows = (
+        db.session.query(Game.completed_at, Game.court_id)
+        .join(GamePlayer, GamePlayer.game_id == Game.id)
+        .filter(
+            GamePlayer.user_id == user.id,
+            Game.status == 'completed',
+            Game.completed_at.isnot(None),
+        )
+        .limit(500)
+        .all()
+    )
+    completed_weeks = {row.completed_at.isocalendar()[:2] for row in completed_rows}
+    week_streak = 0
+    week_cursor = utcnow()
+    if week_cursor.isocalendar()[:2] not in completed_weeks:
+        week_cursor -= timedelta(days=7)
+    while week_cursor.isocalendar()[:2] in completed_weeks:
+        week_streak += 1
+        week_cursor -= timedelta(days=7)
+    payload['play_stats'] = {
+        'games_total': len(completed_rows),
+        'courts_played': len({row.court_id for row in completed_rows}),
+        'week_streak': week_streak,
+    }
     viewer_friends = friend_ids(g.current_user.id)
     viewer_hidden = blocked_pair_ids(g.current_user.id)
     from backend.routes.games import _game_has_blocked_participant
@@ -753,15 +988,25 @@ def report_user(user_id):
         return jsonify({'error': 'user_not_found'}), 404
     if target.id == g.current_user.id:
         return jsonify({'error': 'cannot_report_self'}), 400
-    reason = str((request.get_json(silent=True) or {}).get('reason') or '').strip()[:500]
+    payload = request.get_json(silent=True) or {}
+    reason = str(payload.get('reason') or '').strip()[:500]
+    details = str(payload.get('details') or '').strip()[:2000]
+    if len(reason) < 3:
+        return jsonify({'error': 'reason_required'}), 400
     recent = UserReport.query.filter(
         UserReport.reporter_id == g.current_user.id,
         UserReport.reported_id == target.id,
+        UserReport.content_type == 'user',
         UserReport.created_at >= utcnow() - timedelta(hours=24),
     ).first()
     if not recent:
         db.session.add(UserReport(
             reporter_id=g.current_user.id, reported_id=target.id, reason=reason,
+            details=details, content_type='user',
+            content_snapshot=json.dumps({
+                'display_name': target.display_name,
+                'bio': target.bio or '',
+            }, ensure_ascii=False, separators=(',', ':')),
         ))
         db.session.commit()
     return jsonify({'reported': True})
@@ -864,6 +1109,12 @@ def _reconcile_crews_for_block(blocker_id, blocked_id):
         CrewChatRead.query.filter_by(
             crew_id=crew.id, user_id=departing_id,
         ).delete(synchronize_session=False)
+        from backend.services.conversations import (
+            conversation_ref, delete_conversation_read,
+        )
+        delete_conversation_read(
+            conversation_ref('crew', crew.id), departing_id,
+        )
         crew.roster_version = int(crew.roster_version or 0) + 1
 
 
@@ -1000,6 +1251,71 @@ def list_friends():
     return jsonify({'friends': friends, 'incoming': incoming, 'outgoing': outgoing})
 
 
+@social_bp.get('/players/recent')
+@login_required
+def recent_coplayers():
+    """Return recent eligible co-players for low-friction game planning.
+
+    The result is viewer-relative, block-safe, and intentionally small. It may
+    include both friends and non-friends because a completed shared game is
+    enough context for a direct invitation; the client labels the relationship
+    instead of flattening everyone into the friends list.
+    """
+    limit = _positive_page_arg('limit', 8, 20)
+    hidden_ids = blocked_pair_ids(g.current_user.id)
+    games = (
+        Game.query
+        .join(GamePlayer, GamePlayer.game_id == Game.id)
+        .filter(
+            GamePlayer.user_id == g.current_user.id,
+            Game.status == 'completed',
+        )
+        .options(selectinload(Game.players))
+        .order_by(Game.completed_at.desc(), Game.id.desc())
+        .limit(60)
+        .all()
+    )
+    stats = {}
+    ordered_ids = []
+    for game in games:
+        for player in game.players:
+            user_id = player.user_id
+            credited = game.completion_kind == 'session' or player.team in (1, 2)
+            if (
+                not credited
+                or user_id == g.current_user.id
+                or user_id in hidden_ids
+            ):
+                continue
+            if user_id not in stats:
+                ordered_ids.append(user_id)
+                stats[user_id] = {
+                    'games_together': 0,
+                    'last_played_at': game.completed_at,
+                }
+            stats[user_id]['games_together'] += 1
+    ordered_ids = ordered_ids[:limit]
+    users = {
+        user.id: user for user in User.query.filter(
+            User.id.in_(ordered_ids), User.deleted_at.is_(None),
+        ).all()
+    } if ordered_ids else {}
+    friends = friend_ids(g.current_user.id)
+    items = []
+    for user_id in ordered_ids:
+        user = users.get(user_id)
+        if not user:
+            continue
+        item = user.to_public_dict()
+        item.update({
+            'games_together': stats[user_id]['games_together'],
+            'last_played_at': iso(stats[user_id]['last_played_at']),
+            'is_friend': user_id in friends,
+        })
+        items.append(item)
+    return jsonify({'items': items})
+
+
 @social_bp.get('/friends/digest')
 @login_required
 def friends_digest():
@@ -1032,10 +1348,15 @@ def friends_digest():
         if gp.team and game.score_team1 is not None and game.score_team2 is not None:
             won = (game.score_team1 > game.score_team2) == (gp.team == 1)
             stats['wins' if won else 'losses'] += 1
-    checkins = CheckIn.query.filter(
-        CheckIn.user_id.in_(fids),
-        CheckIn.checked_in_at >= cutoff,
-    ).count()
+    checkins = (
+        CheckIn.query.join(User, CheckIn.user_id == User.id)
+        .filter(
+            CheckIn.user_id.in_(fids),
+            CheckIn.checked_in_at >= cutoff,
+            User.nearby_visibility != 'hidden',
+        )
+        .count()
+    )
     users = {u.id: u for u in User.query.filter(User.id.in_(stats_by_friend)).all()}
     ranked = sorted(stats_by_friend.items(), key=lambda kv: (-kv[1]['games'], -kv[1]['wins']))
     return jsonify({
@@ -1259,39 +1580,145 @@ def remove_friend(friendship_id):
 @social_bp.get('/notifications')
 @login_required
 def list_notifications():
-    rows = (
-        Notification.query.filter_by(user_id=g.current_user.id)
-        .order_by(Notification.id.desc())
-        .limit(50)
+    limit = _positive_page_arg(
+        'limit', NOTIFICATIONS_DEFAULT_LIMIT, NOTIFICATIONS_MAX_LIMIT,
+    )
+    before_id = request.args.get('before_id', type=int)
+    hidden_ids = blocked_pair_ids(g.current_user.id)
+    visible = Notification.query.filter_by(user_id=g.current_user.id)
+    if hidden_ids:
+        visible = visible.filter(or_(
+            Notification.related_user_id.is_(None),
+            Notification.related_user_id.notin_(hidden_ids),
+        ))
+
+    unread = visible.filter(Notification.read.is_(False)).count()
+    page_query = visible
+    if before_id is not None:
+        page_query = page_query.filter(Notification.id < before_id)
+    page_rows = (
+        page_query.order_by(Notification.id.desc())
+        .limit(limit + 1)
         .all()
     )
-    hidden_ids = blocked_pair_ids(g.current_user.id)
-    rows = [
-        row for row in rows
-        if row.related_user_id is None or row.related_user_id not in hidden_ids
-    ]
+    has_more = len(page_rows) > limit
+    rows = page_rows[:limit]
     return jsonify({
         'items': [n.to_dict() for n in rows],
-        'unread': sum(1 for n in rows if not n.read),
+        # Account-wide unread count, not merely unread rows on this page.
+        'unread': unread,
+        'limit': limit,
+        'has_more': has_more,
+        'next_cursor': rows[-1].id if has_more and rows else None,
     })
+
+
+def _requested_notification_ids():
+    """Return ``None`` for the legacy all-items mutation, or explicit ids.
+
+    Both ``ids`` and ``notification_ids`` are accepted so web and native
+    clients can batch the visible page. An empty list intentionally means
+    "change nothing" rather than falling through to the legacy clear-all.
+    """
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, 'invalid_notification_ids'
+
+    present = next(
+        (key for key in ('ids', 'notification_ids', 'id') if key in payload),
+        None,
+    )
+    if present is None:
+        return None, None
+    raw_ids = payload[present]
+    if present == 'id':
+        raw_ids = [raw_ids]
+    if not isinstance(raw_ids, list) or len(raw_ids) > 100:
+        return None, 'invalid_notification_ids'
+
+    ids = []
+    seen = set()
+    for raw_id in raw_ids:
+        if isinstance(raw_id, bool):
+            return None, 'invalid_notification_ids'
+        try:
+            notification_id = int(raw_id)
+        except (TypeError, ValueError):
+            return None, 'invalid_notification_ids'
+        if notification_id <= 0:
+            return None, 'invalid_notification_ids'
+        if notification_id not in seen:
+            seen.add(notification_id)
+            ids.append(notification_id)
+    return ids, None
 
 
 @social_bp.post('/notifications/read')
 @rate_limit(60, 60)
 @login_required
 def mark_notifications_read():
-    Notification.query.filter_by(user_id=g.current_user.id, read=False).update({
+    ids, error = _requested_notification_ids()
+    if error:
+        return jsonify({'error': error}), 400
+    query = Notification.query.filter_by(user_id=g.current_user.id, read=False)
+    if ids is not None:
+        if not ids:
+            return jsonify({'ok': True, 'read': 0})
+        query = query.filter(Notification.id.in_(ids))
+    changed = query.update({
         'read': True,
         'unread_dedupe_key': None,
-    })
+    }, synchronize_session=False)
     db.session.commit()
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'read': changed})
+
+
+@social_bp.post('/notifications/<int:notification_id>/read')
+@rate_limit(60, 60)
+@login_required
+def mark_notification_read(notification_id):
+    notification = Notification.query.filter_by(
+        id=notification_id, user_id=g.current_user.id,
+    ).first()
+    if not notification:
+        return jsonify({'error': 'notification_not_found'}), 404
+    changed = 0
+    if not notification.read:
+        notification.read = True
+        notification.unread_dedupe_key = None
+        changed = 1
+        db.session.commit()
+    return jsonify({'ok': True, 'read': changed, 'id': notification.id})
 
 
 @social_bp.delete('/notifications')
 @rate_limit(20, 3600)
 @login_required
 def clear_notifications():
-    removed = Notification.query.filter_by(user_id=g.current_user.id).delete()
+    ids, error = _requested_notification_ids()
+    if error:
+        return jsonify({'error': error}), 400
+    query = Notification.query.filter_by(user_id=g.current_user.id)
+    if ids is not None:
+        if not ids:
+            return jsonify({'cleared': 0})
+        query = query.filter(Notification.id.in_(ids))
+    removed = query.delete(synchronize_session=False)
     db.session.commit()
     return jsonify({'cleared': removed})
+
+
+@social_bp.delete('/notifications/<int:notification_id>')
+@rate_limit(60, 60)
+@login_required
+def clear_notification(notification_id):
+    notification = Notification.query.filter_by(
+        id=notification_id, user_id=g.current_user.id,
+    ).first()
+    if not notification:
+        return jsonify({'error': 'notification_not_found'}), 404
+    db.session.delete(notification)
+    db.session.commit()
+    return jsonify({'cleared': 1, 'id': notification_id})

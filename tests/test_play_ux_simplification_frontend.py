@@ -5,6 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = (ROOT / "public" / "app-v15.js").read_text()
+INDEX = (ROOT / "public" / "index.html").read_text()
+STYLES = (ROOT / "public" / "styles-v15.css").read_text()
 
 
 def section(start: str, end: str) -> str:
@@ -12,30 +14,37 @@ def section(start: str, end: str) -> str:
     return APP[begin:APP.index(end, begin)]
 
 
-def test_play_launcher_has_one_shared_immediate_entry_and_one_schedule_entry():
-    launcher = section("function rallyLauncherHtml", "function playMoreRoutesHtml")
-    assert launcher.count('data-goto="game-flow"') == 1
+def test_play_launcher_exposes_the_three_plain_play_now_intents_and_planner():
+    launcher = section("function rallyLauncherHtml", "async function renderPlay")
+    assert launcher.count('data-goto="instant-rally"') == 1
+    assert launcher.count('data-goto="on-my-way"') == 1
+    assert launcher.count('data-goto="play-pulse"') == 1
     assert launcher.count('data-goto="new-game"') == 1
-    assert 'data-goto="play-soon"' not in launcher
-    assert 'data-goto="play-now"' not in launcher
-    assert 'data-goto="play-pulse"' not in launcher
-    assert "const immediateAction = `<button" in launcher
-    assert 'data-goto="instant-rally"' not in launcher
-    assert "Find or start a game" in launcher
-    assert "Casual or Ranked · Singles or Doubles" in launcher
-    assert "Plan a game" in launcher
+    assert launcher.count('data-goto="ranked-match"') == 1
+    assert 'data-goto="game-flow"' not in launcher
+    for label in ("At a court", "On my way", "Free this hour", "Plan a game", "Ranked match"):
+        assert label in launcher
 
     flow = section("function openGameFlow", "async function checkInAndStartRally")
-    for label in ("Find", "Start now", "Schedule"):
+    for label in ("Find", "Start now"):
         assert f"> {label}</button>" in flow
+    assert 'id="game-flow-tab-schedule"' not in flow
+    assert 'id="game-flow-plan-later"' in flow
 
 
 def test_arriving_choice_uses_live_rallies_and_existing_arrival_backend_flow():
     arriving = section("async function openPlaySoonArrivalChoices", "async function openPlayNowCourtPicker")
     assert "api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=25`)" in arriving
     assert "normalizeLookingRallies(response)" in arriving
+    assert "normalizeLookingPlayersWithoutRally(response)" in arriving
     assert "rally.arrivalAvailable && rally.spotsLeft > 0" in arriving
     assert "openReadyRally(" in arriving
+    assert "Players waiting at a court" in arriving
+    assert "looking for casual play" in arriving
+    assert "data-play-soon-player-court" in arriving
+    assert "openCourtDetail(Number(button.dataset.playSoonPlayerCourt))" in arriving
+    assert "data-play-soon-coming" in arriving
+    assert "api(`/players/${button.dataset.playSoonComing}/coming`" in arriving
     assert "Share that I’m free this hour" in arriving
 
 
@@ -57,10 +66,14 @@ def test_when_starts_with_exactly_three_smart_choices_and_discloses_any_other_ti
     assert "const smartTimeSuggestions = []" in planner
     assert "smartTimeSuggestions.length >= 3" in planner
     assert planner.count("smartTimeSuggestions.length < 3") == 2
-    assert 'id="ng-smart-times" role="group" aria-label="Suggested game times"' in planner
+    assert 'id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === \'ranked\' ? \'match\' : \'play session\'} times"' in planner
+    assert "syncPlannerNounLabels" in planner
     assert 'data-smart-time="${slot.date.toISOString()}"' in planner
-    assert '<summary>Choose another time</summary>' in planner
-    assert 'id="ng-when" aria-label="Game date and time"' in planner
+    assert 'id="ng-day-strip" role="radiogroup" aria-label="Play date"' in planner
+    assert 'id="ng-time-grid" role="radiogroup" aria-label="Play time in 30-minute steps"' in planner
+    assert 'Array.from({ length: 31 }, (_, index) => 6 + index / 2)' in planner
+    assert '<label for="ng-when">Or pick another date and time</label>' in planner
+    assert 'aria-label="${defaultType === \'ranked\' ? \'Match\' : \'Play session\'} date and time"' in planner
     assert 'id="ng-days"' not in planner
     assert 'id="ng-hours"' not in planner
     assert "dayChips" not in planner
@@ -82,54 +95,66 @@ def test_planner_explains_empty_friends_visibility_and_calls_advanced_settings_m
     planner = section("async function openNewGameModal", "async function renderTournaments")
     assert 'id="ng-friends-empty" role="status"' in planner
     assert "initialVisibility === 'friends' && friends.length === 0" in planner
-    assert "visibility !== 'friends' || friends.length > 0" in planner
-    assert "Add friends from Community" in planner
+    assert "button.dataset.vis === 'friends' && friends.length === 0" in planner
+    assert "'Add friends first'" in planner
     assert '<summary><span>More options</span>' in planner
     assert '<summary><span>Game options</span>' not in planner
 
 
-def test_crew_plans_skip_who_and_end_with_a_private_crew_summary():
+def test_crew_plans_choose_group_friends_or_nearby_before_scheduling():
     planner = section("async function openNewGameModal", "async function renderTournaments")
     assert 'id="ng-crew-private" role="status"' in planner
-    assert "🔒 Private to ${esc(crewName || 'your crew')}" in planner
-    assert 'id="ng-step-who" aria-hidden="true"' in planner
-    assert "const finalStep = crewId ? plannerStep === 'when'" in planner
-    assert "visibility = crewId ? 'private'" in planner
+    assert "Starts with ${esc(crewName || 'your play group')}" in planner
+    assert 'id="ng-step-who" aria-labelledby="planner-who-title"' in planner
+    for label in ("Group only", "Friends", "Nearby players"):
+        assert f'<b>{label}</b>' in planner
+    assert "const finalStep = plannerStep === 'who'" in planner
+    assert "if (crewId && btn.dataset.vis !== 'private') return;" not in planner
 
 
-def test_live_rally_language_is_at_court_arriving_and_spots_left():
+def test_pickup_game_language_is_here_on_the_way_and_open():
     counts = section("function rallyCountsText", "function arrivalEtaLabel")
-    assert "at the court" in counts
-    assert "arriving" in counts
-    assert "left" in counts
-    for old in ("physically ready", "on the way", "spots open"):
+    assert "here" in counts
+    assert "on the way" in counts
+    assert "open" in counts
+    for old in ("physically ready", "at the court", "arriving", "spots left"):
         assert old not in counts
 
     arrival = section("function openRallyArrivalSheet", "async function cancelRallyArrival")
-    assert "at the court" in arrival
-    assert "arriving" in arrival
+    assert '<p class="arrival-summary" role="status">${esc(rallyCountsText(rally))}</p>' in arrival
+    assert '<div class="arrival-summary"' not in arrival
     assert "spots left" not in arrival  # singular/plural is rendered from the count
     assert "Retry safely" not in arrival
     assert "The server" not in arrival
 
 
-def test_fill_game_hides_empty_channels_and_promotes_the_best_available_action():
+def test_fill_game_uses_one_inline_invite_row_and_a_focused_channel_panel():
+    launcher = section("function rosterBoostLauncherHtml", "function openRosterBoostSheet")
     fill = section("function openRosterBoostSheet", "function crewSummaryFrom")
+    assert '<b id="gs-invite-title">Invite</b>' in launcher
+    for channel, label in (
+        ("friends", "Friends"), ("court", "Court chat"), ("share", "Share link"),
+    ):
+        assert f'data-roster-boost-channel="{channel}"' in launcher
+        assert f'<b>{label}</b>' in launcher
+        assert f'data-rb-channel="{channel}"' in fill
+    assert 'role="tablist" aria-label="Invite options"' in fill
     assert 'id="rb-friends-channel"' in fill
     assert 'id="rb-court-channel"' in fill
     assert 'id="rb-share-channel"' in fill
-    assert "friendsSection.classList.toggle('hidden', candidates.length === 0)" in fill
-    assert "const hasCourtAction = hasCourtPost && (canManageCourtPost || canCreateCourtPost);" in fill
-    assert "postButton.classList.toggle('btn-primary', !full && !hasFriends && hasCourtAction)" in fill
-    assert "shareButton.classList.toggle('btn-primary', !full && !hasFriends && !hasCourtAction)" in fill
-    assert "const usableChannels = [" in fill
-    assert "...availableChannels.filter((section) => !usableChannels.includes(section))" in fill
-    assert "No friends here yet" not in fill
+    assert 'role="tabpanel"' in fill
+    assert "panel.classList.toggle('hidden', name !== channel)" in fill
+    assert "button.setAttribute('aria-selected', String(selected))" in fill
+    assert "['ArrowLeft', 'ArrowRight']" in fill
+    assert 'id="rb-receipts"' not in fill
+    assert 'Loading your play group' not in fill
 
 
-def test_join_and_waitlist_confirm_in_place_before_refreshing():
+def test_join_becomes_a_stable_open_action_and_waitlist_remains_manageable():
     cards = section("function gameCardHtml", "// Share text")
-    assert "Joined ✓ · Undo" in cards
+    assert "`${uiIcon('check')} Joined · Open ${esc(playNoun)}`" in cards
+    assert "showJoinedToast(Number(b.dataset.gameJoin)" in cards
+    assert "label: 'Undo'" in cards
     assert "Waitlisted · Leave" in cards
     assert 'data-game-waitlist-manage="${game.id}"' in cards
     assert "setTimeout(refresh, 4000)" in cards
@@ -137,14 +162,15 @@ def test_join_and_waitlist_confirm_in_place_before_refreshing():
 
     detail = section("async function openGameScreen", "function safeNotificationOverlayRoute")
     assert "const rememberFresh = (fresh) =>" in detail
-    assert "button.dataset.undoJoin = 'true'" in detail
-    assert "button.textContent = 'Joined ✓ · Undo'" in detail
-    assert "button.dataset.undoWaitlist = 'true'" in detail
-    assert "button.dataset.confirmationLabel = position ? `Waitlisted #${position} · Leave`" in detail
-    assert "setTimeout(() => render(game), 4000)" in detail
+    assert "showJoinedToast(gameId" in detail
+    assert "render(fresh);" in detail
+    assert "button.dataset.undoJoin" not in detail
+    assert "const fresh = await api(`/games/${gameId}/waitlist`" in detail
+    assert "render(fresh);" in detail
+    assert "maybeOfferPhoneNotifications('Get a ping if a spot opens?')" in detail
 
 
-def test_home_area_onboarding_is_optional_account_scoped_and_replayable():
+def test_home_area_onboarding_is_optional_account_scoped_and_has_one_settings_destination():
     onboarding = section("function homeAreaOnboardingKey", "// One-time 3-step welcome tour")
     assert "`pp_onboarded_home:${id}`" in onboarding
     assert "Optional: choose a home area" in onboarding
@@ -153,9 +179,13 @@ def test_home_area_onboarding_is_optional_account_scoped_and_replayable():
     assert "maybeSuggestStarterCourts" not in onboarding
     assert "maybeShowTour" not in onboarding
 
-    privacy = section("function openPrivacySafetySettings", "function openAppearanceCalendarSettings")
-    assert 'id="privacy-replay-setup"' in privacy
-    assert "openHomeAreaOnboarding({ replay: true, onComplete: renderProfile })" in privacy
+    privacy = section("function openPrivacySafetySettings", "function openAppearanceSettings")
+    assert 'id="privacy-home-area"' in privacy
+    assert 'id="privacy-replay-setup"' not in privacy
+    assert "Quick setup" not in privacy
+    assert "openChildModal(modal, () => openHomeAreaSheet" in privacy
+    assert "syncPrivacyControls();" in privacy
+    assert "renderProfile();" in privacy
 
 
 def test_home_area_city_search_is_labeled_race_safe_and_explains_empty_or_failed_results():
@@ -170,15 +200,47 @@ def test_home_area_city_search_is_labeled_race_safe_and_explains_empty_or_failed
     assert "resultsEl.removeAttribute('aria-busy')" in search
 
     sheet = section("function openHomeAreaSheet", "// Onboarding step 2")
-    assert '<label class="sr-only" for="ha-city">Search for your home city</label>' in sheet
+    assert '<label for="ha-city">Search by city</label>' in sheet
     assert '<div id="ha-results" aria-live="polite"></div>' in sheet
 
 
-def test_play_setup_tolerates_removed_shell_controls_and_keeps_content_routes():
+def test_community_group_search_has_an_accessible_name():
+    sheet = section("async function openFindClubsSheet", "async function openCourtGallery")
+    assert '<label class="sr-only" for="fc-search">Search community groups</label>' in sheet
+
+
+def test_play_shell_has_primary_segments_and_one_contextual_create_action():
     setup = section("function setupPlay", "function openCompetitionCreateSheet")
     assert "$('#play-segments')?.addEventListener" in setup
     assert "$('#new-game-fab')?.addEventListener" in setup
-    routes = section("function playMoreRoutesHtml", "async function renderPlay")
-    assert 'data-play-route="scores"' in routes
-    assert 'data-play-route="brackets"' in routes
-    assert "state.playSeg = button.dataset.playRoute" in routes
+    assert "function setPlaySegment" in setup
+    assert "['games', 'scores', 'brackets'].includes(segment)" in setup
+    assert "fab.classList.remove('hidden')" in setup
+    for segment in ('games', 'scores', 'brackets'):
+        assert f'data-seg="{segment}"' in INDEX
+    assert 'id="new-game-fab" class="fab"' in INDEX
+    assert "function playMoreRoutesHtml" not in APP
+    assert 'data-play-route=' not in APP
+
+
+def test_play_launcher_survives_independent_feed_failures_with_honest_retry_states():
+    play = section("async function renderPlay", "function updatePlayHeader")
+    assert "api(homeUrl)" in play
+    assert "const settled = await Promise.allSettled([" in play
+    assert "api('/games?mine=1')" in play
+    assert "api(`/games?friends=1${levelQuery}`)" in play
+    assert "const mineFeed = feedResult(settled[0]" in play
+    assert "const friendsFeed = feedResult(settled[1]" in play
+    assert "const nearbyFeed = feedResult(settled[2]" in play
+    assert "let html = rallyLauncherHtml();" in play
+    assert "if (feedErrors.mine)" in play
+    assert "Finding, starting, and scheduling play still work." in play
+    # Friend sessions have their own rail and error state; only the nearby
+    # endpoint can make the nearby-discovery rail partial.
+    assert "const discoveryFeedFailed = !!feedErrors.nearby;" in play
+    assert "Friends’ sessions did not load" in play
+    assert "Nearby play did not load" in play
+    assert 'data-play-feed-retry' in play
+    assert "state.playGamesCache = null;" in play
+    assert ".play-feed-state" in STYLES
+    assert ".play-feed-state .btn" in STYLES

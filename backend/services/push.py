@@ -1,20 +1,18 @@
-"""Web push delivery: mirrors in-app notifications to subscribed devices.
+"""Durable web-push delivery.
 
-Dark unless VAPID keys are configured. Sends happen on a single daemon
-worker thread so a burst of notifications (e.g. 200 court fans) never
-blocks the request that created them.
+Each push intent is inserted in the same database transaction as its in-app
+Notification. Scheduled maintenance drains the outbox, so serverless process
+shutdowns cannot discard committed alerts.
 """
+from __future__ import annotations
+
 import json
-import queue
-import threading
+import time
+from datetime import timedelta
 
-from sqlalchemy import event
-from sqlalchemy.orm import Session
 
-_queue = queue.Queue()
-_worker_lock = threading.Lock()
-_worker_started = False
-_PENDING_PUSHES_KEY = 'thirdshot_pending_web_pushes_by_transaction'
+MAX_PUSH_ATTEMPTS = 8
+PUSH_OUTBOX_RETENTION_DAYS = 7
 
 
 def is_configured(app):
@@ -23,64 +21,6 @@ def is_configured(app):
         and app.config.get('VAPID_PRIVATE_KEY')
         and app.config.get('VAPID_PUBLIC_KEY')
     )
-
-
-def _ensure_worker():
-    global _worker_started
-    with _worker_lock:
-        if _worker_started:
-            return
-        thread = threading.Thread(
-            target=_drain, daemon=True,
-            name='webpush-sender',
-        )
-        thread.start()
-        _worker_started = True
-
-
-def _drain():
-    from pywebpush import WebPushException, webpush
-    while True:
-        app, user_id, payload = _queue.get()
-        try:
-            # Resolve subscriptions in a fresh app/session scope after the
-            # notification's transaction is durably committed.
-            with app.app_context():
-                from backend.models import PushSubscription
-                subscriptions = PushSubscription.query.filter_by(user_id=user_id).all()
-                deliveries = [
-                    (subscription.id, subscription.subscription_info())
-                    for subscription in subscriptions
-                ]
-            for subscription_id, subscription_info in deliveries:
-                try:
-                    webpush(
-                        subscription_info=subscription_info,
-                        data=payload,
-                        vapid_private_key=app.config['VAPID_PRIVATE_KEY'],
-                        vapid_claims={'sub': app.config['VAPID_CLAIMS_EMAIL']},
-                        ttl=3600,
-                    )
-                except WebPushException as exc:
-                    status = exc.response.status_code if exc.response is not None else None
-                    if status in (404, 410):
-                        # The browser dropped this subscription — forget it.
-                        try:
-                            with app.app_context():
-                                from backend.app import db
-                                from backend.models import PushSubscription
-                                row = db.session.get(PushSubscription, subscription_id)
-                                if row:
-                                    db.session.delete(row)
-                                    db.session.commit()
-                        except Exception:
-                            app.logger.exception('Pruning dead push subscription failed')
-                except Exception:
-                    app.logger.exception('Web push send failed')
-        except Exception:
-            app.logger.exception('Preparing web push delivery failed')
-        finally:
-            _queue.task_done()
 
 
 def _safe_action_url(url):
@@ -94,126 +34,150 @@ def _safe_action_url(url):
     return value if safe else '/'
 
 
-def _enqueue_user_push(app, user_id, title, body='', action_url=''):
-    """Queue a committed user-level push intent without querying the caller's
-    transaction-bound session."""
-    if not is_configured(app):
-        return
-    _ensure_worker()
-    payload = json.dumps({
-        'title': title,
-        'body': (body or '')[:180],
+def _payload(title, body='', action_url=''):
+    return json.dumps({
+        'title': str(title)[:160],
+        'body': str(body or '')[:180],
         'url': _safe_action_url(action_url),
-    })
-    _queue.put((app, user_id, payload))
-
-
-def _pending_pushes_by_transaction(session, create=False):
-    pending = session.info.get(_PENDING_PUSHES_KEY)
-    if pending is None and create:
-        pending = {}
-        session.info[_PENDING_PUSHES_KEY] = pending
-    return pending
-
-
-def _take_transaction_pushes(session, transaction):
-    pending = _pending_pushes_by_transaction(session)
-    if not pending or transaction is None:
-        return []
-    intents = pending.pop(transaction, [])
-    if not pending:
-        session.info.pop(_PENDING_PUSHES_KEY, None)
-    return intents
-
-
-def _dispatch_committed_pushes(session):
-    transaction = session.get_nested_transaction() or session.get_transaction()
-    intents = _take_transaction_pushes(session, transaction)
-    if transaction is not None and transaction.nested:
-        # RELEASE SAVEPOINT is not a durable commit. Promote its intents to the
-        # parent transaction so an outer rollback can still discard them.
-        if intents:
-            pending = _pending_pushes_by_transaction(session, create=True)
-            pending.setdefault(transaction.parent, []).extend(intents)
-        return
-
-    # Only the root transaction reaches dispatch.
-    for intent in intents:
-        app, user_id, title, body, *destination = intent
-        try:
-            if destination:
-                _enqueue_user_push(
-                    app, user_id, title, body, action_url=destination[0],
-                )
-            else:
-                # Preserve the four-argument call shape for existing workers
-                # and tests when a notification has no specific destination.
-                _enqueue_user_push(app, user_id, title, body)
-        except Exception:
-            # The database has already committed; push remains best-effort and
-            # must never turn a successful API mutation into a 500 response.
-            app.logger.exception('Queueing committed web push failed')
-
-
-def _discard_rolled_back_pushes(session):
-    transaction = session.get_nested_transaction() or session.get_transaction()
-    _take_transaction_pushes(session, transaction)
-
-
-def _discard_unfinished_transaction_pushes(session, transaction):
-    # Covers Session.close()/transaction invalidation paths which do not reach
-    # the explicit commit/rollback hooks. Normal endings already popped theirs.
-    _take_transaction_pushes(session, transaction)
-
-
-# Register once at module import. Flask-SQLAlchemy's session subclass inherits
-# these base Session events, and each session carries its own pending intents.
-if not event.contains(Session, 'after_commit', _dispatch_committed_pushes):
-    event.listen(Session, 'after_commit', _dispatch_committed_pushes)
-if not event.contains(Session, 'after_rollback', _discard_rolled_back_pushes):
-    event.listen(Session, 'after_rollback', _discard_rolled_back_pushes)
-if not event.contains(
-        Session, 'after_transaction_end', _discard_unfinished_transaction_pushes):
-    event.listen(
-        Session, 'after_transaction_end', _discard_unfinished_transaction_pushes,
-    )
+    }, separators=(',', ':'))
 
 
 def defer_to_user_after_commit(user_id, title, body='', action_url=''):
-    """Attach a push intent to the current DB transaction.
+    """Write a durable intent into the caller's active transaction."""
+    from flask import current_app
 
-    The intent is enqueued only by ``after_commit`` and is discarded by
-    ``after_rollback``. No-op when VAPID keys are not configured.
+    if not is_configured(current_app):
+        return None
+    from backend.app import db
+    from backend.models import PushOutbox
+
+    row = PushOutbox(
+        user_id=int(user_id),
+        payload=_payload(title, body, action_url),
+    )
+    db.session.add(row)
+    return row
+
+
+def _retry_delay(attempts):
+    return min(3600, 30 * (2 ** max(0, attempts - 1)))
+
+
+def drain_push_outbox(*, limit=100, deadline=None):
+    """Deliver due outbox rows and return bounded operational counters.
+
+    PostgreSQL callers lock rows with SKIP LOCKED, so overlapping cron calls do
+    not deliver the same row. Successful subscriptions are remembered on the
+    row, preventing duplicates when another device needs a transient retry.
     """
     from flask import current_app
-    if not is_configured(current_app):
-        return
+    from pywebpush import WebPushException, webpush
+
     from backend.app import db
-    session = db.session()
-    transaction = session.get_nested_transaction() or session.get_transaction()
-    if transaction is None:
-        # ``notify`` adds its Notification first, which normally autobegins.
-        # Keep this helper correct for direct callers too.
-        transaction = session.begin()
-    pending = _pending_pushes_by_transaction(session, create=True)
-    intent = (
-        current_app._get_current_object(), int(user_id), str(title), str(body or ''),
-    )
-    destination = _safe_action_url(action_url)
-    if destination != '/':
-        intent += (destination,)
-    pending.setdefault(transaction, []).append(intent)
+    from backend.models import PushOutbox, PushSubscription, utcnow
+
+    stats = {
+        'selected': 0, 'sent': 0, 'retried': 0, 'failed': 0,
+        'subscriptions_pruned': 0,
+    }
+    if not is_configured(current_app):
+        stats['disabled'] = True
+        return stats
+
+    max_rows = max(1, min(int(limit), 500))
+    processed = 0
+    while processed < max_rows:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        # Claim exactly one row in this transaction. Committing a completed
+        # delivery releases only that row's lock; it cannot accidentally
+        # release locks for the rest of a prefetched batch and let a second
+        # cron deliver them in parallel.
+        query = PushOutbox.query.filter(
+            PushOutbox.sent_at.is_(None),
+            PushOutbox.failed_at.is_(None),
+            PushOutbox.available_at <= utcnow(),
+        ).order_by(PushOutbox.id.asc()).limit(1)
+        if db.engine.dialect.name == 'postgresql':
+            query = query.with_for_update(skip_locked=True)
+        row = query.first()
+        if row is None:
+            break
+        processed += 1
+        stats['selected'] += 1
+        delivered = row.delivered_ids()
+        subscriptions = PushSubscription.query.filter_by(user_id=row.user_id).all()
+        transient_errors = []
+        for subscription in subscriptions:
+            if subscription.id in delivered:
+                continue
+            try:
+                webpush(
+                    subscription_info=subscription.subscription_info(),
+                    data=row.payload,
+                    vapid_private_key=current_app.config['VAPID_PRIVATE_KEY'],
+                    vapid_claims={'sub': current_app.config['VAPID_CLAIMS_EMAIL']},
+                    ttl=3600,
+                )
+                delivered.add(subscription.id)
+            except WebPushException as exc:
+                status = exc.response.status_code if exc.response is not None else None
+                if status in (404, 410):
+                    db.session.delete(subscription)
+                    delivered.add(subscription.id)
+                    stats['subscriptions_pruned'] += 1
+                else:
+                    transient_errors.append(f'HTTP {status or "unknown"}')
+            except Exception as exc:  # provider/network failure; retry later
+                transient_errors.append(type(exc).__name__)
+
+        row.delivered_subscription_ids = json.dumps(sorted(delivered))
+        if transient_errors:
+            row.attempts = int(row.attempts or 0) + 1
+            row.last_error = ', '.join(transient_errors)[:500]
+            if row.attempts >= MAX_PUSH_ATTEMPTS:
+                row.failed_at = utcnow()
+                stats['failed'] += 1
+            else:
+                row.available_at = utcnow() + timedelta(
+                    seconds=_retry_delay(row.attempts),
+                )
+                stats['retried'] += 1
+        else:
+            # No subscriptions is a successful no-op: a future subscription
+            # should not receive old alerts from before it existed.
+            row.sent_at = utcnow()
+            row.last_error = ''
+            stats['sent'] += 1
+        db.session.commit()
+
+    # Completed rows contain notification copy and should not become a
+    # permanent shadow inbox. Retain a short diagnostic window, then remove a
+    # bounded batch on every dedicated drain.
+    if deadline is None or time.monotonic() < deadline:
+        cutoff = utcnow() - timedelta(days=PUSH_OUTBOX_RETENTION_DAYS)
+        expired_ids = [row_id for (row_id,) in (
+            db.session.query(PushOutbox.id)
+            .filter(db.or_(
+                PushOutbox.sent_at < cutoff,
+                PushOutbox.failed_at < cutoff,
+            ))
+            .order_by(PushOutbox.id.asc())
+            .limit(1000)
+            .all()
+        )]
+        if expired_ids:
+            PushOutbox.query.filter(PushOutbox.id.in_(expired_ids)).delete(
+                synchronize_session=False,
+            )
+            db.session.commit()
+        stats['purged'] = len(expired_ids)
+
+    return stats
 
 
 def send_to_user(user_id, title, body='', action_url=''):
-    """Queue a push to every device this user has subscribed. No-op when
-    VAPID keys aren't configured. Call inside an app context."""
-    from flask import current_app
-    args = (
-        current_app._get_current_object(), int(user_id), str(title), str(body or ''),
+    """Compatibility helper: enqueue durably in the caller's transaction."""
+    return defer_to_user_after_commit(
+        user_id, title, body, action_url=action_url,
     )
-    destination = _safe_action_url(action_url)
-    if destination != '/':
-        _enqueue_user_push(*args, action_url=destination)
-    else:
-        _enqueue_user_push(*args)

@@ -12,19 +12,37 @@ def section(start: str, end: str) -> str:
     return APP[APP.index(start):APP.index(end, APP.index(start))]
 
 
-def test_global_play_now_enters_unified_find_flow_not_planner_directly():
+def test_global_play_now_enters_casual_community_launcher_not_mixed_planner():
     ctas = section("function setupEmptyStateCtas()", "// ---------- Map / Courts ----------")
     play_now_branch = ctas[ctas.index("target === 'play-now'"):ctas.index("target === 'new-ranked-game'")]
-    assert "openGameFlow({ mode: 'find' });" in play_now_branch
+    assert "openPlaySoonFlow();" in play_now_branch
+    assert "openGameFlow({ mode: 'find' });" not in play_now_branch
     assert "openNewGameModal" not in play_now_branch
 
     flow = section("function openGameFlow", "async function checkInAndStartRally")
-    assert "📍 Current check-in" in flow
-    assert "⭐ Saved" in flow
-    assert "🏠 Home" in flow
+    assert "uiIcon('map-pin')" in flow
+    assert "'Current check-in'" in flow
+    assert "'Saved'" in flow
+    assert "'Home'" in flow
+    for generic_location_glyph in ("📍", "⭐", "🏠"):
+        assert generic_location_glyph not in flow
     assert "distance_miles" in flow
     assert 'id="game-flow-court-search"' in flow
-    assert "Finding never creates a game" in flow
+    assert "Find or start a game" not in flow
+
+
+def test_play_location_surfaces_share_product_icons_instead_of_platform_emoji():
+    pulse = section("function openPlayPulseDetails", "function gameTypeLabel")
+    picker = section("async function openPlayNowCourtPicker", "function openPlayPulseCourtPicker")
+    assert pulse.count("uiIcon('map-pin')") >= 2
+    assert "play-pulse-detail-card > span:first-child .ui-icon" in STYLES
+    assert "play-pulse-active-icon .ui-icon" in STYLES
+    assert "uiIcon('map-pin')" in picker
+    assert "uiIcon(active ? 'check-circle' : 'map-pin')" in picker
+    assert "play-now-selection > span:first-child .ui-icon" in STYLES
+    assert ".play-now-court-pin .ui-icon" in STYLES
+    for generic_location_glyph in ("📍", "⭐", "🏠"):
+        assert generic_location_glyph not in picker
 
 
 def test_ready_confirmation_checks_in_before_durable_rally_resolution():
@@ -32,28 +50,51 @@ def test_ready_confirmation_checks_in_before_durable_rally_resolution():
     checkin = "api(`/courts/${selected.id}/checkin`"
     rally = "await startInstantRally(null"
     assert flow.index(checkin) < flow.index(rally)
-    assert "JSON.stringify({ looking_for_game: true })" in flow
-    assert "state.presence = checkedIn && checkedIn.presence" in flow
-    assert "? checkedIn.presence : fallbackPresence;" in flow
-    assert "presenceConfirmed: true" in flow
+    assert "const presenceLocation = await freshCourtPresenceLocation(selected);" in flow
+    assert "presence_intent: 'instant_rally'" in flow
+    assert "presence_location: presenceLocation" in flow
+    assert "applyAuthoritativeCheckIn(selected, checkedIn, true);" in flow
+    assert "presenceConfirmed" not in flow
+    assert "confirmCourtPresence" not in flow
     assert "expectedCourtId: selected.id" in flow
     assert "Your check-in is saved; try again." in flow
     assert "Retry safely" not in flow
     assert "const callerSession = instantRallySession();" in flow
     assert flow.index("if (!instantRallySessionMatches(callerSession)) return null;") < flow.index(
-        "invalidateMeRequests();"
+        "applyAuthoritativeCheckIn(selected, checkedIn, true);"
     )
     assert flow.count("if (!instantRallySessionMatches(callerSession)) return null;") >= 3
 
 
-def test_checkin_sheet_keeps_plain_group_checkin_and_ready_privacy_copy():
+def test_checkin_sheet_commits_one_authoritative_visibility_choice():
     sheet = section("function openCheckInSheet", "// ---------- Games ----------")
     assert "I’m at ${esc(court.name)}" in sheet
-    assert "Find a game now" in sheet
-    assert "Just check in" in sheet
-    assert "JSON.stringify({ looking_for_game: false })" in sheet
+    assert "Check in &amp; look for a game" in sheet
+    assert "Check in quietly" in sheet
+    assert 'type="radio" name="checkin-visibility"' in sheet
+    assert 'id="ci-submit"' in sheet
+    assert "form.addEventListener('submit'" in sheet
+    assert "const lookingForGame = form.elements['checkin-visibility'].value === 'looking';" in sheet
+    assert "const presenceLocation = await freshCourtPresenceLocation(court);" in sheet
+    assert "presence_intent: presenceIntent" in sheet
+    assert "presence_location: presenceLocation" in sheet
+    assert sheet.count("api(`/courts/${court.id}/checkin`") == 1
+    assert "applyAuthoritativeCheckIn(court, response, lookingForGame);" in sheet
+    assert "openGameFlow" not in sheet
     assert "signed-in players nearby" in sheet
     assert "expires automatically" in sheet
+
+    authoritative = section("function applyAuthoritativeCheckIn", "function openCheckInSheet")
+    assert "invalidateMeRequests();" in authoritative
+    assert "state.presence = response && response.presence" in authoritative
+    assert "rememberInstantRallyPresenceProof(selected.id, response);" in authoritative
+    assert "state.activePlayPulse = null;" in authoritative
+    assert "state.playGamesCache = null;" in authoritative
+    for refresh in (
+        "renderPresenceBanner();", "renderActiveGameBanner();",
+        "updatePlayHeader();", "refreshLookingBanner();", "fetchCourtsInView();",
+    ):
+        assert refresh in authoritative
 
 
 def test_rally_attempt_is_shared_recoverable_and_history_safe():
@@ -75,11 +116,10 @@ def test_rally_attempt_is_shared_recoverable_and_history_safe():
     assert "attempt.gameType, attempt.maxPlayers" in rally
     assert "game_type: attempt.gameType" in rally
     assert "max_players: attempt.maxPlayers" in rally
-    assert "confirm_court_presence: confirmCourtPresence" in rally
+    assert "confirm_court_presence" not in rally
     assert "courtId: expectedCourtId" in rally
     assert "gameType: requestedGameType" in rally
     assert "maxPlayers: requestedMaxPlayers" in rally
-    assert "confirmCourtPresence," in rally
     assert "if (instantRallyInFlight === record) instantRallyInFlight = null;" in rally
     assert "resolution?.abandoned" in rally
     assert "function finishInstantRallyCall(resolution, options = {}, callerSession = null)" in rally
@@ -103,7 +143,7 @@ def test_rally_attempt_is_shared_recoverable_and_history_safe():
 
 
 def test_logout_detaches_inflight_rally_from_the_next_account():
-    logout = section("function logout()", "function tokenHint()")
+    logout = section("function logout({", "function tokenHint()")
     assert logout.index("instantRallyInFlight = null;") < logout.index("state.token = null;")
     rally = section("let instantRallyInFlight = null", "function rallyLauncherHtml")
     assert "if (!instantRallySessionMatches(callerSession)) return { abandoned: true };" in rally
@@ -134,7 +174,8 @@ def test_every_instant_join_uses_arrival_hold_until_at_court_confirmation():
     assert "if (!document.body.contains(sourceModal)" in gate
 
     finish = section("function finishInstantRallyCall", "function rallyLauncherHtml")
-    assert "['active_checkin_required', 'active_checkin_court_mismatch'].includes" in finish
+    assert "'active_checkin_required', 'active_checkin_court_mismatch'," in finish
+    assert "'presence_proof_required', 'presence_proof_expired', 'invalid_presence_proof'," in finish
     assert "refreshMe().finally(reopenConfirmation);" in finish
     assert "transitionModal(sourceModal, () => openGameFlow({" in finish
     assert "mode: 'start', gameType: options.gameType, maxPlayers: options.maxPlayers" in finish
@@ -143,7 +184,7 @@ def test_every_instant_join_uses_arrival_hold_until_at_court_confirmation():
     assert "b.dataset.instantRally === 'true'" in cards
     assert "await openReadyRally" in cards
     assert "data-rally-court" in APP
-    assert "if (game.is_instant)" in section("const joinBtn = el.querySelector('#agb-join')", "const dismissBtn")
+    assert "if (game.is_instant)" in section("const joinBtn = el.querySelector('#agb-join')", "if (dismissBtn)")
 
 
 def test_instant_games_stay_assembly_first_until_explicit_finish():
@@ -154,10 +195,11 @@ def test_instant_games_stay_assembly_first_until_explicit_finish():
     assert "Math.max(" in assembly
     assert "Finding players" in assembly
     assert "Ready to play" in assembly
-    assert "Rally full — ready to play" in assembly
+    assert "Game full — ready to play" in assembly
 
     active_banner = section("function renderActiveGameBanner", "function renderTournamentBanner")
-    assert "if (!assembly && game.banner_state === 'live'" in active_banner
+    assert "openButton.onclick = () => openGameScreen(game.id)" in active_banner
+    assert "openScoreModal(fresh" not in active_banner
 
     card = section("function gameCardHtml", "function bindGameButtons")
     assert "game.status === 'upcoming' && assembly" in card
@@ -165,36 +207,53 @@ def test_instant_games_stay_assembly_first_until_explicit_finish():
     instant_card = card[card.index("game.status === 'upcoming' && assembly"):card.index("} else if (game.status === 'upcoming')")]
     assert "data-game-waitlist" not in instant_card
     assert "rallyActionState(rally)" in instant_card
-    assert "Travel spot held" in APP
+    assert "Someone’s on the way" in APP
     assert "instantRallyScorePending(game)" in card
-    assert "Played? Tap to enter the score." in card
+    assert "Played? Finish with no score or add one." in card
 
     detail = section("function gameScreenHtml", "async function openGameScreen")
     assert "game.spots_left > 0 && (!game.is_instant || assembly)" in detail
     assert "game.is_instant && game.players.length >= 2" in detail
     assert "We finished — enter score" in detail
+
+
+def test_visible_play_feed_revalidates_live_cards_and_joins_from_fresh_state():
+    refresh = section("function startPlayLiveRefresh", "async function showMain")
+    assert "state.tab !== 'play' || state.playSeg !== 'games'" in refresh
+    assert "state.playGamesCache = null" in refresh
+    assert "LIVE_DETAIL_POLL_INTERVAL_MS" in refresh
+
+    cards = section("function bindGameButtons", "// Share text")
+    assert "const fresh = await api(`/games/${gameId}`)" in cards
+    assert "fresh.status !== 'upcoming' || Number(fresh.spots_left) <= 0" in cards
+    assert "showInlineActionError(card, err.message)" in cards
+    detail = section("function gameScreenHtml", "async function openGameScreen")
     assert "!game.is_instant && !startsAhead" in detail
-    assert "No additional spot is promised." in detail
-    assert "Player identities stay private until you join this rally at the court." in detail
+    assert "Game full." in detail
+    assert "Join at the court to see who’s playing." in detail
     assert "At the court (${readyCount}/${game.max_players})" in detail
     assert "Players (${readyCount}/${game.max_players})" in detail
 
     play = section("async function renderPlay", "function updatePlayHeader")
-    assert "g.status === 'upcoming' && g.can_enter_score" in play
-    assert "? instantRallyScorePending(g)" in play
+    assert "g.status === 'upcoming' && (g.can_enter_score || g.can_complete_session)" in play
+    assert "? (instantRallyScorePending(g) || instantSessionWrapPending(g))" in play
     assert "!toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g)" in play
     profile = section("// My upcoming games", "// Personal play stats")
-    assert "const scorePending = (mine.items || []).filter((game) => instantRallyScorePending(game))" in profile
+    assert "const scorePending = (mine.items || []).filter((game) =>" in profile
+    assert "? instantRallyScorePending(game)" in profile
+    assert "const wrapPending = (mine.items || []).filter((game) =>" in profile
+    assert "? instantSessionWrapPending(game)" in profile
     assert "Played — enter the score" in profile
     assert "!instantRallyClosed(game)" in profile
 
     closed = section("function instantRallyClosed", "function renderActiveGameBanner")
     assert "game.assembly_active === false" in closed
     assert "!['finding', 'ready', 'full'].includes(assemblyState)" in closed
-    assert "This rally ended without enough players." in card
+    card = section("function gameCardHtml", "function bindGameButtons")
+    assert "This pickup group ended without enough players." in card
     assert "instantRallyClosed(g)" in play
     assert "instantRallyClosed(game)" in detail
-    assert "This rally is no longer accepting players." in detail
+    assert "This pickup game didn’t fill up." in detail
 
 
 def test_looking_summary_drives_exact_rally_and_nearby_actions_with_fallback():
@@ -205,15 +264,19 @@ def test_looking_summary_drives_exact_rally_and_nearby_actions_with_fallback():
     assert "rallyGameId" in banner and "rallyCourtId" in banner
     assert "View nearby players" in banner
     assert "const generation = ++lookingBannerGeneration" in banner
-    assert "lookingBannerContext(state.token, areaLatLng()) === context" in banner
+    assert "const requestOwner = captureAuthenticatedSessionOwner()" in banner
+    assert "authenticatedSessionOwnerIsCurrent(requestOwner)" in banner
+    assert "lookingBannerContext(" in banner
+    assert "captureAuthenticatedSessionOwner(), committedAreaLatLng()" in banner
     assert banner.count("if (!isCurrent()) return;") == 2
     assert "function clearLookingBanner({ invalidate = true } = {})" in APP
     assert "el.replaceChildren();" in APP
-    logout = section("function resetPrivateUiForLogout", "function logout()")
+    logout = section("function resetPrivateUiForLogout", "function logout({")
     assert "clearLookingBanner();" in logout
-    map_area = section("$('#use-map-area')?.addEventListener", "// NB: don't pass the click event")
+    map_area = section("useMapAreaButton?.addEventListener", "// NB: don't pass the click event")
     assert "clearLookingBanner();" in map_area
     assert "refreshLookingBanner();" in map_area
+    assert "await refreshCourtResults({ showLoading: false });" in map_area
 
     nearby = section("async function renderNearbyPlayers", "async function renderFriends")
     assert "Promise.all" in nearby
@@ -223,8 +286,26 @@ def test_looking_summary_drives_exact_rally_and_nearby_actions_with_fallback():
     assert "openReadyRally" in nearby
 
 
+def test_nearby_player_location_copy_labels_live_last_seen_and_profile_provenance():
+    nearby = section("function nearbyPlayerLocationHtml", "async function renderFriends")
+    assert "if (player.checked_in_court)" in nearby
+    assert "wants to play!" in nearby
+    assert "Last seen ${when}" in nearby
+    assert "distanceText.replace('your area', 'this area then')" in nearby
+    assert "Plays at ${esc(player.home_court_name)}" in nearby
+    assert "Profile area" in nearby
+    assert "Nearby from their profile" in nearby
+    assert "let sub = nearbyPlayerLocationHtml(p);" in nearby
+    assert "${p.distance_miles} mi away" not in nearby
+
+
 def test_play_now_controls_have_mobile_and_accessibility_contracts():
-    assert 'role="listbox" aria-label="Court choices" aria-busy="true"' in APP
+    picker = section("async function openPlayNowCourtPicker", "async function openReadyRally")
+    assert 'role="group" aria-label="Court choices" aria-busy="true"' in picker
+    assert 'role="listbox"' not in picker
+    assert 'role="option"' not in picker
+    assert 'aria-pressed="${!!selected && selected.id === item.id}"' in picker
+    assert "row.setAttribute('aria-pressed', String(active));" in picker
     assert 'role="alert" tabindex="-1"' in section(
         "async function openPlayNowCourtPicker", "async function openReadyRally"
     )
@@ -236,10 +317,10 @@ def test_play_now_controls_have_mobile_and_accessibility_contracts():
     assert ".nearby-rally-card [data-rally-action]" in STYLES
     assert "min-height: 44px" in STYLES
     assert ".active-game-banner.state-rally" in STYLES
-    assert 'id="nearby-skill"' in APP
-    assert '<details class="nearby-filter"' in APP
+    assert 'class="nearby-level-filters" role="group"' in APP
+    assert 'data-nearby-level="${value}"' in APP
     assert "How location sharing works" in APP
-    assert 'action = `<button class="btn btn-secondary btn-sm" data-msg="${p.id}">Message</button>`' in APP
+    assert 'data-msg="${p.id}"' in APP
 
 
 def test_court_detail_uses_private_safe_presence_aggregate():
@@ -247,5 +328,7 @@ def test_court_detail_uses_private_safe_presence_aggregate():
     assert "const visiblePlayersHere = Array.isArray(court.players_here)" in detail
     assert "Math.max(visiblePlayersHere.length, Number(court.players_here_count) || 0)" in detail
     assert "privatePlayersHere" in detail
-    assert "Playing now (${nHere})" in detail
+    assert "Playing and forming now" in detail
+    assert "People at this court (${nHere})" in detail
+    assert "<b>${nHere}</b><span>at the court</span>" in detail
     assert "court.players_here.length" not in detail

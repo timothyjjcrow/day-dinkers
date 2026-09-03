@@ -1,0 +1,36 @@
+{
+  "$schema": "../schemas/business-catalog-v1.schema.json",
+  "schema_version": 1,
+  "source_version": "club-schedule-2026-09-01T15:00:00Z",
+  "generated_at": "2026-09-01T15:00:00Z",
+  "authoritative": true,
+  "occurrences": [
+    {
+      "external_id": "open-play-2026-09-08",
+      "title": "Intermediate open play",
+      "kind": "open_play",
+      "event_date": "2026-09-08",
+      "start_time": "18:00",
+      "end_time": "20:00",
+      "timezone": "America/Los_Angeles",
+      "capacity": 24,
+      "spots_remaining": 7,
+      "status": "scheduled",
+      "skill_level": "intermediate",
+      "location_note": "Courts 1–4",
+      "instructor": "Venue staff",
+      "price_text": "$12",
+      "booking_url": "https://booking.example/open-play",
+      "updated_at": "2026-09-01T14:55:00Z"
+    }
+  ],
+  "conversions": [
+    {
+      "external_event_id": "paid-booking-1842",
+      "occurrence_external_id": "open-play-2026-09-08",
+      "occurred_at": "2026-09-01T15:05:00Z",
+      "value_minor": 1200,
+      "currency": "USD"
+    }
+  ]
+}

@@ -58,17 +58,7 @@ def test_all_whole_game_cancel_entry_points_delegate_to_the_sheet():
     assert "confirm(" not in stale
     assert "/cancel" not in stale
 
-    instant = section(
-        "function showInstantRallyManagement",
-        "async function startInstantRally",
-    )
-    assert "openGameCancellationConfirmation({" in instant
-    assert "variant: 'instant'" in instant
-    assert "requestRallyCancellation(event.currentTarget)" in instant
-    assert "requestRallyCancellation(button)" in instant
-    assert "confirm(" not in instant
-    assert "/cancel" not in instant
-    assert "toast('Game cancelled')" not in instant
+    assert "function showInstantRallyManagement" not in APP
 
     detail = section(
         "box.querySelector('#gs-cancel')?.addEventListener",
@@ -85,7 +75,7 @@ def test_all_whole_game_cancel_entry_points_delegate_to_the_sheet():
 def test_declining_a_challenge_uses_the_same_designed_confirmation():
     decline = section(
         "box.querySelector('#gs-decline')?.addEventListener",
-        "box.querySelector('#gs-score')?.addEventListener",
+        "box.querySelector('#gs-decline-invite')?.addEventListener",
     )
     assert "openGameCancellationConfirmation({" in decline
     assert "variant: 'challenge'" in decline

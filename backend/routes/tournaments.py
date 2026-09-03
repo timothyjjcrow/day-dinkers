@@ -1,33 +1,68 @@
 """Tournaments: registration, seeded brackets, score reporting, standings."""
 from datetime import timedelta
+import json
+import math
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from backend.app import db
 from backend.models import (
     CompetitionResultEvent,
     Court,
+    Notification,
     TOURNAMENT_EVENT_TYPES,
     TOURNAMENT_FORMATS,
+    TOURNAMENT_GAME_FORMATS,
     Tournament,
     TournamentEntry,
     TournamentMatch,
     User,
+    award_new_badges,
+    iso,
     is_blocked_between,
     notify,
     utcnow,
 )
 from backend.routes.auth import login_required
+from backend.routes.competition_http import conditional_competition_detail
 from backend.routes.courts import haversine_miles
-from backend.routes.games import _parse_scheduled_at
-from backend.routes.social import friend_ids
+from backend.routes.games import (
+    _encode_page_cursor,
+    _page_args,
+    _page_payload,
+    _parse_scheduled_at,
+)
 from backend.security import rate_limit
 
 tournaments_bp = Blueprint('tournaments', __name__)
 
 MIN_ENTRIES = 2
 MAX_ENTRIES_CAP = 32
+MAX_TOURNAMENT_COURTS = 24
+GAME_FORMAT_RULES = {
+    'single_11': {'label': 'One game to 11', 'target': 11, 'wins': 1, 'max_games': 1},
+    'single_15': {'label': 'One game to 15', 'target': 15, 'wins': 1, 'max_games': 1},
+    'best_of_3_11': {'label': 'Best of 3 to 11', 'target': 11, 'wins': 2, 'max_games': 3},
+}
+
+
+def _tournament_result_window_hours():
+    return max(1, int(current_app.config.get(
+        'TOURNAMENT_RESULT_AUTO_CONFIRM_HOURS', 2,
+    )))
+
+
+def _result_nudge_cooldown():
+    return timedelta(minutes=max(1, int(current_app.config.get(
+        'COMPETITION_RESULT_NUDGE_COOLDOWN_MINUTES', 30,
+    ))))
+
+
+def _result_review_deadline(reported_at):
+    if not reported_at:
+        return None
+    return reported_at + timedelta(hours=_tournament_result_window_hours())
 
 
 def _seed_slot_order(size):
@@ -56,6 +91,75 @@ def _round_robin_rounds(entry_ids):
         rounds.append(pairs)
         ids = [ids[0], ids[-1]] + ids[1:-1]
     return rounds
+
+
+def _schedule_tournament_matches(tournament):
+    """Give every generated slot an honest estimated time and court number."""
+    courts = max(1, int(tournament.court_count or 1))
+    duration = max(15, int(tournament.match_minutes or 30))
+    round_start = tournament.starts_at
+    for round_number in sorted({match.round for match in tournament.matches}):
+        matches = sorted(
+            (match for match in tournament.matches if match.round == round_number),
+            key=lambda match: (match.position, match.id or 0),
+        )
+        for index, match in enumerate(matches):
+            match.court_number = index % courts + 1
+            match.scheduled_at = round_start + timedelta(
+                minutes=(index // courts) * duration,
+            )
+        waves = max(1, math.ceil(len(matches) / courts))
+        round_start += timedelta(minutes=waves * duration)
+
+
+def _tournament_schedule_estimate(tournament):
+    """Return an honest event duration/end for calendar and share surfaces.
+
+    Once a bracket exists its latest scheduled match is authoritative. During
+    registration, estimate the complete configured field so an exported event
+    cannot quietly promise an arbitrary four-hour block.
+    """
+    courts = max(1, int(tournament.court_count or 1))
+    match_minutes = max(15, int(tournament.match_minutes or 30))
+    scheduled = [match.scheduled_at for match in tournament.matches if match.scheduled_at]
+    if scheduled and tournament.starts_at:
+        end_at = max(scheduled) + timedelta(minutes=match_minutes)
+        duration = max(
+            match_minutes,
+            math.ceil((end_at - tournament.starts_at).total_seconds() / 60),
+        )
+        return duration, end_at
+
+    entries = max(MIN_ENTRIES, int(tournament.max_entries or MIN_ENTRIES))
+    if tournament.format == 'round_robin':
+        rounds = entries - 1 if entries % 2 == 0 else entries
+        matches_per_round = entries // 2
+        waves = max(1, math.ceil(matches_per_round / courts))
+        duration = rounds * waves * match_minutes
+    else:
+        bracket_size = 2
+        while bracket_size < entries:
+            bracket_size *= 2
+        round_matches = [
+            bracket_size // (2 ** round_number)
+            for round_number in range(1, bracket_size.bit_length())
+        ]
+        if entries >= 4:
+            round_matches[-1] += 1  # final and bronze match share the last round
+        duration = sum(
+            max(1, math.ceil(match_count / courts)) * match_minutes
+            for match_count in round_matches
+        )
+    end_at = tournament.starts_at + timedelta(minutes=duration) \
+        if tournament.starts_at else None
+    return duration, end_at
+
+
+def _add_tournament_schedule_estimate(data, tournament):
+    duration, end_at = _tournament_schedule_estimate(tournament)
+    data['estimated_duration_minutes'] = duration
+    data['estimated_end_at'] = iso(end_at)
+    return data
 
 
 def _notify_entry(entry, kind, title, body='', related_user_id=None,
@@ -121,6 +225,14 @@ def _eligible_result_confirmer(tournament, match, user_id):
     return reporter_entry_id is None or viewer_entry.id != reporter_entry_id
 
 
+def _result_confirmer_ids(tournament, match):
+    return {
+        user_id
+        for user_id in _match_participant_ids(tournament, match)
+        if _eligible_result_confirmer(tournament, match, user_id)
+    }
+
+
 def _result_json_payload():
     payload = request.get_json(silent=True)
     return payload if isinstance(payload, dict) else {}
@@ -168,6 +280,133 @@ def _parse_score_pair(payload, stored_match=None):
     if not (0 <= score1 <= 99 and 0 <= score2 <= 99) or score1 == score2:
         return None
     return score1, score2
+
+
+def _parse_game_scores(payload, tournament, stored_match=None):
+    """Validate the configured match format while retaining legacy clients.
+
+    Older clients send one ``score1``/``score2`` pair. New clients send the
+    individual ``games`` ledger; score1/score2 then remain the compatible
+    aggregate used by bracket progression and historical consumers.
+    """
+    if 'games' not in payload:
+        configured_format = getattr(tournament, 'game_format', None) or 'single_11'
+        existing = stored_match.game_scores() if stored_match else []
+        # Only the original one-game-to-11 contract accepts the legacy pair.
+        # A configured alternate format must send its per-game ledger so the
+        # server can enforce the target and match winner.
+        if configured_format != 'single_11' and not existing:
+            return None
+        pair = _parse_score_pair(payload, stored_match=stored_match)
+        if not pair:
+            return None
+        games = existing if existing and not {'score1', 'score2'} & payload.keys() else [
+            {'score1': pair[0], 'score2': pair[1]},
+        ]
+        return pair, games
+
+    rows = payload.get('games')
+    rule = GAME_FORMAT_RULES.get(
+        getattr(tournament, 'game_format', None) or 'single_11'
+    )
+    if not rule or not isinstance(rows, list) or not rows:
+        return None
+    if len(rows) > rule['max_games']:
+        return None
+
+    games = []
+    wins = [0, 0]
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            return None
+        raw1, raw2 = row.get('score1'), row.get('score2')
+        if isinstance(raw1, bool) or isinstance(raw2, bool):
+            return None
+        if isinstance(raw1, float) and not raw1.is_integer():
+            return None
+        if isinstance(raw2, float) and not raw2.is_integer():
+            return None
+        try:
+            score1, score2 = int(raw1), int(raw2)
+        except (TypeError, ValueError):
+            return None
+        high, low = max(score1, score2), min(score1, score2)
+        margin = high - low
+        valid_finish = (
+            high == rule['target'] and margin >= 2
+        ) or (
+            high > rule['target'] and margin == 2
+        )
+        if low < 0 or high > 99 or not valid_finish:
+            return None
+        winner = 0 if score1 > score2 else 1
+        wins[winner] += 1
+        games.append({'score1': score1, 'score2': score2})
+        if wins[winner] == rule['wins'] and index != len(rows) - 1:
+            return None
+
+    if max(wins) != rule['wins']:
+        return None
+    if rule['wins'] == 1 and len(games) != 1:
+        return None
+    return (
+        (games[0]['score1'], games[0]['score2'])
+        if rule['wins'] == 1 else (wins[0], wins[1]),
+        games,
+    )
+
+
+def _parse_optional_division_rating(value):
+    if value in (None, ''):
+        return None
+    if isinstance(value, bool):
+        raise ValueError
+    parsed = float(value)
+    if not 2.0 <= parsed <= 5.5:
+        raise ValueError
+    return round(parsed, 1)
+
+
+def _division_settings(payload, fallback=None):
+    fallback = fallback or {}
+    try:
+        minimum = _parse_optional_division_rating(
+            payload.get('division_min_rating', fallback.get('division_min_rating'))
+        )
+        maximum = _parse_optional_division_rating(
+            payload.get('division_max_rating', fallback.get('division_max_rating'))
+        )
+    except (TypeError, ValueError):
+        return None, 'invalid_division'
+    if (minimum is None) != (maximum is None) or (
+        minimum is not None and minimum > maximum
+    ):
+        return None, 'invalid_division'
+    name = str(payload.get('division_name', fallback.get('division_name') or '') or '').strip()[:80]
+    if not name:
+        name = 'Open' if minimum is None else f'{minimum:.1f}–{maximum:.1f}'
+    return {
+        'division_name': name,
+        'division_min_rating': minimum,
+        'division_max_rating': maximum,
+    }, None
+
+
+def _division_registration_error(tournament, user):
+    minimum = tournament.division_min_rating
+    maximum = tournament.division_max_rating
+    if minimum is None and maximum is None:
+        return None
+    rating = user.skill_rating
+    if rating is None:
+        return 'skill_rating_required'
+    if (
+        minimum is not None and rating < minimum
+    ) or (
+        maximum is not None and rating > maximum
+    ):
+        return 'outside_division'
+    return None
 
 
 def _record_result_action(match, action, actor_id=None, reason=''):
@@ -229,7 +468,8 @@ def _commit_result_change(tournament_id, match_id):
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
 
-def _notify_result_users(tournament, match, user_ids, title, body='', actor_id=None):
+def _notify_result_users(tournament, match, user_ids, title, body='', actor_id=None,
+                         unread_dedupe_key=''):
     for user_id in set(user_ids) - ({actor_id} if actor_id else set()):
         notify(
             user_id,
@@ -239,6 +479,7 @@ def _notify_result_users(tournament, match, user_ids, title, body='', actor_id=N
             related_user_id=actor_id,
             related_tournament_id=tournament.id,
             action_url=_match_action_url(tournament, match),
+            unread_dedupe_key=unread_dedupe_key,
         )
 
 
@@ -250,17 +491,27 @@ def _standings(tournament):
         for e in tournament.entries
     }
     for m in tournament.matches:
-        if m.winner_entry_id is None or m.score1 is None:
+        if m.winner_entry_id is None:
             continue
+        # A recorded forfeit counts as a win/loss but invents no points or
+        # point differential. Byes have a missing side and do not count here.
+        if m.entry1_id is None or m.entry2_id is None:
+            continue
+        game_scores = m.game_scores()
+        points1 = sum(game['score1'] for game in game_scores) \
+            if game_scores else m.score1
+        points2 = sum(game['score2'] for game in game_scores) \
+            if game_scores else m.score2
         for eid, mine, theirs in (
-            (m.entry1_id, m.score1, m.score2),
-            (m.entry2_id, m.score2, m.score1),
+            (m.entry1_id, points1, points2),
+            (m.entry2_id, points2, points1),
         ):
             row = rows.get(eid)
             if not row:
                 continue
-            row['points_for'] += mine
-            row['points_against'] += theirs
+            if mine is not None and theirs is not None:
+                row['points_for'] += mine
+                row['points_against'] += theirs
             if eid == m.winner_entry_id:
                 row['wins'] += 1
             else:
@@ -278,8 +529,76 @@ def _standings(tournament):
     return table
 
 
+def _tournament_action_summary(tournament, user_id):
+    unresolved = [
+        match for match in tournament.matches
+        if match.effective_result_state() in (
+            'awaiting_confirmation', 'disputed',
+        )
+    ]
+    mine = [
+        match for match in unresolved
+        if match.effective_result_state() == 'awaiting_confirmation'
+        and _eligible_result_confirmer(tournament, match, user_id)
+    ]
+    organizer_matches = unresolved if user_id == tournament.organizer_id else []
+    unplayed = [
+        match for match in tournament.matches
+        if tournament.status == 'active'
+        and match.entry1_id is not None and match.entry2_id is not None
+        and match.effective_result_state() == 'unreported'
+        and user_id in _match_participant_ids(tournament, match)
+    ]
+    action_matches = {
+        match.id: match for match in mine + organizer_matches + unplayed
+    }
+    ordered_actions = sorted(
+        action_matches.values(),
+        key=lambda match: (match.reported_at or match.created_at, match.id),
+    )
+    ordered_unresolved = sorted(
+        unresolved,
+        key=lambda match: (match.reported_at or match.created_at, match.id),
+    )
+    partner_action = tournament.partner_action_for(user_id) \
+        if tournament.status == 'registration' else None
+    start_action_pending = bool(
+        tournament.status == 'registration'
+        and tournament.organizer_id == user_id
+        and tournament.starts_at <= utcnow()
+        and sum(
+            entry.partner_ready(tournament.event_type)
+            for entry in tournament.entries
+        ) >= MIN_ENTRIES
+    )
+    return {
+        'my_confirmation_count': len(mine),
+        'unresolved_result_count': len(unresolved),
+        'oldest_waiting_at': iso(
+            ordered_unresolved[0].reported_at or ordered_unresolved[0].created_at
+        ) if ordered_unresolved else None,
+        'pending_action_count': (
+            len(action_matches) + (1 if partner_action else 0)
+            + int(start_action_pending)
+        ),
+        'action_match_id': ordered_actions[0].id if ordered_actions else None,
+        'partner_action_pending': bool(partner_action),
+        'start_action_pending': start_action_pending,
+    }
+
+
+def _summary_payload(tournament, user_id):
+    data = tournament.to_dict(user_id)
+    data.update(_tournament_action_summary(tournament, user_id))
+    data['result_auto_confirm_hours'] = _tournament_result_window_hours()
+    return _add_tournament_schedule_estimate(data, tournament)
+
+
 def _detail_payload(tournament, user_id):
     data = tournament.to_dict(user_id, detail=True)
+    data.update(_tournament_action_summary(tournament, user_id))
+    data['result_auto_confirm_hours'] = _tournament_result_window_hours()
+    _add_tournament_schedule_estimate(data, tournament)
     matches = {match.id: match for match in tournament.matches}
     for item in data.get('matches', []):
         match = matches.get(item.get('id'))
@@ -301,6 +620,24 @@ def _detail_payload(tournament, user_id):
             and match.effective_result_state() == 'confirmed'
             and _confirmed_correction_is_safe(tournament, match)
         )
+        item['can_forfeit_result'] = bool(
+            active and organizer
+            and match.entry1_id is not None and match.entry2_id is not None
+            and match.effective_result_state() in (
+                'unreported', 'awaiting_confirmation', 'disputed',
+            )
+        )
+        item['review_deadline_at'] = iso(
+            _result_review_deadline(match.reported_at)
+        )
+        item['can_nudge_result'] = bool(
+            active and organizer
+            and match.effective_result_state() == 'awaiting_confirmation'
+            and _result_confirmer_ids(tournament, match)
+        )
+        item['nudge_available_at'] = iso(
+            match.last_nudged_at + _result_nudge_cooldown()
+        ) if match.last_nudged_at else None
     if tournament.format == 'round_robin':
         data['standings'] = _standings(tournament)
     # Chat unread badge for members (no marker yet = everything is unread).
@@ -323,50 +660,89 @@ def _detail_payload(tournament, user_id):
 @login_required
 def list_tournaments():
     user_id = g.current_user.id
+    limit, page_offset, page_error = _page_args(default=30, maximum=100)
+    if page_error:
+        return jsonify({'error': page_error}), 400
     if request.args.get('mine'):
         entered = (
             db.session.query(TournamentEntry.tournament_id)
             .filter(db.or_(
                 TournamentEntry.player1_id == user_id,
                 TournamentEntry.player2_id == user_id,
+                TournamentEntry.partner_invitee_id == user_id,
             ))
         )
-        rows = (
+        query = (
             Tournament.query
             .filter(db.or_(
                 Tournament.organizer_id == user_id,
                 Tournament.id.in_(entered),
             ))
             .filter(Tournament.status != 'cancelled')
-            .order_by(Tournament.starts_at.desc())
-            .limit(30)
-            .all()
+            .order_by(Tournament.starts_at.desc(), Tournament.id.desc())
         )
-        return jsonify({'items': [t.to_dict(user_id) for t in rows]})
+        total = query.count()
+        rows = query.offset(page_offset).limit(limit).all()
+        return jsonify(_page_payload(
+            [_summary_payload(t, user_id) for t in rows],
+            limit=limit,
+            offset=page_offset,
+            total=total,
+            already_sliced=True,
+        ))
 
     try:
         lat, lng = float(request.args.get('lat')), float(request.args.get('lng'))
-        radius = min(float(request.args.get('radius', 60)), 250)
+        radius = min(max(float(request.args.get('radius', 60)), 1), 250)
     except (TypeError, ValueError):
         return jsonify({'error': 'lat_lng_required'}), 400
-    rows = (
+    lat_delta = radius / 69.0
+    lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
+    query = (
         Tournament.query.join(Court)
         .filter(
             Tournament.status.in_(['registration', 'active']),
             Tournament.starts_at >= utcnow() - timedelta(days=3),
-            Court.latitude.between(lat - 2.5, lat + 2.5),
-            Court.longitude.between(lng - 2.5, lng + 2.5),
+            Court.latitude.between(lat - lat_delta, lat + lat_delta),
+            Court.longitude.between(lng - lng_delta, lng + lng_delta),
         )
-        .order_by(Tournament.starts_at.asc())
-        .limit(60)
-        .all()
+        .order_by(Tournament.starts_at.asc(), Tournament.id.asc())
     )
-    items = [
-        t.to_dict(user_id) for t in rows
-        if t.court and t.court.latitude is not None
-        and haversine_miles(lat, lng, t.court.latitude, t.court.longitude) <= radius
-    ][:30]
-    return jsonify({'items': items})
+    batch_size = max(25, min(100, limit * 2))
+    raw_offset = 0
+    visible_before_page = 0
+    items = []
+    has_more = False
+    while True:
+        rows = query.offset(raw_offset).limit(batch_size).all()
+        if not rows:
+            break
+        raw_offset += len(rows)
+        for tournament in rows:
+            court = tournament.court
+            if not court or court.latitude is None or court.longitude is None:
+                continue
+            if haversine_miles(
+                lat, lng, court.latitude, court.longitude,
+            ) > radius:
+                continue
+            if visible_before_page < page_offset:
+                visible_before_page += 1
+                continue
+            if len(items) >= limit:
+                has_more = True
+                break
+            items.append(_summary_payload(tournament, user_id))
+        if has_more or len(rows) < batch_size:
+            break
+    return jsonify({
+        'items': items,
+        'count': len(items),
+        'total': None if has_more else page_offset + len(items),
+        'has_more': has_more,
+        'next_cursor': _encode_page_cursor(page_offset + len(items))
+        if has_more else None,
+    })
 
 
 @tournaments_bp.post('/tournaments')
@@ -394,6 +770,22 @@ def create_tournament():
     event_type = str(payload.get('event_type') or 'singles').strip().lower()
     if event_type not in TOURNAMENT_EVENT_TYPES:
         return jsonify({'error': 'invalid_event_type'}), 400
+    game_format = str(payload.get('game_format') or 'single_11').strip().lower()
+    if game_format not in TOURNAMENT_GAME_FORMATS:
+        return jsonify({'error': 'invalid_game_format'}), 400
+    division, division_error = _division_settings(payload)
+    if division_error:
+        return jsonify({'error': division_error}), 400
+
+    try:
+        court_count = int(payload.get('court_count') or 1)
+        match_minutes = int(payload.get('match_minutes') or 30)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'invalid_tournament_schedule'}), 400
+    if not 1 <= court_count <= MAX_TOURNAMENT_COURTS:
+        return jsonify({'error': 'invalid_court_count'}), 400
+    if not 15 <= match_minutes <= 120:
+        return jsonify({'error': 'invalid_match_minutes'}), 400
 
     try:
         max_entries = int(payload.get('max_entries') or 8)
@@ -422,8 +814,12 @@ def create_tournament():
         starts_at=starts_at,
         format=fmt,
         event_type=event_type,
+        game_format=game_format,
+        court_count=court_count,
+        match_minutes=match_minutes,
         max_entries=max_entries,
         ranked=bool(payload.get('ranked')),
+        **division,
     )
     db.session.add(tournament)
     db.session.flush()
@@ -473,7 +869,7 @@ def create_tournament():
             related_tournament_id=tournament.id,
         )
     db.session.commit()
-    return jsonify(tournament.to_dict(g.current_user.id, detail=True)), 201
+    return jsonify(_detail_payload(tournament, g.current_user.id)), 201
 
 
 @tournaments_bp.patch('/tournaments/<int:tournament_id>')
@@ -491,6 +887,72 @@ def edit_tournament(tournament_id):
         return jsonify({'error': 'already_finished'}), 409
 
     payload = request.get_json(silent=True) or {}
+
+    structural_fields = {
+        'court_id', 'format', 'event_type', 'ranked', 'game_format',
+        'division_name', 'division_min_rating', 'division_max_rating',
+        'court_count', 'match_minutes',
+    }
+    if structural_fields & payload.keys():
+        if tournament.status != 'registration':
+            return jsonify({'error': 'registration_closed'}), 409
+        if tournament.entries:
+            return jsonify({'error': 'entries_lock_tournament_format'}), 409
+
+        if 'court_id' in payload:
+            try:
+                court_id = int(payload.get('court_id') or 0)
+            except (TypeError, ValueError):
+                court_id = 0
+            court = db.session.get(Court, court_id)
+            if not court:
+                return jsonify({'error': 'court_not_found'}), 404
+            tournament.court = court
+
+        if 'format' in payload:
+            fmt = str(payload.get('format') or '').strip().lower()
+            if fmt not in TOURNAMENT_FORMATS:
+                return jsonify({'error': 'invalid_format'}), 400
+            tournament.format = fmt
+        if 'event_type' in payload:
+            event_type = str(payload.get('event_type') or '').strip().lower()
+            if event_type not in TOURNAMENT_EVENT_TYPES:
+                return jsonify({'error': 'invalid_event_type'}), 400
+            tournament.event_type = event_type
+        if 'game_format' in payload:
+            game_format = str(payload.get('game_format') or '').strip().lower()
+            if game_format not in TOURNAMENT_GAME_FORMATS:
+                return jsonify({'error': 'invalid_game_format'}), 400
+            tournament.game_format = game_format
+
+        division, division_error = _division_settings(payload, {
+            'division_name': tournament.division_name,
+            'division_min_rating': tournament.division_min_rating,
+            'division_max_rating': tournament.division_max_rating,
+        })
+        if division_error:
+            return jsonify({'error': division_error}), 400
+        for field, value in division.items():
+            setattr(tournament, field, value)
+
+        if 'court_count' in payload:
+            try:
+                court_count = int(payload.get('court_count'))
+            except (TypeError, ValueError):
+                return jsonify({'error': 'invalid_court_count'}), 400
+            if not 1 <= court_count <= MAX_TOURNAMENT_COURTS:
+                return jsonify({'error': 'invalid_court_count'}), 400
+            tournament.court_count = court_count
+        if 'match_minutes' in payload:
+            try:
+                match_minutes = int(payload.get('match_minutes'))
+            except (TypeError, ValueError):
+                return jsonify({'error': 'invalid_match_minutes'}), 400
+            if not 15 <= match_minutes <= 120:
+                return jsonify({'error': 'invalid_match_minutes'}), 400
+            tournament.match_minutes = match_minutes
+        if 'ranked' in payload:
+            tournament.ranked = bool(payload.get('ranked'))
 
     if 'name' in payload:
         name = str(payload.get('name') or '').strip()[:120]
@@ -546,7 +1008,120 @@ def tournament_detail(tournament_id):
     tournament = db.session.get(Tournament, tournament_id)
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
+    return conditional_competition_detail(
+        _detail_payload(tournament, g.current_user.id),
+        kind='tournament',
+        entity_id=tournament.id,
+        viewer_id=g.current_user.id,
+    )
+
+
+@tournaments_bp.patch('/tournaments/<int:tournament_id>/matches/<int:match_id>/schedule')
+@rate_limit(60, 3600)
+@login_required
+def edit_tournament_match_schedule(tournament_id, match_id):
+    tournament = db.session.get(Tournament, tournament_id)
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    if tournament.organizer_id != g.current_user.id:
+        return jsonify({'error': 'not_organizer'}), 403
+    if tournament.status != 'active':
+        return jsonify({'error': 'not_active'}), 409
+    match = next((item for item in tournament.matches if item.id == match_id), None)
+    if not match:
+        return jsonify({'error': 'match_not_found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    if not {'scheduled_at', 'court_number'} & payload.keys():
+        return jsonify({'error': 'schedule_required'}), 400
+    changed = False
+    if 'scheduled_at' in payload:
+        scheduled_at = _parse_scheduled_at(payload.get('scheduled_at'))
+        if not scheduled_at:
+            return jsonify({'error': 'invalid_scheduled_at'}), 400
+        changed = changed or scheduled_at != match.scheduled_at
+        match.scheduled_at = scheduled_at
+    if 'court_number' in payload:
+        try:
+            court_number = int(payload.get('court_number'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_match_court_number'}), 400
+        if not 1 <= court_number <= max(1, int(tournament.court_count or 1)):
+            return jsonify({'error': 'invalid_match_court_number'}), 400
+        changed = changed or court_number != match.court_number
+        match.court_number = court_number
+
+    if changed:
+        when = iso(match.scheduled_at) or 'time to be announced'
+        for user_id in _match_participant_ids(tournament, match):
+            if user_id == g.current_user.id:
+                continue
+            notify(
+                user_id,
+                'tournament_update',
+                f'{tournament.name}: your match schedule changed',
+                f'{when} · court {match.court_number or "to be announced"}',
+                related_user_id=g.current_user.id,
+                related_tournament_id=tournament.id,
+                action_url=_match_action_url(tournament, match),
+            )
+    db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
+def _partner_entry_for_invitee(tournament, user_id):
+    return next((
+        entry for entry in tournament.entries
+        if entry.partner_status == 'pending'
+        and entry.partner_invitee_id == user_id
+    ), None)
+
+
+def _partner_candidate_available(tournament, user_id, exclude_entry=None):
+    """A player can occupy or await only one doubles slot per tournament."""
+    return not any(
+        entry is not exclude_entry and user_id in (
+            entry.player1_id, entry.player2_id, entry.partner_invitee_id,
+        )
+        for entry in tournament.entries
+    )
+
+
+def _mark_partner_notifications_resolved(tournament, user_id, related_user_id=None):
+    query = Notification.query.filter_by(
+        user_id=user_id,
+        kind='tournament_invite',
+        related_tournament_id=tournament.id,
+        read=False,
+    )
+    if related_user_id:
+        query = query.filter(Notification.related_user_id == related_user_id)
+    for notification in query.all():
+        notification.read = True
+        notification.unread_dedupe_key = None
+
+
+def _notify_partner_invitation(tournament, entry, candidate, pending_on):
+    owner = entry.player1
+    if pending_on == 'owner':
+        recipient = owner
+        actor = candidate
+        title = f'{candidate.display_name} offered to partner with you for {tournament.name}'
+        body = 'Accept to complete your team, or decline and stay in the partner pool.'
+    else:
+        recipient = candidate
+        actor = owner
+        title = f'{owner.display_name} invited you to partner for {tournament.name}'
+        body = 'Accept or decline before registration closes. You are not entered until you accept.'
+    notify(
+        recipient.id,
+        'tournament_invite',
+        title,
+        body,
+        related_user_id=actor.id,
+        related_tournament_id=tournament.id,
+        action_url=f'/#tournament/{tournament.id}',
+    )
 
 
 @tournaments_bp.post('/tournaments/<int:tournament_id>/register')
@@ -562,52 +1137,69 @@ def register_entry(tournament_id):
         return jsonify({'error': 'tournament_full'}), 409
 
     user = g.current_user
+    division_error = _division_registration_error(tournament, user)
+    if division_error:
+        return jsonify({'error': division_error}), 409
     if tournament.entry_for(user.id):
         return jsonify({'error': 'already_registered'}), 409
+    if _partner_entry_for_invitee(tournament, user.id):
+        return jsonify({'error': 'partner_action_pending'}), 409
 
     partner = None
+    needs_partner = False
+    payload = request.get_json(silent=True) or {}
     if tournament.event_type == 'doubles':
-        payload = request.get_json(silent=True) or {}
+        needs_partner = payload.get('needs_partner') is True
         try:
             partner_id = int(payload.get('partner_id') or 0)
         except (TypeError, ValueError):
             partner_id = 0
         partner = db.session.get(User, partner_id) if partner_id else None
-        if not partner or partner.deleted_at or partner.id == user.id:
-            return jsonify({'error': 'partner_required'}), 400
-        # Doubles partners must be friends — you can't draft strangers.
-        if partner.id not in friend_ids(user.id):
-            return jsonify({'error': 'partner_not_friend'}), 403
-        if is_blocked_between(user.id, partner.id):
-            return jsonify({'error': 'blocked'}), 403
-        if tournament.entry_for(partner.id):
-            return jsonify({'error': 'partner_already_registered'}), 409
+        if not needs_partner:
+            if not partner or partner.deleted_at or partner.id == user.id:
+                return jsonify({'error': 'partner_choice_required'}), 400
+            if is_blocked_between(user.id, partner.id):
+                return jsonify({'error': 'blocked'}), 403
+            partner_division_error = _division_registration_error(tournament, partner)
+            if partner_division_error:
+                return jsonify({
+                    'error': 'partner_' + partner_division_error,
+                }), 409
+            if not _partner_candidate_available(tournament, partner.id):
+                return jsonify({'error': 'partner_already_registered'}), 409
 
     # Assign the relationship (not the FK) so the tournament's loaded entries
     # collection includes this row when we serialize it below.
     entry = TournamentEntry(
         tournament=tournament,
         player1_id=user.id,
-        player2_id=partner.id if partner else None,
+        player2_id=None,
+        partner_invitee_id=partner.id if partner else None,
+        partner_status=(
+            'accepted' if tournament.event_type == 'singles'
+            else 'pending' if partner else 'needed'
+        ),
+        partner_pending_on='invitee' if partner else '',
     )
     db.session.add(entry)
-    entry_name = f'{user.display_name} & {partner.display_name}' if partner \
-        else user.display_name
+    db.session.flush()
+    entry.player1 = user
+    entry.partner_invitee = partner
+    entry_name = user.display_name
     if partner:
-        notify(
-            partner.id,
-            'tournament_invite',
-            f'{user.display_name} signed you up as their partner for {tournament.name}',
-            related_user_id=user.id,
-            related_tournament_id=tournament.id,
-        )
+        _notify_partner_invitation(tournament, entry, partner, 'invitee')
     if tournament.organizer_id != user.id:
         notify(
             tournament.organizer_id,
             'tournament_join',
-            f'{entry_name} entered {tournament.name}',
+            f'{entry_name} entered {tournament.name}' + (
+                ' and is looking for a partner' if needs_partner
+                else ' with a partner invitation pending' if partner
+                else ''
+            ),
             related_user_id=user.id,
             related_tournament_id=tournament.id,
+            action_url=f'/#tournament/{tournament.id}',
         )
     db.session.commit()
     return jsonify(_detail_payload(tournament, user.id)), 201
@@ -617,8 +1209,7 @@ def register_entry(tournament_id):
 @rate_limit(30, 3600)
 @login_required
 def swap_partner(tournament_id):
-    """The player who registered a doubles team swaps in a different partner
-    while registration is still open."""
+    """The entry owner proposes a partner or returns to the partner pool."""
     tournament = db.session.get(Tournament, tournament_id)
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
@@ -633,41 +1224,193 @@ def swap_partner(tournament_id):
         return jsonify({'error': 'not_entry_owner'}), 403
 
     payload = request.get_json(silent=True) or {}
+    needs_partner = payload.get('needs_partner') is True
     try:
         partner_id = int(payload.get('partner_id') or 0)
     except (TypeError, ValueError):
         partner_id = 0
     partner = db.session.get(User, partner_id) if partner_id else None
-    if not partner or partner.deleted_at or partner.id == g.current_user.id:
-        return jsonify({'error': 'partner_required'}), 400
-    if partner.id == entry.player2_id:
+    if not needs_partner and (
+        not partner or partner.deleted_at or partner.id == g.current_user.id
+    ):
+        return jsonify({'error': 'partner_choice_required'}), 400
+    if partner and (
+        partner.id == entry.player2_id
+        or entry.partner_status == 'pending'
+        and entry.partner_pending_on == 'invitee'
+        and partner.id == entry.partner_invitee_id
+    ):
         return jsonify(_detail_payload(tournament, g.current_user.id))
-    if partner.id not in friend_ids(g.current_user.id):
-        return jsonify({'error': 'partner_not_friend'}), 403
-    if is_blocked_between(g.current_user.id, partner.id):
+    if partner and is_blocked_between(g.current_user.id, partner.id):
         return jsonify({'error': 'blocked'}), 403
-    if tournament.entry_for(partner.id):
+    if partner:
+        partner_division_error = _division_registration_error(tournament, partner)
+        if partner_division_error:
+            return jsonify({
+                'error': 'partner_' + partner_division_error,
+            }), 409
+    if partner and not _partner_candidate_available(
+        tournament, partner.id, exclude_entry=entry,
+    ):
         return jsonify({'error': 'partner_already_registered'}), 409
 
     old_partner_id = entry.player2_id
-    entry.player2_id = partner.id
-    # Refresh the relationship so this response serializes the new pair.
-    entry.player2 = partner
+    old_invitee_id = entry.partner_invitee_id
+    old_pending_on = entry.partner_pending_on
     if old_partner_id:
         notify(
             old_partner_id,
             'tournament_withdraw',
-            f'{g.current_user.display_name} changed partners for {tournament.name}',
+            f'{g.current_user.display_name} reopened their partner spot for {tournament.name}',
             related_user_id=g.current_user.id,
             related_tournament_id=tournament.id,
+            action_url=f'/#tournament/{tournament.id}',
         )
-    notify(
-        partner.id,
-        'tournament_invite',
-        f'{g.current_user.display_name} signed you up as their partner for {tournament.name}',
-        related_user_id=g.current_user.id,
-        related_tournament_id=tournament.id,
-    )
+    elif old_invitee_id:
+        old_invitee = db.session.get(User, old_invitee_id)
+        if old_invitee:
+            notify(
+                old_invitee.id,
+                'tournament_withdraw',
+                f'The pending partner request for {tournament.name} was cancelled',
+                related_user_id=g.current_user.id,
+                related_tournament_id=tournament.id,
+                action_url=f'/#tournament/{tournament.id}',
+            )
+        decision_user_id = g.current_user.id \
+            if old_pending_on == 'owner' else old_invitee_id
+        _mark_partner_notifications_resolved(
+            tournament, decision_user_id,
+            old_invitee_id if old_pending_on == 'owner' else g.current_user.id,
+        )
+    entry.player2_id = None
+    entry.player2 = None
+    entry.partner_invitee_id = partner.id if partner else None
+    entry.partner_invitee = partner
+    entry.partner_status = 'pending' if partner else 'needed'
+    entry.partner_pending_on = 'invitee' if partner else ''
+    if partner:
+        _notify_partner_invitation(tournament, entry, partner, 'invitee')
+    db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/entries/<int:entry_id>/partner-offer')
+@rate_limit(30, 3600)
+@login_required
+def offer_tournament_partner(tournament_id, entry_id):
+    """Offer to fill a visible partner-pool slot; the owner must consent."""
+    tournament = db.session.get(Tournament, tournament_id)
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    if tournament.status != 'registration':
+        return jsonify({'error': 'registration_closed'}), 409
+    if tournament.event_type != 'doubles':
+        return jsonify({'error': 'not_doubles'}), 400
+    if tournament.entry_for(g.current_user.id):
+        return jsonify({'error': 'already_registered'}), 409
+    existing_offer = tournament.partner_offer_for(g.current_user.id)
+    if existing_offer:
+        if existing_offer.id == entry_id:
+            return jsonify(_detail_payload(tournament, g.current_user.id))
+        return jsonify({'error': 'partner_offer_already_pending'}), 409
+    entry = next((item for item in tournament.entries if item.id == entry_id), None)
+    if not entry:
+        return jsonify({'error': 'entry_not_found'}), 404
+    if entry.partner_status != 'needed' or entry.player2_id:
+        return jsonify({'error': 'partner_spot_unavailable'}), 409
+    if entry.player1_id == g.current_user.id:
+        return jsonify({'error': 'cannot_partner_self'}), 400
+    if is_blocked_between(entry.player1_id, g.current_user.id):
+        return jsonify({'error': 'blocked'}), 403
+    division_error = _division_registration_error(tournament, g.current_user)
+    if division_error:
+        return jsonify({'error': division_error}), 409
+    if not _partner_candidate_available(tournament, g.current_user.id):
+        return jsonify({'error': 'partner_already_registered'}), 409
+    entry.partner_invitee_id = g.current_user.id
+    entry.partner_invitee = g.current_user
+    entry.partner_status = 'pending'
+    entry.partner_pending_on = 'owner'
+    _notify_partner_invitation(tournament, entry, g.current_user, 'owner')
+    db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/partner/respond')
+@rate_limit(30, 3600)
+@login_required
+def respond_tournament_partner(tournament_id):
+    """Accept or decline the partner invitation/offer awaiting this user."""
+    tournament = db.session.get(Tournament, tournament_id)
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    if tournament.status != 'registration':
+        return jsonify({'error': 'registration_closed'}), 409
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload.get('accept'), bool):
+        return jsonify({'error': 'accept_required'}), 400
+    entry = tournament.partner_action_for(g.current_user.id)
+    if not entry:
+        return jsonify({'error': 'partner_action_not_pending'}), 409
+    candidate = entry.partner_invitee
+    owner = entry.player1
+    if not candidate or not owner:
+        return jsonify({'error': 'partner_action_not_pending'}), 409
+    actor = owner if entry.partner_pending_on == 'invitee' else candidate
+    _mark_partner_notifications_resolved(tournament, g.current_user.id, actor.id)
+    if payload['accept']:
+        for player in (owner, candidate):
+            division_error = _division_registration_error(tournament, player)
+            if division_error:
+                return jsonify({
+                    'error': division_error if player.id == g.current_user.id
+                    else 'partner_' + division_error,
+                }), 409
+        if not _partner_candidate_available(
+            tournament, candidate.id, exclude_entry=entry,
+        ):
+            return jsonify({'error': 'partner_already_registered'}), 409
+        if is_blocked_between(owner.id, candidate.id):
+            return jsonify({'error': 'blocked'}), 403
+        entry.player2_id = candidate.id
+        entry.player2 = candidate
+        entry.partner_invitee_id = None
+        entry.partner_invitee = None
+        entry.partner_status = 'accepted'
+        entry.partner_pending_on = ''
+        other = owner if g.current_user.id == candidate.id else candidate
+        notify(
+            other.id,
+            'tournament_join',
+            f'{g.current_user.display_name} accepted — your team is entered in {tournament.name}',
+            related_user_id=g.current_user.id,
+            related_tournament_id=tournament.id,
+            action_url=f'/#tournament/{tournament.id}',
+        )
+        if tournament.organizer_id not in {owner.id, candidate.id}:
+            notify(
+                tournament.organizer_id,
+                'tournament_join',
+                f'{owner.display_name} & {candidate.display_name} completed their team for {tournament.name}',
+                related_user_id=g.current_user.id,
+                related_tournament_id=tournament.id,
+                action_url=f'/#tournament/{tournament.id}',
+            )
+    else:
+        other = owner if g.current_user.id == candidate.id else candidate
+        entry.partner_invitee_id = None
+        entry.partner_invitee = None
+        entry.partner_status = 'needed'
+        entry.partner_pending_on = ''
+        notify(
+            other.id,
+            'tournament_withdraw',
+            f'{g.current_user.display_name} declined the partner request for {tournament.name}',
+            related_user_id=g.current_user.id,
+            related_tournament_id=tournament.id,
+            action_url=f'/#tournament/{tournament.id}',
+        )
     db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
@@ -691,10 +1434,27 @@ def withdraw_entry(tournament_id):
         notify(
             other.id,
             'tournament_withdraw',
-            f'{g.current_user.display_name} withdrew your team from {tournament.name}',
+            f'{g.current_user.display_name} left your team in {tournament.name}',
             related_user_id=g.current_user.id,
             related_tournament_id=tournament.id,
         )
+    elif entry.partner_invitee_id:
+        pending = entry.partner_invitee or db.session.get(
+            User, entry.partner_invitee_id,
+        )
+        if pending:
+            notify(
+                pending.id,
+                'tournament_withdraw',
+                f'{g.current_user.display_name} cancelled the partner request for {tournament.name}',
+                related_user_id=g.current_user.id,
+                related_tournament_id=tournament.id,
+                action_url=f'/#tournament/{tournament.id}',
+            )
+            _mark_partner_notifications_resolved(
+                tournament,
+                pending.id if entry.partner_pending_on == 'invitee' else entry.player1_id,
+            )
     # Remove via the collection so delete-orphan fires AND the serialized
     # entries list below is already up to date.
     tournament.entries.remove(entry)
@@ -722,6 +1482,15 @@ def remove_entry(tournament_id, entry_id):
         f'The organizer removed your entry from {tournament.name}',
         related_user_id=g.current_user.id,
     )
+    if entry.partner_invitee_id:
+        notify(
+            entry.partner_invitee_id,
+            'tournament_withdraw',
+            f'The organizer removed the pending team entry from {tournament.name}',
+            related_user_id=g.current_user.id,
+            related_tournament_id=tournament.id,
+            action_url=f'/#tournament/{tournament.id}',
+        )
     tournament.entries.remove(entry)
     db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
@@ -970,6 +1739,8 @@ def _complete_tournament(tournament, champion_entry_id, source_match=None):
             related_tournament_id=tournament.id,
             action_url=action_url,
         )
+    if champion:
+        award_new_badges(*champion.players())
     return True
 
 
@@ -987,6 +1758,24 @@ def start_tournament(tournament_id):
     entries = list(tournament.entries)
     if len(entries) < MIN_ENTRIES:
         return jsonify({'error': 'not_enough_entries'}), 400
+    incomplete = [
+        entry for entry in entries
+        if not entry.partner_ready(tournament.event_type)
+    ]
+    if incomplete:
+        return jsonify({
+            'error': 'pending_partner_entries',
+            'count': len(incomplete),
+        }), 409
+    outside_division = [
+        player for entry in entries for player in entry.players()
+        if _division_registration_error(tournament, player)
+    ]
+    if outside_division:
+        return jsonify({
+            'error': 'division_roster_changed',
+            'count': len(outside_division),
+        }), 409
 
     # Seed by rating (doubles: pair average), best first.
     entries.sort(key=lambda e: -e.avg_rating())
@@ -1029,6 +1818,8 @@ def start_tournament(tournament_id):
         db.session.flush()
         _propagate_bye_wins(tournament)
 
+    db.session.flush()
+    _schedule_tournament_matches(tournament)
     tournament.status = 'active'
     for entry in entries:
         _notify_entry(
@@ -1044,15 +1835,18 @@ def _score_summary(tournament, match):
     entry1, entry2 = _match_entries(tournament, match)
     left = entry1.display_name() if entry1 else 'Entry 1'
     right = entry2.display_name() if entry2 else 'Entry 2'
+    games = match.game_scores()
+    if len(games) > 1:
+        scores = ', '.join(
+            f'{game["score1"]}–{game["score2"]}' for game in games
+        )
+        return f'{left} vs {right}: {scores}'
     return f'{left} {match.score1}–{match.score2} {right}'
 
 
 def _notify_score_submission(tournament, match, actor_id):
     participants = _match_participant_ids(tournament, match)
-    eligible = {
-        user_id for user_id in participants
-        if _eligible_result_confirmer(tournament, match, user_id)
-    }
+    eligible = _result_confirmer_ids(tournament, match)
     summary = _score_summary(tournament, match)
     _notify_result_users(
         tournament,
@@ -1145,9 +1939,10 @@ def score_match(tournament_id, match_id):
     version_error = _check_result_version(payload, tournament, match)
     if version_error:
         return version_error
-    score = _parse_score_pair(payload)
-    if not score:
+    parsed_result = _parse_game_scores(payload, tournament)
+    if not parsed_result:
         return jsonify({'error': 'invalid_score'}), 400
+    score, games = parsed_result
     state = match.effective_result_state()
     if state not in ('unreported', 'disputed'):
         return jsonify({'error': 'result_not_reportable'}), 409
@@ -1158,6 +1953,7 @@ def score_match(tournament_id, match_id):
 
     now = utcnow()
     match.score1, match.score2 = score
+    match.game_scores_json = json.dumps(games, separators=(',', ':'))
     match.winner_entry_id = None
     match.winner_entry = None
     match.result_state = 'awaiting_confirmation'
@@ -1172,6 +1968,9 @@ def score_match(tournament_id, match_id):
     match.disputed_at = None
     match.dispute_reason = ''
     match.resolution_kind = ''
+    match.review_reminded_at = None
+    match.stall_alerted_at = None
+    match.last_nudged_at = None
     _record_result_action(match, 'reported', actor_id=user_id)
     _notify_score_submission(tournament, match, user_id)
     return _commit_result_change(tournament_id, match_id)
@@ -1194,7 +1993,7 @@ def confirm_match_result(tournament_id, match_id):
         return version_error
     if match.effective_result_state() != 'awaiting_confirmation':
         return jsonify({'error': 'result_not_awaiting_confirmation'}), 409
-    if not _parse_score_pair({}, stored_match=match):
+    if not _parse_game_scores({}, tournament, stored_match=match):
         return jsonify({'error': 'score_missing'}), 409
 
     now = utcnow()
@@ -1238,11 +2037,67 @@ def dispute_match_result(tournament_id, match_id):
     match.disputed_at = utcnow()
     match.dispute_reason = reason
     match.resolution_kind = ''
+    match.stall_alerted_at = None
     _record_result_action(
         match, 'disputed', actor_id=user_id, reason=reason,
     )
     _notify_score_action(tournament, match, user_id, 'disputed', reason)
     return _commit_result_change(tournament_id, match_id)
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/matches/<int:match_id>/nudge')
+@rate_limit(30, 3600)
+@login_required
+def nudge_match_result(tournament_id, match_id):
+    tournament, match, error = _result_request_context(tournament_id, match_id)
+    if error:
+        return error
+    if tournament.organizer_id != g.current_user.id:
+        return jsonify({'error': 'not_organizer'}), 403
+
+    payload = _result_json_payload()
+    version_error = _check_result_version(payload, tournament, match)
+    if version_error:
+        return version_error
+    if match.effective_result_state() != 'awaiting_confirmation':
+        return jsonify({'error': 'result_not_awaiting_confirmation'}), 409
+
+    targets = _result_confirmer_ids(tournament, match) - {g.current_user.id}
+    if not targets:
+        return jsonify({'error': 'not_allowed'}), 409
+    now = utcnow()
+    cooldown = _result_nudge_cooldown()
+    available_at = (
+        match.last_nudged_at + cooldown if match.last_nudged_at else now
+    )
+    if available_at > now:
+        data = _detail_payload(tournament, g.current_user.id)
+        data.update({
+            'already_sent': True,
+            'retry_after_seconds': max(
+                1, int((available_at - now).total_seconds() + 0.999),
+            ),
+        })
+        return jsonify(data)
+
+    bucket_seconds = max(60, int(cooldown.total_seconds()))
+    _notify_result_users(
+        tournament,
+        match,
+        targets,
+        f'{tournament.name}: please confirm the submitted score',
+        _score_summary(tournament, match),
+        actor_id=g.current_user.id,
+        unread_dedupe_key=(
+            f'tournament-result-nudge:{match.id}:v{match.result_version}:'
+            f'{int(now.timestamp() // bucket_seconds)}'
+        ),
+    )
+    match.last_nudged_at = now
+    db.session.commit()
+    data = _detail_payload(tournament, g.current_user.id)
+    data.update({'already_sent': False, 'retry_after_seconds': bucket_seconds})
+    return jsonify(data)
 
 
 @tournaments_bp.post('/tournaments/<int:tournament_id>/matches/<int:match_id>/resolve')
@@ -1272,13 +2127,15 @@ def resolve_match_result(tournament_id, match_id):
         downstream.id: (downstream.entry1_id, downstream.entry2_id)
         for downstream in _result_downstream_matches(tournament, match)
     } if correction else {}
-    score = _parse_score_pair(payload, stored_match=match)
-    if not score:
-        status = 400 if 'score1' in payload or 'score2' in payload else 409
+    parsed_result = _parse_game_scores(payload, tournament, stored_match=match)
+    if not parsed_result:
+        status = 400 if {'score1', 'score2', 'games'} & payload.keys() else 409
         return jsonify({'error': 'invalid_score' if status == 400 else 'score_missing'}), status
+    score, games = parsed_result
 
     user_id = g.current_user.id
     match.score1, match.score2 = score
+    match.game_scores_json = json.dumps(games, separators=(',', ':'))
     match.result_state = 'confirmed'
     match.confirmed_by_id = user_id
     match.confirmed_by = g.current_user
@@ -1314,17 +2171,201 @@ def resolve_match_result(tournament_id, match_id):
     return _commit_result_change(tournament_id, match_id)
 
 
+@tournaments_bp.post('/tournaments/<int:tournament_id>/matches/<int:match_id>/forfeit')
+@rate_limit(60, 3600)
+@login_required
+def record_match_forfeit(tournament_id, match_id):
+    """Advance a ready match when the organizer records one side as absent."""
+    tournament, match, error = _result_request_context(tournament_id, match_id)
+    if error:
+        return error
+    if tournament.organizer_id != g.current_user.id:
+        return jsonify({'error': 'not_organizer'}), 403
+
+    payload = _result_json_payload()
+    version_error = _check_result_version(payload, tournament, match)
+    if version_error:
+        return version_error
+    state = match.effective_result_state()
+    if state not in ('unreported', 'awaiting_confirmation', 'disputed'):
+        return jsonify({'error': 'result_not_forfeitable'}), 409
+
+    raw_entry_id = payload.get('forfeiting_entry_id')
+    if isinstance(raw_entry_id, bool):
+        return jsonify({'error': 'invalid_forfeiting_entry'}), 400
+    try:
+        forfeiting_entry_id = int(raw_entry_id)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'invalid_forfeiting_entry'}), 400
+    if forfeiting_entry_id not in (match.entry1_id, match.entry2_id):
+        return jsonify({'error': 'invalid_forfeiting_entry'}), 400
+
+    winner_entry_id = (
+        match.entry2_id
+        if forfeiting_entry_id == match.entry1_id else match.entry1_id
+    )
+    entries = {entry.id: entry for entry in tournament.entries}
+    forfeiting_entry = entries.get(forfeiting_entry_id)
+    winner_entry = entries.get(winner_entry_id)
+    reason = str(payload.get('reason') or '').strip()[:500] or (
+        f'{forfeiting_entry.display_name() if forfeiting_entry else "Entry"} '
+        'did not play'
+    )
+
+    now = utcnow()
+    match.score1 = None
+    match.score2 = None
+    match.game_scores_json = '[]'
+    match.winner_entry_id = winner_entry_id
+    match.winner_entry = winner_entry
+    match.result_state = 'confirmed'
+    match.confirmed_by_id = g.current_user.id
+    match.confirmed_by = g.current_user
+    match.confirmed_at = now
+    match.dispute_reason = reason
+    match.resolution_kind = 'organizer_forfeit'
+    match.review_reminded_at = None
+    match.stall_alerted_at = None
+    _record_result_action(
+        match, 'resolved', actor_id=g.current_user.id, reason=reason,
+    )
+
+    if tournament.format == 'single_elim':
+        _advance_winner(tournament, match, tournament.total_rounds())
+        _propagate_bye_wins(tournament)
+    elif all(candidate.winner_entry_id is not None for candidate in tournament.matches):
+        _complete_tournament(
+            tournament, _top_of_standings(tournament), source_match=match,
+        )
+
+    _notify_result_users(
+        tournament,
+        match,
+        _match_participant_ids(tournament, match) | {tournament.organizer_id},
+        f'{tournament.name}: match recorded as a forfeit',
+        reason,
+        actor_id=g.current_user.id,
+    )
+    return _commit_result_change(tournament_id, match_id)
+
+
 def _top_of_standings(tournament):
     table = _standings(tournament)
     return table[0]['entry']['id'] if table else None
+
+
+def maintain_tournament_results(now=None):
+    """Remind reviewers, auto-confirm quiet scores, and flag stale disputes."""
+    now = now or utcnow()
+    window = timedelta(hours=_tournament_result_window_hours())
+    half_cutoff = now - (window / 2)
+    candidate_ids = (
+        db.session.query(TournamentMatch.tournament_id, TournamentMatch.id)
+        .join(Tournament, Tournament.id == TournamentMatch.tournament_id)
+        .filter(
+            Tournament.status == 'active',
+            TournamentMatch.result_state.in_([
+                'awaiting_confirmation', 'disputed',
+            ]),
+            TournamentMatch.reported_at.is_not(None),
+            TournamentMatch.reported_at <= half_cutoff,
+        )
+        .order_by(TournamentMatch.reported_at.asc(), TournamentMatch.id.asc())
+        .limit(200)
+        .all()
+    )
+    # Candidate discovery must not hold a read transaction while row locks are
+    # acquired one competition at a time.
+    db.session.rollback()
+    outcomes = {'reminded': 0, 'auto_confirmed': 0, 'stalled': 0}
+
+    for tournament_id, match_id in candidate_ids:
+        tournament, match = _locked_tournament_match(tournament_id, match_id)
+        if not tournament or not match or tournament.status != 'active':
+            db.session.rollback()
+            continue
+        state = match.effective_result_state()
+        try:
+            if state == 'awaiting_confirmation':
+                if not match.reported_at:
+                    db.session.rollback()
+                    continue
+                deadline = _result_review_deadline(match.reported_at)
+                if deadline and deadline <= now:
+                    if not _parse_game_scores({}, tournament, stored_match=match):
+                        db.session.rollback()
+                        continue
+                    match.result_state = 'confirmed'
+                    match.confirmed_by_id = None
+                    match.confirmed_by = None
+                    match.confirmed_at = now
+                    match.resolution_kind = 'automatic_timeout'
+                    _record_result_action(match, 'auto_confirmed')
+                    _progress_confirmed_result(tournament, match)
+                    _notify_score_action(
+                        tournament, match, None, 'confirmed automatically',
+                    )
+                    outcomes['auto_confirmed'] += 1
+                elif (
+                    match.reported_at + (window / 2) <= now
+                    and match.review_reminded_at is None
+                ):
+                    targets = _result_confirmer_ids(tournament, match)
+                    _notify_result_users(
+                        tournament,
+                        match,
+                        targets,
+                        f'{tournament.name}: this score still needs your confirmation',
+                        _score_summary(tournament, match),
+                        unread_dedupe_key=(
+                            f'tournament-result-half:{match.id}:'
+                            f'v{match.result_version}'
+                        ),
+                    )
+                    match.review_reminded_at = now
+                    outcomes['reminded'] += 1
+                else:
+                    db.session.rollback()
+                    continue
+            elif state == 'disputed':
+                disputed_from = match.disputed_at or match.reported_at
+                if (
+                    not disputed_from
+                    or disputed_from + window > now
+                    or match.stall_alerted_at is not None
+                ):
+                    db.session.rollback()
+                    continue
+                _notify_result_users(
+                    tournament,
+                    match,
+                    {tournament.organizer_id},
+                    f'{tournament.name}: a disputed score needs your decision',
+                    _score_summary(tournament, match),
+                    unread_dedupe_key=(
+                        f'tournament-result-stall:{match.id}:'
+                        f'v{match.result_version}'
+                    ),
+                )
+                match.stall_alerted_at = now
+                outcomes['stalled'] += 1
+            else:
+                db.session.rollback()
+                continue
+            db.session.commit()
+        except IntegrityError:
+            # A manual result action may win on SQLite between candidate read
+            # and commit. The immutable event/version key makes that harmless.
+            db.session.rollback()
+            continue
+    return outcomes
 
 
 REMINDER_LEAD_MINUTES = 65
 
 
 def send_tournament_reminders():
-    """Lazy sweep (runs on /me reads, like game reminders): hour-before and
-    day-before nudges to every participant, at most once each per tournament."""
+    """Scheduled hour-before/day-before nudges, at most once per tournament."""
     now = utcnow()
     open_statuses = ('registration', 'active')
 
@@ -1340,10 +2381,14 @@ def send_tournament_reminders():
         Tournament.starts_at > now + timedelta(hours=20),
         Tournament.starts_at <= now + timedelta(hours=28),
     ).all()
+    ready_to_start = Tournament.query.filter(
+        Tournament.status == 'registration',
+        Tournament.starts_at <= now,
+    ).all()
 
     changed = False
     for tournament, title in (
-        [(t, f'{t.name} starts in about an hour — check in when you arrive')
+        [(t, f'{t.name} starts in about an hour — tap I’m here when you arrive')
          for t in hour_due]
         + [(t, f'{t.name} is tomorrow — get your paddle ready')
            for t in day_due]
@@ -1359,6 +2404,30 @@ def send_tournament_reminders():
             tournament.reminded_at = now
         else:
             tournament.day_reminded_at = now
+        changed = True
+    for tournament in ready_to_start:
+        if sum(
+            entry.partner_ready(tournament.event_type)
+            for entry in tournament.entries
+        ) < MIN_ENTRIES:
+            continue
+        title = f'{tournament.name} is ready for you to start'
+        if Notification.query.filter_by(
+            user_id=tournament.organizer_id,
+            kind='tournament_reminder',
+            related_tournament_id=tournament.id,
+            title=title,
+        ).first():
+            continue
+        notify(
+            tournament.organizer_id,
+            'tournament_reminder',
+            title,
+            'Review the field, then build the bracket when everyone is ready.',
+            related_tournament_id=tournament.id,
+            action_url=f'/#tournament/{tournament.id}',
+            unread_dedupe_key=f'tournament-ready-to-start:{tournament.id}',
+        )
         changed = True
     if changed:
         db.session.commit()
@@ -1410,4 +2479,4 @@ def cancel_tournament(tournament_id):
             related_tournament_id=tournament.id,
         )
     db.session.commit()
-    return jsonify(tournament.to_dict(g.current_user.id))
+    return jsonify(_summary_payload(tournament, g.current_user.id))
