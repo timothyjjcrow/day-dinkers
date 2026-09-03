@@ -70,6 +70,10 @@ for (const [sourceName, outputName] of entries) {
   }
   const output = await readFile(outputPath);
   const gzip = gzipSync(output, { level: 9, mtime: 0 });
+  // zlib stamps its platform in the gzip OS header byte (Darwin=19,
+  // Unix=3), even when the deflate payload is otherwise identical. Normalize
+  // it so macOS development and Linux CI emit the same committed artifact.
+  gzip[9] = 255;
   const brotli = brotliCompressSync(output, {
     params: {
       [constants.BROTLI_PARAM_QUALITY]: 11,

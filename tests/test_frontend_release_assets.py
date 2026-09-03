@@ -28,6 +28,7 @@ def test_r58_manifest_matches_readable_sources_and_reduces_transfer_size():
         assert len(output) == metadata['minified_bytes']
         assert len(gzip_body) == metadata['gzip_bytes']
         assert len(brotli_body) == metadata['brotli_bytes']
+        assert gzip_body[9] == 255
         assert gzip.decompress(gzip_body) == output
         assert len(output) < len(source)
         assert len(brotli_body) < len(output)
