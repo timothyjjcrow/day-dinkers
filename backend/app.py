@@ -23,6 +23,11 @@ FRONTEND_RELEASE_FILES = frozenset({
     'styles-v15.min.css',
     'styles-v15.min.css.map',
 })
+FRONTEND_RUNTIME_RELEASE_FILES = frozenset({
+    'app-v15.min.js',
+    'crew-planner-v15.min.js',
+    'styles-v15.min.css',
+})
 
 
 _seed_thread_started = False
@@ -2607,9 +2612,15 @@ def create_app(config_name=None):
         return send_from_directory(PUBLIC_DIR, 'styles-v15.css')
 
     @app.get('/assets/<release>/<path:filename>')
+    @app.get('/release-assets/<release>/<path:filename>')
     def frontend_release_asset(release, filename):
         """Serve immutable release assets with the best precompressed body."""
         if release != FRONTEND_RELEASE or filename not in FRONTEND_RELEASE_FILES:
+            return 'not found', 404
+        if (
+            request.path.startswith('/release-assets/')
+            and filename not in FRONTEND_RUNTIME_RELEASE_FILES
+        ):
             return 'not found', 404
         release_dir = os.path.join(PUBLIC_DIR, 'assets', FRONTEND_RELEASE)
         selected_encoding = request.accept_encodings.best_match(

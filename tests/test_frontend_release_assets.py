@@ -55,22 +55,36 @@ def test_release_route_negotiates_precompressed_immutable_assets():
         '/assets/r58/app-v15.min.js', headers={'Accept-Encoding': 'gzip'},
     )
     brotli_response = client.get(
-        '/assets/r58/app-v15.min.js', headers={'Accept-Encoding': 'br, gzip;q=0.8'},
+        '/release-assets/r58/app-v15.min.js',
+        headers={'Accept-Encoding': 'br, gzip;q=0.8'},
+    )
+    brotli_refused = client.get(
+        '/release-assets/r58/app-v15.min.js',
+        headers={'Accept-Encoding': 'gzip, br;q=0'},
     )
 
-    assert plain.status_code == gzip_response.status_code == brotli_response.status_code == 200
+    assert (
+        plain.status_code
+        == gzip_response.status_code
+        == brotli_response.status_code
+        == brotli_refused.status_code
+        == 200
+    )
     assert plain.mimetype in {'application/javascript', 'text/javascript'}
     assert plain.headers.get('Content-Encoding') is None
     assert gzip_response.headers['Content-Encoding'] == 'gzip'
     assert brotli_response.headers['Content-Encoding'] == 'br'
+    assert brotli_refused.headers['Content-Encoding'] == 'gzip'
     assert gzip.decompress(gzip_response.data) == plain.data
     assert brotli_response.data == (RELEASE / 'app-v15.min.js.br').read_bytes()
-    for response in (plain, gzip_response, brotli_response):
+    for response in (plain, gzip_response, brotli_response, brotli_refused):
         assert response.headers['Cache-Control'] == 'public, max-age=31536000, immutable'
         assert response.headers['Vary'] == 'Accept-Encoding'
 
     assert client.get('/assets/r57/app-v15.min.js').status_code == 404
     assert client.get('/assets/r58/not-generated.js').status_code == 404
+    assert client.get('/release-assets/r57/app-v15.min.js').status_code == 404
+    assert client.get('/release-assets/r58/app-v15.min.js.map').status_code == 404
 
 
 def test_vercel_static_delivery_preserves_immutable_release_caching():
@@ -92,7 +106,6 @@ def test_vercel_static_delivery_preserves_immutable_release_caching():
         item['key'].lower(): item['value']
         for item in asset_rule.get('headers', [])
     }
-
     assert headers['cache-control'] == (
         'public, max-age=31536000, immutable'
     )
@@ -105,6 +118,72 @@ def test_vercel_static_delivery_preserves_immutable_release_caching():
     # The catch-all must not replace the release asset's stronger cache rule;
     # Vercel applies both matching header blocks.
     assert 'cache-control' not in security_headers
+
+
+def test_vercel_negotiates_committed_brotli_release_assets():
+    """Brotli-capable production clients receive our quality-11 artifacts."""
+    config = json.loads((ROOT / 'vercel.json').read_text())
+    expected = {
+        'app-v15.min.js': 'application/javascript; charset=utf-8',
+        'crew-planner-v15.min.js': 'application/javascript; charset=utf-8',
+        'styles-v15.min.css': 'text/css; charset=utf-8',
+    }
+    rewrites = config.get('rewrites', [])
+    header_rules = config.get('headers', [])
+    accepted_brotli = (
+        r'(^|.*,\s*)[bB][rR](\s*;\s*[qQ]\s*=\s*'
+        r'(1(\.0{0,3})?|0\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?'
+        r'\s*(,.*|$)'
+    )
+
+    for filename, content_type in expected.items():
+        source = f'/release-assets/r58/{filename}'
+        identity_destination = f'/assets/r58/{filename}'
+        destination = f'{identity_destination}.br'
+        assert not (PUBLIC / source.removeprefix('/')).exists()
+        rewrite = next(
+            rule for rule in rewrites
+            if rule.get('source') == source and rule.get('has')
+        )
+        assert rewrite['destination'] == destination
+        assert rewrite['has'] == [{
+            'type': 'header',
+            'key': 'Accept-Encoding',
+            'value': accepted_brotli,
+        }]
+
+        fallback = next(
+            rule for rule in rewrites
+            if rule.get('source') == source and not rule.get('has')
+        )
+        assert fallback['destination'] == identity_destination
+
+        base_rule = next(
+            rule for rule in header_rules
+            if rule.get('source') == source and not rule.get('has')
+        )
+        base_headers = {
+            item['key'].lower(): item['value']
+            for item in base_rule.get('headers', [])
+        }
+        assert base_headers == {
+            'cache-control': 'public, max-age=31536000, immutable',
+            'content-type': content_type,
+            'vary': 'Accept-Encoding',
+        }
+
+        encoded_rule = next(
+            rule for rule in header_rules
+            if rule.get('source') == source and rule.get('has')
+        )
+        assert encoded_rule['has'] == rewrite['has']
+        encoded_headers = {
+            item['key'].lower(): item['value']
+            for item in encoded_rule.get('headers', [])
+        }
+        assert encoded_headers == {
+            'content-encoding': 'br',
+        }
 
 
 def test_ci_rebuilds_assets_for_every_release_affecting_change():
