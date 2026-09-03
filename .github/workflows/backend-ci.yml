@@ -70,7 +70,7 @@ jobs:
       - name: Run tests when present
         run: |
           if [ -d tests ]; then
-            pytest
+            python -m pytest
           else
             echo "No tests directory found; skipping pytest."
           fi
