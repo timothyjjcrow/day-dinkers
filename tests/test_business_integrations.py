@@ -404,6 +404,131 @@ def test_owner_manages_offerings_and_schedule_then_verified_profile_is_public(ap
         assert private_workflow_field not in detail
 
 
+def test_owner_can_preview_free_csv_schedule_import_without_saving(client):
+    owner = register(client, 'csv-owner@example.com')
+    viewer = register(client, 'csv-viewer@example.com')
+    court = court_id(client)
+    created = create_profile(client, owner['token'], court)
+    assert created.status_code == 201, created.get_json()
+    business_id = created.get_json()['id']
+    csv_text = (
+        'Name,Type,Day,Start,End,Time Zone,Audience,Capacity,Spots,'
+        'Status,Location,Host,Booking Link,Visible,Date,Notes for staff\n'
+        '"Beginner, Open Play",Open Play,Mon,6:00 PM,8:00 PM,'
+        'America/Chicago,Beginners,24,8,Scheduled,Courts 1-4,Jamie,'
+        'https://book.thirdshot.example/open-play,yes,,Bring loaner paddles\n'
+        'Saturday clinic,Lesson or clinic,,9:30 AM,11:00 AM,,3.0+,12,0,'
+        'Sold out,Center court,Alex,,no,09/12/2026,\n'
+    )
+
+    unauthorized = client.post(
+        f'/api/businesses/{business_id}/schedule/import-preview',
+        json={'csv': csv_text, 'timezone': 'America/Chicago'},
+    )
+    assert unauthorized.status_code == 401
+    forbidden = client.post(
+        f'/api/businesses/{business_id}/schedule/import-preview',
+        json={'csv': csv_text, 'timezone': 'America/Chicago'},
+        headers=headers(viewer['token']),
+    )
+    assert forbidden.status_code == 403
+
+    response = client.post(
+        f'/api/businesses/{business_id}/schedule/import-preview',
+        json={'csv': csv_text, 'timezone': 'America/Chicago'},
+        headers=headers(owner['token']),
+    )
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert payload['count'] == 2
+    assert payload['ignored_columns'] == ['Notes for staff']
+    first, second = payload['items']
+    assert first == {
+        'title': 'Beginner, Open Play',
+        'kind': 'open_play',
+        'day_of_week': 'monday',
+        'start_time': '18:00',
+        'end_time': '20:00',
+        'timezone': 'America/Chicago',
+        'recurrence': 'weekly',
+        'start_date': None,
+        'end_date': None,
+        'event_date': None,
+        'capacity': 24,
+        'spots_remaining': 8,
+        'status': 'scheduled',
+        'location_note': 'Courts 1-4',
+        'instructor': 'Jamie',
+        'skill_level': 'Beginners',
+        'booking_url': 'https://book.thirdshot.example/open-play',
+        'active': True,
+    }
+    assert second['title'] == 'Saturday clinic'
+    assert second['kind'] == 'lesson'
+    assert second['day_of_week'] == 'saturday'
+    assert second['event_date'] == '2026-09-12'
+    assert second['recurrence'] == 'dated'
+    assert second['timezone'] == 'America/Chicago'
+    assert second['status'] == 'sold_out'
+    assert second['active'] is False
+
+    # Previewing is deliberately non-destructive. The existing schedule route
+    # remains the only persistence boundary after the owner reviews the rows.
+    mine = client.get('/api/businesses/mine', headers=headers(owner['token']))
+    assert mine.status_code == 200
+    assert mine.get_json()['items'][0]['schedule'] == []
+
+    invalid = client.post(
+        f'/api/businesses/{business_id}/schedule/import-preview',
+        json={
+            'csv': 'Title,Day,Start,End\nBad row,Monday,25:00,26:00\n',
+            'timezone': 'America/Chicago',
+        },
+        headers=headers(owner['token']),
+    )
+    assert invalid.status_code == 400
+    assert invalid.get_json() == {
+        'error': 'schedule_csv_row_invalid',
+        'row': 2,
+        'detail': 'times_must_use_24_hour_hh_mm',
+    }
+
+
+def test_csv_schedule_import_rejects_ambiguous_or_oversized_files(client):
+    owner = register(client, 'csv-validation-owner@example.com')
+    created = create_profile(client, owner['token'], court_id(client))
+    business_id = created.get_json()['id']
+    endpoint = f'/api/businesses/{business_id}/schedule/import-preview'
+    auth = headers(owner['token'])
+
+    missing_columns = client.post(
+        endpoint,
+        json={'csv': 'Title,Day\nOpen play,Monday\n', 'timezone': 'UTC'},
+        headers=auth,
+    )
+    assert missing_columns.status_code == 400
+    assert missing_columns.get_json()['error'] == 'schedule_csv_required_columns'
+
+    duplicate = client.post(
+        endpoint,
+        json={
+            'csv': 'Title,Name,Start,End\nOpen play,Duplicate,09:00,10:00\n',
+            'timezone': 'UTC',
+        },
+        headers=auth,
+    )
+    assert duplicate.status_code == 400
+    assert duplicate.get_json()['error'] == 'schedule_csv_duplicate_column'
+
+    oversized = client.post(
+        endpoint,
+        json={'csv': 'Title,Start,End\n' + ('x' * (256 * 1024)), 'timezone': 'UTC'},
+        headers=auth,
+    )
+    assert oversized.status_code == 400
+    assert oversized.get_json()['error'] == 'schedule_csv_too_large'
+
+
 def test_map_business_signal_requires_verified_published_open_venue(app, client):
     owner = register(client, 'venue-matrix@example.com')
     now = utcnow()

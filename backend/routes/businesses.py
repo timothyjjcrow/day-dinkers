@@ -1,9 +1,11 @@
 """Court-business onboarding, public profiles, offerings, and schedules."""
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -63,10 +65,44 @@ _PROTECTED_PROFILE_FIELDS = {
     'created_at', 'updated_at',
 }
 _MAX_ITEMS = 100
+_SCHEDULE_CSV_MAX_BYTES = 256 * 1024
+_SCHEDULE_CSV_HEADER_ALIASES = {
+    'name': 'title',
+    'type': 'kind',
+    'day': 'day_of_week',
+    'start': 'start_time',
+    'end': 'end_time',
+    'time_zone': 'timezone',
+    'level': 'skill_level',
+    'audience': 'skill_level',
+    'spots': 'spots_remaining',
+    'location': 'location_note',
+    'host': 'instructor',
+    'registration_link': 'booking_url',
+    'booking_link': 'booking_url',
+    'date': 'event_date',
+    'from_date': 'start_date',
+    'to_date': 'end_date',
+    'visible': 'active',
+    'pattern': 'recurrence',
+}
+_SCHEDULE_CSV_FIELDS = {
+    'title', 'kind', 'day_of_week', 'start_time', 'end_time', 'timezone',
+    'recurrence', 'event_date', 'start_date', 'end_date', 'skill_level',
+    'capacity', 'spots_remaining', 'status', 'location_note', 'instructor',
+    'booking_url', 'active',
+}
 
 
 class PayloadError(ValueError):
     pass
+
+
+class ScheduleCsvError(ValueError):
+    def __init__(self, code, *, row=None):
+        super().__init__(code)
+        self.code = code
+        self.row = row
 
 
 def _request_object():
@@ -876,6 +912,212 @@ def _validated_schedule_item(raw, position):
         'active': _boolean(raw.get('active', True), field='active'),
         'sort_order': position,
     }
+
+
+def _schedule_csv_header(value):
+    header = str(value or '').lstrip('\ufeff').strip().lower()
+    header = re.sub(r'[^a-z0-9]+', '_', header).strip('_')
+    return _SCHEDULE_CSV_HEADER_ALIASES.get(header, header)
+
+
+def _schedule_csv_date(value, field):
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    for pattern in ('%Y-%m-%d', '%m/%d/%Y'):
+        try:
+            return datetime.strptime(raw, pattern).date().isoformat()
+        except ValueError:
+            continue
+    raise PayloadError(f'invalid_{field}')
+
+
+def _schedule_csv_time(value):
+    raw = str(value or '').strip().upper().replace('.', '')
+    match = re.fullmatch(r'(\d{1,2})(?::(\d{2}))?\s*([AP]M)?', raw)
+    if not match:
+        raise PayloadError('times_must_use_24_hour_hh_mm')
+    hour = int(match.group(1))
+    minute = int(match.group(2) or 0)
+    meridiem = match.group(3)
+    if minute > 59 or (meridiem and not 1 <= hour <= 12):
+        raise PayloadError('times_must_use_24_hour_hh_mm')
+    if meridiem:
+        hour = hour % 12 + (12 if meridiem == 'PM' else 0)
+    elif hour > 23:
+        raise PayloadError('times_must_use_24_hour_hh_mm')
+    return f'{hour:02d}:{minute:02d}'
+
+
+def _schedule_csv_boolean(value):
+    raw = str(value or '').strip().lower()
+    if not raw:
+        return True
+    if raw in {'1', 'true', 'yes', 'y', 'visible', 'show'}:
+        return True
+    if raw in {'0', 'false', 'no', 'n', 'hidden', 'hide'}:
+        return False
+    raise PayloadError('active_must_be_boolean')
+
+
+def _schedule_csv_item(values, position, default_timezone):
+    item = {key: str(value or '').strip() for key, value in values.items()}
+    recurrence = re.sub(
+        r'[^a-z0-9]+', '_', item.get('recurrence', '').lower(),
+    ).strip('_')
+    recurrence = {
+        'date': 'dated', 'one_time': 'dated', 'one_off': 'dated',
+        'specific_date': 'dated',
+        'range': 'date_range', 'weekly_range': 'date_range',
+        'weekly_within_a_date_range': 'date_range',
+        'repeats_weekly': 'weekly',
+    }.get(recurrence, recurrence)
+    if not recurrence:
+        recurrence = 'dated' if item.get('event_date') else (
+            'date_range'
+            if item.get('start_date') or item.get('end_date') else 'weekly'
+        )
+    item['recurrence'] = recurrence
+
+    kind = re.sub(r'[^a-z0-9]+', '_', item.get('kind', '').lower()).strip('_')
+    item['kind'] = {
+        'openplay': 'open_play',
+        'lesson_or_clinic': 'lesson',
+        'facility_hours': 'hours',
+    }.get(kind, kind or 'other')
+    item['status'] = re.sub(
+        r'[^a-z0-9]+', '_', item.get('status', '').lower(),
+    ).strip('_') or 'scheduled'
+    if item['status'] == 'canceled':
+        item['status'] = 'cancelled'
+
+    day = item.get('day_of_week', '').lower()
+    if day and day not in _DAYS:
+        matches = [candidate for candidate in _DAYS if candidate.startswith(day[:3])]
+        if len(matches) == 1:
+            day = matches[0]
+    item['day_of_week'] = day
+    item['start_time'] = _schedule_csv_time(item.get('start_time'))
+    item['end_time'] = _schedule_csv_time(item.get('end_time'))
+    for field in ('event_date', 'start_date', 'end_date'):
+        item[field] = _schedule_csv_date(item.get(field), field)
+    item['timezone'] = item.get('timezone') or default_timezone
+    item['active'] = _schedule_csv_boolean(item.get('active'))
+    return _validated_schedule_item(item, position)
+
+
+def _schedule_csv_payload(values):
+    fields = (
+        'title', 'kind', 'day_of_week', 'start_time', 'end_time', 'timezone',
+        'recurrence', 'start_date', 'end_date', 'event_date', 'capacity',
+        'spots_remaining', 'status', 'location_note', 'instructor',
+        'skill_level', 'booking_url', 'active',
+    )
+    payload = {field: values.get(field) for field in fields}
+    for field in ('start_date', 'end_date', 'event_date'):
+        if payload[field] is not None:
+            payload[field] = payload[field].isoformat()
+    return payload
+
+
+def _parse_schedule_csv(contents, *, default_timezone):
+    if not isinstance(contents, str) or not contents.strip():
+        raise ScheduleCsvError('schedule_csv_required')
+    if len(contents.encode('utf-8')) > _SCHEDULE_CSV_MAX_BYTES:
+        raise ScheduleCsvError('schedule_csv_too_large')
+    try:
+        reader = csv.DictReader(io.StringIO(contents, newline=''), strict=True)
+        raw_headers = reader.fieldnames
+    except csv.Error as exc:
+        raise ScheduleCsvError('schedule_csv_invalid_format') from exc
+    if not raw_headers:
+        raise ScheduleCsvError('schedule_csv_header_required')
+
+    headers = []
+    ignored = []
+    seen = set()
+    for raw_header in raw_headers:
+        normalized = _schedule_csv_header(raw_header)
+        if not normalized:
+            headers.append(None)
+            continue
+        if normalized not in _SCHEDULE_CSV_FIELDS:
+            ignored.append(str(raw_header or '').strip())
+            headers.append(None)
+            continue
+        if normalized in seen:
+            raise ScheduleCsvError('schedule_csv_duplicate_column')
+        seen.add(normalized)
+        headers.append(normalized)
+    if not {'title', 'start_time', 'end_time'}.issubset(seen):
+        raise ScheduleCsvError('schedule_csv_required_columns')
+
+    items = []
+    try:
+        for row_number, raw_row in enumerate(reader, start=2):
+            if raw_row.get(None):
+                raise ScheduleCsvError(
+                    'schedule_csv_invalid_format', row=row_number,
+                )
+            row = {
+                header: raw_row.get(raw_header, '')
+                for raw_header, header in zip(raw_headers, headers)
+                if header is not None
+            }
+            if not any(str(value or '').strip() for value in row.values()):
+                continue
+            if len(items) >= _MAX_ITEMS:
+                raise ScheduleCsvError('schedule_csv_too_many_rows')
+            try:
+                values = _schedule_csv_item(row, len(items), default_timezone)
+            except PayloadError as exc:
+                raise ScheduleCsvError(
+                    'schedule_csv_row_invalid', row=row_number,
+                ) from exc
+            items.append(_schedule_csv_payload(values))
+    except csv.Error as exc:
+        raise ScheduleCsvError('schedule_csv_invalid_format') from exc
+    if not items:
+        raise ScheduleCsvError('schedule_csv_empty')
+    return items, sorted(set(filter(None, ignored)))
+
+
+@businesses_bp.post('/businesses/<int:business_id>/schedule/import-preview')
+@rate_limit(30, 3600)
+@login_required
+def preview_business_schedule_csv(business_id):
+    actor_error = _lock_current_actor()
+    if actor_error:
+        return actor_error
+    _, err = _owned_profile_or_error(business_id)
+    if err:
+        return err
+    try:
+        payload = _request_object()
+        timezone = _text(
+            payload.get('timezone') or 'UTC', field='timezone', maximum=64,
+            required=True,
+        )
+        ZoneInfo(timezone)
+        items, ignored = _parse_schedule_csv(
+            payload.get('csv'), default_timezone=timezone,
+        )
+    except ZoneInfoNotFoundError:
+        return jsonify({'error': 'invalid_timezone'}), 400
+    except PayloadError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except ScheduleCsvError as exc:
+        body = {'error': exc.code}
+        if exc.row is not None:
+            body['row'] = exc.row
+            if exc.__cause__ is not None:
+                body['detail'] = str(exc.__cause__)
+        return jsonify(body), 400
+    return jsonify({
+        'items': items,
+        'count': len(items),
+        'ignored_columns': ignored,
+    })
 
 
 @businesses_bp.put('/businesses/<int:business_id>/schedule')

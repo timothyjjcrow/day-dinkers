@@ -11,13 +11,13 @@ from backend.app import create_app
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC = ROOT / 'public'
-RELEASE = PUBLIC / 'assets' / 'r59'
+RELEASE = PUBLIC / 'assets' / 'r60'
 CI_WORKFLOW = (ROOT / '.github' / 'workflows' / 'backend-ci.yml').read_text()
 
 
-def test_r59_manifest_matches_readable_sources_and_reduces_transfer_size():
+def test_r60_manifest_matches_readable_sources_and_reduces_transfer_size():
     manifest = json.loads((RELEASE / 'manifest.json').read_text())
-    assert manifest['release'] == 'r59'
+    assert manifest['release'] == 'r60'
     for output_name, metadata in manifest['files'].items():
         source = (PUBLIC / metadata['source']).read_bytes()
         output = (RELEASE / output_name).read_bytes()
@@ -50,16 +50,16 @@ def test_r59_manifest_matches_readable_sources_and_reduces_transfer_size():
 def test_release_route_negotiates_precompressed_immutable_assets():
     app = create_app('testing')
     client = app.test_client()
-    plain = client.get('/assets/r59/app-v15.min.js')
+    plain = client.get('/assets/r60/app-v15.min.js')
     gzip_response = client.get(
-        '/assets/r59/app-v15.min.js', headers={'Accept-Encoding': 'gzip'},
+        '/assets/r60/app-v15.min.js', headers={'Accept-Encoding': 'gzip'},
     )
     brotli_response = client.get(
-        '/release-assets/r59/app-v15.min.js',
+        '/release-assets/r60/app-v15.min.js',
         headers={'Accept-Encoding': 'br, gzip;q=0.8'},
     )
     brotli_refused = client.get(
-        '/release-assets/r59/app-v15.min.js',
+        '/release-assets/r60/app-v15.min.js',
         headers={'Accept-Encoding': 'gzip, br;q=0'},
     )
 
@@ -82,12 +82,13 @@ def test_release_route_negotiates_precompressed_immutable_assets():
         assert response.headers['Vary'] == 'Accept-Encoding'
 
     assert client.get('/assets/r57/app-v15.min.js').status_code == 404
-    assert client.get('/assets/r59/not-generated.js').status_code == 404
+    assert client.get('/assets/r60/not-generated.js').status_code == 404
     assert client.get('/release-assets/r57/app-v15.min.js').status_code == 404
-    assert client.get('/release-assets/r59/app-v15.min.js.map').status_code == 404
-    # r58 remains available to an already-open service-worker client while
-    # the document moves it to the new immutable r59 URLs.
+    assert client.get('/release-assets/r60/app-v15.min.js.map').status_code == 404
+    # Older releases remain available to already-open service-worker clients
+    # while the document moves them to the new immutable r60 URLs.
     assert client.get('/release-assets/r58/app-v15.min.js').status_code == 200
+    assert client.get('/release-assets/r59/app-v15.min.js').status_code == 200
 
 
 def test_vercel_static_delivery_preserves_immutable_release_caching():
@@ -139,7 +140,7 @@ def test_vercel_negotiates_committed_brotli_release_assets():
         r'\s*(,.*|$)'
     )
 
-    for release in ('r58', 'r59'):
+    for release in ('r58', 'r59', 'r60'):
         for filename, content_type in expected.items():
             source = f'/release-assets/{release}/{filename}'
             identity_destination = f'/assets/{release}/{filename}'

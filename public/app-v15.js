@@ -164,6 +164,7 @@
     'ticket', 'external', 'check-circle', 'check', 'bell', 'pickleball',
     'edit', 'link', 'shield', 'chart', 'lock', 'settings', 'eye', 'refresh', 'zap', 'plus', 'phone',
     'sun', 'lightbulb', 'net', 'restroom', 'water', 'key', 'alert-triangle', 'user', 'map', 'copy',
+    'upload', 'download',
   ]);
   function uiIcon(name, className = '') {
     const icon = UI_ICON_NAMES.has(name) ? name : 'pickleball';
@@ -1289,6 +1290,15 @@
     invalid_schedule_kind: 'Choose a valid schedule type.',
     invalid_day_of_week: 'Choose a valid day.',
     times_must_use_24_hour_hh_mm: 'Choose valid start and end times.',
+    schedule_csv_required: 'Choose a CSV file or paste schedule rows.',
+    schedule_csv_too_large: 'Keep the schedule CSV under 256 KB.',
+    schedule_csv_header_required: 'Add a header row to the schedule CSV.',
+    schedule_csv_duplicate_column: 'Each CSV column can appear only once.',
+    schedule_csv_required_columns: 'The CSV needs Title, Start, and End columns.',
+    schedule_csv_too_many_rows: 'A schedule can contain up to 100 rows.',
+    schedule_csv_invalid_format: 'That CSV could not be read. Check its rows and try again.',
+    schedule_csv_empty: 'Add at least one schedule row beneath the CSV header.',
+    schedule_csv_row_invalid: 'One schedule row needs attention before it can be imported.',
     offering_not_found: 'One offering changed elsewhere. Refresh the Business Hub and try again.',
     schedule_item_not_found: 'One schedule item changed elsewhere. Refresh the Business Hub and try again.',
     contact_email_required: 'Add the email we should use for this request.',
@@ -31248,6 +31258,158 @@
     return modal;
   }
 
+  function businessScheduleCsvTemplate(business) {
+    const timezone = business?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles';
+    return [
+      'Title,Type,Day,Start,End,Timezone,Audience,Capacity,Spots remaining,Location,Host,Registration link,Status,Visible,Pattern,Date,Start date,End date',
+      `Beginner open play,Open play,Monday,6:00 PM,8:00 PM,${timezone},Beginners,24,8,Courts 1-4,,,Scheduled,Yes,Weekly,,,`,
+      `Saturday clinic,Clinic,Saturday,9:00 AM,10:30 AM,${timezone},All levels,12,6,Main courts,Coach Taylor,,Scheduled,Yes,Weekly,,,`,
+    ].join('\n');
+  }
+
+  function downloadBusinessScheduleCsvTemplate(business) {
+    const blob = new Blob([businessScheduleCsvTemplate(business)], { type: 'text/csv;charset=utf-8' });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const venue = String(business?.name || 'business').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'business';
+    link.href = href;
+    link.download = `${venue}-schedule-template.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 0);
+  }
+
+  function businessScheduleCsvRowError(error) {
+    const row = Number(error?.data?.row);
+    const detail = String(error?.data?.detail || '');
+    const detailMessage = ({
+      schedule_title_required: 'Add a title.',
+      invalid_schedule_kind: 'Use Open play, Lesson, Clinic, League, Tournament, Event, Facility hours, or Other.',
+      invalid_day_of_week: 'Use a weekday, Daily, Weekdays, or Weekends.',
+      invalid_timezone: 'Use a timezone such as America/Los_Angeles.',
+      invalid_recurrence: 'Use Weekly, Specific date, or Date range.',
+      event_date_required: 'Add a date for this one-time item.',
+      date_range_required: 'Add both a start date and end date.',
+      end_date_before_start_date: 'The end date must be on or after the start date.',
+      end_time_must_be_after_start_time: 'The end time must be after the start time.',
+      invalid_capacity: 'Capacity must be a whole number from 1 to 10,000.',
+      invalid_spots_remaining: 'Spots remaining must be a whole number from 0 to 10,000.',
+      capacity_required_with_spots_remaining: 'Add capacity before spots remaining.',
+      spots_remaining_exceeds_capacity: 'Spots remaining cannot exceed capacity.',
+      invalid_schedule_status: 'Use Scheduled, Sold out, Cancelled, or Completed.',
+      active_must_be_boolean: 'Use Yes or No in the Visible column.',
+      invalid_booking_url: 'Use a secure https:// registration link.',
+    })[detail] || (detail ? humanError(detail, {}, error?.status || 400) : error?.message);
+    return row > 1 ? `Row ${row}: ${detailMessage}` : (detailMessage || 'That CSV could not be imported.');
+  }
+
+  function openBusinessScheduleCsvImport(business, { existingCount = 0, onImport } = {}) {
+    const example = businessScheduleCsvTemplate(business);
+    const modal = openModal(`
+      ${modalHead('Import schedule CSV')}
+      <div class="business-feature-intro"><b>Use any spreadsheet — free.</b><p>Export a Google Sheet, Excel file, or Numbers sheet as CSV. Nothing is published until you review the rows and choose Save schedule.</p></div>
+      <form id="business-schedule-csv-form" novalidate>
+        <button type="button" class="btn btn-secondary btn-block" id="business-schedule-csv-template">${uiIcon('download')} Download CSV template</button>
+        <div class="form-field business-catalog-upload">
+          <span class="business-file-label" id="business-schedule-csv-file-label">Import from a file</span>
+          <div class="business-file-picker" id="business-schedule-csv-file-picker" data-state="idle" data-idle-icon="plus">
+            <input class="business-file-native" type="file" id="business-schedule-csv-file" data-no-draft accept=".csv,text/csv,application/vnd.ms-excel,text/plain" tabindex="-1" aria-hidden="true" />
+            <button type="button" class="business-file-button" id="business-schedule-csv-file-button" data-file-button aria-labelledby="business-schedule-csv-file-label business-schedule-csv-file-action" aria-describedby="business-schedule-csv-file-feedback business-schedule-csv-file-help">
+              <span class="business-file-button-icon" aria-hidden="true">${uiIcon('plus')}</span>
+              <span class="business-file-button-copy"><b id="business-schedule-csv-file-action">Choose CSV file</b><small>Browse this device</small></span>
+              <span class="business-file-button-cta" aria-hidden="true">Choose</span>
+            </button>
+            <div class="business-file-feedback" id="business-schedule-csv-file-feedback" data-file-feedback role="status" aria-live="polite" aria-atomic="true">
+              <span class="business-file-state-icon" data-file-state-icon aria-hidden="true">${uiIcon('plus')}</span>
+              <span class="business-file-feedback-copy"><b data-file-name>No file selected</b><small data-file-meta>CSV · up to 256 KB</small></span>
+              <span class="business-file-state" data-file-state>Optional</span>
+            </div>
+          </div>
+          <small class="field-help" id="business-schedule-csv-file-help">Choose a .csv file, or paste its contents into the editor below.</small>
+        </div>
+        <div class="form-field"><label for="business-schedule-csv-text">Schedule CSV</label><textarea id="business-schedule-csv-text" rows="11" spellcheck="false" placeholder="${esc(example)}"></textarea></div>
+        <div class="form-field"><label for="business-schedule-csv-mode">Import behavior</label><select id="business-schedule-csv-mode" data-select-title="Import behavior"><option value="append">Add rows to the ${existingCount} already here</option><option value="replace">Replace the current schedule</option></select><small class="field-help">Imported rows are staged for review. The current schedule stays live until you save.</small></div>
+        <button type="submit" class="btn btn-primary btn-block" id="business-schedule-csv-submit">Validate &amp; review rows</button>
+      </form>`, { label: 'Import a business schedule from CSV' });
+    const formUX = bindModalFormUX(modal, '#business-schedule-csv-submit');
+    const input = modal.querySelector('#business-schedule-csv-text');
+    const fileInput = modal.querySelector('#business-schedule-csv-file');
+    const fileButton = modal.querySelector('#business-schedule-csv-file-button');
+    const filePicker = modal.querySelector('#business-schedule-csv-file-picker');
+    bindModalDiscardConfirmation(modal, {
+      isDirty: () => Boolean(input.value.trim()),
+      title: 'Discard this CSV import?',
+      message: 'The CSV rows have not been added to the schedule editor yet.',
+    });
+    modal.querySelector('#business-schedule-csv-template').addEventListener('click', () => {
+      downloadBusinessScheduleCsvTemplate(business);
+      toast('Schedule template downloaded');
+    });
+    fileButton.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      formUX.clearError();
+      const meta = businessFileDescription(file, 'CSV');
+      const looksLikeCsv = /\.csv$/i.test(file.name) || ['text/csv', 'application/vnd.ms-excel', 'text/plain'].includes(String(file.type || '').toLowerCase());
+      if (!looksLikeCsv) {
+        setBusinessFilePickerState(filePicker, { state: 'error', name: file.name, meta, badge: 'Choose CSV' });
+        formUX.showError('Choose a CSV file ending in .csv.', fileButton);
+        event.target.value = '';
+        return;
+      }
+      if (!file.size) {
+        setBusinessFilePickerState(filePicker, { state: 'error', name: file.name, meta, badge: 'Empty file' });
+        formUX.showError('That CSV file is empty.', fileButton);
+        event.target.value = '';
+        return;
+      }
+      if (file.size > 256 * 1024) {
+        setBusinessFilePickerState(filePicker, { state: 'error', name: file.name, meta, badge: 'Too large' });
+        formUX.showError('Keep the CSV file under 256 KB.', fileButton);
+        event.target.value = '';
+        return;
+      }
+      fileButton.disabled = true;
+      setBusinessFilePickerState(filePicker, { state: 'loading', name: file.name, meta, badge: 'Reading…' });
+      try {
+        input.value = await file.text();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        setBusinessFilePickerState(filePicker, { state: 'success', name: file.name, meta: `${meta} · loaded into editor`, badge: 'Ready' });
+        fileButton.querySelector('#business-schedule-csv-file-action').textContent = 'Replace CSV file';
+      } catch {
+        setBusinessFilePickerState(filePicker, { state: 'error', name: file.name, meta, badge: 'Couldn’t read' });
+        formUX.showError('That file could not be read. Choose another CSV file.', fileButton);
+        event.target.value = '';
+      } finally { fileButton.disabled = false; }
+    });
+    modal.querySelector('#business-schedule-csv-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      formUX.clearError();
+      const csv = input.value.trim();
+      if (!csv) { formUX.showError('Choose a CSV file or paste schedule rows.', input); return; }
+      if (new Blob([csv]).size > 256 * 1024) { formUX.showError('Keep the CSV under 256 KB.', input); return; }
+      const mode = modal.querySelector('#business-schedule-csv-mode').value;
+      const finish = formUX.startSubmitting('Validating rows…');
+      if (!finish) return;
+      try {
+        const result = await api(`/businesses/${business.id}/schedule/import-preview`, {
+          method: 'POST', body: JSON.stringify({
+            csv,
+            timezone: business.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles',
+          }),
+        });
+        onImport?.(result.items || [], mode, result);
+        closeModal(modal, { force: true });
+      } catch (error) {
+        finish();
+        formUX.showError(businessScheduleCsvRowError(error), input);
+      }
+    });
+    return modal;
+  }
+
   function openBusinessScheduleEditor(rawBusiness, onSaved) {
     const business = normalizeBusinessProfile(rawBusiness);
     let schedule = business.schedule.map((item) => ({ ...item }));
@@ -31262,7 +31424,9 @@
       ${modalHead('Weekly schedule')}
       ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved schedule changes appear to players immediately.</p></div>` : ''}
       <p class="row-sub business-editor-intro">Publish recurring or dated programs with capacity, local timezone, hosts, cancellations, and registration links. Manual entries are not live availability unless a connection says they are synced.</p>
+      <div id="business-schedule-import-status" class="business-form-note" role="status" aria-live="polite"></div>
       <div id="business-schedule-list"></div>
+      <button type="button" class="btn btn-secondary btn-block" id="business-schedule-import">${uiIcon('upload')} Import CSV</button>
       <button type="button" class="btn btn-secondary btn-block" id="business-schedule-add">${uiIcon('plus')} Add schedule item</button>
       <button type="button" class="btn btn-primary btn-block" id="business-schedule-save">Save schedule</button>
     `, { label: 'Manage business schedule' });
@@ -31293,7 +31457,23 @@
     };
     render();
     const initialSchedule = JSON.stringify(schedule);
+    modal.querySelector('#business-schedule-import').addEventListener('click', () => {
+      openChildModal(modal, () => openBusinessScheduleCsvImport(business, {
+        existingCount: schedule.length,
+        onImport: (items, mode, result) => {
+          const combined = mode === 'replace' ? items : [...schedule, ...items];
+          if (combined.length > 100) throw new Error(`This import would create ${combined.length} rows. A schedule can contain up to 100.`);
+          schedule = combined;
+          render();
+          const ignored = Array.isArray(result?.ignored_columns) ? result.ignored_columns.length : 0;
+          const status = modal.querySelector('#business-schedule-import-status');
+          status.textContent = `${items.length} row${items.length === 1 ? '' : 's'} imported for review${ignored ? `; ${ignored} unrecognized column${ignored === 1 ? '' : 's'} ignored` : ''}. Choose Save schedule to publish.`;
+          toast(`${items.length} schedule row${items.length === 1 ? '' : 's'} ready to review`);
+        },
+      }));
+    });
     modal.querySelector('#business-schedule-add').addEventListener('click', () => {
+      if (schedule.length >= 100) { toast('A schedule can contain up to 100 items'); return; }
       openChildModal(modal, () => openBusinessScheduleItemForm({}, -1, (updated) => { schedule.push(updated); render(); }));
     });
     const formUX = bindModalFormUX(modal, '#business-schedule-save');

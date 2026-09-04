@@ -1,4 +1,4 @@
-"""Focused contracts for the business catalog and logo file-picking UI."""
+"""Focused contracts for business file-picking and schedule CSV UI."""
 
 from pathlib import Path
 
@@ -66,6 +66,36 @@ def test_catalog_file_selection_validates_before_reading_and_stays_editable():
     assert "loaded into editor" in catalog
     assert "Replace JSON file" in catalog
     assert "That file could not be read. Choose another JSON file." in catalog
+
+
+def test_schedule_csv_import_is_free_staged_and_accessible():
+    importer = section(
+        "function businessScheduleCsvTemplate",
+        "function openBusinessScheduleEditor",
+    )
+    editor = section(
+        "function openBusinessScheduleEditor",
+        "function openNotificationSettings",
+    )
+
+    assert "Use any spreadsheet — free." in importer
+    assert "Download CSV template" in importer
+    assert "new Blob([businessScheduleCsvTemplate(business)]" in importer
+    assert 'class="business-file-native" type="file" id="business-schedule-csv-file"' in importer
+    assert 'accept=".csv,text/csv,application/vnd.ms-excel,text/plain"' in importer
+    assert 'role="status" aria-live="polite" aria-atomic="true"' in importer
+    assert "file.size > 256 * 1024" in importer
+    assert "input.value = await file.text()" in importer
+    assert "/schedule/import-preview" in importer
+    assert "Nothing is published until you review the rows" in importer
+    assert '<option value="append">' in importer
+    assert '<option value="replace">' in importer
+
+    assert 'id="business-schedule-import"' in editor
+    assert 'id="business-schedule-import-status"' in editor
+    assert "mode === 'replace' ? items : [...schedule, ...items]" in editor
+    assert "combined.length > 100" in editor
+    assert "Choose Save schedule to publish." in editor
 
 
 def test_logo_selection_validates_processes_and_reports_every_state():
