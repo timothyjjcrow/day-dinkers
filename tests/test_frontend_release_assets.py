@@ -139,54 +139,55 @@ def test_vercel_negotiates_committed_brotli_release_assets():
         r'\s*(,.*|$)'
     )
 
-    for filename, content_type in expected.items():
-        source = f'/release-assets/r59/{filename}'
-        identity_destination = f'/assets/r59/{filename}'
-        destination = f'{identity_destination}.br'
-        assert not (PUBLIC / source.removeprefix('/')).exists()
-        rewrite = next(
-            rule for rule in rewrites
-            if rule.get('source') == source and rule.get('has')
-        )
-        assert rewrite['destination'] == destination
-        assert rewrite['has'] == [{
-            'type': 'header',
-            'key': 'Accept-Encoding',
-            'value': accepted_brotli,
-        }]
+    for release in ('r58', 'r59'):
+        for filename, content_type in expected.items():
+            source = f'/release-assets/{release}/{filename}'
+            identity_destination = f'/assets/{release}/{filename}'
+            destination = f'{identity_destination}.br'
+            assert not (PUBLIC / source.removeprefix('/')).exists()
+            rewrite = next(
+                rule for rule in rewrites
+                if rule.get('source') == source and rule.get('has')
+            )
+            assert rewrite['destination'] == destination
+            assert rewrite['has'] == [{
+                'type': 'header',
+                'key': 'Accept-Encoding',
+                'value': accepted_brotli,
+            }]
 
-        fallback = next(
-            rule for rule in rewrites
-            if rule.get('source') == source and not rule.get('has')
-        )
-        assert fallback['destination'] == identity_destination
+            fallback = next(
+                rule for rule in rewrites
+                if rule.get('source') == source and not rule.get('has')
+            )
+            assert fallback['destination'] == identity_destination
 
-        base_rule = next(
-            rule for rule in header_rules
-            if rule.get('source') == source and not rule.get('has')
-        )
-        base_headers = {
-            item['key'].lower(): item['value']
-            for item in base_rule.get('headers', [])
-        }
-        assert base_headers == {
-            'cache-control': 'public, max-age=31536000, immutable',
-            'content-type': content_type,
-            'vary': 'Accept-Encoding',
-        }
+            base_rule = next(
+                rule for rule in header_rules
+                if rule.get('source') == source and not rule.get('has')
+            )
+            base_headers = {
+                item['key'].lower(): item['value']
+                for item in base_rule.get('headers', [])
+            }
+            assert base_headers == {
+                'cache-control': 'public, max-age=31536000, immutable',
+                'content-type': content_type,
+                'vary': 'Accept-Encoding',
+            }
 
-        encoded_rule = next(
-            rule for rule in header_rules
-            if rule.get('source') == source and rule.get('has')
-        )
-        assert encoded_rule['has'] == rewrite['has']
-        encoded_headers = {
-            item['key'].lower(): item['value']
-            for item in encoded_rule.get('headers', [])
-        }
-        assert encoded_headers == {
-            'content-encoding': 'br',
-        }
+            encoded_rule = next(
+                rule for rule in header_rules
+                if rule.get('source') == source and rule.get('has')
+            )
+            assert encoded_rule['has'] == rewrite['has']
+            encoded_headers = {
+                item['key'].lower(): item['value']
+                for item in encoded_rule.get('headers', [])
+            }
+            assert encoded_headers == {
+                'content-encoding': 'br',
+            }
 
 
 def test_ci_rebuilds_assets_for_every_release_affecting_change():
