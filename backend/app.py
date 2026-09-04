@@ -14,7 +14,11 @@ db = SQLAlchemy(session_options={'expire_on_commit': False})
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC_DIR = os.path.join(PROJECT_ROOT, 'public')
 BUNDLED_COURTS_FILE = os.path.join(PROJECT_ROOT, 'data', 'courts.json.gz')
-FRONTEND_RELEASE = 'r58'
+# Immutable frontend URLs are part of the executable shell contract. Keep the
+# prior release readable while an already-open service-worker client reloads
+# onto the current release.
+FRONTEND_RELEASE = 'r59'
+FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', FRONTEND_RELEASE})
 FRONTEND_RELEASE_FILES = frozenset({
     'app-v15.min.js',
     'app-v15.min.js.map',
@@ -2615,14 +2619,14 @@ def create_app(config_name=None):
     @app.get('/release-assets/<release>/<path:filename>')
     def frontend_release_asset(release, filename):
         """Serve immutable release assets with the best precompressed body."""
-        if release != FRONTEND_RELEASE or filename not in FRONTEND_RELEASE_FILES:
+        if release not in FRONTEND_SUPPORTED_RELEASES or filename not in FRONTEND_RELEASE_FILES:
             return 'not found', 404
         if (
             request.path.startswith('/release-assets/')
             and filename not in FRONTEND_RUNTIME_RELEASE_FILES
         ):
             return 'not found', 404
-        release_dir = os.path.join(PUBLIC_DIR, 'assets', FRONTEND_RELEASE)
+        release_dir = os.path.join(PUBLIC_DIR, 'assets', release)
         selected_encoding = request.accept_encodings.best_match(
             ['br', 'gzip', 'identity'],
         ) or 'identity'

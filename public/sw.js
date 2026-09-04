@@ -4,12 +4,12 @@
 // installs refresh the simplified Play, Courts, Community, and Settings shell
 // instead of retaining old executable bytes.
 const SHELL_CACHE_PREFIX = 'thirdshot-v15-r';
-const CACHE = 'thirdshot-v15-r60';
+const CACHE = 'thirdshot-v15-r61';
 const CORE_SHELL = [
   '/',
-  '/release-assets/r58/styles-v15.min.css',
-  '/release-assets/r58/crew-planner-v15.min.js',
-  '/release-assets/r58/app-v15.min.js',
+  '/release-assets/r59/styles-v15.min.css',
+  '/release-assets/r59/crew-planner-v15.min.js',
+  '/release-assets/r59/app-v15.min.js',
   '/vendor/leaflet/leaflet.css?v=1.9.4',
   '/vendor/leaflet/leaflet.js?v=1.9.4',
   '/vendor/leaflet-markercluster/MarkerCluster.css?v=1.5.3',
