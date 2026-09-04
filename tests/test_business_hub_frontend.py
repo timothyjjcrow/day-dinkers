@@ -16,10 +16,10 @@ def section(start: str, end: str) -> str:
 
 def test_business_hub_has_obvious_reentry_without_a_fifth_primary_tab():
     assert 'id="pf-business-hub"' in APP
-    assert "Run a pickleball business?" in APP
+    assert "Manage a venue" in APP
     assert "['business', 'building', 'Business tools'" in APP
     assert "uiIcon(icon)" in section("function openSettingsHub", "async function renderProfile")
-    assert 'add booking links' in APP
+    assert 'Your listing, bookings and events' in APP
     assert "business: openBusinessHub" in APP
     assert "function openBusinessHub(" in APP
     assert "{ page: true, label: 'Business Hub' }" in APP
@@ -34,10 +34,10 @@ def test_business_hub_has_obvious_reentry_without_a_fifth_primary_tab():
 def test_business_hub_functional_navigation_uses_shared_product_icons():
     dashboard = section("function renderBusinessHubDashboard", "function openBusinessPlayerPreview")
     for icon in (
-        "building", "refresh", "eye", "edit", "target", "calendar", "link",
-        "zap", "shield", "users", "chart", "clock", "lock", "settings",
+        "building", "eye", "edit", "target", "calendar", "link",
+        "shield", "users", "chart", "clock", "lock", "settings",
     ):
-        assert f"uiIcon('{icon}')" in dashboard or f"? '{icon}'" in dashboard
+        assert f"uiIcon('{icon}')" in dashboard or f"? '{icon}'" in dashboard or f": '{icon}'" in dashboard or f"icon:'{icon}'" in dashboard
     for glyph in ("✏️", "🎯", "📅", "🔗", "🛡️", "👥", "⇄", "📈", "↶", "🔐", "⚙️"):
         assert glyph not in dashboard
     assert ".business-tools-grid button > span .ui-icon" in STYLES
@@ -101,9 +101,9 @@ def test_claim_flow_is_explicit_private_and_never_overstates_pending_status():
     assert "verification_contact_email: contactInput.value.trim()" in APP
     assert "evidence_url: evidenceUrl" in APP
     assert "evidence_notes: modal.querySelector('#business-claim-evidence-notes').value.trim()" in APP
-    assert "Saved as private claim evidence for the operator reviewer" in APP
-    assert "Saved with the claim as website-domain evidence" in APP
-    assert "Submitting does not instantly verify or publish the venue" in APP
+    assert "Used privately to review your request." in APP
+    assert "An official page can help us confirm your role." in APP
+    assert "Your listing stays private until your management role is approved." in APP
     assert "Manage this venue" in APP
     assert "Claim its profile to add booking, schedules, lessons, and programs." in APP
     assert 'id="business-claim-authorized" data-no-draft' in APP
@@ -114,20 +114,16 @@ def test_claim_flow_is_explicit_private_and_never_overstates_pending_status():
 
 def test_business_profile_has_explicit_publish_control_and_private_preview():
     dashboard = section("function renderBusinessHubDashboard", "async function openBusinessHub")
-    assert "business.published === true" in dashboard
-    assert "After approval, review the draft and publish it when it is ready." in dashboard
-    assert "Verified · hidden" in APP
+    workspace = section("function businessWorkspaceState", "function venueTaskHtml")
+    assert "business.published === true" in workspace
+    assert "verified && business.published === true && review === 'approved' && !business.suspended" in workspace
     assert "JSON.stringify({ published: !isPublic })" in dashboard
-    assert 'id="business-player-preview">Preview player listing' in dashboard
-    assert "function openBusinessPlayerPreview" in dashboard
+    assert 'id="business-player-preview"' in dashboard
     assert "Only business managers can see this draft preview" in dashboard
     assert "transitionModal(modal, () => openCourtDetail(business.court_id))" not in dashboard
-    assert "business && business.is_owner !== false" in APP
-    assert 'id="business-resubmit-claim">Resubmit claim' in dashboard
-    assert "status === 'rejected' ? 'Resubmit first'" in dashboard
+    assert 'id="business-resubmit-claim">Update and resubmit claim' in dashboard
     assert "!canAdminister || (!isPublic && !canPublish) ? 'disabled'" in dashboard
-    assert "'Verify first'" in dashboard
-    assert "const isPublic = status === 'verified' && business.published === true" in dashboard
+    assert "const isPublic = workspace.publicNow" in dashboard
 
 
 def test_business_management_uses_complete_rest_contracts():
@@ -181,7 +177,7 @@ def test_court_detail_loads_verified_business_value_before_social_sections():
     business_slot = detail.index('id="cd-business"')
     players = detail.index('id="cd-sec-players"')
     games = detail.index('id="cd-sec-games"')
-    assert business_slot < players < games
+    assert business_slot < games < players
     assert "loadCourtBusiness(modal, court, { expanded: focusBusiness });" in detail
     assert "Official information from" in APP
     assert "Venue-submitted information from" in APP
@@ -259,7 +255,7 @@ def test_non_owner_business_staff_receive_a_visible_management_entry():
 
 def test_business_dashboard_counts_use_human_singular_and_plural_copy():
     assert "offering${activeOfferingCount === 1 ? '' : 's'}" in APP
-    assert "weekly item${activeScheduleCount === 1 ? '' : 's'}" in APP
+    assert "session${activeScheduleCount === 1 ? '' : 's'}" in APP
     completion = section("function businessCompletion", "function businessCourtName")
     assert "item.active !== false" in completion
 

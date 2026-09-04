@@ -142,6 +142,276 @@
     {
       "source": "/release-assets/r60/styles-v15.min.css",
       "destination": "/assets/r60/styles-v15.min.css"
+    },
+    {
+      "source": "/release-assets/r61/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r61/app-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r61/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r61/crew-planner-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r61/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r61/styles-v15.min.css.br"
+    },
+    {
+      "source": "/release-assets/r61/app-v15.min.js",
+      "destination": "/assets/r61/app-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r61/crew-planner-v15.min.js",
+      "destination": "/assets/r61/crew-planner-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r61/styles-v15.min.css",
+      "destination": "/assets/r61/styles-v15.min.css"
+    },
+    {
+      "source": "/release-assets/r62/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r62/app-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r62/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r62/crew-planner-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r62/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r62/styles-v15.min.css.br"
+    },
+    {
+      "source": "/release-assets/r62/app-v15.min.js",
+      "destination": "/assets/r62/app-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r62/crew-planner-v15.min.js",
+      "destination": "/assets/r62/crew-planner-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r62/styles-v15.min.css",
+      "destination": "/assets/r62/styles-v15.min.css"
+    },
+    {
+      "source": "/release-assets/r63/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r63/app-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r63/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r63/crew-planner-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r63/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r63/styles-v15.min.css.br"
+    },
+    {
+      "source": "/release-assets/r63/app-v15.min.js",
+      "destination": "/assets/r63/app-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r63/crew-planner-v15.min.js",
+      "destination": "/assets/r63/crew-planner-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r63/styles-v15.min.css",
+      "destination": "/assets/r63/styles-v15.min.css"
+    },
+    {
+      "source": "/release-assets/r64/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r64/app-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r64/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r64/crew-planner-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r64/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r64/styles-v15.min.css.br"
+    },
+    {
+      "source": "/release-assets/r64/app-v15.min.js",
+      "destination": "/assets/r64/app-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r64/crew-planner-v15.min.js",
+      "destination": "/assets/r64/crew-planner-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r64/styles-v15.min.css",
+      "destination": "/assets/r64/styles-v15.min.css"
+    },
+    {
+      "source": "/release-assets/r65/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r65/app-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r65/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r65/crew-planner-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r65/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r65/styles-v15.min.css.br"
+    },
+    {
+      "source": "/release-assets/r65/app-v15.min.js",
+      "destination": "/assets/r65/app-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r65/crew-planner-v15.min.js",
+      "destination": "/assets/r65/crew-planner-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r65/styles-v15.min.css",
+      "destination": "/assets/r65/styles-v15.min.css"
+    },
+    {
+      "source": "/release-assets/r66/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r66/app-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r66/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r66/crew-planner-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r66/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r66/styles-v15.min.css.br"
+    },
+    {
+      "source": "/release-assets/r66/app-v15.min.js",
+      "destination": "/assets/r66/app-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r66/crew-planner-v15.min.js",
+      "destination": "/assets/r66/crew-planner-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r66/styles-v15.min.css",
+      "destination": "/assets/r66/styles-v15.min.css"
     }
   ],
   "headers": [
@@ -471,6 +741,600 @@
           "value": "br"
         }
       ]
+    },
+    {
+      "source": "/release-assets/r61/app-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r61/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r61/crew-planner-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r61/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r61/styles-v15.min.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r61/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r62/app-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r62/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r62/crew-planner-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r62/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r62/styles-v15.min.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r62/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r63/app-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r63/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r63/crew-planner-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r63/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r63/styles-v15.min.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r63/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r64/app-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r64/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r64/crew-planner-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r64/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r64/styles-v15.min.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r64/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r65/app-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r65/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r65/crew-planner-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r65/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r65/styles-v15.min.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r65/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r66/app-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r66/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r66/crew-planner-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r66/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r66/styles-v15.min.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r66/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
     }
   ],
   "crons": [
@@ -487,5 +1351,7 @@
       "schedule": "0 10 * * *"
     }
   ],
-  "regions": ["iad1"]
+  "regions": [
+    "iad1"
+  ]
 }

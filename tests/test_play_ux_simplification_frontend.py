@@ -22,7 +22,7 @@ def test_play_launcher_exposes_the_three_plain_play_now_intents_and_planner():
     assert launcher.count('data-goto="new-game"') == 1
     assert launcher.count('data-goto="ranked-match"') == 1
     assert 'data-goto="game-flow"' not in launcher
-    for label in ("At a court", "On my way", "Free this hour", "Plan a game", "Ranked match"):
+    for label in ("I’m at a court", "I’m on my way", "I’m free this hour", "Create game", "Start a ranked match"):
         assert label in launcher
 
     flow = section("function openGameFlow", "async function checkInAndStartRally")
@@ -72,7 +72,7 @@ def test_when_starts_with_exactly_three_smart_choices_and_discloses_any_other_ti
     assert 'id="ng-day-strip" role="radiogroup" aria-label="Play date"' in planner
     assert 'id="ng-time-grid" role="radiogroup" aria-label="Play time in 30-minute steps"' in planner
     assert 'Array.from({ length: 31 }, (_, index) => 6 + index / 2)' in planner
-    assert '<label for="ng-when">Or pick another date and time</label>' in planner
+    assert '<label for="ng-when">Date and time</label>' in planner
     assert 'aria-label="${defaultType === \'ranked\' ? \'Match\' : \'Play session\'} date and time"' in planner
     assert 'id="ng-days"' not in planner
     assert 'id="ng-hours"' not in planner
@@ -215,7 +215,7 @@ def test_play_shell_has_primary_segments_and_one_contextual_create_action():
     assert "$('#new-game-fab')?.addEventListener" in setup
     assert "function setPlaySegment" in setup
     assert "['games', 'scores', 'brackets'].includes(segment)" in setup
-    assert "fab.classList.remove('hidden')" in setup
+    assert "fab.classList.toggle('hidden', state.playSeg === 'games')" in setup
     for segment in ('games', 'scores', 'brackets'):
         assert f'data-seg="{segment}"' in INDEX
     assert 'id="new-game-fab" class="fab"' in INDEX
@@ -228,7 +228,7 @@ def test_play_launcher_survives_independent_feed_failures_with_honest_retry_stat
     assert "api(homeUrl)" in play
     assert "const settled = await Promise.allSettled([" in play
     assert "api('/games?mine=1')" in play
-    assert "api(`/games?friends=1${levelQuery}`)" in play
+    assert "api(`/games?friends=1${areaQuery}${levelQuery}`)" in play
     assert "const mineFeed = feedResult(settled[0]" in play
     assert "const friendsFeed = feedResult(settled[1]" in play
     assert "const nearbyFeed = feedResult(settled[2]" in play

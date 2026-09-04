@@ -14,11 +14,12 @@ def section(start: str, end: str) -> str:
     return APP[begin:APP.index(end, begin)]
 
 
-def test_community_keeps_two_stable_lanes_with_explicit_chat_filters():
+def test_community_separates_messages_groups_and_players():
     setup = section("function configureCommunityLaneTabs", "function chatMessageActionHtml")
     for tab_id, label in (
-        ("#chat-tab-chats", "Chats"),
-        ("#chat-tab-friends", "People"),
+        ("#chat-tab-chats", "Messages"),
+        ("#chat-tab-groups", "Groups"),
+        ("#chat-tab-friends", "Players"),
     ):
         assert tab_id in setup
         assert f"'{label}'" in setup
@@ -58,7 +59,7 @@ def test_community_lanes_keep_partial_results_and_offer_one_retry():
 
 def test_community_unread_badges_route_attention_to_the_correct_lane():
     assert 'id="chat-inbox-badge"' in INDEX
-    assert 'id="chat-groups-badge"' not in INDEX
+    assert 'id="chat-groups-badge"' in INDEX
 
     sync = section("function syncCommunityUnreadLanes", "function renderBadges")
     assert "item.kind === 'game'" in sync
@@ -72,8 +73,8 @@ def test_community_unread_badges_route_attention_to_the_correct_lane():
     assert "state.unreadMessages + state.communityRoomUnread" in badges
     assert "const pendingCrewInviteCount = Number(state.pendingCrewInvites?.count) || 0;" in badges
     assert "const requestTotal = state.pendingRequests + pendingCrewInviteCount;" in badges
-    assert "$('#chat-groups-badge')" not in badges
-    assert "`Chats, ${messagesTotal} unread message" in badges
+    assert "$('#chat-groups-badge')" in badges
+    assert "`Messages, ${messagesTotal} unread message" in badges
     assert "`Community, ${communityParts.join(', ')}`" in badges
     assert "`Play, ${state.gamesToConfirm} game${state.gamesToConfirm === 1 ? '' : 's'} awaiting score confirmation`" in badges
     assert "`Activity and notifications, ${unread} unread notification${unread === 1 ? '' : 's'}`" in badges
@@ -189,7 +190,7 @@ def test_me_is_a_dashboard_with_five_settings_destinations():
     assert "$('#profile-settings')?.addEventListener('click', openSettingsHub);" in APP
     profile = section("async function renderProfile", "function openEditProfile")
     assert 'class="profile-dashboard-actions profile-dashboard-primary-actions"' in profile
-    assert '<section class="profile-dashboard-more profile-dashboard-more-visible"' in profile
+    assert '<details class="profile-dashboard-more simple-disclosure"' in profile
     assert "More stats and history" not in profile
     assert 'id="pf-upcoming"' in profile
     assert 'id="pf-checkout"' not in profile

@@ -32,11 +32,11 @@ def test_me_recovers_only_a_live_server_expiring_pulse_and_refreshes_hero():
 def test_remote_hero_exposes_play_now_intents_without_claiming_presence():
     hero = section("function rallyLauncherHtml", "async function renderPlay")
     assert 'data-goto="instant-rally"' in hero
-    assert "<b>${here ? 'Play here' : 'At a court'}</b>" in hero
+    assert "<b>${here ? 'Play here' : 'I’m at a court'}</b>" in hero
     assert 'data-goto="on-my-way"' in hero
-    assert '<b>On my way</b>' in hero
+    assert '<b>I’m on my way</b>' in hero
     assert 'data-goto="play-pulse"' in hero
-    assert '<b>Free this hour</b>' in hero
+    assert '<b>I’m free this hour</b>' in hero
     assert 'data-goto="new-game"' in hero
     assert 'data-goto="ranked-match"' in hero
     assert 'data-goto="play-now"' not in hero
@@ -207,4 +207,4 @@ def test_errors_mobile_targets_and_shell_revision_are_explicit():
     assert "grid-template-columns: auto minmax(0, 1fr)" in STYLES
     assert ".play-pulse-nearby-card [data-play-pulse-accept]" in STYLES
     assert "min-width: 0" in STYLES
-    assert "thirdshot-v15-r62" in SW
+    assert "thirdshot-v15-r68" in SW

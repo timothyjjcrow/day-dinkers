@@ -1,0 +1,29 @@
+{
+  "release": "r64",
+  "files": {
+    "app-v15.min.js": {
+      "source": "app-v15.js",
+      "source_sha256": "a8b766d7a9760752c3e7afba73fc32c8a783afcdc1a83e7b7ad7b89e260b1831",
+      "source_bytes": 2053002,
+      "minified_bytes": 1280076,
+      "gzip_bytes": 337581,
+      "brotli_bytes": 248785
+    },
+    "crew-planner-v15.min.js": {
+      "source": "crew-planner-v15.js",
+      "source_sha256": "dda2b78142d75dc8c736753564719b472fa648dddc8f935d7d3322a8c8db2f05",
+      "source_bytes": 4543,
+      "minified_bytes": 2434,
+      "gzip_bytes": 1173,
+      "brotli_bytes": 1057
+    },
+    "styles-v15.min.css": {
+      "source": "styles-v15.css",
+      "source_sha256": "e8a291879f9ddfc60436b938cd34f461315cb43f771efc161ee7babdada40b30",
+      "source_bytes": 367717,
+      "minified_bytes": 319669,
+      "gzip_bytes": 50412,
+      "brotli_bytes": 39931
+    }
+  }
+}

@@ -65,11 +65,11 @@ def test_host_edit_sends_only_changed_fields_and_keeps_failures_in_context():
     assert "bindModalDiscardConfirmation(sheet" in edit
 
 
-def test_hosts_get_direct_manage_actions_and_share_stays_in_the_header():
+def test_host_management_is_disclosed_and_share_stays_in_the_header():
     detail = section("function gameScreenHtml", "async function openGameScreen")
     screen = section("async function openGameScreen", "function safeNotificationOverlayRoute")
 
-    assert 'class="game-host-toolbar" aria-label="Host tools"' in detail
+    assert 'class="game-host-toolbar simple-disclosure" aria-label="Host tools"' in detail
     assert "You’re hosting" in detail
     for action_id in ("gs-edit", "gs-reschedule", "gs-share", "gs-cancel"):
         assert f'id="{action_id}"' in detail

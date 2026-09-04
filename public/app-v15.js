@@ -106,6 +106,9 @@
     pushSubscribed: false,
     playGamesCache: null,
     playLevelFilter: '',
+    playWhen: 'any',
+    playRadius: 25,
+    playPrefsFor: null,
     chatFriendsCache: null,
     activeArrival: null,
     activePlayPulse: null,
@@ -1226,6 +1229,7 @@
     visibility_cannot_narrow: 'You can open this game to more players, but cannot hide it from people who already saw it.',
     invalid_preferred_level: 'Choose a valid preferred level.',
     invalid_level: 'Choose a self-rating from 2.0 through 5.5.',
+    invalid_discovery_window: 'Choose a valid time window and try again.',
     invalid_level_range: 'Choose a valid minimum and maximum self-rating.',
     level_range_required: 'Choose both a minimum and maximum self-rating, or leave both at Any.',
     invalid_content_type: 'That type of content cannot be reported here.',
@@ -3107,6 +3111,8 @@
     profileRenderGeneration += 1;
     profileDashboardCache = { userId: null, promise: null, data: null, readyAt: 0 };
     state.playGamesCache = null;
+    state.playPrefsFor = null;
+    state.playWhen = 'any';
     state.chatFriendsCache = null;
     state.activeThreadUserId = null;
     state.lastNotifId = null;
@@ -3952,14 +3958,22 @@
       inboxBadge.textContent = messagesTotal > 99 ? '99+' : String(messagesTotal);
       inboxBadge.classList.toggle('hidden', messagesTotal === 0);
       $('#chat-tab-chats')?.setAttribute('aria-label', messagesTotal
-        ? `Chats, ${messagesTotal} unread message${messagesTotal === 1 ? '' : 's'}` : 'Chats');
+        ? `Messages, ${messagesTotal} unread message${messagesTotal === 1 ? '' : 's'}` : 'Messages');
     }
     const friendsBadge = $('#chat-friends-badge');
     if (friendsBadge) {
-      friendsBadge.textContent = requestTotal > 99 ? '99+' : String(requestTotal);
-      friendsBadge.classList.toggle('hidden', requestTotal === 0);
-      $('#chat-tab-friends')?.setAttribute('aria-label', requestTotal
-        ? `People, ${requestTotal} pending invitation${requestTotal === 1 ? '' : 's'} or request${requestTotal === 1 ? '' : 's'}` : 'People');
+      const count = Number(state.pendingRequests) || 0;
+      friendsBadge.textContent = count > 99 ? '99+' : String(count);
+      friendsBadge.classList.toggle('hidden', count === 0);
+      $('#chat-tab-friends')?.setAttribute('aria-label', count
+        ? `Players, ${count} friend request${count === 1 ? '' : 's'}` : 'Players');
+    }
+    const groupsBadge = $('#chat-groups-badge');
+    if (groupsBadge) {
+      groupsBadge.textContent = pendingCrewInviteCount > 99 ? '99+' : String(pendingCrewInviteCount);
+      groupsBadge.classList.toggle('hidden', pendingCrewInviteCount === 0);
+      $('#chat-tab-groups')?.setAttribute('aria-label', pendingCrewInviteCount
+        ? `Groups, ${pendingCrewInviteCount} invitation${pendingCrewInviteCount === 1 ? '' : 's'}` : 'Groups');
     }
 
     const playBadge = $('#play-badge');
@@ -3977,8 +3991,8 @@
       $('#play-tab-brackets')?.setAttribute(
         'aria-label',
         actionCount
-          ? `Compete, ${actionCount} action${actionCount === 1 ? '' : 's'} needed`
-          : 'Compete',
+          ? `Events, ${actionCount} action${actionCount === 1 ? '' : 's'} needed`
+          : 'Events',
       );
     }
 
@@ -4724,6 +4738,9 @@
       });
     });
     setupCourtSheetDrag();
+    window.matchMedia('(min-width: 900px)').addEventListener('change', () => {
+      setCourtSheetSnap('peek', { announce: false });
+    });
     syncCourtFilterControls();
     setCourtSheetSnap('peek', { announce: false });
 
@@ -5114,7 +5131,7 @@
   }
 
   const COURT_AMENITY_FILTERS = ['indoor', 'lighted', 'nets', 'restrooms', 'water'];
-  const COURT_DETAIL_FILTERS = ['business', ...COURT_AMENITY_FILTERS];
+  const COURT_DETAIL_FILTERS = ['open_now', 'business', ...COURT_AMENITY_FILTERS];
 
   function activeCourtFilterCount() {
     return Object.values(state.courtFilters).filter(Boolean).length;
@@ -5208,6 +5225,7 @@
   function openCourtFilterSheet() {
     const draft = { ...state.courtFilters };
     const venueOptions = [
+      ['open_now', uiIcon('clock'), 'Open now'],
       ['business', uiIcon('check-circle'), 'Verified venues'],
     ];
     const amenityOptions = [
@@ -5218,6 +5236,7 @@
       ['water', uiIcon('water'), 'Drinking water'],
     ];
     const filterDescriptions = {
+      open_now: 'Courts currently within their posted hours',
       business: 'Official club or venue profiles',
       indoor: 'Play protected from weather',
       lighted: 'Courts with evening lights',
@@ -5968,6 +5987,8 @@
 
   function setCourtSheetSnap(snap, { announce = true } = {}) {
     if (!['peek', 'half', 'full'].includes(snap)) return;
+    const desktop = window.innerWidth >= 900;
+    if (desktop) snap = 'half';
     // A half sheet on common short phones leaves room for only one clipped
     // decision card after the handle and controls. Treat List as a full sheet
     // there; Map still has the compact peek card below.
@@ -5985,11 +6006,12 @@
     sheet.style.removeProperty('transform');
     sheet.classList.remove('is-dragging');
     const listOpen = snap !== 'peek';
+    const hideMap = listOpen && !desktop;
     const mapEl = $('#map');
     const mapHadFocus = !!mapEl?.contains(document.activeElement);
     if (mapEl) {
-      mapEl.inert = listOpen;
-      if (listOpen) mapEl.setAttribute('aria-hidden', 'true');
+      mapEl.inert = hideMap;
+      if (hideMap) mapEl.setAttribute('aria-hidden', 'true');
       else mapEl.removeAttribute('aria-hidden');
     }
     document.querySelectorAll('#court-view-switch [data-court-view]').forEach((btn) => {
@@ -6004,7 +6026,7 @@
         : snap === 'half' ? 'Show full court results' : 'Collapse court results to map');
     }
     if (listOpen) hideSearchSuggest();
-    if (listOpen && mapHadFocus) {
+    if (hideMap && mapHadFocus) {
       requestAnimationFrame(() => {
         const focusTarget = $('#court-preview')?.querySelector('button, a[href]') || cycle;
         focusTarget?.focus({ preventScroll: true });
@@ -12031,16 +12053,18 @@
         ${reserveAction}
       </div>` : `
       <div class="cd-now-actions">
-        ${checkedIn ? '' : `<button type="button" class="btn btn-secondary" id="cd-checkin">${uiIcon('map-pin')} I’m at this court</button>`}
+        <button type="button" class="btn btn-secondary" id="cd-schedule">${uiIcon('calendar')} Create game here</button>
         ${directionsAction}
         ${reserveAction}
-        <button type="button" class="btn btn-secondary" id="cd-schedule">${uiIcon('calendar')} Plan with a group</button>
+      </div>
+      <details class="simple-disclosure court-more-actions"><summary>More court options</summary><div class="cd-now-actions">
+        ${checkedIn ? '' : `<button type="button" class="btn btn-secondary" id="cd-checkin">${uiIcon('map-pin')} I’m at this court</button>`}
         <button type="button" class="btn btn-secondary" id="cd-ranked">${uiIcon('trophy')} Set up ranked match</button>
         <button type="button" class="btn btn-secondary cd-chat-action" id="cd-chat" aria-label="Court chat${courtChatUnread ? `, ${courtChatUnread} unread message${courtChatUnread === 1 ? '' : 's'}` : ''}. ${esc(courtChatPreview)}">
           ${uiIcon('message')}<span class="cd-chat-action-copy"><b>Court chat</b><small>${esc(courtChatPreview)}</small></span>
           ${courtChatUnread ? `<span class="badge" data-court-chat-unread>${courtChatUnread > 9 ? '9+' : courtChatUnread}</span>` : ''}
         </button>
-      </div>`;
+      </div></details>`;
     const quickActions = `
       <div class="cd-quick-actions" role="group" aria-label="Court actions">
         <button type="button" id="cd-share">${uiIcon('send')}<span>Share</span></button>
@@ -12108,6 +12132,9 @@
         })() : ''}
       </section>
       <div id="cd-business" class="cd-business-slot" aria-live="polite"></div>
+      ${regularPlaySessionsHtml}
+      <div class="section-label section-label-icon" id="cd-sec-games">${uiIcon('calendar')} Player-organized sessions</div>
+      ${gamesHtml}
       <button type="button" class="card row nav-row-button cd-review-inline" id="cd-review-inline">
         <span class="nav-row-leading" aria-hidden="true">${uiIcon('star')}</span>
         <span class="row-main"><span class="row-title">${court.rating_avg ? `${court.rating_avg} from ${court.rating_count} review${court.rating_count === 1 ? '' : 's'}` : 'No court reviews yet'}</span><span class="row-sub">${state.me ? (court.my_review ? 'Update your review' : 'Write a review') : 'See what players say'}</span></span>
@@ -12115,9 +12142,6 @@
       </button>
       <div class="section-label section-label-icon" id="cd-sec-players">${uiIcon('users')} People at this court (${nHere})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
       ${playersHtml}
-      ${regularPlaySessionsHtml}
-      <div class="section-label section-label-icon" id="cd-sec-games">${uiIcon('calendar')} Player-organized sessions</div>
-      ${gamesHtml}
       ${courtClosed ? '' : `
         <button type="button" class="card row nav-row-button cd-community-finder-action" id="cd-find-communities">
           <span class="nav-row-leading" aria-hidden="true">${uiIcon('users')}</span>
@@ -13627,6 +13651,7 @@
         selected = { ...selected, closed: !!detail.closed };
         const nowGames = Array.isArray(detail.now_games) ? detail.now_games : (detail.games || []);
         const openGames = nowGames.filter((game) => game.status === 'upcoming'
+          && game.game_type === 'ranked'
           && (game.is_joined || Number(game.spots_left) > 0));
         const exact = openGames.filter((game) => game.game_type === gameType
           && Number(game.max_players) === maxPlayers);
@@ -15293,12 +15318,79 @@
   }
 
   // Why a joinable game suits this player: their level, their usual slot.
+  function loadPlayPreferences() {
+    const id = state.me?.id;
+    if (!id || state.playPrefsFor === id) return;
+    state.playPrefsFor = id;
+    state.playLevelFilter = '';
+    state.playRadius = 25;
+    state.playWhen = 'any';
+    try {
+      const saved = JSON.parse(localStorage.getItem(`thirdshot-play-preferences:${id}`) || '{}');
+      if ([10, 25, 50, 100].includes(saved.radius)) state.playRadius = saved.radius;
+      if (normalizedGameLevel(saved.level) != null) state.playLevelFilter = String(saved.level);
+    } catch { /* Preferences must never block discovery. */ }
+  }
+
+  function savePlayPreferences() {
+    if (!state.me?.id) return;
+    try { localStorage.setItem(`thirdshot-play-preferences:${state.me.id}`, JSON.stringify({
+      radius: state.playRadius, level: state.playLevelFilter,
+    })); } catch { /* Storage can be unavailable in private browsing. */ }
+  }
+
+  function playDiscoveryWindow(when, now = new Date()) {
+    const endsAfter = new Date(now);
+    let startsBefore = null;
+    if (when === 'now') startsBefore = new Date(now.getTime() + 60 * 60000);
+    if (when === 'today') { startsBefore = new Date(now); startsBefore.setHours(24, 0, 0, 0); }
+    if (when === 'week') { startsBefore = new Date(now); startsBefore.setDate(startsBefore.getDate() + 7); }
+    return { endsAfter, startsBefore };
+  }
+
+  function playDiscoveryQuery() {
+    const window = playDiscoveryWindow(state.playWhen);
+    const params = new URLSearchParams({ ends_after: window.endsAfter.toISOString() });
+    if (window.startsBefore) params.set('starts_before', window.startsBefore.toISOString());
+    return `&${params}`;
+  }
+
+  function gameRosterStatus(game) {
+    if (game.status !== 'upcoming' || game.is_instant) return null;
+    const joined = (game.players || []).length;
+    const capacity = Math.max(joined, Number(game.max_players) || joined);
+    const raw = game.attendance_confirmed_count;
+    const confirmed = Math.min(joined, Math.max(0, raw != null && Number.isFinite(Number(raw))
+      ? Number(raw) : (game.players || []).filter((player) => player.attending === true).length));
+    if (game.attendance_confirmation_due && game.is_joined && !game.is_creator) {
+      return { tone: 'attention', label: 'Confirm your spot', detail: 'Let the group know you’re still coming.' };
+    }
+    const open = Math.max(0, capacity - joined);
+    if (open) return { tone: 'forming', label: `${open} open spot${open === 1 ? '' : 's'}`,
+      detail: `${confirmed} of ${joined} players confirmed` };
+    if (confirmed < joined) return { tone: 'forming', label: 'Roster full',
+      detail: `${joined - confirmed} still need${joined - confirmed === 1 ? 's' : ''} to confirm` };
+    return joined ? { tone: 'ready', label: 'Roster confirmed', detail: `All ${joined} players confirmed attendance` } : null;
+  }
+
+  function gameRosterStatusHtml(game) {
+    const status = gameRosterStatus(game);
+    return status ? `<span class="game-roster-status is-${status.tone}"><b>${esc(status.label)}</b><span>${esc(status.detail)}</span></span>` : '';
+  }
+
+  function playAgainRowHtml(game) {
+    return `<button type="button" class="play-again-row" data-play-again-game="${game.id}">
+      <span class="play-again-icon" aria-hidden="true">${uiIcon('refresh')}</span>
+      <span class="row-main"><b>Play with this group again</b><small>${esc(game.court?.name || 'Your last court')} · ${game.players.length} players</small></span>${uiIcon('chevron-right', 'chev')}
+    </button>`;
+  }
+
   function gameMatchReasons(game) {
     if (!state.me || game.is_joined || game.status !== 'upcoming' || game.spots_left <= 0) return [];
     const reasons = [];
     const [levelMin, levelMax] = gameLevelRange(game);
     const myLevel = normalizedGameLevel(state.me.skill_rating);
-    if (game.level_match === true || (
+    if ((game.level_match === true && (levelMin != null || levelMax != null)) || (
       myLevel != null && levelMin != null && levelMax != null
       && myLevel >= levelMin && myLevel <= levelMax
     )) reasons.push('skill');
@@ -15344,10 +15436,10 @@
     if (levelRangeLabel !== 'Any level') {
       levelTag += `<span class="tag" style="margin:0 0 0 6px">${uiIcon('sliders')} ${esc(levelRangeLabel)}</span>`;
     }
-    if (reasons.includes('skill')) {
+    if (!compact && reasons.includes('skill')) {
       levelTag += `<span class="tag live" style="margin:0 0 0 6px">${uiIcon('target')} Your level</span>`;
     }
-    if (reasons.includes('time')) {
+    if (!compact && reasons.includes('time')) {
       levelTag += `<span class="tag live" style="margin:0 0 0 6px">${uiIcon('clock')} Your usual time</span>`;
     }
     const host = game.players.find((p) => p.user_id === game.creator_id);
@@ -15449,6 +15541,11 @@
       }
     }
 
+    if (game.status === 'upcoming' && !game.is_instant && game.is_joined
+        && !game.is_creator && game.attendance_confirmation_due) {
+      action = `<button type="button" class="btn btn-primary btn-sm" data-game-attend="${game.id}">I’m coming</button><button type="button" class="btn btn-secondary btn-sm" data-open-game="${game.id}">Review game</button>`;
+    }
+
     const scheduledLabel = game.recurrence === 'weekly' && game.status === 'upcoming'
       ? `${new Date(game.scheduled_at).toLocaleDateString([], { weekday: 'long' })}s · ${new Date(game.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
       : `${fmtDateTime(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
@@ -15466,6 +15563,7 @@
       costLabel,
     ].filter(Boolean);
     const courtSummary = `${court.name || 'Game'}${!compact && court.city ? ` · ${court.city}` : ''}`;
+    const rosterStatus = gameRosterStatusHtml(game);
     return `
       <article class="card game-card" style="${cardStyle}">
         <button type="button" class="game-card-main" data-open-game="${game.id}" aria-label="Open ${esc(customTitle || defaultGameTitle)} at ${esc(courtSummary)}">
@@ -15485,16 +15583,7 @@
         </button>
         <div class="row game-card-footer">
           <div class="avatar-stack">${avatars}</div>
-          <span class="row-sub">${assembly ? esc(rallyCountsText(assembly)) : `${game.players.length}/${game.max_players} players${game.spots_left && game.status === 'upcoming' ? ` · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left` : ''}${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}`}${(() => {
-            if (!game.is_creator || game.is_instant || game.status !== 'upcoming') return '';
-            const confirmed = Number.isFinite(Number(game.attendance_confirmed_count))
-              ? Number(game.attendance_confirmed_count)
-              : game.players.filter((player) => player.attending).length;
-            const unconfirmed = Number.isFinite(Number(game.attendance_unconfirmed_count))
-              ? Number(game.attendance_unconfirmed_count)
-              : Math.max(0, game.players.length - confirmed);
-            return ` · Confirmed ${confirmed}${unconfirmed ? ` · Unconfirmed ${unconfirmed}` : ''}`;
-          })()}</span>
+          <div class="row-sub game-card-roster">${rosterStatus || (assembly ? esc(rallyCountsText(assembly)) : `${game.players.length}/${game.max_players} players`)}${game.waitlist_count ? `<span class="game-card-waiting">${game.waitlist_count} waiting</span>` : ''}</div>
           <div class="game-card-actions">${action}</div>
         </div>
       </article>`;
@@ -15525,6 +15614,21 @@
     rootEl.querySelectorAll('[data-open-game]').forEach((card) => makePressable(
       card, () => openDrillInFrom(rootEl, () => openGameScreen(Number(card.dataset.openGame))),
     ));
+    rootEl.querySelectorAll('[data-game-attend]').forEach((button) => button.addEventListener('click', async () => {
+      const reset = beginButtonAction(button, 'Confirming…');
+      if (!reset) return;
+      const card = button.closest('.game-card');
+      clearInlineActionError(card);
+      try {
+        await api(`/games/${button.dataset.gameAttend}/attend`, { method: 'POST' });
+        state.playGamesCache = null;
+        reset();
+        button.textContent = 'Confirmed';
+        button.disabled = true;
+        toast('Your spot is confirmed');
+        refresh();
+      } catch (error) { reset(); showInlineActionError(card, error.message); }
+    }));
     rootEl.querySelectorAll('[data-game-join]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
       const playNoun = b.dataset.playNoun === 'match' ? 'match'
@@ -16215,6 +16319,8 @@
       court: game.court ? { ...game.court } : null,
       gameType: game.game_type,
       maxPlayers: game.max_players,
+      durationMinutes: game.duration_minutes ?? 0,
+      courtNumber: game.court_number || '',
       preferredLevel: game.preferred_level || 'any',
       levelMin: game.level_min,
       levelMax: game.level_max,
@@ -16256,7 +16362,11 @@
       );
       options.offerSaveGroup = !savedGroup;
       options.saveGroupDefault = false;
-      const opened = openChildModal(fromModal, () => openNewGameModal(options));
+      if (!fromModal && (!button?.isConnected || state.tab !== 'play'
+          || state.playLane !== 'plans' || currentOverlayEntry())) { resetAction(); return; }
+      const opened = fromModal
+        ? openChildModal(fromModal, () => openNewGameModal(options))
+        : openNewGameModal(options);
       const planner = opened ? currentOverlayEntry()?.el : null;
       if (planner && planner !== fromModal) {
         planner._cleanupFns?.push(() => {
@@ -16800,19 +16910,20 @@
       : pulse ? `Free this hour at ${esc(pulse.courtName)}`
         : esc(state.areaLabel || state.me?.home_area || 'Choose how you can play');
     return `
-      <section class="rally-launch rally-launch-compact" aria-labelledby="play-now-title">
-        <div class="play-now-heading"><h3 id="play-now-title">Play now</h3><span>${status}</span></div>
-        ${pulse ? activePlayPulseBannerHtml(pulse) : ''}
-        <div class="play-now-quick-actions">
-          <button type="button" data-goto="instant-rally"><span aria-hidden="true">${uiIcon('map-pin')}</span><b>${here ? 'Play here' : 'At a court'}</b></button>
-          <button type="button" data-goto="on-my-way"><span aria-hidden="true">${uiIcon('clock')}</span><b>On my way</b></button>
-          <button type="button" data-goto="play-pulse"><span aria-hidden="true">${uiIcon('activity')}</span><b>Free this hour</b></button>
-        </div>
-        <div class="play-planning-links">
-          <button type="button" data-goto="new-game">${uiIcon('calendar')} Plan a game</button>
-          <button type="button" data-goto="ranked-match">${uiIcon('trophy')} Ranked match</button>
-        </div>
-      </section>`;
+      <section class="play-action-bar" aria-label="Create or start a game">
+        <button type="button" class="btn btn-primary" data-goto="new-game">${uiIcon('plus')} Create game</button>
+        <details class="play-now-options">
+          <summary>${uiIcon('zap')} Play now</summary>
+          <div class="play-now-quick-actions">
+            <p class="row-sub">${status}</p>
+            <button type="button" data-goto="instant-rally"><span aria-hidden="true">${uiIcon('map-pin')}</span><b>${here ? 'Play here' : 'I’m at a court'}</b></button>
+            <button type="button" data-goto="on-my-way"><span aria-hidden="true">${uiIcon('clock')}</span><b>I’m on my way</b></button>
+            <button type="button" data-goto="play-pulse"><span aria-hidden="true">${uiIcon('activity')}</span><b>I’m free this hour</b></button>
+            <button type="button" data-goto="ranked-match"><span aria-hidden="true">${uiIcon('trophy')}</span><b>Start a ranked match</b></button>
+          </div>
+        </details>
+      </section>
+      ${pulse ? activePlayPulseBannerHtml(pulse) : ''}`;
   }
 
   function playProgressCardHtml(progress) {
@@ -16917,14 +17028,16 @@
   }
 
   async function renderPlay({ reuseFresh = false, useCachedData = false } = {}) {
+    loadPlayPreferences();
     const seg = state.playSeg;
+    const discoveryKey = `${state.playWhen}:${state.playRadius}:${state.playLevelFilter}`;
     const liveEl = $('#play-content');
     if (document.getElementById(`play-tab-${seg}`)) liveEl.setAttribute('aria-labelledby', `play-tab-${seg}`);
     else {
       liveEl.removeAttribute('aria-labelledby');
       liveEl.setAttribute('aria-label', 'Play');
     }
-    const viewKey = `${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}`;
+    const viewKey = `${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}:${discoveryKey}`;
     if (reuseFresh && viewIsFresh(liveEl, viewKey)) return;
     const renderSeq = ++state.playRenderSeq;
     const hadUsableContent = beginViewRender(liveEl, viewKey, 5);
@@ -17155,18 +17268,19 @@
       }
 
       // --- Games: everything actionable + yours + friends + nearby, one scroll ---
-      let gameBundle = useCachedData && state.playGamesCache;
+      let gameBundle = useCachedData && state.playGamesCache?.discoveryKey === discoveryKey && state.playGamesCache;
       if (!gameBundle) {
         const selectedPlayLevel = normalizedGameLevel(state.playLevelFilter);
-        const levelQuery = selectedPlayLevel == null
-          ? '' : `&level=${encodeURIComponent(selectedPlayLevel)}`;
+        const levelQuery = (selectedPlayLevel == null
+          ? '' : `&level=${encodeURIComponent(selectedPlayLevel)}`) + playDiscoveryQuery();
+        const areaQuery = personalLoc ? `&lat=${loc.lat}&lng=${loc.lng}&radius=${state.playRadius}` : '';
         const homeUrl = personalLoc
-          ? `/play/home?lat=${loc.lat}&lng=${loc.lng}&radius=60${levelQuery}`
+          ? `/play/home?lat=${loc.lat}&lng=${loc.lng}&radius=${state.playRadius}${levelQuery}`
           : `/play/home${levelQuery ? `?${levelQuery.slice(1)}` : ''}`;
         const [homeResult, lookingResult] = await Promise.allSettled([
           api(homeUrl),
           personalLoc
-            ? api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=50`)
+            ? api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=${state.playRadius}`)
             : Promise.resolve(null),
         ]);
         let settled;
@@ -17181,9 +17295,9 @@
           // still use the legacy feeds while the aggregate route propagates.
           settled = await Promise.allSettled([
             api('/games?mine=1'),
-            api(`/games?friends=1${levelQuery}`),
+            api(`/games?friends=1${areaQuery}${levelQuery}`),
             personalLoc
-              ? api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60${levelQuery}`)
+              ? api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=${state.playRadius}${levelQuery}`)
               : Promise.resolve({ items: [] }),
           ]);
         }
@@ -17194,6 +17308,8 @@
         const friendsFeed = feedResult(settled[1], 'Friends’ games could not load.');
         const nearbyFeed = feedResult(settled[2], 'Nearby games could not load.');
         gameBundle = {
+          discoveryKey,
+          recent: homeResult.status === 'fulfilled' ? homeResult.value.recent?.items || [] : [],
           mine: mineFeed.data, friends: friendsFeed.data, nearby: nearbyFeed.data,
           errors: { mine: mineFeed.error, friends: friendsFeed.error, nearby: nearbyFeed.error },
           looking: lookingResult.status === 'fulfilled' ? lookingResult.value : null,
@@ -17212,7 +17328,7 @@
         };
       }
       const {
-        mine, friends, nearby, looking = null, progress = null, competitions = [],
+        mine, friends, nearby, looking = null, progress = null, competitions = [], recent = [],
         errors: feedErrors = {},
       } = gameBundle;
       const nowMs = Date.now();
@@ -17222,10 +17338,13 @@
             ? (instantRallyScorePending(g) || instantSessionWrapPending(g))
             : new Date(g.scheduled_at).getTime() <= nowMs));
       const toConfirm = mine.items.filter((g) => g.awaiting_your_confirmation);
+      const toReconfirm = mine.items.filter((g) => g.status === 'upcoming' && !g.is_instant
+        && g.attendance_confirmation_due && !g.is_creator
+        && new Date(g.scheduled_at).getTime() > nowMs);
       const waiting = mine.items.filter((g) =>
         g.status === 'awaiting_confirmation' && !g.awaiting_your_confirmation);
       const upcoming = mine.items.filter((g) =>
-        !toScore.includes(g) && !toConfirm.includes(g) && !waiting.includes(g)
+        !toScore.includes(g) && !toConfirm.includes(g) && !toReconfirm.includes(g) && !waiting.includes(g)
           && !instantRallyClosed(g));
       const mineIds = new Set(mine.items.map((g) => g.id));
       const friendsGames = (friends.items || []).filter((g) =>
@@ -17245,16 +17364,13 @@
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
 
       let html = rallyLauncherHtml();
-      html += playerProfileSetupCardHtml();
-      html += playNearbyNowHtml(looking);
-      html += playProgressCardHtml(progress);
-      if (!personalLoc) {
-        html += `<section class="play-area-setup" role="status">
-          <span class="play-area-setup-icon" aria-hidden="true">${uiIcon('map-pin')}</span>
-          <span class="row-main"><b>Set your area for nearby play</b><small>Choose a city or use your location before Third Shot searches for local courts, games, and players.</small></span>
-          <button type="button" class="btn btn-primary" data-set-play-area>Set area</button>
-        </section>`;
-      }
+      const planCount = [...toConfirm, ...toReconfirm, ...toScore, ...waiting, ...upcoming].length;
+      const attentionCount = toConfirm.length + toScore.length + toReconfirm.length;
+      html += `<div class="segmented play-lanes" role="tablist" aria-label="Games and plans">
+        <button type="button" role="tab" id="play-lane-find" data-play-lane="find" aria-controls="play-find-panel" aria-selected="true" class="active">Find games</button>
+        <button type="button" role="tab" id="play-lane-plans" data-play-lane="plans" aria-controls="play-plans-panel" aria-selected="false">My plans${planCount ? ` · ${planCount}` : ''}${attentionCount ? ` <span class="plan-attention">${attentionCount} to do</span>` : ''}</button>
+      </div>`;
+      html += '<section id="play-plans-panel" role="tabpanel" aria-labelledby="play-lane-plans" hidden>';
 
       const playFeedNoticeHtml = (title, detail) => `<section class="play-feed-state" role="status">
         <span aria-hidden="true">${uiIcon('activity')}</span>
@@ -17268,12 +17384,13 @@
         );
       }
 
-      const priorityItems = [...toConfirm, ...toScore, ...waiting, ...upcoming];
+      const priorityItems = [...toConfirm, ...toReconfirm, ...toScore, ...waiting, ...upcoming];
       let displayedNextGameId = null;
       if (priorityItems.length) {
         const next = priorityItems[0];
         displayedNextGameId = next.id;
         const nextLabel = toConfirm.includes(next) ? 'Next up · Confirm the score'
+          : toReconfirm.includes(next) ? 'Next up · Confirm your spot'
           : toScore.includes(next) ? 'Next up · Finish recent play'
             : waiting.includes(next) ? 'Next up · Waiting on opponents'
               : 'Next up';
@@ -17289,6 +17406,28 @@
         new Set(displayedNextGameId ? [Number(displayedNextGameId)] : []),
         competitions,
       );
+      if (!planCount && !competitions.length && !feedErrors.mine) html += `<div class="empty-state flow-empty"><span class="empty-state-icon" aria-hidden="true">${uiIcon('calendar')}</span><b>Your next game belongs here</b><p>Join a nearby game or plan one with your friends.</p><button type="button" class="btn btn-primary" data-find-play>Find a game</button></div>`;
+      html += playerProfileSetupCardHtml();
+      html += `<button class="btn btn-secondary btn-block" id="pl-log-game" style="margin-top:14px">${uiIcon('target')} Log a game you already played</button>`;
+      const playAgainGame = recent.find((game) => game.status === 'completed' && game.is_joined && game.players?.length >= 2);
+      if (playAgainGame) html += playAgainRowHtml(playAgainGame);
+      html += '</section><section id="play-find-panel" role="tabpanel" aria-labelledby="play-lane-find">';
+      html += `<div class="play-time-filters" role="group" aria-label="When can you play?">
+        ${[['any', 'Any time'], ['now', 'Now'], ['today', 'Today'], ['week', 'Next 7 days']].map(([value, label]) => `<button type="button" data-play-when="${value}" aria-pressed="${state.playWhen === value}" class="${state.playWhen === value ? 'active' : ''}">${label}</button>`).join('')}
+      </div>
+      ${state.playWhen === 'now' ? '<p class="play-discovery-context">Playing now or starting within an hour.</p>' : ''}`;
+
+      const activePlayLevel = normalizedGameLevel(state.playLevelFilter);
+      if (personalLoc) html += `<div class="play-discovery-controls-row" role="group" aria-label="Game search preferences"><div class="play-discovery-controls"><label class="play-radius-filter"><span class="sr-only">Travel radius in miles</span><select id="play-radius-filter" data-select-title="How far will you travel?">${[10, 25, 50, 100].map((radius) => `<option value="${radius}" ${state.playRadius === radius ? 'selected' : ''}>Within ${radius} mi</option>`).join('')}</select></label><label class="play-level-filter"><span class="sr-only">Filter play by self-rating</span><select id="play-level-filter" data-select-title="Filter play by self-rating" data-select-prefix="Level"><option value="" ${activePlayLevel == null ? 'selected' : ''}>Any level</option>${SELF_RATING_CHOICES.map(([value]) => `<option value="${value}" ${value === activePlayLevel ? 'selected' : ''}>${value.toFixed(1)}</option>`).join('')}</select></label></div></div>`;
+
+      if (!personalLoc) {
+        html += `<section class="play-area-setup" role="status">
+          <span class="play-area-setup-icon" aria-hidden="true">${uiIcon('map-pin')}</span>
+          <span class="row-main"><b>Set your area for nearby play</b><small>Choose a city or use your location before Third Shot searches for local courts, games, and players.</small></span>
+          <button type="button" class="btn btn-primary" data-set-play-area>Set area</button>
+        </section>`;
+      }
+      html += playNearbyNowHtml(looking);
       const sortedFriendGames = [...friendsGames]
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
       if (sortedFriendGames.length) {
@@ -17307,15 +17446,6 @@
       // Weekly recurring play is a first-class session rail, rather than being
       // mixed into a capped nearby-games feed. Your own occurrences remain in
       // the agenda above, with their per-date RSVP state.
-      if (personalLoc) html += `<section class="play-regular-sessions" aria-labelledby="play-regular-sessions-title">
-        <div class="section-heading-row">
-          <div><div class="section-label" id="play-regular-sessions-title">Regular group sessions</div><p>Weekly player-organized sessions near you with an RSVP list for each date.</p></div>
-          <button type="button" class="btn btn-secondary btn-sm" data-host-play-session>${uiIcon('plus')} Host</button>
-        </div>
-        ${weeklySessions.length
-          ? weeklySessions.map((game) => gameCardHtml(game, { compact: true })).join('')
-          : '<div class="empty-state play-regular-sessions-empty">No regular sessions nearby yet. Host the first one at your court.</div>'}
-      </section>`;
       const nearbyOneOff = nearbyOpen.filter((g) => !isWeekly(g));
       // Best skill/time fits get pulled out of the nearby list into their own rail.
       const picked = nearbyOneOff
@@ -17334,8 +17464,7 @@
       const discoveryFeedFailed = !!feedErrors.nearby;
       const discoveryFailureTitle = 'Nearby play did not load';
       const discoveryFailureDetail = 'You can still explore courts, invite friends, or retry these listings.';
-      const activePlayLevel = normalizedGameLevel(state.playLevelFilter);
-      if (personalLoc) html += `<div class="section-heading-row play-discovery-heading"><div class="section-label">Play sessions and ranked matches near you</div><label class="play-level-filter"><span class="sr-only">Filter play by self-rating</span><select id="play-level-filter" data-select-title="Filter play by self-rating" data-select-prefix="Level"><option value="" ${activePlayLevel == null ? 'selected' : ''}>Any level</option>${SELF_RATING_CHOICES.map(([value]) => `<option value="${value}" ${value === activePlayLevel ? 'selected' : ''}>${value.toFixed(1)}</option>`).join('')}</select></label></div>`;
+      if (personalLoc) html += '<div class="section-label">Nearby games</div>';
       if (personalLoc && featuredDiscovery.length) {
         html += featuredDiscovery.map((game) => gameCardHtml(game, { compact: true })).join('');
         if (discoveryFeedFailed) html += playFeedNoticeHtml(discoveryFailureTitle, discoveryFailureDetail);
@@ -17346,7 +17475,11 @@
           <button type="button" class="btn btn-secondary btn-block" data-play-feed-retry>Retry play listings</button>
         </div>`;
       } else if (personalLoc) {
-        html += `<div class="empty-state play-discovery-empty" style="padding:18px">No pickup games or ranked matches around you right now.<div class="play-empty-actions"><button class="btn btn-primary" data-goto="courts-list">${uiIcon('map-pin')} Explore nearby courts</button><button class="btn btn-secondary" data-invite-share>${uiIcon('mail')} Invite friends</button></div></div>`;
+        const emptyDiscoveryText = sortedFriendGames.length || weeklySessions.length
+          ? 'No other nearby games match these choices yet.'
+          : state.playWhen !== 'any' || activePlayLevel != null
+            ? 'No games match these choices yet.' : 'No open games nearby yet.';
+        html += `<div class="empty-state play-discovery-empty" style="padding:18px">${emptyDiscoveryText} Try another time, explore a court, or create a game for others to join.<div class="play-empty-actions">${state.playWhen !== 'any' || activePlayLevel != null ? '<button type="button" class="btn btn-primary" data-reset-play-filters>Show any time &amp; level</button>' : ''}<button class="btn btn-secondary" data-goto="courts-list">${uiIcon('map-pin')} Explore nearby courts</button></div></div>`;
       }
       const moreDiscovery = discovery.slice(3);
       if (personalLoc && moreDiscovery.length) {
@@ -17357,11 +17490,40 @@
           </div>
         </details>`;
       }
-      // Capture spontaneous pickup games that never got scheduled here.
-      html += `<button class="btn btn-secondary btn-block" id="pl-log-game" style="margin-top:14px">${uiIcon('target')} Log a game you already played</button>`;
+      if (personalLoc && weeklySessions.length) html += `<section class="play-regular-sessions" aria-labelledby="play-regular-sessions-title">
+        <div class="section-heading-row">
+          <div><div class="section-label" id="play-regular-sessions-title">Regular group sessions</div><p>Weekly player-organized sessions near you with an RSVP list for each date.</p></div>
+          <button type="button" class="btn btn-secondary btn-sm" data-host-play-session>${uiIcon('plus')} Host</button>
+        </div>
+        ${weeklySessions.length
+          ? weeklySessions.map((game) => gameCardHtml(game, { compact: true })).join('')
+          : '<div class="empty-state play-regular-sessions-empty">No regular sessions nearby yet. Host the first one at your court.</div>'}
+      </section>`;
+      html += '</section>';
 
       if (state.playSeg !== seg) return; // a newer segment render owns the panel
       el.innerHTML = html;
+      const selectPlayLane = (lane, { focus = false } = {}) => {
+        const laneRoot = el.childElementCount ? el : liveEl;
+        state.playLane = lane === 'plans' ? 'plans' : 'find';
+        laneRoot.querySelectorAll('[data-play-lane]').forEach((button) => {
+          const active = button.dataset.playLane === state.playLane;
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-selected', String(active));
+          button.tabIndex = active ? 0 : -1;
+        });
+        laneRoot.querySelector('#play-find-panel').hidden = state.playLane !== 'find';
+        laneRoot.querySelector('#play-plans-panel').hidden = state.playLane !== 'plans';
+        if (focus) {
+          const target = laneRoot.querySelector(`#play-lane-${state.playLane}`);
+          target.focus({ preventScroll: true });
+          target.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        }
+      };
+      el.querySelectorAll('[data-play-lane]').forEach((button) => button.addEventListener('click', () => selectPlayLane(button.dataset.playLane)));
+      el.querySelectorAll('[data-find-play]').forEach((button) => button.addEventListener('click', () => selectPlayLane('find', { focus: true })));
+      selectPlayLane(state.playLane);
+      setupTablistKeyboard(el.querySelector('.play-lanes'));
       el.querySelector('[data-complete-player-setup]')?.addEventListener('click', async (event) => {
         const button = event.currentTarget;
         const progress = playerProfileSetupProgress();
@@ -17383,8 +17545,23 @@
         button.disabled = true;
         renderPlay();
       }));
+      const changeDiscovery = (change) => {
+        Object.assign(state, change);
+        savePlayPreferences();
+        state.playGamesCache = null;
+        renderPlay();
+      };
+      el.querySelectorAll('[data-play-when]').forEach((button) => button.addEventListener('click', () => {
+        if (state.playWhen !== button.dataset.playWhen) changeDiscovery({ playWhen: button.dataset.playWhen });
+      }));
+      el.querySelector('#play-radius-filter')?.addEventListener('change', (event) => changeDiscovery({ playRadius: Number(event.currentTarget.value) }));
+      el.querySelector('[data-reset-play-filters]')?.addEventListener('click', () => changeDiscovery({ playWhen: 'any', playLevelFilter: '' }));
+      el.querySelector('[data-play-again-game]')?.addEventListener('click', (event) => {
+        if (playAgainGame) openPostGamePlanner(playAgainGame, null, event.currentTarget);
+      });
       el.querySelector('#play-level-filter')?.addEventListener('change', (event) => {
         state.playLevelFilter = event.currentTarget.value;
+        savePlayPreferences();
         state.playGamesCache = null;
         renderPlay();
       });
@@ -17476,7 +17653,7 @@
     if (!fab) return;
     const label = state.playSeg === 'scores' ? 'Start a ranked match'
       : state.playSeg === 'brackets' ? 'Create a competition' : 'Plan a play session';
-    fab.classList.remove('hidden');
+    fab.classList.toggle('hidden', state.playSeg === 'games');
     fab.setAttribute('aria-label', label);
     fab.title = label;
   }
@@ -18420,8 +18597,9 @@
       ? 'Choose how many people can join this casual group.'
       : rankedMatchMode && setupCarried ? 'Your ranked setup is carried over. Change it only if you need to.'
         : rankedMatchMode ? 'Choose singles or doubles for this ranked match.'
-        : 'Choose the type and format up front.';
+        : 'Choose casual or ranked, then set the group size.';
     const plannerSetupControlsHtml = `
+      <div ${lockGameType || crewId ? 'hidden' : ''}>
       ${gameChoiceCardsHtml({
         id: 'ng-type', name: 'ng-type', legend: 'Game type', value: defaultType,
         options: [
@@ -18429,6 +18607,7 @@
           { value: 'ranked', icon: uiIcon('trophy'), label: 'Ranked', copy: 'Changes match rating', tone: 'ranked' },
         ].filter((option) => !(lockGameType || crewId) || option.value === defaultType),
       })}
+      </div>
       ${gameCapacityChoicesHtml('ng', presetMaxPlayers)}
       <input type="hidden" id="ng-max" value="${presetMaxPlayers}" />
       ${crewId ? `<p class="planner-game-setup-note" id="ng-crew-capacity">${initialInviteIds.size + 1} group player${initialInviteIds.size === 0 ? '' : 's'} selected. Capacity cannot be lower than the selected players.</p>` : ''}`;
@@ -18439,18 +18618,7 @@
       ${plannerCrewHtml}
 
       <form id="ng-form" novalidate>
-      <section class="planner-game-setup" aria-labelledby="ng-game-setup-title">
-        <div class="planner-game-setup-head">
-          <div><b id="ng-game-setup-title">${plannerSetupTitle}</b><span>${plannerSetupCopy}</span></div>
-        </div>
-        ${setupCarried ? `
-          <div class="planner-carried-setup" id="ng-carried-setup">
-            <span class="row-main"><b id="ng-carried-setup-label">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${presetMaxPlayers === 2 ? 'Singles' : 'Doubles'}</b><small>Already selected</small></span>
-            <button type="button" class="btn btn-secondary btn-sm" id="ng-change-setup" aria-expanded="false" aria-controls="ng-setup-controls">Change</button>
-          </div>
-          <div class="hidden" id="ng-setup-controls">${plannerSetupControlsHtml}</div>`
-          : plannerSetupControlsHtml}
-      </section>
+
 
       <div class="court-selected hidden" id="ng-answer-where" role="group" aria-label="Where">
         <div class="row-main"><div class="row-title"><span class="row-sub">Where</span> · <span id="ng-answer-where-value">${court ? esc(court.name) : 'Choose a court'}</span></div></div>
@@ -18487,6 +18655,15 @@
         </div>
         <div id="ng-later-fields">
           <div class="quick-times" id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === 'ranked' ? 'match' : 'play session'} times" style="margin-bottom:8px">${smartTimeChips}</div>
+          <details class="flow-disclosure planner-time-options" id="ng-time-options" ${restoredDraft?.timeKind === 'custom' ? 'open' : ''}>
+          <summary>Choose another time <span>Day, time &amp; date</span></summary>
+          <div class="form-field planner-exact-time" id="ng-other-time">
+            <label for="ng-when">Date and time</label>
+            <input type="datetime-local" id="ng-when" value="${plannerDateTimeValue(initialExactTime)}" min="${plannerDateTimeValue(plannerTimeMinimum)}" aria-label="${defaultType === 'ranked' ? 'Match' : 'Play session'} date and time" />
+            <small class="field-help">Choose the exact time that works for you.</small>
+          </div>
+          <details class="planner-slot-browser" id="ng-slot-browser">
+            <summary>Browse half-hour times</summary>
           <fieldset class="game-choice-field planner-day-time-picker">
             <legend>Choose a day and time</legend>
             <div class="planner-day-strip" id="ng-day-strip" role="radiogroup" aria-label="Play date">
@@ -18496,11 +18673,8 @@
               ${timePresets.map((clock) => `<button type="button" role="radio" data-planner-clock="${clock}" aria-checked="${clock === selHour}" class="${clock === selHour ? 'active' : ''}">${timeLabel(clock)}</button>`).join('')}
             </div>
           </fieldset>
-          <div class="form-field planner-exact-time" id="ng-other-time">
-            <label for="ng-when">Or pick another date and time</label>
-            <input type="datetime-local" id="ng-when" value="${plannerDateTimeValue(initialExactTime)}" min="${plannerDateTimeValue(plannerTimeMinimum)}" aria-label="${defaultType === 'ranked' ? 'Match' : 'Play session'} date and time" />
-            <small class="field-help">Choose any date and time; 30-minute times are supported.</small>
-          </div>
+          </details>
+          </details>
           <div id="ng-busy-hint" class="row-sub" style="margin-bottom:4px"></div>
           <fieldset class="game-choice-field planner-duration" id="ng-duration-choices">
             <legend>How long?</legend>
@@ -18508,8 +18682,11 @@
               ${[60, 90, 120].map((minutes) => `<button type="button" data-duration="${minutes}" class="${presetDurationMinutes === minutes ? 'active' : ''}" aria-pressed="${presetDurationMinutes === minutes}">${minutes} min</button>`).join('')}
               <button type="button" data-duration="" class="${presetDurationMinutes == null ? 'active' : ''}" aria-pressed="${presetDurationMinutes == null}">No end time</button>
             </div>
-            <label class="sr-only" for="ng-duration">Custom duration in minutes</label>
-            <input type="number" id="ng-duration" min="15" max="720" step="15" inputmode="numeric" value="${presetDurationMinutes ?? ''}" placeholder="Custom minutes" aria-describedby="ng-end-preview" />
+            <details class="planner-custom-duration" id="ng-custom-duration" ${presetDurationMinutes != null && ![60, 90, 120].includes(presetDurationMinutes) ? 'open' : ''}>
+              <summary>Custom duration</summary>
+              <label for="ng-duration">Minutes</label>
+              <input type="number" id="ng-duration" min="15" max="720" step="15" inputmode="numeric" value="${presetDurationMinutes ?? ''}" placeholder="Custom minutes" aria-describedby="ng-end-preview" />
+            </details>
             <small class="field-help" id="ng-end-preview"></small>
           </fieldset>
           <label class="row" id="ng-recurring-row" style="margin-bottom:14px;cursor:pointer;gap:10px">
@@ -18542,6 +18719,17 @@
           <span class="planner-step-num">3</span>
           <div><div class="planner-step-title" id="planner-who-title">${crewId ? 'Which group players are joining?' : initialClubId ? 'Who can join this community session?' : 'Who can join?'}</div><div class="planner-step-sub" id="planner-who-sub">${crewId ? 'Accepted members start selected. Deselect anyone who is sitting this session out, then choose who can fill extra spots.' : initialClubId ? 'Community sessions stay open so every member can see and join them.' : 'Keep it open, share with friends, or invite specific players.'}</div></div>
         </div>
+      <section class="planner-game-setup" aria-labelledby="ng-game-setup-title">
+        <div class="planner-game-setup-head"><b id="ng-game-setup-title">${plannerSetupTitle}</b></div>
+        <div class="planner-carried-setup" id="ng-carried-setup">
+          <span class="row-main"><b id="ng-carried-setup-label">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`}</b><small>${lockGameType || crewId ? 'Choose your group size' : 'Type and group size'}</small></span>
+          <button type="button" class="btn btn-secondary btn-sm" id="ng-change-setup" aria-expanded="false" aria-controls="ng-setup-controls">Change</button>
+        </div>
+        <div class="hidden" id="ng-setup-controls">
+          <p class="planner-game-setup-note">${plannerSetupCopy}</p>
+          ${plannerSetupControlsHtml}
+        </div>
+      </section>
         <div class="type-cards vis-cards" id="ng-vis" role="group" aria-label="Who can join">
           ${crewId ? `
             <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('lock')}</span><b>Group only</b><small>Selected players</small></button>
@@ -18556,6 +18744,8 @@
             ? 'Friends couldn’t load. Reload the setup choices, or choose Anyone nearby.'
             : 'Add friends first to use My friends. Anyone nearby is selected for now.'}
         </div>
+        <details class="flow-disclosure planner-invitations" id="ng-invitations" ${crewId || initialVisibility === 'private' || hasPresetInvites ? 'open' : ''}>
+        <summary>${crewId ? 'Choose group players' : 'Invite specific players'} <span>${crewId || initialVisibility === 'private' ? 'Choose who joins' : 'Optional'}</span></summary>
         <div id="ng-friends-wrap" style="margin-top:10px">
           ${invitePeople.length
             ? `<label for="ng-invite-search">${crewId ? 'Group players' : 'Direct invitations'} <span class="row-sub">(${crewId ? 'choose at least one' : 'optional unless invite only'})</span></label>
@@ -18568,6 +18758,7 @@
           <button type="button" class="btn-link planner-invite-link" id="ng-copy-invite-link">${uiIcon('link')} Invite by link</button>
           <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">${hasPresetInvites ? `${initialInviteIds.size} selected for a direct invitation.` : 'Select people to ping directly after scheduling.'}</p>
         </div>
+        </details>
         ${offerSaveGroup && sourceGameId && !crewId ? `<div class="planner-save-group">
           <label>
             <input type="checkbox" id="ng-save-group" ${saveGroupDefault ? 'checked' : ''} />
@@ -18578,6 +18769,23 @@
             <input type="text" id="ng-save-group-name" maxlength="80" value="${esc(presetSaveGroupName)}" autocomplete="off" />
           </div>
         </div>` : ''}
+        ${myClubs.length && !crewId ? `
+        <details class="flow-disclosure planner-club-options" ${initialClubId ? 'open' : ''}>
+        <summary>Post to a community <span>Optional</span></summary>
+        <div class="form-field planner-club-host">
+          <label id="ng-club-label">Choose a community</label>
+          <div class="quick-times" id="ng-club" role="group" aria-labelledby="ng-club-label" aria-describedby="ng-club-hint">
+            <button type="button" data-club-id="" class="${initialClubId ? '' : 'active'}" aria-pressed="${!initialClubId}">Just me</button>
+            ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}" class="${Number(cl.id) === initialClubId ? 'active' : ''}" aria-pressed="${Number(cl.id) === initialClubId}">${uiIcon('building')}<span>${esc(cl.name)}</span></button>`).join('')}
+          </div>
+          <div class="row-sub" id="ng-club-hint" style="margin-top:6px">A community post lets every member see and join this session.</div>
+        </div></details>` : ''}
+
+      </section>
+
+      <details class="planner-advanced hidden" id="ng-advanced">
+        <summary><span>More options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${crewId ? `${initialInviteIds.size + 1} selected group players` : (presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`)} · ${gameLevelRangeLabel({ levelMin: presetLevelMin, levelMax: presetLevelMax })}</span></summary>
+        <div class="planner-advanced-body">
         <fieldset class="game-choice-field" id="ng-level">
           <legend>Self-rating range <span class="row-sub">(a matching hint, not a gate)</span></legend>
           <div class="form-grid">
@@ -18586,24 +18794,10 @@
           </div>
           <small class="field-help">Leave both at Any to welcome every level.</small>
         </fieldset>
-        ${myClubs.length && !crewId ? `
-        <div class="form-field planner-club-host">
-          <label id="ng-club-label">Post this to a club? <span class="row-sub">(optional)</span></label>
-          <div class="quick-times" id="ng-club" role="group" aria-labelledby="ng-club-label" aria-describedby="ng-club-hint">
-            <button type="button" data-club-id="" class="${initialClubId ? '' : 'active'}" aria-pressed="${!initialClubId}">Just me</button>
-            ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}" class="${Number(cl.id) === initialClubId ? 'active' : ''}" aria-pressed="${Number(cl.id) === initialClubId}">${uiIcon('building')}<span>${esc(cl.name)}</span></button>`).join('')}
-          </div>
-          <div class="row-sub" id="ng-club-hint" style="margin-top:6px">A club post lets every member see and join this session.</div>
-        </div>` : ''}
         <div class="form-field planner-note-field">
           <label for="ng-notes">Note <span class="row-sub">(optional)</span></label>
           <input type="text" id="ng-notes" maxlength="500" placeholder="e.g. All levels welcome!" />
         </div>
-      </section>
-
-      <details class="planner-advanced hidden" id="ng-advanced">
-        <summary><span>More options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${crewId ? `${initialInviteIds.size + 1} selected group players` : (presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`)} · ${gameLevelRangeLabel({ levelMin: presetLevelMin, levelMax: presetLevelMax })}</span></summary>
-        <div class="planner-advanced-body">
           <div class="form-field">
             <label for="ng-title">Title <span class="row-sub">(optional)</span></label>
             <input type="text" id="ng-title" maxlength="120" value="${esc(presetTitle)}" placeholder="e.g. Saturday morning round robin" />
@@ -19241,15 +19435,19 @@
         gameType === 'ranked' ? 'Ranked match' : 'Play session', size, timing, level, repeat,
       ].filter(Boolean).join(' · ');
       const carriedLabel = modal.querySelector('#ng-carried-setup-label');
-      if (carriedLabel) carriedLabel.textContent = `${gameType === 'ranked' ? 'Ranked' : 'Casual'} · ${players === 2 ? 'Singles' : 'Doubles'}`;
+      if (carriedLabel) carriedLabel.textContent = `${gameType === 'ranked' ? 'Ranked' : 'Casual'} · ${players === 2 ? 'Singles' : players === 4 ? 'Doubles' : `${players} players`}`;
     };
-    modal.querySelector('#ng-change-setup')?.addEventListener('click', (event) => {
+    const setPlannerSetupExpanded = (expanded, { focus = false } = {}) => {
       const controls = modal.querySelector('#ng-setup-controls');
-      const expanded = controls.classList.contains('hidden');
+      const button = modal.querySelector('#ng-change-setup');
       controls.classList.toggle('hidden', !expanded);
-      event.currentTarget.setAttribute('aria-expanded', String(expanded));
-      event.currentTarget.textContent = expanded ? 'Done' : 'Change';
-      if (expanded) controls.querySelector('input:not([disabled])')?.focus({ preventScroll: true });
+      button.setAttribute('aria-expanded', String(expanded));
+      button.textContent = expanded ? 'Done' : 'Change';
+      if (expanded && focus) [...controls.querySelectorAll('input:not([disabled])')]
+        .find((input) => input.getClientRects().length)?.focus({ preventScroll: true });
+    };
+    modal.querySelector('#ng-change-setup').addEventListener('click', () => {
+      setPlannerSetupExpanded(modal.querySelector('#ng-setup-controls').classList.contains('hidden'), { focus: true });
     });
     modal.querySelector('#ng-capacity').addEventListener('change', (e) => {
       const input = e.target.closest('input[name="ng-capacity"]');
@@ -19340,6 +19538,7 @@
         else button.removeAttribute('title');
       });
       friendsWrap.classList.remove('hidden');
+      if (crewId || visibility === 'private') modal.querySelector('#ng-invitations').open = true;
       friendsEmpty?.classList.toggle('hidden', !!crewId || friends.length > 0);
       syncCapacityChoices();
       updateOptionsSummary();
@@ -19568,6 +19767,7 @@
     });
     modal.querySelector('#ng-save-group-name')?.addEventListener('input', markPlannerDirty);
     modal.querySelector('#ng-duration').addEventListener('input', () => {
+      modal.querySelector('#ng-duration-warning')?.remove();
       updatePlannerEndPreview();
       updateOptionsSummary();
       const duration = modal.querySelector('#ng-duration').value;
@@ -19721,6 +19921,7 @@
         const title = visible.querySelector('.planner-step-title');
         title?.setAttribute('tabindex', '-1');
         title?.focus({ preventScroll: true });
+        plannerBox.scrollTop = 0;
       }
     };
     const chosenPlannerTime = () => {
@@ -19749,7 +19950,17 @@
       const selectedTime = chosenPlannerTime();
       if (!selectedTime || !Number.isFinite(selectedTime.getTime()) || selectedTime.getTime() <= Date.now()) {
         setPlannerWarning('ng-time-warning', 'Choose a future time.');
+        if (customMode) modal.querySelector('#ng-time-options').open = true;
         (customMode ? modal.querySelector('#ng-when') : modal.querySelector('#ng-smart-times button.active'))?.focus();
+        return;
+      }
+      const durationInput = modal.querySelector('#ng-duration');
+      const durationText = durationInput.value.trim();
+      const duration = Number(durationText);
+      if (durationText && (!Number.isInteger(duration) || duration < 15 || duration > 720)) {
+        modal.querySelector('#ng-custom-duration').open = true;
+        setPlannerWarning('ng-duration-warning', 'Use 15–720 whole minutes, or choose No end time.', modal.querySelector('#ng-duration-choices'));
+        durationInput.focus();
         return;
       }
       plannerStep = 'who';
@@ -19900,6 +20111,12 @@
         if (targetPlannerStep && targetPlannerStep !== plannerStep) {
           plannerStep = targetPlannerStep;
           syncPlannerStep();
+        }
+        if (target.closest('#ng-setup-controls')) setPlannerSetupExpanded(true);
+        let disclosure = target.closest('details');
+        while (disclosure) {
+          disclosure.open = true;
+          disclosure = disclosure.parentElement?.closest('details');
         }
         plannerSubmitErrorTarget = target;
         const focusTarget = target._appSelectButton
@@ -24428,8 +24645,9 @@
   // ---------- Chat & Friends ----------
   function configureCommunityLaneTabs() {
     const labels = [
-      ['#chat-tab-chats', 'Chats'],
-      ['#chat-tab-friends', 'People'],
+      ['#chat-tab-chats', 'Messages'],
+      ['#chat-tab-groups', 'Groups'],
+      ['#chat-tab-friends', 'Players'],
     ];
     labels.forEach(([selector, label]) => {
       const button = $(selector);
@@ -24765,7 +24983,7 @@
 
   function universalInboxHtml(
     data, rooms, clubs, competitions, crews = { items: [], invitations: [] },
-    { filter = 'all' } = {},
+    { filter = 'all', groupPage = false } = {},
   ) {
     const items = [];
     (data.items || []).forEach((chat) => items.push({
@@ -24851,9 +25069,9 @@
     const invitations = pendingCrewInvitationEntries(crews);
     const filterLabels = [
       ['all', 'All'], ['direct', 'Direct'], ['games', 'Games'],
-      ['groups', 'Groups'], ['courts', 'Courts'],
+      ['courts', 'Courts'],
     ];
-    let html = `<div class="chat-kind-filters" role="group" aria-label="Filter chats">
+    let html = groupPage ? '' : `<div class="chat-kind-filters" role="group" aria-label="Filter chats">
       ${filterLabels.map(([value, label]) => `<button type="button" data-chat-filter="${value}" class="${selectedFilter === value ? 'active' : ''}" aria-pressed="${selectedFilter === value}">${label}</button>`).join('')}
     </div>`;
     const unreadConversationCount = items.reduce(
@@ -24904,13 +25122,18 @@
           <button class="btn btn-secondary" id="group-new">${uiIcon('plus')} Create a group</button>
         </div>
       </div>`;
-      html += '<div class="section-label" style="margin-top:4px">Private groups</div>';
-      html += crewItems.length ? crewItems.map((item) => rowHtml(item)).join('')
-        : '<div class="empty-state community-lane-empty" style="padding:14px">Bring friends together in an invite-only group for the next session.</div>';
-      html += '<div class="section-label">Your community groups</div>';
-      html += clubItems.length ? clubItems.map((item) => rowHtml(item)).join('')
-        : '<div class="empty-state community-lane-empty" style="padding:14px">Join a public court community or start one for local players.</div>';
-      if (conversationItems.length) {
+      if (crewItems.length) {
+        html += '<div class="section-label" style="margin-top:4px">Private groups</div>';
+        html += crewItems.map((item) => rowHtml(item)).join('');
+      }
+      if (clubItems.length) {
+        html += '<div class="section-label">Your community groups</div>';
+        html += clubItems.map((item) => rowHtml(item)).join('');
+      }
+      if (!crewItems.length && !clubItems.length && !invitations.length) {
+        html += '<div class="empty-state community-lane-empty">Your groups will appear here. Find local players or bring your friends together.</div>';
+      }
+      if (!groupPage && conversationItems.length) {
         html += '<div class="section-label">Related conversations</div>';
         html += conversationItems.map((item) => rowHtml(item)).join('');
       }
@@ -24967,7 +25190,7 @@
         // the inbox once the player returns, rather than multiplying /inbox
         // traffic underneath the still-open conversation.
         queueMicrotask(() => {
-          if (state.tab === 'chat' && state.chatSeg === 'chats') renderChat();
+          if (state.tab === 'chat' && ['chats', 'groups'].includes(state.chatSeg)) renderChat();
         });
       });
     }));
@@ -25130,7 +25353,7 @@
       return true;
     };
     try {
-      if (seg === 'chats') {
+      if (seg === 'chats' || seg === 'groups') {
         const inbox = await api('/inbox');
         const data = inbox.direct || { items: [] };
         const rooms = inbox.courts || { items: [] };
@@ -25147,7 +25370,8 @@
         }[key] || key));
         el.innerHTML = communityPartialLoadHtml(failedLabels)
           + universalInboxHtml(data, rooms, clubs, competitions, crews, {
-            filter: state.chatConversationFilter,
+            filter: seg === 'groups' ? 'groups' : (state.chatConversationFilter === 'groups' ? 'all' : state.chatConversationFilter),
+            groupPage: seg === 'groups',
           });
         bindCommunityPartialRetry(el);
         bindCommunityConversationRows(el);
@@ -26378,13 +26602,12 @@
 
   // ---------- Crews ----------
   function showCommunityInbox() {
-    // Open the unified chat list with its Groups filter selected.
-    state.chatSeg = 'chats';
-    state.chatConversationFilter = 'groups';
+    state.chatSeg = 'groups';
     document.querySelectorAll('#chat-segments button').forEach((button) => {
-      const active = button.dataset.seg === 'chats';
+      const active = button.dataset.seg === 'groups';
       button.classList.toggle('active', active);
       button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
     });
     switchTab('chat');
     renderChat();
@@ -26838,13 +27061,18 @@
       ${crew.pending_count ? `<div class="crew-pending-note">${crew.pending_count} invitation${crew.pending_count === 1 ? '' : 's'} pending. They choose whether to join.</div>` : ''}
       ${owner ? `<button type="button" class="btn btn-secondary btn-block crew-add-players" id="crew-add-players">${uiIcon('plus')} Add players</button>` : ''}
       ${upcomingGamesHtml ? `<div class="section-label">Upcoming play</div><div class="crew-upcoming-games">${upcomingGamesHtml}</div>` : '<div class="crew-pending-note">No upcoming sessions yet. Plan one when this group is ready.</div>'}
-      <div class="section-label">Players</div>
-      <div class="crew-roster">${membersHtml || '<div class="empty-state" style="padding:18px">No players available.</div>'}</div>
+      <details class="flow-disclosure" ${crew.member_count <= 4 ? 'open' : ''}>
+        <summary>Players <span>${crew.member_count}</span></summary>
+        <div class="crew-roster">${membersHtml || '<div class="empty-state" style="padding:18px">No players available.</div>'}</div>
+      </details>
+      <details class="flow-disclosure crew-settings">
+      <summary>Group settings <span>Notifications &amp; membership</span></summary>
       <div class="crew-manage-actions">
         <button type="button" class="btn btn-secondary" id="crew-notifications">${uiIcon('bell')} Notifications: ${notificationLabel}</button>
         ${owner ? `<button type="button" class="btn btn-secondary" id="crew-rename">${uiIcon('edit')} Rename</button><button type="button" class="btn btn-secondary danger-text" id="crew-delete">${uiIcon('trash')} Disband group</button>`
           : '<button type="button" class="btn btn-secondary" id="crew-leave">Leave group</button>'}
       </div>
+      </details>
     `;
     modal.dataset.crewInfoId = String(crew.id);
     setDialogLabel(box, crew.name);
@@ -29288,149 +29516,139 @@
   }
 
   function businessHubLocationCard(business) {
-    const completion = businessCompletion(business);
     return `<button type="button" class="card business-location-card" data-business-open="${business.id}">
       <span class="business-location-icon" aria-hidden="true">${uiIcon('building')}</span>
       <span class="row-main">
         <span class="business-location-title">${esc(business.name || businessCourtName(business))}</span>
         <span class="row-sub">${esc(businessCourtName(business))}</span>
-        <span class="business-location-progress"><i style="width:${completion.percent}%"></i></span>
-        <span class="row-sub">Setup ${completion.percent}% complete</span>
+
       </span>
       <span class="business-location-side">${businessStatusHtml(business)}${uiIcon('chevron-right', 'chev')}</span>
     </button>`;
   }
 
   function businessHubEmptyHtml(court = null) {
-    return `
-      <div class="business-hub-intro">
-        <span class="business-hub-intro-icon" aria-hidden="true">${uiIcon('building')}</span>
-        <p class="tab-kicker">Third Shot for businesses</p>
-        <h2>Turn court views into real visits</h2>
-        <p>Give players one trusted place to see your schedule, book courts and lessons, find open play, and contact your team.</p>
-      </div>
-      <div class="business-value-grid">
-        <div><span aria-hidden="true">${uiIcon('calendar')}</span><b>Drive bookings</b><small>Link the system you already use.</small></div>
-        <div><span aria-hidden="true">${uiIcon('target')}</span><b>Promote lessons</b><small>Show clinics, coaching, and pricing.</small></div>
-        <div><span aria-hidden="true">${uiIcon('pickleball')}</span><b>Publish play</b><small>Keep open play and weekly programming clear.</small></div>
-        <div><span aria-hidden="true">${uiIcon('bell')}</span><b>Stay current</b><small>Share hours, announcements, and contact details.</small></div>
-      </div>
-      <div class="card business-claim-card">
-        <span class="section-label">Get started</span>
-        <h3>${court ? `Claim ${esc(court.name)}` : 'Claim your club or court'}</h3>
-        <p>Tell us which venue you manage. You can build the profile while we review the claim.</p>
-        <button type="button" class="btn btn-primary btn-block" id="business-claim-start">${court ? 'Claim this venue' : 'Find and claim a venue'}</button>
-        <small>Only authorized owners, managers, or staff should submit a claim.</small>
-      </div>`;
+    return `<section class="venue-welcome">
+      <span class="venue-welcome-icon">${uiIcon('building')}</span>
+      <h2>Your venue. Ready for players.</h2>
+      <p>Manage your court’s information and help players book, join sessions, and find your business.</p>
+      <ol class="venue-start-steps">
+        <li><span>1</span><div><b>Find your venue</b><small>Choose its existing court listing.</small></div></li>
+        <li><span>2</span><div><b>Confirm you manage it</b><small>We review your role before publishing.</small></div></li>
+        <li><span>3</span><div><b>Make it yours</b><small>Add details and your existing booking link.</small></div></li>
+      </ol>
+      <button type="button" class="btn btn-primary btn-block" id="business-claim-start">${court ? `Manage ${esc(court.name)}` : 'Find my venue'}</button>
+      <p class="venue-welcome-footnote">Already managing a venue? It appears here when you sign in with your business account.</p>
+    </section>`;
+  }
+
+  function businessWorkspaceState(business) {
+    const role = String(business.manager_role || (business.is_owner ? 'owner' : 'viewer')).toLowerCase();
+    const verified = businessVerificationState(business) === 'verified';
+    const review = String(business.content_review_status || 'approved');
+    const publicNow = verified && business.published === true && review === 'approved' && !business.suspended;
+    if (business.suspended) return { publicNow, title: 'Publishing paused', copy: 'Review the decision before making this venue visible again.', tool: role === 'owner' ? 'ownership' : 'verification', action: 'Review status' };
+    if (businessVerificationState(business) === 'rejected') return { publicNow, title: 'Your claim needs attention', copy: 'Review the feedback, then update your claim.', tool: 'verification', action: 'Review feedback' };
+    if (!verified) return { publicNow, title: 'Confirm your management role', copy: 'Your venue stays private while we review your claim. You can prepare its details now.', tool: 'verification', action: 'View verification' };
+    if (review !== 'approved') return { publicNow, title: review === 'pending' ? 'Changes are being reviewed' : 'A change needs attention', copy: 'Your listing is private until these changes are approved.', tool: 'revisions', action: 'View changes' };
+    if (publicNow) return { publicNow, title: 'Live on the court map', copy: 'Players can see your venue details and booking options.', tool: 'preview', action: 'View player listing' };
+    return { publicNow, title: 'Ready when you are', copy: 'Check your listing, then publish it for players.', tool: ['owner', 'admin'].includes(role) ? 'publish' : 'preview', action: ['owner', 'admin'].includes(role) ? 'Publish venue' : 'Preview listing' };
+  }
+
+  function venueTaskHtml({ tool, icon, title, copy, disabled = false }) {
+    return `<button type="button" class="venue-task" data-business-tool="${tool}" ${disabled ? 'disabled' : ''}>
+      <span class="venue-task-icon" aria-hidden="true">${uiIcon(icon)}</span><span class="row-main"><b>${esc(title)}</b><small>${esc(copy)}</small></span>${uiIcon('chevron-right', 'chev')}
+    </button>`;
+  }
+
+  function openBusinessBookingSetup(rawBusiness, onSaved) {
+    const business = normalizeBusinessProfile(rawBusiness);
+    const role = String(business.manager_role || (business.is_owner ? 'owner' : 'viewer'));
+    const canEdit = ['owner', 'admin', 'editor'].includes(role);
+    const modal = openModal(`${modalHead('Bookings')}
+      <div class="simple-page-intro"><h3>Use the system you already have</h3><p>Add the page where players reserve a court. They’ll complete their booking with your provider.</p></div>
+      <form id="venue-booking-form" novalidate>
+        <div class="form-field"><label for="venue-booking-url">Booking page</label><input type="url" id="venue-booking-url" value="${esc(business.booking_url || '')}" placeholder="https://your-booking-page.com" inputmode="url" ${canEdit ? '' : 'disabled'} /><small>Copy the public booking link from your website or booking app.</small></div>
+        <details class="simple-disclosure" ${business.membership_url ? 'open' : ''}><summary>Membership link <span>Optional</span></summary><div class="form-field"><label for="venue-membership-url">Membership page</label><input type="url" id="venue-membership-url" value="${esc(business.membership_url || '')}" placeholder="https://yourclub.com/join" inputmode="url" ${canEdit ? '' : 'disabled'} /></div></details>
+        ${canEdit ? '<button type="submit" class="btn btn-primary btn-block" id="venue-booking-save">Save booking links</button>' : '<p class="simple-note">An owner, admin, or editor can update booking links.</p>'}
+        <p class="simple-note">New links are reviewed before they appear publicly.</p>
+      </form>
+      <div class="simple-section-title">Show players what’s on</div>
+      <button type="button" class="venue-task" id="venue-booking-schedule"><span class="venue-task-icon">${uiIcon('calendar')}</span><span class="row-main"><b>Add a schedule</b><small>Enter sessions or import a spreadsheet.</small></span>${uiIcon('chevron-right', 'chev')}</button>
+      <details class="simple-disclosure"><summary>Automatic updates &amp; integration help</summary>
+        <p class="simple-note">A booking link is enough to get started. If your system can export a schedule feed, connect it here.</p>
+        <button type="button" class="venue-task" id="venue-booking-feed"><span class="venue-task-icon">${uiIcon('refresh')}</span><span class="row-main"><b>Connect a schedule feed</b><small>Manage automatic updates and connection health.</small></span>${uiIcon('chevron-right', 'chev')}</button>
+        <button type="button" class="btn-link" id="venue-booking-help">Ask about my booking system</button>
+      </details>`, { label: 'Business bookings' });
+    const openChild = (fn) => openChildModal(modal, fn);
+    modal.querySelector('#venue-booking-schedule').addEventListener('click', () => {
+      if (!canEdit) { toast('Ask an owner or editor to update the schedule'); return; }
+      openChild(() => openBusinessScheduleEditor(business, onSaved));
+    });
+    modal.querySelector('#venue-booking-feed').addEventListener('click', () => openChild(() => openBusinessConnections(business, onSaved)));
+    modal.querySelector('#venue-booking-help').addEventListener('click', () => {
+      if (!['owner', 'admin'].includes(role) || businessVerificationState(business) !== 'verified') { toast('The venue must be verified, and an owner or admin must request an integration'); return; }
+      openChild(() => openBusinessIntegrationRequest(business));
+    });
+    if (canEdit) {
+      const formUX = bindModalFormUX(modal, '#venue-booking-save', { draftKey: `venue-booking-${business.id}` });
+      modal.querySelector('#venue-booking-form').addEventListener('submit', async (event) => {
+        event.preventDefault(); formUX.clearError();
+        const booking = optionalBusinessUrl(modal, '#venue-booking-url', 'booking', formUX);
+        const membership = optionalBusinessUrl(modal, '#venue-membership-url', 'membership', formUX);
+        if (booking === null || membership === null) return;
+        const finish = formUX.startSubmitting('Saving…'); if (!finish) return;
+        try {
+          const updated = await api(`/businesses/${business.id}`, { method: 'PATCH', body: JSON.stringify({ booking_url: booking, membership_url: membership }) });
+          formUX.clearDraft({ disable: true }); closeModal(modal); onSaved?.(updated); toast('Booking links saved');
+        } catch (error) { finish(); formUX.showError(error.message); }
+      });
+    }
+    return modal;
   }
 
   function renderBusinessHubDashboard(modal, body, business, context) {
-    const completion = businessCompletion(business);
-    const status = businessVerificationState(business);
     const managerRole = String(business.manager_role || (business.is_owner ? 'owner' : 'viewer')).toLowerCase();
     const canEditContent = ['owner', 'admin', 'editor'].includes(managerRole);
     const canAdminister = ['owner', 'admin'].includes(managerRole);
     const canOwn = managerRole === 'owner';
-    const contentReview = String(business.content_review_status || 'approved').toLowerCase();
-    const isPublic = status === 'verified' && business.published === true;
+    const status = businessVerificationState(business);
+    const contentReview = String(business.content_review_status || 'approved');
+    const workspace = businessWorkspaceState(business);
+    const isPublic = workspace.publicNow;
     const canPublish = canAdminister && status === 'verified' && contentReview === 'approved' && !business.suspended;
-    const integrationReady = canAdminister && status === 'verified';
     const activeOfferingCount = business.offerings.filter((item) => item && item.active !== false).length;
     const activeScheduleCount = business.schedule.filter((item) => item && item.active !== false).length;
-    const statusCopy = contentReview === 'pending'
-      ? 'A sensitive saved change is awaiting operator review. The listing stays hidden until that review is complete.'
-      : contentReview === 'rejected'
-        ? 'A sensitive change was rejected. Open Change history for reviewer feedback before editing again.'
-        : status === 'pending'
-      ? 'Claim submitted — only you can see this draft. Finish setup while we review it.'
-      : status === 'verified' && business.published === true
-        ? 'Your verified profile is available to players on this court page.'
-        : status === 'verified'
-          ? 'Your claim is verified. Publish the profile when it is ready for players.'
-        : status === 'rejected'
-          ? 'Review your role and resubmit if you can confirm control of this venue.'
-          : 'Complete the profile and submit a venue claim before it goes live.';
     const bookingReady = businessHasBookingLink(business);
-    const connectionHealth = businessConnectionHealth(business);
+    body.classList.add('venue-workspace');
     body.innerHTML = `
-      ${context.businesses.length > 1 ? `<button type="button" class="business-hub-back" id="business-hub-locations">${uiIcon('arrow-left')} All locations</button>` : ''}
-      <section class="business-dashboard-hero">
-        <div class="business-dashboard-title">
-          <span class="business-location-icon" aria-hidden="true">${uiIcon('building')}</span>
-          <div class="row-main"><p class="tab-kicker">Business Hub</p><h2>${esc(business.name || businessCourtName(business))}</h2><p>${esc(businessCourtName(business))}</p></div>
+      ${context.businesses.length > 1 ? `<button type="button" class="business-hub-back" id="business-hub-locations">${uiIcon('arrow-left')} Your venues</button>` : ''}
+      <header class="venue-workspace-heading"><p class="simple-eyebrow">YOUR VENUE</p><h2>${esc(business.name || businessCourtName(business))}</h2>${business.name !== businessCourtName(business) ? `<p>${esc(businessCourtName(business))}</p>` : ''}</header>
+      <section class="venue-status ${isPublic ? 'is-live' : ''}" aria-label="Publishing status">
+        <span aria-hidden="true">${uiIcon(isPublic ? 'check-circle' : 'shield')}</span><div class="row-main"><h3>${esc(workspace.title)}</h3><p>${esc(workspace.copy)}</p>
+        ${workspace.tool === 'publish' ? '<button type="button" class="btn btn-primary" id="business-publish-toggle">Publish venue</button>' : `<button type="button" class="btn btn-${isPublic ? 'secondary' : 'primary'}" data-business-tool="${workspace.tool}">${esc(workspace.action)}</button>`}
+        ${status === 'rejected' && canOwn ? '<button type="button" class="btn-link" id="business-resubmit-claim">Update and resubmit claim</button>' : ''}
         </div>
-        <div class="business-dashboard-status">${businessStatusHtml(business)}<p>${esc(statusCopy)}</p></div>
       </section>
-
-      ${status === 'rejected' && canOwn ? `<section class="card business-claim-recovery"><span aria-hidden="true">${uiIcon('refresh')}</span><div class="row-main"><b>Ready to try the claim again?</b><p>Confirm your role and resubmit this location for review.</p></div><button type="button" class="btn btn-primary btn-sm" id="business-resubmit-claim">Resubmit claim</button></section>` : ''}
-      ${contentReview !== 'approved' ? `<section class="card business-claim-recovery"><span aria-hidden="true">${uiIcon(businessStateIconName(contentReview))}</span><div class="row-main"><b>${contentReview === 'pending' ? 'Sensitive change under review' : 'Content change needs attention'}</b><p>${contentReview === 'pending' ? 'Verification still confirms your control, but the edited listing is not public yet.' : 'Review the decision and restore or revise the affected content.'}</p></div><button type="button" class="btn btn-secondary btn-sm" data-business-tool="revisions">View changes</button></section>` : ''}
-
-      <section class="card business-visibility-card ${isPublic ? 'is-ready' : ''}">
-        <span class="business-visibility-icon" aria-hidden="true">${uiIcon('eye')}</span>
-        <div class="row-main">
-          <b>${status === 'pending' ? 'Private while under review' : isPublic ? 'Visible to players' : 'Hidden from players'}</b>
-          <p>${status === 'pending'
-            ? 'After approval, review the draft and publish it when it is ready.'
-            : isPublic ? 'Players can see this information now. Saved edits appear immediately.' : 'Only business managers can see and edit this profile.'}</p>
-        </div>
-        <button type="button" class="btn btn-${isPublic ? 'secondary' : 'primary'} btn-sm" id="business-publish-toggle" ${!canAdminister || (!isPublic && !canPublish) ? 'disabled' : ''}>${!canAdminister ? 'Owner or admin' : status === 'rejected' ? 'Resubmit first' : status !== 'verified' ? 'Verify first' : contentReview === 'pending' ? 'Review pending' : contentReview === 'rejected' ? 'Resolve review' : business.suspended ? 'Suspended' : isPublic ? 'Unpublish' : 'Publish'}</button>
-      </section>
-
-      <p class="business-role-note"><b>${esc(managerRole.replace(/^./, (letter) => letter.toUpperCase()))} access.</b> ${managerRole === 'viewer' ? 'You can inspect this business, its team, history, connections, analytics, and security, but cannot change it.' : managerRole === 'editor' ? 'You can edit listing content, restore revisions, and sync an existing feed. Publishing, staff, integration requests, and ownership stay with an owner or admin.' : managerRole === 'admin' ? 'You can publish, manage staff, and configure connections. Only the owner can add locations, transfer ownership, or release the organization.' : 'You can manage this organization and every attached location.'}</p>
-
-      <section class="card business-setup-card">
-        <div class="business-setup-heading">
-          <div><span class="section-label">Profile readiness</span><h3>${completion.percent}% complete</h3></div>
-          <span class="business-setup-score">${completion.complete}/${completion.checks.length}</span>
-        </div>
-        <div class="business-progress-track" role="progressbar" aria-label="Profile setup" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${completion.percent}"><i style="width:${completion.percent}%"></i></div>
-        <div class="business-checklist">${completion.checks.map((check) => `
-          <button type="button" data-business-setup="${check.key}" class="${check.done ? 'done' : ''}" ${canEditContent ? '' : 'disabled'}>
-            ${uiIcon(check.done ? 'check-circle' : 'target')}<b>${esc(check.label)}</b>${uiIcon('chevron-right', 'chev')}
-          </button>`).join('')}</div>
-      </section>
-
-      <div class="section-label">Manage what players see</div>
-      <div class="business-tools-grid">
-        <button type="button" data-business-tool="details" ${canEditContent ? '' : 'disabled'}><span aria-hidden="true">${uiIcon('edit')}</span><b>Business details</b><small>${canEditContent ? 'About, contact, and links' : 'Read-only for viewers'}</small></button>
-        <button type="button" data-business-tool="offerings" ${canEditContent ? '' : 'disabled'}><span aria-hidden="true">${uiIcon('target')}</span><b>Offerings</b><small>${canEditContent ? (activeOfferingCount ? `${activeOfferingCount} visible offering${activeOfferingCount === 1 ? '' : 's'}` : 'Add lessons and services') : 'Read-only for viewers'}</small></button>
-        <button type="button" data-business-tool="schedule" ${canEditContent ? '' : 'disabled'}><span aria-hidden="true">${uiIcon('calendar')}</span><b>Schedule</b><small>${canEditContent ? (activeScheduleCount ? `${activeScheduleCount} visible weekly item${activeScheduleCount === 1 ? '' : 's'}` : 'Add weekly items') : 'Read-only for viewers'}</small></button>
-        <button type="button" data-business-tool="integration" ${integrationReady ? '' : 'disabled'}><span aria-hidden="true">${uiIcon('link')}</span><b>Integration requests</b><small>${integrationReady ? 'Ask about a custom connection' : !canAdminister ? 'Owner or admin only' : 'Available after verification'}</small></button>
+      <div class="simple-section-title">Manage your venue</div>
+      <div class="venue-task-list">
+        ${venueTaskHtml({ tool: 'details', icon: 'edit', title: 'Venue details', copy: canEditContent ? 'About, hours, contact and logo' : 'Your role has read-only access', disabled: !canEditContent })}
+        ${venueTaskHtml({ tool: 'booking', icon: 'link', title: 'Bookings', copy: bookingReady ? (isPublic ? 'Booking links available to players' : 'Booking links saved · private until published') : 'Connect your existing booking page' })}
+        ${venueTaskHtml({ tool: 'schedule', icon: 'calendar', title: 'Sessions & events', copy: activeScheduleCount ? `${activeScheduleCount} saved session${activeScheduleCount === 1 ? '' : 's'} · edit or import` : 'Open play, clinics and your weekly schedule', disabled: !canEditContent })}
+        ${venueTaskHtml({ tool: 'offerings', icon: 'target', title: 'Lessons & services', copy: activeOfferingCount ? `${activeOfferingCount} saved offering${activeOfferingCount === 1 ? '' : 's'}` : 'Optional · coaching, memberships and more', disabled: !canEditContent })}
       </div>
-
-      <section class="card business-booking-health ${bookingReady ? 'is-ready' : ''}">
-        <div class="business-booking-health-icon" aria-hidden="true">${uiIcon(bookingReady ? 'check-circle' : 'link')}</div>
-        <div class="row-main"><b>${bookingReady ? 'Booking link is live' : 'Add your booking link'}</b><p>${bookingReady ? 'Players can leave Third Shot and continue with your booking provider.' : 'Add your current secure booking URL—no platform switch required.'}</p></div>
-        <button type="button" class="btn btn-${bookingReady ? 'secondary' : 'primary'} btn-sm" data-business-tool="details" ${canEditContent ? '' : 'disabled'}>${canEditContent ? (bookingReady ? 'Edit' : 'Add link') : 'View only'}</button>
-      </section>
-
-      <section class="card business-integration-callout">
-        <span aria-hidden="true">${uiIcon('zap')}</span>
-        <div class="row-main"><b>Need a deeper integration?</b><p>Tell us what your venue uses for reservations, memberships, lessons, or events. We’ll help map the cleanest connection.</p></div>
-        <button type="button" class="btn btn-secondary btn-block" data-business-tool="integration" ${integrationReady ? '' : 'disabled'}>${integrationReady ? 'Request integration help' : !canAdminister ? 'Owner or admin only' : 'Available after verification'}</button>
-      </section>
-
-      <section class="card business-connection-health ${connectionHealth.tone}">
-        <span class="business-connection-health-icon" aria-hidden="true">${uiIcon(connectionHealth.icon)}</span>
-        <div class="row-main"><b>${esc(connectionHealth.label)}</b><p>${esc(connectionHealth.detail)}</p></div>
-        <button type="button" class="btn btn-secondary btn-sm" data-business-tool="connections">View</button>
-      </section>
-
-      <div class="section-label">Business operations</div>
-      <div class="business-operations-grid">
-        <button type="button" data-business-tool="verification"><span aria-hidden="true">${uiIcon('shield')}</span><b>Verification</b><small>Evidence, challenge, and reviewer feedback</small></button>
-        <button type="button" data-business-tool="team"><span aria-hidden="true">${uiIcon('users')}</span><b>Team access</b><small>Invite staff and choose roles</small></button>
-        <button type="button" data-business-tool="connections"><span aria-hidden="true">${uiIcon('link')}</span><b>Connections</b><small>Live sync health, reconnect, or disconnect</small></button>
-        <button type="button" data-business-tool="analytics"><span aria-hidden="true">${uiIcon('chart')}</span><b>Analytics</b><small>Views and outbound action clicks</small></button>
-        <button type="button" data-business-tool="revisions"><span aria-hidden="true">${uiIcon('clock')}</span><b>Change history</b><small>Review and restore saved versions</small></button>
-        <button type="button" data-business-tool="security"><span aria-hidden="true">${uiIcon('lock')}</span><b>Security</b><small>MFA and active business sessions</small></button>
-        <button type="button" data-business-tool="ownership" ${canOwn ? '' : 'disabled'}><span aria-hidden="true">${uiIcon('settings')}</span><b>Ownership &amp; visibility</b><small>${canOwn ? 'Transfer or release the organization' : 'Primary owner only'}</small></button>
-      </div>
-
-      <div class="business-dashboard-footer">
-        <button type="button" class="btn btn-secondary" id="business-player-preview">Preview player listing</button>
-        <button type="button" class="btn btn-secondary" id="business-add-location" ${canOwn ? '' : 'disabled'}>${canOwn ? `${uiIcon('plus')} Add location` : 'Owner adds locations'}</button>
-      </div>`;
+      <button type="button" class="venue-preview-link" id="business-player-preview">${uiIcon('eye')} Preview player listing</button>
+      <details class="simple-disclosure venue-management"><summary>Team, activity &amp; settings</summary>
+        <p class="simple-note">${esc(managerRole.replace(/^./, (c) => c.toUpperCase()))} access</p>
+        ${venueTaskHtml({tool:'team',icon:'users',title:'Team access',copy:'Add staff and manage their permissions'})}
+        ${venueTaskHtml({tool:'analytics',icon:'chart',title:'Player activity',copy:'Listing views and booking-link clicks'})}
+        ${venueTaskHtml({tool:'verification',icon:'shield',title:'Verification',copy:'Claim status and review feedback'})}
+        ${venueTaskHtml({tool:'revisions',icon:'clock',title:'Change history',copy:'Review or restore earlier details'})}
+        ${venueTaskHtml({tool:'security',icon:'lock',title:'Account security',copy:'Protect your business account'})}
+        ${venueTaskHtml({tool:'ownership',icon:'settings',title:'Ownership & visibility',copy:canOwn ? 'Transfer management or release this venue' : 'Only the owner can change ownership',disabled:!canOwn})}
+        ${workspace.tool !== 'publish' ? `<button type="button" class="btn btn-secondary btn-block" id="business-publish-toggle" ${!canAdminister || (!isPublic && !canPublish) ? 'disabled' : ''}>${isPublic ? 'Unpublish venue' : 'Publish after approval'}</button>` : ''}
+        <button type="button" class="btn-link" id="business-add-location" ${canOwn ? '' : 'disabled'}>${uiIcon('plus')} Add another venue</button>
+      </details>`;
 
     const updateBusiness = (updated) => {
       const normalized = normalizeBusinessProfile(updated);
@@ -29440,7 +29658,11 @@
     };
     const openToolChild = (openNext) => openChildModal(modal, openNext);
     const openTool = (tool) => {
-      if (tool === 'details' || tool === 'contact' || tool === 'booking') {
+      if (tool === 'booking') {
+        openToolChild(() => openBusinessBookingSetup(business, updateBusiness));
+      } else if (tool === 'preview') {
+        openToolChild(() => openBusinessPlayerPreview(business));
+      } else if (tool === 'details' || tool === 'contact') {
         if (!canEditContent) { toast('Viewer access is read-only'); return; }
         openToolChild(() => openBusinessDetailsEditor(business, updateBusiness));
       } else if (tool === 'offerings') {
@@ -29638,7 +29860,7 @@
   }
 
   function openBusinessVerificationCenter(business, onSaved, { evidenceId = null, token = '' } = {}) {
-    const modal = openModal(`${modalHead('Verification center')}<div class="business-feature-body" aria-live="polite">${skeletonHtml(2)}</div>`, { label: 'Business verification center' });
+    const modal = openModal(`${modalHead('Verify your venue')}<div class="business-feature-body" aria-live="polite">${skeletonHtml(2)}</div>`, { label: 'Business verification center' });
     const body = modal.querySelector('.business-feature-body');
     const typeLabels = {
       business_email: 'Business-domain email', business_phone: 'Published business phone',
@@ -29664,17 +29886,17 @@
       const canSubmit = claim && claim.status === 'pending';
       body.innerHTML = `
         <div class="business-trust-summary ${status === 'verified' ? 'is-ready' : status === 'rejected' ? 'is-error' : 'is-pending'}">
-          <span aria-hidden="true">${uiIcon(businessStateIconName(status))}</span><div><b>${status === 'verified' ? 'Listing control confirmed' : status === 'rejected' ? 'More information is needed' : 'Control review pending'}</b>
-          <p>${status === 'verified' ? 'Verification confirms who controls this listing. It does not endorse prices, links, availability, or services.' : 'A Third Shot operator must review evidence before this venue can publish.'}</p></div>
+          <span aria-hidden="true">${uiIcon(businessStateIconName(status))}</span><div><b>${status === 'verified' ? 'Your management role is verified' : status === 'rejected' ? 'More information is needed' : 'Your claim is being reviewed'}</b>
+          <p>${status === 'verified' ? 'You can now publish and manage your venue listing.' : 'Confirm your work email or provide an official reference. Our team will review your role before the venue goes live.'}</p></div>
         </div>
         ${feedback ? `<div class="card business-review-feedback"><span class="section-label">Reviewer feedback</span><p>${esc(feedback)}</p></div>` : ''}
-        ${evidence.length ? `<div class="section-label">Evidence history</div><div class="business-evidence-list">${evidence.map((item) => `<div class="card business-evidence-row"><span aria-hidden="true">${uiIcon(businessStateIconName(item.status))}</span><div class="row-main"><b>${esc(typeLabels[item.type] || item.type || 'Evidence')}</b><small>${esc(item.value || '')}</small><small>${esc(String(item.status || 'submitted').replace(/_/g, ' '))}${item.challenge_expires_at ? ` · expires ${esc(fmtDateTime(item.challenge_expires_at))}` : ''}</small>${item.review_note ? `<p>${esc(item.review_note)}</p>` : ''}</div></div>`).join('')}</div>` : ''}
+        ${evidence.length ? `<details class="simple-disclosure"><summary>Submitted information · ${evidence.length}</summary><div class="business-evidence-list">${evidence.map((item) => `<div class="card business-evidence-row"><span aria-hidden="true">${uiIcon(businessStateIconName(item.status))}</span><div class="row-main"><b>${esc(typeLabels[item.type] || item.type || 'Evidence')}</b><small>${esc(item.value || '')}</small><small>${esc(String(item.status || 'submitted').replace(/_/g, ' '))}${item.challenge_expires_at ? ` · expires ${esc(fmtDateTime(item.challenge_expires_at))}` : ''}</small>${item.review_note ? `<p>${esc(item.review_note)}</p>` : ''}</div></div>`).join('')}</div></details>` : ''}
         ${challenge ? `<form id="business-email-challenge-form" class="card business-email-challenge" novalidate><span class="section-label">Email challenge</span><b>Check ${esc(challenge.value)}</b><p>Enter the six-digit code from the Third Shot email. This confirms mailbox access; an operator still reviews listing control.</p>${challenge.challenge_locked ? '<div class="business-connection-error" role="alert">This code is locked after too many attempts. Send a new code.</div>' : ''}<div class="form-field"><label for="business-email-challenge-token">Six-digit email code</label><input type="text" id="business-email-challenge-token" inputmode="numeric" maxlength="6" autocomplete="one-time-code" value="${Number(challenge.id) === Number(evidenceId) ? esc(token) : ''}" ${challenge.challenge_locked ? 'disabled' : ''} /></div><button type="submit" class="btn btn-primary btn-block" id="business-email-challenge-submit" ${challenge.challenge_locked ? 'disabled' : ''}>Verify email code</button><button type="button" class="btn-link btn-block" data-resend-email-challenge>Send a new code</button>${Number.isFinite(Number(challenge.challenge_attempts_remaining)) ? `<small>${Number(challenge.challenge_attempts_remaining)} attempt${Number(challenge.challenge_attempts_remaining) === 1 ? '' : 's'} remaining</small>` : ''}</form>` : ''}
         ${canSubmit ? `<form id="business-evidence-form" novalidate>
-          <div class="form-field"><label for="business-evidence-method">How can we confirm your role?</label><select id="business-evidence-method" data-select-title="Verification method"><option value="business_email">Business-domain email challenge</option><option value="business_phone">Published business phone</option><option value="website_domain">Official website or directory</option><option value="documents">Supporting document reference</option><option value="in_person">In-person confirmation</option><option value="other">Other evidence</option></select></div>
-          <div class="form-field"><label for="business-evidence-value" data-evidence-value-label>Business-domain email</label><input type="email" id="business-evidence-value" maxlength="500" value="${esc(challenge?.value || state.me?.email || '')}" autocomplete="email" /><small class="field-help" data-evidence-value-help>A private one-time token is sent to this mailbox. Use a domain controlled by the venue when possible.</small></div>
-          <div class="form-field"><label for="business-evidence-notes">Context for the reviewer</label><textarea id="business-evidence-notes" rows="4" maxlength="1000" placeholder="Your title and how the venue can confirm it."></textarea></div>
-          <button type="submit" class="btn btn-primary btn-block" id="business-evidence-send">Send email challenge</button>
+          <div class="form-field"><label for="business-evidence-method">Verify with</label><select id="business-evidence-method" data-select-title="Verification method"><option value="business_email">Work email</option><option value="business_phone">Published business phone</option><option value="website_domain">Official website or directory</option><option value="documents">Supporting document reference</option><option value="in_person">In-person confirmation</option><option value="other">Other evidence</option></select></div>
+          <div class="form-field"><label for="business-evidence-value" data-evidence-value-label>Work email</label><input type="email" id="business-evidence-value" maxlength="500" value="${esc(challenge?.value || state.me?.email || '')}" autocomplete="email" /><small class="field-help" data-evidence-value-help>We’ll email you a six-digit code. Use your venue’s work email if you have one.</small></div>
+          <div class="form-field"><label for="business-evidence-notes">Additional details (optional)</label><textarea id="business-evidence-notes" rows="2" maxlength="1000" placeholder="Your title and how the venue can confirm it."></textarea></div>
+          <button type="submit" class="btn btn-primary btn-block" id="business-evidence-send">Send verification code</button>
           <p class="business-form-note">Never send passwords, API keys, payment information, government IDs, or sensitive personal documents.</p>
         </form>` : '<p class="business-form-note">Evidence can be added while a claim is pending. Resubmit the claim first if the reviewer requested changes.</p>'}`;
       const challengeForm = body.querySelector('#business-email-challenge-form');
@@ -29691,7 +29913,7 @@
       const valueHelp = body.querySelector('[data-evidence-value-help]');
       const send = body.querySelector('#business-evidence-send');
       const methodConfig = {
-        business_email: ['Business-domain email', 'email', 'name@venue-domain.com', 'A private one-time token is sent to this mailbox. Use a domain controlled by the venue when possible.', 'Send email challenge'],
+        business_email: ['Work email', 'email', 'name@venue-domain.com', 'We’ll email you a six-digit code. Use your venue’s work email if you have one.', 'Send verification code'],
         business_phone: ['Published business phone', 'tel', '(555) 555-1234', 'Use a number publicly associated with the venue.', 'Submit phone evidence'],
         website_domain: ['Official HTTPS page', 'url', 'https://venue.example/team', 'Link to an official page that helps confirm your role.', 'Submit website evidence'],
         documents: ['Pre-arranged document reference', 'text', 'Reference name or secure review ticket', 'Do not paste sensitive document contents into Third Shot.', 'Submit document reference'],
@@ -30616,9 +30838,11 @@
 
   function openBusinessClaimSheet({ court = null, onSaved = null, onMissing = null } = {}) {
     const modal = openModal(`
-      ${modalHead('Claim a venue')}
+      ${modalHead('Manage a venue')}
+      <ol class="simple-step-trail" aria-label="Venue setup"><li id="claim-trail-venue">1. Choose venue</li><li id="claim-trail-role">2. Confirm your role</li></ol>
       <form id="business-claim-form" novalidate>
-        <div class="business-claim-explainer"><span aria-hidden="true">${uiIcon('shield')}</span><div><b>Built for trusted venue information</b><p>Your draft stays private while we verify that you’re authorized to manage this location.</p></div></div>
+        <section id="claim-step-venue" aria-labelledby="claim-venue-title">
+        <div class="simple-page-intro"><h3 id="claim-venue-title">Which venue do you manage?</h3><p>Find its court listing so players have one place to find you.</p></div>
         <div class="form-field">
           <label for="bh-court-search">Club or court</label>
           <input type="search" id="bh-court-search" placeholder="Search by venue name or city" autocomplete="off" value="${esc(court?.name || '')}" ${court ? 'readonly' : ''} />
@@ -30626,6 +30850,11 @@
           <div id="bh-court-results" class="business-court-results"></div>
           ${!court && onMissing ? `<div class="business-missing-venue"><span>Can’t find your venue?</span><button type="button" class="btn-link" id="business-add-missing-venue">Add it on the Courts map</button></div>` : ''}
         </div>
+        <button type="button" class="btn btn-primary btn-block" id="claim-next">Continue</button>
+        </section>
+        <section id="claim-step-role" aria-labelledby="claim-role-title" hidden>
+        <button type="button" class="simple-back" id="claim-back">${uiIcon('arrow-left')} ${court ? 'Review venue' : 'Change venue'}</button>
+        <div class="simple-page-intro"><h3 id="claim-role-title">Confirm you manage this venue</h3><p id="claim-selected-name">${esc(court?.name || '')}</p></div>
         <div class="form-field">
           <label for="business-claim-role">Your role</label>
           <select id="business-claim-role" data-select-title="Your role" data-select-prefix="Role">
@@ -30634,25 +30863,52 @@
             <option value="staff" data-icon-name="users" data-description="I am authorized to publish venue information">Authorized staff</option>
           </select>
         </div>
-        <div class="form-field"><label for="business-claim-contact">Private work email for verification</label><input type="email" id="business-claim-contact" maxlength="255" value="${esc(state.me?.email || '')}" autocomplete="email" /><small class="field-help">Saved as private claim evidence for the operator reviewer. It is not shown publicly and this step does not send an email challenge.</small></div>
-        <div class="form-field"><label for="business-claim-evidence-url">Official website or staff page (optional)</label><input type="url" id="business-claim-evidence-url" placeholder="https://official-site.example/team" inputmode="url" /><small class="field-help">Saved with the claim as website-domain evidence.</small></div>
-        <div class="form-field"><label for="business-claim-evidence-notes">How can the venue confirm your role?</label><textarea id="business-claim-evidence-notes" rows="3" maxlength="800" placeholder="Your title and the best public or business contact to verify it."></textarea><small class="field-help">Saved as a separate private context item in the evidence history.</small></div>
+        <div class="form-field"><label for="business-claim-contact">Work email</label><input type="email" id="business-claim-contact" maxlength="255" value="${esc(state.me?.email || '')}" autocomplete="email" /><small class="field-help">Used privately to review your request. It will not appear on the court listing.</small></div>
+        <details class="simple-disclosure" id="claim-supporting-details"><summary>Add supporting information <span>Optional</span></summary>
+        <div class="form-field"><label for="business-claim-evidence-url">Official website or staff page (optional)</label><input type="url" id="business-claim-evidence-url" placeholder="https://official-site.example/team" inputmode="url" /><small class="field-help">An official page can help us confirm your role.</small></div>
+        <div class="form-field"><label for="business-claim-evidence-notes">How can the venue confirm your role?</label><textarea id="business-claim-evidence-notes" rows="3" maxlength="800" placeholder="Your title and the best public or business contact to verify it."></textarea><small class="field-help">Tell us who to contact or where your role is listed.</small></div>
+        </details>
         <label class="business-authorized-check"><input type="checkbox" id="business-claim-authorized" data-no-draft /> <span>I confirm I’m authorized to represent this business.</span></label>
-        <button type="submit" class="btn btn-primary btn-block" id="business-claim-submit">Submit claim</button>
-        <p class="business-form-note">Submitting does not instantly verify or publish the venue. A trusted operator checks control outside the app; the authorization checkbox alone is not proof. You can prepare the private draft while it is reviewed.</p>
+        <button type="submit" class="btn btn-primary btn-block" id="business-claim-submit">Create my venue workspace</button>
+        <p class="business-form-note">Your listing stays private until your management role is approved. You can add details and booking links while we review it.</p>
+        </section>
       </form>
-    `, { label: 'Claim a venue' });
+    `, { label: 'Manage a venue' });
     if (!court) clubCourtPicker(modal, 'bh');
     modal.querySelector('#business-add-missing-venue')?.addEventListener('click', () => {
       transitionModal(modal, onMissing);
     });
     const formUX = bindModalFormUX(modal, '#business-claim-submit', { draftKey: 'business-claim' });
+    let claimStep = court ? 'role' : 'venue';
+    const showClaimStep = (step, focus = false) => {
+      claimStep = step;
+      modal.querySelector('#claim-step-venue').hidden = step !== 'venue';
+      modal.querySelector('#claim-step-role').hidden = step !== 'role';
+      modal.querySelector('#claim-selected-name').textContent = modal.querySelector('#bh-court-search').value;
+      ['venue', 'role'].forEach((name) => modal.querySelector(`#claim-trail-${name}`).setAttribute('aria-current', name === step ? 'step' : 'false'));
+      if (focus) {
+        const target = modal.querySelector(step === 'venue' ? '#bh-court-search' : '#business-claim-role');
+        (target._appSelectButton || target).focus();
+      }
+    };
+    const continueClaim = () => {
+      formUX.clearError();
+      const search = modal.querySelector('#bh-court-search');
+      const selected = Number(search.dataset.selectedCourtId || modal.querySelector('#bh-court-id').value);
+      if (!Number.isSafeInteger(selected) || selected <= 0) { formUX.showError('Select your venue from the search results.', search); return false; }
+      showClaimStep('role', true); return true;
+    };
+    modal.querySelector('#claim-next').addEventListener('click', continueClaim);
+    modal.querySelector('#claim-back').addEventListener('click', () => showClaimStep('venue', true));
+    showClaimStep(claimStep);
     modal.querySelector('#business-claim-form').addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (claimStep === 'venue') { continueClaim(); return; }
       formUX.clearError();
       const searchInput = modal.querySelector('#bh-court-search');
       const courtId = Number(searchInput.dataset.selectedCourtId || modal.querySelector('#bh-court-id').value);
       if (!Number.isSafeInteger(courtId) || courtId <= 0) {
+        showClaimStep('venue');
         formUX.showError('Choose your club or court from the search results.', modal.querySelector('#bh-court-search'));
         return;
       }
@@ -30668,6 +30924,7 @@
       const evidenceRaw = modal.querySelector('#business-claim-evidence-url').value.trim();
       const evidenceUrl = evidenceRaw ? businessActionHref(evidenceRaw) : '';
       if (evidenceRaw && !evidenceUrl) {
+        modal.querySelector('#claim-supporting-details').open = true;
         formUX.showError('Use a secure https:// official evidence link.', modal.querySelector('#business-claim-evidence-url'));
         return;
       }
@@ -30703,6 +30960,8 @@
     if (!raw) return '';
     const href = businessActionHref(raw);
     if (!href) {
+      const disclosure = input.closest('details');
+      if (disclosure) disclosure.open = true;
       formUX.showError(`Enter a valid ${label} link that starts with https://`, input);
       return null;
     }
@@ -30714,7 +30973,7 @@
     const hasManagedLogo = business.has_logo_upload || /^\/api\/businesses\/\d+\/logo$/.test(business.logo_url || '');
     const modal = openModal(`
       ${modalHead('Business details')}
-      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Ordinary content saves update the listing. Identity, contact, link, or logo changes can hide it for operator review before you republish.</p></div>` : ''}
+      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Changes to your name, contact details or logo may need review before they appear publicly.</p></div>` : ''}
       <form id="business-details-form" novalidate>
         <p class="row-sub business-editor-intro">This is the trusted information players see before they decide to visit or book.</p>
         <div class="form-field">
@@ -30737,14 +30996,9 @@
         <div class="form-field"><label for="business-hours">Facility hours</label><input type="text" id="business-hours" maxlength="300" value="${esc(business.hours || '')}" placeholder="Mon–Fri 6 AM–10 PM · Sat–Sun 7 AM–8 PM" /></div>
         <div class="form-field"><label for="business-amenities">Amenities</label><input type="text" id="business-amenities" maxlength="400" value="${esc(Array.isArray(business.amenities) ? business.amenities.join(', ') : business.amenities || '')}" placeholder="Pro shop, showers, ball machine, café" /></div>
 
-        <div class="business-form-section">
-          <span class="section-label">Connect your existing systems</span>
-          <p>Players leave Third Shot to finish reservations and purchases with your provider.</p>
-        </div>
-        <div class="form-field"><label for="business-booking-url">Court booking link</label><input type="url" id="business-booking-url" value="${esc(business.booking_url || '')}" placeholder="https://your-booking-provider.com/venue" inputmode="url" /></div>
-        <div class="form-field"><label for="business-membership-url">Membership link</label><input type="url" id="business-membership-url" value="${esc(business.membership_url || '')}" placeholder="https://yourclub.com/memberships" inputmode="url" /></div>
         <div class="form-field"><label for="business-website-url">Website</label><input type="url" id="business-website-url" value="${esc(business.website_url || '')}" placeholder="https://yourclub.com" inputmode="url" /></div>
-        <div class="form-field"><label for="business-logo-url">Logo image link</label><input type="url" id="business-logo-url" value="${esc(business.logo_url || '')}" placeholder="https://yourclub.com/logo.png" inputmode="url" /><small class="field-help">Use a stable secure image URL, or upload a logo so Third Shot serves a privacy-friendly same-origin copy.</small></div>
+        <details class="simple-disclosure" id="business-branding"><summary>Logo &amp; branding <span>Optional</span></summary>
+        <div class="form-field"><label for="business-logo-url">Logo image link</label><input type="url" id="business-logo-url" value="${esc(business.logo_url || '')}" placeholder="https://yourclub.com/logo.png" inputmode="url" /><small class="field-help">Upload a logo, or link to one on your website.</small></div>
         <div class="form-field business-logo-upload">
           <span class="business-file-label" id="business-logo-file-label">Upload a logo</span>
           <div class="business-file-picker" id="business-logo-file-picker" data-state="${hasManagedLogo ? 'success' : 'idle'}" data-idle-icon="camera">
@@ -30763,6 +31017,7 @@
           <small class="field-help" id="business-logo-file-help">Choose an image up to 12 MB. Third Shot resizes it before upload. Avoid confidential images.</small>
           <button type="button" class="btn-link" id="business-logo-remove" ${hasManagedLogo ? '' : 'hidden'}>Remove uploaded logo</button>
         </div>
+        </details>
         <button type="submit" class="btn btn-primary btn-block" id="business-details-save">Save business details</button>
       </form>
     `, { label: 'Edit business details' });
@@ -30853,8 +31108,6 @@
       const rawLogoUrl = modal.querySelector('#business-logo-url').value.trim();
       const managedLogo = /^\/api\/businesses\/\d+\/logo$/.test(rawLogoUrl);
       const urls = {
-        booking_url: optionalBusinessUrl(modal, '#business-booking-url', 'booking', formUX),
-        membership_url: optionalBusinessUrl(modal, '#business-membership-url', 'membership', formUX),
         website_url: optionalBusinessUrl(modal, '#business-website-url', 'website', formUX),
         ...(managedLogo ? {} : { logo_url: optionalBusinessUrl(modal, '#business-logo-url', 'logo image', formUX) }),
       };
@@ -32640,16 +32893,6 @@
         <span class="row-main"><b>Usually plays</b><small>${availabilityLines.length ? availabilityLines.join(' · ') : 'Add your usual days and times'}</small></span>
         ${uiIcon('chevron-right', 'chev')}
       </button>
-      <div class="stat-grid" id="profile-headline-stats" ${total ? '' : 'aria-busy="true"'}>
-        ${headlineStats}
-      </div>
-      ${total ? `<button type="button" class="btn btn-secondary btn-block profile-rankings-link" id="pf-rankings">${uiIcon('trophy')} See rankings</button>` : ''}
-      <div id="pf-new-player-progress" aria-live="polite"></div>
-      <button type="button" class="profile-business-entry" id="pf-business-hub">
-        <span class="profile-business-icon" aria-hidden="true">${uiIcon('building')}</span>
-        <span class="row-main"><b>Run a pickleball business?</b><small>Claim your venue, add booking links, and help players find everything in one place.</small></span>
-        <span class="profile-business-cta">Business Hub ${uiIcon('chevron-right', 'chev')}</span>
-      </button>
       <div class="profile-load-error hidden" id="pf-dashboard-error" role="alert">
         <span class="nav-row-leading" aria-hidden="true">${uiIcon('refresh')}</span>
         <span class="row-main"><b>Your latest play dashboard did not load</b><span>Your profile and settings still work. Check the connection and try the play sections again.</span></span>
@@ -32661,14 +32904,21 @@
       <div id="pf-courts" aria-busy="true" style="min-height:108px">
         <div class="section-label">Saved courts</div>${skeletonHtml(1)}
       </div>
-      <div id="pf-history" aria-busy="true" style="min-height:166px">
-        <div class="section-label">Recent play</div>${skeletonHtml(2)}
-      </div>
       <div class="profile-dashboard-actions profile-dashboard-primary-actions">
         <button type="button" class="btn btn-secondary" id="pf-invite">${uiIcon('send')} Invite friends</button>
         <button type="button" class="btn btn-secondary" id="pf-feedback">${uiIcon('message')} Send feedback</button>
       </div>
-      <section class="profile-dashboard-more profile-dashboard-more-visible" aria-label="Play stats and history">
+      <details class="profile-dashboard-more simple-disclosure" aria-label="Play stats and history">
+        <summary>Your progress &amp; history</summary>
+      <div class="stat-grid" id="profile-headline-stats" ${total ? '' : 'aria-busy="true"'}>
+        ${headlineStats}
+      </div>
+      ${total ? `<button type="button" class="btn btn-secondary btn-block profile-rankings-link" id="pf-rankings">${uiIcon('trophy')} See rankings</button>` : ''}
+      <div id="pf-new-player-progress" aria-live="polite"></div>
+      <div id="pf-history" aria-busy="true" style="min-height:166px">
+        <div class="section-label">Recent play</div>${skeletonHtml(2)}
+      </div>
+
         <div id="pf-play-stats" aria-busy="true" style="min-height:146px">
           <div class="section-label">Your play stats</div>${skeletonHtml(1)}
         </div>
@@ -32676,7 +32926,13 @@
         </div>
         <div id="pf-history-more">
         </div>
-      </section>
+      </details>
+      <button type="button" class="profile-business-entry" id="pf-business-hub">
+        <span class="profile-business-icon" aria-hidden="true">${uiIcon('building')}</span>
+        <span class="row-main"><b>Manage a venue</b><small>Your listing, bookings and events</small></span>
+        ${uiIcon('chevron-right', 'chev')}
+      </button>
+
     `;
 
     el.querySelector('#profile-avatar-edit')?.addEventListener('click', openEditProfile);
@@ -34199,15 +34455,15 @@
         }
         moreActions.push(`<button class="btn btn-secondary btn-block" id="gs-leave">Leave ${playNoun}</button>`);
         if (game.is_creator) {
-          actions += `<section class="game-host-toolbar" aria-label="Host tools">
-            <div class="game-host-toolbar-title">${uiIcon('shield')} <span><b>You’re hosting</b><small>Manage this ${playNoun}</small></span></div>
+          actions += `<details class="game-host-toolbar simple-disclosure" aria-label="Host tools">
+            <summary>${uiIcon('shield')} Manage ${playNoun}<small>You’re hosting</small></summary>
             <div class="game-host-toolbar-actions">
               ${game.is_instant ? '' : `<button type="button" class="btn btn-secondary" id="gs-edit">${uiIcon('edit')} Edit game</button>`}
               ${!game.is_instant && startsAhead && game.recurrence !== 'weekly' ? `<button type="button" class="btn btn-secondary" id="gs-reschedule">${uiIcon('clock')} Reschedule</button>` : ''}
               <button type="button" class="btn btn-secondary" id="gs-share">${uiIcon('send')} Share</button>
               <button type="button" class="btn btn-danger" id="gs-cancel">Cancel ${playNoun}</button>
             </div>
-          </section>`;
+          </details>`;
         }
         if (moreActions.length) actions += `<div class="game-player-secondary-actions">${moreActions.join('')}</div>`;
       }
@@ -34318,6 +34574,7 @@
         <div style="flex:1">
           <h3 class="game-detail-title" data-status="${esc(game.status)}"><span class="game-detail-status-icon" aria-hidden="true">${statusIcon}</span><span class="game-detail-headline">${headline}</span></h3>
           <div class="row-sub">${subline}</div>
+          ${gameRosterStatusHtml(game)}
           ${detailMeta}
         </div>
         ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="${playNounTitle} chat — current players only" aria-label="${playNounTitle} chat — current players only" style="box-shadow:none;position:relative">${uiIcon('message')}${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
@@ -35945,31 +36202,26 @@
     });
   }
 
-  // Onboarding step 2: seed the saved-courts list — saved courts power the
-  // Saved filter, court chat, and new-game pings, so an empty list is a
-  // quieter app. Skips itself when there's nothing decent nearby.
+  // Nearby courts are suggestions; players can search the full directory
+  // and paginate without leaving profile setup.
   async function maybeSuggestStarterCourts(next) {
     const modalLoad = beginRoutedOverlayLoad(null);
     let courts = [];
+    let nextCursor = null;
+    let initialError = false;
+    const accountId = Number(state.me?.id);
     try {
       if (state.me && state.me.home_lat != null) {
-        const data = await api(`/courts?lat=${state.me.home_lat}&lng=${state.me.home_lng}&radius=15&limit=30&sort=rating`);
-        courts = (data.items || [])
-          .sort((a, b) => (b.rating_avg ?? 0) - (a.rating_avg ?? 0) || (b.num_courts || 0) - (a.num_courts || 0))
-          .slice(0, 3);
+        const data = await api(`/courts?lat=${state.me.home_lat}&lng=${state.me.home_lng}&radius=50&limit=12&sort=distance`);
+        courts = data.items || [];
+        nextCursor = data.next_cursor || null;
       }
-    } catch { /* offline — skip the nicety */ }
+    } catch { initialError = true; }
     if (!routedOverlayLoadIsCurrent(modalLoad)) return;
-    if (!courts.length) { next(); return; }
+    if (Number(state.me?.id) !== accountId) return;
 
-    const modal = openModal(`
-      <div class="checkin-sheet onboarding-sheet starter-courts-sheet">
-        <div class="checkin-sheet-icon" aria-hidden="true">${uiIcon('star')}</div>
-        <span class="onboarding-kicker">Build your home feed</span>
-        <h3>Save your courts</h3>
-        <p class="row-sub onboarding-copy">Choose a primary court and save any others you play at. Your home area controls which nearby results you see.</p>
-        ${courts.map((c) => {
-          const saved = !!(state.favIds?.has(c.id) || c.is_favorite || c.favorited);
+    const courtRowsHtml = (items) => items.map((c) => {
+          const saved = !!(state.favIds ? state.favIds.has(c.id) : (c.is_favorite || c.favorited));
           return `
             <div class="card row starter-court-row">
               <span class="nav-row-leading" aria-hidden="true">${uiIcon('map-pin')}</span>
@@ -35982,10 +36234,24 @@
                 <button type="button" class="btn ${saved ? 'btn-primary' : 'btn-secondary'} btn-sm starter-court-save" data-star-court="${c.id}" data-court-name="${esc(c.name)}" aria-label="${saved ? 'Remove' : 'Save'} ${esc(c.name)}" aria-pressed="${saved}">${uiIcon('star', saved ? 'is-filled' : '')}</button>
               </span>
             </div>`;
-        }).join('')}
-        <button type="button" class="btn btn-primary btn-block modal-close onboarding-done">Done</button>
+        }).join('');
+    const modal = openModal(`
+      <div class="checkin-sheet onboarding-sheet starter-courts-sheet">
+        <div class="checkin-sheet-icon" aria-hidden="true">${uiIcon('star')}</div>
+        <span class="onboarding-kicker">Build your home feed</span>
+        <h3>Save your courts</h3>
+        <p class="row-sub onboarding-copy">Choose a primary court and save any others you play at. Your home area controls which nearby results you see.</p>
+        <label class="sr-only" for="starter-court-search">Search courts by name or city</label>
+        <input type="search" id="starter-court-search" placeholder="Search by court name or city" autocomplete="off" />
+        <p class="row-sub" id="starter-court-status" role="status" aria-live="polite"></p>
+        <div id="starter-court-results"></div>
+        <button type="button" class="btn btn-secondary btn-block hidden" id="starter-court-more">Show more courts</button>
+        <button type="button" class="btn btn-secondary btn-block hidden" id="starter-court-retry">Try again</button>
+
+        <button type="button" class="btn btn-primary btn-block onboarding-done">Done</button>
       </div>
     `, { label: 'Save nearby courts' });
+    const bindCourtActions = () => {
     modal.querySelectorAll('[data-star-court]').forEach((btn) => btn.addEventListener('click', async () => {
       const resetAction = beginButtonAction(btn, 'Saving…');
       if (!resetAction) return;
@@ -36013,7 +36279,7 @@
         applyMe(data);
         resetAction();
         modal.querySelectorAll('[data-home-court]').forEach((choice) => {
-          const active = choice === btn;
+          const active = Number(choice.dataset.homeCourt) === Number(state.me?.home_court_id);
           choice.classList.toggle('btn-primary', active);
           choice.classList.toggle('btn-secondary', !active);
           choice.setAttribute('aria-pressed', String(active));
@@ -36026,7 +36292,66 @@
         toast(error.message, { tone: 'warning' });
       }
     }));
-    modal.querySelector('.modal-close').addEventListener('click', (e) => {
+    };
+    const results = modal.querySelector('#starter-court-results');
+    const search = modal.querySelector('#starter-court-search');
+    const status = modal.querySelector('#starter-court-status');
+    const more = modal.querySelector('#starter-court-more');
+    const retry = modal.querySelector('#starter-court-retry');
+    let sequence = 0;
+    let timer;
+    const renderCourts = () => {
+      results.innerHTML = courtRowsHtml(courts);
+      bindCourtActions();
+      more.classList.toggle('hidden', !nextCursor);
+      more.disabled = false;
+      status.textContent = courts.length
+        ? (search.value.trim() ? `${courts.length} courts found` : 'Nearby suggestions · search to find any court')
+        : 'No courts found. Try another court name or city.';
+    };
+    const loadCourts = async (append = false) => {
+      const requestId = ++sequence;
+      const query = search.value.trim();
+      const params = new URLSearchParams({ limit: '12' });
+      if (query) params.set('q', query);
+      else if (state.me?.home_lat != null) {
+        params.set('lat', state.me.home_lat); params.set('lng', state.me.home_lng);
+        params.set('radius', '50'); params.set('sort', 'distance');
+      }
+      if (append && nextCursor) params.set('cursor', nextCursor);
+      status.textContent = 'Finding courts…';
+      results.setAttribute('aria-busy', 'true');
+      more.disabled = true;
+      retry.classList.add('hidden');
+      try {
+        const data = await api(`/courts?${params}`);
+        if (requestId !== sequence || !modal.isConnected || Number(state.me?.id) !== accountId) return;
+        courts = append ? [...courts, ...(data.items || [])] : (data.items || []);
+        nextCursor = data.next_cursor || null;
+        renderCourts();
+      } catch (error) {
+        if (requestId !== sequence || !modal.isConnected) return;
+        status.textContent = 'Courts could not load. Try again or search another name.';
+        retry.classList.remove('hidden');
+        more.disabled = false;
+      } finally {
+        if (requestId === sequence) results.removeAttribute('aria-busy');
+      }
+    };
+    renderCourts();
+    if (!courts.length && state.me?.home_lat == null) status.textContent = 'Search for your court by name or city.';
+    if (initialError) { status.textContent = 'Nearby courts could not load. Search for your court or try again.'; retry.classList.remove('hidden'); }
+    search.addEventListener('input', () => {
+      clearTimeout(timer); sequence += 1;
+      courts = []; nextCursor = null; results.innerHTML = '';
+      more.classList.add('hidden'); retry.classList.add('hidden');
+      status.textContent = 'Finding courts…';
+      timer = setTimeout(() => loadCourts(), 250);
+    });
+    more.addEventListener('click', () => loadCourts(true));
+    retry.addEventListener('click', () => loadCourts());
+    modal._cleanupFns.push(() => { clearTimeout(timer); sequence += 1; });
+    modal.querySelector('.onboarding-done').addEventListener('click', (e) => {
       e.stopPropagation();
       dismissModal(modal, () => { next(); fetchCourtsInView(); });
     });

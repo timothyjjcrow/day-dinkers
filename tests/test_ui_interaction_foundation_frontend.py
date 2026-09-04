@@ -965,8 +965,8 @@ def test_remaining_cross_app_destinations_use_native_controls_and_product_icons(
     assert 'class="card row nav-row-button" id="gs-court"' in game
     assert '<button type="button" class="profile-relationship-link" data-view-user=' in profile
     assert "openToolChild(() => openBusinessDetailsEditor" in business
-    assert "uiIcon(check.done ? 'check-circle' : 'target')" in business
-    assert "uiIcon('chevron-right', 'chev')" in business
+    assert "venueTaskHtml({ tool: 'offerings', icon: 'target'" in business
+    assert "uiIcon('chevron-right', 'chev')" in js_function("venueTaskHtml")
 
     assert not re.search(r'<span class="(?:chev|agb-chev)"[^>]*>›</span>', APP)
     assert '>✕</button>' not in APP
@@ -1296,7 +1296,7 @@ def test_business_connection_and_rematch_states_use_product_icons_not_font_arrow
 
     for icon in ("link", "alert-triangle", "refresh", "check-circle"):
         assert f"icon: '{icon}'" in health
-    assert "uiIcon(connectionHealth.icon)" in dashboard
+    assert "uiIcon(isPublic ? 'check-circle' : 'shield')" in dashboard
     assert "const statusIcon = problem ? 'alert-triangle'" in connections
     assert "uiIcon(statusIcon)" in connections
     assert "uiIcon('link')" in connections
@@ -1320,7 +1320,7 @@ def test_operator_connection_health_check_is_a_guarded_form():
 
 def test_business_onboarding_value_cards_use_product_icons():
     empty = js_function("businessHubEmptyHtml")
-    for icon in ("calendar", "target", "pickleball", "bell"):
+    for icon in ("building",):
         assert f"uiIcon('{icon}')" in empty
     for emoji in ("📅", "🎯", "🏓", "📣"):
         assert emoji not in empty

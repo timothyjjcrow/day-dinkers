@@ -18,14 +18,14 @@
     } catch { /* storage can be disabled; CSS media queries remain the fallback */ }
   </script>
   <title>Third Shot — Find courts, players & play</title>
-  <link rel="stylesheet" href="/release-assets/r60/styles-v15.min.css" />
+  <link rel="stylesheet" href="/release-assets/r66/styles-v15.min.css" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-512.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
   <!-- Start downloading the large application files early, but execute them
        with defer so the useful boot shell can paint before bundle parsing. -->
-  <link rel="preload" href="/release-assets/r60/crew-planner-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r60/app-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r66/crew-planner-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r66/app-v15.min.js" as="script" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -181,11 +181,8 @@
         </div>
         <div id="search-suggest" class="search-suggest hidden" role="listbox" aria-label="Court search suggestions"></div>
         <div class="map-filters" id="map-filters" role="group" aria-label="Quick court filters">
-          <button type="button" data-court-filter="open_now" aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-clock" /></svg> Open now</button>
           <button type="button" data-court-filter="active" aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-activity" /></svg> Happening now</button>
           <button type="button" data-court-filter="saved" aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-star" /></svg> Saved</button>
-          <button type="button" data-court-filter="business" aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-check-circle" /></svg> Verified venues</button>
-          <button type="button" id="court-auto-checkin" role="switch" aria-checked="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-map-pin" /></svg> Auto check-in <span data-switch-copy>Off</span></button>
           <button type="button" id="court-more-filters" aria-expanded="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-sliders" /></svg> Filters <span id="court-filter-count" class="filter-count hidden">0</span></button>
         </div>
         <div id="court-list" class="sheet court-sheet" data-snap="peek" role="region" aria-label="Court results">
@@ -247,9 +244,9 @@
             </div>
           </div>
           <div class="segmented play-segments" id="play-segments" role="tablist" aria-label="Play views">
-            <button type="button" role="tab" id="play-tab-games" aria-controls="play-content" data-seg="games" class="active" aria-selected="true">Today</button>
+            <button type="button" role="tab" id="play-tab-games" aria-controls="play-content" data-seg="games" class="active" aria-selected="true">Games</button>
             <button type="button" role="tab" id="play-tab-scores" aria-controls="play-content" data-seg="scores" aria-selected="false">Rankings</button>
-            <button type="button" role="tab" id="play-tab-brackets" aria-controls="play-content" data-seg="brackets" aria-selected="false">Compete <span id="competition-action-badge" class="segment-badge hidden" aria-hidden="true"></span></button>
+            <button type="button" role="tab" id="play-tab-brackets" aria-controls="play-content" data-seg="brackets" aria-selected="false">Events <span id="competition-action-badge" class="segment-badge hidden" aria-hidden="true"></span></button>
           </div>
           <button type="button" class="view-freshness hidden" data-refresh-view="play" aria-label="Refresh Play" aria-controls="play-content">
             <span data-view-age>Not updated yet</span><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-refresh" /></svg>
@@ -267,13 +264,16 @@
         <header class="tab-header">
           <div class="tab-title-row">
             <h2>Community</h2>
+            <div class="tab-header-actions">
             <button id="chat-compose" class="header-icon-btn" type="button" aria-label="New message" title="New message">
               <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-edit" /></svg>
             </button>
           </div>
+          </div>
           <div class="segmented" id="chat-segments" role="tablist" aria-label="Community views">
-            <button type="button" role="tab" id="chat-tab-chats" aria-controls="chat-content" data-seg="chats" class="active" aria-selected="true">Chats <span id="chat-inbox-badge" class="segment-badge hidden"></span></button>
-            <button type="button" role="tab" id="chat-tab-friends" aria-controls="chat-content" data-seg="friends" aria-selected="false">People <span id="chat-friends-badge" class="segment-badge hidden"></span></button>
+            <button type="button" role="tab" id="chat-tab-chats" aria-controls="chat-content" data-seg="chats" class="active" aria-selected="true">Messages <span id="chat-inbox-badge" class="segment-badge hidden"></span></button>
+            <button type="button" role="tab" id="chat-tab-groups" aria-controls="chat-content" data-seg="groups" aria-selected="false">Groups <span id="chat-groups-badge" class="segment-badge hidden"></span></button>
+            <button type="button" role="tab" id="chat-tab-friends" aria-controls="chat-content" data-seg="friends" aria-selected="false">Players <span id="chat-friends-badge" class="segment-badge hidden"></span></button>
           </div>
           <button type="button" class="view-freshness hidden" data-refresh-view="chat" aria-label="Refresh Community" aria-controls="chat-content">
             <span data-view-age>Not updated yet</span><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-refresh" /></svg>
@@ -397,7 +397,7 @@
       syncBoot();
     })();
   </script>
-  <script defer src="/release-assets/r60/crew-planner-v15.min.js"></script>
-  <script defer src="/release-assets/r60/app-v15.min.js"></script>
+  <script defer src="/release-assets/r66/crew-planner-v15.min.js"></script>
+  <script defer src="/release-assets/r66/app-v15.min.js"></script>
 </body>
 </html>

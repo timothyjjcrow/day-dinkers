@@ -7,7 +7,7 @@ import path from 'node:path';
 import { build } from 'esbuild';
 import { minify } from 'terser';
 
-const release = 'r60';
+const release = 'r66';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(projectRoot, 'public');
 const outputDir = path.join(publicDir, 'assets', release);

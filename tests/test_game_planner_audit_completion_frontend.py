@@ -65,10 +65,11 @@ def test_audience_options_and_invites_are_visible_searchable_and_additive():
     assert "visibility === 'private' ? [...inviteIds] : []" not in planner
     assert "button.dataset.vis === 'friends' && friends.length === 0" in planner
     assert "initialVisibility = 'open';" in planner
-    assert 'id="ng-level"' in who
+    advanced = planner[planner.index('<details class="planner-advanced'):planner.index('<div class="planner-submit-bar')]
+    assert 'id="ng-level"' in advanced
     assert 'id="ng-club"' in who
-    assert 'id="ng-notes"' in who
-    assert "Post this to a club?" in who
+    assert 'id="ng-notes"' in advanced
+    assert "Post to a community" in who
 
 
 def test_capacity_is_three_choices_with_group_stepper_to_one_hundred():

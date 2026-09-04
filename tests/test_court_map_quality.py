@@ -136,7 +136,8 @@ def test_open_now_filter_uses_structured_hours_before_pagination(client):
     assert payload['has_more'] is False
     assert [court['name'] for court in payload['items']] == ['Always Open Courts']
 
-    assert 'data-court-filter="open_now"' in (ROOT / 'public' / 'index.html').read_text()
+    assert "['open_now', uiIcon('clock'), 'Open now']" in APP
+    assert "COURT_DETAIL_FILTERS = ['open_now', 'business'" in APP
     assert "[...COURT_AMENITY_FILTERS, 'open_now']" in APP
     assert "court.open_status?.is_open !== true" in APP
 

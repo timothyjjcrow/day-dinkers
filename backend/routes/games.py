@@ -2517,9 +2517,32 @@ def _game_matches_level(game, rating):
     return bool(low is not None and high is not None and low <= rating <= high)
 
 
+def _discovery_window_args():
+    """Explicit UTC bounds keep player-local day choices correct across zones."""
+    bounds = {}
+    for key in ('ends_after', 'starts_before'):
+        raw = request.args.get(key)
+        if raw is None:
+            bounds[key] = None
+            continue
+        text = raw.strip().replace('Z', '+00:00')
+        try:
+            value = datetime.fromisoformat(text)
+            if value.tzinfo is None or not 1970 <= value.year <= 9998:
+                raise ValueError('valid date and timezone required')
+            bounds[key] = value.astimezone(UTC).replace(tzinfo=None)
+        except (ValueError, OverflowError):
+            return {}, 'invalid_discovery_window'
+    if bounds['ends_after'] and bounds['starts_before'] \
+            and bounds['starts_before'] <= bounds['ends_after']:
+        return {}, 'invalid_discovery_window'
+    return bounds, None
+
+
 def _games_feed_payload(current_user, *, lat=None, lng=None,
                         mine=False, friends_only=False, radius=50.0,
-                        limit=100, offset=0, level=None):
+                        limit=100, offset=0, level=None,
+                        ends_after=None, starts_before=None):
     """Build one upcoming-games feed for both legacy and aggregate routes."""
     viewer_id = current_user.id
     viewer_friends = friend_ids(viewer_id)
@@ -2530,13 +2553,14 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
             current_user, lat, lng, limit=limit, offset=offset,
         )
 
+    earliest_start = ends_after - timedelta(hours=12) if ends_after else utcnow() - timedelta(hours=2)
     if friends_only:
         if not viewer_friends:
             return _page_payload([], limit=limit, offset=offset)
         # Upcoming games a friend created or joined (creator is always a player).
         query = (
             Game.query.filter(
-                Game.scheduled_at >= utcnow() - timedelta(hours=2),
+                Game.scheduled_at >= earliest_start,
                 Game.status == 'upcoming',
             )
             .join(GamePlayer)
@@ -2550,10 +2574,12 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
         if lat is None or lng is None:
             return None
         query = Game.query.filter(
-            Game.scheduled_at >= utcnow() - timedelta(hours=2),
+            Game.scheduled_at >= earliest_start,
             Game.status == 'upcoming',
         )
-    if not friends_only and lat is not None and lng is not None:
+    if starts_before is not None:
+        query = query.filter(Game.scheduled_at < starts_before)
+    if lat is not None and lng is not None:
         radius = min(max(float(radius or 50.0), 1.0), 200.0)
         lat_delta = radius / 69.0
         lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
@@ -2563,6 +2589,8 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
         )
 
     if not friends_only and lat is not None and lng is not None:
+        # Friends retain chronological ordering with DISTINCT; PostgreSQL
+        # requires DISTINCT order expressions to appear in the select list.
         # The bounding box above keeps this portable across SQLite/Postgres;
         # squared degree distance gives the database a stable proximity order
         # before the exact Haversine check below.
@@ -2598,6 +2626,11 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
     # Stop as soon as one extra visible row is found. Each database fetch is
     # bounded, while select-in relationship loading remains fully supported.
     for game in batched_games():
+        # Apply time eligibility before pagination and privacy-safe serialization.
+        # Unknown durations use the existing four-hour stale-session horizon.
+        if ends_after is not None and game.scheduled_at + timedelta(
+                minutes=game.duration_minutes or 240) <= ends_after:
+            continue
         # In the public/nearby and friends feeds, only show games the viewer may see.
         if not game.visible_to(viewer_id, viewer_friends) \
                 or _game_has_blocked_participant(game, viewer_id, viewer_hidden) \
@@ -2619,7 +2652,7 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
             distance = haversine_miles(
                 lat, lng, court.latitude, court.longitude,
             )
-            if not friends_only and distance > radius:
+            if distance > radius:
                 continue
             item['distance_miles'] = round(distance, 1)
         if visible_before_page < offset:
@@ -2668,10 +2701,13 @@ def list_games():
             return jsonify({'error': 'invalid_level'}), 400
         if level not in set(SELF_RATING_LEVELS):
             return jsonify({'error': 'invalid_level'}), 400
+    window, window_error = _discovery_window_args()
+    if window_error:
+        return jsonify({'error': window_error}), 400
     payload = _games_feed_payload(
         g.current_user, lat=lat, lng=lng, mine=mine,
         friends_only=friends_only, radius=radius, limit=limit,
-        offset=offset, level=level,
+        offset=offset, level=level, **window,
     )
     if payload is None:
         return jsonify({'error': 'location_required'}), 400
@@ -2716,6 +2752,23 @@ def _play_tournament_schedule(user, now=None):
     } for tournament in tournaments]
 
 
+def _recent_completed_play(user):
+    """A small participant-only shortcut, without history totals or extra pages."""
+    games = (
+        Game.query.join(GamePlayer)
+        .filter(
+            GamePlayer.user_id == user.id, Game.status == 'completed',
+            _game_player_count_subquery() >= 2,
+            or_(GamePlayer.team.in_([1, 2]), Game.score_team1.is_(None),
+                Game.score_team2.is_(None)),
+        )
+        .order_by(db.func.coalesce(Game.completed_at, Game.scheduled_at).desc(),
+                  Game.id.desc())
+        .limit(3).all()
+    )
+    return {'items': [_slim_game_payload(_game_payload(game, user.id)) for game in games]}
+
+
 @games_bp.get('/play/home')
 @login_required
 def play_home():
@@ -2735,6 +2788,9 @@ def play_home():
             return jsonify({'error': 'invalid_level'}), 400
         if level not in set(SELF_RATING_LEVELS):
             return jsonify({'error': 'invalid_level'}), 400
+    window, window_error = _discovery_window_args()
+    if window_error:
+        return jsonify({'error': window_error}), 400
     from backend.routes.auth import profile_stats_payload
 
     return jsonify({
@@ -2743,14 +2799,15 @@ def play_home():
         ),
         'friends': _games_feed_payload(
             g.current_user, lat=lat, lng=lng, friends_only=True,
-            level=level,
+            radius=radius, level=level, **window,
         ),
         'nearby': (
             _games_feed_payload(
                 g.current_user, lat=lat, lng=lng, radius=radius,
-                level=level,
+                level=level, **window,
             ) if lat is not None and lng is not None else {'items': []}
         ),
+        'recent': _recent_completed_play(g.current_user),
         'progress': profile_stats_payload(g.current_user),
         'competitions': _play_tournament_schedule(g.current_user),
     })

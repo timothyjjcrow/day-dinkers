@@ -428,7 +428,7 @@ def test_court_detail_leads_with_now_and_defers_venue_management():
     players = detail.index('id="cd-sec-players"')
     games = detail.index('id="cd-sec-games"')
     disclosure = detail.index('class="card cd-progressive cd-court-details"')
-    assert now_at < players < games < disclosure
+    assert now_at < games < players < disclosure
     assert "courtClosed ? 'Closed to new play' : 'Playing and forming now'" in detail
     assert "const nowGames = Array.isArray(court.now_games) ? court.now_games" in detail
     assert "const actionableGames = nowGames.filter((game) => game.is_joined || Number(game.spots_left) > 0);" in detail
@@ -438,7 +438,7 @@ def test_court_detail_leads_with_now_and_defers_venue_management():
     assert "const primaryAction = courtClosed ? '' : myOpenGame" in detail
     assert 'id="cd-open-game" data-game-id="${myOpenGame.id}">Open your play session' in detail
     assert "Find people to play here" in detail
-    assert "Plan with a group" in detail
+    assert "Create game here" in detail
     assert "Set up ranked match" in detail
     assert "const directionsAction = mapsUrl ?" in detail
     assert "${directionsAction}" in detail
@@ -542,10 +542,12 @@ def test_result_region_and_empty_search_popup_keep_accessible_state_current():
 def test_list_mode_removes_the_covered_map_from_pointer_and_keyboard_navigation():
     snap = section("function setCourtSheetSnap", "function setupCourtSheetDrag")
     assert "const mapHadFocus = !!mapEl?.contains(document.activeElement);" in snap
-    assert "mapEl.inert = listOpen;" in snap
+    assert "mapEl.inert = hideMap;" in snap
+    assert "const hideMap = listOpen && !desktop;" in snap
+    assert "if (desktop) snap = 'half';" in snap
     assert "mapEl.setAttribute('aria-hidden', 'true')" in snap
     assert "mapEl.removeAttribute('aria-hidden')" in snap
-    assert "if (listOpen && mapHadFocus)" in snap
+    assert "if (hideMap && mapHadFocus)" in snap
     assert "$('#court-preview')?.querySelector('button, a[href]') || cycle" in snap
     assert "focusTarget?.focus({ preventScroll: true })" in snap
 
@@ -646,8 +648,8 @@ def test_single_markers_use_a_venue_symbol_while_clusters_keep_counts():
 def test_verified_venues_are_discoverable_and_court_people_have_contextual_actions():
     filtering = section("function applyCourtFilters", "function addCourtDistances")
     assert "filters.business && !court.business" in filtering
-    assert 'data-court-filter="business"' in INDEX
-    assert "Verified venues" in INDEX
+    assert "['business', uiIcon('check-circle'), 'Verified venues']" in APP
+    assert "Verified venues" in APP
     assert 'role="status" aria-live="polite"' in INDEX
     assert ".court-marker.integrated" in STYLES
     assert ".marker-venue-badge" in STYLES

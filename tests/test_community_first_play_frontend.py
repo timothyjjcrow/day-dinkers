@@ -16,11 +16,11 @@ def section(start: str, end: str) -> str:
 def test_play_launcher_has_explicit_now_arrival_availability_and_planning_paths():
     launcher = section("function rallyLauncherHtml", "async function renderPlay")
     assert 'data-goto="instant-rally"' in launcher
-    assert "<b>${here ? 'Play here' : 'At a court'}</b>" in launcher
+    assert "<b>${here ? 'Play here' : 'I’m at a court'}</b>" in launcher
     assert 'data-goto="on-my-way"' in launcher
-    assert '<b>On my way</b>' in launcher
+    assert '<b>I’m on my way</b>' in launcher
     assert 'data-goto="play-pulse"' in launcher
-    assert '<b>Free this hour</b>' in launcher
+    assert '<b>I’m free this hour</b>' in launcher
     assert 'data-goto="new-game"' in launcher
     assert 'data-goto="ranked-match"' in launcher
     assert 'data-goto="game-flow"' not in launcher
@@ -268,7 +268,7 @@ def test_opening_an_inbox_room_refreshes_the_lane_only_after_return():
     assert "roomModal._cleanupFns.push" in rows
     assert "refreshedAfterClose" in rows
     assert "queueMicrotask(() =>" in rows
-    assert "state.tab === 'chat' && state.chatSeg === 'chats'" in rows
+    assert "state.tab === 'chat' && ['chats', 'groups'].includes(state.chatSeg)" in rows
     assert "if (state.tab === 'chat') renderChat();" not in rows
 
 

@@ -202,7 +202,7 @@ def test_compete_ui_exposes_action_badge_and_progressive_pages():
         assert f'data-competition-page="{source}"' in app_source
     assert "api(`${baseUrl}&cursor=${encodeURIComponent(cursor)}`)" in app_source
     assert "state.competitionActionCount" in app_source
-    assert "Compete, ${actionCount} action" in app_source
+    assert "Events, ${actionCount} action" in app_source
 
 
 def test_play_home_schedule_includes_owned_tournaments_in_the_next_week(client, app):

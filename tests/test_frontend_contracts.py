@@ -32,7 +32,7 @@ def test_map_tiles_work_without_a_provider_api_key():
 def test_primary_mobile_views_keep_accessible_navigation_contracts():
     assert 'id="play-segments" role="tablist"' in INDEX
     for segment, label in (
-        ('games', 'Today'), ('scores', 'Rankings'), ('brackets', 'Compete'),
+        ('games', 'Games'), ('scores', 'Rankings'), ('brackets', 'Events'),
     ):
         assert f'id="play-tab-{segment}"' in INDEX
         assert f'data-seg="{segment}"' in INDEX
@@ -167,16 +167,16 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r62';" in SERVICE_WORKER
+    assert "const CACHE = 'thirdshot-v15-r68';" in SERVICE_WORKER
     for asset in (
-        "/release-assets/r60/styles-v15.min.css",
-        "/release-assets/r60/crew-planner-v15.min.js",
-        "/release-assets/r60/app-v15.min.js",
+        "/release-assets/r66/styles-v15.min.css",
+        "/release-assets/r66/crew-planner-v15.min.js",
+        "/release-assets/r66/app-v15.min.js",
     ):
         assert asset in SERVICE_WORKER
-    assert 'href="/release-assets/r60/styles-v15.min.css"' in INDEX
-    assert 'src="/release-assets/r60/crew-planner-v15.min.js"' in INDEX
-    assert 'src="/release-assets/r60/app-v15.min.js"' in INDEX
+    assert 'href="/release-assets/r66/styles-v15.min.css"' in INDEX
+    assert 'src="/release-assets/r66/crew-planner-v15.min.js"' in INDEX
+    assert 'src="/release-assets/r66/app-v15.min.js"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -250,13 +250,14 @@ def test_rankings_and_fab_always_offer_the_contextual_next_action():
 def test_community_is_a_universal_attention_aware_inbox():
     assert 'id="chat-inbox-badge"' in INDEX
     assert 'id="chat-friends-badge"' in INDEX
-    assert 'id="chat-groups-badge"' not in INDEX
+    assert 'id="chat-groups-badge"' in INDEX
     assert "const inbox = await api('/inbox');" in APP
     for kind in ('game', 'tournament', 'league'):
         assert f"kind === '{kind}'" in APP
     assert "function universalInboxHtml(" in APP
     assert "['all', 'All'], ['direct', 'Direct'], ['games', 'Games']" in APP
-    assert "['groups', 'Groups'], ['courts', 'Courts']" in APP
+    assert "['courts', 'Courts']" in APP
+    assert 'id="chat-tab-groups"' in INDEX
     assert "Private groups" in APP
     assert "Your community groups" in APP
     assert "function renderPeopleLane" in APP
@@ -268,7 +269,7 @@ def test_community_is_a_universal_attention_aware_inbox():
     rows = APP[APP.index("function bindCommunityConversationRows"):APP.index("function openCreateGroupChoiceSheet")]
     assert "roomModal._cleanupFns.push" in rows
     assert "Opening the room already performed the authoritative read" in rows
-    assert "state.tab === 'chat' && state.chatSeg === 'chats'" in rows
+    assert "state.tab === 'chat' && ['chats', 'groups'].includes(state.chatSeg)" in rows
     assert "if (state.tab === 'chat') renderChat();" not in rows
     assert "avatarHtml(chat.user, '', 'span')" in APP
     assert "firstRevealed?.focus({ preventScroll: true });" in APP
@@ -418,7 +419,7 @@ def test_logout_is_a_hard_account_privacy_boundary():
     assert "profileRenderGeneration += 1;" in APP
     assert "panel.replaceChildren();" in APP
     assert "function areaViewKey()" in APP
-    assert "`${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}`" in APP
+    assert "`${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}:${discoveryKey}`" in APP
     assert "const peopleKey = seg === 'friends' ? `:${state.peopleMode}` : '';" in APP
     assert "`${state.me?.id || 'signed-out'}:chat:${seg}${peopleKey}:${areaViewKey()}`" in APP
     assert "const CHAT_DRAFT_TTL = 24 * 60 * 60 * 1000;" in APP

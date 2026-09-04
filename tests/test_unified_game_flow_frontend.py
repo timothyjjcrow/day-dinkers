@@ -206,8 +206,8 @@ def test_play_launcher_is_intent_specific_while_map_and_court_keep_compatibility
     assert 'data-goto="play-pulse"' in launcher
     assert 'data-goto="new-game"' in launcher
     assert 'data-goto="ranked-match"' in launcher
-    assert "At a court" in launcher
-    assert "Free this hour" in launcher
+    assert "I’m at a court" in launcher
+    assert "I’m free this hour" in launcher
 
     ctas = section("function setupEmptyStateCtas()", "// ---------- Map / Courts ----------")
     assert "target === 'game-flow'" in ctas
