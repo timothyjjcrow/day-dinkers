@@ -33,23 +33,22 @@ def test_saved_plan_requires_an_explicit_resume_or_start_new_choice():
     assert "let plannerStep = restoredDraft ? 'where'" in planner
 
 
-def test_when_step_has_day_strip_half_hour_grid_duration_and_repeat():
+def test_when_step_has_compact_suggestions_visible_editor_duration_and_repeat():
     planner = planner_source()
-
-    assert "Array.from({ length: 31 }, (_, index) => 6 + index / 2)" in planner
-    assert 'id="ng-day-strip" role="radiogroup" aria-label="Play date"' in planner
-    assert 'id="ng-time-grid" role="radiogroup" aria-label="Play time in 30-minute steps"' in planner
-    assert 'data-planner-clock="${clock}"' in planner
-    assert "function" not in planner[planner.index("const setPlannerClock"):planner.index("const timeLabel")]
+    assert "scheduleDateTimePickerHtml('ng-when'" in planner
+    assert "bindScheduleDateTimePicker(modal, 'ng-when')" in planner
+    assert 'id="ng-more-times" aria-expanded="false"' in planner
+    assert 'id="ng-slot-browser"' not in planner
+    assert 'id="ng-time-options"' not in planner
     assert 'id="ng-duration-choices"' in planner
     assert "[60, 90, 120].map" in planner
+    assert 'id="ng-duration-custom-toggle"' in planner
     assert 'id="ng-recurring-row"' in planner
     assert 'id="ng-recurrence-weekdays"' in planner
     assert 'id="ng-recurrence-end"' in planner
     assert "busyWindowContains" in planner
-    assert "classList.toggle('is-popular', popular)" in planner
-    assert ".planner-day-strip" in STYLES
-    assert ".planner-time-grid" in STYLES
+    assert ".schedule-suggestions" in STYLES
+    assert ".schedule-calendar" in STYLES
 
 
 def test_audience_options_and_invites_are_visible_searchable_and_additive():

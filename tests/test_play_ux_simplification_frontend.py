@@ -61,23 +61,18 @@ def test_planner_reveals_where_then_when_then_who_and_never_offers_right_now():
     assert "Start game now" not in planner
 
 
-def test_when_starts_with_exactly_three_smart_choices_and_discloses_any_other_time():
+def test_when_starts_with_three_suggestions_and_expands_more_in_place():
     planner = section("async function openNewGameModal", "async function renderTournaments")
     assert "const smartTimeSuggestions = []" in planner
-    assert "smartTimeSuggestions.length >= 3" in planner
-    assert planner.count("smartTimeSuggestions.length < 3") == 2
-    assert 'id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === \'ranked\' ? \'match\' : \'play session\'} times"' in planner
+    assert "smartTimeSuggestions.length >= 9" in planner
+    assert "index >= 3 ? 'hidden' : ''" in planner
+    assert 'data-extra-time' in planner
+    assert 'More common times' in planner
     assert "syncPlannerNounLabels" in planner
     assert 'data-smart-time="${slot.date.toISOString()}"' in planner
-    assert 'id="ng-day-strip" role="radiogroup" aria-label="Play date"' in planner
-    assert 'id="ng-time-grid" role="radiogroup" aria-label="Play time in 30-minute steps"' in planner
-    assert 'Array.from({ length: 31 }, (_, index) => 6 + index / 2)' in planner
-    assert '<label for="ng-when">Date and time</label>' in planner
-    assert 'aria-label="${defaultType === \'ranked\' ? \'Match\' : \'Play session\'} date and time"' in planner
-    assert 'id="ng-days"' not in planner
-    assert 'id="ng-hours"' not in planner
-    assert "dayChips" not in planner
-    assert "timeChips" not in planner
+    assert "scheduleDateTimePickerHtml('ng-when'" in planner
+    assert 'id="ng-day-strip"' not in planner
+    assert 'id="ng-time-grid"' not in planner
 
 
 def test_answered_planner_questions_become_accessible_summaries_with_change_actions():

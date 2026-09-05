@@ -1123,7 +1123,7 @@ def test_small_modal_actions_use_semantic_forms_and_shared_feedback():
     assert "formUX.showError(err.message);" in profile
 
     assert 'id="rs-form" novalidate' in game
-    assert 'type="datetime-local" id="rs-when"' in game
+    assert "scheduleDateTimePickerHtml('rs-when'" in game
     assert "bindModalFormUX(sheet, '#rs-save')" in game
     assert "formUX.startSubmitting('Saving new time…')" in game
     assert "Number.isFinite(when.getTime())" in game

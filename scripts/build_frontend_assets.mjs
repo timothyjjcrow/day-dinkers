@@ -7,7 +7,7 @@ import path from 'node:path';
 import { build } from 'esbuild';
 import { minify } from 'terser';
 
-const release = 'r68';
+const release = 'r69';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(projectRoot, 'public');
 const outputDir = path.join(publicDir, 'assets', release);
@@ -39,7 +39,7 @@ for (const [sourceName, outputName] of entries) {
       { [mappedSourceName]: source.toString('utf8') },
       {
         ecma: 2020,
-        compress: true,
+        compress: { passes: 3 },
         mangle: true,
         format: { comments: false, ecma: 2020 },
         sourceMap: {

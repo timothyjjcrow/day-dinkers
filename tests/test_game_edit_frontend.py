@@ -20,7 +20,7 @@ def test_host_edit_sheet_exposes_every_supported_field_and_safe_constraints():
         'id="eg-title" maxlength="120"',
         'id="eg-description" maxlength="1000"',
         'id="eg-court-search"',
-        'id="eg-when"',
+        "scheduleDateTimePickerHtml('eg-when'",
         'id="eg-duration" min="15" max="720"',
         'id="eg-cost" min="0" max="10000"',
         'id="eg-court-number" maxlength="40"',

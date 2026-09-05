@@ -1160,40 +1160,6 @@ textarea[aria-invalid="true"]:focus-visible {
   border-radius: var(--radius-sm); background: var(--card); color: var(--green-accent);
 }
 .planner-draft-choice-icon .ui-icon { width: 19px; height: 19px; }
-.planner-exact-time { margin-top: 10px; }
-.planner-day-time-picker { margin-top: 12px; }
-.planner-day-strip {
-  display: flex; gap: 6px; margin: 0 -2px 10px; padding: 2px 2px 5px; overflow-x: auto;
-  scrollbar-width: thin; scroll-snap-type: x proximity;
-}
-.planner-day-strip > button {
-  min-width: 76px; min-height: 48px; flex: 0 0 auto; display: grid; place-content: center;
-  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--ink-soft);
-  scroll-snap-align: start;
-}
-.planner-day-strip b,
-.planner-day-strip small { display: block; }
-.planner-day-strip b { color: var(--ink); font-size: var(--text-xs); }
-.planner-day-strip small { margin-top: 2px; font-size: var(--text-xs); }
-.planner-day-strip > button.active {
-  border-color: var(--green-600); background: var(--green-50); color: var(--green-ink);
-}
-.planner-time-grid {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
-  max-height: 202px; padding: 1px; overflow-y: auto;
-}
-.planner-time-grid > button {
-  min-width: 0; min-height: var(--tap-min); padding: 6px 3px; border: 1px solid var(--line);
-  border-radius: var(--radius-sm); background: var(--card); color: var(--ink-soft); font-size: var(--text-xs); font-weight: 800;
-}
-.planner-time-grid > button.is-popular::after {
-  content: 'Popular'; display: block; margin-top: 1px; color: var(--green-accent); font-size: var(--text-xs);
-  letter-spacing: .03em; text-transform: uppercase;
-}
-.planner-time-grid > button.active {
-  border-color: var(--green-600); background: var(--green-50); color: var(--green-ink);
-}
-.planner-time-grid > button:disabled { opacity: .38; }
 .planner-duration { margin-top: 12px; }
 .planner-duration > input { margin-top: 8px; }
 .planner-game-setup-note { margin: -2px 0 0; color: var(--ink-soft); font-size: var(--text-xs); line-height: 1.4; }
@@ -6262,7 +6228,6 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .business-next-step small { font-size: var(--text-xs); color: var(--ink-soft); }
 .business-next-step b { font-size: 15px; }
 
-.planner-time-options > .planner-day-time-picker, .planner-time-options > .planner-exact-time { margin: 0 14px 14px; }
 
 .rally-launch .tab-kicker { color: #d5e64f; }
 
@@ -6378,15 +6343,6 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .game-card-waiting { display: block; margin-top: 2px; }
 
 /* Planning starts with common choices; precise controls remain one tap away. */
-.planner-slot-browser, .planner-custom-duration { margin: 8px 0; }
-.planner-slot-browser > summary, .planner-custom-duration > summary {
-  min-height: var(--tap-min); display: flex; align-items: center; gap: 8px;
-  cursor: pointer; color: var(--ink-soft); font-size: var(--text-xs); font-weight: 650;
-}
-.planner-slot-browser > summary::before, .planner-custom-duration > summary::before { content: '+'; }
-.planner-slot-browser[open] > summary::before, .planner-custom-duration[open] > summary::before { content: '−'; }
-.planner-custom-duration > label { display: block; margin: 4px 0 6px; font-size: var(--text-xs); }
-.planner-time-options .planner-exact-time { margin-top: 12px; }
 .planner-club-options .planner-club-host { margin-top: 12px; }
 #ng-setup-controls { margin-top: 12px; }
 
@@ -6405,4 +6361,78 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
   .starter-court-row > .row-main { flex: 1; min-width: 180px; }
   .starter-court-actions { width: 100%; justify-content: flex-end; }
   .onboarding-photo-picker .profile-photo-actions { flex-direction: column; }
+}
+
+/* Scheduling: a few suggestions, one visible date/clock, one inline calendar. */
+.schedule-suggestions-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0 6px; }
+.schedule-suggestions-heading > b { font-size: 12px; color: var(--ink-soft); font-weight: 650; }
+.schedule-suggestions-heading .btn-link { min-height: 44px; font-size: 12px; text-align: right; }
+.schedule-suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+.schedule-suggestions button { min-width: 0; min-height: 68px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 4px; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--ink); text-align: left; }
+.schedule-suggestions button small { font-size: var(--text-xs); color: var(--ink-soft); }
+.schedule-suggestions button b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.schedule-suggestions button.active { background: var(--green-50); border-color: var(--green-accent); box-shadow: inset 0 0 0 1px var(--green-accent); }
+.schedule-suggestions button.active small, .schedule-suggestions button.active b { color: var(--green-ink); }
+.schedule-suggestions button:disabled { opacity: .4; cursor: not-allowed; }
+.schedule-editor { margin: 0 0 18px; }
+.schedule-editor-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.schedule-date-field, .schedule-clock-field { min-width: 0; }
+.schedule-date-field > span, .schedule-clock-field > label { display: block; margin: 0 0 7px; font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+.schedule-date-button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 50px; padding: 10px 12px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 14px; text-align: left; }
+.schedule-date-button .ui-icon { width: 18px; height: 18px; flex: 0 0 18px; color: var(--green-ink); }
+.schedule-date-button[aria-expanded="true"] { border-color: var(--green-accent); }
+.schedule-clock-controls { display: flex; align-items: center; gap: 6px; padding-right: 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); min-height: 50px; }
+.schedule-clock-controls input { flex: 1 1 60px; min-width: 0; width: 64px; border: 0; background: transparent; box-shadow: none; padding: 12px 8px 12px 12px; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; border-radius: var(--radius-xs); }
+.schedule-clock-controls input[aria-invalid="true"] { outline: 2px solid var(--red-700); outline-offset: -2px; }
+.schedule-period { display: flex; flex: 0 0 auto; gap: 2px; }
+.schedule-period button { min-height: 42px; min-width: 38px; border: 0; border-radius: var(--radius-xs); padding: 5px; background: transparent; color: var(--ink-soft); font-size: 12px; font-weight: 750; }
+.schedule-period button[aria-pressed="true"] { color: var(--on-solid); background: var(--solid); }
+.schedule-editor > .field-help { display: block; margin-top: 8px; font-size: var(--text-xs); }
+.schedule-calendar { max-width: 360px; margin: 12px 0 0; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+.schedule-calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.schedule-calendar-head b { font-size: 14px; }
+.schedule-calendar button { min-width: 0; min-height: 42px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink); font-size: 13px; font-weight: 650; padding: 4px; }
+.schedule-calendar-head button { width: 42px; }
+.schedule-calendar-head .ui-icon { width: 17px; height: 17px; }
+.schedule-calendar-week, .schedule-calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; text-align: center; }
+.schedule-calendar-week { font-size: var(--text-xs); color: var(--ink-soft); padding: 8px 0; }
+.schedule-calendar-days button[aria-current="date"] { box-shadow: inset 0 0 0 1px var(--green-accent); }
+.schedule-calendar-days button[aria-pressed="true"] { background: var(--solid); color: var(--on-solid); }
+.schedule-calendar button:disabled { opacity: .3; cursor: not-allowed; }
+.schedule-calendar-footer { display: flex; justify-content: space-between; margin-top: 8px; border-top: 1px solid var(--line); }
+.schedule-calendar-footer button { min-width: 64px; color: var(--green-ink); }
+.schedule-calendar button:not(:disabled):hover, .schedule-date-button:hover { background: var(--green-50); color: var(--green-ink); }
+.schedule-calendar-days button[aria-pressed="true"]:hover { background: var(--solid); color: var(--on-solid); }
+#ng-duration-choices { margin-top: 16px; margin-bottom: 12px; }
+#ng-duration-choices > legend { font-size: 12px; font-weight: 700; text-transform: none; letter-spacing: 0; margin-bottom: 9px; }
+#ng-duration-choices .quick-times { display: flex; flex-wrap: wrap; gap: 6px; }
+#ng-duration-choices .quick-times button { min-height: 42px; padding: 9px 12px; font-size: 12px; border-radius: var(--radius-sm); }
+.schedule-custom-duration { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.schedule-custom-duration label { font-size: 12px; color: var(--ink-soft); }
+.schedule-custom-duration input { max-width: 115px; min-height: 44px; }
+.schedule-repeat { display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; margin: 8px 0 12px; border-top: 1px solid var(--line); cursor: pointer; }
+.schedule-repeat input[role="switch"] { appearance: none; width: 40px; height: 24px; min-height: 0; border: 0; border-radius: var(--radius-pill); background: var(--line); padding: 3px; flex: 0 0 40px; cursor: pointer; }
+.schedule-repeat input[role="switch"]::before { content: ''; display: block; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--card); box-shadow: 0 1px 3px #0003; transition: transform .15s; }
+.schedule-repeat input[role="switch"]:checked { background: var(--green-accent); }
+.schedule-repeat input[role="switch"]:checked::before { transform: translateX(16px); }
+.schedule-repeat .planner-recurring-title { font-size: 13px; font-weight: 650; }
+#ng-busy-hint:empty { display: none; }
+@media (max-width: 480px) {
+  .schedule-editor-fields { gap: 8px; }
+  .schedule-suggestions { gap: 6px; }
+  .schedule-suggestions button { padding: 9px 8px; }
+  .schedule-suggestions button b { font-size: 13px; }
+  .schedule-calendar { max-width: none; padding: 8px; }
+}
+
+#ng-duration-choices > legend { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 0; }
+#ng-duration-custom-toggle { min-height: 36px; font-size: 12px; }
+#ng-duration-custom-toggle.active { font-weight: 800; text-decoration: underline; }
+#ng-duration-choices .quick-times { margin-top: 0; }
+#ng-step-when > .planner-next { position: sticky; bottom: -14px; z-index: 2; box-shadow: 0 8px 0 8px var(--card); }
+@media (max-width: 360px) {
+  .schedule-editor-fields { grid-template-columns: 1fr; }
+  .schedule-suggestions-heading > b { font-size: var(--text-xs); }
+  .schedule-suggestions-heading .btn-link { font-size: var(--text-xs); }
+  #ng-duration-choices .quick-times button { padding: 9px; }
 }

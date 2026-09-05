@@ -18275,6 +18275,148 @@
     };
   }
 
+  // A single local-time value backs the visible calendar and clock controls.
+  // Keep the editor inline so it works inside sheets without another popover.
+  function scheduleDateTimeValue(date) {
+    const pad = value => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function scheduleDateTimePickerHtml(id, value, timezone) {
+    return `<div class="schedule-editor" id="${id}-editor">
+      <input type="hidden" id="${id}" value="${esc(value)}" />
+      <div class="schedule-editor-fields">
+        <div class="schedule-date-field"><span id="${id}-date-label">Date</span>
+          <button type="button" class="schedule-date-button" id="${id}-date" aria-labelledby="${id}-date-label ${id}-date-text" aria-expanded="false" aria-controls="${id}-calendar">${uiIcon('calendar')}<span id="${id}-date-text">Choose a date</span></button>
+        </div>
+        <div class="schedule-clock-field"><label for="${id}-clock">Start time</label>
+          <div class="schedule-clock-controls"><input type="text" id="${id}-clock" inputmode="text" autocomplete="off" placeholder="6:00" maxlength="5" aria-describedby="${id}-help" />
+            <div class="schedule-period" role="group" aria-label="AM or PM"><button type="button" data-period="AM" aria-pressed="false">AM</button><button type="button" data-period="PM" aria-pressed="false">PM</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="schedule-calendar hidden" id="${id}-calendar" role="group" aria-label="Choose a date">
+        <div class="schedule-calendar-head"><button type="button" data-month="-1" aria-label="Previous month">${uiIcon('arrow-left')}</button><b id="${id}-month" aria-live="polite"></b><button type="button" data-month="1" aria-label="Next month">${uiIcon('arrow-right')}</button></div>
+        <div class="schedule-calendar-week" aria-hidden="true">${['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(day => `<span>${day}</span>`).join('')}</div>
+        <div class="schedule-calendar-days" id="${id}-days" role="group" aria-labelledby="${id}-month"></div>
+        <div class="schedule-calendar-footer"><button type="button" data-calendar-today>Today</button></div>
+      </div>
+      <small class="field-help" id="${id}-help">${esc(timezone)} · Enter a time like 6:15</small>
+    </div>`;
+  }
+
+  function bindScheduleDateTimePicker(root, id) {
+    const editor = root.querySelector(`#${id}-editor`);
+    const valueInput = root.querySelector(`#${id}`);
+    const clock = root.querySelector(`#${id}-clock`);
+    const dateButton = root.querySelector(`#${id}-date`);
+    const calendar = root.querySelector(`#${id}-calendar`);
+    const dayGrid = root.querySelector(`#${id}-days`);
+    const help = root.querySelector(`#${id}-help`);
+    const defaultHelp = help.textContent;
+    const dateKey = (date) => scheduleDateTimeValue(date).slice(0, 10);
+    const today = () => { const date = new Date(); date.setHours(0, 0, 0, 0); return date; };
+    let selectedDay = today();
+    let month = new Date(selectedDay.getFullYear(), selectedDay.getMonth(), 1);
+    let period = 'PM';
+    const render = () => {
+      root.querySelector(`#${id}-date-text`).textContent = selectedDay.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', ...(selectedDay.getFullYear() !== today().getFullYear() ? { year: 'numeric' } : {}) });
+      editor.querySelectorAll('[data-period]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.period === period));
+      });
+      root.querySelector(`#${id}-month`).textContent = month.toLocaleDateString([], { month: 'long', year: 'numeric' });
+      const first = new Date(month.getFullYear(), month.getMonth(), 1);
+      const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+      editor.querySelector('[data-month="-1"]').disabled = month <= new Date(today().getFullYear(), today().getMonth(), 1);
+      dayGrid.innerHTML = `${'<span aria-hidden="true"></span>'.repeat(first.getDay())}${Array.from({ length: count }, (_, index) => {
+        const date = new Date(month.getFullYear(), month.getMonth(), index + 1);
+        const selected = dateKey(date) === dateKey(selectedDay);
+        return `<button type="button" data-date="${dateKey(date)}" aria-label="${esc(date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }))}" aria-pressed="${selected}" ${date < today() ? 'disabled' : ''} ${dateKey(date) === dateKey(today()) ? 'aria-current="date"' : ''}>${index + 1}</button>`;
+      }).join('')}`;
+    };
+    const setOpen = (open, focus = false) => {
+      calendar.classList.toggle('hidden', !open);
+      dateButton.setAttribute('aria-expanded', String(open));
+      if (open) {
+        month = new Date(selectedDay.getFullYear(), selectedDay.getMonth(), 1);
+        render();
+        if (focus) (dayGrid.querySelector('[aria-pressed="true"]:not(:disabled)') || dayGrid.querySelector('button:not(:disabled)'))?.focus();
+      } else if (focus) dateButton.focus();
+    };
+    const commit = () => {
+      const match = /^(\d{1,2})(?::(\d{2}))?$/.exec(clock.value.trim());
+      const hour = match ? Number(match[1]) : NaN;
+      const minute = match ? Number(match[2] || 0) : NaN;
+      let value = '';
+      if (hour >= 1 && hour <= 12 && minute >= 0 && minute < 60) {
+        const hour24 = hour % 12 + (period === 'PM' ? 12 : 0);
+        const date = new Date(selectedDay);
+        date.setHours(hour24, minute, 0, 0);
+        // Reject nonexistent local times at the spring DST transition.
+        if (date.getHours() === hour24 && date.getMinutes() === minute) {
+          value = scheduleDateTimeValue(date);
+        }
+      }
+      clock.setAttribute('aria-invalid', String(!value));
+      help.textContent = value ? defaultHelp : 'Enter a valid time, such as 6:15, and choose AM or PM.';
+      valueInput.value = value;
+      valueInput.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const sync = (value = valueInput.value) => {
+      const date = value ? new Date(value) : null;
+      if (date && Number.isFinite(date.getTime())) {
+        selectedDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        month = new Date(date.getFullYear(), date.getMonth(), 1);
+        period = date.getHours() < 12 ? 'AM' : 'PM';
+        clock.value = `${date.getHours() % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')}`;
+      } else clock.value = '';
+      clock.removeAttribute('aria-invalid');
+      help.textContent = defaultHelp;
+      render();
+    };
+    dateButton.addEventListener('click', () => setOpen(calendar.classList.contains('hidden'), true));
+    clock.addEventListener('input', commit);
+    clock.addEventListener('blur', () => {
+      if (valueInput.value) {
+        const date = new Date(valueInput.value);
+        clock.value = `${date.getHours() % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')}`;
+      }
+    });
+    // Enter in the clock edits the time; it must not submit the entire planner.
+    clock.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); commit(); clock.blur(); } });
+    editor.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button || button.disabled) return;
+      // Day rendering removes its button; do not let that detached click
+      // reach the sheet's outside-click dismissal handler.
+      event.stopPropagation();
+      if (button.dataset.period) { period = button.dataset.period; render(); commit(); }
+      if (button.dataset.month) {
+        month = new Date(month.getFullYear(), month.getMonth() + Number(button.dataset.month), 1);
+        render();
+      }
+      if (button.dataset.date || button.hasAttribute('data-calendar-today')) {
+        selectedDay = button.dataset.date ? new Date(`${button.dataset.date}T00:00:00`) : today();
+        render(); commit(); setOpen(false, true);
+      }
+    });
+    calendar.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false, true); return; }
+      const date = event.target.closest('[data-date]')?.dataset.date;
+      const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[event.key];
+      if (!date || !offset) return;
+      event.preventDefault();
+      const next = new Date(`${date}T00:00:00`);
+      next.setDate(next.getDate() + offset);
+      if (next < today()) return;
+      month = new Date(next.getFullYear(), next.getMonth(), 1);
+      render();
+      dayGrid.querySelector(`[data-date="${dateKey(next)}"]`)?.focus();
+    });
+    sync();
+    return { sync, focus: () => { setOpen(false); clock.focus(); } };
+  }
+
   async function openNewGameModal(options = {}) {
     const plannerOptions = options && typeof options === 'object' ? options : {};
     const plannerId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0
@@ -18528,21 +18670,11 @@
     }
     const dayLabel = (d, i) => i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString([], { weekday: 'short' });
     const timePresets = Array.from({ length: 31 }, (_, index) => 6 + index / 2);
-    const plannerClockParts = (clock) => ({
-      hour: Math.floor(Number(clock)),
-      minute: Number(clock) % 1 === 0.5 ? 30 : 0,
-    });
     const setPlannerClock = (date, clock) => {
-      const { hour, minute } = plannerClockParts(clock);
-      date.setHours(hour, minute, 0, 0);
+      date.setHours(Math.floor(clock), (clock % 1) * 60, 0, 0);
       return date;
     };
-    const timeLabel = (clock) => {
-      const { hour, minute } = plannerClockParts(clock);
-      const suffix = hour < 12 ? 'AM' : 'PM';
-      const hour12 = hour % 12 || 12;
-      return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
-    };
+    const timeLabel = (clock) => fmtTimeShort(setPlannerClock(new Date(), clock).toISOString());
 
     // Defaults: first preset at least ~1h away today, else tomorrow morning
     let selDayIdx = 0;
@@ -18613,7 +18745,7 @@
     const smartTimeSuggestions = [];
     const smartTimeKeys = new Set();
     const addSmartTime = (dayIdx, hour) => {
-      if (smartTimeSuggestions.length >= 3 || !days[dayIdx] || !timePresets.includes(hour)) return;
+      if (smartTimeSuggestions.length >= 9 || !days[dayIdx] || !timePresets.includes(hour)) return;
       const date = setPlannerClock(new Date(days[dayIdx]), hour);
       const key = `${dayIdx}:${hour}`;
       if (date.getTime() <= Date.now() + 50 * 60000 || smartTimeKeys.has(key)) return;
@@ -18621,22 +18753,13 @@
       smartTimeSuggestions.push({ dayIdx, hour, date });
     };
     addSmartTime(selDayIdx, selHour);
-    for (let dayIdx = selDayIdx; dayIdx < days.length && smartTimeSuggestions.length < 3; dayIdx++) {
-      [10, 14, 18, 20].forEach((hour) => addSmartTime(dayIdx, hour));
+    for (let dayIdx = 0; dayIdx < days.length && smartTimeSuggestions.length < 9; dayIdx++) {
+      [9, 12, 17, 18].forEach((hour) => addSmartTime(dayIdx, hour));
     }
-    for (let dayIdx = 0; dayIdx < days.length && smartTimeSuggestions.length < 3; dayIdx++) {
-      timePresets.forEach((hour) => addSmartTime(dayIdx, hour));
-    }
-    const smartTimeLabel = ({ date, dayIdx, hour }) => `${dayLabel(date, dayIdx)} at ${timeLabel(hour)}`;
-    const smartTimeChips = smartTimeSuggestions.map((slot) =>
-      `<button type="button" data-smart-time="${slot.date.toISOString()}" data-smart-day="${slot.dayIdx}" data-smart-hour="${slot.hour}" aria-pressed="${slot.dayIdx === selDayIdx && slot.hour === selHour}" class="${slot.dayIdx === selDayIdx && slot.hour === selHour ? 'active' : ''}">${smartTimeLabel(slot)}</button>`).join('');
-    const smartTimeChoicesHtml = `<div class="quick-times" id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === 'ranked' ? 'match' : 'play session'} times" style="margin-bottom:8px">${smartTimeChips}</div>`;
-    const plannerDateTimeValue = (value) => {
-      const pad2 = (number) => String(number).padStart(2, '0');
-      return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}T${pad2(value.getHours())}:${pad2(value.getMinutes())}`;
-    };
+    const smartTimeChips = smartTimeSuggestions.map((slot, index) =>
+      `<button type="button" data-smart-time="${slot.date.toISOString()}" aria-pressed="false" class="${index >= 3 ? 'hidden' : ''}" ${index >= 3 ? 'data-extra-time' : ''}><small>${esc(dayLabel(slot.date, slot.dayIdx))}${slot.dayIdx > 1 ? ` · ${slot.date.toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}</small><b>${timeLabel(slot.hour)}</b></button>`).join('');
+    const smartTimeChoicesHtml = `<div class="schedule-suggestions" id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === 'ranked' ? 'match' : 'play session'} times">${smartTimeChips}</div>`;
     const initialExactTime = initialTimeSelection?.date || setPlannerClock(new Date(days[selDayIdx]), selHour);
-    const plannerTimeMinimum = new Date();
 
     const inviteAvailabilityKey = (date) => {
       if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return '';
@@ -18812,45 +18935,26 @@
           <div><div class="planner-step-title" id="planner-when-title">When?</div><div class="planner-step-sub">${initialScheduledAt ? 'Review the selected time, or choose another.' : 'Pick a suggestion or choose any other time.'}</div></div>
         </div>
         <div id="ng-later-fields">
-          ${initialScheduledAt ? '' : smartTimeChoicesHtml}
-          <details class="flow-disclosure planner-time-options" id="ng-time-options" ${initialScheduledAt || restoredDraft?.timeKind === 'custom' ? 'open' : ''}>
-          <summary>${initialScheduledAt ? 'Selected date and time' : 'Choose another time'} <span>Day, time &amp; date</span></summary>
-          <div class="form-field planner-exact-time" id="ng-other-time">
-            <label for="ng-when">Date and time</label>
-            <input type="datetime-local" id="ng-when" value="${initialTimeUnavailable ? '' : plannerDateTimeValue(initialExactTime)}" min="${plannerDateTimeValue(plannerTimeMinimum)}" aria-label="${defaultType === 'ranked' ? 'Match' : 'Play session'} date and time" aria-describedby="ng-timezone-help" />
-            <small class="field-help" id="ng-timezone-help">Date and time are shown in your timezone: ${esc(plannerTimeZoneLabel(detectedRecurrenceTimezone))}.</small>
-          </div>
-          <details class="planner-slot-browser" id="ng-slot-browser">
-            <summary>Browse half-hour times</summary>
-          <fieldset class="game-choice-field planner-day-time-picker">
-            <legend>Choose a day and time</legend>
-            <div class="planner-day-strip" id="ng-day-strip" role="radiogroup" aria-label="Play date">
-              ${days.map((day, index) => `<button type="button" role="radio" data-planner-day="${index}" aria-checked="${index === selDayIdx}" class="${index === selDayIdx ? 'active' : ''}"><b>${esc(dayLabel(day, index))}</b><small>${day.toLocaleDateString([], { month: 'short', day: 'numeric' })}</small></button>`).join('')}
-            </div>
-            <div class="planner-time-grid" id="ng-time-grid" role="radiogroup" aria-label="Play time in 30-minute steps">
-              ${timePresets.map((clock) => `<button type="button" role="radio" data-planner-clock="${clock}" aria-checked="${clock === selHour}" class="${clock === selHour ? 'active' : ''}">${timeLabel(clock)}</button>`).join('')}
-            </div>
-          </fieldset>
-          </details>
-          </details>
-          ${initialScheduledAt ? `<p class="field-help">Other suggested times</p>${smartTimeChoicesHtml}` : ''}
+          <div class="schedule-suggestions-heading"><b>Suggested times</b><button type="button" class="btn-link" id="ng-more-times" aria-expanded="false" aria-controls="ng-smart-times">More common times</button></div>
+          ${smartTimeChoicesHtml}
+          ${scheduleDateTimePickerHtml('ng-when', initialTimeUnavailable ? '' : scheduleDateTimeValue(initialExactTime), plannerTimeZoneLabel(detectedRecurrenceTimezone))}
           <div id="ng-busy-hint" class="row-sub" style="margin-bottom:4px"></div>
           <fieldset class="game-choice-field planner-duration" id="ng-duration-choices">
-            <legend>How long?</legend>
+            <legend><span>How long?</span><button type="button" class="btn-link" id="ng-duration-custom-toggle" aria-expanded="${presetDurationMinutes != null && ![60, 90, 120].includes(presetDurationMinutes)}" aria-controls="ng-custom-duration">${presetDurationMinutes != null && ![60, 90, 120].includes(presetDurationMinutes) ? `${presetDurationMinutes} min` : 'Custom'}</button></legend>
             <div class="quick-times" role="group" aria-label="Play duration">
-              ${[60, 90, 120].map((minutes) => `<button type="button" data-duration="${minutes}" class="${presetDurationMinutes === minutes ? 'active' : ''}" aria-pressed="${presetDurationMinutes === minutes}">${minutes} min</button>`).join('')}
+              ${[60, 90, 120].map((minutes) => `<button type="button" data-duration="${minutes}" class="${presetDurationMinutes === minutes ? 'active' : ''}" aria-pressed="${presetDurationMinutes === minutes}">${minutes === 60 ? '1 hour' : minutes === 90 ? '1½ hours' : '2 hours'}</button>`).join('')}
               <button type="button" data-duration="" class="${presetDurationMinutes == null ? 'active' : ''}" aria-pressed="${presetDurationMinutes == null}">No end time</button>
+
             </div>
-            <details class="planner-custom-duration" id="ng-custom-duration" ${presetDurationMinutes != null && ![60, 90, 120].includes(presetDurationMinutes) ? 'open' : ''}>
-              <summary>Custom duration</summary>
+            <div class="schedule-custom-duration ${presetDurationMinutes != null && ![60, 90, 120].includes(presetDurationMinutes) ? '' : 'hidden'}" id="ng-custom-duration">
               <label for="ng-duration">Minutes</label>
-              <input type="number" id="ng-duration" min="15" max="720" step="15" inputmode="numeric" value="${presetDurationMinutes ?? ''}" placeholder="Custom minutes" aria-describedby="ng-end-preview" />
-            </details>
+              <input type="number" id="ng-duration" min="15" max="720" step="1" inputmode="numeric" value="${presetDurationMinutes ?? ''}" placeholder="e.g. 45" aria-describedby="ng-end-preview" />
+            </div>
             <small class="field-help" id="ng-end-preview"></small>
           </fieldset>
-          <label class="row" id="ng-recurring-row" style="margin-bottom:14px;cursor:pointer;gap:10px">
-            <input type="checkbox" id="ng-recurring" ${initiallyRecurring ? 'checked' : ''} style="width:22px;height:22px;flex:0 0 auto" />
-            <span><span class="planner-recurring-title">${uiIcon('refresh')} Repeat this schedule</span><br><span class="row-sub">Choose weekdays and an optional end date</span></span>
+          <label class="schedule-repeat" id="ng-recurring-row">
+            <input type="checkbox" id="ng-recurring" ${initiallyRecurring ? 'checked' : ''} role="switch" />
+            <span><span class="planner-recurring-title">${uiIcon('refresh')} Repeat weekly</span></span>
           </label>
           <div class="planner-recurrence-settings hidden" id="ng-recurrence-settings">
             <fieldset class="game-choice-field">
@@ -19005,15 +19109,12 @@
     let frozenSubmitPayload = plannerSubmitting ? restoredDraft.submittedPayload : null;
     let plannerSaveTimer = null;
     let exactRetryRequested = false;
+    const chosenPlannerTime = () => {
+      const raw = modal.querySelector('#ng-when').value;
+      return raw ? new Date(raw) : null;
+    };
     const plannerScheduledIso = () => {
-      let value;
-      if (customMode) {
-        const raw = modal.querySelector('#ng-when').value;
-        value = raw ? new Date(raw) : null;
-      } else {
-        value = new Date(days[selDayIdx]);
-        setPlannerClock(value, selHour ?? 18);
-      }
+      const value = chosenPlannerTime();
       return value && Number.isFinite(value.getTime()) ? value.toISOString() : null;
     };
     const plannerSnapshot = (status = 'editing') => ({
@@ -19023,7 +19124,7 @@
       mode: 'later',
       courtId: Number(modal.querySelector('#ng-court-id').value) || null,
       scheduledAt: plannerScheduledIso(),
-      timeKind: customMode ? 'custom' : 'preset',
+      timeKind: 'custom',
       visibility,
       inviteUserIds: [...inviteIds],
       invitees: invitePeople.filter((person) => inviteIds.has(person.id)).map(sanitizePlannerInvitee),
@@ -19145,34 +19246,15 @@
       const clock = value.getHours() + value.getMinutes() / 60;
       return clock >= startHour && clock < startHour + 2;
     };
-    const syncPopularTimeChoices = () => {
-      modal.querySelectorAll('#ng-time-grid [data-planner-clock]').forEach((button) => {
-        const optionDate = setPlannerClock(
-          new Date(days[selDayIdx]), Number(button.dataset.plannerClock),
-        );
-        const popular = (busyTimes || []).some((row) => busyWindowContains(row.label, optionDate));
-        button.classList.toggle('is-popular', popular);
-        if (popular) button.title = 'Popular at this court';
-        else button.removeAttribute('title');
-      });
-    };
     const updateBusyHint = () => {
       const el = modal.querySelector('#ng-busy-hint');
-      syncPopularTimeChoices();
       if (!busyTimes || !busyTimes.length) { el.innerHTML = ''; return; }
-      let when;
-      if (customMode) {
-        const raw = modal.querySelector('#ng-when').value;
-        when = raw ? new Date(raw) : null;
-      } else {
-        when = new Date(days[selDayIdx]);
-        setPlannerClock(when, selHour ?? 18);
-      }
+      const when = chosenPlannerTime();
       const popularWindow = when
         ? busyTimes.find((row) => busyWindowContains(row.label, when)) : null;
       el.innerHTML = popularWindow
         ? `${uiIcon('check-circle')} Good pick — ${esc(popularWindow.label)} is popular at this court`
-        : `${uiIcon('chart')} Popular here: ${busyTimes.map((row) => esc(row.label)).join(' · ')}`;
+        : '';
     };
     const loadBusyHint = async (courtId) => {
       busyTimes = null;
@@ -19187,14 +19269,8 @@
     const updatePlannerSummary = () => {
       const summary = modal.querySelector('#ng-summary');
       const courtName = modal.querySelector('#ng-court-name').textContent || 'Choose a court';
-      let whenText;
-      if (customMode) {
-        const raw = modal.querySelector('#ng-when').value;
-        const parsed = raw ? new Date(raw) : null;
-        whenText = parsed && Number.isFinite(parsed.getTime()) ? fmtDateTime(parsed.toISOString()) : 'Choose a time';
-      } else {
-        whenText = `${dayLabel(days[selDayIdx], selDayIdx)} at ${timeLabel(selHour)}`;
-      }
+      const scheduledIso = plannerScheduledIso();
+      const whenText = scheduledIso ? fmtDateTime(scheduledIso) : 'Choose a time';
       if (summary) summary.textContent = `${courtName} · ${whenText}`;
       const whereAnswer = modal.querySelector('#ng-answer-where');
       modal.querySelector('#ng-answer-where-value').textContent = courtName;
@@ -19312,19 +19388,11 @@
     });
 
     // --- When ---
-    let customMode = Boolean(initialScheduledAt && !initialTimeSelection?.preset);
     const updatePlannerEndPreview = () => {
       const output = modal.querySelector('#ng-end-preview');
       const rawDuration = modal.querySelector('#ng-duration').value.trim();
       const duration = Number(rawDuration);
-      let start;
-      if (customMode) {
-        const raw = modal.querySelector('#ng-when').value;
-        start = raw ? new Date(raw) : null;
-      } else {
-        start = new Date(days[selDayIdx]);
-        setPlannerClock(start, selHour ?? 18);
-      }
+      const start = chosenPlannerTime();
       if (!rawDuration) {
         output.textContent = 'Optional · no end time';
       } else if (Number.isInteger(duration) && duration >= 15 && duration <= 720
@@ -19343,13 +19411,7 @@
     };
     const syncDefaultRecurrenceWeekday = () => {
       if (recurrenceDaysTouched) return;
-      let planned;
-      if (customMode) {
-        const raw = modal.querySelector('#ng-when').value;
-        planned = raw ? new Date(raw) : null;
-      } else {
-        planned = new Date(days[selDayIdx]);
-      }
+      const planned = chosenPlannerTime();
       if (!planned || !Number.isFinite(planned.getTime())) return;
       recurrenceWeekdays = new Set([recurrenceDayKeys[planned.getDay()]]);
       renderRecurrenceWeekdays();
@@ -19358,43 +19420,20 @@
     updatePlannerEndPreview();
     let refreshPlannerInviteChoices = () => {};
     const exactTimeInput = modal.querySelector('#ng-when');
-    const plannerPresetDate = (dayIndex = selDayIdx, clock = selHour) => {
-      if (!days[dayIndex] || clock == null) return null;
-      return setPlannerClock(new Date(days[dayIndex]), clock);
-    };
+    const schedulePicker = bindScheduleDateTimePicker(modal, 'ng-when');
     const syncPlannerTimeChoices = () => {
-      modal.querySelectorAll('#ng-day-strip [data-planner-day]').forEach((button) => {
-        const active = !customMode && Number(button.dataset.plannerDay) === selDayIdx;
-        button.classList.toggle('active', active);
-        button.setAttribute('aria-checked', String(active));
-      });
-      modal.querySelectorAll('#ng-time-grid [data-planner-clock]').forEach((button) => {
-        const clock = Number(button.dataset.plannerClock);
-        const optionDate = plannerPresetDate(selDayIdx, clock);
-        const unavailable = !optionDate || optionDate.getTime() <= Date.now() + 5 * 60000;
-        const active = !customMode && !unavailable && clock === selHour;
-        button.disabled = unavailable;
-        button.classList.toggle('active', active);
-        button.setAttribute('aria-checked', String(active));
-      });
       modal.querySelectorAll('#ng-smart-times button').forEach((button) => {
-        const active = !customMode
-          && Number(button.dataset.smartDay) === selDayIdx
-          && Number(button.dataset.smartHour) === selHour;
+        const active = button.dataset.smartTime === plannerScheduledIso();
+        button.disabled = new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000;
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
       });
-      if (!customMode) {
-        const picked = plannerPresetDate();
-        if (picked) exactTimeInput.value = plannerDateTimeValue(picked);
-      }
     };
-    const selectPlannerPreset = (dayIndex, clock) => {
-      const picked = plannerPresetDate(dayIndex, clock);
-      if (!picked || picked.getTime() <= Date.now() + 5 * 60000) return;
-      customMode = false;
-      selDayIdx = dayIndex;
-      selHour = clock;
+    const selectPlannerPreset = (iso) => {
+      const picked = new Date(iso);
+      if (!Number.isFinite(picked.getTime()) || picked.getTime() <= Date.now() + 5 * 60000) return;
+      exactTimeInput.value = scheduleDateTimeValue(picked);
+      schedulePicker.sync();
       syncPlannerTimeChoices();
       modal.querySelector('#ng-time-warning')?.remove();
       updateBusyHint();
@@ -19407,34 +19446,24 @@
     modal.querySelector('#ng-smart-times').addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-smart-time]');
       if (!btn) return;
-      selectPlannerPreset(Number(btn.dataset.smartDay), Number(btn.dataset.smartHour));
+      selectPlannerPreset(btn.dataset.smartTime);
     });
-    modal.querySelector('#ng-day-strip').addEventListener('click', (event) => {
-      const button = event.target.closest('[data-planner-day]');
-      if (!button) return;
-      const dayIndex = Number(button.dataset.plannerDay);
-      const currentChoice = plannerPresetDate(dayIndex, selHour);
-      const clock = currentChoice && currentChoice.getTime() > Date.now() + 5 * 60000
-        ? selHour : timePresets.find((option) => (
-            plannerPresetDate(dayIndex, option)?.getTime() > Date.now() + 5 * 60000
-          ));
-      if (clock != null) selectPlannerPreset(dayIndex, clock);
-    });
-    modal.querySelector('#ng-time-grid').addEventListener('click', (event) => {
-      const button = event.target.closest('[data-planner-clock]');
-      if (!button || button.disabled) return;
-      selectPlannerPreset(selDayIdx, Number(button.dataset.plannerClock));
+    modal.querySelector('#ng-more-times').addEventListener('click', (event) => {
+      const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
+      event.currentTarget.setAttribute('aria-expanded', String(expanded));
+      event.currentTarget.textContent = expanded ? 'Fewer times' : 'More common times';
+      modal.querySelectorAll('[data-extra-time]').forEach(button => button.classList.toggle('hidden', !expanded));
+      syncPlannerTimeChoices();
     });
     exactTimeInput.addEventListener('input', () => {
       const value = new Date(exactTimeInput.value);
-      customMode = true;
       syncPlannerTimeChoices();
       if (Number.isFinite(value.getTime()) && value.getTime() > Date.now()) modal.querySelector('#ng-time-warning')?.remove();
       updateBusyHint(); updatePlannerSummary(); updatePlannerEndPreview();
       syncDefaultRecurrenceWeekday(); refreshPlannerInviteChoices(); markPlannerDirty();
     });
     syncPlannerTimeChoices();
-    // Initial hint for a preselected court (after customMode exists).
+    // Initial hint for a preselected court.
     if (court) {
       if (court.busy_times) { busyTimes = court.busy_times; updateBusyHint(); }
       else loadBusyHint(court.id);
@@ -19773,12 +19802,7 @@
     };
     refreshPlannerInviteChoices = () => {
       if (!invitesEl) return;
-      let planned;
-      if (customMode) planned = exactTimeInput.value ? new Date(exactTimeInput.value) : null;
-      else {
-        planned = new Date(days[selDayIdx]);
-        setPlannerClock(planned, selHour ?? 18);
-      }
+      const planned = chosenPlannerTime();
       const matchingSlot = inviteAvailabilityKey(planned);
       const query = String(inviteSearch?.value || '').trim().toLocaleLowerCase();
       visibleInvitePeople = invitePeople.filter((person) => (
@@ -19937,6 +19961,8 @@
       updatePlannerEndPreview();
       updateOptionsSummary();
       const duration = modal.querySelector('#ng-duration').value;
+      modal.querySelector('#ng-duration-custom-toggle').classList.toggle('active', Boolean(duration) && ![60, 90, 120].includes(Number(duration)));
+      modal.querySelector('#ng-duration-custom-toggle').textContent = duration && ![60, 90, 120].includes(Number(duration)) ? `${duration} min` : 'Custom';
       modal.querySelectorAll('#ng-duration-choices [data-duration]').forEach((button) => {
         const active = button.dataset.duration === duration;
         button.classList.toggle('active', active);
@@ -19944,11 +19970,19 @@
       });
       markPlannerDirty();
     });
+    modal.querySelector('#ng-duration-custom-toggle').addEventListener('click', (event) => {
+      const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
+      event.currentTarget.setAttribute('aria-expanded', String(expanded));
+      modal.querySelector('#ng-custom-duration').classList.toggle('hidden', !expanded);
+      if (expanded) modal.querySelector('#ng-duration').focus();
+    });
     modal.querySelector('#ng-duration-choices')?.addEventListener('click', (event) => {
       const button = event.target.closest('[data-duration]');
       if (!button) return;
       const input = modal.querySelector('#ng-duration');
       input.value = button.dataset.duration;
+      modal.querySelector('#ng-custom-duration').classList.add('hidden');
+      modal.querySelector('#ng-duration-custom-toggle').setAttribute('aria-expanded', 'false');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
@@ -19970,26 +20004,12 @@
       if (restoredCourt) setCourt(restoredCourt.id, restoredCourt.name, { dirty: false });
       const restoredTime = restoredDraft.scheduledAt ? new Date(restoredDraft.scheduledAt) : null;
       const validTime = restoredTime && Number.isFinite(restoredTime.getTime()) && restoredTime.getTime() > Date.now();
-      if (validTime) {
-        const matchingDay = days.findIndex((day) => day.toDateString() === restoredTime.toDateString());
-        const restoredClock = restoredTime.getHours() + restoredTime.getMinutes() / 60;
-        const isPreset = restoredDraft.timeKind === 'preset' && matchingDay >= 0
-          && timePresets.includes(restoredClock);
-        if (isPreset) {
-          customMode = false;
-          selDayIdx = matchingDay;
-          selHour = restoredClock;
-        } else {
-          customMode = true;
-          const pad2 = (n) => String(n).padStart(2, '0');
-          modal.querySelector('#ng-when').value = `${restoredTime.getFullYear()}-${pad2(restoredTime.getMonth() + 1)}-${pad2(restoredTime.getDate())}T${pad2(restoredTime.getHours())}:${pad2(restoredTime.getMinutes())}`;
-        }
-      } else {
-        customMode = true;
-        selHour = null;
+      exactTimeInput.value = validTime ? scheduleDateTimeValue(restoredTime) : '';
+      if (!validTime) {
         setPlannerWarning('ng-time-warning', 'Your saved time has passed. Choose a new time.');
       }
       syncPlannerTimeChoices();
+      schedulePicker.sync();
 
       const restoredCrewSize = crewId ? initialInviteIds.size + 1 : null;
       gameType = crewId && ![2, 4].includes(restoredCrewSize) && restoredDraft.gameType === 'ranked'
@@ -20093,16 +20113,6 @@
         plannerBox.scrollTop = 0;
       }
     };
-    const chosenPlannerTime = () => {
-      if (customMode) {
-        const raw = modal.querySelector('#ng-when').value;
-        return raw ? new Date(raw) : null;
-      }
-      if (selHour == null) return null;
-      const value = new Date(days[selDayIdx]);
-      setPlannerClock(value, selHour);
-      return value;
-    };
     modal.querySelector('#ng-next-when').addEventListener('click', () => {
       if (!modal.querySelector('#ng-court-id').value) {
         modal.querySelector('#ng-court-search').focus();
@@ -20119,15 +20129,15 @@
       const selectedTime = chosenPlannerTime();
       if (!selectedTime || !Number.isFinite(selectedTime.getTime()) || selectedTime.getTime() <= Date.now()) {
         setPlannerWarning('ng-time-warning', 'Choose a future time.');
-        if (customMode) modal.querySelector('#ng-time-options').open = true;
-        (customMode ? modal.querySelector('#ng-when') : modal.querySelector('#ng-smart-times button.active'))?.focus();
+        schedulePicker.focus();
         return;
       }
       const durationInput = modal.querySelector('#ng-duration');
       const durationText = durationInput.value.trim();
       const duration = Number(durationText);
       if (durationText && (!Number.isInteger(duration) || duration < 15 || duration > 720)) {
-        modal.querySelector('#ng-custom-duration').open = true;
+        modal.querySelector('#ng-custom-duration').classList.remove('hidden');
+        modal.querySelector('#ng-duration-custom-toggle').setAttribute('aria-expanded', 'true');
         setPlannerWarning('ng-duration-warning', 'Use 15–720 whole minutes, or choose No end time.', modal.querySelector('#ng-duration-choices'));
         durationInput.focus();
         return;
@@ -20359,22 +20369,14 @@
       }
       const courtId = exactRetry ? exactPayload.court_id : modal.querySelector('#ng-court-id').value;
       if (!exactRetry && !courtId) { showPlannerSubmitError('Pick a court first.', modal.querySelector('#ng-court-search')); return; }
-      let scheduledAt;
-      if (exactRetry) {
-        scheduledAt = new Date(exactPayload.scheduled_at);
-      } else if (customMode) {
-        const v = modal.querySelector('#ng-when').value;
-        if (!v) { showPlannerSubmitError('Pick a date and time.', modal.querySelector('#ng-when')); return; }
-        scheduledAt = new Date(v);
-        if (!Number.isFinite(scheduledAt.getTime())) { showPlannerSubmitError('Choose a valid date and time.', modal.querySelector('#ng-when')); return; }
-      } else {
-        if (selHour == null) { showPlannerSubmitError('Pick a time.', modal.querySelector('#ng-smart-times button')); return; }
-        scheduledAt = new Date(days[selDayIdx]);
-        setPlannerClock(scheduledAt, selHour);
+      const scheduledAt = exactRetry ? new Date(exactPayload.scheduled_at) : chosenPlannerTime();
+      if (!scheduledAt || !Number.isFinite(scheduledAt.getTime())) {
+        showPlannerSubmitError('Choose a valid date and time.', modal.querySelector('#ng-when-clock'));
+        return;
       }
       if (!exactRetry && scheduledAt.getTime() <= Date.now()) {
         setPlannerWarning('ng-time-warning', 'That time has passed. Choose a future time.');
-        showPlannerSubmitError('Choose a future time.', customMode ? modal.querySelector('#ng-when') : modal.querySelector('#ng-smart-times button.active'));
+        showPlannerSubmitError('Choose a future time.', modal.querySelector('#ng-when-clock'));
         return;
       }
       if (!exactRetry && visibility === 'private' && inviteIds.size === 0) {
@@ -34402,10 +34404,7 @@
   function openEditGameSheet(game, onSaved = null) {
     const court = game.court || {};
     const scheduled = new Date(game.scheduled_at);
-    const pad2 = (value) => String(value).padStart(2, '0');
-    const localDateTime = (value) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}T${pad2(value.getHours())}:${pad2(value.getMinutes())}`;
-    const whenValue = localDateTime(scheduled);
-    const minWhen = localDateTime(new Date(Date.now() - 15 * 60000));
+    const whenValue = scheduleDateTimeValue(scheduled);
     const exposure = ['private', 'friends', 'open'];
     const visibilityLabels = {
       private: 'Invite only', friends: 'Friends', open: 'Nearby players',
@@ -34440,9 +34439,7 @@
           <div id="eg-court-results" role="listbox" hidden></div>
         </div>
         <div class="form-field">
-          <label for="eg-when">Date and time</label>
-          <input type="datetime-local" id="eg-when" value="${whenValue}" min="${minWhen}" required aria-describedby="eg-timezone-help" />
-          <small class="field-help" id="eg-timezone-help">Date and time are shown in your timezone: ${esc(plannerTimeZoneLabel(Intl.DateTimeFormat().resolvedOptions().timeZone))}.</small>
+          ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.DateTimeFormat().resolvedOptions().timeZone))}
           <p class="row-sub">Players keep their spot and will be asked to re-confirm if the court or time changes.</p>
         </div>
         <div class="form-grid game-plan-fields">
@@ -34472,6 +34469,7 @@
       </form>
     `, { label: `Edit ${playNoun}` });
     enhanceAppSelects(sheet);
+    bindScheduleDateTimePicker(sheet, 'eg-when');
     const formUX = bindModalFormUX(sheet, '#eg-save');
     const editLevelMin = sheet.querySelector('#eg-level-min');
     const editLevelMax = sheet.querySelector('#eg-level-max');
@@ -34497,7 +34495,7 @@
     editLevelMin.addEventListener('change', () => syncEditLevelRange(editLevelMin));
     editLevelMax.addEventListener('change', () => syncEditLevelRange(editLevelMax));
     bindModalDiscardConfirmation(sheet, {
-      isDirty: formUX.isDirty,
+      isDirty: () => formUX.isDirty() || sheet.querySelector('#eg-when').value !== whenValue,
       title: 'Discard game changes?',
       message: `The ${playNoun} will keep its current details.`,
     });
@@ -34626,7 +34624,7 @@
       const when = new Date(whenInput.value);
       if (!whenInput.value || !Number.isFinite(when.getTime())
           || when.getTime() < Date.now() - 15 * 60000) {
-        formUX.showError('Choose a date and time that has not already passed.', whenInput);
+        formUX.showError('Choose a date and time that has not already passed.', sheet.querySelector('#eg-when-clock'));
         return;
       }
       const recurrence = canRepeat ? editRecurrenceSelect.value : game.recurrence;
@@ -36102,20 +36100,20 @@
       });
       box.querySelector('#gs-reschedule')?.addEventListener('click', () => {
         const cur = new Date(game.scheduled_at);
-        const pad2 = (n) => String(n).padStart(2, '0');
-        const val = `${cur.getFullYear()}-${pad2(cur.getMonth() + 1)}-${pad2(cur.getDate())}T${pad2(cur.getHours())}:${pad2(cur.getMinutes())}`;
+        const val = scheduleDateTimeValue(cur);
         openChildModal(modal, () => {
           const sheet = openModal(`
             ${modalHead(`Reschedule ${playNoun}`)}
             <p class="row-sub" style="margin-bottom:10px">Players keep their spot and will be asked to re-confirm for the new time.</p>
             <form id="rs-form" novalidate>
-              <div class="form-field"><label for="rs-when">New date and time</label><input type="datetime-local" id="rs-when" value="${val}" min="${(() => { const now = new Date(Date.now() - 15 * 60000); return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}T${pad2(now.getHours())}:${pad2(now.getMinutes())}`; })()}" required /></div>
+              ${scheduleDateTimePickerHtml('rs-when', val, plannerTimeZoneLabel(Intl.DateTimeFormat().resolvedOptions().timeZone))}
               <button type="submit" class="btn btn-primary btn-block" id="rs-save" style="padding:15px">Save new time</button>
             </form>
           `, { label: `Reschedule ${playNoun}` });
+          bindScheduleDateTimePicker(sheet, 'rs-when');
           const formUX = bindModalFormUX(sheet, '#rs-save');
           bindModalDiscardConfirmation(sheet, {
-            isDirty: formUX.isDirty,
+            isDirty: () => formUX.isDirty() || sheet.querySelector('#rs-when').value !== val,
             title: 'Discard the new time?',
             message: `This ${playNoun} will keep its current date and time.`,
           });
@@ -36124,12 +36122,12 @@
             const field = sheet.querySelector('#rs-when');
             const raw = field.value;
             if (!raw) {
-              formUX.showError('Choose the new date and time.', field);
+              formUX.showError('Choose the new date and time.', sheet.querySelector('#rs-when-clock'));
               return;
             }
             const when = new Date(raw);
             if (!Number.isFinite(when.getTime()) || when.getTime() < Date.now() - 15 * 60000) {
-              formUX.showError('Choose a date and time that has not already passed.', field);
+              formUX.showError('Choose a date and time that has not already passed.', sheet.querySelector('#rs-when-clock'));
               return;
             }
             const resetSubmitting = formUX.startSubmitting('Saving new time…');
