@@ -1,4 +1,4 @@
-# Schedule picker rework — local release r69
+# Schedule picker rework — release r69
 
 The play planner now starts with three complete time suggestions. **More common
 times** expands to nine choices in place. A visible date button and editable
@@ -22,6 +22,7 @@ payload. Legacy preset/custom drafts still restore from their saved timestamp.
 
 Validation:
 
+- All 1,295 tests passed before production promotion (262 seconds).
 - 610 frontend/design-system checks passed on the final sources and generated assets.
 - 133 targeted planner, recurrence, edit, calendar, and release checks passed.
 - Browser checks on an isolated in-memory demo server verified suggestion
@@ -32,7 +33,14 @@ Validation:
   reachable. Desktop/light and mobile/dark layouts were visually inspected.
 - Production assets remain below the existing 250 KiB Brotli app budget. r69
   has separate immutable routes; earlier releases remain available. Service
-  worker revision is r71. No production deployment was performed.
+  worker revision is r71.
+- Staged and live checks verified health/database readiness, exact asset hashes,
+  compressed delivery, the new shell, and availability of the previous release.
 
 Local demo preview: http://127.0.0.1:8013/ (ui-player-0@example.com / pickleball).
 Screenshots are in `output/schedule-picker/`.
+
+Published September 5, 2026 to https://third-shot.vercel.app/.
+Deployment: https://third-shot-ba3xlv0fh-timothyjjcrows-projects.vercel.app
+Source commit: `7244223`. The deployment was built without assigning the public
+domain, verified, and then promoted after the full suite passed.
