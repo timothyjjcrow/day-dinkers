@@ -246,17 +246,12 @@ def test_clubs_are_presented_as_public_community_groups_with_planning():
     assert "public and discoverable" in create
     assert "A club is your crew" not in create
     club = section("function openClubInfo", "async function openClubInviteSheet")
-    assert "Plan with this community" in club
-    assert 'id="club-plan-weekly"' in club
-    assert "Weekly open play" in club
+    assert "Plan a session" in club
+    assert 'club-plan-weekly' not in club
     assert "clubId: club.id" in club
     assert "communityName: club.name" in club
-    assert "openClubPlanner({ weekly: true })" in club
-    assert "scheduledAt: weeklyStart.toISOString()" in club
-    assert "recurrence: 'weekly'" in club
-    assert "recurrenceWeekdays: [weeklyDay]" in club
-    assert "recurrenceEndsOn: weeklyDate(weeklyEnd)" in club
     planner = section("async function openNewGameModal", "async function renderTournaments")
+    assert "Repeat this schedule" in planner
     assert "if (clubId) visibility = 'open'" in planner
     assert "Community sessions stay open so every member can see and join them." in planner
     assert "Public community sessions are open to every member" in planner

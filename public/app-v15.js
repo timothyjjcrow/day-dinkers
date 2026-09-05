@@ -27409,7 +27409,7 @@
     return true;
   }
 
-  function crewSessionContentHtml(game) {
+  function groupSessionContentHtml(game, { community = false } = {}) {
     const copy = crewChatPlanCopy(null, game);
     if (!copy) return '';
     const playerCount = Array.isArray(game.players)
@@ -27418,18 +27418,22 @@
     const suppliedSpots = game.spots_left == null ? NaN : Number(game.spots_left);
     const spotsLeft = Number.isFinite(suppliedSpots)
       ? Math.max(0, suppliedSpots) : Math.max(0, capacity - playerCount);
-    return `<span class="nav-row-leading">${uiIcon('calendar')}</span>
-      <span class="row-main"><span class="row-title">${esc(copy.title)}</span>
-        <span class="row-sub">${esc(copy.detail)}</span>
+    const ranked = game.game_type === 'ranked';
+    const title = community && game.title ? game.title : copy.title;
+    const detail = community && game.title ? `${copy.title} · ${copy.detail}` : copy.detail;
+    const action = ranked ? copy.action.replace('View session', 'View match') : copy.action;
+    return `<span class="nav-row-leading">${uiIcon(ranked ? 'trophy' : 'calendar')}</span>
+      <span class="row-main"><span class="row-title">${esc(title)}</span>
+        <span class="row-sub">${esc(detail)}</span>
         <span class="row-sub">${playerCount}${capacity ? `/${capacity}` : ''} in${capacity ? spotsLeft ? ` · ${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : ' · Full' : ''}</span>
-        <span class="crew-session-attendance">${esc(copy.action)}</span>
+        <span class="crew-session-attendance">${esc(action)}</span>
       </span>${uiIcon('chevron-right', 'chev')}`;
   }
 
-  function crewUpcomingGamesHtml(games) {
-    const rows = games.map((game) => `<button type="button" class="card row nav-row-button crew-session-row" data-open-crew-game="${game.id}">${crewSessionContentHtml(game)}</button>`);
+  function groupUpcomingGamesHtml(games, { community = false } = {}) {
+    const rows = games.map((game) => `<button type="button" class="card row nav-row-button crew-session-row" ${community ? 'data-open-game' : 'data-open-crew-game'}="${Number(game.id)}">${groupSessionContentHtml(game, { community })}</button>`);
     if (!rows.length) return '';
-    return `<div class="section-label">Upcoming play</div><div class="crew-upcoming-games">${rows[0]}</div>${rows.length > 1 ? `<details class="flow-disclosure crew-later-sessions"><summary>More upcoming sessions <span>${rows.length - 1}</span></summary><div class="crew-upcoming-games">${rows.slice(1).join('')}</div></details>` : ''}`;
+    return `<div class="section-label">${community ? 'Upcoming community play' : 'Upcoming play'}</div><div class="crew-upcoming-games">${rows[0]}</div>${rows.length > 1 ? `<details class="flow-disclosure crew-later-sessions"><summary>More upcoming sessions <span>${rows.length - 1}</span></summary><div class="crew-upcoming-games">${rows.slice(1).join('')}</div></details>` : ''}`;
   }
 
   async function openCrewScreen(crewId, { showInvitations = false } = {}) {
@@ -27490,7 +27494,7 @@
     const notificationLabel = crew.my_notification_level === 'off' ? 'Muted'
       : crew.my_notification_level === 'mentions' ? 'Mentions only' : 'All messages';
     let upcomingGames = Array.isArray(crew.upcoming_games) ? crew.upcoming_games : [];
-    const upcomingGamesHtml = crewUpcomingGamesHtml(upcomingGames);
+    const upcomingGamesHtml = groupUpcomingGamesHtml(upcomingGames);
     const heroContent = `
       <div class="crew-avatar-stack">${crew.members.slice(0, 4).map((member) => avatarHtml(member, 'sm')).join('')}</div>
       <div class="row-main">
@@ -27592,9 +27596,9 @@
           const section = modal.querySelector('.crew-upcoming-section');
           const existingRow = section.querySelector(`[data-open-crew-game="${Number(fresh.id)}"]`);
           if (fresh.status === 'upcoming' && existingRow) {
-            existingRow.innerHTML = crewSessionContentHtml(fresh);
+            existingRow.innerHTML = groupSessionContentHtml(fresh);
           } else {
-            section.innerHTML = crewUpcomingGamesHtml(upcomingGames);
+            section.innerHTML = groupUpcomingGamesHtml(upcomingGames);
           }
           section.hidden = !upcomingGames.length;
           const plan = modal.querySelector('#crew-plan');
@@ -28259,6 +28263,7 @@
 
   function openClubInfo(club, routeLoad = null) {
     if (!routedOverlayLoadIsCurrent(routeLoad)) return;
+    let upcomingGames = club.upcoming_games || [];
     const isOwner = club.my_role === 'owner';
     const isManager = club.can_manage === true || ['owner', 'admin'].includes(club.my_role);
     const rosterVisible = club.roster_visible === true;
@@ -28295,22 +28300,9 @@
     if (!routedOverlayLoadIsCurrent(routeLoad)) return;
     const modal = openModal(`
       ${modalHead(club.name)}
-      <div class="community-group-eyebrow">Community group</div>
+      <div class="community-group-eyebrow">Public community · ${club.member_count} member${club.member_count === 1 ? '' : 's'}</div>
       ${club.description ? `<div class="row-sub community-description">${esc(club.description)}</div>` : ''}
       ${announcementHtml}
-      ${club.joined ? `
-        <button class="btn btn-primary btn-block community-primary-action" id="club-plan">${uiIcon('calendar')} Plan with this community</button>
-        <button class="btn btn-secondary btn-block community-primary-action" id="club-plan-weekly">${uiIcon('refresh')} Weekly open play</button>` : ''}
-      ${club.joined
-        ? `<button class="btn btn-secondary btn-block community-primary-action" id="club-chat-btn">${uiIcon('message')} Open community chat</button>`
-        : `<button class="btn btn-primary btn-block community-primary-action" id="club-join-btn" ${joinPending ? 'disabled' : ''}>${uiIcon(joinPending ? 'clock' : 'users')} ${joinPending ? 'Request pending' : (club.join_policy === 'request' ? 'Request to join' : 'Join this community')}</button>${joinPending ? '<button class="btn btn-secondary btn-block community-primary-action" id="club-cancel-request">Cancel join request</button>' : ''}`}
-      ${club.joined ? `<button class="btn btn-secondary btn-block community-primary-action" id="club-invite">${uiIcon('ticket')} ${CTA_LABELS.invitePlayers}</button>` : ''}
-      <button class="btn btn-secondary btn-block community-primary-action" id="club-share">${uiIcon('send')} Share community</button>
-      ${isManager ? `<button class="btn btn-secondary btn-block community-primary-action" id="club-announcement">${uiIcon('bell')} ${club.announcement ? 'Update announcement' : 'Post announcement'}</button>` : ''}
-      ${isManager && Number(club.pending_join_requests) > 0 ? `<button class="btn btn-secondary btn-block community-primary-action" id="club-join-requests">${uiIcon('users')} Review ${Number(club.pending_join_requests)} join request${Number(club.pending_join_requests) === 1 ? '' : 's'}</button>` : ''}
-      ${isManager ? `<button class="btn btn-secondary btn-block community-primary-action" id="club-bans">${uiIcon('shield')} Blocked players</button>` : ''}
-      ${club.joined ? `<button class="btn btn-secondary btn-block community-primary-action" id="club-notifications">${uiIcon('bell')} Community notifications · ${notificationLabel}</button>` : ''}
-      <p class="form-error inline-action-error" data-inline-action-error role="alert" tabindex="-1" hidden></p>
       ${club.home_court_id ? `
         <button type="button" class="card row nav-row-button" id="club-court" aria-label="Open ${esc(club.home_court_name || 'community home court')}">
           <span class="nav-row-leading">${uiIcon('map-pin')}</span>
@@ -28320,6 +28312,17 @@
           </span>
           ${uiIcon('chevron-right', 'chev')}
         </button>` : ''}
+      <section class="community-upcoming-section" aria-label="Upcoming community play" ${upcomingGames.length ? '' : 'hidden'}>${groupUpcomingGamesHtml(upcomingGames, { community: true })}</section>
+      <div class="community-group-actions community-session-actions">
+        ${club.joined ? `
+          <button class="btn btn-primary" id="club-plan">${uiIcon('calendar')} Plan a session</button>
+          <button class="btn btn-secondary" id="club-chat-btn">${uiIcon('message')} Community chat</button>` : `
+          <button class="btn btn-primary" id="club-join-btn" ${joinPending ? 'disabled' : ''}>${uiIcon(joinPending ? 'clock' : 'users')} ${joinPending ? 'Request pending' : (club.join_policy === 'request' ? 'Request to join' : 'Join community')}</button>
+          <button class="btn btn-secondary" id="club-share">${uiIcon('send')} Share</button>`}
+      </div>
+      ${!club.joined && joinPending ? '<button class="btn btn-secondary btn-block community-primary-action" id="club-cancel-request">Cancel join request</button>' : ''}
+      ${isManager && Number(club.pending_join_requests) > 0 ? `<button class="btn btn-secondary btn-block community-primary-action" id="club-join-requests">${uiIcon('users')} Review ${Number(club.pending_join_requests)} join request${Number(club.pending_join_requests) === 1 ? '' : 's'}</button>` : ''}
+      <p class="form-error inline-action-error" data-inline-action-error role="alert" tabindex="-1" hidden></p>
       ${(club.leagues || []).length ? `
         <div class="section-label section-label-icon">${uiIcon('grid')} Community leagues</div>
         ${club.leagues.map((lg) => `
@@ -28342,31 +28345,34 @@
             </span>
             ${uiIcon('chevron-right', 'chev')}
           </button>`).join('')}` : ''}
-      ${(club.upcoming_games || []).length ? `
-        <div class="section-label section-label-icon">${uiIcon('pickleball')} Upcoming community play</div>
-        ${club.upcoming_games.map((gm) => `
-          <button type="button" class="card row nav-row-button" data-open-game="${gm.id}" aria-label="Open ${gm.game_type === 'ranked' ? 'ranked match' : 'play session'} at ${esc((gm.court && gm.court.name) || 'court')}">
-            <span class="nav-row-leading">${uiIcon(gm.game_type === 'ranked' ? 'trophy' : 'pickleball')}</span>
-            <span class="row-main">
-              <span class="row-title">${esc((gm.court && gm.court.name) || 'Court')}</span>
-              <span class="row-sub">${fmtDateTime(gm.scheduled_at)} · ${gm.players.length}/${gm.max_players} in${gm.spots_left ? ` · ${gm.spots_left} spot${gm.spots_left === 1 ? '' : 's'} left` : ' · full'}</span>
-            </span>
-            ${uiIcon('chevron-right', 'chev')}
-          </button>`).join('')}` : ''}
+      ${club.joined ? `<details class="flow-disclosure" id="club-members">
+        <summary>Members <span>${club.member_count}</span></summary>
+        <div class="community-group-actions community-session-actions">
+          <button class="btn btn-secondary" id="club-invite">${uiIcon('ticket')} ${CTA_LABELS.invitePlayers}</button>
+          <button class="btn btn-secondary" id="club-share">${uiIcon('send')} Share community</button>
+        </div>` : ''}
       ${rosterVisible ? `
-        <div class="section-label section-label-icon">${uiIcon('users')} Members · ${club.member_count}</div>
         ${membersHtml || '<div class="empty-state community-roster-empty">No member profiles are available.</div>'}` : `
         <div class="card row community-roster-private" role="note">
           <span class="nav-row-leading">${uiIcon('lock')}</span>
           <span class="row-main"><span class="row-title">Member list is private</span><span class="row-sub">Join this community to see its members. Until then, only the total of ${club.member_count} is shown.</span></span>
         </div>`}
+      ${club.joined ? '</details>' : ''}
+      ${club.joined ? `<details class="flow-disclosure community-settings" id="club-settings">
+        <summary>Community settings <span>${isManager ? 'Preferences &amp; management' : 'Notifications &amp; membership'}</span></summary>
+        <div class="community-settings-actions">
+          <button class="btn btn-secondary btn-block" id="club-notifications">${uiIcon('bell')} Notifications · ${notificationLabel}</button>
+          ${isManager ? `<button class="btn btn-secondary btn-block" id="club-announcement">${uiIcon('bell')} ${club.announcement ? 'Update announcement' : 'Post announcement'}</button><button class="btn btn-secondary btn-block" id="club-bans">${uiIcon('shield')} Blocked players</button>` : ''}
       ${isOwner ? `
         <div class="community-manage-actions">
-          <button class="btn btn-secondary" id="club-edit">${uiIcon('edit')} Settings</button>
+          <button class="btn btn-secondary" id="club-edit">${uiIcon('edit')} Edit community</button>
           <button class="btn btn-secondary danger-text" id="club-delete">${uiIcon('trash')} Close community</button>
         </div>`
         : (club.joined ? '<button class="btn btn-secondary btn-block community-leave" id="club-leave">Leave community</button>' : '')}
+        </div>
+      </details>` : ''}
     `, { route: { kind: 'club', id: club.id } });
+    modal.classList.add('community-info-modal');
     modal.dataset.clubInfoId = String(club.id);
     bindUserButtons(modal);
 
@@ -28384,9 +28390,25 @@
     modal.querySelector('#club-court')?.addEventListener('click', () => {
       openChildModal(modal, () => openCourtDetail(club.home_court_id));
     });
-    modal.querySelectorAll('[data-open-game]').forEach((row) => row.addEventListener('click', () => {
-      openChildModal(modal, () => openGameScreen(Number(row.dataset.openGame)));
-    }));
+    modal.querySelector('.community-upcoming-section').addEventListener('click', (event) => {
+      const row = event.target.closest('[data-open-game]');
+      if (!row) return;
+      openChildModal(modal, () => openGameScreen(Number(row.dataset.openGame), {
+        onUpdated: (fresh) => {
+          if (!modal.isConnected) return;
+          upcomingGames = upcomingGames.map((item) => Number(item.id) === Number(fresh.id) ? fresh : item)
+            .filter((item) => item.status === 'upcoming');
+          const section = modal.querySelector('.community-upcoming-section');
+          const existingRow = section.querySelector(`[data-open-game="${Number(fresh.id)}"]`);
+          if (fresh.status === 'upcoming' && existingRow) {
+            existingRow.innerHTML = groupSessionContentHtml(fresh, { community: true });
+          } else {
+            section.innerHTML = groupUpcomingGamesHtml(upcomingGames, { community: true });
+          }
+          section.hidden = !upcomingGames.length;
+        },
+      }));
+    });
     modal.querySelectorAll('[data-open-club-tournament]').forEach((row) => row.addEventListener('click', () => {
       openChildModal(modal, () => openTournamentScreen(Number(row.dataset.openClubTournament)));
     }));
@@ -28396,24 +28418,10 @@
     modal.querySelector('#club-chat-btn')?.addEventListener('click', () => {
       openChildModal(modal, () => openClubChat(club));
     });
-    const openClubPlanner = ({ weekly = false } = {}) => {
+    modal.querySelector('#club-plan')?.addEventListener('click', () => {
       const court = club.home_court_id ? {
         id: club.home_court_id, name: club.home_court_name || 'Community home court',
       } : null;
-      // The weekly shortcut is a complete, editable program rather than a
-      // checkbox hidden later in the planner: tomorrow at 6pm, on that local
-      // weekday, through eight weeks from the first occurrence.
-      const weeklyStart = new Date();
-      weeklyStart.setDate(weeklyStart.getDate() + 1);
-      weeklyStart.setHours(18, 0, 0, 0);
-      const weeklyEnd = new Date(weeklyStart);
-      weeklyEnd.setDate(weeklyEnd.getDate() + 8 * 7);
-      const weeklyDate = (date) => [
-        date.getFullYear(),
-        String(date.getMonth() + 1).padStart(2, '0'),
-        String(date.getDate()).padStart(2, '0'),
-      ].join('-');
-      const weeklyDay = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][weeklyStart.getDay()];
       openChildModal(modal, () => openNewGameModal({
         court,
         gameType: 'casual',
@@ -28423,24 +28431,10 @@
         communityName: club.name,
         lockGameType: true,
         sessionMode: true,
-        ...(weekly ? {
-          title: 'Weekly open play',
-          scheduledAt: weeklyStart.toISOString(),
-          durationMinutes: 120,
-          recurrence: 'weekly',
-          recurrenceWeekdays: [weeklyDay],
-          recurrenceEndsOn: weeklyDate(weeklyEnd),
-        } : {}),
         onCreated: () => {
           if (modal.isConnected) transitionModal(modal, () => openClubScreen(club.id));
         },
       }));
-    };
-    modal.querySelector('#club-plan')?.addEventListener('click', () => {
-      openClubPlanner();
-    });
-    modal.querySelector('#club-plan-weekly')?.addEventListener('click', () => {
-      openClubPlanner({ weekly: true });
     });
     modal.querySelector('#club-join-btn')?.addEventListener('click', async (event) => {
       clearInlineActionError(modal);

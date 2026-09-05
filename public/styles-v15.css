@@ -2646,6 +2646,11 @@ button.tag, a.tag, .tag[role="button"] {
   .recent-player-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 }
 .community-group-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.community-info-modal .nav-row-button .row-title { white-space: normal; overflow-wrap: anywhere; }
+.community-roster-private .row-title, .community-roster-private .row-sub { display: block; }
+.community-session-actions { margin: 12px 0; }
+.community-settings-actions { display: grid; gap: 8px; padding: 0 14px 14px; }
+#club-members > .community-group-actions, #club-members > .community-member-row { margin-left: 14px; margin-right: 14px; }
 .community-group-actions .btn { min-height: 48px; }
 .community-discovery-hero {
   display: grid; gap: 12px; margin: 2px 0 18px; padding: 15px;

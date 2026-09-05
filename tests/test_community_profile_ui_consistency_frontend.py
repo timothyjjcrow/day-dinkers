@@ -74,7 +74,7 @@ def test_club_controls_and_membership_states_share_product_icons():
 
     assert "community-announcement-icon" in club
     assert "uiIcon('bell')" in club
-    assert "uiIcon('users')} Members" in club
+    assert '<summary>Members <span>' in club
     assert "uiIcon('lock')" in club
     assert "Leaderboard" not in club
     assert 'class="community-rank"' not in club

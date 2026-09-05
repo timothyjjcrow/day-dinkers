@@ -773,12 +773,15 @@ def test_community_leaf_destinations_share_native_navigation_rows():
         'id="club-court"',
         'data-open-club-league=',
         'data-open-club-tournament=',
-        'data-open-game=',
     ):
         assert re.search(
             rf'<button type="button" class="card row nav-row-button"[^>]*{attribute}',
             club,
         )
+    group_rows = app_section("function groupUpcomingGamesHtml", "async function openCrewScreen")
+    assert '<button type="button" class="card row nav-row-button crew-session-row"' in group_rows
+    assert "'data-open-game'" in group_rows
+    assert 'groupUpcomingGamesHtml(upcomingGames, { community: true })' in club
     assert '<button type="button" class="card row nav-row-button community-search-result"' in finder
     assert '<button type="button" class="row-main club-thread-head-target" id="club-head"' in chat
     assert "uiIcon('chevron-right', 'chev')" in club

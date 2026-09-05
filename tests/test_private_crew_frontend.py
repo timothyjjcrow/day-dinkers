@@ -184,8 +184,8 @@ def test_crew_detail_consumes_upcoming_games_and_owner_removal_api():
     screen_end = APP.index("function openRenameCrewSheet", screen_start)
     screen = APP[screen_start:screen_end]
     assert "Array.isArray(crew.upcoming_games)" in screen
-    assert 'crewUpcomingGamesHtml(upcomingGames)' in screen
-    assert 'data-open-crew-game="${game.id}"' in APP
+    assert 'groupUpcomingGamesHtml(upcomingGames)' in screen
+    assert "'data-open-crew-game'" in APP
     assert 'Upcoming play' in screen
     assert 'data-crew-remove-member="${memberId}"' in screen
     assert "api(`/crews/${crew.id}/members/${memberId}`, { method: 'DELETE' })" in screen

@@ -896,3 +896,97 @@ Once pushed, r67 is an immutable release. Subsequent frontend work must use a
 new release directory and service-worker cache version, retaining prior routes
 and assets for already-open clients. Continue with public-community information
 simplification and the established between-iteration overall review.
+
+GitHub push confirmed: `871f30b87c7e91690992e8c56612c22ebc79ed87` on `main`.
+GitHub Actions run 33976951117 completed successfully, including the full test
+suite, immutable-asset check, and container build.
+
+## Cycle 20: simplify public-community information
+
+The between-iteration review selected the dense public-community action stack.
+Upcoming play and the home court now precede one planning path and community
+chat. Recurrence remains in the existing planner's Repeat this schedule option;
+the separate weekly shortcut and its hidden tomorrow/eight-week defaults were
+removed. Members contains invitations, sharing, and the privacy-aware roster.
+Community settings contains notification preferences and role-appropriate
+organizer/membership actions. Pending join requests remain visible outside the
+disclosures. Visitors keep joining/request cancellation and sharing.
+
+Phone verification also exposed clipped court names and run-together private
+roster copy. Community court names now wrap, and the private-member explanation
+has a separate heading. No new navigation destination, feature category, or
+backend behavior was added. This local iteration begins r68 and SW cache r70;
+the already-pushed r67 assets remain unchanged.
+
+Validation: **84 focused frontend, release, membership, governance, deletion,
+chat, and crew tests passed in 7.84 seconds** after the final build. An executable
+render check covers member, owner, organizer, visitor, pending-request, roster
+privacy, escaping, and action-priority behavior. JavaScript/SW syntax and diff
+whitespace checks passed. Log: `tmp/ui-loop/cycle20-final-tests.log`.
+
+Browser verification used synthetic localhost data only: owner settings opened
+notification preferences; the single planner exposed repeat weekdays/end date;
+Jordan joined the community and received member-only planning/chat controls;
+chat opened its composer without sending a message. Owner, visitor, and member
+phone views and the light desktop member view were inspected. Final court names
+wrap at 320px, with no horizontal overflow. Screenshots:
+`tmp/ui-loop/cycle20-member-dark-320-final.png`,
+`tmp/ui-loop/cycle20-member-light-1280.png`, and
+`tmp/ui-loop/cycle20-settings-dark-320.png`.
+
+Synthetic server restarted for r68. It now seeds community 1 and community
+session 10, plus the previous private-group fixtures. Game 8 was regenerated as
+a normal future open session; the earlier cross-day recurrence check remains
+covered by its prior evidence and regression tests. Jordan joined community 1
+through the real local UI. No production data or messages were changed.
+
+Overall review before cycle 21: revisited Play (find games/My plans), Courts
+(search/map/list), and Me (upcoming plan, usual times, court, settings), with
+Community inspected throughout cycle 20. Their existing jobs remain distinct;
+no new top-level controls are justified. Public-community upcoming games are
+the concrete cohesion gap: five dates can push all actions down the sheet,
+custom session titles disappear, and the parent card remains stale after RSVP.
+Reproduced with Jordan: joining session 10 showed two players in the game,
+then Back still showed 1/8 and seven spots on the community card. Next change:
+share the private-group card presentation, reveal later dates on demand, and
+refresh the existing card after a game update while preserving return focus.
+
+## Cycle 21: keep community plans current and compact
+
+Public-community and private-group information now share the same session-card
+renderer. Public cards retain custom session names, show personal RSVP/waitlist
+status, and distinguish ranked matches. Only the next date is exposed by
+default; later sessions use the existing More upcoming sessions disclosure.
+Opening a community game now passes the same authoritative update callback used
+by private groups. Joining updates the original card in place, preserving its
+focus target and any expanded dates. Cancelled/completed sessions leave the
+upcoming list. This reuses existing UI and game behavior rather than adding a
+new planning path.
+
+Validation: **606 frontend checks passed in 6.42 seconds**. Executable coverage
+includes community titles/escaping, ranked wording, compact later dates, fresh
+RSVP counts, removed cancelled sessions, and preserving the original return
+focus target. The browser confirmed session 10 now returns with 2/8, six spots,
+and “You’re in.” Joining session 11 from expanded later dates preserved both
+the expanded disclosure and focus on session 11, with the same fresh count.
+Phone and light desktop layouts were inspected with four future community
+sessions. No messages were sent. Log: `tmp/ui-loop/cycle21-frontend-tests.log`.
+Screenshots: `tmp/ui-loop/cycle21-multi-dark-320.png` and
+`tmp/ui-loop/cycle21-member-light-1280.png`.
+
+## Requested pause after deployment — September 5, 2026
+
+The user requested completing this iteration, deploying all changes, and then
+stopping/pausing the improvement loop. Do not start another improvement cycle.
+Finish release verification and deployment only. The goal is already paused;
+resume improvement work only when the user asks again. Cycles 20–21 comprise the
+r68 release, retaining the pushed r67 assets and routes.
+
+Final pre-deployment validation: **1,293 tests passed in 291.53 seconds**.
+Backend compilation, JavaScript/service-worker syntax, unchanged prior r67
+assets, and whitespace checks passed. A final deterministic frontend rebuild
+is checked against the staged r68 artifacts before committing. Full suite log:
+`tmp/ui-loop/final-deploy-tests.log`. The production deployment uses the existing
+GitHub → Vercel integration for `main`; post-deployment health, exact asset
+hashes, service-worker version, public browser boot, and runtime errors are the
+remaining release checks. The improvement loop stays paused after those checks.

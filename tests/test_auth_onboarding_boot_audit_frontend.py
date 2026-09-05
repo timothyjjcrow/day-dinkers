@@ -127,9 +127,9 @@ def test_account_reads_are_event_driven_and_me_is_side_effect_free():
 
 def test_first_paint_has_a_static_shell_and_non_parser_blocking_app_files():
     assert 'id="boot-screen" class="screen boot-screen"' in INDEX
-    assert '<link rel="preload" href="/release-assets/r67/app-v15.min.js" as="script" />' in INDEX
-    assert '<script defer src="/release-assets/r67/crew-planner-v15.min.js"></script>' in INDEX
-    assert '<script defer src="/release-assets/r67/app-v15.min.js"></script>' in INDEX
+    assert '<link rel="preload" href="/release-assets/r68/app-v15.min.js" as="script" />' in INDEX
+    assert '<script defer src="/release-assets/r68/crew-planner-v15.min.js"></script>' in INDEX
+    assert '<script defer src="/release-assets/r68/app-v15.min.js"></script>' in INDEX
     assert "if (!localStorage.getItem('pp_token'))" in INDEX
     assert "auth?.classList.remove('hidden')" in INDEX
     assert "window.__thirdShotShowBootFailure = showRecovery" in INDEX

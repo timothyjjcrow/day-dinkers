@@ -10,7 +10,7 @@ def section(start, end):
 
 
 def run(script):
-    source = section('  function crewSessionContentHtml(', '  async function openCrewScreen(')
+    source = section('  function groupSessionContentHtml(', '  async function openCrewScreen(')
     source += section('  function crewChatPlanCopy(', '  function syncCrewChatPlan(')
     subprocess.run(['node', '-e', '''
       const assert=require('node:assert/strict');
@@ -23,24 +23,24 @@ def run(script):
 def test_group_session_shows_personal_status_and_respects_an_explicit_full_roster():
     run('''
       const game={id:9,scheduled_at:'Tomorrow at 10 AM',court:{name:'Sunset <Park>'},players:[{id:1}],max_players:4,spots_left:0,is_invited:true};
-      const html=crewSessionContentHtml(game);
+      const html=groupSessionContentHtml(game);
       assert.ok(html.includes('Tomorrow at 10 AM'));
       assert.ok(html.includes('Sunset &lt;Park>'));
       assert.ok(html.includes('1/4 in · Full'));
       assert.ok(!html.includes('spots left'));
       assert.ok(html.includes('You’re invited · View &amp; RSVP'));
-      assert.ok(crewSessionContentHtml({...game,is_joined:true}).includes('You’re in · View session'));
-      assert.ok(crewSessionContentHtml({...game,waitlist_position:2}).includes('Waitlist #2 · View session'));
-      assert.ok(crewSessionContentHtml({...game,spots_left:null}).includes('3 spots left'));
+      assert.ok(groupSessionContentHtml({...game,is_joined:true}).includes('You’re in · View session'));
+      assert.ok(groupSessionContentHtml({...game,waitlist_position:2}).includes('Waitlist #2 · View session'));
+      assert.ok(groupSessionContentHtml({...game,spots_left:null}).includes('3 spots left'));
     ''')
 
 
 def test_only_the_next_session_is_exposed_before_the_optional_more_dates_disclosure():
     run('''
       const game=id=>({id,scheduled_at:'Day '+id,court:{name:'Park'},max_players:4,spots_left:3,is_joined:true});
-      assert.equal(crewUpcomingGamesHtml([]),'');
-      assert.ok(!crewUpcomingGamesHtml([game(1)]).includes('<details'));
-      const html=crewUpcomingGamesHtml([game(1),game(2),game(3)]);
+      assert.equal(groupUpcomingGamesHtml([]),'');
+      assert.ok(!groupUpcomingGamesHtml([game(1)]).includes('<details'));
+      const html=groupUpcomingGamesHtml([game(1),game(2),game(3)]);
       const split=html.indexOf('<details');
       assert.ok(html.indexOf('data-open-crew-game="1"')<split);
       assert.ok(html.indexOf('data-open-crew-game="2"')>split);
@@ -88,5 +88,45 @@ def test_authoritative_rsvp_update_preserves_the_return_focus_target():
       assert.ok(plan.innerHTML.includes('Plan with this group'));
       modal.isConnected=false;
       update({id:9,status:'upcoming'});
+      assert.equal(section.hidden,true);
+    ''')
+
+
+def test_public_community_uses_the_same_compact_cards_with_title_and_ranked_context():
+    run('''
+      const game={id:10,scheduled_at:'Tomorrow at 10 AM',court:{name:'Sunset <Park>'},title:'Friendly <doubles>',players:[{}],max_players:4,spots_left:3,status:'upcoming'};
+      const html=groupUpcomingGamesHtml([game,{...game,id:11}],{community:true});
+      const split=html.indexOf('<details');
+      assert.ok(html.indexOf('data-open-game="10"')<split);
+      assert.ok(html.indexOf('data-open-game="11"')>split);
+      assert.ok(html.includes('Friendly &lt;doubles>'));
+      assert.ok(html.includes('Tomorrow at 10 AM · Sunset &lt;Park>'));
+      assert.ok(html.includes('Open to you · View &amp; RSVP'));
+      assert.ok(!html.includes('data-open-crew-game'));
+      assert.ok(groupSessionContentHtml({...game,game_type:'ranked',is_joined:true},{community:true}).includes('You’re in · View match'));
+    ''')
+
+
+def test_community_rsvp_update_keeps_return_focus_and_removes_cancelled_sessions():
+    start = APP.index('        onUpdated: (fresh) => {', APP.index('  function openClubInfo('))
+    end = APP.index('      }));', start)
+    callback = APP[start:end].strip().removeprefix('onUpdated: ').removesuffix(',')
+    run('''
+      let upcomingGames=[{id:10,status:'upcoming',players:[{}],max_players:8}];
+      const row={innerHTML:''};
+      const section={innerHTML:'original',hidden:false,querySelector:()=>row};
+      const modal={isConnected:true,querySelector:()=>section};
+      const update=''' + callback + ''';
+      update({id:10,status:'upcoming',is_joined:true,title:'Morning play',scheduled_at:'Tomorrow',players:[{},{}],max_players:8,spots_left:6});
+      assert.equal(section.innerHTML,'original');
+      assert.ok(row.innerHTML.includes('You’re in · View session'));
+      assert.ok(row.innerHTML.includes('2/8 in'));
+      assert.ok(row.innerHTML.includes('Morning play'));
+      assert.equal(upcomingGames[0].is_joined,true);
+      update({id:10,status:'cancelled'});
+      assert.equal(section.hidden,true);
+      assert.equal(upcomingGames.length,0);
+      modal.isConnected=false;
+      update({id:10,status:'upcoming'});
       assert.equal(section.hidden,true);
     ''')
