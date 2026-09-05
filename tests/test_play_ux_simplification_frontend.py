@@ -199,7 +199,7 @@ def test_home_area_city_search_is_labeled_race_safe_and_explains_empty_or_failed
     assert "resultsEl.setAttribute('aria-busy', 'true')" in search
     assert "resultsEl.removeAttribute('aria-busy')" in search
 
-    sheet = section("function openHomeAreaSheet", "// Onboarding step 2")
+    sheet = section("function openHomeAreaSheet", "async function maybeSuggestStarterCourts")
     assert '<label for="ha-city">Search by city</label>' in sheet
     assert '<div id="ha-results" aria-live="polite"></div>' in sheet
 

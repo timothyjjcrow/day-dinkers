@@ -89,10 +89,11 @@ def test_inbox_accessible_names_include_the_visible_preview_and_time():
     inbox = section("function inboxMessagePreviewText", "function bindCommunityConversationRows")
 
     assert "function inboxMessagePreviewText(item)" in inbox
-    assert "const preview = inboxMessagePreviewText(item);" in inbox
-    assert "const when = item.lastMessage ? `, ${fmtInboxTimestamp(item.lastMessage.created_at)}` : '';" in inbox
-    assert "${item.title}, ${kindLabel[item.kind]} chat${attention}, ${preview}${when}" in inbox
-    assert "return esc(inboxMessagePreviewText(item));" in inbox
+    assert "const preview = groupInfo ? item.emptyText : inboxMessagePreviewText(item);" in inbox
+    assert "${item.title}, ${kindLabel[item.kind]} chat${attention}, ${preview}" in inbox
+    assert "fmtInboxTimestamp(item.lastMessage.created_at)" in inbox
+    assert 'aria-label="${esc(accessibleLabel)}"' in inbox
+    assert '${esc(preview)}</span>' in inbox
 
 
 def test_people_rows_use_disclosed_filters_and_one_contextual_action():

@@ -329,6 +329,6 @@ def test_court_detail_uses_private_safe_presence_aggregate():
     assert "Math.max(visiblePlayersHere.length, Number(court.players_here_count) || 0)" in detail
     assert "privatePlayersHere" in detail
     assert "Playing and forming now" in detail
-    assert "People at this court (${nHere})" in detail
-    assert "<b>${nHere}</b><span>at the court</span>" in detail
+    assert "Checked-in players (${nHere})" in detail
+    assert "<b>${nHere}</b><span>checked in</span>" in detail
     assert "court.players_here.length" not in detail

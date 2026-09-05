@@ -47,7 +47,7 @@ def test_new_player_onboarding_is_connected_and_uses_product_icons():
     assert "if (openedLinkedDestination) pendingNewPlayerOnboardingAccountId = state.me.id;" in auth
     assert "else runNewPlayerOnboarding();" in auth
 
-    home = section("function openHomeAreaSheet", "// Onboarding step 2")
+    home = section("function openHomeAreaSheet", "async function maybeSuggestStarterCourts")
     assert "checkin-sheet-icon home-area-hero" in home
     assert "uiIcon('map-pin')" in home
     assert "uiIcon('target')" in home

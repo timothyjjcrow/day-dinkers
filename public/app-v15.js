@@ -638,7 +638,12 @@
         ? value.availability.filter((slot) => /^(sun|mon|tue|wed|thu|fri|sat)-(am|pm|eve)$/.test(slot))
         : [])],
       skill_level: ['beginner', 'intermediate', 'advanced', 'pro'].includes(value.skill_level)
-        ? value.skill_level : 'intermediate',
+        ? value.skill_level : null,
+      skill_rating: typeof value.skill_rating === 'number' && Number.isFinite(value.skill_rating)
+        ? value.skill_rating : null,
+      dupr_rating: typeof value.dupr_rating === 'number' && Number.isFinite(value.dupr_rating)
+        ? value.dupr_rating : null,
+      dupr_id: typeof value.dupr_id === 'string' ? value.dupr_id.slice(0, 80) : '',
       rating: Number.isFinite(Number(value.rating)) ? Number(value.rating) : 1200,
       is_recent: value.is_recent === true,
       is_friend: value.is_friend === true,
@@ -1273,6 +1278,10 @@
     user_blocked: "You can't interact with this player.",
     message_not_allowed: 'You can message friends and players you have shared a game, group, competition, or court check-in with.',
     crew_changed: 'Someone in this play group is no longer available. Review the selected players and try again.',
+    crew_invitees_changed: 'The available players changed. Review the refreshed list, then start your group again.',
+    too_many_invitees: 'Choose up to 11 players. A play group has room for 12 people, including you.',
+    crew_invitation_changed: 'This invitation has changed. Refresh the group to see whether the player joined or was invited again.',
+    invitation_version_required: 'Refresh the group before changing this invitation.',
     community_session_must_be_open: 'Public community sessions must be open so every member can view and join them.',
     no_friends: 'Add a friend before making a friends-only game, or choose Anyone nearby.',
     court_id_required: 'Choose a club or court.',
@@ -1970,7 +1979,7 @@
     return shell;
   }
 
-  function hydrateChatLoadShell(shell, html, label = 'Conversation') {
+  function hydrateChatLoadShell(shell, html, label = 'Conversation', { focusComposer = true } = {}) {
     if (!shell?.modal?.isConnected) return null;
     shell.modal.classList.add('chat-modal');
     shell.modal.classList.remove('chat-load-shell');
@@ -1978,7 +1987,7 @@
     shell.box.querySelector('.thread-msgs')?.setAttribute('data-scroll', '');
     const composer = shell.box.querySelector('.thread-input textarea');
     queueMicrotask(() => {
-      if (composer?.isConnected) composer.focus({ preventScroll: true });
+      if (focusComposer && composer?.isConnected) composer.focus({ preventScroll: true });
     });
     return shell.modal;
   }
@@ -6140,10 +6149,10 @@
     if (context) {
       const active = [];
       if (state.courtFilters.open_now) active.push('open now');
-      if (state.courtFilters.active) active.push('active now');
+      if (state.courtFilters.active) active.push('live activity');
       if (state.courtFilters.business) active.push('verified venues');
       if (state.courtFilters.saved) active.push('saved');
-      if (state.courtFilters.players) active.push('players here');
+      if (state.courtFilters.players) active.push('check-ins');
       if (state.courtFilters.games) active.push('joinable games');
       const amenities = COURT_AMENITY_FILTERS.filter((key) => state.courtFilters[key]).length;
       if (amenities) active.push(`${amenities} ${amenities === 1 ? 'amenity' : 'amenities'}`);
@@ -6498,7 +6507,7 @@
     const markerLabel = [
       court.name,
       integrated ? `Official venue profile from ${court.business.name}` : '',
-      busy ? `${court.players_here} playing now` : `${court.num_courts} court${court.num_courts === 1 ? '' : 's'}`,
+      busy ? `${court.players_here} checked in` : `${court.num_courts} court${court.num_courts === 1 ? '' : 's'}`,
       court.active_games ? `${court.active_games} pickup game${court.active_games === 1 ? '' : 's'} in the next two hours` : '',
       fav ? 'Saved court' : '',
       court.condition && COURT_CONDITION_LABELS[court.condition]
@@ -6743,8 +6752,8 @@
       const businessLabel = courtBusinessDiscoveryLabel(court);
       const businessDiscovery = courtBusinessDiscoveryAvailable(court);
       const live = court.players_here
-        ? `${court.players_here} playing now`
-        : court.active_games ? `${court.active_games} pickup game${court.active_games === 1 ? '' : 's'} soon` : 'Quiet right now';
+        ? `${court.players_here} checked in`
+        : court.active_games ? `${court.active_games} pickup game${court.active_games === 1 ? '' : 's'} soon` : 'No players checked in';
       preview.innerHTML = `
         <div class="row">
           <div class="row-main">
@@ -7205,16 +7214,47 @@
     return parts.filter(Boolean).join(' · ');
   }
 
-  function nextCourtOpenPlayStart(row, now = new Date()) {
+  function nextCourtOpenPlayStart(row, now = new Date(), timeZone = null) {
     const weekdayIndex = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
     const targetDay = weekdayIndex[row?.weekday];
-    const match = /^(\d{2}):(\d{2})$/.exec(String(row?.start || ''));
-    if (targetDay == null || !match) return null;
+    const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(row?.start || ''));
+    if (targetDay == null || !match || !Number.isFinite(now.getTime())) return null;
+    if (timeZone) {
+      try {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone, calendar: 'gregory', numberingSystem: 'latn', hourCycle: 'h23',
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        });
+        const parts = (date) => Object.fromEntries(formatter.formatToParts(date)
+          .filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]));
+        const stamp = (value) => Date.UTC(value.year, value.month - 1, value.day, value.hour, value.minute, value.second);
+        const today = parts(now);
+        const localDate = new Date(Date.UTC(today.year, today.month - 1, today.day));
+        localDate.setUTCDate(localDate.getUTCDate() + ((targetDay - localDate.getUTCDay() + 7) % 7));
+        for (let week = 0; week < 3; week++) {
+          const desired = Date.UTC(localDate.getUTCFullYear(), localDate.getUTCMonth(), localDate.getUTCDate(), Number(match[1]), Number(match[2]));
+          // Offsets on either side of the target cover clock changes, including
+          // half-hour changes. Verify the wall clock instead of shifting a gap.
+          const offsets = new Set([-48, -24, 0, 24, 48].map((hours) => {
+            const sample = desired + hours * 3600000;
+            return stamp(parts(new Date(sample))) - sample;
+          }));
+          const candidates = [...offsets].map((offset) => desired - offset)
+            .filter((instant) => stamp(parts(new Date(instant))) === desired).sort((a, b) => a - b);
+          // Match recurrence generation: first occurrence in a fall-back fold;
+          // skip a nonexistent spring-forward time rather than changing it.
+          if (candidates.length && candidates[0] > now.getTime()) return new Date(candidates[0]);
+          localDate.setUTCDate(localDate.getUTCDate() + 7);
+        }
+        return null;
+      } catch { return null; }
+    }
     const start = new Date(now);
     start.setSeconds(0, 0);
     start.setDate(start.getDate() + ((targetDay - start.getDay() + 7) % 7));
     start.setHours(Number(match[1]), Number(match[2]), 0, 0);
-    if (start.getTime() <= now.getTime() + 50 * 60 * 1000) start.setDate(start.getDate() + 7);
+    if (start.getTime() <= now.getTime()) start.setDate(start.getDate() + 7);
     return start;
   }
 
@@ -7284,6 +7324,78 @@
     return compactCourtFact(fees, 28);
   }
 
+  function courtVisitHoursHtml(court) {
+    if (court.hours_dawn_to_dusk) return '<p>Dawn to dusk</p>';
+    const schedule = court.structured_hours || {};
+    const validClock = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value || '');
+    const rows = Object.entries(COURT_WEEKDAY_LABELS).map(([day, label]) => {
+      const raw = schedule[day];
+      const windows = (Array.isArray(raw) ? raw : [raw])
+        .filter((window) => window && validClock(window.open) && validClock(window.close))
+        .map((window) => window.open === window.close ? '24 hours'
+          : `${courtTimeRangeLabel(window.open, window.close)}${window.close < window.open ? ' (next day)' : ''}`);
+      return { label, windows };
+    });
+    if (!rows.some((row) => row.windows.length)) {
+      return `<p>${esc(court.hours || 'Hours have not been listed yet.')}</p>`;
+    }
+    return `<dl class="court-visit-hours">${rows.map((row) => `<div><dt>${esc(row.label)}</dt><dd>${esc(row.windows.join(' · ') || 'Not listed')}</dd></div>`).join('')}</dl>
+      ${schedule.timezone ? `<p class="row-sub">Times at the court · ${esc(String(schedule.timezone).replaceAll('_', ' '))}</p>` : ''}
+      ${court.hours ? `<p class="court-visit-note">${esc(court.hours)}</p>` : ''}`;
+  }
+
+  function openCourtVisitSheet(court, section = 'hours') {
+    const rows = courtOpenPlayRows(court).sort((a, b) => (
+      Object.keys(COURT_WEEKDAY_LABELS).indexOf(a.weekday) - Object.keys(COURT_WEEKDAY_LABELS).indexOf(b.weekday)
+      || a.start.localeCompare(b.start)
+    ));
+    const facilities = [
+      [court.nets_provided, 'net', 'Nets provided'],
+      [court.has_restrooms, 'restroom', 'Restrooms'],
+      [court.has_water, 'water', 'Water'],
+      [court.lighted, 'lightbulb', 'Lights'],
+    ].filter(([listed]) => listed);
+    const website = businessActionHref(court.website);
+    const reservation = businessActionHref(court.reservation_url);
+    const phone = safeHref(court.phone && `tel:${court.phone}`, { tel: true });
+    const modal = openModal(`
+      ${modalHead('Before you go', 'map-pin')}
+      <p class="court-visit-intro"><b>${esc(court.name)}</b><span>Community-maintained court information</span></p>
+      ${court.closed ? '<p class="court-visit-closed">This court is reported permanently closed.</p>' : ''}
+      <section class="court-visit-section" aria-labelledby="court-visit-hours-title">
+        <h4 id="court-visit-hours-title" tabindex="-1">${uiIcon('clock')} Hours</h4>
+        ${courtVisitHoursHtml(court)}
+      </section>
+      <section class="court-visit-section" aria-labelledby="court-visit-fees-title">
+        <h4 id="court-visit-fees-title" tabindex="-1">${uiIcon('ticket')} Fees &amp; access</h4>
+        <p>${esc(court.fees || courtFeeTypeFact(court) || 'Fees have not been listed yet.')}</p>
+        ${reservation ? `<a class="btn btn-secondary btn-block" href="${esc(reservation)}" target="_blank" rel="noopener">${uiIcon('external')} View reservation details</a>` : ''}
+      </section>
+      <section class="court-visit-section" aria-labelledby="court-visit-openplay-title">
+        <h4 id="court-visit-openplay-title" tabindex="-1">${uiIcon('calendar')} Open play</h4>
+        ${rows.length ? `<div class="court-visit-openplay">${rows.map((row) => `<div><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start, row.end)}`)}</b>${row.level || row.cost ? `<p class="row-sub">${esc([row.level, row.cost].filter(Boolean).join(' · '))}</p>` : ''}${row.notes ? `<p>${esc(row.notes)}</p>` : ''}</div>`).join('')}</div>` : ''}
+        ${court.open_play_schedule ? `<p>${esc(court.open_play_schedule)}</p>` : !rows.length ? '<p>No open-play schedule has been listed yet.</p>' : ''}
+      </section>
+      <section class="court-visit-section" aria-labelledby="court-visit-facilities-title">
+        <h4 id="court-visit-facilities-title">${uiIcon('grid')} Facilities</h4>
+        ${facilities.length ? `<ul class="court-visit-facilities">${facilities.map(([, icon, label]) => `<li>${uiIcon(icon)} ${label}</li>`).join('')}</ul>` : '<p>Facility details have not been listed yet.</p>'}
+      </section>
+      <div class="court-visit-links">
+        <a class="btn btn-primary btn-block" href="${esc(courtDirectionsUrl(court))}" target="_blank" rel="noopener">${uiIcon('map-pin')} Directions</a>
+        ${website ? `<a class="btn btn-secondary" href="${esc(website)}" target="_blank" rel="noopener">${uiIcon('external')} Court website</a>` : ''}
+        ${phone ? `<a class="btn btn-secondary" href="${esc(phone)}">${uiIcon('phone')} Call the court</a>` : ''}
+      </div>
+    `, { label: `Before you go to ${court.name}` });
+    requestAnimationFrame(() => {
+      if (!modal.isConnected) return;
+      const key = ['hours', 'fees', 'openplay'].includes(section) ? section : 'hours';
+      const heading = modal.querySelector(`#court-visit-${key}-title`);
+      heading?.focus({ preventScroll: true });
+      if (key !== 'hours') heading?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    });
+    return modal;
+  }
+
   function courtFeeTypeFact(court) {
     const type = String(court?.fee_type || '').trim().toLowerCase();
     if (['free', 'no_fee'].includes(type)) return 'Free';
@@ -7351,7 +7463,7 @@
     )).join('')}</span>` : '';
     const liveMetrics = [];
     if (c.players_here > 0) liveMetrics.push(
-      `<span class="court-card-metric live"><b>${c.players_here}</b><span>here now</span></span>`,
+      `<span class="court-card-metric live"><b>${c.players_here}</b><span>checked in</span></span>`,
     );
     if (c.active_games > 0) liveMetrics.push(
       `<span class="court-card-metric live"><b>${c.active_games}</b><span>open soon</span></span>`,
@@ -7360,12 +7472,13 @@
       `<span class="court-card-metric"><b>${uiIcon('star')} ${c.rating_avg}</b><span>${c.rating_count} rating${c.rating_count === 1 ? '' : 's'}</span></span>`,
     );
     const activityHtml = quietNow
-      ? `<span class="court-card-quiet">Quiet now${c.upcoming_games > 0 ? ` · ${c.upcoming_games} later session${c.upcoming_games === 1 ? '' : 's'}` : c.rating_count > 0 && c.rating_avg ? ` · ${uiIcon('star')} ${c.rating_avg}` : ''}</span>`
+      ? `<span class="court-card-quiet">No players checked in${c.upcoming_games > 0 ? ` · ${c.upcoming_games} later session${c.upcoming_games === 1 ? '' : 's'}` : c.rating_count > 0 && c.rating_avg ? ` · ${uiIcon('star')} ${c.rating_avg}` : ''}</span>`
       : `<span class="court-card-metrics">${liveMetrics.join('')}</span>`;
     const reasonHtml = location && c.distance_miles != null
       ? `<span class="court-card-reason">${esc(location)}</span>` : '';
-    const accessibleActivity = quietNow ? 'Quiet now' : [
-      c.players_here > 0 ? `${c.players_here} here now` : '',
+    const accessibleActivity = [
+      quietNow ? 'No players checked in'
+        : c.players_here > 0 ? `${c.players_here} checked in` : '',
       c.active_games > 0
         ? `${c.active_games} pickup game${c.active_games === 1 ? '' : 's'} in the next two hours` : '',
       c.upcoming_games > c.active_games
@@ -7428,10 +7541,10 @@
   function courtPeekCardHtml(c, index = 0) {
     const selected = Number(state.selectedCourtId) === Number(c.id);
     const live = c.players_here > 0
-      ? `${c.players_here} here now`
+      ? `${c.players_here} checked in`
       : c.active_games > 0
         ? `${c.active_games} pickup game${c.active_games === 1 ? '' : 's'} soon`
-        : 'Quiet right now';
+        : 'No players checked in';
     const location = [
       c.distance_miles != null ? `${c.distance_miles} mi` : '',
       c.city || '',
@@ -8562,6 +8675,14 @@
     const result = openNext();
     const replacement = currentOverlayEntry()?.el;
     if (flowParent && replacement && replacement !== flowParent) decorateFlowChildModal(replacement);
+    if (flowParent && result && typeof result.then === 'function') {
+      // Async detail screens replace their loading header. Restore the Back
+      // label on that exact child after it finishes, without touching a newer
+      // screen the player may have opened in the meantime.
+      result.then(() => {
+        if (flowParent.isConnected && replacement?.isConnected) decorateFlowChildModal(replacement);
+      }).catch(() => {});
+    }
     return result || true;
   }
 
@@ -9614,7 +9735,9 @@
     });
   }
 
-  function bindChatContinuity(modal, msgsEl, inputEl, channelKey) {
+  function bindChatContinuity(modal, msgsEl, inputEl, channelKey, {
+    emptyMessageHtml = () => '<div class="empty-state" style="padding:20px">No messages yet.</div>',
+  } = {}) {
     const accountId = state.me && state.me.id;
     const outboxSessionRevision = chatOutboxSessionRevision;
     const storageKey = accountId
@@ -9846,7 +9969,7 @@
       }).join('');
       if (html) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (!msgsEl.querySelector('[data-message-id], .empty-state')) {
-        msgsEl.innerHTML = '<div class="empty-state" style="padding:20px">No messages yet.</div>';
+        msgsEl.innerHTML = emptyMessageHtml();
       }
       restoreScroll(snapshot, { forceBottom: snapshot.nearBottom });
     };
@@ -10190,8 +10313,10 @@
       const settle = (accepted) => {
         if (settled) return;
         settled = true;
-        closeModal(sheet);
-        resolve(accepted);
+        // Finish the confirmation's Back traversal before its caller can
+        // replace the parent. A fast response otherwise races the pending
+        // popstate and can dismiss the freshly refreshed profile or game.
+        dismissModal(sheet, () => resolve(accepted));
       };
       sheet._cleanupFns?.push(() => {
         if (settled) return;
@@ -11177,7 +11302,7 @@
     btn.type = 'button';
     btn.innerHTML = uiIcon('camera');
     btn.setAttribute('aria-label', 'Send a photo');
-    btn.style.cssText = 'background:transparent;font-size:19px;padding:0 2px';
+    btn.className = 'thread-photo-button';
     form.prepend(file);
     form.prepend(btn);
     btn.addEventListener('click', () => {
@@ -11912,8 +12037,8 @@
         }).join('') + (privatePlayersHere
           ? `<div class="row-sub" style="padding:2px 8px 10px">＋ ${privatePlayersHere} other checked-in player${privatePlayersHere === 1 ? '' : 's'} not shown here.</div>` : '')
       : nHere
-        ? `<div class="court-detail-empty"><span aria-hidden="true">${uiIcon('shield')}</span><p>${nHere} player${nHere === 1 ? ' is' : 's are'} here — check in to see who’s playing.</p></div>`
-      : `<div class="court-detail-empty"><span aria-hidden="true">${uiIcon('users')}</span><p>No one is here yet. Share that you want to play and gather a group.</p></div>`;
+        ? `<div class="court-detail-empty"><span aria-hidden="true">${uiIcon('shield')}</span><p>${nHere} player${nHere === 1 ? ' is' : 's are'} checked in — check in to see who’s playing.</p></div>`
+      : `<div class="court-detail-empty"><span aria-hidden="true">${uiIcon('users')}</span><p>No players are checked in on Third Shot right now. Check in when you arrive to help others find you.</p></div>`;
 
     const allCourtGames = Array.isArray(court.games) ? court.games : [];
     // A weekly occurrence is a regular player-organized session, not just
@@ -11958,7 +12083,7 @@
     const checkedIn = court.is_checked_in === true;
     const lookingForGame = checkedIn && court.is_looking_for_game === true;
     let isFavorite = court.is_favorite;
-    const heroFallback = `<div class="cd-hero-img placeholder" aria-hidden="true">${uiIcon('pickleball')}</div>`;
+    const heroFallback = `<div class="cd-hero-img placeholder" aria-hidden="true"></div>`;
     const heroImg = `${heroFallback}${court.photo_url
       ? `<img class="cd-hero-img cd-hero-photo" src="${esc(court.photo_url)}" alt="" data-remove-on-error>`
       : ''}`;
@@ -11977,13 +12102,12 @@
       ? compactCourtFact(court.open_play_schedule, 54)
       : venueBusiness?.schedule?.some((item) => item && item.active !== false)
         ? 'See venue schedule below' : 'No schedule listed');
-    const openPlayTitle = structuredOpenPlay?.raw || court.open_play_schedule || openPlayFact;
     const structuredOpenPlayHtml = courtOpenPlayScheduleHtml(court);
     const visitFactsHtml = `
       <dl class="cd-visit-facts" aria-label="Today at this court">
-        <div><dt>${uiIcon('clock')} Today</dt><dd>${esc(todayHours)}</dd></div>
-        <div><dt>${uiIcon('ticket')} Fees</dt><dd>${esc(feeFact || 'Not listed')}</dd></div>
-        <div><dt>${uiIcon('calendar')} Open play</dt><dd title="${esc(openPlayTitle)}">${esc(openPlayFact)}</dd></div>
+        <div><dt>${uiIcon('clock')} Today</dt><dd><button type="button" data-court-visit="hours" aria-label="View full court hours: ${esc(todayHours)}">${esc(todayHours)}${uiIcon('chevron-right')}</button></dd></div>
+        <div><dt>${uiIcon('ticket')} Fees</dt><dd><button type="button" data-court-visit="fees" aria-label="View full fees and access details: ${esc(feeFact || 'Not listed')}">${esc(feeFact || 'Not listed')}${uiIcon('chevron-right')}</button></dd></div>
+        <div><dt>${uiIcon('calendar')} Open play</dt><dd><button type="button" data-court-visit="openplay" aria-label="View full open-play schedule: ${esc(openPlayFact)}">${esc(openPlayFact)}${uiIcon('chevron-right')}</button></dd></div>
       </dl>`;
     const linkParts = [];
     if (court.website && (!venueBusiness || !venueBusiness.website_url)) linkParts.push(`<a href="${esc(court.website)}" target="_blank" rel="noopener" aria-label="Community website for ${esc(court.name)} (opens new tab)">${uiIcon('external')} Community website link</a>`);
@@ -12010,10 +12134,10 @@
     const nowSummary = courtClosed
       ? '<p class="cd-now-quiet cd-closed-copy">Check-ins, new play sessions, ranked matches, and court chat are paused here. If this listing is wrong, tell us and we’ll review it.</p>'
       : quietNow
-      ? '<p class="cd-now-quiet">No group is forming yet. Let nearby players know you want to play here.</p>'
+      ? '<p class="cd-now-quiet">No current check-ins are shared on Third Shot. Check in when you arrive, or create a game for later.</p>'
       : `<div class="cd-now-signals">
           <button type="button" class="cd-now-signal${nHere ? ' hot' : ''}" data-scroll-to="cd-sec-players">
-            <b>${nHere}</b><span>at the court</span>${uiIcon('chevron-right', 'chev')}
+            <b>${nHere}</b><span>checked in</span>${uiIcon('chevron-right', 'chev')}
           </button>
           <button type="button" class="cd-now-signal${nGames ? ' hot' : ''}" data-scroll-to="cd-sec-games">
             <b>${nGames}</b><span>open session${nGames === 1 ? '' : 's'}</span>${uiIcon('chevron-right', 'chev')}
@@ -12023,7 +12147,7 @@
       ? `<button type="button" class="btn btn-primary btn-block cd-primary-action" id="cd-open-game" data-game-id="${myOpenGame.id}">Open your play session ${uiIcon('chevron-right')}</button>`
       : checkedIn && lookingForGame
         ? `<button type="button" class="btn btn-primary btn-block cd-primary-action" id="cd-play-now">${uiIcon('users')} View players and open sessions</button>`
-        : `<button type="button" class="btn btn-primary btn-block cd-primary-action" id="cd-play-now">${uiIcon('users')} Find people to play here</button>`;
+        : `<button type="button" class="btn btn-primary btn-block cd-primary-action" id="cd-play-now">${uiIcon('users')} ${checkedIn ? 'Look for a game' : 'Check in to find players'}</button>`;
     const presenceControl = checkedIn ? `
       <div class="cd-presence-control" role="region" aria-label="Your court presence">
         <span class="cd-presence-control-icon" aria-hidden="true">${uiIcon(courtClosed ? 'alert-triangle' : lookingForGame ? 'users' : 'check-circle')}</span>
@@ -12109,10 +12233,10 @@
       <section class="card cd-now-card" aria-labelledby="cd-now-heading">
         <div class="cd-now-heading">
           <div>
-            <div class="row-sub">${courtClosed ? 'Court status' : 'At this court'}</div>
+            <div class="row-sub">${courtClosed ? 'Court status' : 'Shared on Third Shot'}</div>
             <h3 id="cd-now-heading">${courtClosed ? 'Closed to new play' : 'Playing and forming now'}</h3>
           </div>
-          ${courtClosed ? '<span class="tag warn">Closed</span>' : quietNow ? '<span class="tag">Quiet now</span>' : '<span class="tag live">Active now</span>'}
+          ${courtClosed ? '<span class="tag warn">Closed</span>' : ''}
         </div>
         ${nowSummary}
         ${presenceControl}
@@ -12140,7 +12264,7 @@
         <span class="row-main"><span class="row-title">${court.rating_avg ? `${court.rating_avg} from ${court.rating_count} review${court.rating_count === 1 ? '' : 's'}` : 'No court reviews yet'}</span><span class="row-sub">${state.me ? (court.my_review ? 'Update your review' : 'Write a review') : 'See what players say'}</span></span>
         ${uiIcon('chevron-right', 'chev')}
       </button>
-      <div class="section-label section-label-icon" id="cd-sec-players">${uiIcon('users')} People at this court (${nHere})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
+      <div class="section-label section-label-icon" id="cd-sec-players">${uiIcon('users')} Checked-in players (${nHere})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
       ${playersHtml}
       ${courtClosed ? '' : `
         <button type="button" class="card row nav-row-button cd-community-finder-action" id="cd-find-communities">
@@ -12579,6 +12703,11 @@
     const refreshCourtAfterGameCreate = () => {
       if (modal.isConnected) refreshCourtDetailPreservingContext(modal, court.id);
     };
+    modal.querySelectorAll('[data-court-visit]').forEach((button) => {
+      button.addEventListener('click', () => {
+        openChildModal(modal, () => openCourtVisitSheet(court, button.dataset.courtVisit));
+      });
+    });
     const commitLookingIntent = async (button, desiredLooking) => {
       const callerSession = instantRallySession();
       if (!callerSession) { toast('Sign in again before updating your check-in.'); return; }
@@ -12631,7 +12760,9 @@
           candidate.weekday === button.dataset.openPlayDay
           && candidate.start === button.dataset.openPlayStart
         ));
-        const start = nextCourtOpenPlayStart(row);
+        const courtTimezone = court.structured_hours?.timezone || court.open_status?.timezone
+          || (String(court.state || '').toUpperCase() === 'CA' ? 'America/Los_Angeles' : null);
+        const start = nextCourtOpenPlayStart(row, new Date(), courtTimezone);
         if (!row || !start) {
           toast('That schedule time needs an update before it can be planned.');
           return;
@@ -12647,6 +12778,7 @@
           sessionMode: true,
           recurrence: 'weekly',
           recurrenceWeekdays: [row.weekday],
+          ...(courtTimezone ? { recurrenceTimezone: courtTimezone } : {}),
           scheduledAt: start.toISOString(),
           durationMinutes: courtOpenPlayDuration(row),
           maxPlayers: 8,
@@ -16305,16 +16437,16 @@
           minLeadMinutes: 50,
         })
       : null;
-    let availabilityLabel = `${invitees.length} teammate${invitees.length === 1 ? '' : 's'} selected`;
+    let availabilityLabel = `${invitees.length} player${invitees.length === 1 ? '' : 's'} selected`;
     if (suggestion && window.CrewPlanner) {
       const slot = window.CrewPlanner.slotLabel(suggestion.slot);
       availabilityLabel = suggestion.usedFallback
         ? `Same rhythm: ${slot}`
-        : `Best overlap: ${slot} · ${suggestion.coverage} of ${suggestion.total} available`;
+        : `${slot} · ${suggestion.coverage} of ${suggestion.total} usually play then`;
     }
     const sourceLabel = savedCrew
-      ? `${savedCrew.name} · ${invitees.length} teammate${invitees.length === 1 ? '' : 's'}`
-      : `Same play group · ${invitees.length} teammate${invitees.length === 1 ? '' : 's'}`;
+      ? `${savedCrew.name} · ${invitees.length} player${invitees.length === 1 ? '' : 's'}`
+      : `Same players · ${invitees.length} selected`;
     return {
       court: game.court ? { ...game.court } : null,
       gameType: game.game_type,
@@ -16355,12 +16487,23 @@
       const savedGroup = completedGameCrewSummary(game, response);
       const groupReady = savedGroup
         && savedGroup.joined !== false && !savedGroup.invitation_pending;
+      let plannerGroup = null;
+      if (groupReady) {
+        try {
+          const detail = await api(`/crews/${savedGroup.id}`);
+          const acceptedIds = new Set((detail.members || []).map((person) => Number(person.id)));
+          if ([state.me?.id, ...teammates.map((person) => person.id)]
+              .every((id) => acceptedIds.has(Number(id)))) plannerGroup = detail;
+        } catch { /* The original game's eligible players can still plan independently. */ }
+      }
       const options = completedCrewPlannerOptions(
         game,
         teammates,
-        groupReady ? savedGroup : { attachCrew: false },
+        plannerGroup || { attachCrew: false },
       );
-      options.offerSaveGroup = !savedGroup;
+      // Group creation has its own player review on the completed game.
+      // Scheduling another date does not also create a second invitation flow.
+      options.offerSaveGroup = false;
       options.saveGroupDefault = false;
       if (!fromModal && (!button?.isConnected || state.tab !== 'play'
           || state.playLane !== 'plans' || currentOverlayEntry())) { resetAction(); return; }
@@ -16386,7 +16529,7 @@
       return '<div class="postgame-connection-loading">No eligible connection actions are available from this game.</div>';
     }
     if (!actions.length) {
-      return `<div class="postgame-connected"><span class="postgame-connected-icon" aria-hidden="true">${uiIcon('check-circle')}</span><div><b>Your play group is connected</b><div class="row-sub">Friends can coordinate the next session anytime.</div></div></div>`;
+      return `<div class="postgame-connected"><span class="postgame-connected-icon" aria-hidden="true">${uiIcon('check-circle')}</span><div><b>You’re friends with these players</b><div class="row-sub">Keep in touch or plan your next game together.</div></div></div>`;
     }
     return `<div class="section-label" style="margin-top:16px">Stay connected</div>
       <div class="postgame-connections">
@@ -18112,6 +18255,26 @@
     });
   }
 
+  function plannerTimeZoneLabel(timeZone) {
+    try {
+      return new Intl.DateTimeFormat(undefined, { timeZone, timeZoneName: 'longGeneric' })
+        .formatToParts(new Date()).find((part) => part.type === 'timeZoneName')?.value
+        || String(timeZone).replaceAll('_', ' ');
+    } catch { return String(timeZone).replaceAll('_', ' '); }
+  }
+
+  function plannerInitialTimeSelection(value, days, presets, now = new Date()) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime()) || date <= now) return null;
+    const dayIndex = days.findIndex((day) => day.toDateString() === date.toDateString());
+    const clock = date.getHours() + date.getMinutes() / 60;
+    return {
+      date, dayIndex, clock,
+      preset: dayIndex >= 0 && presets.includes(clock) && date.getTime() > now.getTime() + 50 * 60000,
+    };
+  }
+
   async function openNewGameModal(options = {}) {
     const plannerOptions = options && typeof options === 'object' ? options : {};
     const plannerId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0
@@ -18401,16 +18564,11 @@
       }
     }
     const initialScheduledAt = (restoredDraft && restoredDraft.scheduledAt) || preferredScheduledAt;
-    if (initialScheduledAt) {
-      const preferredDate = new Date(initialScheduledAt);
-      const dayIdx = days.findIndex((day) => day.toDateString() === preferredDate.toDateString());
-      const preferredClock = preferredDate.getHours() + preferredDate.getMinutes() / 60;
-      if (Number.isFinite(preferredDate.getTime())
-          && preferredDate.getTime() > Date.now() + 50 * 60000
-          && dayIdx >= 0 && timePresets.includes(preferredClock)) {
-        selDayIdx = dayIdx;
-        selHour = preferredClock;
-      }
+    const initialTimeSelection = plannerInitialTimeSelection(initialScheduledAt, days, timePresets);
+    const initialTimeUnavailable = Boolean(initialScheduledAt && !initialTimeSelection);
+    if (initialTimeSelection?.preset) {
+      selDayIdx = initialTimeSelection.dayIndex;
+      selHour = initialTimeSelection.clock;
     }
     const recurrenceDayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
     const recurrenceDayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -18472,13 +18630,13 @@
     const smartTimeLabel = ({ date, dayIdx, hour }) => `${dayLabel(date, dayIdx)} at ${timeLabel(hour)}`;
     const smartTimeChips = smartTimeSuggestions.map((slot) =>
       `<button type="button" data-smart-time="${slot.date.toISOString()}" data-smart-day="${slot.dayIdx}" data-smart-hour="${slot.hour}" aria-pressed="${slot.dayIdx === selDayIdx && slot.hour === selHour}" class="${slot.dayIdx === selDayIdx && slot.hour === selHour ? 'active' : ''}">${smartTimeLabel(slot)}</button>`).join('');
+    const smartTimeChoicesHtml = `<div class="quick-times" id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === 'ranked' ? 'match' : 'play session'} times" style="margin-bottom:8px">${smartTimeChips}</div>`;
     const plannerDateTimeValue = (value) => {
       const pad2 = (number) => String(number).padStart(2, '0');
       return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}T${pad2(value.getHours())}:${pad2(value.getMinutes())}`;
     };
-    const initialExactTime = new Date(days[selDayIdx]);
-    setPlannerClock(initialExactTime, selHour);
-    const plannerTimeMinimum = new Date(Date.now() + 5 * 60000);
+    const initialExactTime = initialTimeSelection?.date || setPlannerClock(new Date(days[selDayIdx]), selHour);
+    const plannerTimeMinimum = new Date();
 
     const inviteAvailabilityKey = (date) => {
       if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return '';
@@ -18491,7 +18649,7 @@
       const match = /^(sun|mon|tue|wed|thu|fri|sat)-(am|pm|eve)$/.exec(slot || '');
       if (!match) return '';
       const day = match[1].slice(0, 1).toUpperCase() + match[1].slice(1);
-      return `Free ${day} ${match[2] === 'am' ? 'AM' : match[2] === 'pm' ? 'PM' : 'evening'}`;
+      return `Usually plays ${day} ${match[2] === 'am' ? 'AM' : match[2] === 'pm' ? 'PM' : 'evening'}`;
     };
     const inviteChipHtml = (f, selected = false, matchingSlot = '') => {
       const free = matchingSlot && (f.availability || []).includes(matchingSlot);
@@ -18651,16 +18809,16 @@
       <section class="planner-step hidden" id="ng-step-when" aria-labelledby="planner-when-title">
         <div class="planner-step-head">
           <span class="planner-step-num">2</span>
-          <div><div class="planner-step-title" id="planner-when-title">When?</div><div class="planner-step-sub">Pick a suggestion or choose any other time.</div></div>
+          <div><div class="planner-step-title" id="planner-when-title">When?</div><div class="planner-step-sub">${initialScheduledAt ? 'Review the selected time, or choose another.' : 'Pick a suggestion or choose any other time.'}</div></div>
         </div>
         <div id="ng-later-fields">
-          <div class="quick-times" id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === 'ranked' ? 'match' : 'play session'} times" style="margin-bottom:8px">${smartTimeChips}</div>
-          <details class="flow-disclosure planner-time-options" id="ng-time-options" ${restoredDraft?.timeKind === 'custom' ? 'open' : ''}>
-          <summary>Choose another time <span>Day, time &amp; date</span></summary>
+          ${initialScheduledAt ? '' : smartTimeChoicesHtml}
+          <details class="flow-disclosure planner-time-options" id="ng-time-options" ${initialScheduledAt || restoredDraft?.timeKind === 'custom' ? 'open' : ''}>
+          <summary>${initialScheduledAt ? 'Selected date and time' : 'Choose another time'} <span>Day, time &amp; date</span></summary>
           <div class="form-field planner-exact-time" id="ng-other-time">
             <label for="ng-when">Date and time</label>
-            <input type="datetime-local" id="ng-when" value="${plannerDateTimeValue(initialExactTime)}" min="${plannerDateTimeValue(plannerTimeMinimum)}" aria-label="${defaultType === 'ranked' ? 'Match' : 'Play session'} date and time" />
-            <small class="field-help">Choose the exact time that works for you.</small>
+            <input type="datetime-local" id="ng-when" value="${initialTimeUnavailable ? '' : plannerDateTimeValue(initialExactTime)}" min="${plannerDateTimeValue(plannerTimeMinimum)}" aria-label="${defaultType === 'ranked' ? 'Match' : 'Play session'} date and time" aria-describedby="ng-timezone-help" />
+            <small class="field-help" id="ng-timezone-help">Date and time are shown in your timezone: ${esc(plannerTimeZoneLabel(detectedRecurrenceTimezone))}.</small>
           </div>
           <details class="planner-slot-browser" id="ng-slot-browser">
             <summary>Browse half-hour times</summary>
@@ -18675,6 +18833,7 @@
           </fieldset>
           </details>
           </details>
+          ${initialScheduledAt ? `<p class="field-help">Other suggested times</p>${smartTimeChoicesHtml}` : ''}
           <div id="ng-busy-hint" class="row-sub" style="margin-bottom:4px"></div>
           <fieldset class="game-choice-field planner-duration" id="ng-duration-choices">
             <legend>How long?</legend>
@@ -18696,6 +18855,7 @@
           <div class="planner-recurrence-settings hidden" id="ng-recurrence-settings">
             <fieldset class="game-choice-field">
               <legend>Repeat on</legend>
+              <p class="field-help">Repeat days, times, and the end date follow ${esc(plannerTimeZoneLabel(recurrenceTimezone))}.</p>
               <div class="recurrence-weekdays" id="ng-recurrence-weekdays">
                 ${recurrenceDayKeys.map((day, index) => `<button type="button" data-recurrence-day="${day}" class="${recurrenceWeekdays.has(day) ? 'active' : ''}" aria-pressed="${recurrenceWeekdays.has(day)}">${recurrenceDayLabels[index]}</button>`).join('')}
               </div>
@@ -18703,7 +18863,6 @@
             <div class="form-field">
               <label for="ng-recurrence-end">End date <span class="row-sub">(optional)</span></label>
               <input type="date" id="ng-recurrence-end" value="${recurrenceEndsOn || ''}" />
-              <small class="field-help">Times stay fixed in ${esc(recurrenceTimezone)} across daylight-saving changes.</small>
             </div>
           </div>
         </div>
@@ -18736,7 +18895,7 @@
             <button type="button" data-vis="friends" aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('users')}</span><b>Friends</b><small>Selected group + friends</small></button>
             <button type="button" data-vis="open" aria-pressed="${initialVisibility === 'open'}" class="${initialVisibility === 'open' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('map-pin')}</span><b>Nearby players</b><small>Open at the court</small></button>` : `
             <button type="button" data-vis="open" aria-pressed="${initialVisibility === 'open'}" class="${initialVisibility === 'open' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('map-pin')}</span><b>Anyone nearby</b><small>Open at the court</small></button>
-            <button type="button" data-vis="friends" aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}" ${friends.length ? '' : 'disabled aria-disabled="true"'}><span class="vis-choice-icon" aria-hidden="true">${uiIcon('users')}</span><b>My friends</b><small>${friends.length ? 'Everyone you follow' : 'Add friends first'}</small></button>
+            <button type="button" data-vis="friends" aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}" ${friends.length ? '' : 'disabled aria-disabled="true"'}><span class="vis-choice-icon" aria-hidden="true">${uiIcon('users')}</span><b>My friends</b><small>${friends.length ? 'Friends can join' : 'Add friends first'}</small></button>
             <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}" ${invitePeople.length ? '' : 'disabled aria-disabled="true"'}><span class="vis-choice-icon" aria-hidden="true">${uiIcon('lock')}</span><b>Invite only</b><small>${invitePeople.length ? 'Only selected players' : 'Find players first'}</small></button>`}
         </div>
         <div class="planner-inline-warning ${!crewId && friends.length === 0 ? '' : 'hidden'}" id="ng-friends-empty" role="status">
@@ -18750,7 +18909,7 @@
           ${invitePeople.length
             ? `<label for="ng-invite-search">${crewId ? 'Group players' : 'Direct invitations'} <span class="row-sub">(${crewId ? 'choose at least one' : 'optional unless invite only'})</span></label>
                <input type="search" id="ng-invite-search" placeholder="${crewId ? 'Search group players…' : 'Search players…'}" autocomplete="off" />
-               <div class="planner-invite-toolbar"><span class="row-sub">Available at this time appear first.</span><button type="button" class="btn-link" id="ng-select-visible" aria-pressed="false">Select all visible</button></div>
+               <div class="planner-invite-toolbar"><span class="row-sub">Players who usually play then appear first.</span><button type="button" class="btn-link" id="ng-select-visible" aria-pressed="false">Select all visible</button></div>
                <div class="invite-chips planner-invite-list" id="ng-invites">${friendChips}</div>`
             : `<div class="empty-state planner-invite-empty"><span>${plannerFeedErrors.friends
               ? 'Friends couldn’t load. Reload setup choices to invite someone.'
@@ -18762,7 +18921,7 @@
         ${offerSaveGroup && sourceGameId && !crewId ? `<div class="planner-save-group">
           <label>
             <input type="checkbox" id="ng-save-group" ${saveGroupDefault ? 'checked' : ''} />
-            <span><b>Save these players as a group</b><small>Optional. Group invitations are sent only after you schedule this game.</small></span>
+            <span><b>Save the original game’s players as a group</b><small>This saved draft invites the original game’s eligible players to a group after scheduling. Your invitations above are for the next game.</small></span>
           </label>
           <div class="form-field ${saveGroupDefault ? '' : 'hidden'}" id="ng-save-group-name-wrap">
             <label for="ng-save-group-name">Group name</label>
@@ -19153,7 +19312,7 @@
     });
 
     // --- When ---
-    let customMode = false;
+    let customMode = Boolean(initialScheduledAt && !initialTimeSelection?.preset);
     const updatePlannerEndPreview = () => {
       const output = modal.querySelector('#ng-end-preview');
       const rawDuration = modal.querySelector('#ng-duration').value.trim();
@@ -19496,6 +19655,13 @@
             : `Selected group players are included; nearby players can fill the extra spots.`;
         return;
       }
+      if (!sourceGameId && !crewName) {
+        title.textContent = sourceLabel || 'Your plan';
+        copy.textContent = inviteIds.size
+          ? `${inviteIds.size} selected player${inviteIds.size === 1 ? '' : 's'} will get a direct invitation.`
+          : 'Review the time and details before scheduling.';
+        return;
+      }
       if (visibility !== 'private') {
         if (crewName) title.textContent = crewName;
         else title.textContent = 'Same players as last time';
@@ -19794,6 +19960,9 @@
       warning.textContent = message;
       (anchor || modal.querySelector('#ng-later-fields')).appendChild(warning);
     };
+    if (!restoredDraft && initialTimeUnavailable) {
+      setPlannerWarning('ng-time-warning', 'The selected start time is no longer available. Choose a new time.');
+    }
 
     // Restore only after every closure variable and event handler exists, so
     // the UI and the eventual POST payload are guaranteed to agree.
@@ -20235,11 +20404,7 @@
           );
           return;
         }
-        const localStartDate = [
-          scheduledAt.getFullYear(),
-          String(scheduledAt.getMonth() + 1).padStart(2, '0'),
-          String(scheduledAt.getDate()).padStart(2, '0'),
-        ].join('-');
+        const localStartDate = calendarDateInTimeZone(scheduledAt, recurrenceTimezone);
         if (recurrenceEndsOn && recurrenceEndsOn < localStartDate) {
           showPlannerSubmitError(
             'Choose an end date on or after the first session.',
@@ -24658,13 +24823,46 @@
     });
   }
 
-  function patchVisibleFriendRelationship(userId, relationship) {
+  function playerInvitePlannerOptions(player) {
+    const invitee = sanitizePlannerInvitee(player);
+    if (!invitee) return { visibility: 'private', inviteUserIds: [] };
+    const suggestion = window.CrewPlanner?.bestSlot([state.me, invitee], {
+      hostId: state.me?.id, minLeadMinutes: 50,
+    });
+    return {
+      visibility: 'private', invitees: [invitee], inviteUserIds: [invitee.id],
+      ...(suggestion?.coverage === 2 ? { scheduledAt: suggestion.scheduledAt } : {}),
+    };
+  }
+
+  function refreshConnectionViews() {
+    state.chatFriendsCache = null;
+    state.playGamesCache = null;
+    if (state.tab === 'chat') renderChat();
+    else if (state.tab === 'play') renderPlay();
+  }
+
+  function patchVisibleFriendRelationship(userId, relationship, playerSnapshot = null) {
     const id = Number(userId);
     if (!Number.isSafeInteger(id) || id <= 0) return;
     state.chatFriendsCache = null;
     document.querySelectorAll(`[data-view-user="${id}"]`).forEach((profileButton) => {
-      const row = profileButton.closest('[data-relationship-row], .friend-person-row');
+      const row = profileButton.closest('[data-relationship-row], .friend-person-row, [data-recent-player]');
       if (!row) return;
+      if (row.dataset.recentPlayer) {
+        const action = row.querySelector('.recent-player-action');
+        const person = {
+          ...playerSnapshot,
+          id, display_name: row.querySelector('.row-title')?.textContent || 'this player',
+          is_friend: relationship === 'accepted',
+          friendship_status: relationship, outgoing: relationship === 'pending',
+        };
+        action.innerHTML = recentPlayerActionHtml(person);
+        action.querySelector('[data-recent-invite]')?.addEventListener('click', () => {
+          openNewGameModal(playerInvitePlannerOptions(person));
+        });
+        return;
+      }
       const current = row.querySelector(`[data-add-friend="${id}"], [data-respond-inline], [data-msg="${id}"]`);
       if (!current) return;
       if (relationship === 'pending') {
@@ -24886,14 +25084,27 @@
         <input type="search" id="new-message-search" placeholder="Name or exact email" autocomplete="off" aria-controls="new-message-results" />
         <small class="field-help">Search by display name, or enter someone’s full email address.</small>
       </div>
-      <div id="new-message-results" class="community-compose-results" aria-live="polite">
-        <div class="settings-empty-state"><span aria-hidden="true">${uiIcon('message')}</span><p>Choose someone to start a conversation.</p></div>
+      <div id="new-message-results" class="community-compose-results" aria-live="polite" aria-busy="true">
+        ${skeletonHtml(3)}
       </div>
     `, { label: 'New message' });
     const input = modal.querySelector('#new-message-search');
     const results = modal.querySelector('#new-message-results');
     let timer = null;
     let searchSeq = 0;
+    let friends = null;
+    let friendsPromise = null;
+
+    const playerRow = (user) => {
+      const canMessage = user.can_message === true;
+      const action = canMessage ? `data-compose-user="${user.id}"` : `data-compose-profile="${user.id}"`;
+      const label = canMessage ? `Message ${user.display_name}` : `View ${user.display_name}'s profile to connect`;
+      return `<button type="button" class="card row nav-row-button community-compose-result" ${action} aria-label="${esc(label)}">
+        ${avatarHtml(user, 'sm', 'span')}
+        <span class="row-main"><span class="row-title">${esc(user.display_name)}</span><span class="row-sub">${canMessage ? playerSkillIdentityHtml(user) : 'View profile to connect'}</span></span>
+        ${uiIcon(canMessage ? 'message' : 'chevron-right', 'chev')}
+      </button>`;
+    };
 
     const bindResults = () => {
       results.querySelectorAll('[data-compose-user]').forEach((button) => {
@@ -24904,6 +25115,39 @@
           }
         });
       });
+      results.querySelectorAll('[data-compose-profile]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const userId = Number(button.dataset.composeProfile);
+          if (Number.isSafeInteger(userId) && userId > 0) {
+            transitionModal(modal, () => openUserProfile(userId));
+          }
+        });
+      });
+    };
+    const showFriends = async () => {
+      const seq = ++searchSeq;
+      results.setAttribute('aria-busy', 'true');
+      if (!friends) results.innerHTML = skeletonHtml(3);
+      try {
+        if (!friends) {
+          if (!friendsPromise) friendsPromise = api('/friends').then((data) => {
+            friends = (data.friends || []).filter((friend) => friend.can_message === true)
+              .sort((a, b) => a.display_name.localeCompare(b.display_name));
+            return friends;
+          }).finally(() => { friendsPromise = null; });
+          await friendsPromise;
+        }
+        if (seq !== searchSeq || !modal.isConnected || input.value.trim()) return;
+        results.innerHTML = friends.length
+          ? `<div class="section-label">Your friends</div>${friends.slice(0, 8).map(playerRow).join('')}${friends.length > 8 ? '<p class="field-help">Search by name to find more friends.</p>' : ''}`
+          : '<div class="settings-empty-state"><span aria-hidden="true">' + uiIcon('users') + '</span><p>Search for a player to connect or start a conversation.</p></div>';
+        bindResults();
+      } catch (error) {
+        if (seq !== searchSeq || !modal.isConnected || input.value.trim()) return;
+        renderError(results, 'Your friends could not load. You can still search for a player.', showFriends);
+      } finally {
+        if (seq === searchSeq) results.removeAttribute('aria-busy');
+      }
     };
     const runSearch = async (query) => {
       const seq = ++searchSeq;
@@ -24913,13 +25157,8 @@
         const data = await api(`/users/search?q=${encodeURIComponent(query)}`);
         if (seq !== searchSeq || !modal.isConnected || input.value.trim() !== query) return;
         const items = Array.isArray(data.items) ? data.items : [];
-        results.innerHTML = items.length ? items.map((user) => {
-          return `<button type="button" class="card row nav-row-button community-compose-result" data-compose-user="${user.id}" aria-label="Message ${esc(user.display_name)}">
-            ${avatarHtml(user, 'sm', 'span')}
-            <span class="row-main"><span class="row-title">${esc(user.display_name)}</span><span class="row-sub">${playerSkillIdentityHtml(user)}</span></span>
-            ${uiIcon('chevron-right', 'chev')}
-          </button>`;
-        }).join('') : `<div class="settings-empty-state"><span aria-hidden="true">${uiIcon('search')}</span><p>No players found for “${esc(query)}”.</p></div>`;
+        results.innerHTML = items.length ? items.map(playerRow).join('')
+          : `<div class="settings-empty-state"><span aria-hidden="true">${uiIcon('search')}</span><p>No players found for “${esc(query)}”.</p></div>`;
         bindResults();
       } catch (error) {
         if (seq !== searchSeq || !modal.isConnected || input.value.trim() !== query) return;
@@ -24932,11 +25171,10 @@
       clearTimeout(timer);
       searchSeq += 1;
       const query = input.value.trim();
+      if (!query) { showFriends(); return; }
       if (query.length < 2) {
         results.removeAttribute('aria-busy');
-        results.innerHTML = query
-          ? '<div class="settings-empty-state"><p>Type at least two characters.</p></div>'
-          : `<div class="settings-empty-state"><span aria-hidden="true">${uiIcon('message')}</span><p>Choose someone to start a conversation.</p></div>`;
+        results.innerHTML = '<div class="settings-empty-state"><p>Type at least two characters.</p></div>';
         return;
       }
       timer = setTimeout(() => runSearch(query), 300);
@@ -24945,7 +25183,10 @@
       clearTimeout(timer);
       searchSeq += 1;
     });
-    queueMicrotask(() => input.focus({ preventScroll: true }));
+    showFriends();
+    // On phones, keep familiar players visible instead of covering the list
+    // with a keyboard before the player has chosen to search.
+    if (matchMedia('(pointer: fine)').matches) queueMicrotask(() => input.focus({ preventScroll: true }));
     return modal;
   }
 
@@ -24964,10 +25205,6 @@
     if (item.kind === 'dm') return body;
     const sender = (message.sender_name || 'Player').split(' ')[0];
     return `${sender}: ${body}`;
-  }
-
-  function inboxMessagePreview(item) {
-    return esc(inboxMessagePreviewText(item));
   }
 
   function competitionInboxContext(room) {
@@ -25052,17 +25289,20 @@
     const rowHtml = (item, extraClass = '') => {
       const attention = item.unread
         ? `, ${item.unread} unread message${item.unread === 1 ? '' : 's'}` : '';
-      const preview = inboxMessagePreviewText(item);
-      const when = item.lastMessage ? `, ${fmtInboxTimestamp(item.lastMessage.created_at)}` : '';
+      const groupInfo = groupPage && ['crew', 'club'].includes(item.kind);
+      const preview = groupInfo ? item.emptyText : inboxMessagePreviewText(item);
+      const accessibleLabel = groupInfo
+        ? `Open ${item.title}, ${item.kind === 'crew' ? 'private play group' : 'public community'}, ${preview}${attention}, group info`
+        : `${item.title}, ${kindLabel[item.kind]} chat${attention}, ${preview}${item.lastMessage ? `, ${fmtInboxTimestamp(item.lastMessage.created_at)}` : ''}`;
       return `
-      <button type="button" class="card row inbox-row ${extraClass}" data-inbox-kind="${item.kind}" data-inbox-id="${item.id}" data-inbox-title="${esc(item.title)}" data-unread="${item.unread}" aria-label="${esc(`${item.title}, ${kindLabel[item.kind]} chat${attention}, ${preview}${when}`)}">
+      <button type="button" class="card row inbox-row ${extraClass}" data-inbox-kind="${item.kind}" data-inbox-destination="${groupInfo ? 'info' : 'chat'}" data-inbox-id="${item.id}" data-inbox-title="${esc(item.title)}" data-unread="${item.unread}" aria-label="${esc(accessibleLabel)}">
         ${item.iconHtml}
         <span class="row-main">
-          <span class="row-title" style="display:block">${esc(item.title)}<span class="inbox-kind">${item.messageRequest ? 'Message request' : kindLabel[item.kind]}</span></span>
-          <span class="row-sub" style="display:block">${inboxMessagePreview(item)}</span>
+          <span class="row-title" style="display:block">${esc(item.title)}${groupInfo ? '' : `<span class="inbox-kind">${item.messageRequest ? 'Message request' : kindLabel[item.kind]}</span>`}</span>
+          <span class="row-sub" style="display:block">${esc(preview)}</span>
         </span>
         ${item.unread ? `<span class="badge" style="position:static">${item.unread > 99 ? '99+' : item.unread}</span>`
-          : item.lastMessage ? `<span class="row-sub inbox-time">${fmtInboxTimestamp(item.lastMessage.created_at)}</span>` : uiIcon('chevron-right', 'chev')}
+          : !groupInfo && item.lastMessage ? `<span class="row-sub inbox-time">${fmtInboxTimestamp(item.lastMessage.created_at)}</span>` : uiIcon('chevron-right', 'chev')}
       </button>`;
     };
 
@@ -25115,7 +25355,7 @@
           if (a.lastMessage && b.lastMessage) return b.lastMessage.id - a.lastMessage.id;
           return a.lastMessage ? -1 : b.lastMessage ? 1 : a.title.localeCompare(b.title);
         });
-      html += `<div class="community-discovery-hero">
+      const discoveryHtml = `<div class="community-discovery-hero">
         <span class="row-main"><b>Find or create a group</b><small>Join a public community group, or create a private group for people you play with.</small></span>
         <div class="community-group-actions">
           <button class="btn btn-primary" id="club-find">${uiIcon('search')} Find public groups</button>
@@ -25130,8 +25370,9 @@
         html += '<div class="section-label">Your community groups</div>';
         html += clubItems.map((item) => rowHtml(item)).join('');
       }
+      html += discoveryHtml;
       if (!crewItems.length && !clubItems.length && !invitations.length) {
-        html += '<div class="empty-state community-lane-empty">Your groups will appear here. Find local players or bring your friends together.</div>';
+        html += '<div class="empty-state community-lane-empty">Your groups will appear here.</div>';
       }
       if (!groupPage && conversationItems.length) {
         html += '<div class="section-label">Related conversations</div>';
@@ -25171,8 +25412,13 @@
       try {
         if (kind === 'dm') roomModal = await openThread(id);
         else if (kind === 'court') roomModal = await openCourtChat({ id, name: row.dataset.inboxTitle });
-        else if (kind === 'club') roomModal = await openClubScreen(id, { destination: 'chat' });
-        else if (kind === 'crew') roomModal = await openCrewChatById(id);
+        else if (kind === 'club') roomModal = await openClubScreen(id, {
+          destination: row.dataset.inboxDestination === 'info' ? 'info' : 'chat',
+        });
+        else if (kind === 'crew') {
+          roomModal = row.dataset.inboxDestination === 'info'
+            ? await openCrewScreen(id) : await openCrewChatById(id);
+        }
         else if (kind === 'game') roomModal = await openGameChat({ id });
         else if (kind === 'tournament') roomModal = await openTournamentChat({ id });
         else if (kind === 'league') roomModal = await openLeagueChat({ id, name: row.dataset.inboxTitle });
@@ -25186,9 +25432,9 @@
       roomModal._cleanupFns.push(() => {
         if (refreshedAfterClose) return;
         refreshedAfterClose = true;
-        // Opening the room already performed the authoritative read. Refresh
-        // the inbox once the player returns, rather than multiplying /inbox
-        // traffic underneath the still-open conversation.
+        // Opening a chat performs the authoritative read; opening group info
+        // leaves unread messages alone. Refresh after either view closes to
+        // reconcile membership and badges without fetching underneath it.
         queueMicrotask(() => {
           if (state.tab === 'chat' && ['chats', 'groups'].includes(state.chatSeg)) renderChat();
         });
@@ -25299,23 +25545,113 @@
   }
 
   async function renderPeopleLane(el, { useCachedData = false } = {}) {
-    const mode = state.peopleMode === 'nearby' ? 'nearby' : 'friends';
+    const mode = ['nearby', 'recent'].includes(state.peopleMode) ? state.peopleMode : 'friends';
     el.innerHTML = `
       <div class="segmented community-people-switch" id="people-mode" role="tablist" aria-label="People views" style="margin:2px 0 12px">
-        <button type="button" id="people-tab-nearby" role="tab" data-people-mode="nearby" aria-controls="people-content" aria-selected="${mode === 'nearby'}" class="${mode === 'nearby' ? 'active' : ''}">Players near you</button>
+        <button type="button" id="people-tab-nearby" role="tab" data-people-mode="nearby" aria-controls="people-content" aria-selected="${mode === 'nearby'}" class="${mode === 'nearby' ? 'active' : ''}">Nearby</button>
         <button type="button" id="people-tab-friends" role="tab" data-people-mode="friends" aria-controls="people-content" aria-selected="${mode === 'friends'}" class="${mode === 'friends' ? 'active' : ''}">Friends</button>
+        <button type="button" id="people-tab-recent" role="tab" data-people-mode="recent" aria-controls="people-content" aria-selected="${mode === 'recent'}" class="${mode === 'recent' ? 'active' : ''}">Played together</button>
       </div>
       <div id="people-content" role="tabpanel" aria-labelledby="people-tab-${mode}"></div>`;
     const body = el.querySelector('#people-content');
     if (mode === 'nearby') await renderNearbyPlayers(body);
+    else if (mode === 'recent') await renderRecentPlayers(body);
     else await renderFriends(body, { useCachedData });
     setupTablistKeyboard(el.querySelector('#people-mode'));
-    el.querySelector('#people-mode').addEventListener('click', (event) => {
+    el.querySelector('#people-mode').addEventListener('click', async (event) => {
       const button = event.target.closest('[data-people-mode]');
       if (!button || button.dataset.peopleMode === state.peopleMode) return;
-      state.peopleMode = button.dataset.peopleMode;
-      renderChat({ useCachedData: state.peopleMode === 'friends' });
+      const nextMode = button.dataset.peopleMode;
+      const restoreFocus = event.detail === 0 && document.activeElement === button;
+      state.peopleMode = nextMode;
+      await renderChat({ useCachedData: state.peopleMode === 'friends' });
+      if (restoreFocus && state.peopleMode === nextMode && state.chatSeg === 'friends') {
+        document.getElementById(`people-tab-${nextMode}`)?.focus({ preventScroll: true });
+      }
     });
+  }
+
+  function recentPlayerActionHtml(player) {
+    if (player.is_friend) {
+      return `<button type="button" class="btn btn-primary btn-sm" data-recent-invite="${player.id}" aria-label="Invite ${esc(player.display_name)} to play again">${uiIcon('calendar')} Play again</button>`;
+    }
+    if (player.friendship_status === 'pending') {
+      return player.outgoing
+        ? '<span class="tag recent-player-pending" role="status">Request sent</span>'
+        : `<button type="button" class="btn btn-primary btn-sm" data-recent-accept="${player.friendship_id}" aria-label="Accept friend request from ${esc(player.display_name)}">${uiIcon('check-circle')} Accept</button>`;
+    }
+    return `<button type="button" class="btn btn-primary btn-sm" data-recent-add="${player.id}" aria-label="Add ${esc(player.display_name)} as a friend">${uiIcon('plus')} Add friend</button>`;
+  }
+
+  async function renderRecentPlayers(el) {
+    let data;
+    try {
+      data = await api('/players/recent?limit=20');
+    } catch (error) {
+      renderError(el, error.message, () => renderRecentPlayers(el));
+      return;
+    }
+    const players = data.items || [];
+    el.innerHTML = players.length ? `
+      <div class="recent-players-intro">
+        <h2>Good games. Familiar faces.</h2>
+        <p>Keep in touch with people from your recent games and sessions.</p>
+      </div>
+      <div class="recent-players-list">${players.map((player) => {
+        const played = new Date(player.last_played_at);
+        const lastPlayed = player.last_played_at && Number.isFinite(played.getTime())
+          ? played.toLocaleDateString([], { month: 'short', day: 'numeric', ...(played.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) }) : '';
+        const together = `Played together ${player.games_together === 1 ? 'once' : `${player.games_together} times`}`;
+        const sharedTimes = sharedAvailabilityText(state.me.availability, player.availability);
+        return `<div class="card recent-player-row" data-recent-player="${player.id}">
+          <button type="button" class="player-profile-link" data-view-user="${player.id}" aria-label="View ${esc(player.display_name)}'s profile">
+            ${avatarHtml(player)}
+            <span class="row-main">
+              <span class="row-title">${esc(player.display_name)}</span>
+              <span class="row-sub">${together}${lastPlayed ? ` · ${esc(lastPlayed)}` : ''}</span>
+              ${sharedTimes
+                ? `<span class="row-sub community-inline-status">${uiIcon('clock', 'community-inline-icon')} Shared usual times: ${esc(sharedTimes)}</span>` : ''}
+            </span>
+          </button>
+          <div class="recent-player-action">${recentPlayerActionHtml(player)}</div>
+        </div>`;
+      }).join('')}</div>` : emptyStateHtml({
+        icon: 'users', title: 'Turn a first game into a next game',
+        body: 'After a completed game or session, find the people you played with here.',
+        primary: { goto: 'play', label: 'Find a game', icon: 'pickleball' },
+      });
+    bindUserButtons(el);
+    const bindAction = (row, player) => {
+      row.querySelector('[data-recent-invite]')?.addEventListener('click', () => {
+        openNewGameModal(playerInvitePlannerOptions(player));
+      });
+      const button = row.querySelector('[data-recent-add], [data-recent-accept]');
+      button?.addEventListener('click', async () => {
+        const accepting = !!button.dataset.recentAccept;
+        clearInlineActionError(row);
+        const reset = beginButtonAction(button, accepting ? 'Accepting…' : 'Sending…');
+        if (!reset) return;
+        try {
+          const result = await api(accepting ? `/friends/${button.dataset.recentAccept}/respond` : '/friends/request', {
+            method: 'POST', body: JSON.stringify(accepting ? { accept: true } : { user_id: player.id }),
+          });
+          const accepted = accepting || result.status === 'accepted';
+          player.is_friend = accepted;
+          player.friendship_status = accepted ? 'accepted' : 'pending';
+          player.outgoing = !accepted;
+          state.chatFriendsCache = null;
+          row.querySelector('.recent-player-action').innerHTML = recentPlayerActionHtml(player);
+          bindAction(row, player);
+          row.querySelector('.recent-player-action button')?.focus({ preventScroll: true });
+          toast(accepted ? 'Friend added. Plan your next game together.' : 'Friend request sent');
+          refreshMe();
+        } catch (error) {
+          reset();
+          showInlineActionError(row, error.message);
+        }
+      });
+    };
+    players.forEach((player) => bindAction(el.querySelector(`[data-recent-player="${player.id}"]`), player));
   }
 
   function communityPartialLoadHtml(failedLabels) {
@@ -26139,7 +26475,7 @@
         </div>
         <div class="thread-msgs" id="thread-msgs" role="log" aria-live="off" aria-relevant="additions" aria-label="Conversation with ${esc(data.user.display_name)}"></div>
         <form class="thread-input" id="thread-form">
-          <button type="button" id="thread-photo" aria-label="Send a photo" style="background:transparent;padding:0 2px">${uiIcon('camera')}</button>
+          <button type="button" id="thread-photo" class="thread-photo-button" aria-label="Send a photo">${uiIcon('camera')}</button>
           <input type="file" id="thread-file" accept="image/*" class="hidden" />
           <textarea id="thread-text" aria-label="Message ${esc(data.user.display_name)}" placeholder="Message…" autocomplete="off" maxlength="2000" rows="1"></textarea>
           <button type="submit" aria-label="Send">${uiIcon('send')}</button>
@@ -26621,95 +26957,159 @@
     ));
   }
 
-  async function openCreatePlayGroupSheet() {
-    const presetCourt = state.presence && state.presence.checked_in ? {
+  function playGroupInviteCapacity(crew = null) {
+    const members = new Set((crew?.members || []).map((member) => Number(member.id ?? member.user_id)));
+    const memberCount = Math.max(1, Number(crew?.member_count) || 0, members.size);
+    const pending = new Set((crew?.pending_invites || []).map((invite) => Number(invite.user?.id))
+      .filter((id) => Number.isSafeInteger(id) && id > 0 && !members.has(id)));
+    return Math.max(0, Math.min(11, 12 - memberCount - pending.size));
+  }
+
+  function playGroupFriendSearchHtml(prefix, listId, peopleLabel = 'friends') {
+    return `<div class="form-field hidden" id="${prefix}-friend-search-field">
+      <label for="${prefix}-friend-search">Find ${peopleLabel} to invite</label>
+      <input type="search" id="${prefix}-friend-search" placeholder="Search ${peopleLabel} by name" autocomplete="off" data-no-draft aria-controls="${listId}" />
+    </div><p class="play-group-search-empty hidden" id="${prefix}-friend-search-empty" role="status">No ${peopleLabel} match this name. <button type="button" class="btn-link" id="${prefix}-friend-search-clear">Clear search</button></p>`;
+  }
+
+  function bindPlayGroupFriendSearch(modal, prefix, list, selector) {
+    const input = modal.querySelector(`#${prefix}-friend-search`);
+    const field = modal.querySelector(`#${prefix}-friend-search-field`);
+    const empty = modal.querySelector(`#${prefix}-friend-search-empty`);
+    const sync = () => {
+      const query = input.value.trim().toLocaleLowerCase();
+      const buttons = [...list.querySelectorAll(selector)];
+      let visible = 0;
+      buttons.forEach((button) => {
+        const matches = (button.dataset.friendName || '').toLocaleLowerCase().includes(query);
+        button.classList.toggle('hidden', !matches);
+        if (matches) visible += 1;
+      });
+      field.classList.toggle('hidden', buttons.length <= 6 && !query);
+      empty.classList.toggle('hidden', !query || visible > 0 || !buttons.length);
+    };
+    input.addEventListener('input', sync);
+    modal.querySelector(`#${prefix}-friend-search-clear`).addEventListener('click', () => {
+      input.value = '';
+      sync();
+      input.focus({ preventScroll: true });
+    });
+    return sync;
+  }
+
+  async function openCreatePlayGroupSheet({ sourceGame = null, onCreated = null } = {}) {
+    const inviteLimit = playGroupInviteCapacity();
+    const sourceGameId = safePositiveId(sourceGame?.id);
+    const peopleLabel = sourceGameId ? 'players' : 'friends';
+    const presetCourt = sourceGameId ? sourceGame.court : state.presence && state.presence.checked_in ? {
       id: state.presence.court_id, name: state.presence.court_name,
     } : state.me && state.me.home_court_id ? {
       id: state.me.home_court_id, name: state.me.home_court_name || 'Primary court',
     } : null;
     const modal = openModal(`
       ${modalHead('Start a play group')}
-      <p class="play-group-intro">Create a private, invite-only group for the people you want to play with again. Everyone chooses whether to join.</p>
+      <p class="play-group-intro">${sourceGameId
+        ? 'Keep in touch with players from this game. Choose who to invite to a private group; everyone decides whether to join. You can plan your next game later.'
+        : 'Create a private, invite-only group for the people you want to play with again. Everyone chooses whether to join.'}</p>
       <form id="play-group-form" novalidate>
         <div class="form-field">
           <label for="pg-name">Group name</label>
-          <input type="text" id="pg-name" maxlength="80" placeholder="e.g. Saturday morning regulars" autocomplete="off" />
+          <input type="text" id="pg-name" maxlength="80" placeholder="e.g. Saturday morning regulars" autocomplete="off" ${sourceGameId ? `value="${esc(`${presetCourt?.name || 'Pickleball'} regulars`.slice(0, 80))}"` : ''} />
         </div>
-        <div class="form-field">
+        ${sourceGameId ? `<div class="play-group-source-court"><span class="row-sub">Default court</span><b>${esc(presetCourt?.name || 'Court from this game')}</b><small>You can change it in the group later.</small><input type="hidden" id="pg-court-id" value="${presetCourt?.id || ''}" /></div>` : `<div class="form-field">
           <label for="pg-court-search">Default court <span class="row-sub">(optional)</span></label>
           <input type="search" id="pg-court-search" placeholder="Search courts…" autocomplete="off" value="${presetCourt ? esc(presetCourt.name) : ''}" ${presetCourt ? `data-selected-court-name="${esc(presetCourt.name)}" data-selected-court-id="${presetCourt.id}"` : ''} />
           <input type="hidden" id="pg-court-id" value="${presetCourt ? presetCourt.id : ''}" />
           <div id="pg-court-results" style="margin-top:8px"></div>
-        </div>
+        </div>`}
         <fieldset class="play-group-friends">
-          <legend>Invite friends</legend>
-          <p>Choose one or more friends. They will receive a play-group invitation.</p>
+          <legend>${sourceGameId ? 'Invite players from this game' : 'Invite friends'}</legend>
+          <p>Choose up to ${inviteLimit} ${peopleLabel}. With you, a group can have 12 players.</p>
+          <p class="row-sub play-group-selection" id="pg-selection" role="status">Loading ${peopleLabel}…</p>
+          ${playGroupFriendSearchHtml('pg', 'pg-friends', peopleLabel)}
           <div id="pg-friends" class="play-group-friend-grid" aria-live="polite" aria-busy="true">${skeletonHtml(3)}</div>
         </fieldset>
-        <p class="row-sub play-group-selection" id="pg-selection" role="status">Choose at least one friend.</p>
         <button type="submit" class="btn btn-primary btn-block" id="pg-submit">Start play group</button>
       </form>
     `, { label: 'Start a private play group' });
-    clubCourtPicker(modal, 'pg');
-    const formUX = bindModalFormUX(modal, '#pg-submit', { draftKey: 'create-play-group' });
+    if (!sourceGameId) clubCourtPicker(modal, 'pg');
+    const formUX = bindModalFormUX(modal, '#pg-submit', {
+      draftKey: sourceGameId ? `create-play-group:${sourceGameId}` : 'create-play-group',
+    });
     const list = modal.querySelector('#pg-friends');
     const selection = modal.querySelector('#pg-selection');
     const submit = modal.querySelector('#pg-submit');
     const selectedIds = new Set();
+    const syncSearch = bindPlayGroupFriendSearch(modal, 'pg', list, '[data-play-group-friend]');
     let friends = [];
     let friendsReady = false;
     const syncSelection = () => {
       selection.textContent = selectedIds.size
-        ? `${selectedIds.size} friend${selectedIds.size === 1 ? '' : 's'} selected · they choose whether to join.`
-        : friendsReady ? 'Choose at least one friend.' : 'Loading friends…';
+        ? `${selectedIds.size} of ${inviteLimit} ${peopleLabel} selected · ${selectedIds.size === inviteLimit ? 'group limit reached.' : 'they choose whether to join.'}`
+        : friendsReady ? `Choose at least one ${sourceGameId ? 'player' : 'friend'}.` : `Loading ${peopleLabel}…`;
       submit.disabled = !friendsReady || !friends.length || !selectedIds.size;
       modal.querySelectorAll('[data-play-group-friend]').forEach((button) => {
         const active = selectedIds.has(Number(button.dataset.playGroupFriend));
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
+        button.disabled = !active && selectedIds.size >= inviteLimit;
       });
     };
     const loadFriends = async () => {
       friendsReady = false;
       submit.disabled = true;
-      selection.textContent = 'Loading friends…';
+      selection.textContent = `Loading ${peopleLabel}…`;
       list.setAttribute('aria-busy', 'true');
       list.innerHTML = skeletonHtml(3);
       try {
-        const response = await api('/friends');
+        const response = await api(sourceGameId ? `/games/${sourceGameId}/crew` : '/friends');
         if (!document.body.contains(modal)) return;
-        friends = Array.isArray(response.friends) ? response.friends : [];
+        const existing = sourceGameId && completedGameCrewSummary(sourceGame, response);
+        if (existing) {
+          formUX.clearDraft({ disable: true });
+          transitionModal(modal, () => openCrewScreen(existing.id));
+          return;
+        }
+        friends = sourceGameId ? (response.items || []) : (response.friends || []);
         friendsReady = true;
         const liveIds = new Set(friends.map((friend) => Number(friend.id)));
         [...selectedIds].forEach((id) => { if (!liveIds.has(id)) selectedIds.delete(id); });
         list.removeAttribute('aria-busy');
         list.innerHTML = friends.length ? friends.map((friend) => `
-          <button type="button" class="play-group-friend" data-play-group-friend="${friend.id}" aria-pressed="false">
+          <button type="button" class="play-group-friend" data-play-group-friend="${friend.id}" data-friend-name="${esc(friend.display_name)}" aria-pressed="false">
             ${avatarHtml(friend, 'sm')}
             <span><b>${esc(friend.display_name)}</b><small>${playerSkillIdentityHtml(friend)}</small></span>
             <span class="play-group-check" aria-hidden="true">${uiIcon('check')}</span>
           </button>`).join('')
-          : '<div class="empty-state" style="padding:18px">Add friends from Community first, then start your private play group.</div>';
+          : emptyStateHtml({
+              icon: 'users', title: sourceGameId ? 'No available players from this game' : 'Start with your player circle',
+              body: sourceGameId
+                ? 'Players who took part and are available to connect will appear here.'
+                : 'Connect with a friend or someone you have played with, then invite them to your group.',
+              primary: { goto: 'chat-nearby', label: 'Find players', icon: 'search' },
+            });
         list.querySelectorAll('[data-play-group-friend]').forEach((button) => button.addEventListener('click', () => {
           const id = Number(button.dataset.playGroupFriend);
-          if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+          if (selectedIds.has(id)) selectedIds.delete(id);
+          else if (selectedIds.size < inviteLimit) selectedIds.add(id);
           syncSelection();
         }));
         syncSelection();
+        syncSearch();
       } catch (error) {
         if (!document.body.contains(modal)) return;
         friendsReady = false;
         submit.disabled = true;
-        selection.textContent = 'Friends could not load. Try again below.';
+        selection.textContent = `${sourceGameId ? 'Players' : 'Friends'} could not load. Try again below.`;
         list.removeAttribute('aria-busy');
-        renderError(list, error.message || 'Friends could not load.', loadFriends);
+        renderError(list, error.message || 'Players could not load.', loadFriends);
       }
     };
     modal.querySelector('#play-group-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       formUX.clearError();
       if (!friendsReady) {
-        formUX.showError('Wait for friends to finish loading, then try again.', list);
+        formUX.showError(`Wait for ${peopleLabel} to finish loading, then try again.`, list);
         return;
       }
       const name = modal.querySelector('#pg-name').value.trim();
@@ -26718,24 +27118,41 @@
         return;
       }
       if (!selectedIds.size) {
-        formUX.showError('Choose at least one friend to invite.', list.querySelector('button') || list);
+        formUX.showError(`Choose at least one ${sourceGameId ? 'player' : 'friend'} to invite.`, list.querySelector('button') || list);
         return;
       }
-      const finish = formUX.startSubmitting('Starting group…');
-      if (!finish) return;
+      if (selectedIds.size > inviteLimit) {
+        formUX.showError(`Choose up to ${inviteLimit} ${peopleLabel} for this group.`, list);
+        return;
+      }
+      const finishSubmitting = formUX.startSubmitting('Starting group…');
+      if (!finishSubmitting) return;
+      const submittedInviteIds = [...selectedIds];
+      const groupForm = modal.querySelector('#play-group-form');
+      groupForm.setAttribute('inert', '');
+      const finish = () => {
+        groupForm.removeAttribute('inert');
+        finishSubmitting();
+      };
       try {
-        const response = await api('/crews', {
+        const response = await api(sourceGameId ? `/games/${sourceGameId}/crew` : '/crews', {
           method: 'POST',
           body: JSON.stringify({
             name,
             default_court_id: Number(modal.querySelector('#pg-court-id').value) || null,
-            invite_user_ids: [...selectedIds],
+            invite_user_ids: submittedInviteIds,
           }),
         });
         const crew = crewSummaryFrom(response.crew || response);
         if (!crew) throw new Error('The play group was created, but could not be opened.');
+        if (typeof onCreated === 'function') onCreated(crew);
         formUX.clearDraft({ disable: true });
-        const requested = selectedIds.size;
+        if (response.created === false) {
+          toast('This game’s play group is already ready');
+          transitionModal(modal, () => openCrewScreen(crew.id));
+          return;
+        }
+        const requested = submittedInviteIds.length;
         const sent = Math.max(0, Number(response.invited_count) || 0);
         const skipped = Array.isArray(response.skipped) ? response.skipped : [];
         const needsInviteReview = sent !== requested || skipped.length > 0;
@@ -26762,6 +27179,7 @@
         transitionModal(modal, () => openCrewScreen(crew.id));
       } catch (error) {
         finish();
+        if (sourceGameId && error.code === 'crew_invitees_changed') await loadFriends();
         formUX.showError(error.message);
       }
     });
@@ -26770,15 +27188,35 @@
   }
 
   async function openCrewInviteSheet(crew, onSaved = null) {
+    const inviteLimit = playGroupInviteCapacity(crew);
+    if (!inviteLimit) {
+      const hasPending = (crew.pending_invites || []).length > 0;
+      const full = openModal(`
+        ${modalHead('Your group is full', 'users')}
+        <p class="play-group-intro">${hasPending
+          ? 'Members and pending invitations use all 12 spaces. Review unanswered invitations to free a space.'
+          : 'All 12 spaces are filled. You can manage the player list from your group.'}</p>
+        <button type="button" class="btn btn-primary btn-block" id="crew-review-capacity">${hasPending ? 'Review invitations' : 'Back to group'}</button>
+      `, { label: 'Your group is full' });
+      full.querySelector('#crew-review-capacity').addEventListener('click', () => {
+        dismissModal(full, () => {
+          if (onSaved) onSaved({ showInvitations: hasPending });
+          else openCrewScreen(crew.id, { showInvitations: hasPending });
+        });
+      });
+      return full;
+    }
     const modal = openModal(`
       ${modalHead(`Add players to ${crew.name}`)}
       <p class="play-group-intro">Invite established friends. They choose whether to join this private play group.</p>
       <form id="crew-invite-form" novalidate>
         <fieldset class="play-group-friends">
           <legend>Friends you can invite</legend>
+          <p>${inviteLimit} ${inviteLimit === 1 ? 'space available' : 'spaces available'}. Pending invitations reserve a space.</p>
+          <p class="row-sub play-group-selection" id="crew-invite-selection" role="status">Choose one or more friends.</p>
+          ${playGroupFriendSearchHtml('crew-invite', 'crew-invite-friends')}
           <div id="crew-invite-friends" class="play-group-friend-grid" aria-live="polite" aria-busy="true">${skeletonHtml(3)}</div>
         </fieldset>
-        <p class="row-sub play-group-selection" id="crew-invite-selection" role="status">Choose one or more friends.</p>
         <button type="submit" class="btn btn-primary btn-block" id="crew-invite-submit">Send invitations</button>
       </form>
     `, { label: `Add players to ${crew.name}` });
@@ -26787,17 +27225,19 @@
     const selection = modal.querySelector('#crew-invite-selection');
     const submit = modal.querySelector('#crew-invite-submit');
     const selectedIds = new Set();
+    const syncSearch = bindPlayGroupFriendSearch(modal, 'crew-invite', list, '[data-crew-invite-friend]');
     let candidates = [];
     let friendsReady = false;
     const syncSelection = () => {
       selection.textContent = selectedIds.size
-        ? `${selectedIds.size} friend${selectedIds.size === 1 ? '' : 's'} selected.`
+        ? `${selectedIds.size} of ${inviteLimit} available spaces selected.`
         : friendsReady ? 'Choose one or more friends.' : 'Loading friends…';
-      submit.disabled = !friendsReady || !candidates.length || !selectedIds.size;
+      submit.disabled = !friendsReady || !candidates.length || !selectedIds.size || !inviteLimit;
       list.querySelectorAll('[data-crew-invite-friend]').forEach((button) => {
         const active = selectedIds.has(Number(button.dataset.crewInviteFriend));
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
+        button.disabled = !active && selectedIds.size >= inviteLimit;
       });
     };
     const loadFriends = async () => {
@@ -26819,7 +27259,7 @@
         [...selectedIds].forEach((id) => { if (!liveIds.has(id)) selectedIds.delete(id); });
         list.removeAttribute('aria-busy');
         list.innerHTML = candidates.length ? candidates.map((friend) => `
-          <button type="button" class="play-group-friend" data-crew-invite-friend="${friend.id}" aria-pressed="false">
+          <button type="button" class="play-group-friend" data-crew-invite-friend="${friend.id}" data-friend-name="${esc(friend.display_name)}" aria-pressed="false">
             ${avatarHtml(friend, 'sm')}
             <span><b>${esc(friend.display_name)}</b><small>${playerSkillIdentityHtml(friend)}</small></span>
             <span class="play-group-check" aria-hidden="true">${uiIcon('check')}</span>
@@ -26827,10 +27267,12 @@
           : '<div class="empty-state" style="padding:18px">Everyone eligible is already in this group or has an invitation.</div>';
         list.querySelectorAll('[data-crew-invite-friend]').forEach((button) => button.addEventListener('click', () => {
           const id = Number(button.dataset.crewInviteFriend);
-          if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+          if (selectedIds.has(id)) selectedIds.delete(id);
+          else if (selectedIds.size < inviteLimit) selectedIds.add(id);
           syncSelection();
         }));
         syncSelection();
+        syncSearch();
       } catch (error) {
         if (!document.body.contains(modal)) return;
         friendsReady = false;
@@ -26849,6 +27291,10 @@
       }
       if (!selectedIds.size) {
         formUX.showError('Choose at least one friend to invite.', list.querySelector('button') || list);
+        return;
+      }
+      if (selectedIds.size > inviteLimit) {
+        formUX.showError(`Choose up to ${inviteLimit} friends for the available spaces.`, list);
         return;
       }
       const finish = formUX.startSubmitting('Sending invitations…');
@@ -26963,7 +27409,30 @@
     return true;
   }
 
-  async function openCrewScreen(crewId) {
+  function crewSessionContentHtml(game) {
+    const copy = crewChatPlanCopy(null, game);
+    if (!copy) return '';
+    const playerCount = Array.isArray(game.players)
+      ? game.players.length : Math.max(0, Number(game.player_count) || 0);
+    const capacity = Math.max(0, Number(game.max_players) || 0);
+    const suppliedSpots = game.spots_left == null ? NaN : Number(game.spots_left);
+    const spotsLeft = Number.isFinite(suppliedSpots)
+      ? Math.max(0, suppliedSpots) : Math.max(0, capacity - playerCount);
+    return `<span class="nav-row-leading">${uiIcon('calendar')}</span>
+      <span class="row-main"><span class="row-title">${esc(copy.title)}</span>
+        <span class="row-sub">${esc(copy.detail)}</span>
+        <span class="row-sub">${playerCount}${capacity ? `/${capacity}` : ''} in${capacity ? spotsLeft ? ` · ${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : ' · Full' : ''}</span>
+        <span class="crew-session-attendance">${esc(copy.action)}</span>
+      </span>${uiIcon('chevron-right', 'chev')}`;
+  }
+
+  function crewUpcomingGamesHtml(games) {
+    const rows = games.map((game) => `<button type="button" class="card row nav-row-button crew-session-row" data-open-crew-game="${game.id}">${crewSessionContentHtml(game)}</button>`);
+    if (!rows.length) return '';
+    return `<div class="section-label">Upcoming play</div><div class="crew-upcoming-games">${rows[0]}</div>${rows.length > 1 ? `<details class="flow-disclosure crew-later-sessions"><summary>More upcoming sessions <span>${rows.length - 1}</span></summary><div class="crew-upcoming-games">${rows.slice(1).join('')}</div></details>` : ''}`;
+  }
+
+  async function openCrewScreen(crewId, { showInvitations = false } = {}) {
     const route = { kind: 'crew', id: crewId };
     const shell = openDetailLoadShell({
       route,
@@ -27014,20 +27483,14 @@
     const crew = { ...detail, ...summary, members };
     crew.member_count = Math.max(1, Number(detail.member_count) || members.length || summary.member_count);
     const owner = crewIsOwner(crew);
+    const pendingInvites = owner && Array.isArray(crew.pending_invites) ? crew.pending_invites : [];
+    const plannerOptions = crewPlannerOptions(crew);
+    const canPlan = plannerOptions.inviteUserIds.length > 0;
+    const reviewInvitations = pendingInvites.length > 0 && playGroupInviteCapacity(crew) === 0;
     const notificationLabel = crew.my_notification_level === 'off' ? 'Muted'
       : crew.my_notification_level === 'mentions' ? 'Mentions only' : 'All messages';
-    const upcomingGames = Array.isArray(crew.upcoming_games) ? crew.upcoming_games : [];
-    const upcomingGamesHtml = upcomingGames.map((game) => {
-      const playerCount = Array.isArray(game.players)
-        ? game.players.length : Math.max(0, Number(game.player_count) || 0);
-      const spotsLeft = Math.max(0, Number(game.spots_left)
-        || (Math.max(0, Number(game.max_players) || 0) - playerCount));
-      return `<button type="button" class="card row nav-row-button" data-open-crew-game="${game.id}" aria-label="View play-session details at ${esc(game.court?.name || 'court')}">
-        <span class="nav-row-leading">${uiIcon(game.game_type === 'ranked' ? 'trophy' : 'pickleball')}</span>
-        <span class="row-main"><span class="row-title">${esc(game.court?.name || 'Court')}</span><span class="row-sub">${fmtDateTime(game.scheduled_at)} · ${playerCount}/${game.max_players} in${spotsLeft ? ` · ${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : ' · full'}</span></span>
-        ${uiIcon('chevron-right', 'chev')}
-      </button>`;
-    }).join('');
+    let upcomingGames = Array.isArray(crew.upcoming_games) ? crew.upcoming_games : [];
+    const upcomingGamesHtml = crewUpcomingGamesHtml(upcomingGames);
     const heroContent = `
       <div class="crew-avatar-stack">${crew.members.slice(0, 4).map((member) => avatarHtml(member, 'sm')).join('')}</div>
       <div class="row-main">
@@ -27054,15 +27517,24 @@
     box.innerHTML = `
       ${modalHead(crew.name)}
       ${heroHtml}
-      <div class="crew-primary-actions">
-        <button type="button" class="btn btn-primary" id="crew-plan">${uiIcon('calendar')} Plan with this group</button>
-        <button type="button" class="btn btn-secondary" id="crew-chat">${uiIcon('message')} Group chat</button>
+      <section class="crew-upcoming-section" aria-label="Upcoming play" ${upcomingGamesHtml ? '' : 'hidden'}>${upcomingGamesHtml}</section>
+      <div class="crew-primary-actions ${canPlan ? '' : 'is-single'}">
+        ${canPlan ? `<button type="button" class="btn ${upcomingGames.length ? 'btn-secondary' : 'btn-primary'}" id="crew-plan">${uiIcon('calendar')} ${upcomingGames.length ? 'Plan another' : 'Plan with this group'}</button>` : ''}
+        <button type="button" class="btn ${upcomingGames.length || !canPlan ? 'btn-primary' : 'btn-secondary'}" id="crew-chat">${uiIcon('message')} Group chat</button>
       </div>
-      ${crew.pending_count ? `<div class="crew-pending-note">${crew.pending_count} invitation${crew.pending_count === 1 ? '' : 's'} pending. They choose whether to join.</div>` : ''}
-      ${owner ? `<button type="button" class="btn btn-secondary btn-block crew-add-players" id="crew-add-players">${uiIcon('plus')} Add players</button>` : ''}
-      ${upcomingGamesHtml ? `<div class="section-label">Upcoming play</div><div class="crew-upcoming-games">${upcomingGamesHtml}</div>` : '<div class="crew-pending-note">No upcoming sessions yet. Plan one when this group is ready.</div>'}
-      <details class="flow-disclosure" ${crew.member_count <= 4 ? 'open' : ''}>
-        <summary>Players <span>${crew.member_count}</span></summary>
+      ${!canPlan ? `<p class="crew-pending-note" id="crew-plan-waiting">${crew.pending_count ? 'Once a player accepts your invitation, you can plan your first session together.' : 'Add a player to start planning sessions together.'}</p>` : ''}
+      <details class="flow-disclosure" id="crew-players" ${!canPlan || showInvitations ? 'open' : ''}>
+        <summary>Players <span>${crew.member_count}${crew.pending_count ? ` · ${crew.pending_count} invited` : ''}</span></summary>
+        ${owner ? `<button type="button" class="btn ${canPlan ? 'btn-secondary' : 'btn-primary'} btn-block crew-add-players" id="crew-add-players">${uiIcon(reviewInvitations ? 'users' : 'plus')} ${reviewInvitations ? 'Review invitations' : 'Add players'}</button>` : ''}
+      ${pendingInvites.length ? `<details class="flow-disclosure" id="crew-pending-management" ${showInvitations ? 'open' : ''}>
+        <summary>Pending invitations <span>${pendingInvites.length}</span></summary>
+        <p class="row-sub crew-invitation-help">Withdraw an unanswered invitation to free a group space. You can invite the player again later.</p>
+        <div class="crew-roster">${pendingInvites.map((invitation) => `<div class="row crew-pending-person" data-crew-pending-row="${invitation.id}">
+          ${avatarHtml(invitation.user, 'sm')}
+          <span class="row-main"><b>${esc(invitation.user.display_name)}</b><small class="row-sub">${invitation.invited_at ? `Invited ${esc(fmtDateTime(invitation.invited_at))}` : 'Awaiting a response'}</small></span>
+          <button type="button" class="btn btn-secondary btn-sm" data-crew-withdraw-invite="${invitation.id}" aria-label="Withdraw invitation for ${esc(invitation.user.display_name)}">Withdraw</button>
+        </div>`).join('')}</div>
+      </details>` : ''}
         <div class="crew-roster">${membersHtml || '<div class="empty-state" style="padding:18px">No players available.</div>'}</div>
       </details>
       <details class="flow-disclosure crew-settings">
@@ -27077,13 +27549,67 @@
     modal.dataset.crewInfoId = String(crew.id);
     setDialogLabel(box, crew.name);
     bindUserButtons(modal);
+    modal.querySelectorAll('[data-crew-withdraw-invite]').forEach((button) => button.addEventListener('click', async () => {
+      const invitation = pendingInvites.find((item) => Number(item.id) === Number(button.dataset.crewWithdrawInvite));
+      if (!invitation) return;
+      const row = button.closest('[data-crew-pending-row]');
+      clearInlineActionError(row);
+      const reset = beginButtonAction(button, 'Withdrawing…', [...modal.querySelectorAll('[data-crew-withdraw-invite]')]);
+      if (!reset) return;
+      try {
+        await api(`/crews/${crew.id}/invites/${invitation.id}`, {
+          method: 'DELETE', body: JSON.stringify({ expected_invited_at: invitation.invited_at }),
+        });
+        toast('Invitation withdrawn. A group space is available.');
+        renderChat();
+        refreshMe();
+        transitionModal(modal, () => openCrewScreen(crew.id, { showInvitations: true }));
+      } catch (error) {
+        reset();
+        if (error.status === 409) {
+          toast('This invitation changed. Showing the current group.');
+          transitionModal(modal, () => openCrewScreen(crew.id, { showInvitations: true }));
+        } else showInlineActionError(row, error.message);
+      }
+    }));
+    if (showInvitations) requestAnimationFrame(() => {
+      if (!modal.isConnected) return;
+      const target = modal.querySelector('[data-crew-withdraw-invite]') || modal.querySelector('#crew-add-players');
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: 'nearest' });
+    });
     modal.querySelector('#crew-court')?.addEventListener('click', () => {
       openChildModal(modal, () => openCourtDetail(crew.default_court_id));
     });
-    modal.querySelectorAll('[data-open-crew-game]').forEach((row) => row.addEventListener('click', () => {
-      openChildModal(modal, () => openGameScreen(Number(row.dataset.openCrewGame)));
-    }));
-    modal.querySelector('#crew-plan')?.addEventListener('click', () => {
+    modal.querySelector('.crew-upcoming-section').addEventListener('click', (event) => {
+      const row = event.target.closest('[data-open-crew-game]');
+      if (!row) return;
+      openChildModal(modal, () => openGameScreen(Number(row.dataset.openCrewGame), {
+        onUpdated: (fresh) => {
+          if (!modal.isConnected) return;
+          upcomingGames = upcomingGames.map((item) => Number(item.id) === Number(fresh.id) ? fresh : item)
+            .filter((item) => item.status === 'upcoming');
+          const section = modal.querySelector('.crew-upcoming-section');
+          const existingRow = section.querySelector(`[data-open-crew-game="${Number(fresh.id)}"]`);
+          if (fresh.status === 'upcoming' && existingRow) {
+            existingRow.innerHTML = crewSessionContentHtml(fresh);
+          } else {
+            section.innerHTML = crewUpcomingGamesHtml(upcomingGames);
+          }
+          section.hidden = !upcomingGames.length;
+          const plan = modal.querySelector('#crew-plan');
+          if (plan) {
+            plan.innerHTML = `${uiIcon('calendar')} ${upcomingGames.length ? 'Plan another' : 'Plan with this group'}`;
+            plan.classList.toggle('btn-primary', !upcomingGames.length);
+            plan.classList.toggle('btn-secondary', Boolean(upcomingGames.length));
+          }
+          const chat = modal.querySelector('#crew-chat');
+          chat.classList.toggle('btn-primary', Boolean(upcomingGames.length) || !canPlan);
+          chat.classList.toggle('btn-secondary', !upcomingGames.length && canPlan);
+        },
+      }));
+    });
+    const openGroupPlanner = () => {
       const options = crewPlannerOptions(crew);
       if (!options.inviteUserIds.length) {
         toast('At least one player needs to join before this group can plan a session');
@@ -27093,10 +27619,17 @@
         if (modal.isConnected) transitionModal(modal, () => openCrewScreen(crew.id));
       };
       openChildModal(modal, () => openNewGameModal(options));
-    });
+    };
+    modal.querySelector('#crew-plan')?.addEventListener('click', () => openGroupPlanner());
     modal.querySelector('#crew-add-players')?.addEventListener('click', () => {
-      openChildModal(modal, () => openCrewInviteSheet(crew, () => {
-        transitionModal(modal, () => openCrewScreen(crew.id));
+      if (reviewInvitations) {
+        const disclosure = modal.querySelector('#crew-pending-management');
+        if (disclosure) disclosure.open = true;
+        modal.querySelector('[data-crew-withdraw-invite]')?.focus();
+        return;
+      }
+      openChildModal(modal, () => openCrewInviteSheet(crew, (viewOptions = {}) => {
+        transitionModal(modal, () => openCrewScreen(crew.id, viewOptions));
       }));
     });
     modal.querySelector('#crew-chat')?.addEventListener('click', () => {
@@ -27290,6 +27823,89 @@
     return openCrewChat({ ...detail, ...summary }, { shell });
   }
 
+  function crewChatStarters(crew) {
+    const court = String(crew.default_court_name || '').trim();
+    return [
+      { id: 'hello', label: 'Say hello', icon: 'users',
+        text: 'Hi everyone! Looking forward to playing together. What kind of games do you enjoy?' },
+      { id: 'time', label: 'Find a time', icon: 'calendar',
+        text: 'What days and times usually work for everyone? We can pick our next game from there.' },
+      { id: 'court', label: 'Ask for a court tip', icon: 'map-pin',
+        text: `${court ? `Any tips for playing at ${court}?` : 'What is your favorite local court?'} Best times to go, parking, or what to bring?` },
+    ];
+  }
+
+  function crewChatWelcomeCopy(crew) {
+    const alone = Number(crew.member_count) === 1;
+    const pending = Math.max(0, Number(crew.pending_count) || 0);
+    return alone ? {
+      title: 'Leave a welcome for your group',
+      body: pending
+        ? `${pending} invitation${pending === 1 ? ' is' : 's are'} pending. Players can read the conversation after they join.`
+        : 'It’s just you here for now. Add players from group info when you’re ready.',
+    } : {
+      title: 'Start with a hello',
+      body: 'Get to know your group, trade court tips, or find a time to play together.',
+    };
+  }
+
+  function crewChatWelcomeHtml(crew, hasDraft = false) {
+    const copy = crewChatWelcomeCopy(crew);
+    return `<section class="empty-state crew-chat-welcome" aria-label="Start your group conversation">
+      <span class="crew-welcome-icon" aria-hidden="true">${uiIcon('message')}</span>
+      <h3 data-crew-welcome-title>${esc(copy.title)}</h3>
+      <p data-crew-welcome-body>${esc(copy.body)}</p>
+      <div data-crew-starters ${hasDraft ? 'hidden' : ''}>
+        <p class="crew-starter-help">Choose a starting point, then edit it before sending.</p>
+        <div class="crew-chat-starters">${crewChatStarters(crew).map((starter) => `
+          <button type="button" class="btn btn-secondary" data-crew-chat-starter="${starter.id}">${uiIcon(starter.icon)} ${esc(starter.label)}</button>
+        `).join('')}</div>
+      </div>
+      <p class="crew-starter-help" data-crew-draft-note ${hasDraft ? '' : 'hidden'}>Your draft is in the message box. Make it yours, then send when you’re ready.</p>
+    </section>`;
+  }
+
+  function applyChatStarter(input, text) {
+    if (!input || input.value || !text) return false;
+    const limit = Number(input.maxLength) > 0 ? Number(input.maxLength) : 2000;
+    input.value = String(text).slice(0, limit);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+    return true;
+  }
+
+  function crewChatPlanCopy(crew, game) {
+    if (Number(game?.id) > 0) {
+      const attendance = game.is_joined ? 'You’re in'
+        : Number(game.waitlist_position) > 0 ? `Waitlist #${game.waitlist_position}`
+          : game.is_invited ? 'You’re invited' : 'Open to you';
+      return {
+        gameId: Number(game.id), eyebrow: 'Next session',
+        title: fmtDateTime(game.scheduled_at),
+        detail: game.court?.name || 'View court details',
+        action: `${attendance} · ${game.is_joined || Number(game.waitlist_position) > 0 ? 'View session' : 'View & RSVP'}`,
+      };
+    }
+    if (Number(crew?.member_count) < 2 || !crew?.joined) return null;
+    return {
+      gameId: null, eyebrow: '', title: 'Plan with this group',
+      detail: 'Choose a court and time together.', action: '',
+    };
+  }
+
+  function syncCrewChatPlan(button, crew, game) {
+    const copy = crewChatPlanCopy(crew, game);
+    button.hidden = !copy;
+    button.dataset.gameId = copy?.gameId || '';
+    if (!copy) return;
+    for (const key of ['eyebrow', 'title', 'detail', 'action']) {
+      const field = button.querySelector(`[data-crew-plan-${key}]`);
+      field.textContent = copy[key];
+      field.hidden = !copy[key];
+    }
+  }
+
   async function openCrewChat(crew, { shell: existingShell = null } = {}) {
     const shell = existingShell || openChatLoadShell({
       route: { kind: 'crew', id: crew.id },
@@ -27311,6 +27927,7 @@
       return modal;
     }
     if (!routedOverlayLoadIsCurrent(routeLoad) || !modal.isConnected) return;
+    if (Number(data.crew?.id) === Number(crew.id)) crew = { ...crew, ...data.crew };
     refreshMe();
     hydrateChatLoadShell(shell, `
       <div class="thread">
@@ -27322,16 +27939,85 @@
             <span class="row-sub">Private play group · invite only · ${crew.member_count} player${crew.member_count === 1 ? '' : 's'} · Open group info</span>
           </button>
         </div>
+        <button type="button" class="crew-chat-plan" id="crew-chat-plan" hidden>
+          ${uiIcon('calendar')}
+          <span class="row-main">
+            <span class="crew-chat-plan-eyebrow" data-crew-plan-eyebrow></span>
+            <b data-crew-plan-title></b>
+            <span class="row-sub" data-crew-plan-detail></span>
+            <span class="crew-chat-plan-action" data-crew-plan-action></span>
+          </span>
+          ${uiIcon('chevron-right')}
+        </button>
         <div class="thread-msgs" id="crew-msgs" role="log" aria-live="off" aria-relevant="additions" aria-label="${esc(crew.name)} private play group conversation"></div>
         <form class="thread-input" id="crew-form">
           <textarea id="crew-text" aria-label="Message the play group" placeholder="Message the play group…" autocomplete="off" maxlength="2000" rows="1"></textarea>
           <button type="submit" aria-label="Send">${uiIcon('send')}</button>
         </form>
       </div>
-    `, `${crew.name || 'Play group'} chat`);
+    `, `${crew.name || 'Play group'} chat`, {
+      focusComposer: (data.items || data.messages || []).length > 0,
+    });
     const msgsEl = modal.querySelector('#crew-msgs');
     const input = modal.querySelector('#crew-text');
-    const chatUX = bindChatContinuity(modal, msgsEl, input, `crew:${crew.id}`);
+    const planButton = modal.querySelector('#crew-chat-plan');
+    syncCrewChatPlan(planButton, crew, data.next_game);
+    planButton.addEventListener('click', async () => {
+      const gameId = Number(planButton.dataset.gameId);
+      if (gameId) {
+        openChildModal(modal, () => openGameScreen(gameId));
+        return;
+      }
+      if (planButton.disabled) return;
+      planButton.disabled = true;
+      planButton.setAttribute('aria-busy', 'true');
+      try {
+        const freshCrew = await api(`/crews/${crew.id}`);
+        if (!modal.isConnected || currentOverlayEntry()?.el !== modal) return;
+        const options = crewPlannerOptions(freshCrew);
+        if (!options.inviteUserIds.length) {
+          crew = { ...crew, ...freshCrew };
+          syncCrewChatPlan(planButton, crew, freshCrew.upcoming_games?.[0]);
+          syncWelcome();
+          toast('At least one other player needs to join before you can plan together.');
+          return;
+        }
+        options.onCreated = (game) => {
+          if (modal.isConnected) syncCrewChatPlan(planButton, crew, game);
+        };
+        openChildModal(modal, () => openNewGameModal(options));
+      } catch (error) {
+        if (modal.isConnected && currentOverlayEntry()?.el === modal) toast(error.message);
+      } finally {
+        planButton.disabled = false;
+        planButton.removeAttribute('aria-busy');
+      }
+    });
+    const emptyMessageHtml = () => crewChatWelcomeHtml(crew, Boolean(input.value));
+    const chatUX = bindChatContinuity(modal, msgsEl, input, `crew:${crew.id}`, { emptyMessageHtml });
+    const syncWelcome = () => {
+      const copy = crewChatWelcomeCopy(crew);
+      const title = msgsEl.querySelector('[data-crew-welcome-title]');
+      const body = msgsEl.querySelector('[data-crew-welcome-body]');
+      if (title) title.textContent = copy.title;
+      if (body) body.textContent = copy.body;
+      const choices = msgsEl.querySelector('[data-crew-starters]');
+      const draftNote = msgsEl.querySelector('[data-crew-draft-note]');
+      if (choices) choices.hidden = Boolean(input.value);
+      if (draftNote) draftNote.hidden = !input.value;
+    };
+    const onStarter = (event) => {
+      const button = event.target.closest('[data-crew-chat-starter]');
+      if (!button) return;
+      const starter = crewChatStarters(crew).find((item) => item.id === button.dataset.crewChatStarter);
+      if (starter) applyChatStarter(input, starter.text);
+    };
+    msgsEl.addEventListener('click', onStarter);
+    input.addEventListener('input', syncWelcome);
+    modal._cleanupFns?.push(() => {
+      msgsEl.removeEventListener('click', onStarter);
+      input.removeEventListener('input', syncWelcome);
+    });
     let lastId = 0;
     const renderMessages = (rawItems, append, { forceBottom = false, newMessages = false, prepend = false } = {}) => {
       const batch = prepareChatRenderBatch(msgsEl, rawItems || [], append || prepend);
@@ -27354,7 +28040,7 @@
       if (prepend) { msgsEl.querySelector('.empty-state')?.remove(); msgsEl.insertAdjacentHTML('afterbegin', html); }
       else if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
-      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — pick the next time.</div>';
+      else msgsEl.innerHTML = html || emptyMessageHtml();
       normalizeChatDaySeparators(msgsEl);
       chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0, preserveAnchor: prepend });
       hydrateChatImages(msgsEl, chatUX);
@@ -27369,6 +28055,18 @@
     addPhotoToComposer(modal, '#crew-form', '#crew-text', chatUX);
     startAdaptiveChatPoll(modal, msgsEl, async () => {
       const fresh = await api(`/crews/${crew.id}/chat?since_id=${lastId}`);
+      if (!modal.isConnected || modal._destroyed) return false;
+      if (Number(fresh.crew?.id) === Number(crew.id)) {
+        crew = { ...crew, ...fresh.crew };
+        const head = modal.querySelector('#crew-chat-head');
+        head.querySelector('.row-title').textContent = crew.name;
+        head.querySelector('.row-sub').textContent = `Private play group · invite only · ${crew.member_count} player${crew.member_count === 1 ? '' : 's'} · Open group info`;
+        head.setAttribute('aria-label', `Open ${crew.name} play group info`);
+        msgsEl.setAttribute('aria-label', `${crew.name} private play group conversation`);
+        setDialogLabel(shell.box, `${crew.name} chat`);
+        syncWelcome();
+      }
+      syncCrewChatPlan(planButton, crew, fresh.next_game);
       const items = fresh.items || fresh.messages || [];
       if (items.length) renderMessages(items, true, { newMessages: true });
       applyRoomHearts(msgsEl, fresh.heart_counts);
@@ -29198,7 +29896,7 @@
         if (!resetAction) return;
         try {
           await api(`/users/${userId}/unblock`, { method: 'POST' });
-          state.chatFriendsCache = null;
+          refreshConnectionViews();
           toast('User unblocked');
           transitionModal(modal, () => openUserProfile(userId));
         } catch (e) {
@@ -29222,9 +29920,11 @@
       if (!resetAction) return;
       try {
         await api(`/users/${userId}/block`, { method: 'POST' });
-        state.chatFriendsCache = null;
+        refreshConnectionViews();
         toast('User blocked');
-        transitionModal(modal, () => openUserProfile(userId));
+        // Blocked profiles are intentionally unavailable. Return to the
+        // refreshed player list instead of trying to reopen that profile.
+        closeModal(modal);
       } catch (e) {
         resetAction();
         showInlineActionError(modal, e.message);
@@ -29239,7 +29939,7 @@
       try {
         await api('/friends/request', { method: 'POST', body: JSON.stringify({ user_id: userId }) });
         toast('Friend request sent!');
-        patchVisibleFriendRelationship(userId, 'pending');
+        patchVisibleFriendRelationship(userId, 'pending', user);
         const pending = document.createElement('span');
         pending.className = 'tag';
         pending.textContent = 'Request pending';
@@ -29257,13 +29957,8 @@
       try {
         await api(`/friends/${user.friendship_id}/respond`, { method: 'POST', body: JSON.stringify({ accept: true }) });
         toast('Friend added');
-        patchVisibleFriendRelationship(userId, 'accepted');
-        const messageButton = document.createElement('button');
-        messageButton.type = 'button';
-        messageButton.className = 'btn btn-primary';
-        messageButton.innerHTML = `${uiIcon('message')} Message`;
-        messageButton.addEventListener('click', () => openChildModal(modal, () => openThread(userId)));
-        button.replaceWith(messageButton);
+        patchVisibleFriendRelationship(userId, 'accepted', user);
+        transitionModal(modal, () => openUserProfile(userId));
         refreshMe();
       } catch (e) {
         resetAction();
@@ -29287,7 +29982,7 @@
       if (!resetAction) return;
       try {
         await api(`/friends/${user.friendship_id}`, { method: 'DELETE' });
-        state.chatFriendsCache = null;
+        refreshConnectionViews();
         toast('Friend removed');
         transitionModal(modal, () => openUserProfile(userId));
       } catch (e) {
@@ -29309,18 +30004,8 @@
       openChildModal(modal, () => openChallengeSheet(user, court));
     });
     modal.querySelector('#up-schedule-shared')?.addEventListener('click', () => {
-      // Open the scheduler pre-set to the shared slot whose next occurrence
-      // is soonest on the calendar (so it lands within the day picker's range).
-      const shared = (user.availability || []).filter((s) => (state.me.availability || []).includes(s));
-      const dow = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-      const today = new Date().getDay();
-      const daysUntil = (s) => ((dow[s.split('-')[0]] - today) + 7) % 7;
-      const slot = shared.sort((x, y) => daysUntil(x) - daysUntil(y))[0];
       openChildModal(modal, () => openNewGameModal({
-        preferredSlot: slot,
-        invitees: [user],
-        inviteUserIds: [userId],
-        visibility: 'private',
+        ...playerInvitePlannerOptions(user),
         onCreated: () => {
           if (modal.isConnected) transitionModal(modal, () => openUserProfile(userId));
         },
@@ -31972,6 +32657,7 @@
         try {
           await api(`/users/${button.dataset.unblock}/unblock`, { method: 'POST' });
           toast('Player unblocked');
+          refreshConnectionViews();
           loadBlockedPlayers(root);
         } catch (error) {
           resetAction();
@@ -33761,7 +34447,8 @@
         </div>
         <div class="form-field">
           <label for="eg-when">Date and time</label>
-          <input type="datetime-local" id="eg-when" value="${whenValue}" min="${minWhen}" required />
+          <input type="datetime-local" id="eg-when" value="${whenValue}" min="${minWhen}" required aria-describedby="eg-timezone-help" />
+          <small class="field-help" id="eg-timezone-help">Date and time are shown in your timezone: ${esc(plannerTimeZoneLabel(Intl.DateTimeFormat().resolvedOptions().timeZone))}.</small>
           <p class="row-sub">Players keep their spot and will be asked to re-confirm if the court or time changes.</p>
         </div>
         <div class="form-grid game-plan-fields">
@@ -33783,8 +34470,8 @@
           <div class="form-field"><label for="eg-recurrence">Repeats</label><select id="eg-recurrence" data-select-title="Repeat schedule" ${canRepeat ? '' : 'disabled'}><option value="none">One time</option><option value="weekly" ${game.recurrence === 'weekly' ? 'selected' : ''}>Every week</option></select></div>
         </div>
         <div class="planner-recurrence-settings ${game.recurrence === 'weekly' ? '' : 'hidden'}" id="eg-recurrence-settings">
-          <fieldset class="game-choice-field"><legend>Repeat on</legend><div class="recurrence-weekdays" id="eg-recurrence-weekdays">${recurrenceDayKeys.map((day, index) => `<button type="button" data-recurrence-day="${day}" class="${editRecurrenceDays.has(day) ? 'active' : ''}" aria-pressed="${editRecurrenceDays.has(day)}">${recurrenceDayLabels[index]}</button>`).join('')}</div></fieldset>
-          <div class="form-field"><label for="eg-recurrence-end">End date <span class="row-sub">(optional)</span></label><input type="date" id="eg-recurrence-end" value="${esc(game.recurrence_ends_on || '')}" /><small class="field-help">Times stay fixed in ${esc(editRecurrenceTimezone)} across daylight-saving changes.</small></div>
+          <fieldset class="game-choice-field"><legend>Repeat on</legend><p class="field-help">Repeat days, times, and the end date follow ${esc(plannerTimeZoneLabel(editRecurrenceTimezone))}.</p><div class="recurrence-weekdays" id="eg-recurrence-weekdays">${recurrenceDayKeys.map((day, index) => `<button type="button" data-recurrence-day="${day}" class="${editRecurrenceDays.has(day) ? 'active' : ''}" aria-pressed="${editRecurrenceDays.has(day)}">${recurrenceDayLabels[index]}</button>`).join('')}</div></fieldset>
+          <div class="form-field"><label for="eg-recurrence-end">End date <span class="row-sub">(optional)</span></label><input type="date" id="eg-recurrence-end" value="${esc(game.recurrence_ends_on || '')}" /></div>
         </div>
         <div class="form-field"><label for="eg-notes">Note <span class="row-sub">(optional)</span></label><textarea id="eg-notes" maxlength="500" rows="3" placeholder="What should players know?">${esc(game.notes || '')}</textarea></div>
         <button type="submit" class="btn btn-primary btn-block" id="eg-save" style="padding:15px">Save changes</button>
@@ -33951,10 +34638,7 @@
       const recurrence = canRepeat ? editRecurrenceSelect.value : game.recurrence;
       const recurrenceEndInput = sheet.querySelector('#eg-recurrence-end');
       const recurrenceEnd = recurrenceEndInput.value || null;
-      const localStartDate = [
-        when.getFullYear(), String(when.getMonth() + 1).padStart(2, '0'),
-        String(when.getDate()).padStart(2, '0'),
-      ].join('-');
+      const localStartDate = calendarDateInTimeZone(when, editRecurrenceTimezone);
       if (recurrence === 'weekly' && !editRecurrenceDays.size) {
         formUX.showError('Choose at least one repeat day.', sheet.querySelector('#eg-recurrence-weekdays'));
         return;
@@ -34190,6 +34874,24 @@
       </section>`);
   }
 
+  function recurrenceClockLabel(game) {
+    const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(game.recurrence_local_time || '');
+    const hour = match ? Number(match[1]) : -1;
+    const minute = match ? Number(match[2]) : -1;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return '';
+    const clock = new Date(Date.UTC(2000, 0, 1, hour, minute)).toLocaleTimeString([], {
+      hour: 'numeric', minute: '2-digit', timeZone: 'UTC',
+    });
+    const timezone = String(game.recurrence_timezone || 'UTC');
+    let zoneLabel = timezone.replace(/_/g, ' ');
+    try {
+      zoneLabel = new Intl.DateTimeFormat(undefined, {
+        timeZone: timezone, timeZoneName: 'shortGeneric',
+      }).formatToParts(new Date()).find((part) => part.type === 'timeZoneName')?.value || zoneLabel;
+    } catch { /* Keep an unfamiliar legacy zone readable rather than hiding it. */ }
+    return `${clock} ${zoneLabel}`;
+  }
+
   function gameScreenHtml(game) {
     const court = game.court || {};
     const isRankedMatch = game.game_type === 'ranked';
@@ -34222,22 +34924,15 @@
           month: 'short', day: 'numeric', year: 'numeric',
         })
       : '';
+    const recurrenceClock = recurrenceClockLabel(game);
     const recurrencePattern = game.recurrence === 'weekly'
-      ? `Repeats ${recurrenceDays.join(', ') || 'weekly'}${game.recurrence_local_time ? ` at ${game.recurrence_local_time}` : ''} ${game.recurrence_timezone || 'UTC'}${recurrenceEndLabel ? ` through ${recurrenceEndLabel}` : ''}`
+      ? `Repeats ${recurrenceDays.join(', ') || 'weekly'}${recurrenceClock ? ` at ${recurrenceClock}` : ''}`
       : '';
 
     let statusIcon = uiIcon('pickleball');
     let headline = `${fmtDateTime(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
-    let subline = `${readyCount}/${game.max_players} players`;
-    if (game.is_creator && !game.is_instant && game.status === 'upcoming') {
-      const confirmed = Number.isFinite(Number(game.attendance_confirmed_count))
-        ? Number(game.attendance_confirmed_count)
-        : game.players.filter((player) => player.attending).length;
-      const unconfirmed = Number.isFinite(Number(game.attendance_unconfirmed_count))
-        ? Number(game.attendance_unconfirmed_count)
-        : Math.max(0, game.players.length - confirmed);
-      subline += ` · Confirmed ${confirmed}${unconfirmed ? ` · Unconfirmed ${unconfirmed}` : ''}`;
-    }
+    let subline = game.status === 'upcoming' && !game.is_instant
+      ? '' : `${readyCount}/${game.max_players} players`;
     if (game.status === 'completed') {
       if (game.completion_kind === 'session') {
         statusIcon = uiIcon('check-circle');
@@ -34279,8 +34974,7 @@
       subline = 'This pickup game didn’t fill up.';
     } else if (game.my_invite_status === 'pending' && !game.is_joined) {
       statusIcon = uiIcon('send');
-      headline = `${esc((game.invited_by || {}).display_name || 'The host')} invited you`;
-      subline = `${fmtDateTime(game.scheduled_at)} · ${esc(court.name || 'Court')}`;
+      subline = `${esc((game.invited_by || {}).display_name || 'The host')} invited you`;
     } else if (isChallenge && !game.is_joined && game.spots_left > 0) {
       statusIcon = uiIcon('trophy'); headline = "You've been challenged!";
       subline = `Ranked singles vs ${esc((game.players[0] || {}).display_name || 'a player')}`;
@@ -34443,9 +35137,6 @@
         if (!game.is_instant && startsAhead) {
           moreActions.push(`<button class="btn btn-secondary btn-block" id="gs-calendar">${uiIcon('calendar')} Add to calendar</button>`);
         }
-        if (!game.is_creator) {
-          moreActions.push(`<button class="btn btn-secondary btn-block" id="gs-share">${uiIcon('send')} Share ${playNoun}</button>`);
-        }
         if (game.recurrence === 'weekly') {
           const standing = game.is_creator || game.my_recurrence_rsvp?.standing_rsvp === true;
           moreActions.push(`<section class="recurrence-rsvp-card" aria-label="Recurring RSVP preference">
@@ -34460,7 +35151,6 @@
             <div class="game-host-toolbar-actions">
               ${game.is_instant ? '' : `<button type="button" class="btn btn-secondary" id="gs-edit">${uiIcon('edit')} Edit game</button>`}
               ${!game.is_instant && startsAhead && game.recurrence !== 'weekly' ? `<button type="button" class="btn btn-secondary" id="gs-reschedule">${uiIcon('clock')} Reschedule</button>` : ''}
-              <button type="button" class="btn btn-secondary" id="gs-share">${uiIcon('send')} Share</button>
               <button type="button" class="btn btn-danger" id="gs-cancel">Cancel ${playNoun}</button>
             </div>
           </details>`;
@@ -34514,6 +35204,8 @@
         <div class="postgame-next">
           <div class="postgame-next-copy"><b>Play again</b><span>Review the same court, players, and a suggested time before anything is created.</span></div>
           <button class="btn btn-primary btn-block" id="gs-play-again">${uiIcon('calendar')} Play again</button>
+          <button type="button" class="btn btn-secondary btn-block" id="gs-save-group">${uiIcon('users')} Start a play group</button>
+          <small id="gs-save-group-hint">Keep in touch before you pick the next date.</small>
         </div>
         <div id="gs-crew-connect" aria-live="polite"><div class="postgame-connection-loading">Checking who you still need to connect with…</div></div>`;
     } else if (['cancelled', 'expired', 'unresolved'].includes(game.status) || closedRally) {
@@ -34525,7 +35217,8 @@
     const gameTypeAndFormat = `${isRankedMatch ? 'Ranked' : 'Casual'} · ${gameFormat}`;
     const detailMetaItems = [
       game.is_instant ? `${assembly ? 'Live pickup game' : 'Pickup game'} · ${gameTypeAndFormat}` : gameTypeAndFormat,
-      game.recurrence === 'weekly' ? recurrenceDays.join(', ') || 'Weekly' : '',
+      game.visibility === 'private' ? 'Invite only'
+        : game.visibility === 'friends' ? 'Friends' : game.visibility === 'open' ? 'Open game' : '',
       gameLevelRangeLabel(game) !== 'Any level' ? gameLevelRangeLabel(game) : '',
       game.club_name || '',
     ].filter(Boolean);
@@ -34539,13 +35232,14 @@
         : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
     const courtScaleLabel = game.court_count
       ? `${game.court_count} court${Number(game.court_count) === 1 ? '' : 's'} reserved` : '';
-    const planningFacts = [durationLabel, costLabel, courtScaleLabel, recurrencePattern].filter(Boolean);
+    const planningFacts = [durationLabel, costLabel, courtScaleLabel].filter(Boolean);
     const planningDetails = !game.is_instant && (
-      game.title || game.description || planningFacts.length
+      game.title || game.description || planningFacts.length || recurrencePattern
     ) ? `<section class="game-detail-plan" aria-label="Game plan">
       ${game.title ? `<h4>${esc(game.title)}</h4>` : ''}
       ${game.description ? `<p>${esc(game.description)}</p>` : ''}
       ${planningFacts.length ? `<div class="game-detail-plan-facts">${planningFacts.map((fact) => `<span>${esc(fact)}</span>`).join('')}</div>` : ''}
+      ${recurrencePattern ? `<div class="game-detail-recurrence"><b>${esc(recurrencePattern)}</b>${recurrenceEndLabel ? `<small>Through ${esc(recurrenceEndLabel)}</small>` : ''}</div>` : ''}
     </section>` : '';
     const startMs = new Date(game.scheduled_at).getTime();
     const conditionsExpected = game.status === 'upcoming' && court.id
@@ -34562,24 +35256,26 @@
       avatar_color: preview.sender_color,
       avatar_url: preview.sender_avatar_url,
     } : null;
-    const chatPreview = game.is_joined ? `<button type="button" class="game-chat-preview" id="gs-chat-card" aria-label="Open ${playNounTitle} chat${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">
+    const chatPreview = game.is_joined && (preview || Number(game.chat_unread) > 0) ? `<button type="button" class="game-chat-preview" id="gs-chat-card" aria-label="Open ${playNounTitle} chat${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">
       <span class="game-chat-preview-icon">${previewPerson ? avatarHtml(previewPerson, 'sm', 'span') : uiIcon('message')}</span>
-      <span class="row-main"><span class="row-title">${playNounTitle} chat${game.chat_unread ? ` <span class="tag live">${game.chat_unread > 9 ? '9+' : game.chat_unread} new</span>` : ''}</span>
-        <span class="row-sub">${preview ? `${esc(preview.sender_name)}: ${esc(preview.body || (preview.has_image ? 'Photo' : 'New message'))}` : 'No messages yet — coordinate with the group'}</span>
+      <span class="row-main"><span class="row-title">Chat${game.chat_unread ? ` <span class="tag live">${game.chat_unread > 9 ? '9+' : game.chat_unread} new</span>` : ''}</span>
+        <span class="row-sub">${preview ? `${esc(preview.sender_name)}: ${esc(preview.body || (preview.has_image ? 'Photo' : 'New message'))}` : `${Number(game.chat_unread)} unread message${Number(game.chat_unread) === 1 ? '' : 's'}`}</span>
       </span>${uiIcon('chevron-right', 'chev')}
     </button>` : '';
 
     return `
-      <div class="modal-head">
-        <div style="flex:1">
+      <div class="modal-head game-detail-header">
           <h3 class="game-detail-title" data-status="${esc(game.status)}"><span class="game-detail-status-icon" aria-hidden="true">${statusIcon}</span><span class="game-detail-headline">${headline}</span></h3>
-          <div class="row-sub">${subline}</div>
+        <button class="modal-close" aria-label="Close">${uiIcon('x')}</button>
+      </div>
+      <div class="game-detail-summary">
+          ${subline ? `<div class="row-sub">${subline}</div>` : ''}
           ${gameRosterStatusHtml(game)}
           ${detailMeta}
+        <div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
+          ${game.is_joined ? `<button type="button" class="btn btn-secondary" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} Chat${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
+          <button type="button" class="btn btn-secondary" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
         </div>
-        ${game.is_joined ? `<button class="icon-btn" id="gs-chat" title="${playNounTitle} chat — current players only" aria-label="${playNounTitle} chat — current players only" style="box-shadow:none;position:relative">${uiIcon('message')}${game.chat_unread ? `<span class="badge" style="top:-2px;right:-4px">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
-        <button class="icon-btn" id="gs-share-header" title="Share ${playNoun}" aria-label="Share ${playNoun}" style="box-shadow:none">${uiIcon('send')}</button>
-        <button class="modal-close" aria-label="Close">${uiIcon('x')}</button>
       </div>
       ${planningDetails}
       <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
@@ -34659,7 +35355,9 @@
       const snapshot = preserve ? captureGameViewState(box) : null;
       game = fresh;
       fingerprint = gameFingerprint(game);
+      options.onUpdated?.(game);
       box.innerHTML = gameScreenHtml(game);
+      if (modal.classList.contains('flow-child-modal')) decorateFlowChildModal(modal);
       injectScoreConflictBanner(box, game);
       box.removeAttribute('aria-busy');
       setDialogLabel(box, game.game_type === 'ranked' ? 'Ranked match details' : 'Play session details');
@@ -34703,6 +35401,16 @@
           try {
             const response = await loadCrew(refresh);
             if (!document.body.contains(crewTarget)) return;
+            const savedGroup = completedGameCrewSummary(game, response);
+            const groupButton = box.querySelector('#gs-save-group');
+            if (groupButton) {
+              groupButton.innerHTML = `${uiIcon('users')} ${savedGroup
+                ? savedGroup.invitation_pending ? 'Review group invitation' : 'Open play group'
+                : 'Start a play group'}`;
+              const groupHint = box.querySelector('#gs-save-group-hint');
+              if (groupHint) groupHint.textContent = savedGroup
+                ? savedGroup.name : 'Keep in touch before you pick the next date.';
+            }
             crewTarget.innerHTML = completedCrewConnectionsHtml(response.items || []);
             bindUserButtons(crewTarget);
             crewTarget.querySelectorAll('[data-connect-crew]').forEach((connectButton) => {
@@ -34743,6 +35451,29 @@
         hydrateCrewConnections();
       }
       box.querySelector('#gs-court')?.addEventListener('click', () => openChildModal(modal, () => openCourtDetail(court.id)));
+      box.querySelector('#gs-save-group')?.addEventListener('click', async (event) => {
+        const reset = beginButtonAction(event.currentTarget, 'Opening group…');
+        if (!reset) return;
+        try {
+          const response = await loadCrew(true);
+          const savedGroup = completedGameCrewSummary(game, response);
+          openChildModal(modal, () => savedGroup
+            ? openCrewScreen(savedGroup.id)
+            : openCreatePlayGroupSheet({
+                sourceGame: game,
+                onCreated: (crew) => {
+                  crewPromise = null;
+                  if (!modal.isConnected || modal._destroyed) return;
+                  game.saved_crew = crew;
+                  render(game, { preserve: true });
+                },
+              }));
+        } catch (error) {
+          showInlineActionError(box, error.message);
+        } finally {
+          reset();
+        }
+      });
       box.querySelectorAll('#gs-chat, #gs-chat-card, #gs-message-group').forEach((button) => {
         button.addEventListener('click', () => openChildModal(modal, () => openGameChat(game)));
       });
@@ -35012,9 +35743,7 @@
           }
         });
       });
-      box.querySelectorAll('#gs-share, #gs-share-header').forEach((button) => {
-        button.addEventListener('click', () => shareGame(game));
-      });
+      box.querySelector('#gs-share-header')?.addEventListener('click', () => shareGame(game));
       box.querySelector('#gs-arrival')?.addEventListener('click', () => {
         const gameRally = rallySummaryFromValue(game);
         openChildModal(modal, () => openRallyArrivalSheet(gameRally, { fromModal: modal }));
@@ -36111,6 +36840,8 @@
   // Home-area picker: device location or a city search. Used by onboarding
   // and the profile's Set/Change button.
   function openHomeAreaSheet({ intro, dismissLabel = 'Cancel', onSet, onDismiss } = {}) {
+    const courtId = Number(state.me?.home_court_id);
+    const primaryCourtId = Number.isSafeInteger(courtId) && courtId > 0 ? courtId : null;
     const modal = openModal(`
       <div class="checkin-sheet onboarding-sheet">
         <div class="checkin-sheet-icon home-area-hero" aria-hidden="true">${uiIcon('map-pin')}</div>
@@ -36118,6 +36849,7 @@
         <h3>Where do you usually play?</h3>
         <p class="row-sub onboarding-copy">${esc(intro || 'Courts, games, and players near here greet you when the app opens.')}</p>
         <button type="button" class="btn btn-primary btn-block onboarding-primary-action" id="ha-loc">${uiIcon('target')} <span>Use my current location</span></button>
+        ${primaryCourtId ? `<button type="button" class="btn btn-secondary btn-block home-area-primary-court" id="ha-primary-court">${uiIcon('home')} <span><b>Use my primary court’s area</b><small>${esc(state.me.home_court_name || 'My primary court')}</small></span></button>` : ''}
         <div class="onboarding-divider" aria-hidden="true"><span>or</span></div>
         <div class="form-field home-area-search-field">
           <label for="ha-city">Search by city</label>
@@ -36130,6 +36862,7 @@
       </div>
     `, { label: 'Choose your home area' });
     const locationButton = modal.querySelector('#ha-loc');
+    const primaryCourtButton = modal.querySelector('#ha-primary-court');
     const cityInput = modal.querySelector('#ha-city');
     const results = modal.querySelector('#ha-results');
     const dismissButton = modal.querySelector('.modal-close');
@@ -36148,7 +36881,7 @@
       if (saving) return;
       saving = true;
       const resetAction = beginButtonAction(trigger, pendingLabel, [
-        locationButton, dismissButton, ...results.querySelectorAll('[data-city]'),
+        locationButton, primaryCourtButton, dismissButton, ...results.querySelectorAll('[data-city]'),
       ]);
       if (!resetAction) { saving = false; return; }
       const cityWasDisabled = cityInput.disabled;
@@ -36189,6 +36922,18 @@
       commitHomeArea(locationButton, 'Getting your location…', (onError) => (
         setHomeAreaFromLocation({ silent: true, onError })
       ));
+    });
+    primaryCourtButton?.addEventListener('click', () => {
+      commitHomeArea(primaryCourtButton, 'Finding your court’s area…', async (onError) => {
+        const court = await api(`/courts/${primaryCourtId}`);
+        const lat = court.latitude;
+        const lng = court.longitude;
+        if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lng) || Math.abs(lng) > 180) {
+          throw new Error('This court’s area is unavailable. Choose a city instead.');
+        }
+        const label = [court.city, court.state].filter(Boolean).join(', ') || court.name || 'My primary court';
+        return saveHomeArea(lat, lng, label, { silent: true, onError });
+      });
     });
     bindCitySearch(cityInput, results, (p, row) => {
       commitHomeArea(row, 'Saving home area…', (onError) => (
@@ -36378,7 +37123,7 @@
       intro: replay
         ? 'Choose the area Third Shot should use for nearby courts, games, and players.'
         : 'Optional: choose a home area so Third Shot opens near the courts and players you care about.',
-      dismissLabel: replay ? 'Keep current area' : 'Maybe later',
+      dismissLabel: replay && committedAreaLatLng() ? 'Keep current area' : 'Maybe later',
       onSet: finish,
       onDismiss: finish,
     });
@@ -36540,10 +37285,9 @@
     }
   }
 
-  // The audit calls for progressive profile capture instead of one long,
-  // skippable form. Each screen commits independently, so a player can leave
-  // and resume from the persistent Play card without losing earlier choices.
-  function openPlayerBasicsOnboarding(next) {
+  // Each screen commits independently. Exiting pauses the entire flow;
+  // resuming from Play can skip profile details that are already complete.
+  function openPlayerBasicsOnboarding(next, { onPause, onlyMissing = false } = {}) {
     if (!state.me) { next?.(); return null; }
     const accountId = Number(state.me.id);
     const stillCurrent = () => Number(state.me?.id) === accountId;
@@ -36553,13 +37297,18 @@
     };
     const finishBinding = (modal, nextStep) => {
       let resolved = false;
-      const continueOnce = () => {
+      const pauseOnce = () => {
         if (resolved) return;
         resolved = true;
-        if (stillCurrent()) nextStep?.();
+        if (stillCurrent()) onPause?.();
       };
       modal._cleanupFns?.push(() => {
-        if (!resolved) queueMicrotask(continueOnce);
+        if (!resolved) queueMicrotask(pauseOnce);
+      });
+      modal.querySelector('[data-onboarding-pause]')?.addEventListener('click', () => {
+        if (resolved) return;
+        resolved = true;
+        dismissModal(modal, () => { if (stillCurrent()) onPause?.(); });
       });
       return () => {
         if (resolved) return;
@@ -36570,11 +37319,15 @@
 
     const openPhotoStep = () => {
       if (!stillCurrent()) return null;
+      if (onlyMissing && playerProfileSetupProgress().items.find((item) => item.key === 'photo').complete) {
+        next?.();
+        return null;
+      }
       const me = state.me;
       const modal = openModal(`
         <div class="checkin-sheet onboarding-sheet player-basics-sheet">
           <div class="checkin-sheet-icon" aria-hidden="true">${uiIcon('camera')}</div>
-          <span class="onboarding-kicker">Profile step 3 of 3</span>
+          <div class="onboarding-progress-row"><span class="onboarding-kicker">Profile step 3 of 3</span><button type="button" class="btn-link" data-onboarding-pause>Finish later</button></div>
           <h3>Add a profile photo</h3>
           <p class="row-sub onboarding-copy">A recognizable photo helps players know who they are meeting at the court.</p>
           <form id="onboarding-photo-form" novalidate>
@@ -36666,11 +37419,14 @@
 
     const openAvailabilityStep = () => {
       if (!stillCurrent()) return null;
+      if (onlyMissing && playerProfileSetupProgress().items.find((item) => item.key === 'availability').complete) {
+        return openPhotoStep();
+      }
       const me = state.me;
       const modal = openModal(`
         <div class="checkin-sheet onboarding-sheet player-basics-sheet">
           <div class="checkin-sheet-icon" aria-hidden="true">${uiIcon('calendar')}</div>
-          <span class="onboarding-kicker">Profile step 2 of 3</span>
+          <div class="onboarding-progress-row"><span class="onboarding-kicker">Profile step 2 of 3</span><button type="button" class="btn-link" data-onboarding-pause>Finish later</button></div>
           <h3>When do you usually play?</h3>
           <p class="row-sub onboarding-copy">Pick every time that normally works. Third Shot uses these choices for better game and player matches.</p>
           <form id="onboarding-availability-form" novalidate>
@@ -36721,13 +37477,16 @@
 
     const openLevelStep = () => {
       if (!stillCurrent()) return null;
+      if (onlyMissing && playerProfileSetupProgress().items.find((item) => item.key === 'level').complete) {
+        return openAvailabilityStep();
+      }
       const me = state.me;
       let rating = SELF_RATING_CHOICES.some(([value]) => value === Number(me.skill_rating))
         ? Number(me.skill_rating) : null;
       const modal = openModal(`
         <div class="checkin-sheet onboarding-sheet player-basics-sheet">
           <div class="checkin-sheet-icon" aria-hidden="true">${uiIcon('activity')}</div>
-          <span class="onboarding-kicker">Profile step 1 of 3</span>
+          <div class="onboarding-progress-row"><span class="onboarding-kicker">Profile step 1 of 3</span><button type="button" class="btn-link" data-onboarding-pause>Finish later</button></div>
           <h3>What’s your level?</h3>
           <p class="row-sub onboarding-copy">Choose the closest self-rating. The descriptions make the standard 2.0–5.5 scale easier to place yourself on.</p>
           <form id="onboarding-level-form" novalidate>
@@ -36779,8 +37538,24 @@
 
   function runNewPlayerOnboarding({ replay = false, profileOnly = false } = {}) {
     const accountId = Number(state.me?.id || 0);
+    if (!accountId) return null;
+    const pauseKey = `pp_setup_paused:${accountId}`;
+    // Pausing is a device-local preference, never a claim that all required
+    // profile data was saved. The server-owned completion flag stays accurate.
+    if (!replay && localStorage.getItem(pauseKey) === '1') return null;
+    if (replay) localStorage.removeItem(pauseKey);
+    const pauseSetup = () => {
+      if (Number(state.me?.id) !== accountId) return;
+      localStorage.setItem(pauseKey, '1');
+      pendingNewPlayerOnboardingAccountId = null;
+      toast('Finish your profile in Play, under My plans.');
+      resumePlayerInviteIntentAfterAuth();
+    };
     const finishSetup = () => {
       if (!state.me || Number(state.me.id) !== accountId) return;
+      // Reaching the end also counts as having seen setup, even if the player
+      // skipped optional fields. Keep missing details on Play, not in a loop.
+      localStorage.setItem(pauseKey, '1');
       Promise.resolve(completeNewPlayerOnboarding(accountId, { surfaceError: profileOnly }))
         .finally(() => {
           if (Number(state.me?.id) !== accountId) return;
@@ -36797,6 +37572,7 @@
     };
     const continueToCourts = () => {
       if (!state.me || Number(state.me.id) !== accountId) return;
+      if (profileOnly && state.me.home_court_id) { finishSetup(); return; }
       maybeSuggestStarterCourts(afterCourts);
     };
     return openPlayerBasicsOnboarding(() => {
@@ -36807,7 +37583,7 @@
       openHomeAreaOnboarding({ replay, onComplete: () => {
         continueToCourts();
       } });
-    });
+    }, { onPause: pauseSetup, onlyMissing: profileOnly });
   }
 
   function startPlayLiveRefresh() {

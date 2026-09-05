@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Third Shot — LinkedIn launch carousel</title>
+  <style>
+    :root {
+      --forest: #0d1711;
+      --forest-2: #16241b;
+      --green: #3f914c;
+      --green-bright: #6fe17e;
+      --lime: #e1ef68;
+      --cream: #f4f1e8;
+      --muted: #a9b8ad;
+      --line: rgba(255,255,255,.14);
+      --ink: #172019;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 1080px; height: 1350px; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--forest);
+      color: #fff;
+      -webkit-font-smoothing: antialiased;
+    }
+    body.render-small { width: 864px; height: 1080px; }
+    body.render-small .slide { transform: scale(.8); transform-origin: top left; }
+    .slide {
+      display: none;
+      position: relative;
+      width: 1080px;
+      height: 1350px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 86% 0%, rgba(86, 169, 93, .22), transparent 32%),
+        linear-gradient(155deg, var(--forest-2), var(--forest));
+    }
+    body[data-slide="1"] #slide-1,
+    body[data-slide="2"] #slide-2,
+    body[data-slide="3"] #slide-3,
+    body[data-slide="4"] #slide-4,
+    body[data-slide="5"] #slide-5,
+    body[data-slide="6"] #slide-6 { display: block; }
+
+    .brand {
+      position: absolute;
+      top: 56px;
+      left: 64px;
+      right: 64px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      z-index: 5;
+    }
+    .brand img {
+      width: 62px;
+      height: 62px;
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 10px 28px rgba(0,0,0,.24);
+    }
+    .brand-name {
+      font-weight: 900;
+      font-size: 29px;
+      letter-spacing: .09em;
+    }
+    .slide-count {
+      margin-left: auto;
+      color: rgba(255,255,255,.7);
+      font-size: 22px;
+      font-weight: 750;
+    }
+    .eyebrow {
+      color: var(--green-bright);
+      font-weight: 850;
+      font-size: 23px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    h1, h2, p { margin: 0; }
+    .title {
+      font-size: 70px;
+      line-height: .99;
+      letter-spacing: -.045em;
+      font-weight: 900;
+      text-wrap: balance;
+    }
+    .dek {
+      margin-top: 26px;
+      color: var(--muted);
+      font-size: 29px;
+      line-height: 1.34;
+      font-weight: 560;
+      text-wrap: balance;
+    }
+    .footer {
+      position: absolute;
+      left: 64px;
+      right: 64px;
+      bottom: 45px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 10;
+      color: rgba(255,255,255,.76);
+      font-size: 21px;
+      font-weight: 700;
+    }
+    .footer .swipe { color: var(--lime); }
+
+    .phone {
+      position: absolute;
+      overflow: hidden;
+      border: 11px solid #2b3930;
+      border-radius: 50px;
+      background: #111614;
+      box-shadow: 0 34px 70px rgba(0,0,0,.42), 0 0 0 1px rgba(255,255,255,.1);
+    }
+    .phone img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 38px;
+    }
+    .phone::after {
+      content: "";
+      position: absolute;
+      top: 11px;
+      left: 50%;
+      width: 88px;
+      height: 20px;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      background: rgba(0,0,0,.72);
+      box-shadow: 0 1px 0 rgba(255,255,255,.09);
+    }
+
+    /* Slide 1 */
+    #slide-1 .hero-photo {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      filter: saturate(.92) contrast(1.04);
+    }
+    #slide-1 .veil {
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(180deg, rgba(5,12,8,.85) 0%, rgba(5,12,8,.58) 34%, rgba(5,12,8,.16) 63%, rgba(5,12,8,.82) 100%),
+        linear-gradient(90deg, rgba(8,20,12,.34), transparent 70%);
+    }
+    #slide-1 .cover-copy {
+      position: absolute;
+      z-index: 3;
+      top: 190px;
+      left: 64px;
+      right: 64px;
+    }
+    #slide-1 .title {
+      max-width: 930px;
+      margin-top: 22px;
+      font-size: 86px;
+      text-shadow: 0 8px 28px rgba(0,0,0,.36);
+    }
+    #slide-1 .dek {
+      max-width: 750px;
+      color: rgba(255,255,255,.87);
+      font-size: 31px;
+      text-shadow: 0 3px 12px rgba(0,0,0,.4);
+    }
+    #slide-1 .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 32px;
+      padding: 16px 22px;
+      border-radius: 999px;
+      background: var(--lime);
+      color: #162016;
+      font-weight: 900;
+      font-size: 24px;
+      box-shadow: 0 12px 28px rgba(0,0,0,.24);
+    }
+    #slide-1 .live-pill::before {
+      content: "";
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #258a3d;
+    }
+
+    /* Slide 2 */
+    #slide-2 .copy {
+      position: absolute;
+      top: 165px;
+      left: 64px;
+      width: 480px;
+      z-index: 3;
+    }
+    #slide-2 .title { margin-top: 18px; font-size: 65px; }
+    #slide-2 .phone { width: 426px; height: 922px; top: 160px; right: 58px; transform: rotate(1.3deg); }
+    .mode-list { margin-top: 44px; display: grid; gap: 16px; }
+    .mode {
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255,255,255,.055);
+    }
+    .mode strong { display: block; color: #fff; font-size: 24px; line-height: 1.1; }
+    .mode span { display: block; margin-top: 8px; color: var(--muted); font-size: 20px; line-height: 1.25; }
+    .mode:nth-child(2) { border-color: rgba(225,239,104,.55); background: rgba(225,239,104,.08); }
+    .mode:nth-child(3) { border-color: rgba(111,225,126,.45); }
+
+    /* Slide 3 */
+    #slide-3 .copy, #slide-4 .copy {
+      position: absolute;
+      top: 158px;
+      left: 64px;
+      right: 64px;
+      z-index: 5;
+    }
+    #slide-3 .title, #slide-4 .title { max-width: 900px; margin-top: 17px; font-size: 68px; }
+    #slide-3 .dek, #slide-4 .dek { max-width: 900px; font-size: 27px; }
+    #slide-3 .phone-a, #slide-4 .phone-a {
+      width: 374px;
+      height: 810px;
+      left: 104px;
+      top: 480px;
+      transform: rotate(-3deg);
+      z-index: 2;
+    }
+    #slide-3 .phone-b, #slide-4 .phone-b {
+      width: 374px;
+      height: 810px;
+      right: 104px;
+      top: 480px;
+      transform: rotate(3deg);
+      z-index: 3;
+    }
+    #slide-3 .orbit, #slide-4 .orbit {
+      position: absolute;
+      top: 570px;
+      left: 50%;
+      width: 820px;
+      height: 620px;
+      transform: translateX(-50%);
+      border: 1px solid rgba(111,225,126,.2);
+      border-radius: 50%;
+      box-shadow: 0 0 100px rgba(63,145,76,.16) inset;
+    }
+
+    /* Slide 4 */
+    #slide-4 { background: radial-gradient(circle at 20% 90%, rgba(225,239,104,.12), transparent 34%), linear-gradient(155deg,#17251c,#0d1711); }
+    #slide-4 .phone-a { left: 95px; }
+    #slide-4 .phone-b { right: 95px; }
+
+    /* Slide 5 */
+    #slide-5 .copy {
+      position: absolute;
+      top: 174px;
+      left: 595px;
+      right: 62px;
+      z-index: 4;
+    }
+    #slide-5 .title { margin-top: 18px; font-size: 65px; }
+    #slide-5 .dek { font-size: 27px; }
+    #slide-5 .phone {
+      width: 470px;
+      height: 1017px;
+      left: 72px;
+      top: 173px;
+      transform: rotate(-1.6deg);
+    }
+    .stat-grid { margin-top: 42px; display: grid; gap: 18px; }
+    .stat {
+      padding: 22px;
+      border-radius: 24px;
+      background: rgba(255,255,255,.065);
+      border: 1px solid var(--line);
+    }
+    .stat b { display: block; color: var(--lime); font-size: 31px; line-height: 1; }
+    .stat span { display: block; margin-top: 9px; color: var(--muted); font-size: 21px; line-height: 1.25; }
+
+    /* Slide 6 */
+    #slide-6 {
+      background:
+        radial-gradient(circle at 80% 20%, rgba(225,239,104,.16), transparent 31%),
+        radial-gradient(circle at 12% 83%, rgba(111,225,126,.18), transparent 30%),
+        linear-gradient(145deg, #17281d, #0b130e);
+    }
+    #slide-6 .copy { position: absolute; top: 170px; left: 64px; right: 64px; }
+    #slide-6 .title { margin-top: 18px; max-width: 900px; font-size: 78px; }
+    .checklist {
+      margin-top: 48px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .check {
+      min-height: 132px;
+      padding: 25px 25px 23px;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: rgba(255,255,255,.055);
+    }
+    .check .top { display: flex; align-items: center; gap: 13px; }
+    .check .tick {
+      display: grid;
+      place-items: center;
+      width: 31px;
+      height: 31px;
+      border-radius: 50%;
+      background: var(--lime);
+      color: var(--ink);
+      font-size: 19px;
+      font-weight: 950;
+    }
+    .check strong { font-size: 25px; line-height: 1.05; }
+    .check p { margin-top: 12px; color: var(--muted); font-size: 20px; line-height: 1.25; }
+    #slide-6 .cta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      margin-top: 31px;
+      padding: 26px 30px;
+      border-radius: 28px;
+      background: var(--lime);
+      color: var(--ink);
+      font-size: 25px;
+      font-weight: 850;
+    }
+    #slide-6 .cta b { font-size: 29px; }
+  </style>
+</head>
+<body>
+  <section class="slide" id="slide-1">
+    <img class="hero-photo" src="hero-community-photo.png" alt="Four local pickleball players laughing together after a game">
+    <div class="veil"></div>
+    <div class="brand">
+      <img src="third-shot-icon.png" alt="">
+      <span class="brand-name">THIRD SHOT</span>
+      <span class="slide-count">1 / 6</span>
+    </div>
+    <div class="cover-copy">
+      <div class="eyebrow">Big update · live now</div>
+      <h1 class="title">Getting four people on a court shouldn’t be this hard.</h1>
+      <p class="dek">I built this Third Shot update to get from “who can play?” to a real local game faster.</p>
+      <div class="live-pill">The new local-game loop is live</div>
+    </div>
+    <div class="footer"><span>third-shot.vercel.app</span><span class="swipe">Swipe →</span></div>
+  </section>
+
+  <section class="slide" id="slide-2">
+    <div class="brand"><span class="brand-name">THIRD SHOT</span><span class="slide-count">2 / 6</span></div>
+    <div class="copy">
+      <div class="eyebrow">Say what you actually mean</div>
+      <h2 class="title">Four honest ways to say, “I can play.”</h2>
+      <div class="mode-list">
+        <div class="mode"><strong>📣 Available this hour</strong><span>I could play at this court.</span></div>
+        <div class="mode"><strong>⚡ Play now</strong><span>I’m physically here and ready.</span></div>
+        <div class="mode"><strong>🚗 I’m on my way</strong><span>Hold one spot for 5, 10 or 15 minutes.</span></div>
+        <div class="mode"><strong>📅 Plan ahead</strong><span>Pick the time and your people.</span></div>
+      </div>
+    </div>
+    <div class="phone"><img src="screen-home.png" alt="Third Shot Play home screen"></div>
+    <div class="footer"><span>No fake check-ins. No guessing.</span><span class="swipe">Swipe →</span></div>
+  </section>
+
+  <section class="slide" id="slide-3">
+    <div class="brand"><span class="brand-name">THIRD SHOT</span><span class="slide-count">3 / 6</span></div>
+    <div class="copy">
+      <div class="eyebrow">Fill the game</div>
+      <h2 class="title">Fill the last spots without starting another group chat.</h2>
+      <p class="dek">Invite friends, ask the court, or share the link. The live card updates with the real roster and closes with the game.</p>
+    </div>
+    <div class="orbit"></div>
+    <div class="phone phone-a"><img src="screen-fill-game.png" alt="Fill the game recruiting sheet"></div>
+    <div class="phone phone-b"><img src="screen-live-court-card.png" alt="Live game card in court chat"></div>
+    <div class="footer"><span>Join or waitlist right from court chat.</span><span class="swipe">Swipe →</span></div>
+  </section>
+
+  <section class="slide" id="slide-4">
+    <div class="brand"><span class="brand-name">THIRD SHOT</span><span class="slide-count">4 / 6</span></div>
+    <div class="copy">
+      <div class="eyebrow">Crews</div>
+      <h2 class="title">One good game can become a real crew.</h2>
+      <p class="dek">Opt in, keep the chat private, and schedule the next game with the accepted roster already selected. Or tap Play again now.</p>
+    </div>
+    <div class="orbit"></div>
+    <div class="phone phone-a"><img src="screen-crew.png" alt="Private Crew roster"></div>
+    <div class="phone phone-b"><img src="screen-crew-planner.png" alt="Crew next-game planner"></div>
+    <div class="footer"><span>Less rebuilding the group from scratch.</span><span class="swipe">Swipe →</span></div>
+  </section>
+
+  <section class="slide" id="slide-5">
+    <div class="brand"><span class="brand-name">THIRD SHOT</span><span class="slide-count">5 / 6</span></div>
+    <div class="phone"><img src="screen-map.png" alt="Court discovery map powered by OpenStreetMap"></div>
+    <div class="copy">
+      <div class="eyebrow">Court discovery</div>
+      <h2 class="title">And yes—the map works without an API key.</h2>
+      <p class="dek">Search an area, compare courts, and see what’s happening nearby.</p>
+      <div class="stat-grid">
+        <div class="stat"><b>18,000+</b><span>pickleball courts across the US</span></div>
+        <div class="stat"><b>Live context</b><span>players here, open games, lights, indoor and more</span></div>
+        <div class="stat"><b>OpenStreetMap</b><span>no paid map key required</span></div>
+      </div>
+    </div>
+    <div class="footer"><span>Find the court. Then find the game.</span><span class="swipe">Swipe →</span></div>
+  </section>
+
+  <section class="slide" id="slide-6">
+    <div class="brand"><span class="brand-name">THIRD SHOT</span><span class="slide-count">6 / 6</span></div>
+    <div class="copy">
+      <div class="eyebrow">What just shipped</div>
+      <h2 class="title">The whole local-game loop.</h2>
+      <div class="checklist">
+        <div class="check"><div class="top"><span class="tick">✓</span><strong>Play now</strong></div><p>Join or start the live rally where you are.</p></div>
+        <div class="check"><div class="top"><span class="tick">✓</span><strong>I’m on my way</strong></div><p>A short, honest held spot before you arrive.</p></div>
+        <div class="check"><div class="top"><span class="tick">✓</span><strong>Available this hour</strong></div><p>Turn availability into a quick game.</p></div>
+        <div class="check"><div class="top"><span class="tick">✓</span><strong>Fill the game</strong></div><p>Friends, court chat and sharing in one place.</p></div>
+        <div class="check"><div class="top"><span class="tick">✓</span><strong>Crews + Play again</strong></div><p>Keep good groups together and play sooner.</p></div>
+        <div class="check"><div class="top"><span class="tick">✓</span><strong>No-key court map</strong></div><p>Find courts and local activity nationwide.</p></div>
+      </div>
+      <div class="cta"><span>It’s still early. Try it and tell me where you get stuck.</span><b>third-shot.vercel.app</b></div>
+    </div>
+    <div class="footer"><span>Built for less coordinating and more playing.</span><span class="swipe">Third Shot</span></div>
+  </section>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const requested = params.get('slide') || '1';
+    if (params.get('render') === 'small') document.body.classList.add('render-small');
+    document.body.dataset.slide = /^[1-6]$/.test(requested) ? requested : '1';
+  </script>
+</body>
+</html>

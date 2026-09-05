@@ -20,6 +20,11 @@ playful language for celebrations, never errors or required decisions.
 - **Ranked match** means a confirmed result that changes the **Third Shot match rating**.
 - **Self-rating** is the player's editable 2.0–5.5 level. **DUPR** is always
   labeled as an external rating and never shortened to “rating” by itself.
+- **Friends** are players connected through an accepted friend request. Do not
+  describe this relationship as following someone.
+- **Usual play times** are preferences, not confirmed availability. Say
+  “usually plays” or “shared usual times” instead of “free” or “available” when
+  only profile preferences support the claim.
 
 ## Privacy and status copy
 

@@ -1254,7 +1254,7 @@ def list_friends():
 @social_bp.get('/players/recent')
 @login_required
 def recent_coplayers():
-    """Return recent eligible co-players for low-friction game planning.
+    """Return recent eligible co-players for reconnecting and game planning.
 
     The result is viewer-relative, block-safe, and intentionally small. It may
     include both friends and non-friends because a completed shared game is
@@ -1278,6 +1278,13 @@ def recent_coplayers():
     stats = {}
     ordered_ids = []
     for game in games:
+        # A roster spot without a scored team is not evidence that the viewer
+        # played. Unscored completed sessions credit the entire recorded roster.
+        if game.completion_kind == 'score' and not any(
+            player.user_id == g.current_user.id and player.team in (1, 2)
+            for player in game.players
+        ):
+            continue
         for player in game.players:
             user_id = player.user_id
             credited = game.completion_kind == 'session' or player.team in (1, 2)
@@ -1294,23 +1301,39 @@ def recent_coplayers():
                     'last_played_at': game.completed_at,
                 }
             stats[user_id]['games_together'] += 1
-    ordered_ids = ordered_ids[:limit]
     users = {
         user.id: user for user in User.query.filter(
             User.id.in_(ordered_ids), User.deleted_at.is_(None),
         ).all()
     } if ordered_ids else {}
+    ordered_ids = [user_id for user_id in ordered_ids if user_id in users][:limit]
     friends = friend_ids(g.current_user.id)
+    relationships = {}
+    if ordered_ids:
+        for friendship in Friendship.query.filter(or_(
+            and_(Friendship.requester_id == g.current_user.id,
+                 Friendship.addressee_id.in_(ordered_ids)),
+            and_(Friendship.addressee_id == g.current_user.id,
+                 Friendship.requester_id.in_(ordered_ids)),
+        )).all():
+            other_id = (friendship.addressee_id
+                        if friendship.requester_id == g.current_user.id
+                        else friendship.requester_id)
+            relationships[other_id] = friendship
     items = []
     for user_id in ordered_ids:
         user = users.get(user_id)
         if not user:
             continue
         item = user.to_public_dict()
+        friendship = relationships.get(user_id)
         item.update({
             'games_together': stats[user_id]['games_together'],
             'last_played_at': iso(stats[user_id]['last_played_at']),
             'is_friend': user_id in friends,
+            'friendship_status': friendship.status if friendship else None,
+            'friendship_id': friendship.id if friendship else None,
+            'outgoing': bool(friendship and friendship.requester_id == g.current_user.id),
         })
         items.append(item)
     return jsonify({'items': items})

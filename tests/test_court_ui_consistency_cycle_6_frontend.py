@@ -129,7 +129,7 @@ def test_condition_report_is_typed_inline_and_recovers_without_a_toast_only_erro
 
 def test_court_detail_uses_product_icons_and_closed_courts_bind_only_live_controls():
     detail = section("async function openCourtDetail", "function openCourtPlayerActions")
-    assert 'class="cd-hero-img placeholder" aria-hidden="true">${uiIcon(\'pickleball\')}' in detail
+    assert 'class="cd-hero-img placeholder" aria-hidden="true"></div>' in detail
     assert "data-remove-on-error" in detail
     assert "onerror=\"this.remove()\"" not in detail
     assert 'class="cd-closed-banner" role="status"' in detail
@@ -144,7 +144,7 @@ def test_court_detail_uses_product_icons_and_closed_courts_bind_only_live_contro
     assert "modal.querySelector('#cd-schedule')?.addEventListener" in detail
     assert "modal.querySelector('#cd-ranked')?.addEventListener" in detail
     assert "modal.querySelector('#cd-chat')?.addEventListener" in detail
-    assert ".cd-hero-title { position: absolute; z-index: 2;" in STYLES
+    assert ".cd-hero-title { position: relative; z-index: 2;" in STYLES
     assert "position: absolute; z-index: 2; inset: 0;" in STYLES
     assert ".cd-closed-banner" in STYLES
     assert ".court-claim-action" in STYLES

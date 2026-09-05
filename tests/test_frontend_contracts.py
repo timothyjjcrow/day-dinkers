@@ -167,16 +167,16 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r68';" in SERVICE_WORKER
+    assert "const CACHE = 'thirdshot-v15-r69';" in SERVICE_WORKER
     for asset in (
-        "/release-assets/r66/styles-v15.min.css",
-        "/release-assets/r66/crew-planner-v15.min.js",
-        "/release-assets/r66/app-v15.min.js",
+        "/release-assets/r67/styles-v15.min.css",
+        "/release-assets/r67/crew-planner-v15.min.js",
+        "/release-assets/r67/app-v15.min.js",
     ):
         assert asset in SERVICE_WORKER
-    assert 'href="/release-assets/r66/styles-v15.min.css"' in INDEX
-    assert 'src="/release-assets/r66/crew-planner-v15.min.js"' in INDEX
-    assert 'src="/release-assets/r66/app-v15.min.js"' in INDEX
+    assert 'href="/release-assets/r67/styles-v15.min.css"' in INDEX
+    assert 'src="/release-assets/r67/crew-planner-v15.min.js"' in INDEX
+    assert 'src="/release-assets/r67/app-v15.min.js"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -268,7 +268,8 @@ def test_community_is_a_universal_attention_aware_inbox():
     assert "if (row.disabled) return;" in APP
     rows = APP[APP.index("function bindCommunityConversationRows"):APP.index("function openCreateGroupChoiceSheet")]
     assert "roomModal._cleanupFns.push" in rows
-    assert "Opening the room already performed the authoritative read" in rows
+    assert "opening group info" in rows
+    assert "leaves unread messages alone" in rows
     assert "state.tab === 'chat' && ['chats', 'groups'].includes(state.chatSeg)" in rows
     assert "if (state.tab === 'chat') renderChat();" not in rows
     assert "avatarHtml(chat.user, '', 'span')" in APP

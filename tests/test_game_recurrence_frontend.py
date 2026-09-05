@@ -28,7 +28,7 @@ def test_planner_collects_timezone_multi_weekday_pattern_and_end_date():
         'recurrence_timezone: recurrenceTimezone',
         'recurrence_weekdays: [...recurrenceWeekdays]',
         'recurrence_ends_on: recurrenceEndsOn',
-        'across daylight-saving changes',
+        'Repeat days, times, and the end date follow',
         "plannerOptions.recurrence === 'weekly'",
         'Array.isArray(plannerOptions.recurrenceWeekdays)',
         "${initiallyRecurring ? 'checked' : ''}",
@@ -77,7 +77,7 @@ def test_host_edit_exposes_and_submits_the_same_local_rule():
         'recurrence_timezone: editRecurrenceTimezone',
         'recurrence_weekdays: [...editRecurrenceDays]',
         'recurrence_ends_on: recurrenceEnd',
-        'across daylight-saving changes',
+        'Repeat days, times, and the end date follow',
     ):
         assert contract in edit
 
@@ -94,7 +94,7 @@ def test_detail_has_standing_rsvp_skip_rejoin_and_leave_series_actions():
 
     for contract in (
         'game.recurrence_weekdays',
-        'game.recurrence_timezone',
+        'recurrenceClockLabel(game)',
         'game.recurrence_ends_on',
         'game.my_recurrence_rsvp',
         'id="gs-standing-rsvp"',
@@ -104,6 +104,9 @@ def test_detail_has_standing_rsvp_skip_rejoin_and_leave_series_actions():
         'Rejoin this date',
     ):
         assert contract in detail
+
+    clock = section('function recurrenceClockLabel', 'function gameScreenHtml')
+    assert 'game.recurrence_timezone' in clock
 
     assert '`/games/${game.id}/recurrence-rsvp`' in actions
     assert '`/games/${game.id}/skip-occurrence`' in actions

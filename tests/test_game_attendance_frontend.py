@@ -31,8 +31,9 @@ def test_hosts_get_recruiting_as_the_primary_underfilled_action():
     assert 'data-roster-boost-channel="friends"' in APP
     assert 'data-roster-boost-channel="court"' in APP
     assert 'data-roster-boost-channel="share"' in APP
-    assert 'Confirmed ${confirmed}' in detail
-    assert 'Unconfirmed ${unconfirmed}' in detail
+    assert '${gameRosterStatusHtml(game)}' in detail
+    assert 'Confirmed ${confirmed}' not in detail
+    assert 'Unconfirmed ${unconfirmed}' not in detail
 
 
 def test_reminder_decline_uses_the_same_guarded_leave_flow():

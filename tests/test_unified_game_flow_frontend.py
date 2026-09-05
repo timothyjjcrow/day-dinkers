@@ -223,7 +223,7 @@ def test_play_launcher_is_intent_specific_while_map_and_court_keep_compatibility
     assert "startInstantRally" not in preview
 
     detail = section("async function openCourtDetail", "function openCheckInSheet")
-    assert 'id="cd-play-now">${uiIcon(\'users\')} Find people to play here</button>' in detail
+    assert "checkedIn ? 'Look for a game' : 'Check in to find players'" in detail
     assert "openCheckInSheet(court" in detail
     assert "commitLookingIntent(event.currentTarget, true);" in detail
     assert "applyAuthoritativeCheckIn(court, response, desiredLooking);" in detail

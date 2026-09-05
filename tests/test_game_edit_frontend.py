@@ -71,10 +71,11 @@ def test_host_management_is_disclosed_and_share_stays_in_the_header():
 
     assert 'class="game-host-toolbar simple-disclosure" aria-label="Host tools"' in detail
     assert "You’re hosting" in detail
-    for action_id in ("gs-edit", "gs-reschedule", "gs-share", "gs-cancel"):
+    for action_id in ("gs-edit", "gs-reschedule", "gs-cancel"):
         assert f'id="{action_id}"' in detail
     assert 'id="gs-share-header"' in detail
-    assert "querySelectorAll('#gs-share, #gs-share-header')" in screen
+    assert "querySelector('#gs-share-header')" in screen
+    assert 'id="gs-share"' not in detail
     assert "querySelector('#gs-edit')" in screen
     assert "openEditGameSheet(game" in screen
     assert "Players keep their spot and will be asked to re-confirm for the new time." in screen

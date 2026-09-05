@@ -269,7 +269,7 @@ def test_quiet_cards_hide_zero_metrics_and_zero_results_hide_sorting():
     assert "c.upcoming_games > 0" in card
     assert "later session" in card
     assert "if (c.rating_count > 0 && c.rating_avg)" in card
-    assert 'class="court-card-quiet">Quiet now' in card
+    assert 'class="court-card-quiet">No players checked in' in card
 
     summary = section("function syncCourtSheetSummary", "function openCourtListPanel")
     assert "const activitySortOwnsOrder = state.courtFilters.active && n > 0;" in summary
@@ -351,7 +351,8 @@ def test_all_native_selects_are_presented_through_one_branded_picker():
 
 def test_court_cards_expose_the_visible_decision_data_in_their_accessible_name():
     card = section("function courtRowHtml", "function sortCourts")
-    assert "const accessibleActivity = quietNow ? 'Quiet now'" in card
+    assert "const accessibleActivity = [" in card
+    assert "quietNow ? 'No players checked in'" in card
     assert "const accessibleAmenities = [" in card
     assert "cond ? cond[1] : ''" in card
     assert "`${c.num_courts} court${c.num_courts === 1 ? '' : 's'}`" in card
@@ -381,7 +382,10 @@ def test_verified_venue_programs_have_a_direct_accessible_discovery_path():
     assert 'class="court-card-main" data-court=' in card
     assert 'class="court-card-programs" data-court-business=' in card
     assert "`${businessLabel} available from the venue`" in card
-    assert "event.detail === 0" not in APP
+    # Court activation must work for keyboard and pointer users alike. Other
+    # views may inspect input type solely to restore focus after rendering.
+    assert "event.detail === 0" not in preview
+    assert "event.detail === 0" not in card
     assert ".court-card-programs" in STYLES
     assert "min-height: 44px" in STYLES
     assert ".court-preview-actions.has-business" in STYLES
@@ -437,7 +441,7 @@ def test_court_detail_leads_with_now_and_defers_venue_management():
     assert "const myOpenGame = nowGames.find((game) => game.is_joined && game.status === 'upcoming') || null;" in detail
     assert "const primaryAction = courtClosed ? '' : myOpenGame" in detail
     assert 'id="cd-open-game" data-game-id="${myOpenGame.id}">Open your play session' in detail
-    assert "Find people to play here" in detail
+    assert "checkedIn ? 'Look for a game' : 'Check in to find players'" in detail
     assert "Create game here" in detail
     assert "Set up ranked match" in detail
     assert "const directionsAction = mapsUrl ?" in detail

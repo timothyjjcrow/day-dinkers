@@ -533,7 +533,8 @@ def test_successful_child_edits_refresh_one_retained_community_or_crew_parent():
     assert "async function openCrewInviteSheet(crew, onSaved = null)" in crew
     assert "onSaved?.();" in crew
     assert "if (onSaved) closeModal(modal);" in crew
-    assert "openCrewInviteSheet(crew, () => {" in crew_screen
+    assert "openCrewInviteSheet(crew, (viewOptions = {}) => {" in crew_screen
+    assert "transitionModal(modal, () => openCrewScreen(crew.id, viewOptions));" in crew_screen
     assert "transitionModal(modal, () => openCrewScreen(crew.id));" in crew_screen
 
     assert "function openRenameCrewSheet(crew, onSaved = null)" in rename

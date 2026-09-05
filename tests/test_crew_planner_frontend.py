@@ -115,7 +115,7 @@ def test_postgame_ctas_open_the_reviewable_planner_before_any_mutation():
     assert 'plannedPlayerCount > effectiveCapacity' in APP
     assert "title.textContent = 'Same players as last time';" in APP
     assert 'id="ng-save-group"' in APP
-    assert 'Group invitations are sent only after you schedule this game.' in APP
+    assert 'Your invitations above are for the next game.' in APP
 
 
 def test_uncertain_create_recovery_replays_immutable_payload_across_reload():
@@ -147,7 +147,7 @@ def test_play_again_never_creates_a_game_or_group_before_schedule_submit():
     planner = APP[APP.index('async function openPostGamePlanner'):APP.index('function completedCrewConnectionsHtml')]
     assert "crewRequest || api(`/games/${game.id}/crew`)" in planner
     assert "method: 'POST'" not in planner
-    assert 'options.offerSaveGroup = !savedGroup;' in planner
+    assert 'options.offerSaveGroup = false;' in planner
     assert 'openNewGameModal(options)' in planner
     assert 'rematchAttemptKey' not in APP
     assert 'gs-rematch' not in APP

@@ -12,7 +12,10 @@ def test_completed_game_reviews_source_roster_before_optional_group_save():
     assert "crewRequest || api(`/games/${game.id}/crew`)" in APP
     assert 'id="cel-play-again"' in APP
     assert 'id="gs-play-again"' in APP
-    assert 'options.offerSaveGroup = !savedGroup;' in APP
+    assert 'options.offerSaveGroup = false;' in APP
+    assert 'id="gs-save-group"' in APP
+    assert 'sourceGame: game,' in APP
+    assert 'game.saved_crew = crew;' in APP
     assert 'id="ng-save-group"' in APP
     assert "api(`/games/${sourceGameId}/crew`, {" in APP
     assert "body: JSON.stringify({ name: saveGroupName })" in APP
@@ -90,7 +93,7 @@ def test_community_has_crews_pending_invites_and_response_actions():
     assert 'data-crew-response="decline"' in APP
     assert "api(`/crews/${crewId}/respond`" in APP
     assert 'body: JSON.stringify({ accept })' in APP
-    assert "else if (kind === 'crew') roomModal = await openCrewChatById(id);" in APP
+    assert "? await openCrewScreen(id) : await openCrewChatById(id)" in APP
     assert "roomModal._cleanupFns.push" in APP
     assert '>Decline</button>' in APP
 
@@ -107,13 +110,13 @@ def test_pending_invite_routes_open_the_consent_card_in_place():
 
 def test_crew_home_management_chat_outbox_and_hash_route_are_wired():
     assert "api(`/crews/${crewId}`)" in APP
-    assert "uiIcon('calendar')} Plan with this group" in APP
+    assert "upcomingGames.length ? 'Plan another' : 'Plan with this group'" in APP
     assert "uiIcon('message')} Group chat" in APP
     assert "api(`/crews/${crew.id}`, { method: 'PATCH'" in APP
     assert "api(`/crews/${crew.id}/leave`, { method: 'POST' })" in APP
     assert "api(`/crews/${crew.id}`, { method: 'DELETE' })" in APP
     assert "api(`/crews/${crew.id}/chat`)" in APP
-    assert 'bindChatContinuity(modal, msgsEl, input, `crew:${crew.id}`)' in APP
+    assert 'bindChatContinuity(modal, msgsEl, input, `crew:${crew.id}`, { emptyMessageHtml })' in APP
     assert "crew: 'crews'" in APP
     assert "'court', 'game', 'tournament', 'club', 'crew', 'league'" in APP
     assert "else if (route.kind === 'crew') openCrewScreen(route.id);" in APP
@@ -181,7 +184,8 @@ def test_crew_detail_consumes_upcoming_games_and_owner_removal_api():
     screen_end = APP.index("function openRenameCrewSheet", screen_start)
     screen = APP[screen_start:screen_end]
     assert "Array.isArray(crew.upcoming_games)" in screen
-    assert 'data-open-crew-game="${game.id}"' in screen
+    assert 'crewUpcomingGamesHtml(upcomingGames)' in screen
+    assert 'data-open-crew-game="${game.id}"' in APP
     assert 'Upcoming play' in screen
     assert 'data-crew-remove-member="${memberId}"' in screen
     assert "api(`/crews/${crew.id}/members/${memberId}`, { method: 'DELETE' })" in screen
@@ -200,8 +204,8 @@ def test_play_group_friend_loaders_keep_retry_and_selection_continuity():
         assert "const loadFriends = async () =>" in source
         assert "list.setAttribute('aria-busy', 'true');" in source
         assert "list.innerHTML = skeletonHtml(3);" in source
-        assert "renderError(list, error.message || 'Friends could not load.', loadFriends);" in source
-        assert "await loadFriends();" not in source
+        assert "renderError(list, error.message ||" in source
+        assert "loadFriends);" in source
         assert "let friendsReady = false;" in source
         assert "submit.disabled = true;" in source
         assert "if (!friendsReady)" in source
@@ -209,3 +213,6 @@ def test_play_group_friend_loaders_keep_retry_and_selection_continuity():
         assert source.index("event.preventDefault();") < source.index("loadFriends();")
         assert "const liveIds = new Set" in source
         assert "[...selectedIds].forEach" in source
+
+    assert "error.code === 'crew_invitees_changed') await loadFriends();" in create
+    assert "await loadFriends();" not in invite

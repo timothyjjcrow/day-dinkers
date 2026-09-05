@@ -186,6 +186,13 @@ def _crew_detail_payload(crew, viewer_id):
     if viewer_id == crew.owner_id:
         data['pending_invites'] = _owner_pending_invitation_payloads(crew)
 
+    data['upcoming_games'] = [
+        game.to_dict(viewer_id) for game in _crew_upcoming_games(crew, viewer_id)
+    ]
+    return data
+
+
+def _crew_upcoming_games(crew, viewer_id, limit=8):
     # A later join must not reveal a private game whose immutable invite
     # snapshot did not include that player.
     upcoming = (
@@ -205,12 +212,27 @@ def _crew_detail_payload(crew, viewer_id):
 
     viewer_friends = friend_ids(viewer_id)
     viewer_hidden = blocked_pair_ids(viewer_id)
-    data['upcoming_games'] = [
-        game.to_dict(viewer_id) for game in upcoming
-        if game.visible_to(viewer_id, viewer_friends)
-        and not _game_has_blocked_participant(game, viewer_id, viewer_hidden)
-    ][:8]
-    return data
+    visible = []
+    for game in upcoming:
+        if (game.visible_to(viewer_id, viewer_friends)
+                and not _game_has_blocked_participant(game, viewer_id, viewer_hidden)):
+            visible.append(game)
+            if len(visible) >= limit:
+                break
+    return visible
+
+
+def _crew_chat_next_game(crew, viewer_id):
+    upcoming = _crew_upcoming_games(crew, viewer_id, limit=1)
+    if not upcoming:
+        return None
+    game = upcoming[0].to_dict(viewer_id, slim_players=True)
+    return {
+        key: game[key] for key in (
+            'id', 'scheduled_at', 'court', 'max_players', 'spots_left',
+            'is_joined', 'is_invited', 'waitlist_position',
+        )
+    }
 
 
 def _minimal_invitation_payload(invite):
@@ -511,6 +533,18 @@ def create_crew_from_game(game_id):
         # offline retry resurrect the same crew under a fresh row.
         return jsonify({'error': 'crew_archived'}), 409
 
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    target_ids = None
+    if 'invite_user_ids' in payload:
+        target_ids, invite_error = _parse_invite_user_ids(payload, required=True)
+        if invite_error:
+            return jsonify({'error': invite_error}), 400
+        if any(user_id == g.current_user.id or user_id not in scored_ids
+               for user_id in target_ids):
+            return jsonify({'error': 'invalid_invite_user_ids'}), 400
+
     # Serialize eligibility against blocking and account deletion. Social
     # pair locks use the same ascending User order, so a block cannot commit in
     # the gap between our check and the durable CrewInvite rows.
@@ -524,9 +558,6 @@ def create_crew_from_game(game_id):
         return jsonify({'error': 'authentication_required'}), 401
     g.current_user = locked_owner
 
-    payload = request.get_json(silent=True) or {}
-    if not isinstance(payload, dict):
-        return jsonify({'error': 'invalid_payload'}), 400
     requested_name = str(payload.get('name') or '').strip()
     default_name = (
         f'{game.scheduled_at.strftime("%A")} at {game.court.name}'
@@ -535,6 +566,21 @@ def create_crew_from_game(game_id):
     name = (requested_name or default_name)[:80]
     if len(name) < 3:
         return jsonify({'error': 'name_must_be_3_to_80_chars'}), 400
+
+    candidates = {
+        user_id: user for user_id, user in locked_by_id.items()
+        if user_id != g.current_user.id and user.deleted_at is None
+        and not is_blocked_between(g.current_user.id, user_id)
+    }
+    # Explicit review never silently substitutes or drops a selected player.
+    # Old clients may omit the selection, retaining their eligible source roster.
+    if target_ids is not None and any(user_id not in candidates for user_id in target_ids):
+        return jsonify({'error': 'crew_invitees_changed'}), 409
+    invite_ids = target_ids if target_ids is not None else [
+        user_id for user_id in scored_ids if user_id in candidates
+    ]
+    if len(invite_ids) > MAX_CREW_SIZE - 1:
+        return jsonify({'error': 'too_many_invitees'}), 400
 
     crew = Crew(
         owner_id=g.current_user.id,
@@ -567,17 +613,8 @@ def create_crew_from_game(game_id):
 
     sync_group_identity('crew', crew)
 
-    candidates = {
-        user_id: user for user_id, user in locked_by_id.items()
-        if user_id != g.current_user.id and user.deleted_at is None
-    }
     invited_count = 0
-    for user_id in scored_ids:
-        if user_id == g.current_user.id:
-            continue
-        candidate = candidates.get(user_id)
-        if not candidate or is_blocked_between(g.current_user.id, user_id):
-            continue
+    for user_id in invite_ids:
         db.session.add(CrewInvite(
             crew=crew,
             invitee_id=user_id,
@@ -600,6 +637,7 @@ def create_crew_from_game(game_id):
         'crew': _crew_detail_payload(crew, g.current_user.id),
         'created': True,
         'invited_count': invited_count,
+        'invited_user_ids': invite_ids,
     }), 201
 
 
@@ -785,6 +823,40 @@ def invite_to_crew(crew_id):
         'invited_user_ids': invited_user_ids,
         'skipped': skipped,
     })
+
+
+@crews_bp.delete('/crews/<int:crew_id>/invites/<int:invite_id>')
+@rate_limit(30, 3600)
+@login_required
+def withdraw_crew_invitation(crew_id, invite_id):
+    """Release pending capacity without ever removing an accepted member."""
+    crew, err = _member_crew_for_update_or_404(crew_id)
+    if err:
+        return err
+    if crew.owner_id != g.current_user.id:
+        return jsonify({'error': 'crew_not_found'}), 404
+    invite = CrewInvite.query.filter_by(id=invite_id, crew_id=crew.id).first()
+    if not invite:
+        return jsonify({'error': 'crew_not_found'}), 404
+    payload = request.get_json(silent=True)
+    expected = payload.get('expected_invited_at') if isinstance(payload, dict) else None
+    if not isinstance(expected, str) or not expected:
+        return jsonify({'error': 'invitation_version_required'}), 400
+    if invite.status == 'revoked':
+        return jsonify({'withdrawn': True})
+    # Durable invitation rows are reused when someone is invited again. A
+    # stale screen must not withdraw a newer invitation with the same row ID.
+    stamp = invite.updated_at or invite.created_at
+    current_version = stamp.isoformat() + 'Z' if stamp else None
+    if invite.status != 'pending' or expected != current_version:
+        return jsonify({'error': 'crew_invitation_changed'}), 409
+    invite.status = 'revoked'
+    invite.resolved_at = utcnow()
+    Notification.query.filter_by(
+        user_id=invite.invitee_id, related_crew_id=crew.id, kind='crew_invite',
+    ).delete(synchronize_session=False)
+    db.session.commit()
+    return jsonify({'withdrawn': True})
 
 
 @crews_bp.post('/crews/<int:crew_id>/respond')
@@ -1060,7 +1132,8 @@ def crew_chat(crew_id):
     db.session.commit()
     return jsonify({
         'conversation': conversation.to_dict(crew.name),
-        'crew': {'id': crew.id, 'name': crew.name},
+        'crew': crew.to_summary_dict(g.current_user.id),
+        'next_game': _crew_chat_next_game(crew, g.current_user.id),
         'items': [
             room_message_payload(message, visible_reactor_ids)
             for message in messages

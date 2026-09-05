@@ -319,7 +319,7 @@ def test_community_entity_and_conversation_routes_preserve_their_intent():
     assert "{ destination = 'info' }" in screen
     assert "openClubScreen(clubId, { destination })" in screen
     assert "destination === 'chat' && club.joined" in screen
-    assert "openClubScreen(id, { destination: 'chat' })" in rows
+    assert "destination: row.dataset.inboxDestination === 'info' ? 'info' : 'chat'" in rows
     assert "notification.kind === 'club_message'" in activity
     assert "openClubScreen(Number(target.id), { destination: 'chat' })" in activity
     assert "modal.dataset.clubInfoId = String(club.id);" in info
@@ -682,12 +682,12 @@ def test_created_game_refreshes_retained_entity_only_after_game_is_visible():
 def test_branded_action_confirmation_replaces_native_browser_dialogs():
     assert not re.search(r"\b(?:window\.)?confirm\s*\(", APP)
 
-    helper = app_section("function openActionConfirmation", "// ---------- Court detail")
+    helper = app_section("function openActionConfirmation", "function requestScoreDisputeReason")
     assert "return new Promise((resolve) =>" in helper
     assert 'class="action-confirmation is-${normalizedTone}"' in helper
     assert "data-action-confirm-cancel" in helper
     assert "data-action-confirm-accept" in helper
-    assert "closeModal(sheet);" in helper
+    assert "dismissModal(sheet, () => resolve(accepted));" in helper
     assert "resolve(false);" in helper  # close, Escape, backdrop, and Back cleanup
     assert "sheet._cleanupFns?.push" in helper
     assert APP.count("await openActionConfirmation({") >= 15

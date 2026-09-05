@@ -177,12 +177,13 @@ def test_private_play_group_can_start_cold_with_multiple_friends_and_a_court():
     create = section("async function openCreatePlayGroupSheet", "async function openCrewInviteSheet")
     assert "Start a play group" in create
     assert "private, invite-only group" in create
-    assert "api('/friends')" in create
+    assert "api(sourceGameId ? `/games/${sourceGameId}/crew` : '/friends')" in create
     assert "new Set()" in create
     assert "clubCourtPicker(modal, 'pg')" in create
-    assert "api('/crews'" in create
+    assert "api(sourceGameId ? `/games/${sourceGameId}/crew` : '/crews'" in create
     assert "default_court_id:" in create
-    assert "invite_user_ids: [...selectedIds]" in create
+    assert "const submittedInviteIds = [...selectedIds]" in create
+    assert "invite_user_ids: submittedInviteIds" in create
     assert "response.crew || response" in create
     assert "'Crew court'" not in APP
 
@@ -213,7 +214,8 @@ def test_owner_can_add_multiple_players_with_durable_crew_invites():
     assert 'id="crew-review-group"' in invite
     screen = section("async function openCrewScreen", "function openRenameCrewSheet")
     assert 'id="crew-add-players"' in screen
-    assert "openCrewInviteSheet(crew, () => {" in screen
+    assert "openCrewInviteSheet(crew, (viewOptions = {}) => {" in screen
+    assert "transitionModal(modal, () => openCrewScreen(crew.id, viewOptions));" in screen
     assert "transitionModal(modal, () => openCrewScreen(crew.id));" in screen
     assert "Plan with this group" in screen
 
