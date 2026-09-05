@@ -86,7 +86,8 @@ def test_map_discovery_controls_precede_the_map_and_markers_support_keyboard_act
 
 
 def test_compact_map_keeps_filters_reachable_and_peek_shows_actionable_nearby_cards():
-    assert '#tab-courts { --court-sheet-peek: 250px; }' in STYLES
+    court_layout = STYLES.split('#tab-courts {', 1)[1].split('}', 1)[0]
+    assert '--court-sheet-peek: 250px;' in court_layout
     assert 'bottom: var(--court-sheet-peek);' in STYLES
     assert 'translateY(calc(100% - var(--court-sheet-peek)))' in STYLES
     assert '.map-filters [data-court-filter="business"] { display: none; }' in STYLES
