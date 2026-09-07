@@ -273,10 +273,13 @@ def test_looking_summary_drives_exact_rally_and_nearby_actions_with_fallback():
     assert "el.replaceChildren();" in APP
     logout = section("function resetPrivateUiForLogout", "function logout({")
     assert "clearLookingBanner();" in logout
-    map_area = section("useMapAreaButton?.addEventListener", "// NB: don't pass the click event")
+    map_area = section("function openCourtAreaSheet", "function areaViewKey")
     assert "clearLookingBanner();" in map_area
     assert "refreshLookingBanner();" in map_area
-    assert "await refreshCourtResults({ showLoading: false });" in map_area
+    assert "state.playGamesCache = null;" in map_area
+    assert "state.chatFriendsCache = null;" in map_area
+    assert "updatePlayHeader();" in map_area
+    assert "refreshCourtResults" not in map_area
 
     nearby = section("async function renderNearbyPlayers", "async function renderFriends")
     assert "Promise.all" in nearby

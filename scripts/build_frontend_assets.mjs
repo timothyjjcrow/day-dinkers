@@ -7,7 +7,7 @@ import path from 'node:path';
 import { build } from 'esbuild';
 import { minify } from 'terser';
 
-const release = 'r70';
+const release = 'r71';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(projectRoot, 'public');
 const outputDir = path.join(publicDir, 'assets', release);
@@ -39,7 +39,7 @@ for (const [sourceName, outputName] of entries) {
       { [mappedSourceName]: source.toString('utf8') },
       {
         ecma: 2020,
-        compress: { passes: 3 },
+        compress: { passes: 5 },
         mangle: true,
         format: { comments: false, ecma: 2020 },
         sourceMap: {
@@ -77,6 +77,9 @@ for (const [sourceName, outputName] of entries) {
   const brotli = brotliCompressSync(output, {
     params: {
       [constants.BROTLI_PARAM_QUALITY]: 11,
+      // A 512 KiB input block improves compression of the application while
+      // keeping the immutable transfer within its existing 250 KiB budget.
+      [constants.BROTLI_PARAM_LGBLOCK]: 19,
       [constants.BROTLI_PARAM_MODE]: sourceName.endsWith('.css')
         ? constants.BROTLI_MODE_TEXT : constants.BROTLI_MODE_TEXT,
     },

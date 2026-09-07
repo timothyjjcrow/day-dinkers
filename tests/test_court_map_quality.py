@@ -166,8 +166,8 @@ def test_granted_location_auto_centers_without_prompting_or_clobbering_interacti
     assert "currentCenter.distanceTo(centerAtStart) < 25" in location
     assert "Turn on location to start with courts near you." in location
     assert "Allow it for Third Shot in browser settings" in location
-    assert "if (!automatic) {" in location
-    assert "state.areaLoc = null" in location
+    assert "state.areaLoc =" not in location
+    assert "state.areaLabel =" not in location
     assert "L.circle(state.userLoc" in APP
     assert "state.userAccuracyRing.setRadius(radius);" in APP
     assert "about ${Math.max(25, Math.round(feet / 25) * 25)} ft accuracy" in location
@@ -277,16 +277,18 @@ def test_primary_court_search_is_quiet_local_and_useful_before_typing():
     assert '`/geocode?q=${encodeURIComponent(q)}${geocoderViewbox}`' in search
 
 
-def test_context_strip_lives_in_sheet_and_desktop_search_uses_real_selector():
+def test_context_strip_follows_persistent_view_controls_and_area_has_its_own_action():
     index = (ROOT / 'public' / 'index.html').read_text()
     sheet_head = index[
         index.index('<div class="court-sheet-head"'):
-        index.index('<div class="court-sheet-view-row"')
+        index.index('<div class="court-sheet-summary"')
     ]
     assert 'class="court-context-strip"' in sheet_head
     assert 'id="presence-banner"' in sheet_head
     assert 'id="looking-banner"' in sheet_head
-    assert 'id="use-map-area"' in sheet_head
+    assert 'id="court-area-settings"' in sheet_head
+    assert sheet_head.index('id="court-view-switch"') < sheet_head.index('class="court-context-strip"')
+    assert 'id="use-map-area" class="use-map-area hidden" hidden tabindex="-1"' in sheet_head
     assert 'court-map-hud' not in index
     assert '.court-context-strip > :not(.hidden) ~ :not(.hidden)' in STYLES
     assert '#tab-courts .map-topbar {' in STYLES

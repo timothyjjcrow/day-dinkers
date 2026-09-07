@@ -80,9 +80,9 @@ def test_map_search_delays_place_geocoding_and_shares_activation_semantics():
     assert "q.length >= 3" in search
     assert 'courtSearchCache.set(cacheKey' in search
     assert 'Promise.all' not in search
-    assert 'Number(state.selectedCourtId) === Number(court.id)' in activation
-    assert 'selectCourtOnMap(court, { preserveList });' in activation
-    assert "openCourtFromDiscovery(court" in activation
+    assert 'selectCourtOnMap(court);' in activation
+    assert "querySelector('.court-preview-title')?.focus({ preventScroll: true })" in activation
+    assert "openCourtFromDiscovery(court" not in activation
 
 
 def test_court_detail_preserves_context_and_gives_recoverable_share_save_actions():
@@ -103,8 +103,10 @@ def test_court_detail_preserves_context_and_gives_recoverable_share_save_actions
 def test_court_context_strip_and_compact_metadata_are_consolidated():
     assert '<div class="court-map-hud"' not in INDEX
     assert '<div class="court-context-strip"' in INDEX
-    sheet_head = INDEX[INDEX.index('class="court-sheet-head"'):INDEX.index('class="court-sheet-view-row"')]
+    sheet_head = INDEX[INDEX.index('class="court-sheet-head"'):INDEX.index('class="court-sheet-summary"')]
     assert 'class="court-context-strip"' in sheet_head
+    assert sheet_head.index('id="court-view-switch"') < sheet_head.index('class="court-context-strip"')
+    assert 'id="court-area-settings"' in sheet_head
     assert INDEX.index('id="presence-banner"') < INDEX.index('id="looking-banner"')
     assert INDEX.index('id="looking-banner"') < INDEX.index('id="use-map-area"')
     assert '#court-sheet-expand' not in APP

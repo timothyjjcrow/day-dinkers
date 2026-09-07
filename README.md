@@ -37,13 +37,15 @@ Demo accounts: `dana@example.com`, `marcus@example.com`, `priya@example.com`,
 ## Features
 
 - **Courts & map** — clustered map of ~18.5k US courts with live activity,
-  amenity filters, text search, and **geocoding area search** ("jump to Austin,
-  TX"). The default view leads with Search, **Active now**, **Filters**, and two
-  recommended cards; exact court-name matches outrank similar place names.
-  Selecting a result opens a state-aware **Now at this court** detail directly,
-  suppressing empty metrics and counting only games the viewer can act on.
-  Venue details, reviews, photos, and management actions stay behind progressive
-  disclosures. Auto check-in by proximity is available while the app is open.
+  amenity filters, text search, and geocoding area search ("jump to Austin,
+  TX"). On mobile, Map keeps a selected court card beside the usable map;
+  List fills the available screen with scrollable results. Pins and cards
+  reveal the selected place, including courts inside clusters. Court details,
+  play options, and directions are explicit actions. The Area control explains
+  and changes the area for Play and Community separately from map browsing,
+  with a temporary visit area or a saved home area. Venue details, reviews,
+  photos, and management actions stay behind progressive disclosures.
+  Auto check-in by proximity is available while the app is open.
 - **Business Hub** — authorized venue operators can claim one or more locations,
   verify a business-domain mailbox, complete a human control review, and publish
   only after sensitive content is approved. Organization-wide owner, admin,

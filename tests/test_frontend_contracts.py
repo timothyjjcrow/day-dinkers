@@ -167,16 +167,16 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r72';" in SERVICE_WORKER
+    assert "const CACHE = 'thirdshot-v15-r73';" in SERVICE_WORKER
     for asset in (
-        "/release-assets/r70/styles-v15.min.css",
-        "/release-assets/r70/crew-planner-v15.min.js",
-        "/release-assets/r70/app-v15.min.js",
+        "/release-assets/r71/styles-v15.min.css",
+        "/release-assets/r71/crew-planner-v15.min.js",
+        "/release-assets/r71/app-v15.min.js",
     ):
         assert asset in SERVICE_WORKER
-    assert 'href="/release-assets/r70/styles-v15.min.css"' in INDEX
-    assert 'src="/release-assets/r70/crew-planner-v15.min.js"' in INDEX
-    assert 'src="/release-assets/r70/app-v15.min.js"' in INDEX
+    assert 'href="/release-assets/r71/styles-v15.min.css"' in INDEX
+    assert 'src="/release-assets/r71/crew-planner-v15.min.js"' in INDEX
+    assert 'src="/release-assets/r71/app-v15.min.js"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -218,14 +218,14 @@ def test_court_results_render_progressively_without_collapsing_list_context():
     assert "const firstNewIndex = 0;" in APP
     assert 'class="court-peek-strip"' in APP
     assert 'Browse all ${availableCourtCount} court' in APP
-    assert "compactPortrait ? 'full' : 'half'" in APP
+    assert "if (!desktop && snap === 'half') snap = 'full';" in APP
     assert 'id="court-show-more"' in APP
     assert "state.courtListLimit += 20;" in APP
     listing = APP[APP.index("function renderCourtList"):APP.index("function openSuggestEditSheet")]
     discovery = APP[APP.index("function courtDiscoveryReturnFocus"):APP.index("function selectCourtOnMap")]
     markers = APP[APP.index("function drawMarkers"):APP.index("function setCourtMarkerSelected")]
-    assert "activateCourtFromDiscovery(byId.get(Number(row.dataset.court)), { preserveList: true })" in listing
-    assert "selectCourtOnMap(court, { preserveList })" in discovery
+    assert "activateCourtFromDiscovery(byId.get(Number(row.dataset.court)))" in listing
+    assert "selectCourtOnMap(court);" in discovery
     assert "return openCourtDetail(court.id" in discovery
     assert "returnFocusFallback: () => courtDiscoveryReturnFocus(court.id)" in discovery
     assert "on('click', () => activateCourtFromDiscovery(court))" in markers

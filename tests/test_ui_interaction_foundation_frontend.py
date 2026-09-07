@@ -142,7 +142,9 @@ def test_custom_select_and_shared_status_controls_use_product_icons():
     assert 'id="ui-check"' in INDEX
     assert 'class="offline-status"' in INDEX
     assert '<use href="#ui-alert-triangle"' in INDEX
-    assert "useMapAreaButton.innerHTML = `${uiIcon('map-pin')}" in map_setup
+    area_control = INDEX.split('id="court-area-settings"', 1)[1].split('</button>', 1)[0]
+    assert '<use href="#ui-map-pin"' in area_control
+    assert "$('#court-area-settings')?.addEventListener('click', openCourtAreaSheet);" in map_setup
     assert ".court-context-strip > :not(.hidden) ~ :not(.hidden)" in STYLES
     assert 'class="court-context-strip"' in INDEX
     assert re.search(r"modalHead\s*=.*<button type=\"button\"", APP)

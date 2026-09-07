@@ -18,7 +18,7 @@ def test_quick_filters_keep_saved_and_active_first_class_with_detail_sheet_for_v
     setup = section("function setupMap()", "function locateMe")
     assert "quickFilters?.querySelector('[data-court-filter=\"players\"]')" in setup
     assert "legacyPlayers.dataset.courtFilter = 'active'" in setup
-    assert "legacyPlayers.innerHTML = `${uiIcon('activity')} Happening now`" in setup
+    assert "legacyPlayers.innerHTML = `${uiIcon('activity')} Active now`" in setup
     assert "quickFilters?.querySelector('[data-court-filter=\"saved\"]')?.remove()" not in setup
     assert "quickFilters?.querySelector('[data-court-filter=\"games\"]')?.remove()" in setup
     assert 'data-court-filter="saved"' in INDEX
@@ -52,7 +52,7 @@ def test_exact_court_matches_precede_places_and_open_with_selection_continuity()
 
     listing = section("function renderCourtList", "function openSuggestEditSheet")
     assert listing.index("uiIcon('pickleball')} Exact court") < listing.index("uiIcon('map-pin')} Jump to area")
-    assert "activateCourtFromDiscovery(byId.get(Number(row.dataset.court)), { preserveList: true })" in listing
+    assert "activateCourtFromDiscovery(byId.get(Number(row.dataset.court)))" in listing
     assert "[data-court-open]" in listing
     assert "openCourtFromDiscovery(byId.get(Number(button.dataset.courtBusiness)), { focusBusiness: true })" in listing
     assert "selectCourtBeforeOpen" not in listing
@@ -86,14 +86,17 @@ def test_map_discovery_controls_precede_the_map_and_markers_support_keyboard_act
 
 
 def test_compact_map_keeps_filters_reachable_and_peek_shows_actionable_nearby_cards():
-    court_layout = STYLES.split('#tab-courts {', 1)[1].split('}', 1)[0]
-    assert '--court-sheet-peek: 250px;' in court_layout
-    assert 'bottom: var(--court-sheet-peek);' in STYLES
-    assert 'translateY(calc(100% - var(--court-sheet-peek)))' in STYLES
+    court_layout = STYLES.split('\n.court-sheet {', 1)[1].split('}', 1)[0]
+    assert 'transform: none;' in court_layout
+    assert 'display: flex; flex-direction: column; min-height: 0;' in court_layout
+    assert 'var(--court-dock-height, var(--court-sheet-peek))' in STYLES
+    assert 'translateY(calc(100% - var(--court-sheet-peek)))' not in STYLES
     assert '.map-filters [data-court-filter="business"] { display: none; }' in STYLES
-    assert '#tab-courts { --court-sheet-peek: 146px; }' in STYLES
-    assert '@media (max-height: 740px) and (orientation: portrait)' in STYLES
-    assert '.court-sheet[data-snap="half"] { transform: translateY(0); }' in STYLES
+    assert '@media (max-width: 899px) and (max-height: 500px) and (orientation: landscape)' in STYLES
+    assert '.court-sheet[data-snap="peek"].has-selection .court-sheet-results' in STYLES
+    assert '.court-sheet:not([data-snap="peek"]) .court-preview { display: none; }' in STYLES
+    results_layout = STYLES.split('.court-sheet-results {', 1)[1].split('}', 1)[0]
+    assert 'flex: 1; min-height: 0; overflow-y: auto;' in results_layout
     assert '.court-sheet[data-snap="peek"] .court-sheet-summary' in STYLES
     assert '.court-peek-main' in STYLES
 
@@ -103,14 +106,15 @@ def test_compact_map_keeps_filters_reachable_and_peek_shows_actionable_nearby_ca
     assert "courtPeekCardHtml(court, index)" in listing
     assert 'class="court-peek-strip"' in listing
     assert 'Browse all ${availableCourtCount} court' in listing
-    assert "window.innerHeight <= 740" in listing
+    assert "setCourtSheetSnap('full');" in listing
     peek = section("function courtPeekCardHtml", "function sortCourts")
     assert "? 'Selected court' : index === 0 ? 'Nearest result' : 'Nearby result'" in peek
-    assert 'data-court-open="${c.id}"' in peek
+    assert 'data-court="${c.id}"' in peek
     assert '.court-peek-strip' in STYLES
     assert 'flex: 0 0 min(82%, 310px)' in STYLES
-    snap = section("function setCourtSheetSnap", "function setupCourtSheetDrag")
-    assert "if (snap === 'half' && window.innerHeight <= 740" in snap
+    snap = section("function setCourtSheetSnap", "function syncCourtDockLayout")
+    assert "if (!desktop && snap === 'half') snap = 'full';" in snap
+    assert 'setupCourtSheetDrag' not in APP
 
 
 def test_court_preview_actions_are_separate_from_the_selection_announcement():
@@ -375,7 +379,7 @@ def test_verified_venue_programs_have_a_direct_accessible_discovery_path():
 
     preview = section("function selectCourtOnMap", "function autoCheckInStorageKey")
     assert 'data-preview-business>${esc(businessLabel)}</button>' in preview
-    assert "openCourtDetail(court.id, { focusBusiness: true })" in preview
+    assert "openCourtFromDiscovery(court, { focusBusiness: true })" in preview
     assert 'court-preview-actions ${businessDiscovery ? \'has-business\'' in preview
 
     card = section("function courtRowHtml", "function sortCourts")
@@ -498,19 +502,24 @@ def test_court_address_is_a_native_directions_link():
     assert "text-decoration: none" in address_css
 
 
-def test_user_owned_map_moves_offer_a_meaningful_area_commit_without_swallowing_suppression():
+def test_map_browsing_and_saved_area_changes_have_separate_explicit_controls():
     area = section("function committedAreaLatLng", "function areaViewKey")
     assert "if (state.areaLoc) return" in area
     assert "if (state.userLoc) return" in area
     assert "function courtDistanceOrigin()" in area
-    assert "if (!committed)" in area
-    assert "button.classList.remove('hidden');" in area
-    assert "const movedMiles = milesBetween(" in area
-    assert "movedMiles < 0.25" in area
+    control = section("function syncUseMapAreaAction", "function openCourtAreaSheet")
+    assert "$('#use-map-area')?.classList.add('hidden');" in control
+    assert "const button = $('#court-area-settings');" in control
+    assert 'state.areaLoc =' not in control
+    assert 'data-apply-map-area' in area
+    assert 'data-edit-home-area' in area
+    assert 'Your saved home area stays the same.' in area
 
     setup = section("function setupMap()", "function locateMe")
-    moveend = setup[setup.index("state.map.on('moveend'") : setup.index("useMapAreaButton?.addEventListener")]
+    moveend = setup[setup.index("state.map.on('moveend'") : setup.index("clearInterval(state.courtAutoRefreshTimer)")]
     assert moveend.index("if (state.suppressCourtMoveFetch)") < moveend.index("syncUseMapAreaAction();")
+    assert 'state.areaLoc =' not in moveend
+    assert "$('#court-area-settings')?.addEventListener('click', openCourtAreaSheet);" in setup
     assert "state.map.on('dragend'" not in setup
     assert "const reference = courtDistanceOrigin();" in section(
         "async function fetchCourtsInView", "function safePositiveId",
@@ -529,7 +538,7 @@ def test_user_owned_map_moves_offer_a_meaningful_area_commit_without_swallowing_
 
 
 def test_result_region_and_empty_search_popup_keep_accessible_state_current():
-    sheet = section("function syncSearchClear", "function setupCourtSheetDrag")
+    sheet = section("function syncSearchClear", "function syncCourtDockLayout")
     assert "function syncCourtSheetLabel()" in sheet
     assert "state.courtSheetSnap === 'peek' ? 'map view' : 'list view'" in sheet
     assert "syncCourtSheetLabel();" in sheet
@@ -545,21 +554,21 @@ def test_result_region_and_empty_search_popup_keep_accessible_state_current():
 
 
 def test_list_mode_removes_the_covered_map_from_pointer_and_keyboard_navigation():
-    snap = section("function setCourtSheetSnap", "function setupCourtSheetDrag")
+    snap = section("function setCourtSheetSnap", "function syncCourtDockLayout")
     assert "const mapHadFocus = !!mapEl?.contains(document.activeElement);" in snap
     assert "mapEl.inert = hideMap;" in snap
-    assert "const hideMap = listOpen && !desktop;" in snap
+    assert "const hideMap = snap === 'full' && !desktop;" in snap
     assert "if (desktop) snap = 'half';" in snap
     assert "mapEl.setAttribute('aria-hidden', 'true')" in snap
     assert "mapEl.removeAttribute('aria-hidden')" in snap
     assert "if (hideMap && mapHadFocus)" in snap
-    assert "$('#court-preview')?.querySelector('button, a[href]') || cycle" in snap
+    assert "document.querySelector('[data-court-view=\"map\"]')" in snap
     assert "focusTarget?.focus({ preventScroll: true })" in snap
 
 
 def test_court_sheet_announces_real_mode_changes_and_rerenders_empty_lists():
     assert 'id="court-sheet-status" class="sr-only" role="status" aria-live="polite"' in INDEX
-    snap = section("function setCourtSheetSnap", "function setupCourtSheetDrag")
+    snap = section("function setCourtSheetSnap", "function syncCourtDockLayout")
     assert "if (announce && previousSnap !== snap)" in snap
     assert "snap === 'peek' ? 'Map view'" in snap
     assert "snap === 'half' ? 'Court list expanded' : 'Full court list'" in snap
@@ -570,7 +579,7 @@ def test_court_sheet_announces_real_mode_changes_and_rerenders_empty_lists():
 def test_court_sort_reorders_loaded_results_without_refetching_or_losing_selection():
     setup = section("function setupMap()", "// ---------- Theme")
     sort_handler = setup[setup.index("$('#court-sort').addEventListener") : setup.index(
-        "setupCourtSheetDrag();"
+        "setupCourtDockLayout();"
     )]
     assert "state.listSort = e.target.value;" in sort_handler
     assert "renderCourtList(state.courtsInView, state.courtListPlaces" in sort_handler

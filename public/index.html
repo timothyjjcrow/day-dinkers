@@ -18,14 +18,14 @@
     } catch { /* storage can be disabled; CSS media queries remain the fallback */ }
   </script>
   <title>Third Shot — Find courts, players & play</title>
-  <link rel="stylesheet" href="/release-assets/r70/styles-v15.min.css" />
+  <link rel="stylesheet" href="/release-assets/r71/styles-v15.min.css" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-512.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
   <!-- Start downloading the large application files early, but execute them
        with defer so the useful boot shell can paint before bundle parsing. -->
-  <link rel="preload" href="/release-assets/r70/crew-planner-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r70/app-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r71/crew-planner-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r71/app-v15.min.js" as="script" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -181,24 +181,25 @@
         </div>
         <div id="search-suggest" class="search-suggest hidden" role="listbox" aria-label="Court search suggestions"></div>
         <div class="map-filters" id="map-filters" role="group" aria-label="Quick court filters">
-          <button type="button" data-court-filter="active" aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-activity" /></svg> Happening now</button>
+          <button type="button" data-court-filter="active" aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-activity" /></svg> Active now</button>
           <button type="button" data-court-filter="saved" aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-star" /></svg> Saved</button>
           <button type="button" id="court-more-filters" aria-expanded="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-sliders" /></svg> Filters <span id="court-filter-count" class="filter-count hidden">0</span></button>
         </div>
         <div id="court-list" class="sheet court-sheet" data-snap="peek" role="region" aria-label="Court results">
           <div class="court-sheet-head" id="court-sheet-drag">
-            <button type="button" class="sheet-handle" id="court-sheet-cycle" aria-label="Expand court results" aria-expanded="false"><span></span></button>
-            <div class="court-context-strip" role="group" aria-label="Current court activity and map area">
-              <div id="presence-banner" class="presence-banner hidden"></div>
-              <button type="button" id="looking-banner" class="looking-banner hidden"></button>
-              <button type="button" id="use-map-area" class="use-map-area hidden"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-map-pin" /></svg><span>Use this area for Play &amp; Community</span></button>
-            </div>
+            <button type="button" class="sheet-handle hidden" id="court-sheet-cycle" aria-label="Expand court results" aria-expanded="false" tabindex="-1"><span></span></button>
             <div class="court-sheet-view-row">
               <div class="segmented court-view-switch" id="court-view-switch" role="group" aria-label="Court view">
                 <button type="button" data-court-view="map" class="active" aria-pressed="true"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-map" /></svg><span>Map</span></button>
                 <button type="button" data-court-view="list" aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-grid" /></svg><span>List</span> <span id="court-result-count">0</span></button>
               </div>
+              <button type="button" id="court-area-settings" class="court-area-settings" title="Area for Play and Community" aria-label="Area for Play and Community"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-map-pin" /></svg><span>Area</span></button>
             </div>
+            <div class="court-context-strip" role="group" aria-label="Current court activity">
+              <div id="presence-banner" class="presence-banner hidden"></div>
+              <button type="button" id="looking-banner" class="looking-banner hidden"></button>
+            </div>
+            <button type="button" id="use-map-area" class="use-map-area hidden" hidden tabindex="-1"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-map-pin" /></svg><span>Use this area for Play &amp; Community</span></button>
             <div class="court-sheet-summary">
               <div class="row-main">
                 <h3 class="sheet-title">Finding courts…</h3>
@@ -397,7 +398,7 @@
       syncBoot();
     })();
   </script>
-  <script defer src="/release-assets/r70/crew-planner-v15.min.js"></script>
-  <script defer src="/release-assets/r70/app-v15.min.js"></script>
+  <script defer src="/release-assets/r71/crew-planner-v15.min.js"></script>
+  <script defer src="/release-assets/r71/app-v15.min.js"></script>
 </body>
 </html>

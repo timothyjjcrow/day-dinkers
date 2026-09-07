@@ -60,6 +60,7 @@
     courtListPlaces: [],
     courtListSavedOnly: false,
     selectedCourtId: null,
+    selectedCourt: null,
     courtMarkers: new Map(),
     courtFetchSeq: 0,
     courtMoveFetchTimer: null,
@@ -4143,7 +4144,13 @@
     renderActiveGameBanner();
     if (tab === 'courts') {
       if (state.map) {
-        setTimeout(() => state.map.invalidateSize(), 60);
+        setTimeout(() => {
+          if (state.tab !== 'courts' || !state.map) return;
+          state.map.invalidateSize();
+          syncCourtDockLayout();
+          revealSelectedCourtOnMap();
+          syncUseMapAreaAction();
+        }, 60);
         refreshLookingBanner();
         maybeAutoLocateCourts();
       }
@@ -4600,7 +4607,7 @@
     const legacyPlayers = quickFilters?.querySelector('[data-court-filter="players"]');
     if (legacyPlayers && !quickFilters.querySelector('[data-court-filter="active"]')) {
       legacyPlayers.dataset.courtFilter = 'active';
-      legacyPlayers.innerHTML = `${uiIcon('activity')} Happening now`;
+      legacyPlayers.innerHTML = `${uiIcon('activity')} Active now`;
     }
     quickFilters?.querySelector('[data-court-filter="games"]')?.remove();
 
@@ -4639,7 +4646,6 @@
     });
     syncAutoCheckInControls();
 
-    const useMapAreaButton = $('#use-map-area');
     state.map.on('moveend', () => {
       const c = state.map.getCenter();
       const key = mapViewStorageKey();
@@ -4678,35 +4684,9 @@
       beginCourtContextRefresh('Refreshing live court activity…');
       await fetchCourtsInView({ surfaceError: true });
     }, 60_000);
-    // Upgrade older cached shells too: this action changes the area used by
-    // Play and Community, while court markers already follow the viewport.
-    if (useMapAreaButton) useMapAreaButton.innerHTML = `${uiIcon('map-pin')}<span>Use this area for Play &amp; Community</span>`;
-    useMapAreaButton?.addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      const c = state.map.getCenter();
-      state.areaLoc = [c.lat, c.lng];
-      state.areaLabel = 'Selected map area';
-      state.snapshotAreaProvisional = false;
-      state.playGamesCache = null;
-      state.chatFriendsCache = null;
-      clearLookingBanner();
-      btn.classList.add('hidden');
-      updatePlayHeader();
-      refreshLookingBanner();
-      toast('Play and Community now follow this map area', { icon: 'map-pin' });
-      // Distances and sorting use areaLoc. Re-run the active court query after
-      // committing so the visible list cannot retain measurements from the
-      // previously selected area.
-      beginCourtContextRefresh('Updating courts and distances for this area…');
-      await refreshCourtResults({ showLoading: false });
-      try {
-        const geo = await api(`/geocode/reverse?lat=${c.lat}&lng=${c.lng}`);
-        if (geo.label && state.areaLoc && state.areaLoc[0] === c.lat && state.areaLoc[1] === c.lng) {
-          state.areaLabel = geo.label;
-          updatePlayHeader();
-        }
-      } catch { /* the committed coordinates still work */ }
-    });
+    // Area changes are an explicit choice, separate from browsing the map.
+    $('#court-area-settings')?.addEventListener('click', openCourtAreaSheet);
+    syncUseMapAreaAction();
 
     // NB: don't pass the click event through — locateMe's arg is the `silent` flag.
     $('#locate-btn').addEventListener('click', () => locateMe(false));
@@ -4729,13 +4709,7 @@
     $('#court-view-switch').addEventListener('click', (e) => {
       const btn = e.target.closest('[data-court-view]');
       if (!btn) return;
-      const compactPortrait = window.innerHeight < 650 && window.innerHeight >= window.innerWidth;
-      setCourtSheetSnap(btn.dataset.courtView === 'map' ? 'peek' : compactPortrait ? 'full' : 'half');
-    });
-    $('#court-sheet-cycle').addEventListener('click', () => {
-      if (state.courtSheetJustDragged) { state.courtSheetJustDragged = false; return; }
-      setCourtSheetSnap(state.courtSheetSnap === 'peek' ? 'half'
-        : state.courtSheetSnap === 'half' ? 'full' : 'peek');
+      setCourtSheetSnap(btn.dataset.courtView === 'map' ? 'peek' : 'full');
     });
     $('#court-sort').addEventListener('change', (e) => {
       state.listSort = e.target.value;
@@ -4746,7 +4720,7 @@
         savedOnly: state.courtListSavedOnly,
       });
     });
-    setupCourtSheetDrag();
+    setupCourtDockLayout();
     window.matchMedia('(min-width: 900px)').addEventListener('change', () => {
       setCourtSheetSnap('peek', { announce: false });
     });
@@ -5020,15 +4994,6 @@
           resolve(true);
           return;
         }
-        if (!automatic) {
-          state.areaLoc = null; // an explicit locate returns nearby features to this device
-          state.areaLabel = 'Near me';
-          state.snapshotAreaProvisional = false;
-          state.playGamesCache = null;
-          state.chatFriendsCache = null;
-          clearLookingBanner();
-          refreshLookingBanner();
-        }
         state.searchQ = '';
         state.dismissedSearchSuggestionQuery = '';
         const search = $('#court-search');
@@ -5081,21 +5046,51 @@
   }
 
   function syncUseMapAreaAction() {
-    const button = $('#use-map-area');
-    if (!button || !state.map) return;
-    const committed = committedAreaLatLng();
-    if (!committed) {
-      // Older accounts can have a named home area without saved coordinates.
-      // This helper is called after a user-owned move, so let that move become
-      // the first explicit Play & Community origin instead of hiding the CTA.
-      button.classList.remove('hidden');
-      return;
-    }
+    // Older shells can still contain the moved-map CTA. Keep it out of the
+    // browsing flow; the stable Area control explains both origins together.
+    $('#use-map-area')?.classList.add('hidden');
+    const button = $('#court-area-settings');
+    if (!button) return;
+    const label = state.areaLabel || state.me?.home_area || 'your nearby area';
+    button.setAttribute('aria-label', `Area for Play and Community: ${label}`);
+  }
+
+  function openCourtAreaSheet() {
+    if (!state.map) return null;
     const center = state.map.getCenter();
-    const movedMiles = milesBetween(
-      [committed.lat, committed.lng], [center.lat, center.lng],
-    );
-    button.classList.toggle('hidden', !Number.isFinite(movedMiles) || movedMiles < 0.25);
+    const area = { lat: center.lat, lng: center.lng };
+    const committedLabel = state.areaLabel || state.me?.home_area || 'Near you';
+    let mapLabel = `Map near ${area.lat.toFixed(2)}, ${area.lng.toFixed(2)}`;
+    const modal = openModal(`
+      ${modalHead('Your browsing area')}
+      <div class="card"><p class="section-label">Play &amp; Community</p><p class="row-title">${esc(committedLabel)}</p></div>
+      <div class="card"><p class="section-label">On the court map</p><p class="row-title" data-map-area-label>${esc(mapLabel)}</p><p class="row-sub">For this visit only. Your saved home area stays the same.</p></div>
+      <button type="button" class="btn btn-primary btn-block" data-apply-map-area>Use map area for this visit</button>
+      <button type="button" class="btn btn-secondary btn-block" data-edit-home-area>Change saved home area</button>
+      <button type="button" class="btn-link btn-block modal-close">Keep browsing</button>
+    `, { label: 'Area for Play and Community' });
+    api(`/geocode/reverse?lat=${area.lat}&lng=${area.lng}`).then((geo) => {
+      if (!modal.isConnected || !geo.label) return;
+      mapLabel = geo.label;
+      modal.querySelector('[data-map-area-label]').textContent = mapLabel;
+    }).catch(() => { /* the coordinate label remains a usable fallback */ });
+    modal.querySelector('[data-apply-map-area]').addEventListener('click', () => {
+      state.areaLoc = [area.lat, area.lng];
+      state.areaLabel = mapLabel;
+      state.snapshotAreaProvisional = false;
+      state.playGamesCache = null;
+      state.chatFriendsCache = null;
+      clearLookingBanner();
+      updatePlayHeader();
+      refreshLookingBanner();
+      syncUseMapAreaAction();
+      closeModal(modal);
+      toast(`Play and Community now use ${mapLabel}`, { icon: 'map-pin' });
+    });
+    modal.querySelector('[data-edit-home-area]').addEventListener('click', () => {
+      openChildModal(modal, () => openHomeAreaSheet({ onSet: () => { syncUseMapAreaAction(); closeModal(modal); } }));
+    });
+    return modal;
   }
 
   function areaViewKey() {
@@ -5998,11 +5993,7 @@
     if (!['peek', 'half', 'full'].includes(snap)) return;
     const desktop = window.innerWidth >= 900;
     if (desktop) snap = 'half';
-    // A half sheet on common short phones leaves room for only one clipped
-    // decision card after the handle and controls. Treat List as a full sheet
-    // there; Map still has the compact peek card below.
-    if (snap === 'half' && window.innerHeight <= 740
-        && window.innerHeight >= window.innerWidth) snap = 'full';
+    if (!desktop && snap === 'half') snap = 'full';
     const sheet = $('#court-list');
     if (!sheet) return;
     const previousSnap = state.courtSheetSnap;
@@ -6012,10 +6003,8 @@
     }
     state.courtSheetSnap = snap;
     sheet.dataset.snap = snap;
-    sheet.style.removeProperty('transform');
-    sheet.classList.remove('is-dragging');
     const listOpen = snap !== 'peek';
-    const hideMap = listOpen && !desktop;
+    const hideMap = snap === 'full' && !desktop;
     const mapEl = $('#map');
     const mapHadFocus = !!mapEl?.contains(document.activeElement);
     if (mapEl) {
@@ -6028,16 +6017,10 @@
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-pressed', String(active));
     });
-    const cycle = $('#court-sheet-cycle');
-    if (cycle) {
-      cycle.setAttribute('aria-expanded', String(listOpen));
-      cycle.setAttribute('aria-label', snap === 'peek' ? 'Expand court results'
-        : snap === 'half' ? 'Show full court results' : 'Collapse court results to map');
-    }
     if (listOpen) hideSearchSuggest();
     if (hideMap && mapHadFocus) {
       requestAnimationFrame(() => {
-        const focusTarget = $('#court-preview')?.querySelector('button, a[href]') || cycle;
+        const focusTarget = document.querySelector('[data-court-view="map"]');
         focusTarget?.focus({ preventScroll: true });
       });
     }
@@ -6047,6 +6030,10 @@
       requestAnimationFrame(() => { main.scrollTop = 0; });
     }
     syncCourtSheetLabel();
+    syncCourtDockLayout();
+    if (snap === 'peek' && state.selectedCourtId != null) {
+      requestAnimationFrame(() => revealSelectedCourtOnMap());
+    }
     if (announce && previousSnap !== snap) {
       const status = $('#court-sheet-status');
       if (status) status.textContent = snap === 'peek' ? 'Map view'
@@ -6066,64 +6053,55 @@
     }
   }
 
-  function setupCourtSheetDrag() {
-    const handle = $('#court-sheet-cycle');
+  function syncCourtDockLayout() {
     const sheet = $('#court-list');
-    if (!handle || !sheet || !window.PointerEvent) return;
-    let pointerId = null;
-    let startY = 0;
-    let startShift = 0;
-    let lastY = 0;
-    let lastAt = 0;
-    let velocity = 0;
-    let moved = false;
-    const shiftForSnap = (snap) => {
-      const h = sheet.getBoundingClientRect().height;
-      if (snap === 'full') return 0;
-      if (snap === 'half') {
-        const bannerOffset = $('#app')?.classList.contains('has-banner') ? 58 : 0;
-        return window.innerHeight < 500 ? 0 : Math.max(0, h * 0.42 - bannerOffset);
-      }
-      const peekHeight = Number.parseFloat(
-        getComputedStyle(sheet).getPropertyValue('--court-sheet-peek'),
-      ) || 250;
-      return Math.max(0, h - peekHeight);
-    };
-    handle.addEventListener('pointerdown', (e) => {
-      if (pointerId != null) return;
-      pointerId = e.pointerId;
-      startY = lastY = e.clientY;
-      lastAt = performance.now();
-      startShift = shiftForSnap(state.courtSheetSnap);
-      velocity = 0;
-      moved = false;
-      handle.setPointerCapture(pointerId);
-      sheet.classList.add('is-dragging');
+    const tab = $('#tab-courts');
+    if (!sheet || !tab || !sheet.getBoundingClientRect().height) return;
+    const height = window.innerWidth < 900 && state.courtSheetSnap === 'peek'
+      ? sheet.getBoundingClientRect().height : 0;
+    tab.style.setProperty('--court-dock-height', `${Math.ceil(height)}px`);
+  }
+
+  function setupCourtDockLayout() {
+    const sheet = $('#court-list');
+    if (!sheet) return;
+    if (window.ResizeObserver) {
+      const observer = new ResizeObserver(syncCourtDockLayout);
+      observer.observe(sheet);
+    }
+    window.addEventListener('resize', () => {
+      syncCourtDockLayout();
+      requestAnimationFrame(() => revealSelectedCourtOnMap());
     });
-    handle.addEventListener('pointermove', (e) => {
-      if (e.pointerId !== pointerId) return;
-      const now = performance.now();
-      const dt = Math.max(1, now - lastAt);
-      velocity = (e.clientY - lastY) / dt;
-      lastY = e.clientY;
-      lastAt = now;
-      const maxShift = shiftForSnap('peek');
-      const shift = Math.max(0, Math.min(maxShift, startShift + e.clientY - startY));
-      if (Math.abs(e.clientY - startY) > 5) moved = true;
-      sheet.style.transform = `translateY(${shift}px)`;
-    });
-    const finish = (e) => {
-      if (e.pointerId !== pointerId) return;
-      try { handle.releasePointerCapture(pointerId); } catch { /* already released */ }
-      pointerId = null;
-      const h = sheet.getBoundingClientRect().height;
-      const projected = Math.max(0, Math.min(h, startShift + e.clientY - startY + velocity * 160));
-      const ratio = projected / Math.max(1, h);
-      state.courtSheetJustDragged = moved;
-      setCourtSheetSnap(ratio < 0.22 ? 'full' : ratio < 0.72 ? 'half' : 'peek');
-    };
-    handle.addEventListener('pointerup', finish);
-    handle.addEventListener('pointercancel', finish);
+    syncCourtDockLayout();
+  }
+
+  function revealSelectedCourtOnMap() {
+    const court = state.selectedCourt;
+    if (!state.map || !court || court.latitude == null
+        || (window.innerWidth < 900 && state.courtSheetSnap !== 'peek')) return;
+    // Selection and orientation changes own this reveal. Cancel an older
+    // viewport request so it cannot replace the selection after we pan it in.
+    clearTimeout(state.courtMoveFetchTimer);
+    state.courtMoveFetchTimer = null;
+    state.courtFetchSeq += 1;
+    try {
+      const mapRect = $('#map').getBoundingClientRect();
+      const sheetRect = $('#court-list').getBoundingClientRect();
+      const filtersRect = $('#map-filters').getBoundingClientRect();
+      const zoomRect = document.querySelector('#map .leaflet-control-zoom')?.getBoundingClientRect();
+      const left = zoomRect ? Math.max(24, zoomRect.right - mapRect.left + 24) : 24;
+      const sidePanel = window.innerWidth >= 900
+        || (window.innerHeight <= 500 && window.innerWidth > window.innerHeight);
+      const top = Math.max(24, filtersRect.bottom - mapRect.top + 24);
+      const bottom = sidePanel ? 48 : Math.max(48, mapRect.bottom - sheetRect.top + 48);
+      const right = sidePanel ? Math.max(24, mapRect.right - sheetRect.left + 24) : 24;
+      moveCourtMapWithoutRefresh(() => state.map.panInside(
+        [court.latitude, court.longitude], {
+          paddingTopLeft: [left, top], paddingBottomRight: [right, bottom], animate: false,
+        },
+      ));
+    } catch { /* Selection remains available if Leaflet is still sizing. */ }
   }
 
   function syncCourtSheetSummary(courts, { savedOnly = false, searching = false } = {}) {
@@ -6579,6 +6557,7 @@
     state.courtMarkers.forEach((entry, courtId) => {
       if (nextIds.has(Number(courtId))) return;
       state.markers.removeLayer(entry.marker);
+      state.map.removeLayer(entry.marker);
       state.courtMarkers.delete(courtId);
     });
     courts.forEach((court) => {
@@ -6620,12 +6599,25 @@
     const restoreFocus = !!current && (document.activeElement === current || current.contains(document.activeElement));
     entry.marker.setIcon(courtMarkerIcon(entry.court, selected));
     entry.visualKey = courtMarkerVisualKey(entry.court, selected);
+    // A selected place is always a visible pin, even at a clustered zoom.
+    // Temporarily lift it out of the cluster and return it when deselected.
+    if (selected) {
+      state.markers.removeLayer(entry.marker);
+      entry.marker.addTo(state.map);
+      entry.marker.setZIndexOffset(1000);
+    } else {
+      state.map.removeLayer(entry.marker);
+      entry.marker.setZIndexOffset(0);
+      entry.marker.addTo(state.markers);
+    }
     syncCourtMarkerAccessibility(entry.marker, entry.court, { restoreFocus });
   }
 
   function clearCourtSelection(message = '') {
     const previousCourtId = state.selectedCourtId;
     state.selectedCourtId = null;
+    state.selectedCourt = null;
+    $('#court-list')?.classList.remove('has-selection');
     if (previousCourtId != null) setCourtMarkerSelected(previousCourtId, false);
     const preview = $('#court-preview');
     if (preview) {
@@ -6675,6 +6667,9 @@
   }
 
   function courtDiscoveryReturnFocus(courtId) {
+    if (state.courtSheetSnap === 'peek' && state.selectedCourtId === Number(courtId)) {
+      return $('#court-preview')?.querySelector('[data-preview-detail]') || $('#court-search');
+    }
     return document.querySelector(`#court-list-items [data-court="${Number(courtId)}"]`)
       || $('#court-search');
   }
@@ -6690,16 +6685,12 @@
     });
   }
 
-  // Marker and list-card activation share one predictable model: the first
-  // activation selects and previews a court; activating that selected court
-  // opens its detail sheet. Explicit “Court details” and search suggestions
-  // can still drill in directly through openCourtFromDiscovery().
-  function activateCourtFromDiscovery(court, { preserveList = false } = {}) {
+  // Pins and result cards always preview the chosen place on the map.
+  // Opening details is a separate, labelled action, including on repeat taps.
+  function activateCourtFromDiscovery(court) {
     if (!court) return null;
-    if (Number(state.selectedCourtId) === Number(court.id)) {
-      return openCourtFromDiscovery(court);
-    }
-    selectCourtOnMap(court, { preserveList });
+    selectCourtOnMap(court);
+    requestAnimationFrame(() => $('#court-preview')?.querySelector('.court-preview-title')?.focus({ preventScroll: true }));
     return null;
   }
 
@@ -6743,6 +6734,11 @@
     if (!court) return;
     const previousCourtId = state.selectedCourtId;
     state.selectedCourtId = court.id;
+    state.selectedCourt = court;
+    if (!state.courtMarkers.has(court.id) && court.latitude != null) {
+      drawMarkers([...state.courtsInView, court]);
+    }
+    $('#court-list')?.classList.add('has-selection');
     if (previousCourtId !== court.id) {
       setCourtMarkerSelected(previousCourtId, false);
       setCourtMarkerSelected(court.id, true);
@@ -6755,13 +6751,14 @@
         ? `${court.players_here} checked in`
         : court.active_games ? `${court.active_games} pickup game${court.active_games === 1 ? '' : 's'} soon` : 'No players checked in';
       preview.innerHTML = `
-        <div class="row">
+        <div class="row court-preview-head">
           <div class="row-main">
-            <div class="row-title">${esc(court.name)}${court.business ? `<span class="verified-venue-badge">${uiIcon('check-circle')} Verified venue</span>` : ''}</div>
+            <p class="court-peek-eyebrow">Selected court</p>
+            <h3 class="row-title court-preview-title" tabindex="-1">${esc(court.name)}${court.business ? `<span class="verified-venue-badge">${uiIcon('check-circle')} Verified venue</span>` : ''}</h3>
             <div class="row-sub">${[court.distance_miles != null ? `${court.distance_miles} mi` : '', esc(court.city || ''), live].filter(Boolean).join(' · ')}</div>
             ${court.business ? `<div class="court-preview-venue">Official profile from ${esc(court.business.name)}${court.business.booking_available ? ' · Booking available' : ''}</div>` : ''}
           </div>
-          ${court.rating_avg ? `<span class="tag inline-rating" style="margin:0">${uiIcon('star')} ${court.rating_avg}</span>` : ''}
+          <button type="button" class="court-preview-close" data-preview-close aria-label="Clear selected court">${uiIcon('x')}</button>
         </div>
         <div class="court-preview-actions ${businessDiscovery ? 'has-business' : ''}">
           ${businessDiscovery ? `<button type="button" class="btn btn-primary" data-preview-business>${esc(businessLabel)}</button>` : ''}
@@ -6770,12 +6767,18 @@
           <a class="btn btn-secondary" data-preview-directions href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name)} (opens Maps)">${uiIcon('external')}<span>Directions</span></a>
         </div>`;
       preview.classList.remove('hidden');
+      preview.scrollTop = 0;
+      preview.querySelector('[data-preview-close]').addEventListener('click', () => {
+        clearCourtSelection();
+        renderCourtList(state.courtsInView, state.courtListPlaces, { savedOnly: state.courtListSavedOnly, preserveLimit: true });
+        document.querySelector('[data-court-view="map"]')?.focus({ preventScroll: true });
+      });
       const selectionStatus = $('#court-selection-status');
       if (selectionStatus) selectionStatus.textContent = `${court.name} selected. ${live}.`;
       preview.querySelector('[data-preview-business]')?.addEventListener('click', () => {
-        openCourtDetail(court.id, { focusBusiness: true });
+        openCourtFromDiscovery(court, { focusBusiness: true });
       });
-      preview.querySelector('[data-preview-detail]').addEventListener('click', () => openCourtDetail(court.id));
+      preview.querySelector('[data-preview-detail]').addEventListener('click', () => openCourtFromDiscovery(court));
       preview.querySelector('[data-preview-play]').addEventListener('click', () => {
         openCourtPlayMenu(court);
       });
@@ -6785,21 +6788,9 @@
       card.classList.toggle('selected', selected);
       card.querySelector('[data-court]')?.setAttribute('aria-pressed', String(selected));
     });
-    if (!preserveList || state.courtSheetSnap === 'peek') setCourtSheetSnap('half');
-    if (state.map && court.latitude != null) {
-      try {
-        const bottomPadding = Math.min(330, window.innerHeight * 0.48);
-        const point = state.map.latLngToContainerPoint([court.latitude, court.longitude]);
-        const size = state.map.getSize();
-        const needsPan = point.x < 24 || point.x > size.x - 24
-          || point.y < 24 || point.y > size.y - bottomPadding;
-        if (needsPan) moveCourtMapWithoutRefresh(() => state.map.panInside(
-          [court.latitude, court.longitude], {
-            paddingTopLeft: [24, 24], paddingBottomRight: [24, bottomPadding], animate: false,
-          },
-        ));
-      } catch { /* Leaflet version fallback: selection still works */ }
-    }
+    if (!preserveList) setCourtSheetSnap('peek');
+    syncCourtDockLayout();
+    requestAnimationFrame(() => revealSelectedCourtOnMap());
   }
 
   // ---------- Live location & auto check-in ----------
@@ -7492,7 +7483,7 @@
       c.has_water ? 'Water' : '',
     ].filter(Boolean).join(', ');
     const accessibleSummary = [
-      `Select or open ${c.name}`,
+      `Show ${c.name} on the map`,
       c.distance_miles != null ? `${c.distance_miles} miles away` : c.city,
       accessibleActivity,
       cond ? cond[1] : '',
@@ -7551,7 +7542,7 @@
       live,
     ].filter(Boolean).join(' · ');
     return `<article class="court-peek-card" data-court-card="${c.id}">
-      <button type="button" class="court-peek-main" data-court-open="${c.id}" aria-label="Open ${esc(c.name)} court details">
+      <button type="button" class="court-peek-main" data-court="${c.id}" aria-pressed="${selected}" aria-label="Show ${esc(c.name)} on the map">
         ${courtPhotoHtml(c)}
         <span class="court-peek-copy">
           <span class="court-peek-eyebrow">${selected ? 'Selected court' : index === 0 ? 'Nearest result' : 'Nearby result'}</span>
@@ -7718,8 +7709,7 @@
     el.querySelector('#court-show-more')?.addEventListener('click', () => {
       if (state.courtSheetSnap === 'peek') {
         const firstNewIndex = 0;
-        const compactPortrait = window.innerHeight <= 740 && window.innerHeight >= window.innerWidth;
-        setCourtSheetSnap(compactPortrait ? 'full' : 'half');
+        setCourtSheetSnap('full');
         el.querySelectorAll('[data-court]')[firstNewIndex]?.focus({ preventScroll: true });
         return;
       }
@@ -7768,7 +7758,7 @@
     const byId = new Map(courts.map((court) => [court.id, court]));
     el.querySelectorAll('[data-court]').forEach((row) => {
       row.addEventListener('click', () => {
-        activateCourtFromDiscovery(byId.get(Number(row.dataset.court)), { preserveList: true });
+        activateCourtFromDiscovery(byId.get(Number(row.dataset.court)));
       });
     });
     el.querySelectorAll('[data-court-open]').forEach((row) => {
@@ -7785,7 +7775,7 @@
       const p = places[Number(row.dataset.place)];
       if (p) row.addEventListener('click', () => jumpToPlace(p.lat, p.lng, p.label));
     });
-    if (state.selectedCourtId && !byId.has(state.selectedCourtId)) {
+    if (!preserveLimit && state.selectedCourtId && !byId.has(state.selectedCourtId)) {
       clearCourtSelection('The selected court is not in these results.');
     }
   }

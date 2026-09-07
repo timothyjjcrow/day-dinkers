@@ -15,7 +15,7 @@ def section(start: str, end: str) -> str:
 
 def test_happening_now_forces_then_restores_sort_without_empty_result_toast():
     assert 'data-court-filter="active" aria-pressed="false"' in INDEX
-    assert '> Happening now</button>' in INDEX
+    assert '> Active now</button>' in INDEX
 
     sorting = section(
         "function syncActiveCourtSort()", "function syncCourtFilterControls()",
