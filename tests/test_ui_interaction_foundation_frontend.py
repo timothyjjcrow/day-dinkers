@@ -970,7 +970,7 @@ def test_remaining_cross_app_destinations_use_native_controls_and_product_icons(
     assert 'class="card row nav-row-button" id="gs-court"' in game
     assert '<button type="button" class="profile-relationship-link" data-view-user=' in profile
     assert "openToolChild(() => openBusinessDetailsEditor" in business
-    assert "venueTaskHtml({ tool: 'offerings', icon: 'target'" in business
+    assert "window.VenueWorkspace.render(business, { icon: uiIcon" in business
     assert "uiIcon('chevron-right', 'chev')" in js_function("venueTaskHtml")
 
     assert not re.search(r'<span class="(?:chev|agb-chev)"[^>]*>›</span>', APP)
@@ -1301,7 +1301,7 @@ def test_business_connection_and_rematch_states_use_product_icons_not_font_arrow
 
     for icon in ("link", "alert-triangle", "refresh", "check-circle"):
         assert f"icon: '{icon}'" in health
-    assert "uiIcon(isPublic ? 'check-circle' : 'shield')" in dashboard
+    assert "uiIcon(isPublic ? 'check-circle' : 'eye')" in dashboard
     assert "const statusIcon = problem ? 'alert-triangle'" in connections
     assert "uiIcon(statusIcon)" in connections
     assert "uiIcon('link')" in connections

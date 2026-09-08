@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = (ROOT / "public" / "app-v15.js").read_text()
 STYLES = (ROOT / "public" / "styles-v15.css").read_text()
+VENUE_WORKSPACE = (ROOT / "public" / "venue-workspace-v15.js").read_text()
 COURTS_BACKEND = (ROOT / "backend" / "routes" / "courts.py").read_text()
 
 
@@ -33,15 +34,20 @@ def test_business_hub_has_obvious_reentry_without_a_fifth_primary_tab():
 
 def test_business_hub_functional_navigation_uses_shared_product_icons():
     dashboard = section("function renderBusinessHubDashboard", "function openBusinessPlayerPreview")
+    navigation = dashboard + VENUE_WORKSPACE
     for icon in (
         "building", "eye", "edit", "target", "calendar", "link",
         "shield", "users", "chart", "clock", "lock", "settings",
     ):
-        assert f"uiIcon('{icon}')" in dashboard or f"? '{icon}'" in dashboard or f": '{icon}'" in dashboard or f"icon:'{icon}'" in dashboard
+        assert any(pattern in navigation for pattern in (
+            f"uiIcon('{icon}')", f"? '{icon}'", f": '{icon}'", f"icon:'{icon}'",
+            f"icon('{icon}')", f", '{icon}',",
+        ))
     for glyph in ("✏️", "🎯", "📅", "🔗", "🛡️", "👥", "⇄", "📈", "↶", "🔐", "⚙️"):
-        assert glyph not in dashboard
-    assert ".business-tools-grid button > span .ui-icon" in STYLES
-    assert ".business-operations-grid button > span .ui-icon" in STYLES
+        assert glyph not in navigation
+    assert "window.VenueWorkspace.render(business, { icon: uiIcon" in dashboard
+    assert ".venue-owner-tabs" in STYLES
+    assert ".venue-item-actions" in STYLES
 
 
 def test_business_statuses_and_manager_actions_use_semantic_product_ui():
@@ -115,14 +121,14 @@ def test_claim_flow_is_explicit_private_and_never_overstates_pending_status():
 def test_business_profile_has_explicit_publish_control_and_private_preview():
     dashboard = section("function renderBusinessHubDashboard", "async function openBusinessHub")
     workspace = section("function businessWorkspaceState", "function venueTaskHtml")
-    assert "business.published === true" in workspace
-    assert "verified && business.published === true && review === 'approved' && !business.suspended" in workspace
-    assert "JSON.stringify({ published: !isPublic })" in dashboard
+    assert "window.VenueWorkspace.state(business, businessVerificationState(business))" in workspace
+    assert "verified && business.published === true && review === 'approved' && !business.suspended" in VENUE_WORKSPACE
+    assert "JSON.stringify({ published: !publicationEnabled })" in dashboard
     assert 'id="business-player-preview"' in dashboard
     assert "Only business managers can see this draft preview" in dashboard
     assert "transitionModal(modal, () => openCourtDetail(business.court_id))" not in dashboard
     assert 'id="business-resubmit-claim">Update and resubmit claim' in dashboard
-    assert "!canAdminister || (!isPublic && !canPublish) ? 'disabled'" in dashboard
+    assert "!canAdminister || (!publicationEnabled && !canPublish) ? 'disabled'" in dashboard
     assert "const isPublic = workspace.publicNow" in dashboard
 
 
@@ -253,9 +259,9 @@ def test_non_owner_business_staff_receive_a_visible_management_entry():
     assert "data['manager_role'] = manager_role" in backend
 
 
-def test_business_dashboard_counts_use_human_singular_and_plural_copy():
-    assert "offering${activeOfferingCount === 1 ? '' : 's'}" in APP
-    assert "session${activeScheduleCount === 1 ? '' : 's'}" in APP
+def test_business_dashboard_shows_named_content_and_keeps_active_completion_checks():
+    assert "item.title || 'Untitled session'" in VENUE_WORKSPACE
+    assert "item.name || 'Untitled lesson'" in VENUE_WORKSPACE
     completion = section("function businessCompletion", "function businessCourtName")
     assert "item.active !== false" in completion
 
@@ -515,12 +521,24 @@ def test_staged_business_editors_confirm_before_discarding_every_unsaved_layer()
     assert "isDirty: () => JSON.stringify(schedule) !== initialSchedule" in schedule
     assert "Discard unsaved schedule changes?" in schedule
 
-    # Successful submissions remain programmatic closes, so the discard guard
-    # protects only user dismissal and cannot interrupt a completed save.
-    assert "closeModal(modal);\n      onSave?.(updated, index);" in offering_form
-    assert "closeModal(modal);\n      onSave?.(updated, index);" in schedule_form
+    # Persisted single-item edits keep their drafts and modal until saving works;
+    # the same forms explicitly stage changes when opened by the bulk editors.
+    for item_form in [offering_form, schedule_form]:
+        assert item_form.index("await onSave?.(updated, index);") < item_form.index("closeModal(modal);")
+        assert "formUX.clearDraft({ disable: true });" in item_form
+        assert "catch (error) { finish(); formUX.showError(error.message); }" in item_form
+        assert "'Update list'" in item_form
+    assert "Next, choose Save offerings to save the updated list." in offering_form
+    assert "Next, choose Save schedule to save the updated list." in schedule_form
     assert "closeModal(modal);\n        toast('Offerings updated')" in offerings
     assert "closeModal(modal);\n        toast('Schedule updated')" in schedule
+
+
+def test_booking_links_keep_a_dirty_guard_and_clear_it_only_after_saving():
+    booking = section("function openBusinessBookingSetup", "function renderBusinessHubDashboard")
+    assert "bindModalDiscardConfirmation(modal, { isDirty: formUX.isDirty" in booking
+    assert "Discard unsaved booking links?" in booking
+    assert booking.index("const updated = await api(") < booking.index("formUX.clearDraft({ disable: true });")
 
 
 def test_successful_child_edits_refresh_one_retained_community_or_crew_parent():

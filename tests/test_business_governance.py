@@ -124,6 +124,55 @@ def challenge_code(app):
     return match.group(1)
 
 
+@pytest.mark.parametrize(
+    'published,closed,review_status,expected_public',
+    [
+        (True, False, 'approved', True),
+        (True, True, 'approved', False),
+        (True, False, 'pending', False),
+        (False, False, 'approved', False),
+    ],
+    ids=['live', 'closed-court', 'content-review', 'unpublished'],
+)
+def test_manager_publication_flag_matches_player_visibility(
+    app, client, published, closed, review_status, expected_public,
+):
+    owner = register(client, 'visibility-owner@official.example')
+    editor = register(client, 'visibility-editor@official.example')
+    profile = create_profile(
+        client, owner['token'], 1, name='Official Pickle Club',
+    )
+    assert profile['is_public'] is False
+    with app.app_context():
+        business = db.session.get(BusinessProfile, profile['id'])
+        business.claim_status = 'verified'
+        business.verified_at = utcnow()
+        business.published = published
+        business.content_review_status = review_status
+        business.court.closed = closed
+        organization = ensure_organization(business, owner['user']['id'])
+        db.session.add(BusinessOrganizationMember(
+            organization_id=organization.id,
+            user_id=editor['user']['id'], role='editor',
+        ))
+        db.session.commit()
+
+    for account in (owner, editor):
+        detail = client.get(
+            f"/api/businesses/{profile['id']}", headers=auth(account['token']),
+        )
+        assert detail.status_code == 200, detail.get_json()
+        assert detail.get_json()['is_public'] is expected_public
+        mine = client.get('/api/businesses/mine', headers=auth(account['token']))
+        assert mine.status_code == 200, mine.get_json()
+        assert mine.get_json()['items'][0]['is_public'] is expected_public
+
+    public_detail = client.get(f"/api/businesses/{profile['id']}")
+    assert public_detail.status_code == (200 if expected_public else 404)
+    if expected_public:
+        assert 'is_public' not in public_detail.get_json()
+
+
 def test_initial_claim_fields_persist_as_private_operator_evidence(app, client):
     claimant = register(client, 'manager@official.example')
     payload = {

@@ -281,6 +281,7 @@ def _profile_payload(business, *, owner=False, manager_role=None):
     data['is_owner'] = bool(owner)
     if owner or manager_role:
         data['is_manager'] = True
+        data['is_public'] = business_is_public(business)
         role = manager_role or 'owner'
         data['manager_role'] = role
         # Integration requests contain private contact, requester, and vendor

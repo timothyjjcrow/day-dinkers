@@ -1,0 +1,45 @@
+{
+  "release": "r73",
+  "files": {
+    "app-v15.min.js": {
+      "source": "app-v15.js",
+      "source_sha256": "5d248ff73e0b7eb4aa7bc47052bc520ffedbf4371b808fdc57844bfc97b6fbbb",
+      "source_bytes": 2102384,
+      "minified_bytes": 1308591,
+      "gzip_bytes": 348057,
+      "brotli_bytes": 255642
+    },
+    "crew-planner-v15.min.js": {
+      "source": "crew-planner-v15.js",
+      "source_sha256": "dda2b78142d75dc8c736753564719b472fa648dddc8f935d7d3322a8c8db2f05",
+      "source_bytes": 4543,
+      "minified_bytes": 2432,
+      "gzip_bytes": 1168,
+      "brotli_bytes": 1057
+    },
+    "tournament-bracket-v15.min.js": {
+      "source": "tournament-bracket-v15.js",
+      "source_sha256": "d79b354ae99b68ae5761b953ed52d8d7098bf5e2aa0a6a3038bdef9e5136596c",
+      "source_bytes": 15424,
+      "minified_bytes": 10466,
+      "gzip_bytes": 3992,
+      "brotli_bytes": 3518
+    },
+    "venue-workspace-v15.min.js": {
+      "source": "venue-workspace-v15.js",
+      "source_sha256": "b8e5d61764934760aade599a7e68df39088b18d586d99f3cce54f5f8be25554b",
+      "source_bytes": 21039,
+      "minified_bytes": 17250,
+      "gzip_bytes": 5871,
+      "brotli_bytes": 5020
+    },
+    "styles-v15.min.css": {
+      "source": "styles-v15.css",
+      "source_sha256": "2d5ec393e996ccfe88154feca13dbc219824cbb74cadef25320b19a952149f01",
+      "source_bytes": 405364,
+      "minified_bytes": 352619,
+      "gzip_bytes": 55893,
+      "brotli_bytes": 44237
+    }
+  }
+}

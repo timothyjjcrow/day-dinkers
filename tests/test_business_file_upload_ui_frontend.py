@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = (ROOT / "public" / "app-v15.js").read_text()
 STYLES = (ROOT / "public" / "styles-v15.css").read_text()
+VENUE_WORKSPACE = (ROOT / "public" / "venue-workspace-v15.js").read_text()
+LOGO_MARKUP = VENUE_WORKSPACE[VENUE_WORKSPACE.index("function logoFields("):VENUE_WORKSPACE.index("function preview(")]
 
 
 def section(start: str, end: str) -> str:
@@ -17,16 +19,17 @@ def test_business_file_inputs_are_hidden_behind_named_keyboard_buttons():
     catalog = section("function openBusinessCatalogUpload", "function openBusinessAddConnection")
     details = section("function openBusinessDetailsEditor", "function openBusinessIntegrationRequest")
 
-    for markup, stem in ((catalog, "business-catalog-file"), (details, "business-logo-file")):
+    for markup, stem in ((catalog, "business-catalog-file"), (LOGO_MARKUP, "business-logo-file")):
         assert f'class="business-file-native" type="file" id="{stem}"' in markup
         assert 'tabindex="-1" aria-hidden="true"' in markup
         assert f'id="{stem}-button" data-file-button' in markup
 
     assert "fileButton.addEventListener('click', () => fileInput.click())" in catalog
     assert "logoFileButton.addEventListener('click', () => logoFileInput.click())" in details
+    assert "window.VenueWorkspace.logoFields(business, { icon: uiIcon, hasManagedLogo })" in details
 
     assert 'class="sr-only" type="file" id="business-catalog-file"' not in catalog
-    assert '<input type="file" id="business-logo-file"' not in details
+    assert '<input type="file" id="business-logo-file"' not in LOGO_MARKUP
 
 
 def test_business_file_pickers_expose_selection_metadata_and_live_status():
@@ -43,13 +46,14 @@ def test_business_file_pickers_expose_selection_metadata_and_live_status():
     assert "button.setAttribute('aria-invalid', 'true')" in helpers
     assert "feedback.setAttribute('aria-live', 'polite')" in helpers
 
-    for markup in (catalog, details):
+    for markup in (catalog, LOGO_MARKUP):
         assert 'class="business-file-feedback"' in markup
         assert 'data-file-name' in markup
         assert 'data-file-meta' in markup
         assert 'data-file-state' in markup
         assert 'role="status" aria-live="polite" aria-atomic="true"' in markup
-        assert "businessFileDescription(file" in markup
+    for handlers in (catalog, details):
+        assert "businessFileDescription(file" in handlers
 
 
 def test_catalog_file_selection_validates_before_reading_and_stays_editable():
@@ -95,7 +99,7 @@ def test_schedule_csv_import_is_free_staged_and_accessible():
     assert 'id="business-schedule-import-status"' in editor
     assert "mode === 'replace' ? items : [...schedule, ...items]" in editor
     assert "combined.length > 100" in editor
-    assert "Choose Save schedule to publish." in editor
+    assert "Choose Save schedule to save these changes." in editor
 
 
 def test_logo_selection_validates_processes_and_reports_every_state():

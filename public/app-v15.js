@@ -1603,6 +1603,7 @@
     };
     const showError = (message, target = null) => {
       clearError();
+      for (let disclosure = target?.closest('details'); disclosure; disclosure = disclosure.parentElement?.closest('details')) disclosure.open = true;
       const field = target?.closest('.form-field');
       if (field) field.appendChild(error);
       else submitButton.insertAdjacentElement('beforebegin', error);
@@ -10446,6 +10447,7 @@
     title = 'Discard unsaved changes?',
     message = 'Your changes have not been saved yet.',
     detail = 'Discarding returns to the previous screen and cannot be undone.',
+    onDiscard = null,
   } = {}) {
     let discardAuthorized = false;
     let promptOpen = false;
@@ -10473,6 +10475,7 @@
       promptOpen = false;
       if (!accepted || !modal.isConnected || currentOverlayEntry()?.el !== modal) return;
       discardAuthorized = true;
+      onDiscard?.();
       closeModal(modal);
     };
     modal._cleanupFns?.push(() => {
@@ -30161,16 +30164,7 @@
   }
 
   function businessWorkspaceState(business) {
-    const role = String(business.manager_role || (business.is_owner ? 'owner' : 'viewer')).toLowerCase();
-    const verified = businessVerificationState(business) === 'verified';
-    const review = String(business.content_review_status || 'approved');
-    const publicNow = verified && business.published === true && review === 'approved' && !business.suspended;
-    if (business.suspended) return { publicNow, title: 'Publishing paused', copy: 'Review the decision before making this venue visible again.', tool: role === 'owner' ? 'ownership' : 'verification', action: 'Review status' };
-    if (businessVerificationState(business) === 'rejected') return { publicNow, title: 'Your claim needs attention', copy: 'Review the feedback, then update your claim.', tool: 'verification', action: 'Review feedback' };
-    if (!verified) return { publicNow, title: 'Confirm your management role', copy: 'Your venue stays private while we review your claim. You can prepare its details now.', tool: 'verification', action: 'View verification' };
-    if (review !== 'approved') return { publicNow, title: review === 'pending' ? 'Changes are being reviewed' : 'A change needs attention', copy: 'Your listing is private until these changes are approved.', tool: 'revisions', action: 'View changes' };
-    if (publicNow) return { publicNow, title: 'Live on the court map', copy: 'Players can see your venue details and booking options.', tool: 'preview', action: 'View player listing' };
-    return { publicNow, title: 'Ready when you are', copy: 'Check your listing, then publish it for players.', tool: ['owner', 'admin'].includes(role) ? 'publish' : 'preview', action: ['owner', 'admin'].includes(role) ? 'Publish venue' : 'Preview listing' };
+    return window.VenueWorkspace.state(business, businessVerificationState(business));
   }
 
   function venueTaskHtml({ tool, icon, title, copy, disabled = false }) {
@@ -30180,36 +30174,24 @@
   }
 
   function openBusinessBookingSetup(rawBusiness, onSaved) {
-    const business = normalizeBusinessProfile(rawBusiness);
+    let business = normalizeBusinessProfile(rawBusiness);
+    const adoptSaved = (updated) => { business = normalizeBusinessProfile(updated); onSaved?.(business); };
     const role = String(business.manager_role || (business.is_owner ? 'owner' : 'viewer'));
     const canEdit = ['owner', 'admin', 'editor'].includes(role);
-    const modal = openModal(`${modalHead('Bookings')}
-      <div class="simple-page-intro"><h3>Use the system you already have</h3><p>Add the page where players reserve a court. They’ll complete their booking with your provider.</p></div>
-      <form id="venue-booking-form" novalidate>
-        <div class="form-field"><label for="venue-booking-url">Booking page</label><input type="url" id="venue-booking-url" value="${esc(business.booking_url || '')}" placeholder="https://your-booking-page.com" inputmode="url" ${canEdit ? '' : 'disabled'} /><small>Copy the public booking link from your website or booking app.</small></div>
-        <details class="simple-disclosure" ${business.membership_url ? 'open' : ''}><summary>Membership link <span>Optional</span></summary><div class="form-field"><label for="venue-membership-url">Membership page</label><input type="url" id="venue-membership-url" value="${esc(business.membership_url || '')}" placeholder="https://yourclub.com/join" inputmode="url" ${canEdit ? '' : 'disabled'} /></div></details>
-        ${canEdit ? '<button type="submit" class="btn btn-primary btn-block" id="venue-booking-save">Save booking links</button>' : '<p class="simple-note">An owner, admin, or editor can update booking links.</p>'}
-        <p class="simple-note">New links are reviewed before they appear publicly.</p>
-      </form>
-      <div class="simple-section-title">Show players what’s on</div>
-      <button type="button" class="venue-task" id="venue-booking-schedule"><span class="venue-task-icon">${uiIcon('calendar')}</span><span class="row-main"><b>Add a schedule</b><small>Enter sessions or import a spreadsheet.</small></span>${uiIcon('chevron-right', 'chev')}</button>
-      <details class="simple-disclosure"><summary>Automatic updates &amp; integration help</summary>
-        <p class="simple-note">A booking link is enough to get started. If your system can export a schedule feed, connect it here.</p>
-        <button type="button" class="venue-task" id="venue-booking-feed"><span class="venue-task-icon">${uiIcon('refresh')}</span><span class="row-main"><b>Connect a schedule feed</b><small>Manage automatic updates and connection health.</small></span>${uiIcon('chevron-right', 'chev')}</button>
-        <button type="button" class="btn-link" id="venue-booking-help">Ask about my booking system</button>
-      </details>`, { label: 'Business bookings' });
+    const modal = openModal(window.VenueWorkspace.bookingForm(business, { icon: uiIcon, head: modalHead('Bookings'), canEdit }), { label: 'Business bookings' });
     const openChild = (fn) => openChildModal(modal, fn);
     modal.querySelector('#venue-booking-schedule').addEventListener('click', () => {
       if (!canEdit) { toast('Ask an owner or editor to update the schedule'); return; }
-      openChild(() => openBusinessScheduleEditor(business, onSaved));
+      openChild(() => openBusinessScheduleEditor(business, adoptSaved));
     });
-    modal.querySelector('#venue-booking-feed').addEventListener('click', () => openChild(() => openBusinessConnections(business, onSaved)));
+    modal.querySelector('#venue-booking-feed').addEventListener('click', () => openChild(() => openBusinessConnections(business, adoptSaved)));
     modal.querySelector('#venue-booking-help').addEventListener('click', () => {
       if (!['owner', 'admin'].includes(role) || businessVerificationState(business) !== 'verified') { toast('The venue must be verified, and an owner or admin must request an integration'); return; }
       openChild(() => openBusinessIntegrationRequest(business));
     });
     if (canEdit) {
       const formUX = bindModalFormUX(modal, '#venue-booking-save', { draftKey: `venue-booking-${business.id}` });
+      bindModalDiscardConfirmation(modal, { isDirty: formUX.isDirty, onDiscard: () => formUX.clearDraft({ disable: true }), title: 'Discard unsaved booking links?', message: 'Your booking links have not been saved.' });
       modal.querySelector('#venue-booking-form').addEventListener('submit', async (event) => {
         event.preventDefault(); formUX.clearError();
         const booking = optionalBusinessUrl(modal, '#venue-booking-url', 'booking', formUX);
@@ -30218,7 +30200,7 @@
         const finish = formUX.startSubmitting('Saving…'); if (!finish) return;
         try {
           const updated = await api(`/businesses/${business.id}`, { method: 'PATCH', body: JSON.stringify({ booking_url: booking, membership_url: membership }) });
-          formUX.clearDraft({ disable: true }); closeModal(modal); onSaved?.(updated); toast('Booking links saved');
+          formUX.clearDraft({ disable: true }); closeModal(modal); adoptSaved(updated); toast('Booking links saved');
         } catch (error) { finish(); formUX.showError(error.message); }
       });
     }
@@ -30234,28 +30216,19 @@
     const contentReview = String(business.content_review_status || 'approved');
     const workspace = businessWorkspaceState(business);
     const isPublic = workspace.publicNow;
+    const publicationEnabled = business.published === true;
     const canPublish = canAdminister && status === 'verified' && contentReview === 'approved' && !business.suspended;
-    const activeOfferingCount = business.offerings.filter((item) => item && item.active !== false).length;
-    const activeScheduleCount = business.schedule.filter((item) => item && item.active !== false).length;
-    const bookingReady = businessHasBookingLink(business);
     body.classList.add('venue-workspace');
+    modal.querySelector('.modal')?.classList.add('venue-owner-modal');
     body.innerHTML = `
       ${context.businesses.length > 1 ? `<button type="button" class="business-hub-back" id="business-hub-locations">${uiIcon('arrow-left')} Your venues</button>` : ''}
-      <header class="venue-workspace-heading"><p class="simple-eyebrow">YOUR VENUE</p><h2>${esc(business.name || businessCourtName(business))}</h2>${business.name !== businessCourtName(business) ? `<p>${esc(businessCourtName(business))}</p>` : ''}</header>
-      <section class="venue-status ${isPublic ? 'is-live' : ''}" aria-label="Publishing status">
-        <span aria-hidden="true">${uiIcon(isPublic ? 'check-circle' : 'shield')}</span><div class="row-main"><h3>${esc(workspace.title)}</h3><p>${esc(workspace.copy)}</p>
-        ${workspace.tool === 'publish' ? '<button type="button" class="btn btn-primary" id="business-publish-toggle">Publish venue</button>' : `<button type="button" class="btn btn-${isPublic ? 'secondary' : 'primary'}" data-business-tool="${workspace.tool}">${esc(workspace.action)}</button>`}
+      <header class="venue-owner-heading"><span class="venue-owner-mark" aria-hidden="true">${uiIcon('building')}</span><div class="row-main"><p class="simple-eyebrow">VENUE MANAGER</p><h2>${esc(business.name || businessCourtName(business))}</h2><p>${esc(businessCourtName(business))}</p></div><button type="button" class="btn btn-secondary" id="business-player-preview">${uiIcon('eye')} Player preview</button></header>
+      <section class="venue-owner-status ${isPublic ? 'is-live' : ''}" aria-label="Publishing status"><span>${uiIcon(isPublic ? 'check-circle' : 'eye')}</span><div class="row-main"><b>${esc(workspace.title)}</b><p>${esc(workspace.copy)}</p></div>
+        ${workspace.tool === 'publish' ? '<button type="button" class="btn btn-primary" id="business-publish-toggle">Publish venue</button>' : !isPublic ? `<button type="button" class="btn btn-secondary" data-business-tool="${workspace.tool}">${esc(workspace.action)}</button>` : ''}
         ${status === 'rejected' && canOwn ? '<button type="button" class="btn-link" id="business-resubmit-claim">Update and resubmit claim</button>' : ''}
-        </div>
       </section>
-      <div class="simple-section-title">Manage your venue</div>
-      <div class="venue-task-list">
-        ${venueTaskHtml({ tool: 'details', icon: 'edit', title: 'Venue details', copy: canEditContent ? 'About, hours, contact and logo' : 'Your role has read-only access', disabled: !canEditContent })}
-        ${venueTaskHtml({ tool: 'booking', icon: 'link', title: 'Bookings', copy: bookingReady ? (isPublic ? 'Booking links available to players' : 'Booking links saved · private until published') : 'Connect your existing booking page' })}
-        ${venueTaskHtml({ tool: 'schedule', icon: 'calendar', title: 'Sessions & events', copy: activeScheduleCount ? `${activeScheduleCount} saved session${activeScheduleCount === 1 ? '' : 's'} · edit or import` : 'Open play, clinics and your weekly schedule', disabled: !canEditContent })}
-        ${venueTaskHtml({ tool: 'offerings', icon: 'target', title: 'Lessons & services', copy: activeOfferingCount ? `${activeOfferingCount} saved offering${activeOfferingCount === 1 ? '' : 's'}` : 'Optional · coaching, memberships and more', disabled: !canEditContent })}
-      </div>
-      <button type="button" class="venue-preview-link" id="business-player-preview">${uiIcon('eye')} Preview player listing</button>
+      ${context.savedMessage ? `<p class="venue-save-success" role="status">${uiIcon('check-circle')} ${esc(context.savedMessage)}</p>` : ''}
+      ${window.VenueWorkspace.render(business, { icon: uiIcon, day: businessDayLabel, time: businessTimeLabel, workspace, canEdit: canEditContent, panel: context.venuePanel })}
       <details class="simple-disclosure venue-management"><summary>Team, activity &amp; settings</summary>
         <p class="simple-note">${esc(managerRole.replace(/^./, (c) => c.toUpperCase()))} access</p>
         ${venueTaskHtml({tool:'team',icon:'users',title:'Team access',copy:'Add staff and manage their permissions'})}
@@ -30264,31 +30237,69 @@
         ${venueTaskHtml({tool:'revisions',icon:'clock',title:'Change history',copy:'Review or restore earlier details'})}
         ${venueTaskHtml({tool:'security',icon:'lock',title:'Account security',copy:'Protect your business account'})}
         ${venueTaskHtml({tool:'ownership',icon:'settings',title:'Ownership & visibility',copy:canOwn ? 'Transfer management or release this venue' : 'Only the owner can change ownership',disabled:!canOwn})}
-        ${workspace.tool !== 'publish' ? `<button type="button" class="btn btn-secondary btn-block" id="business-publish-toggle" ${!canAdminister || (!isPublic && !canPublish) ? 'disabled' : ''}>${isPublic ? 'Unpublish venue' : 'Publish after approval'}</button>` : ''}
+        ${workspace.tool !== 'publish' ? `<button type="button" class="btn btn-secondary btn-block" id="business-publish-toggle" ${!canAdminister || (!publicationEnabled && !canPublish) ? 'disabled' : ''}>${publicationEnabled ? 'Unpublish venue' : 'Publish after approval'}</button>` : ''}
         <button type="button" class="btn-link" id="business-add-location" ${canOwn ? '' : 'disabled'}>${uiIcon('plus')} Add another venue</button>
       </details>`;
 
     const updateBusiness = (updated) => {
+      if (!body.isConnected) return;
       const normalized = normalizeBusinessProfile(updated);
       const index = context.businesses.findIndex((item) => Number(item.id) === Number(normalized.id));
       if (index >= 0) context.businesses[index] = normalized;
       renderBusinessHubDashboard(modal, body, normalized, context);
     };
     const openToolChild = (openNext) => openChildModal(modal, openNext);
+    const savedBusiness = (updated) => {
+      context.savedMessage = updated.content_review_status === 'pending'
+        ? 'Saved. Your listing is private while the changed details or links are reviewed.'
+        : updated.is_public === true ? 'Saved. Your player listing is up to date.' : 'Saved to your venue. Your listing is still private.';
+      updateBusiness(updated);
+    };
+    const saveItem = async (kind, updated, original) => {
+      const fresh = normalizeBusinessProfile(await api(`/businesses/${business.id}`));
+      const items = window.VenueWorkspace.mergeItem(fresh[kind], updated, original);
+      const result = await api(`/businesses/${business.id}/${kind}`, { method: 'PUT', body: JSON.stringify({ items }) });
+      savedBusiness(result);
+    };
+    const editItem = (kind, item = null) => {
+      if (!canEditContent) return;
+      const openForm = kind === 'schedule' ? openBusinessScheduleItemForm : openBusinessOfferingForm;
+      const child = openToolChild(() => openForm(item || {}, item ? 0 : -1, (updated) => saveItem(kind, updated, item), { persist: true }));
+      if (child?.querySelector) {
+        child.querySelector('.modal-head')?.insertAdjacentHTML('afterend', `<p class="venue-editor-context">${esc(business.name)} · ${kind === 'schedule' ? 'Sessions & events' : 'Lessons & services'}</p>`);
+      }
+    };
+    window.VenueWorkspace.bindTabs(body, (panel) => { context.venuePanel = panel; });
+    body.querySelectorAll('[data-venue-edit]').forEach((button) => button.addEventListener('click', () => {
+      const kind = button.dataset.venueEdit;
+      const item = business[kind].find((row) => Number(row.id) === Number(button.dataset.itemId));
+      if (item) editItem(kind, item);
+    }));
+    body.querySelectorAll('[data-venue-remove]').forEach((button) => button.addEventListener('click', async () => {
+      if (!canEditContent) return;
+      const kind = button.dataset.venueRemove;
+      const item = business[kind].find((row) => Number(row.id) === Number(button.dataset.itemId));
+      if (!item || !await openActionConfirmation({ title: `Remove ${item.title || item.name}?`, message: 'This item will be removed from your venue. You can add it again later.', confirmLabel: 'Remove item', cancelLabel: 'Keep item', icon: 'trash', tone: 'danger', trigger: button })) return;
+      const reset = beginButtonAction(button, 'Removing…'); if (!reset) return;
+      try { await saveItem(kind, null, item); } catch (error) { reset(); toast(error.message); }
+    }));
+
     const openTool = (tool) => {
-      if (tool === 'booking') {
-        openToolChild(() => openBusinessBookingSetup(business, updateBusiness));
+      if (tool === 'add-session' || tool === 'add-lesson') {
+        editItem(tool === 'add-session' ? 'schedule' : 'offerings');
+      } else if (tool === 'booking') {
+        openToolChild(() => openBusinessBookingSetup(business, savedBusiness));
       } else if (tool === 'preview') {
         openToolChild(() => openBusinessPlayerPreview(business));
-      } else if (tool === 'details' || tool === 'contact') {
+      } else if (tool === 'details' || tool === 'contact' || tool === 'announcement') {
         if (!canEditContent) { toast('Viewer access is read-only'); return; }
-        openToolChild(() => openBusinessDetailsEditor(business, updateBusiness));
+        openToolChild(() => openBusinessDetailsEditor(business, savedBusiness, { focusField: tool === 'announcement' ? '#business-announcement' : null }));
       } else if (tool === 'offerings') {
         if (!canEditContent) { toast('Viewer access is read-only'); return; }
-        openToolChild(() => openBusinessOfferingsEditor(business, updateBusiness));
+        openToolChild(() => openBusinessOfferingsEditor(business, savedBusiness));
       } else if (tool === 'schedule') {
         if (!canEditContent) { toast('Viewer access is read-only'); return; }
-        openToolChild(() => openBusinessScheduleEditor(business, updateBusiness));
+        openToolChild(() => openBusinessScheduleEditor(business, savedBusiness));
       } else if (tool === 'integration') {
         if (!canAdminister) { toast('Owner or admin access is required'); return; }
         openToolChild(() => openBusinessIntegrationRequest(business));
@@ -30313,7 +30324,7 @@
     body.querySelectorAll('[data-business-setup]').forEach((button) => button.addEventListener('click', () => openTool(button.dataset.businessSetup)));
     body.querySelector('#business-publish-toggle').addEventListener('click', async (event) => {
       const button = event.currentTarget;
-      if (isPublic && !await openActionConfirmation({
+      if (publicationEnabled && !await openActionConfirmation({
         eyebrow: 'Player visibility',
         title: 'Unpublish this business profile?',
         message: 'Players will stop seeing the venue profile, offerings, schedule, and booking actions until it is published again.',
@@ -30327,7 +30338,7 @@
       button.disabled = true;
       try {
         const updated = await api(`/businesses/${business.id}`, {
-            method: 'PATCH', body: JSON.stringify({ published: !isPublic }),
+            method: 'PATCH', body: JSON.stringify({ published: !publicationEnabled }),
         });
         toast(updated.published
           ? 'Business profile published'
@@ -31330,7 +31341,7 @@
 
   async function openBusinessHub({ court = null, businessId = null } = {}) {
     const modal = openModal(`
-      ${modalHead('Business Hub')}
+      ${modalHead('Manage your venue')}
       <div id="business-hub-body" aria-live="polite">${skeletonHtml(3)}</div>
     `, { page: true, label: 'Business Hub' });
     const body = modal.querySelector('#business-hub-body');
@@ -31388,7 +31399,7 @@
         <button type="button" class="btn btn-primary btn-block" id="business-add-location" style="margin-top:16px">${uiIcon('plus')} Claim another location</button>`;
       body.querySelectorAll('[data-business-open]').forEach((button) => button.addEventListener('click', () => {
         const business = businesses.find((item) => Number(item.id) === Number(button.dataset.businessOpen));
-        if (business) renderBusinessHubDashboard(modal, body, business, context);
+        if (business) { context.savedMessage = ''; renderBusinessHubDashboard(modal, body, business, context); }
       }));
       body.querySelectorAll('[data-business-claim-resubmit]').forEach((button) => button.addEventListener('click', () => {
         const claim = visibleClaims.find((item) => Number(item.id) === Number(button.dataset.businessClaimResubmit));
@@ -31586,16 +31597,18 @@
     return href;
   }
 
-  function openBusinessDetailsEditor(rawBusiness, onSaved) {
+  function openBusinessDetailsEditor(rawBusiness, onSaved, { focusField = null } = {}) {
     const business = normalizeBusinessProfile(rawBusiness);
     const hasManagedLogo = business.has_logo_upload || /^\/api\/businesses\/\d+\/logo$/.test(business.logo_url || '');
     const modal = openModal(`
-      ${modalHead('Business details')}
-      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Changes to your name, contact details or logo may need review before they appear publicly.</p></div>` : ''}
+      ${modalHead('Edit venue details')}
+      <div class="venue-editor-context-row"><p class="venue-editor-context">${esc(business.name || businessCourtName(business))}</p><button type="button" class="btn btn-secondary btn-sm venue-mobile-preview" id="venue-jump-preview">${uiIcon('eye')} Preview changes</button></div>
+      <div class="venue-edit-layout">
       <form id="business-details-form" novalidate>
-        <p class="row-sub business-editor-intro">This is the trusted information players see before they decide to visit or book.</p>
+        <div class="venue-edit-fields">
+        <fieldset class="venue-form-section"><legend>About your venue</legend>
         <div class="form-field">
-          <label for="business-name">Business name</label>
+          <label for="business-name">Venue name</label>
           <input type="text" id="business-name" maxlength="120" value="${esc(business.name || '')}" placeholder="e.g. Third Shot Pickleball Club" />
         </div>
         <div class="form-field">
@@ -31607,39 +31620,32 @@
           <input type="text" id="business-announcement" maxlength="300" value="${esc(business.announcement || '')}" placeholder="e.g. Labor Day open play starts at 9 AM" />
           <small class="field-help">Use this for a timely update. Leave it blank when there is nothing to announce.</small>
         </div>
+        </fieldset>
+        <fieldset class="venue-form-section"><legend>Plan a visit</legend>
+        <div class="form-field"><label for="business-hours">Facility hours</label><textarea id="business-hours" rows="2" maxlength="300" placeholder="Mon–Fri 6 AM–10 PM · Sat–Sun 7 AM–8 PM">${esc(business.hours || '')}</textarea></div>
+        <div class="form-field"><label for="business-amenities">Amenities</label><input type="text" id="business-amenities" maxlength="400" value="${esc(Array.isArray(business.amenities) ? business.amenities.join(', ') : business.amenities || '')}" placeholder="Pro shop, showers, ball machine, café" /></div>
+
+        </fieldset>
+        <details class="simple-disclosure venue-form-contact"><summary>Contact &amp; website</summary>
         <div class="form-grid">
           <div class="form-field"><label for="business-phone">Public phone</label><input type="tel" id="business-phone" maxlength="40" value="${esc(business.phone || '')}" autocomplete="tel" /></div>
           <div class="form-field"><label for="business-email">Public email</label><input type="email" id="business-email" maxlength="160" value="${esc(business.email || '')}" autocomplete="email" /></div>
         </div>
-        <div class="form-field"><label for="business-hours">Facility hours</label><input type="text" id="business-hours" maxlength="300" value="${esc(business.hours || '')}" placeholder="Mon–Fri 6 AM–10 PM · Sat–Sun 7 AM–8 PM" /></div>
-        <div class="form-field"><label for="business-amenities">Amenities</label><input type="text" id="business-amenities" maxlength="400" value="${esc(Array.isArray(business.amenities) ? business.amenities.join(', ') : business.amenities || '')}" placeholder="Pro shop, showers, ball machine, café" /></div>
-
         <div class="form-field"><label for="business-website-url">Website</label><input type="url" id="business-website-url" value="${esc(business.website_url || '')}" placeholder="https://yourclub.com" inputmode="url" /></div>
-        <details class="simple-disclosure" id="business-branding"><summary>Logo &amp; branding <span>Optional</span></summary>
-        <div class="form-field"><label for="business-logo-url">Logo image link</label><input type="url" id="business-logo-url" value="${esc(business.logo_url || '')}" placeholder="https://yourclub.com/logo.png" inputmode="url" /><small class="field-help">Upload a logo, or link to one on your website.</small></div>
-        <div class="form-field business-logo-upload">
-          <span class="business-file-label" id="business-logo-file-label">Upload a logo</span>
-          <div class="business-file-picker" id="business-logo-file-picker" data-state="${hasManagedLogo ? 'success' : 'idle'}" data-idle-icon="camera">
-            <input class="business-file-native" type="file" id="business-logo-file" data-no-draft accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" tabindex="-1" aria-hidden="true" />
-            <button type="button" class="business-file-button" id="business-logo-file-button" data-file-button aria-labelledby="business-logo-file-label business-logo-file-action" aria-describedby="business-logo-upload-status business-logo-file-help">
-              <span class="business-file-button-icon" aria-hidden="true">${uiIcon('camera')}</span>
-              <span class="business-file-button-copy"><b id="business-logo-file-action">${hasManagedLogo ? 'Replace uploaded logo' : 'Choose logo image'}</b><small>Browse this device</small></span>
-              <span class="business-file-button-cta" aria-hidden="true">Choose</span>
-            </button>
-            <div class="business-file-feedback" id="business-logo-upload-status" data-file-feedback role="status" aria-live="polite" aria-atomic="true">
-              <span class="business-file-state-icon" data-file-state-icon aria-hidden="true">${uiIcon(hasManagedLogo ? 'check-circle' : 'camera')}</span>
-              <span class="business-file-feedback-copy"><b data-file-name>${hasManagedLogo ? 'Uploaded logo on file' : business.logo_url ? 'No replacement chosen' : 'No logo selected'}</b><small data-file-meta>${hasManagedLogo ? 'Choose a new image to replace it' : 'PNG, JPEG, or WebP · optimized to 512 KB'}</small></span>
-              <span class="business-file-state" data-file-state>${hasManagedLogo ? 'Current' : 'Optional'}</span>
-            </div>
-          </div>
-          <small class="field-help" id="business-logo-file-help">Choose an image up to 12 MB. Third Shot resizes it before upload. Avoid confidential images.</small>
-          <button type="button" class="btn-link" id="business-logo-remove" ${hasManagedLogo ? '' : 'hidden'}>Remove uploaded logo</button>
-        </div>
         </details>
-        <button type="submit" class="btn btn-primary btn-block" id="business-details-save">Save business details</button>
+        ${window.VenueWorkspace.logoFields(business, { icon: uiIcon, hasManagedLogo })}
+        </div>
+        <footer class="venue-editor-savebar"><div><b id="venue-details-dirty">Your saved details</b><p id="venue-details-save-impact"></p></div><button type="submit" class="btn btn-primary" id="business-details-save">Save venue details</button></footer>
       </form>
-    `, { label: 'Edit business details' });
+      <aside class="venue-editor-preview" aria-label="Player preview"><p class="venue-preview-heading">See it as you edit</p><div id="venue-details-preview"></div><button type="button" class="btn btn-secondary btn-block venue-mobile-preview" id="venue-back-edit">Back to editing</button></aside>
+      </div>
+    `, { page: true, label: 'Edit venue details' });
+    modal.querySelector('.modal').classList.add('venue-details-modal');
     const formUX = bindModalFormUX(modal, '#business-details-save', { draftKey: `business-details-${business.id}` });
+    const syncPreview = window.VenueWorkspace.bindDetailsEditor(modal, business, { formUX, icon: uiIcon, verified: businessVerificationState(business) === 'verified', publicNow: businessWorkspaceState(business).publicNow });
+    bindModalDiscardConfirmation(modal, { isDirty: formUX.isDirty, onDiscard: () => formUX.clearDraft({ disable: true }), title: 'Discard unsaved venue details?', message: 'Your text edits have not been saved. Logo uploads or removals already completed are kept.' });
+    if (focusField) requestAnimationFrame(() => { const input = modal.querySelector(focusField); input?.scrollIntoView({ block: 'center' }); input?.focus({ preventScroll: true }); });
+    const adoptLogoState = (updated) => { Object.assign(business, normalizeBusinessProfile(updated)); syncPreview(); onSaved?.(business); };
     const logoFileInput = modal.querySelector('#business-logo-file');
     const logoFileButton = modal.querySelector('#business-logo-file-button');
     const logoFilePicker = modal.querySelector('#business-logo-file-picker');
@@ -31686,9 +31692,9 @@
         setBusinessFilePickerState(logoFilePicker, { state: 'success', name: file.name, meta: `${meta} · uploaded securely`, badge: 'Uploaded' });
         logoFileButton.querySelector('#business-logo-file-action').textContent = 'Replace uploaded logo';
         logoRemoveButton.hidden = false;
-        toast('Business logo uploaded');
-        try { onSaved?.(await api(`/businesses/${business.id}`)); }
-        catch { onSaved?.({ ...business, logo_url: url, has_logo_upload: true, published: false, content_review_status: 'pending' }); }
+        syncPreview(); toast('Logo saved. Your listing may need review.');
+        try { adoptLogoState(await api(`/businesses/${business.id}`)); }
+        catch { adoptLogoState({ ...business, logo_url: url, has_logo_upload: true, is_public: false, published: false, content_review_status: 'pending' }); }
       } catch (error) {
         uploadError = error.status === 404
           ? 'Managed logo uploads are not enabled yet. Use a secure image link for now.'
@@ -31708,7 +31714,7 @@
     });
     logoRemoveButton.addEventListener('click', () => openBusinessConfirmAction({
       title: 'Remove uploaded logo?', message: 'The player listing will return to its venue icon. A verified listing may need content review before republishing.', confirmLabel: 'Remove logo',
-      onConfirm: async (sheet) => { await api(`/businesses/${business.id}/logo`, { method: 'DELETE' }); modal.querySelector('#business-logo-url').value = ''; logoRemoveButton.hidden = true; setBusinessFilePickerState(logoFilePicker, { state: 'idle', name: 'Uploaded logo removed', meta: 'Choose an image to add a new logo', badge: 'Optional', icon: 'camera' }); logoFileButton.querySelector('#business-logo-file-action').textContent = 'Choose logo image'; closeModal(sheet); toast('Uploaded logo removed'); try { onSaved?.(await api(`/businesses/${business.id}`)); } catch { onSaved?.({ ...business, logo_url: '', has_logo_upload: false, published: false, content_review_status: 'pending' }); } },
+      onConfirm: async (sheet) => { await api(`/businesses/${business.id}/logo`, { method: 'DELETE' }); modal.querySelector('#business-logo-url').value = ''; logoRemoveButton.hidden = true; setBusinessFilePickerState(logoFilePicker, { state: 'idle', name: 'Uploaded logo removed', meta: 'Choose an image to add a new logo', badge: 'Optional', icon: 'camera' }); logoFileButton.querySelector('#business-logo-file-action').textContent = 'Choose logo image'; closeModal(sheet); toast('Uploaded logo removed'); try { adoptLogoState(await api(`/businesses/${business.id}`)); } catch { adoptLogoState({ ...business, logo_url: '', has_logo_upload: false, is_public: false, published: false, content_review_status: 'pending' }); } },
     }));
     modal.querySelector('#business-details-form').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -31748,8 +31754,8 @@
         });
         formUX.clearDraft({ disable: true });
         closeModal(modal);
-        toast('Business details saved');
         onSaved?.(updated);
+        toast('Venue details saved');
       } catch (error) {
         finish();
         formUX.showError(error.message);
@@ -31876,12 +31882,13 @@
     return BUSINESS_OFFERING_CATEGORIES[key] || BUSINESS_OFFERING_CATEGORIES.other;
   }
 
-  function openBusinessOfferingForm(item = {}, index = -1, onSave) {
+  function openBusinessOfferingForm(item = {}, index = -1, onSave, { persist = false } = {}) {
     const category = Object.prototype.hasOwnProperty.call(BUSINESS_OFFERING_CATEGORIES, item.category)
       ? item.category : 'lesson';
     const modal = openModal(`
-      ${modalHead(index >= 0 ? 'Edit offering' : 'Add an offering')}
-      <form id="business-offering-form" novalidate>
+      ${modalHead(index >= 0 ? 'Edit lesson or service' : 'Add lesson or service')}
+      <form id="business-offering-form" class="venue-item-form" novalidate>
+        <fieldset class="venue-form-section"><legend>Lesson or service</legend>
         <div class="form-field"><label for="business-offering-name">Name</label><input type="text" id="business-offering-name" maxlength="120" value="${esc(item.name || item.title || '')}" placeholder="e.g. Beginner private lesson" /></div>
         <div class="form-field">
           <label for="business-offering-category">Type</label>
@@ -31890,13 +31897,14 @@
           </select>
         </div>
         <div class="form-field"><label for="business-offering-description">Short description</label><textarea id="business-offering-description" rows="3" maxlength="400" placeholder="Who it’s for and what’s included">${esc(item.description || '')}</textarea></div>
+        </fieldset><fieldset class="venue-form-section"><legend>Price &amp; booking</legend>
         <div class="form-grid">
           <div class="form-field"><label for="business-offering-price">Price</label><input type="text" id="business-offering-price" maxlength="80" value="${esc(item.price_text || '')}" placeholder="$45 / person" /></div>
           <div class="form-field"><label for="business-offering-duration">Minutes</label><input type="number" id="business-offering-duration" min="5" max="1440" step="1" inputmode="numeric" value="${item.duration_minutes || ''}" placeholder="60" /><small class="field-help">Optional · 5 minutes or longer</small></div>
         </div>
         <div class="form-field"><label for="business-offering-booking">Direct booking link</label><input type="url" id="business-offering-booking" value="${esc(item.booking_url || '')}" placeholder="https://…" inputmode="url" /><small class="field-help">Players continue to this link to finish booking.</small></div>
         <label class="business-authorized-check"><input type="checkbox" id="business-offering-active" ${item.active === false ? '' : 'checked'} /> <span>Show this offering to players</span></label>
-        <button type="submit" class="btn btn-primary btn-block" id="business-offering-done">${index >= 0 ? 'Save changes' : 'Add offering'}</button>
+        </fieldset><footer class="venue-item-savebar"><button type="submit" class="btn btn-primary btn-block" id="business-offering-done">${persist ? 'Save lesson or service' : 'Update list'}</button><p class="simple-note">${persist ? 'Saves to your venue. Changed booking links need review before your listing is public.' : 'Next, choose Save offerings to save the updated list.'}</p></footer>
       </form>
     `, { label: index >= 0 ? 'Edit business offering' : 'Add business offering' });
     const formUX = bindModalFormUX(modal, '#business-offering-done');
@@ -31905,7 +31913,7 @@
       title: 'Discard this offering draft?',
       message: 'The offering fields you changed have not been added to the list yet.',
     });
-    modal.querySelector('#business-offering-form').addEventListener('submit', (event) => {
+    modal.querySelector('#business-offering-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       formUX.clearError();
       const name = modal.querySelector('#business-offering-name').value.trim();
@@ -31932,8 +31940,13 @@
         booking_url: bookingUrl,
         active: modal.querySelector('#business-offering-active').checked,
       };
-      closeModal(modal);
-      onSave?.(updated, index);
+      const finish = formUX.startSubmitting(persist ? 'Saving…' : 'Updating list…');
+      if (!finish) return;
+      try {
+        await onSave?.(updated, index);
+        formUX.clearDraft({ disable: true });
+        closeModal(modal);
+      } catch (error) { finish(); formUX.showError(error.message); }
     });
     return modal;
   }
@@ -31944,7 +31957,7 @@
     const initialOfferings = JSON.stringify(offerings);
     const modal = openModal(`
       ${modalHead('Offerings')}
-      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved offering changes appear to players immediately.</p></div>` : ''}
+      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved changes update your listing. Changed booking links make the listing private until reviewed.</p></div>` : ''}
       <p class="row-sub business-editor-intro">Show players exactly what they can book or join. Each item can use its own direct link.</p>
       <div id="business-offerings-list"></div>
       <button type="button" class="btn btn-secondary btn-block" id="business-offering-add">${uiIcon('plus')} Add offering</button>
@@ -32008,14 +32021,15 @@
     other: ['map-pin', 'Other'],
   };
 
-  function openBusinessScheduleItemForm(item = {}, index = -1, onSave) {
+  function openBusinessScheduleItemForm(item = {}, index = -1, onSave, { persist = false } = {}) {
     const kind = Object.prototype.hasOwnProperty.call(BUSINESS_SCHEDULE_KINDS, item.kind) ? item.kind : 'open_play';
     const dayValue = businessDayLabel(item.day_of_week ?? item.day ?? 'monday').toLowerCase();
     const recurrence = item.recurrence || (item.event_date ? 'dated' : 'weekly');
     const defaultTimezone = item.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles';
     const modal = openModal(`
-      ${modalHead(index >= 0 ? 'Edit schedule item' : 'Add to schedule')}
-      <form id="business-schedule-item-form" novalidate>
+      ${modalHead(index >= 0 ? 'Edit session' : 'Add session')}
+      <form id="business-schedule-item-form" class="venue-item-form" novalidate>
+        <fieldset class="venue-form-section"><legend>Session details</legend>
         <div class="form-field"><label for="business-schedule-title">Title</label><input type="text" id="business-schedule-title" maxlength="120" value="${esc(item.title || item.name || '')}" placeholder="e.g. Intermediate open play" /></div>
         <div class="form-field">
           <label for="business-schedule-kind">Type</label>
@@ -32023,6 +32037,8 @@
             ${Object.entries(BUSINESS_SCHEDULE_KINDS).map(([value, [icon, label]]) => `<option value="${value}" data-icon-name="${icon}" ${kind === value ? 'selected' : ''}>${label}</option>`).join('')}
           </select>
         </div>
+        </fieldset><fieldset class="venue-form-section"><legend>When it happens</legend>
+        <div class="form-field"><label for="business-schedule-recurrence">Schedule pattern</label><select id="business-schedule-recurrence" data-select-title="Schedule pattern"><option value="weekly" ${recurrence === 'weekly' ? 'selected' : ''}>Repeats weekly</option><option value="dated" ${recurrence === 'dated' ? 'selected' : ''}>Specific date</option><option value="date_range" ${recurrence === 'date_range' ? 'selected' : ''}>Weekly within a date range</option></select></div>
         <div class="form-field">
           <label for="business-schedule-day">Day</label>
           <select id="business-schedule-day" data-select-title="Day of week" data-select-prefix="Day">
@@ -32032,7 +32048,6 @@
             <option value="weekends" ${dayValue === 'weekends' ? 'selected' : ''}>Weekends</option>
           </select>
         </div>
-        <div class="form-field"><label for="business-schedule-recurrence">Schedule pattern</label><select id="business-schedule-recurrence" data-select-title="Schedule pattern"><option value="weekly" ${recurrence === 'weekly' ? 'selected' : ''}>Repeats weekly</option><option value="dated" ${recurrence === 'dated' ? 'selected' : ''}>Specific date</option><option value="date_range" ${recurrence === 'date_range' ? 'selected' : ''}>Weekly within a date range</option></select></div>
         <div class="form-grid business-schedule-dates">
           <div class="form-field"><label for="business-schedule-event-date">Event date</label><input type="date" id="business-schedule-event-date" value="${esc(item.event_date || '')}" /></div>
           <div class="form-field"><label for="business-schedule-start-date">Begins on</label><input type="date" id="business-schedule-start-date" value="${esc(item.start_date || '')}" /></div>
@@ -32042,15 +32057,17 @@
           <div class="form-field"><label for="business-schedule-start">Starts</label><input type="time" id="business-schedule-start" value="${esc(item.start_time || item.start || '')}" /></div>
           <div class="form-field"><label for="business-schedule-end">Ends</label><input type="time" id="business-schedule-end" value="${esc(item.end_time || item.end || '')}" /></div>
         </div>
+        </fieldset><details class="simple-disclosure"><summary>Audience, capacity &amp; location <span>Optional</span></summary>
         <div class="form-field"><label for="business-schedule-skill">Skill or audience</label><input type="text" id="business-schedule-skill" maxlength="40" value="${esc(item.skill_level || '')}" placeholder="All levels, 3.5+, beginners…" /></div>
         <div class="form-grid"><div class="form-field"><label for="business-schedule-instructor">Instructor or host</label><input type="text" id="business-schedule-instructor" maxlength="120" value="${esc(item.instructor || '')}" /></div><div class="form-field"><label for="business-schedule-capacity">Capacity</label><input type="number" id="business-schedule-capacity" min="1" max="10000" inputmode="numeric" value="${item.capacity ?? ''}" placeholder="24" /></div></div>
         <div class="form-field"><label for="business-schedule-spots">Spots remaining (optional)</label><input type="number" id="business-schedule-spots" min="0" max="10000" inputmode="numeric" value="${item.spots_remaining ?? ''}" placeholder="8" /><small class="field-help">Use 0 when full. Third Shot labels a scheduled item sold out when no spots remain.</small></div>
         <div class="form-field"><label for="business-schedule-location">Court or meeting point</label><input type="text" id="business-schedule-location" maxlength="160" value="${esc(item.location_note || '')}" placeholder="Courts 1–4, front desk, upstairs studio…" /></div>
+        </details><fieldset class="venue-form-section"><legend>Registration &amp; visibility</legend>
         <div class="form-field"><label for="business-schedule-timezone">Venue timezone</label><input type="text" id="business-schedule-timezone" maxlength="80" value="${esc(defaultTimezone)}" placeholder="America/Los_Angeles" /><small class="field-help">Times are shown in the venue’s local timezone.</small></div>
         <div class="form-field"><label for="business-schedule-booking">Registration link (optional)</label><input type="url" id="business-schedule-booking" value="${esc(item.booking_url || '')}" placeholder="https://…" inputmode="url" /></div>
         <div class="form-field"><label for="business-schedule-status">Program status</label><select id="business-schedule-status" data-select-title="Program status"><option value="scheduled" ${!['sold_out', 'cancelled', 'completed'].includes(item.status) ? 'selected' : ''}>Scheduled</option><option value="sold_out" ${item.status === 'sold_out' ? 'selected' : ''}>Sold out</option><option value="cancelled" ${item.status === 'cancelled' ? 'selected' : ''}>Cancelled — keep visible</option><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>Completed</option></select></div>
         <label class="business-authorized-check"><input type="checkbox" id="business-schedule-active" ${item.active === false ? '' : 'checked'} /> <span>Show this on the public schedule</span></label>
-        <button type="submit" class="btn btn-primary btn-block" id="business-schedule-item-done">${index >= 0 ? 'Save changes' : 'Add to schedule'}</button>
+        </fieldset><footer class="venue-item-savebar"><button type="submit" class="btn btn-primary btn-block" id="business-schedule-item-done">${persist ? 'Save session' : 'Update list'}</button><p class="simple-note">${persist ? 'Saves to your venue. Changed registration links need review before your listing is public.' : 'Next, choose Save schedule to save the updated list.'}</p></footer>
       </form>
     `, { label: index >= 0 ? 'Edit business schedule item' : 'Add business schedule item' });
     const formUX = bindModalFormUX(modal, '#business-schedule-item-done');
@@ -32061,13 +32078,14 @@
     });
     const syncScheduleDateFields = () => {
       const value = modal.querySelector('#business-schedule-recurrence').value;
+      modal.querySelector('#business-schedule-day').closest('.form-field').hidden = value === 'dated';
       modal.querySelector('#business-schedule-event-date').closest('.form-field').hidden = value !== 'dated';
       modal.querySelector('#business-schedule-start-date').closest('.form-field').hidden = value !== 'date_range';
       modal.querySelector('#business-schedule-end-date').closest('.form-field').hidden = value !== 'date_range';
     };
     modal.querySelector('#business-schedule-recurrence').addEventListener('change', syncScheduleDateFields);
     syncScheduleDateFields();
-    modal.querySelector('#business-schedule-item-form').addEventListener('submit', (event) => {
+    modal.querySelector('#business-schedule-item-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       formUX.clearError();
       const title = modal.querySelector('#business-schedule-title').value.trim();
@@ -32101,6 +32119,9 @@
       if (spotsText && (!Number.isInteger(spotsRemaining) || spotsRemaining < 0 || spotsRemaining > 10000)) { formUX.showError('Use a whole number from 0 to 10,000 for spots remaining.', modal.querySelector('#business-schedule-spots')); return; }
       if (spotsText && !capacityText) { formUX.showError('Add capacity before setting spots remaining.', modal.querySelector('#business-schedule-capacity')); return; }
       if (spotsText && spotsRemaining > capacity) { formUX.showError('Spots remaining cannot be greater than capacity.', modal.querySelector('#business-schedule-spots')); return; }
+      const timezoneInput = modal.querySelector('#business-schedule-timezone');
+      try { new Intl.DateTimeFormat('en-US', { timeZone: timezoneInput.value.trim() }).format(new Date()); }
+      catch { formUX.showError('Enter a valid venue timezone, such as America/Los_Angeles.', timezoneInput); return; }
       const updated = {
         ...item,
         title,
@@ -32123,8 +32144,13 @@
         booking_url: bookingUrl,
         active: modal.querySelector('#business-schedule-active').checked,
       };
-      closeModal(modal);
-      onSave?.(updated, index);
+      const finish = formUX.startSubmitting(persist ? 'Saving…' : 'Updating list…');
+      if (!finish) return;
+      try {
+        await onSave?.(updated, index);
+        formUX.clearDraft({ disable: true });
+        closeModal(modal);
+      } catch (error) { finish(); formUX.showError(error.message); }
     });
     return modal;
   }
@@ -32293,8 +32319,8 @@
     });
     const modal = openModal(`
       ${modalHead('Weekly schedule')}
-      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved schedule changes appear to players immediately.</p></div>` : ''}
-      <p class="row-sub business-editor-intro">Publish recurring or dated programs with capacity, local timezone, hosts, cancellations, and registration links. Manual entries are not live availability unless a connection says they are synced.</p>
+      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved changes update your listing. Changed registration links make the listing private until reviewed.</p></div>` : ''}
+      <p class="row-sub business-editor-intro">Add weekly sessions or one-time events. Review your changes here, then choose Save schedule.</p>
       <div id="business-schedule-import-status" class="business-form-note" role="status" aria-live="polite"></div>
       <div id="business-schedule-list"></div>
       <button type="button" class="btn btn-secondary btn-block" id="business-schedule-import">${uiIcon('upload')} Import CSV</button>
@@ -32338,7 +32364,7 @@
           render();
           const ignored = Array.isArray(result?.ignored_columns) ? result.ignored_columns.length : 0;
           const status = modal.querySelector('#business-schedule-import-status');
-          status.textContent = `${items.length} row${items.length === 1 ? '' : 's'} imported for review${ignored ? `; ${ignored} unrecognized column${ignored === 1 ? '' : 's'} ignored` : ''}. Choose Save schedule to publish.`;
+          status.textContent = `${items.length} row${items.length === 1 ? '' : 's'} imported for review${ignored ? `; ${ignored} unrecognized column${ignored === 1 ? '' : 's'} ignored` : ''}. Choose Save schedule to save these changes.`;
           toast(`${items.length} schedule row${items.length === 1 ? '' : 's'} ready to review`);
         },
       }));

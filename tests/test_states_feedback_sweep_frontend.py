@@ -196,7 +196,15 @@ def test_reduced_motion_loaders_remain_meaningful_and_location_names_its_state()
     assert 'id="court-search-status" class="sr-only" role="status" aria-live="polite"' in INDEX
     locate = section("function locateMe", "function committedAreaLatLng")
     assert "setAttribute('aria-label', 'Locating…')" in locate
-    reduced = CSS[CSS.rindex("@media (prefers-reduced-motion: reduce)") :]
+    blocks = []
+    for match in re.finditer(r"@media \(prefers-reduced-motion: reduce\)\s*\{", CSS):
+        depth = 1
+        end = match.end()
+        while depth:
+            depth += (CSS[end] == "{") - (CSS[end] == "}")
+            end += 1
+        blocks.append(CSS[match.end():end - 1])
+    reduced = "\n".join(blocks)
     for selector in (".search-spin", ".map-load-spinner", ".play-now-loading .spinner", ".ptr-spinner.spin::before"):
         assert selector in reduced
     assert "animation: none !important" in reduced

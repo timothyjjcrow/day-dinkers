@@ -17,8 +17,8 @@ BUNDLED_COURTS_FILE = os.path.join(PROJECT_ROOT, 'data', 'courts.json.gz')
 # Immutable frontend URLs are part of the executable shell contract. Keep the
 # prior release readable while an already-open service-worker client reloads
 # onto the current release.
-FRONTEND_RELEASE = 'r72'
-FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', FRONTEND_RELEASE})
+FRONTEND_RELEASE = 'r73'
+FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', FRONTEND_RELEASE})
 FRONTEND_RELEASE_FILES = frozenset({
     'app-v15.min.js',
     'app-v15.min.js.map',
@@ -26,6 +26,8 @@ FRONTEND_RELEASE_FILES = frozenset({
     'crew-planner-v15.min.js.map',
     'tournament-bracket-v15.min.js',
     'tournament-bracket-v15.min.js.map',
+    'venue-workspace-v15.min.js',
+    'venue-workspace-v15.min.js.map',
     'styles-v15.min.css',
     'styles-v15.min.css.map',
 })
@@ -33,6 +35,7 @@ FRONTEND_RUNTIME_RELEASE_FILES = frozenset({
     'app-v15.min.js',
     'crew-planner-v15.min.js',
     'tournament-bracket-v15.min.js',
+    'venue-workspace-v15.min.js',
     'styles-v15.min.css',
 })
 

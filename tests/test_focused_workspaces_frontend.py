@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 
 APP = (Path(__file__).resolve().parents[1] / 'public/app-v15.js').read_text()
+VENUE_MODULE = Path(__file__).resolve().parents[1] / 'public/venue-workspace-v15.js'
 
 
 def run_js(script):
@@ -42,7 +43,13 @@ def business_html(**overrides):
     business = dict(name='Test club', offerings=[], schedule=[], manager_role='owner',
                     claim_status='verified', published=False, content_review_status='approved')
     business.update(overrides)
-    return run_js('''
+    return run_js(f'''
+      import fs from 'node:fs';
+      import vm from 'node:vm';
+      const sandbox = {{module: {{exports: {{}}}}}};
+      vm.runInNewContext(fs.readFileSync({json.dumps(str(VENUE_MODULE))}, 'utf8'), sandbox);
+      const window = {{VenueWorkspace: sandbox.module.exports}};
+    ''' + '''
       const businessCompletion = () => ({percent: 100, complete: 0, checks: []});
       const businessVerificationState = b => b.claim_status;
       const businessHasBookingLink = () => true;
@@ -52,22 +59,26 @@ def business_html(**overrides):
       const businessStateIconName = () => 'clock';
       const uiIcon = () => '';
       const esc = value => String(value || '');
+      const businessDayLabel = String, businessTimeLabel = String;
     ''' + APP[APP.index('  function businessWorkspaceState('):APP.index('  function openBusinessBookingSetup(')] + APP[start:end] + '}\n' + f'''
       const body = {{classList: {{add() {{}}}}}};
-      renderBusinessHubDashboard(null, body, {json.dumps(business)}, {{businesses: []}});
+      const modal = {{querySelector: () => null}};
+      renderBusinessHubDashboard(modal, body, {json.dumps(business)}, {{businesses: []}});
       console.log(JSON.stringify(body.innerHTML));
     ''')
 
 
-def test_booking_status_reflects_player_visibility_not_just_saved_url():
-    assert 'Booking links saved' in business_html()
-    assert 'Booking links available to players' in business_html(published=True)
+def test_saved_content_status_reflects_player_visibility_not_just_published_flag():
+    content = dict(offerings=[dict(id=3, name='Private lesson', active=True)])
+    assert 'Saved · listing private' in business_html(**content)
+    assert 'On your listing' in business_html(**content, published=True)
     for changes in [dict(published=True, suspended=True),
                     dict(published=True, content_review_status='pending'),
-                    dict(published=True, claim_status='pending')]:
-        html = business_html(**changes)
-        assert 'Booking links saved' in html
-        assert 'Booking links available to players' not in html
+                    dict(published=True, claim_status='pending'),
+                    dict(published=True, is_public=False)]:
+        html = business_html(**content, **changes)
+        assert 'Saved · listing private' in html
+        assert 'On your listing' not in html
         assert 'Live on the court map' not in html
 
 
@@ -88,7 +99,7 @@ def test_business_home_focuses_on_content_and_preserves_role_permissions():
 
 def test_venue_next_action_follows_verification_review_and_visibility():
     assert 'Publish venue' in business_html()
-    assert 'Confirm your management role' in business_html(claim_status='pending')
+    assert 'Your claim is being reviewed' in business_html(claim_status='pending')
     assert 'Changes are being reviewed' in business_html(content_review_status='pending')
     assert 'Your claim needs attention' in business_html(claim_status='rejected')
     assert 'Live on the court map' in business_html(published=True)
