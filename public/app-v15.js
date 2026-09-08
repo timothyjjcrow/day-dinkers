@@ -10944,12 +10944,15 @@
     toast('League date downloaded', { tone: 'success', icon: 'calendar' });
   }
 
-  function formStripHtml(form) {
+  function formStripHtml(form, visibleOnly = false) {
     if (!form || !form.length) return '';
     return `
-      <div style="display:flex;gap:5px;justify-content:center;align-items:center;margin-top:10px">
-        <span class="row-sub" style="margin-right:2px">Last ${form.length}:</span>
-        ${form.map((r) => `<span style="width:22px;height:22px;border-radius:var(--radius-pill);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:800;color:#fff;background:${r === 'W' ? 'var(--green-600)' : '#e03131'}">${r}</span>`).join('')}
+      <div style="margin-top:10px;text-align:center">
+        <div style="display:flex;gap:5px;justify-content:center;align-items:center;flex-wrap:wrap">
+          <span class="row-sub" style="margin-right:2px">${visibleOnly ? 'Visible results' : 'Recent results'}:</span>
+          ${form.map((r) => `<span aria-label="${r === 'W' ? 'Win' : 'Loss'}" style="width:22px;height:22px;border-radius:var(--radius-pill);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:800;color:#fff;background:${r === 'W' ? 'var(--green-600)' : '#e03131'}">${r}</span>`).join('')}
+        </div>
+        <div class="row-sub" style="font-size:var(--text-xs);margin-top:4px">Ranked + casual · newest first</div>
       </div>`;
   }
 
@@ -29725,9 +29728,9 @@
     const rankedTotal = Number(user.ranked_wins || 0) + Number(user.ranked_losses || 0);
     const playStats = user.play_stats || {};
     const publicHeadlineStats = rankedTotal ? `
-      <div class="stat-card"><div class="stat-value">${user.ranked_wins}–${user.ranked_losses}</div><div class="stat-label">Ranked record</div></div>
+      <div class="stat-card"><div class="stat-value">${user.ranked_wins}–${user.ranked_losses}</div><div class="stat-label">Ranked wins–losses</div></div>
       <div class="stat-card"><div class="stat-value">${Math.round((Number(user.ranked_wins) / rankedTotal) * 100)}%</div><div class="stat-label">Ranked win rate</div></div>
-      <div class="stat-card"><div class="stat-value">${Number(user.current_streak) >= 2 ? uiIcon('trophy', 'profile-stat-icon') : ''}${user.current_streak || 0}</div><div class="stat-label">Win streak</div></div>` : `
+      <div class="stat-card"><div class="stat-value">${Number(user.current_streak) >= 2 ? uiIcon('trophy', 'profile-stat-icon') : ''}${user.current_streak || 0}</div><div class="stat-label">Current ranked win streak</div></div>` : `
       <div class="stat-card"><div class="stat-value">${playStats.games_total || 0}</div><div class="stat-label">Games played</div></div>
       <div class="stat-card"><div class="stat-value">${playStats.courts_played || 0}</div><div class="stat-label">Courts played</div></div>
       <div class="stat-card"><div class="stat-value">${Number(playStats.week_streak) >= 2 ? uiIcon('calendar', 'profile-stat-icon') : ''}${playStats.week_streak || 0}</div><div class="stat-label">Weeks in a row</div></div>`;
@@ -29740,11 +29743,11 @@
         const line = wins > losses ? `You lead ${wins}–${losses}`
           : losses > wins ? `${esc(firstName)} leads ${losses}–${wins}`
           : `Tied ${wins}–${wins}`;
-        lines += `<div class="profile-compare-line">${uiIcon('target')} ${line}</div><div class="row-sub">Your head-to-head record</div>`;
+        lines += `<div class="profile-compare-line">${uiIcon('target')} ${line}</div><div class="row-sub">Head-to-head · ranked + casual</div>`;
       }
       if (user.as_teammates) {
         const t = user.as_teammates;
-        lines += `<div class="profile-compare-line" style="margin-top:${user.head_to_head ? '8px' : '0'}">${uiIcon('users')} ${t.wins}–${t.losses} together</div><div class="row-sub">As teammates</div>`;
+        lines += `<div class="profile-compare-line" style="margin-top:${user.head_to_head ? '8px' : '0'}">${uiIcon('users')} ${t.wins} win${t.wins === 1 ? '' : 's'} · ${t.losses} loss${t.losses === 1 ? '' : 'es'}</div><div class="row-sub">You + ${esc(firstName)} as teammates</div><div class="row-sub" style="font-size:var(--text-xs)">Ranked + casual</div>`;
       }
       h2hHtml = `<div class="card" style="text-align:center;padding:10px 14px;margin:12px 0 0">${lines}</div>`;
     }
@@ -29782,10 +29785,11 @@
       <div class="stat-grid">
         ${publicHeadlineStats}
       </div>
-      ${rankedTotal ? formStripHtml(user.form) : ''}
+      ${rankedTotal ? formStripHtml(user.form, true) : ''}
       ${(user.badges || []).length ? `
-        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
-          ${user.badges.map((b) => `<span class="tag" style="margin:0" title="${esc(b.label)}">${b.emoji} ${esc(b.label)}${b.id === 'mvp' && user.mvp_awards > 1 ? ` ×${user.mvp_awards}` : ''}</span>`).join('')}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;align-items:center;margin-top:10px" role="group" aria-label="Earned badges">
+          <span class="row-sub">Earned:</span>
+          ${user.badges.map((b) => `<span class="tag" style="margin:0" title="Earned badge: ${esc(b.label)}">${b.emoji} ${esc(b.label)}${b.id === 'mvp' && user.mvp_awards > 1 ? ` ×${user.mvp_awards}` : ''}</span>`).join('')}
         </div>` : ''}
       ${tournamentTitlesHtml(user.tournament_titles, user.league_titles)}
       ${h2hHtml}
@@ -33456,9 +33460,9 @@
     const winPct = total ? Math.round((me.ranked_wins / total) * 100) : 0;
     const availabilityLines = availabilitySummary(me.availability);
     const headlineStats = total ? `
-      <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">Ranked record</div></div>
+      <div class="stat-card"><div class="stat-value">${me.ranked_wins}–${me.ranked_losses}</div><div class="stat-label">Ranked wins–losses</div></div>
       <div class="stat-card"><div class="stat-value">${winPct}%</div><div class="stat-label">Ranked win rate</div></div>
-      <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? uiIcon('trophy', 'profile-stat-icon') : ''}${me.current_streak}</div><div class="stat-label">Win streak · best ${me.best_streak}</div></div>` : `
+      <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? uiIcon('trophy', 'profile-stat-icon') : ''}${me.current_streak}</div><div class="stat-label">Current ranked win streak · best ${me.best_streak}</div></div>` : `
       <section class="profile-ranked-starter" aria-labelledby="profile-ranked-starter-title">
         <span class="profile-ranked-starter-icon" aria-hidden="true">${uiIcon('trophy')}</span>
         <span class="row-main"><b id="profile-ranked-starter-title">Your ranked story starts with one match</b><small>Find a ranked opponent when you’re ready. Casual play still builds your full play history below.</small></span>

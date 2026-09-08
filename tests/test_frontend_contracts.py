@@ -167,18 +167,18 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r77';" in SERVICE_WORKER
+    assert "const CACHE = 'thirdshot-v15-r78';" in SERVICE_WORKER
     for asset in (
-        "/release-assets/r75/styles-v15.min.css",
-        "/release-assets/r75/crew-planner-v15.min.js",
-        "/release-assets/r75/tournament-bracket-v15.min.js",
-        "/release-assets/r75/venue-workspace-v15.min.js",
-        "/release-assets/r75/app-v15.min.js",
+        "/release-assets/r76/styles-v15.min.css",
+        "/release-assets/r76/crew-planner-v15.min.js",
+        "/release-assets/r76/tournament-bracket-v15.min.js",
+        "/release-assets/r76/venue-workspace-v15.min.js",
+        "/release-assets/r76/app-v15.min.js",
     ):
         assert asset in SERVICE_WORKER
-    assert 'href="/release-assets/r75/styles-v15.min.css"' in INDEX
-    assert 'src="/release-assets/r75/crew-planner-v15.min.js"' in INDEX
-    assert 'src="/release-assets/r75/app-v15.min.js"' in INDEX
+    assert 'href="/release-assets/r76/styles-v15.min.css"' in INDEX
+    assert 'src="/release-assets/r76/crew-planner-v15.min.js"' in INDEX
+    assert 'src="/release-assets/r76/app-v15.min.js"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER

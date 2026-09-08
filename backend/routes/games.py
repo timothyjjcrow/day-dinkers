@@ -44,6 +44,7 @@ from backend.models import (
     Friendship,
     Tournament,
     TournamentEntry,
+    TournamentMatch,
     User,
     award_new_badges,
     blocked_pair_ids,
@@ -7057,15 +7058,83 @@ def _finalize_game(game, actor_id=None, confirmation_kind=None, correction=False
         award_new_badges(*(player.user for player in game.players))
 
 
+def _current_ranked_streak(user_id, excluded_game_id):
+    """Replay rated outcomes in their settlement order after one removal.
+
+    Tournament ratings settle together at completion, in bracket order. A
+    match's earlier confirmation time does not advance the rated streak.
+    Casual results, byes and still-active tournaments never contribute.
+    """
+    games = (
+        db.session.query(
+            Game.id, Game.completed_at, Game.score_team1, Game.score_team2,
+            GamePlayer.team,
+        )
+        .select_from(Game)
+        .join(GamePlayer, GamePlayer.game_id == Game.id)
+        .filter(
+            GamePlayer.user_id == user_id,
+            GamePlayer.team.in_([1, 2]),
+            GamePlayer.rating_delta.isnot(None),
+            Game.id != excluded_game_id,
+            Game.status == 'completed', Game.game_type == 'ranked',
+            Game.completed_at.isnot(None),
+            Game.score_team1.isnot(None), Game.score_team2.isnot(None),
+        )
+        .all()
+    )
+    outcomes = [
+        (row.completed_at, 0, row.id, 0, 0,
+         (row.score_team1 > row.score_team2) == (row.team == 1))
+        for row in games
+    ]
+    tournament_results = (
+        db.session.query(
+            Tournament.id, Tournament.completed_at,
+            TournamentMatch.round, TournamentMatch.position,
+            TournamentMatch.winner_entry_id, TournamentEntry.id.label('entry_id'),
+        )
+        .select_from(Tournament)
+        .join(TournamentEntry, TournamentEntry.tournament_id == Tournament.id)
+        .join(TournamentMatch, or_(
+            TournamentMatch.entry1_id == TournamentEntry.id,
+            TournamentMatch.entry2_id == TournamentEntry.id,
+        ))
+        .filter(
+            or_(TournamentEntry.player1_id == user_id,
+                TournamentEntry.player2_id == user_id),
+            Tournament.status == 'completed', Tournament.ranked.is_(True),
+            Tournament.completed_at.isnot(None),
+            TournamentMatch.entry1_id.isnot(None),
+            TournamentMatch.entry2_id.isnot(None),
+            TournamentMatch.score1.isnot(None),
+            TournamentMatch.winner_entry_id.isnot(None),
+        )
+        .all()
+    )
+    outcomes.extend(
+        (row.completed_at, 1, row.id, row.round, row.position,
+         row.winner_entry_id == row.entry_id)
+        for row in tournament_results
+    )
+    streak = 0
+    for *_, won in sorted(outcomes, reverse=True):
+        if not won:
+            break
+        streak += 1
+    return streak
+
+
 def _reverse_auto_confirmed_ranked_result(game):
     """Remove one timeout-confirmed result before closing it as disputed.
 
     Per-player deltas are the durable rating ledger for ordinary games, so the
     rollback is exact even when another result happened later. Win/loss totals
     are also reversed. Historical peak/streak achievements remain historical;
-    the current streak only loses this win when it still contributes to it.
+    the current streak is rebuilt from the remaining settled ranked results.
     """
     winning_team = 1 if game.score_team1 > game.score_team2 else 2
+    affected_users = []
     for player in game.players:
         if player.team not in (1, 2) or player.rating_delta is None:
             continue
@@ -7073,11 +7142,13 @@ def _reverse_auto_confirmed_ranked_result(game):
         user.rating -= player.rating_delta
         if player.team == winning_team:
             user.ranked_wins = max(0, int(user.ranked_wins or 0) - 1)
-            if user.current_streak:
-                user.current_streak = max(0, int(user.current_streak) - 1)
         else:
             user.ranked_losses = max(0, int(user.ranked_losses or 0) - 1)
         player.rating_delta = None
+        affected_users.append(user)
+    for user in affected_users:
+        user.current_streak = _current_ranked_streak(user.id, game.id)
+        user.best_streak = max(user.best_streak or 0, user.current_streak)
 
 
 @games_bp.post('/games/<int:game_id>/complete')
