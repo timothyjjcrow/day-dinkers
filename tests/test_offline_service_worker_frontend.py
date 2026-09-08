@@ -28,11 +28,12 @@ def test_update_waits_for_an_explicit_accessible_refresh_action():
 
 
 def test_versioned_shell_and_pinned_leaflet_are_available_offline():
-    assert "const CACHE = 'thirdshot-v15-r73';" in SW
+    assert "const CACHE = 'thirdshot-v15-r74';" in SW
     for asset in (
-        "/release-assets/r71/styles-v15.min.css",
-        "/release-assets/r71/crew-planner-v15.min.js",
-        "/release-assets/r71/app-v15.min.js",
+        "/release-assets/r72/styles-v15.min.css",
+        "/release-assets/r72/crew-planner-v15.min.js",
+        "/release-assets/r72/tournament-bracket-v15.min.js",
+        "/release-assets/r72/app-v15.min.js",
         "/vendor/leaflet/leaflet.css?v=1.9.4",
         "/vendor/leaflet-markercluster/MarkerCluster.css?v=1.5.3",
         "/vendor/leaflet/leaflet.js?v=1.9.4",

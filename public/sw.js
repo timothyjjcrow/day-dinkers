@@ -1,15 +1,16 @@
 /* Third Shot service worker: fast app-shell caching with an offline fallback. */
 // Bump the cache revision whenever an in-place v15 shell changes. The asset
 // path release guards major transitions; this revision makes existing v15
-// installs refresh the mobile map browsing and place selection experience
+// installs refresh tournament browsing and the extracted bracket renderer
 // instead of retaining old executable bytes.
 const SHELL_CACHE_PREFIX = 'thirdshot-v15-r';
-const CACHE = 'thirdshot-v15-r73';
+const CACHE = 'thirdshot-v15-r74';
 const CORE_SHELL = [
   '/',
-  '/release-assets/r71/styles-v15.min.css',
-  '/release-assets/r71/crew-planner-v15.min.js',
-  '/release-assets/r71/app-v15.min.js',
+  '/release-assets/r72/styles-v15.min.css',
+  '/release-assets/r72/crew-planner-v15.min.js',
+  '/release-assets/r72/tournament-bracket-v15.min.js',
+  '/release-assets/r72/app-v15.min.js',
   '/vendor/leaflet/leaflet.css?v=1.9.4',
   '/vendor/leaflet/leaflet.js?v=1.9.4',
   '/vendor/leaflet-markercluster/MarkerCluster.css?v=1.5.3',

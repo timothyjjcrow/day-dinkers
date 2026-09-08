@@ -7,13 +7,14 @@ import path from 'node:path';
 import { build } from 'esbuild';
 import { minify } from 'terser';
 
-const release = 'r71';
+const release = 'r72';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(projectRoot, 'public');
 const outputDir = path.join(publicDir, 'assets', release);
 const entries = [
   ['app-v15.js', 'app-v15.min.js'],
   ['crew-planner-v15.js', 'crew-planner-v15.min.js'],
+  ['tournament-bracket-v15.js', 'tournament-bracket-v15.min.js'],
   ['styles-v15.css', 'styles-v15.min.css'],
 ];
 

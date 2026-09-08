@@ -148,10 +148,11 @@ def test_hub_cards_are_truthful_when_full_or_waiting_and_show_attention():
     assert cards.count('competitionPendingActionHtml(') >= 3
 
 
-def test_match_cards_have_direct_opponent_actions_without_hijacking_drill_in():
+def test_league_cards_and_tournament_details_keep_separate_opponent_actions():
     helpers = section('function competitionOpponents', 'function competitionResultStatusHtml')
     league_card = section('function leagueMatchCardHtml', 'async function openLeagueScreen')
     tournament_cards = section('function bracketHtml', 'function tournamentPartnerPickerHtml')
+    result_sheet = section('function openCompetitionResultSheet', '// ---------- Box leagues')
 
     for token in (
         'data-card-opponent-profile', 'data-card-opponent-message',
@@ -160,7 +161,10 @@ def test_match_cards_have_direct_opponent_actions_without_hijacking_drill_in():
     ):
         assert token in helpers
     assert "competitionCardOpponentActionsHtml('league'" in league_card
-    assert "competitionCardOpponentActionsHtml('tournament'" in tournament_cards
+    assert "competitionCardOpponentActionsHtml('tournament'" not in tournament_cards
+    assert 'data-opponent-profile' in result_sheet
+    assert 'data-opponent-message' in result_sheet
+    assert "openUserProfile(Number(button.dataset.opponentProfile))" in result_sheet
 
 
 def test_round_picker_my_matches_and_tbd_safety_are_real_controls():
@@ -174,8 +178,9 @@ def test_round_picker_my_matches_and_tbd_safety_are_real_controls():
     assert 'lg-round-filter' in league
     assert 'lg-mine-filter' in league
     assert 'match_history' in league
-    assert "hasBothSides ? `data-tmatch=" in tournament_cards
-    assert 'aria-label="Matchup not set yet"' in tournament_cards
+    assert "window.TournamentBracket.render(t" in tournament_cards
+    assert "selectedRound, mineOnly, formatDateTime: fmtDateTime" in tournament_cards
+    assert "roundLabel: t.format === 'single_elim'" in tournament
     assert 'selectedTournamentRound' in tournament
     assert 'td-round-filter' in tournament
     assert 'td-mine-filter' in tournament
@@ -286,9 +291,10 @@ def test_tournament_result_sheet_collects_per_game_scores_and_rejects_extra_game
     assert 'Remove games entered after the match was already decided.' in sheet
 
 
-def test_tournament_match_cards_show_and_edit_time_and_court_without_opening_result():
+def test_tournament_scheduling_lives_in_match_details_and_optional_organizer_tools():
     helpers = section('// ---------- Tournaments ----------', 'function competitionStatusTag')
     tournament = section('async function openTournamentScreen', 'function openEditTournamentSheet')
+    result_sheet = section('function openCompetitionResultSheet', '// ---------- Box leagues')
 
     assert 'function tournamentMatchScheduleHtml' in helpers
     assert 'function tournamentGameScoresText' in helpers
@@ -298,6 +304,12 @@ def test_tournament_match_cards_show_and_edit_time_and_court_without_opening_res
     assert 'data-edit-tournament-schedule' in tournament
     schedule_binding = tournament[tournament.index("content.querySelectorAll('[data-edit-tournament-schedule]'"):]
     assert schedule_binding.index('event.stopPropagation();') < schedule_binding.index('openTournamentMatchScheduleSheet(')
+    assert '<details class="tournament-schedule-tools">' in tournament
+    assert "!normalizeCompetitionResult(match).terminal" in tournament
+    assert 'id="competition-edit-schedule"' in result_sheet
+    assert "liveParent.is_organizer && liveParent.status === 'active'" in result_sheet
+    assert "openChildModal(modal, () => openTournamentMatchScheduleSheet" in result_sheet
+    assert "scheduling.innerHTML = tournamentMatchScheduleHtml(match);" in result_sheet
 
 
 def test_tournament_arrival_and_league_completion_copy_are_operational_and_honest():

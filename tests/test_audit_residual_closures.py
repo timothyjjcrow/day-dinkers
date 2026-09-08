@@ -61,11 +61,16 @@ def test_rating_help_is_reusable_and_game_detail_uses_it():
     assert 'openThirdShotRatingExplainer({ parentModal: modal })' in detail
 
 
-def test_bracket_has_visible_round_connectors():
+def test_bracket_binds_measured_svg_connectors_and_releases_previous_bindings():
     bracket = section('function bracketHtml', 'function roundRobinHtml')
-    assert 'class="bracket-match-slot"' in bracket
-    assert '.bracket-round:not(:last-child) .bracket-match-slot::after' in CSS
-    assert '.bracket-round:not(:first-child) .bracket-match-slot::before' in CSS
+    tournament = section('async function openTournamentScreen', 'function openEditTournamentSheet')
+    assert 'window.TournamentBracket.render(t' in bracket
+    assert 'cleanupBracket = window.TournamentBracket.bind(content);' in tournament
+    assert 'box._cleanupFns?.push(() => cleanupBracket());' in tournament
+    assert tournament.index('cleanupBracket();') < tournament.index('content.innerHTML = body;')
+    assert '.bracket-connectors' in CSS
+    assert '.bracket-round:not(:last-child) .bracket-match-slot::after' not in CSS
+    assert '.bracket-round:not(:first-child) .bracket-match-slot::before' not in CSS
 
 
 def test_consolidated_badges_keep_installed_app_count_defined():

@@ -21352,6 +21352,7 @@
 
     const activate = (target, { focus = false } = {}) => {
       const selected = tabs.find((tab) => tab.dataset.competitionTab === target) || tabs[0];
+      root.dataset.competitionTab = selected.dataset.competitionTab;
       tabs.forEach((tab) => {
         const active = tab === selected;
         tab.setAttribute('aria-selected', String(active));
@@ -21577,6 +21578,7 @@
     if (!COMPETITION_RESULT_STATES[stateName]) stateName = 'unreported';
     const meta = COMPETITION_RESULT_STATES[stateName];
     const waitingForSides = Object.prototype.hasOwnProperty.call(match, 'entry1_id')
+      && !['confirmed', 'bye', 'void'].includes(stateName)
       && (match.entry1_id == null || match.entry2_id == null);
     return {
       state: stateName,
@@ -22121,7 +22123,7 @@
             absolutePrefix: 'Play by', futurePrefix: 'Due in', expiredLabel: 'Play deadline reached',
           }) : ''}
         </div>
-        ${kind === 'tournament' ? tournamentMatchScheduleHtml(match) : ''}
+        ${kind === 'tournament' ? `<div id="competition-match-scheduling">${tournamentMatchScheduleHtml(match)}</div>${liveParent.is_organizer && liveParent.status === 'active' ? '<button type="button" class="btn btn-secondary" id="competition-edit-schedule">Edit match time &amp; court</button>' : ''}` : ''}
         ${scoreFieldsHtml}
         ${needsReason ? `
           <div class="form-field competition-reason-field">
@@ -22157,6 +22159,22 @@
           Number(button.dataset.opponentPropose), { draft },
         ));
       });
+    });
+    modal.querySelector('#competition-edit-schedule')?.addEventListener('click', () => {
+      openChildModal(modal, () => openTournamentMatchScheduleSheet(liveParent, match, (fresh) => {
+        const freshMatch = (fresh.matches || []).find((item) => Number(item.id) === Number(match.id));
+        if (freshMatch && Number(freshMatch.result_version || 0) !== Number(match.result_version || 0)) {
+          // A concurrent score must be made visible before adopting its version.
+          void refreshStaleResult('schedule', fresh);
+        } else {
+          liveParent = fresh;
+          if (freshMatch) match = freshMatch;
+          hooks.adoptFresh?.(fresh, { render: false });
+          staleParentNeedsRender = true;
+        }
+        const scheduling = modal.querySelector('#competition-match-scheduling');
+        if (scheduling) scheduling.innerHTML = tournamentMatchScheduleHtml(match);
+      }));
     });
     let staleParentNeedsRender = false;
     modal._cleanupFns?.push(() => {
@@ -22323,8 +22341,11 @@
         syncTemporalResult();
         refreshed = true;
       } catch { /* keep the user's inputs and the original stale message */ }
-      formUX.showError(!refreshed
+      const showRefreshMessage = (message) => formUX ? formUX.showError(message) : showInlineActionError(modal, message);
+      showRefreshMessage(!refreshed
         ? 'This result changed on another device, but we could not refresh it. Your entries are preserved—reconnect and try again.'
+        : attemptedAction === 'schedule'
+        ? 'The result changed while you edited the schedule. Review the refreshed score and match status.'
         : canRetry
         ? 'This result changed on another device. The visible score, permissions, and history are now refreshed—review them before trying again.'
         : 'This result changed on another device, so that action is no longer available. The visible score and history are now up to date.');
@@ -22460,7 +22481,7 @@
   }
 
   function competitionRoundControlsHtml(prefix, rounds, selectedRound, mineOnly, {
-    hasMine = true, allLabel = 'All rounds',
+    hasMine = true, allLabel = 'All rounds', roundLabel = null,
   } = {}) {
     if (!rounds.length) return '';
     return `<div class="competition-match-filters" aria-label="Match filters">
@@ -22468,7 +22489,7 @@
         <label for="${prefix}-round-filter">Round</label>
         <select id="${prefix}-round-filter" data-select-title="Choose a round">
           <option value="all" ${selectedRound === 'all' ? 'selected' : ''}>${esc(allLabel)}</option>
-          ${rounds.map((round) => `<option value="${round}" ${String(selectedRound) === String(round) ? 'selected' : ''}>Round ${round}</option>`).join('')}
+          ${rounds.map((round) => `<option value="${round}" ${String(selectedRound) === String(round) ? 'selected' : ''}>${esc(roundLabel ? roundLabel(round) : `Round ${round}`)}</option>`).join('')}
         </select>
       </div>
       <button type="button" class="btn btn-secondary" id="${prefix}-mine-filter" aria-pressed="${mineOnly}" ${hasMine ? '' : 'disabled'}>${uiIcon('user')} My matches</button>
@@ -23746,61 +23767,9 @@
   }
 
   function bracketHtml(t, { selectedRound = 'all', mineOnly = false } = {}) {
-    const entries = {};
-    t.entries.forEach((en) => { entries[en.id] = en; });
-    const visibleMatch = (match) => (
-      (selectedRound === 'all' || Number(match.round) === Number(selectedRound))
-      && (!mineOnly || [match.entry1_id, match.entry2_id].includes(t.my_entry_id))
-    );
-    const sideHtml = (m, entryId, score) => {
-      const en = entryId ? entries[entryId] : null;
-      const result = normalizeCompetitionResult(m);
-      const isWinner = (result.confirmed || result.state === 'bye')
-        && m.winner_entry_id && m.winner_entry_id === entryId;
-      const mineCls = t.my_entry_id && entryId === t.my_entry_id ? 'bm-mine' : '';
-      return `
-        <div class="bm-side ${isWinner ? 'bm-win' : ''} ${mineCls}">
-          <span class="bm-seed">${en && en.seed ? en.seed : ''}</span>
-          <span class="bm-name">${en ? esc(en.name) : '<span style="opacity:.45">—</span>'}</span>
-          <span class="bm-score">${score != null ? score : (m.status === 'bye' && isWinner ? 'bye' : '')}</span>
-        </div>`;
-    };
-    const matchHtml = (m) => {
-      const result = normalizeCompetitionResult(m);
-      const ready = m.entry1_id != null && m.entry2_id != null && t.status === 'active' && result.state === 'unreported';
-      const hasBothSides = m.entry1_id != null && m.entry2_id != null;
-      return `
-        <div class="bracket-match-slot">
-        <div class="bm competition-bracket-match ${ready ? 'bm-ready' : ''}${hasBothSides ? '' : ' bm-tbd'}" ${hasBothSides ? `data-tmatch="${m.id}" data-result-match="${m.id}" data-match-key="${m.id}"` : 'aria-label="Matchup not set yet"'}>
-          ${sideHtml(m, m.entry1_id, m.score1)}
-          ${sideHtml(m, m.entry2_id, m.score2)}
-          ${tournamentMatchScheduleHtml(m, { compact: true })}
-          ${Array.isArray(m.game_scores) && m.game_scores.length > 1 ? `<span class="competition-game-scores">${esc(tournamentGameScoresText(m))}</span>` : ''}
-          ${competitionResultStatusHtml(m, { compact: true })}
-          ${hasBothSides ? competitionCardOpponentActionsHtml('tournament', t, m) : ''}
-          ${tournamentScheduleActionHtml(t, m)}
-        </div>
-        </div>`;
-    };
-    // The bronze match shares the last round but gets its own caption.
-    const isThirdPlace = (m) => m.round === t.total_rounds && m.position === 1;
-    const rounds = [];
-    for (let r = 1; r <= t.total_rounds; r++) {
-      if (selectedRound !== 'all' && Number(selectedRound) !== r) continue;
-      const ms = t.matches.filter((m) => m.round === r && !isThirdPlace(m) && visibleMatch(m));
-      const third = r === t.total_rounds ? t.matches.find((match) => isThirdPlace(match) && visibleMatch(match)) : null;
-      if (mineOnly && !ms.length && !third) continue;
-      rounds.push(`
-        <div class="bracket-round">
-          <div class="bracket-round-title">${tournamentRoundLabel(r, t.total_rounds)}</div>
-          <div class="bracket-round-matches">
-          ${ms.map(matchHtml).join('')}
-          ${third ? `<div><div class="bracket-round-title bracket-third-place">3rd place</div>${matchHtml(third)}</div>` : ''}
-          </div>
-        </div>`);
-    }
-    if (!rounds.length) return '<div class="empty-state" style="padding:16px">You have no matches in this round.</div>';
-    return `<div class="bracket-scroll-hint" aria-hidden="true"><span>Swipe for later rounds</span>${uiIcon('chevron-right')}</div><div class="bracket" role="region" aria-label="Tournament bracket. Scroll horizontally to view later rounds." tabindex="0">${rounds.join('')}</div>`;
+    return window.TournamentBracket.render(t, {
+      selectedRound, mineOnly, formatDateTime: fmtDateTime,
+    });
   }
 
   function roundRobinHtml(t, { selectedRound = 'all', mineOnly = false } = {}) {
@@ -23820,41 +23789,9 @@
         </div>`).join('');
       html += '</div>';
     }
-    const visibleMatches = t.matches.filter((match) => (
-      (selectedRound === 'all' || Number(match.round) === Number(selectedRound))
-      && (!mineOnly || [match.entry1_id, match.entry2_id].includes(t.my_entry_id))
-    ));
-    const roundsSeen = [...new Set(visibleMatches.map((m) => m.round))].sort((a, b) => a - b);
-    html += '<div class="section-label">Matches</div>';
-    if (!roundsSeen.length) return `${html}<div class="empty-state" style="padding:16px">You have no matches in this round.</div>`;
-    roundsSeen.forEach((r) => {
-      const ms = visibleMatches.filter((m) => m.round === r);
-      if (roundsSeen.length > 1) html += `<div class="row-sub" style="margin:4px 2px">Round ${r}</div>`;
-      ms.forEach((m) => {
-        const e1 = entries[m.entry1_id], e2 = entries[m.entry2_id];
-        const result = normalizeCompetitionResult(m);
-        const done = result.confirmed || result.state === 'bye';
-        const ready = m.entry1_id != null && m.entry2_id != null && t.status === 'active' && result.state === 'unreported';
-        const hasBothSides = m.entry1_id != null && m.entry2_id != null;
-        html += `
-          <div class="card row competition-match-card ${ready ? 'bm-ready' : ''}${hasBothSides ? '' : ' bm-tbd'}" ${hasBothSides ? `data-tmatch="${m.id}" data-result-match="${m.id}" data-match-key="${m.id}"` : 'aria-label="Matchup not set yet"'} style="padding:10px 14px">
-            <div class="row-main">
-              <div class="row-title" style="font-size:14px">
-                <span class="${done && m.winner_entry_id === m.entry1_id ? 'rr-win' : ''}">${e1 ? esc(e1.name) : '—'}</span>
-                <span style="opacity:.55;font-weight:400"> vs </span>
-                <span class="${done && m.winner_entry_id === m.entry2_id ? 'rr-win' : ''}">${e2 ? esc(e2.name) : '—'}</span>
-              </div>
-              ${competitionResultStatusHtml(m)}
-              ${tournamentMatchScheduleHtml(m, { compact: true })}
-              ${Array.isArray(m.game_scores) && m.game_scores.length > 1 ? `<span class="competition-game-scores">${esc(tournamentGameScoresText(m))}</span>` : ''}
-            </div>
-            <div class="stat-value" style="font-size:15px">${esc(tournamentGameScoresText(m))}</div>
-            ${hasBothSides ? competitionCardOpponentActionsHtml('tournament', t, m) : ''}
-            ${tournamentScheduleActionHtml(t, m)}
-          </div>`;
-      });
+    return html + window.TournamentBracket.render(t, {
+      selectedRound, mineOnly, formatDateTime: fmtDateTime,
     });
-    return html;
   }
 
   function tournamentPartnerPickerHtml(prefix, {
@@ -24027,6 +23964,7 @@
     if (!routedOverlayLoadIsCurrent(routeLoad) || !box.isConnected) return;
     content.removeAttribute('aria-busy');
     setDialogLabel(content, 'Tournament');
+    content.classList.add('tournament-detail');
     let deepLinkOpened = false;
     const requestedTournamentMatch = (t.matches || []).find(
       (match) => Number(match.id) === Number(requestedMatchId),
@@ -24034,6 +23972,8 @@
     let selectedTournamentRound = requestedTournamentMatch
       ? String(requestedTournamentMatch.round) : 'all';
     let tournamentMineOnly = false;
+    let cleanupBracket = () => {};
+    box._cleanupFns?.push(() => cleanupBracket());
     const refreshGuard = createCompetitionRefreshGuard();
     const setCompetitionMutation = (busy) => {
       if (busy) refreshGuard.invalidate();
@@ -24244,15 +24184,20 @@
         body += '<div id="td-matches" tabindex="-1"></div>';
         body += competitionRoundControlsHtml(
           'td', tournamentRounds, selectedTournamentRound, tournamentMineOnly,
-          { hasMine: !!t.my_entry_id },
+          { hasMine: !!t.my_entry_id, allLabel: t.format === 'single_elim' ? 'Full bracket' : 'All rounds',
+            roundLabel: t.format === 'single_elim' ? (round) => tournamentRoundLabel(round, t.total_rounds) : null },
         );
         body += t.format === 'round_robin'
           ? roundRobinHtml(t, { selectedRound: selectedTournamentRound, mineOnly: tournamentMineOnly })
           : bracketHtml(t, { selectedRound: selectedTournamentRound, mineOnly: tournamentMineOnly });
         if (t.status === 'active') {
-          body += '<div class="competition-progression-note">Open any match for its result status and activity. Bracket progression waits for confirmation.</div>';
+          body += '<div class="competition-progression-note">Tap a matchup for scores, player profiles, and match details. Confirmed winners advance.</div>';
         }
         if (t.status === 'active' && t.is_organizer) {
+          const scheduledMatches = (t.matches || []).filter((match) => !normalizeCompetitionResult(match).terminal);
+          body += `<details class="tournament-schedule-tools"><summary>${uiIcon('calendar')} Manage match times <span>${scheduledMatches.length}</span></summary>
+            <div>${scheduledMatches.map((match) => `<div class="tournament-schedule-row"><div><b>${esc(window.TournamentBracket.matchLabel(t, match))}</b>${tournamentMatchScheduleHtml(match, { compact: true })}</div>${tournamentScheduleActionHtml(t, match)}</div>`).join('')}</div>
+          </details>`;
           body += `<button type="button" class="btn btn-secondary btn-block competition-secondary-action" id="td-edit">${uiIcon('edit')} Edit details</button>`;
           body += `<button type="button" class="btn btn-danger btn-block competition-danger-action" id="td-cancel">${uiIcon('trash')} Cancel tournament</button>`;
         }
@@ -24268,6 +24213,7 @@
         body += '<div class="empty-state" style="padding:16px">This tournament was cancelled.</div>';
       }
 
+      cleanupBracket();
       content.innerHTML = body;
       enhanceAppSelects(content);
       setDialogLabel(content, 'Tournament');
@@ -24275,6 +24221,7 @@
         content, snapshot?.activeCompetitionTab || (requestedMatchId ? 'td-matches' : null),
       );
       bindUserButtons(box);
+      cleanupBracket = window.TournamentBracket.bind(content);
 
       // --- actions ---
       const mutationControls = () => [...content.querySelectorAll(

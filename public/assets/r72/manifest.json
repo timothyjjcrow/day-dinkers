@@ -1,0 +1,37 @@
+{
+  "release": "r72",
+  "files": {
+    "app-v15.min.js": {
+      "source": "app-v15.js",
+      "source_sha256": "98c9f2e4b9dc4c3c834ba803c3fb4f1b836389d360be0757aaa4240483f52967",
+      "source_bytes": 2102642,
+      "minified_bytes": 1310333,
+      "gzip_bytes": 348341,
+      "brotli_bytes": 255725
+    },
+    "crew-planner-v15.min.js": {
+      "source": "crew-planner-v15.js",
+      "source_sha256": "dda2b78142d75dc8c736753564719b472fa648dddc8f935d7d3322a8c8db2f05",
+      "source_bytes": 4543,
+      "minified_bytes": 2432,
+      "gzip_bytes": 1168,
+      "brotli_bytes": 1057
+    },
+    "tournament-bracket-v15.min.js": {
+      "source": "tournament-bracket-v15.js",
+      "source_sha256": "d79b354ae99b68ae5761b953ed52d8d7098bf5e2aa0a6a3038bdef9e5136596c",
+      "source_bytes": 15424,
+      "minified_bytes": 10466,
+      "gzip_bytes": 3992,
+      "brotli_bytes": 3518
+    },
+    "styles-v15.min.css": {
+      "source": "styles-v15.css",
+      "source_sha256": "de7da0d91073f8f4eb2675d22ffae6b46e724c0c3f3d4693e1f24fdc22f244b7",
+      "source_bytes": 394150,
+      "minified_bytes": 342818,
+      "gzip_bytes": 54384,
+      "brotli_bytes": 43038
+    }
+  }
+}
