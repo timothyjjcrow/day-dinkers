@@ -1,17 +1,17 @@
 /* Third Shot service worker: fast app-shell caching with an offline fallback. */
 // Bump the cache revision whenever an in-place v15 shell changes. The asset
 // path release guards major transitions; this revision makes existing v15
-// installs refresh mobile game-card layouts and profile action visibility
+// installs refresh session, competition, profile, and venue layouts
 // instead of retaining old executable bytes.
 const SHELL_CACHE_PREFIX = 'thirdshot-v15-r';
-const CACHE = 'thirdshot-v15-r76';
+const CACHE = 'thirdshot-v15-r77';
 const CORE_SHELL = [
   '/',
-  '/release-assets/r74/styles-v15.min.css',
-  '/release-assets/r74/crew-planner-v15.min.js',
-  '/release-assets/r74/tournament-bracket-v15.min.js',
-  '/release-assets/r74/venue-workspace-v15.min.js',
-  '/release-assets/r74/app-v15.min.js',
+  '/release-assets/r75/styles-v15.min.css',
+  '/release-assets/r75/crew-planner-v15.min.js',
+  '/release-assets/r75/tournament-bracket-v15.min.js',
+  '/release-assets/r75/venue-workspace-v15.min.js',
+  '/release-assets/r75/app-v15.min.js',
   '/vendor/leaflet/leaflet.css?v=1.9.4',
   '/vendor/leaflet/leaflet.js?v=1.9.4',
   '/vendor/leaflet-markercluster/MarkerCluster.css?v=1.5.3',

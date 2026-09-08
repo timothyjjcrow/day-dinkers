@@ -66,17 +66,18 @@ def test_cards_and_detail_surface_the_saved_plan_without_hiding_time():
     detail = section('function gameScreenHtml', 'async function openGameScreen')
 
     assert 'const customTitle = String(game.title || \'\').trim();' in card
-    assert 'customTitle && !game.is_instant ? scheduledLabel' in card
-    assert 'game-card-description' in card
-    assert 'game.court_number || \'\'' in card
-    assert 'game-detail-plan' in detail
-    assert 'game.description' in detail
-    assert 'game.duration_minutes' in detail
+    assert 'customTitle && !game.is_instant ? `<span class="game-card-when"' in card
+    assert '${esc(scheduledLabel)}' in card
+    assert 'game-card-description' not in card
+    assert '${esc(game.court_number)}' in card
+    assert '<details class="game-detail-plan simple-disclosure">' in detail
+    assert '${esc(game.description)}' in detail
+    assert 'game.ends_at' in detail
     assert 'game.cost_cents' in detail
     assert 'game.court_count' in detail
     assert "game.court_number || ''" in detail
 
     assert '.game-money-input' in STYLES
-    assert '.game-card-description' in STYLES
+    assert '.game-card-when' in STYLES
     assert '.game-detail-plan' in STYLES
     assert '.game-detail-plan-facts' in STYLES

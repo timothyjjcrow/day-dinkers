@@ -147,16 +147,16 @@ def test_saved_plans_preserve_their_session_or_ranked_lane():
 def test_cards_call_casual_play_sessions_and_ranked_matches():
     cards = section("function gameCardHtml", "// Share text")
     assert "const playNoun = isRankedMatch ? 'match' : 'session';" in cards
-    assert "'Ranked match' : Number(game.max_players) > 4 ? 'Group session' : 'Casual game'" in cards
-    assert "Play session ·" in cards
+    assert 'esc(gameActivityLabel(game))' in cards
+    assert 'data-play-noun="${playNoun}"' in cards
     assert "Join ${playNoun}" in cards
     assert "This pickup group ended" in cards
 
 
 def test_detail_chat_and_manage_actions_use_session_or_match_nouns():
     detail = section("function gameScreenHtml", "async function openGameScreen")
-    assert "const playNoun = isRankedMatch ? 'match' : 'play session';" in detail
-    assert "const playNounTitle = isRankedMatch ? 'Match' : 'Play session';" in detail
+    assert "const playNoun = isRankedMatch ? 'match' : 'session';" in detail
+    assert "const playNounTitle = isRankedMatch ? 'Match' : 'Session';" in detail
     for copy in (
         "Join this ${playNoun}", "Share ${playNoun}", "Leave ${playNoun}",
         "Cancel ${playNoun}", "${playNounTitle} chat",

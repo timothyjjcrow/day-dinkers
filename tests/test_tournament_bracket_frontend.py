@@ -181,8 +181,8 @@ def test_only_confirmed_results_highlight_winners_and_pending_scores_stay_provis
 def test_unresolved_final_and_bronze_name_their_feeders_without_result_actions():
     root = render(tournament())
     rendered = cards(root)
-    assert "Winner of SF 1" in rendered[203].text
-    assert "Loser of SF 1" in rendered[204].text
+    assert "Winner of Semifinal 1" in rendered[203].text
+    assert "Loser of Semifinal 1" in rendered[204].text
     for match_id in [203, 204]:
         assert rendered[match_id].attrs["data-bracket-source-1"] == "201"
         assert rendered[match_id].attrs["data-bracket-source-2"] == "202"

@@ -622,8 +622,9 @@ def test_operator_queue_assignment_evidence_and_decisions_use_exact_contracts():
     assert operator.count('<option value="" selected disabled>Choose a status</option>') >= 2
     assert "Choose whether to accept or reject this evidence." in operator
     assert "Choose a decision before saving." in operator
-    assert "before_snapshot" in APP
-    assert "after_snapshot" in APP
+    assert "window.VenueWorkspace.revisionDiff(item)" in APP
+    assert "before_snapshot" in VENUE_WORKSPACE
+    assert "after_snapshot" in VENUE_WORKSPACE
     assert "/acknowledge" not in operator.lower()
     assert "status: 'acknowledged'" not in operator.lower()
 

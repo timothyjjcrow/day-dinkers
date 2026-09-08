@@ -23,24 +23,63 @@
     return { publicNow, title: 'Ready when you are', copy: 'Check your listing, then publish it for players.', tool: ['owner', 'admin'].includes(role) ? 'publish' : 'preview', action: ['owner', 'admin'].includes(role) ? 'Publish venue' : 'Preview listing' };
   }
 
-  function bindDetailsEditor(modal, business, { formUX, icon, verified, publicNow }) {
-    const readPreview = () => Object.fromEntries(['name', 'description', 'announcement', 'hours', 'amenities', 'phone', 'email'].map((key) => [key, modal.querySelector(`#business-${key}`).value.trim()]));
-    const syncPreview = () => {
-      modal.querySelector('#venue-details-preview').innerHTML = preview(readPreview(), icon);
-      modal.querySelector('#venue-details-dirty').textContent = formUX.isDirty() ? 'Unsaved changes' : 'Your saved details';
-      const sensitive = ['name', 'phone', 'email'].some((key) => modal.querySelector(`#business-${key}`).value.trim() !== String(business[key] || ''))
-        || modal.querySelector('#business-website-url').value.trim() !== String(business.website_url || '')
-        || modal.querySelector('#business-logo-url').value.trim() !== String(business.logo_url || '');
-      modal.querySelector('#venue-details-save-impact').textContent = sensitive && verified
-        ? 'Saving these identity or contact changes makes your listing private until reviewed.'
-        : (business.is_public === true || (business.is_public == null && publicNow)) ? 'Saved changes appear on your player listing.' : 'Changes save to your venue. Your listing is currently private.';
+  function bindDetailsEditor(modal, business, { formUX, icon, verified, publicNow, baseline = business }) {
+    const form = modal.querySelector('#business-details-form');
+    const sectionButtons = [...modal.querySelectorAll('[data-venue-section]')];
+    const selectSection = (key, focus = false) => {
+      sectionButtons.forEach((button) => {
+        const selected = button.dataset.venueSection === key;
+        button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+        modal.querySelector(`#venue-field-${button.dataset.venueSection}`).hidden = !selected;
+        if (selected && focus) button.focus();
+      });
     };
-    modal.querySelector('#business-details-form').addEventListener('input', syncPreview);
-    modal.querySelector('#business-details-form').addEventListener('change', syncPreview);
+    const setView = (view) => {
+      form.dataset.view = view;
+      modal.querySelectorAll('[data-venue-editor-view]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.venueEditorView === view)));
+    };
+    sectionButtons.forEach((button, index) => {
+      button.addEventListener('click', () => selectSection(button.dataset.venueSection));
+      button.addEventListener('keydown', (event) => {
+        const next = event.key === 'ArrowRight' ? (index + 1) % sectionButtons.length : event.key === 'ArrowLeft' ? (index + sectionButtons.length - 1) % sectionButtons.length : event.key === 'Home' ? 0 : event.key === 'End' ? sectionButtons.length - 1 : null;
+        if (next !== null) { event.preventDefault(); selectSection(sectionButtons[next].dataset.venueSection, true); }
+      });
+    });
+    modal.querySelectorAll('[data-venue-editor-view]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.venueEditorView)));
+    const reveal = (target) => {
+      const section = target?.closest('[data-venue-field-section]');
+      if (section) selectSection(section.dataset.venueFieldSection);
+      setView('edit');
+    };
+    const originalError = formUX.showError;
+    formUX.showError = (message, target) => { if (target) reveal(target); originalError(message, target); };
+    const readPreview = () => ({ ...business, ...Object.fromEntries(['name', 'description', 'announcement', 'hours', 'amenities', 'phone', 'email', 'website-url', 'logo-url'].map((key) => [key.replaceAll('-', '_'), modal.querySelector(`#business-${key}`).value.trim()])) });
+    const syncPreview = () => {
+      const dirty = formUX.isDirty();
+      modal.querySelector('#venue-details-preview').innerHTML = preview(readPreview(), icon);
+      modal.querySelector('#venue-details-dirty').textContent = dirty ? 'Unsaved changes' : 'All changes saved';
+      const sensitive = ['name', 'phone', 'email'].some((key) => modal.querySelector(`#business-${key}`).value.trim() !== String(baseline[key] || ''))
+        || modal.querySelector('#business-website-url').value.trim() !== String(baseline.website_url || '')
+        || modal.querySelector('#business-logo-url').value.trim() !== String(baseline.logo_url || '');
+      modal.querySelector('#venue-details-save-impact').textContent = sensitive && verified
+        ? 'These changes make your listing private until reviewed.'
+        : (business.is_public === true || (business.is_public == null && publicNow)) ? 'Saved changes appear on your listing.' : 'Only managers can see this preview. Your listing is private.';
+    };
+    form.addEventListener('input', syncPreview);
+    form.addEventListener('change', syncPreview);
+    syncPreview.reveal = reveal;
     syncPreview();
-    modal.querySelector('#venue-jump-preview').addEventListener('click', () => { const preview = modal.querySelector('.venue-editor-preview'); preview.tabIndex = -1; preview.scrollIntoView({ block: 'start' }); preview.focus({ preventScroll: true }); });
-    modal.querySelector('#venue-back-edit').addEventListener('click', () => { const input = modal.querySelector('#business-name'); input.scrollIntoView({ block: 'center' }); input.focus({ preventScroll: true }); });
     return syncPreview;
+  }
+
+  function changedDetails(original, fields) {
+    return Object.fromEntries(Object.entries(fields).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(original[key] ?? (Array.isArray(value) ? [] : ''))));
+  }
+
+  function assertCollectionUnchanged(fresh, original) {
+    const content = (items) => items.map((item) => Object.fromEntries(Object.entries(item).filter(([key]) => !['created_at', 'updated_at', 'source_updated_at', 'freshness', 'sort_order'].includes(key)).sort(([a], [b]) => a.localeCompare(b)))).sort((a, b) => entryId(a.id) - entryId(b.id));
+    if (JSON.stringify(content(fresh)) !== JSON.stringify(content(original))) throw new Error('This list changed elsewhere. Your edits are still here. Close and reopen it to use the latest version.');
   }
 
   function mergeItem(items, updated, original = null) {
@@ -90,46 +129,61 @@
       const date = item.recurrence === 'dated' ? item.event_date : day(item.day_of_week ?? item.day);
       const range = item.recurrence === 'date_range' ? [item.start_date, item.end_date].filter(Boolean).join(' to ') : '';
       const state = String(item.status || 'scheduled').replace(/_/g, ' ');
-      return `<article class="venue-content-item"><div class="venue-session-date"><b>${e(date || 'Date not set')}</b><span>${item.recurrence === 'dated' ? 'One-time session' : 'Recurring session'}</span></div><div class="venue-item-main"><h4>${e(item.title || 'Untitled session')}</h4><p class="venue-session-time">${e(time(item.start_time))} – ${e(time(item.end_time))}</p><p>${e([item.skill_level, item.location_note, item.capacity ? `${item.capacity} places` : ''].filter(Boolean).join(' · '))}</p>${range ? `<p>${e(range)}</p>` : ''}<div class="venue-item-meta"><span>${e(visibility(item))}</span>${state !== 'scheduled' ? `<span class="venue-item-status">${e(state)}</span>` : ''}<span>${e(item.timezone || '')}</span></div></div>${editorActions('schedule', item)}</article>`;
+      return `<article class="venue-content-item"><div class="venue-session-date"><b>${e(date || 'Date not set')}</b><span>${item.recurrence === 'dated' ? 'One-time' : 'Repeats'}</span></div><div class="venue-item-main"><h4>${e(item.title || 'Untitled session')}</h4><p class="venue-session-time">${e(time(item.start_time))} – ${e(time(item.end_time))}</p><p>${e([item.skill_level, item.location_note, item.capacity ? `${item.capacity} places` : ''].filter(Boolean).join(' · '))}</p>${range ? `<p>${e(range)}</p>` : ''}<div class="venue-item-meta"><span>${e(visibility(item))}</span>${state !== 'scheduled' ? `<span class="venue-item-status">${e(state)}</span>` : ''}<span>${e(item.timezone || '')}</span></div></div>${editorActions('schedule', item)}</article>`;
     }).join('');
     const offerings = (b.offerings || []).map((item) => `<article class="venue-content-item"><span class="venue-service-icon" aria-hidden="true">${icon('target')}</span><div class="venue-item-main"><h4>${e(item.name || 'Untitled lesson')}</h4><p>${e(item.description || '')}</p><p class="venue-session-time">${e([item.price_text, item.duration_minutes ? `${item.duration_minutes} min` : ''].filter(Boolean).join(' · '))}</p><div class="venue-item-meta"><span>${e(visibility(item))}</span><span>${e(String(item.category || 'other').replace(/_/g, ' '))}</span></div></div>${editorActions('offerings', item)}</article>`).join('');
     const empty = (name, copy) => `<div class="venue-content-empty">${icon(name)}<p>${e(copy)}</p></div>`;
     return `<nav class="venue-owner-tabs" role="tablist" aria-label="Manage your venue">${nav.map(([key, mark, label]) => `<button type="button" id="venue-tab-${key}" role="tab" aria-selected="${key === active}" aria-controls="venue-panel-${key}" tabindex="${key === active ? 0 : -1}" data-venue-panel="${key}">${icon(mark)}<span>${label}</span></button>`).join('')}</nav>
       <section class="venue-owner-panel" id="venue-panel-details" role="tabpanel" aria-labelledby="venue-tab-details" ${active === 'details' ? '' : 'hidden'}>
-        ${panelHead('Venue details', 'The information players need before they visit.', tool('details', 'Edit venue details', true))}
-        <div class="venue-overview-grid"><article class="venue-info-card"><span class="simple-eyebrow">ABOUT YOUR VENUE</span><h4>${e(b.name)}</h4><p>${e(b.description || 'Add a short introduction so players know what to expect.')}</p><dl class="venue-facts">${fact('Opening hours', b.hours)}${fact('Amenities', (b.amenities || []).join(' · '))}</dl></article><article class="venue-info-card"><span class="simple-eyebrow">CONTACT & UPDATES</span><dl class="venue-facts">${fact('Phone', b.phone)}${fact('Email', b.email)}${fact('Website', b.website_url)}</dl><div class="venue-announcement"><b>Latest update</b><p>${e(b.announcement || 'Nothing to announce. Add an update when something changes.')}</p>${tool('announcement', b.announcement ? 'Edit update' : 'Add an update')}</div></article></div>
+        ${panelHead('Your player listing', '', tool('details', 'Edit venue details', true))}
+        <div class="venue-overview-studio"><div class="venue-overview-content">${preview(b, icon, { saved: true, publicNow: workspace.publicNow })}</div><div class="venue-overview-actions">
+          <p class="venue-section-label">MAKE IT YOURS</p>
+          ${[['details', 'edit', 'About & updates', b.announcement ? 'Announcement added' : 'Introduce your venue'], ['visit', 'clock', 'Hours & amenities', b.hours ? 'Visiting information added' : 'Help players plan a visit'], ['contact', 'phone', 'Contact & branding', b.email || b.phone ? 'Contact details added' : 'Add your contact details']].map(([name, mark, label, copy]) => `<button type="button" class="venue-edit-entry" data-business-tool="${name}" ${canEdit ? '' : 'disabled'}><span>${icon(mark)}</span><div><b>${label}</b><small>${copy}</small></div>${icon('chevron-right')}</button>`).join('')}
+          <div class="venue-owner-tip">${icon('shield')}<span>${workspace.publicNow ? 'You manage this venue’s official information.' : 'Your edits stay private until this venue is approved and published.'}</span></div>
+        </div></div>
       </section>
       <section class="venue-owner-panel" id="venue-panel-schedule" role="tabpanel" aria-labelledby="venue-tab-schedule" ${active === 'schedule' ? '' : 'hidden'}>
-        ${panelHead('Sessions & events', 'Add a session. Set the time. Let players know what’s on.', tool('add-session', 'Add session', true))}
+        ${panelHead('Sessions & events', `${(b.schedule || []).length} saved sessions`, tool('add-session', 'Add session', true))}
         <div class="venue-content-list">${schedule || empty('calendar', 'No sessions yet. Add your first open play, clinic, or event.')}</div>
         ${tool('schedule', 'Import or edit multiple sessions')}<p class="simple-note">Times use each session’s venue timezone. You keep these sessions up to date.</p>
       </section>
       <section class="venue-owner-panel" id="venue-panel-offerings" role="tabpanel" aria-labelledby="venue-tab-offerings" ${active === 'offerings' ? '' : 'hidden'}>
-        ${panelHead('Lessons & services', 'Show what you offer, what it costs, and how to book.', tool('add-lesson', 'Add lesson or service', true))}
+        ${panelHead('Lessons & services', `${(b.offerings || []).length} saved offerings`, tool('add-lesson', 'Add lesson or service', true))}
         <div class="venue-content-list">${offerings || empty('target', 'Add coaching, a clinic, a membership, or another service.')}</div>${tool('offerings', 'Edit multiple lessons')}
       </section>
       <section class="venue-owner-panel" id="venue-panel-booking" role="tabpanel" aria-labelledby="venue-tab-booking" ${active === 'booking' ? '' : 'hidden'}>
-        ${panelHead('Booking links', 'Send players to the booking system you already use.', tool('booking', 'Edit booking links', true))}
+        ${panelHead('Booking links', 'Players book directly with you.', tool('booking', 'Edit booking links', true))}
         <div class="venue-overview-grid"><article class="venue-info-card"><span class="venue-service-icon">${icon('calendar')}</span><h4>Court reservations</h4><p>Players choose “Book a court” on your listing and finish booking on this page.</p><div class="venue-saved-link">${e(b.booking_url || 'No booking page added')}</div></article><article class="venue-info-card"><span class="venue-service-icon">${icon('ticket')}</span><h4>Memberships</h4><p>An optional link for players who want to join your venue.</p><div class="venue-saved-link">${e(b.membership_url || 'No membership page added')}</div></article></div>
       </section>`;
   }
 
   function bookingForm(business, { icon, head, canEdit }) {
-    return `${head}
-      <div class="simple-page-intro"><h3>Use the system you already have</h3><p>Add the page where players reserve a court. They’ll complete their booking with your provider.</p></div>
+    return `${head}<div class="venue-booking-studio"><p class="venue-editor-context">${escape(business.name)}</p>
       <form id="venue-booking-form" novalidate>
-        <div class="form-field"><label for="venue-booking-url">Booking page</label><input type="url" id="venue-booking-url" value="${escape(business.booking_url || '')}" placeholder="https://your-booking-page.com" inputmode="url" ${canEdit ? '' : 'disabled'} /><small>Copy the public booking link from your website or booking app.</small></div>
+        <h3>Let players book with you</h3><p class="venue-field-intro">Connect your existing booking page.</p>
+        <div class="form-field"><label for="venue-booking-url">Court booking link</label><input type="url" id="venue-booking-url" value="${escape(business.booking_url || '')}" placeholder="https://your-booking-page.com" inputmode="url" ${canEdit ? '' : 'disabled'} /></div>
+        <div class="venue-booking-handoff" aria-label="Booking action preview"><span>${icon('calendar')}</span><div><b>Book a court</b><small id="venue-booking-destination">Your booking provider</small></div>${icon('external')}</div>
         <details class="simple-disclosure" ${business.membership_url ? 'open' : ''}><summary>Membership link <span>Optional</span></summary><div class="form-field"><label for="venue-membership-url">Membership page</label><input type="url" id="venue-membership-url" value="${escape(business.membership_url || '')}" placeholder="https://yourclub.com/join" inputmode="url" ${canEdit ? '' : 'disabled'} /></div></details>
+        <p class="venue-booking-impact">${icon('shield')} Changed links make a verified listing private until reviewed.</p>
         ${canEdit ? '<button type="submit" class="btn btn-primary btn-block" id="venue-booking-save">Save booking links</button>' : '<p class="simple-note">An owner, admin, or editor can update booking links.</p>'}
-        <p class="simple-note">Changing these links makes a verified listing private until the links are reviewed.</p>
       </form>
-      <div class="simple-section-title">Show players what’s on</div>
-      <button type="button" class="venue-task" id="venue-booking-schedule"><span class="venue-task-icon">${icon('calendar')}</span><span class="row-main"><b>Add a schedule</b><small>Enter sessions or import a spreadsheet.</small></span>${icon('chevron-right', 'chev')}</button>
-      <details class="simple-disclosure"><summary>Automatic updates &amp; integration help</summary>
-        <p class="simple-note">A booking link is enough to get started. If your system can export a schedule feed, connect it here.</p>
-        <button type="button" class="venue-task" id="venue-booking-feed"><span class="venue-task-icon">${icon('refresh')}</span><span class="row-main"><b>Connect a schedule feed</b><small>Manage automatic updates and connection health.</small></span>${icon('chevron-right', 'chev')}</button>
+      <details class="simple-disclosure venue-booking-extras"><summary>Schedule &amp; integrations</summary>
+        <button type="button" class="venue-task" id="venue-booking-schedule"><span class="venue-task-icon">${icon('calendar')}</span><span class="row-main"><b>Edit your schedule</b><small>Add sessions or import a spreadsheet</small></span>${icon('chevron-right', 'chev')}</button>
+        <button type="button" class="venue-task" id="venue-booking-feed"><span class="venue-task-icon">${icon('refresh')}</span><span class="row-main"><b>Schedule feeds</b><small>Connections and automatic updates</small></span>${icon('chevron-right', 'chev')}</button>
         <button type="button" class="btn-link" id="venue-booking-help">Ask about my booking system</button>
-      </details>`;
+      </details></div>`;
+  }
+
+  function bindBookingPreview(modal) {
+    const input = modal.querySelector('#venue-booking-url');
+    const sync = () => {
+      let destination = 'Add a link to your booking page';
+      try { const url = new URL(input.value); if (url.protocol === 'https:' || url.protocol === 'http:') destination = `Continue to ${url.hostname.replace(/^www\./, '')}`; } catch { /* Incomplete URL while typing. */ }
+      modal.querySelector('#venue-booking-destination').textContent = destination;
+    };
+    input.addEventListener('input', sync);
+    input.addEventListener('change', sync);
+    sync();
   }
 
   function logoFields(business, { icon, hasManagedLogo }) {
@@ -156,9 +210,42 @@
         </details>`;
   }
 
-  function preview(b, icon) {
-    return `<div class="venue-live-preview-card"><div class="venue-preview-brand">${icon('building')}<span>PLAYER PREVIEW</span></div><h3>${escape(b.name || 'Your venue name')}</h3><p>${escape(b.description || 'Your introduction will appear here.')}</p>${b.announcement ? `<div class="venue-preview-update"><b>Latest update</b><p>${escape(b.announcement)}</p></div>` : ''}<dl class="venue-facts"><div><dt>Opening hours</dt><dd>${escape(b.hours || 'Add your opening hours')}</dd></div>${b.amenities ? `<div><dt>Amenities</dt><dd>${escape(b.amenities)}</dd></div>` : ''}${b.phone || b.email ? `<div><dt>Contact</dt><dd>${escape([b.phone, b.email].filter(Boolean).join(' · '))}</dd></div>` : ''}</dl><span class="venue-preview-caption">Preview of your edits · save to update</span></div>`;
+  function preview(b, icon, { saved = false, publicNow = false } = {}) {
+    const amenities = (Array.isArray(b.amenities) ? b.amenities : String(b.amenities || '').split(',')).map((item) => item.trim()).filter(Boolean);
+    const logo = /^(https:\/\/|\/api\/businesses\/\d+\/logo$)/.test(String(b.logo_url || '')) ? b.logo_url : '';
+    return `<div class="venue-live-preview-card"><div class="venue-preview-cover"><span class="venue-preview-brand">${icon('building')} ${saved && publicNow ? 'PLAYER LISTING' : 'PLAYER PREVIEW'}</span><span class="venue-preview-privacy">${icon(saved && publicNow ? 'check-circle' : 'lock')}${saved && publicNow ? 'Live' : 'Private preview'}</span><div class="venue-preview-identity"><span class="venue-preview-avatar">${logo ? `<img src="${escape(logo)}" alt="" />` : icon('building')}</span><div><h3>${escape(b.name || 'Your venue name')}</h3>${b.court_name ? `<p>${icon('map-pin')}${escape(b.court_name)}</p>` : ''}</div></div></div><div class="venue-preview-content">
+      <p class="venue-preview-description">${escape(b.description || 'Add a short introduction for players.')}</p>
+      ${b.announcement ? `<div class="venue-preview-update"><b>${icon('bell')} From the venue</b><p>${escape(b.announcement)}</p></div>` : ''}
+      <dl class="venue-facts"><div><dt>${icon('clock')} Opening hours</dt><dd>${escape(b.hours || 'Hours not added')}</dd></div>${amenities.length ? `<div><dt>${icon('check-circle')} Amenities</dt><dd class="venue-preview-amenities">${amenities.map((item) => `<span>${escape(item)}</span>`).join('')}</dd></div>` : ''}${b.phone || b.email || b.website_url ? `<div><dt>${icon('phone')} Contact</dt><dd>${escape([b.phone, b.email, b.website_url].filter(Boolean).join('\n'))}</dd></div>` : ''}</dl>
+      <span class="venue-preview-caption">${saved ? publicNow ? 'Your saved venue information' : 'Saved · only visible to managers' : 'Preview of your edits · save to update'}</span></div></div>`;
   }
+
+  function detailsForm(b, { head, icon, hasManagedLogo }) {
+    const e = escape;
+    return `${head}<div class="venue-editor-context-row"><p class="venue-editor-context">${e(b.name || b.court_name)}</p><span class="venue-editor-owner">${icon('shield')} Venue manager</span></div>
+      <form id="business-details-form" class="venue-studio-form" data-view="edit" novalidate>
+      <div class="venue-editor-view-switch" role="group" aria-label="Editor view"><button type="button" id="venue-back-edit" data-venue-editor-view="edit" aria-pressed="true">${icon('edit')} Edit details</button><button type="button" id="venue-jump-preview" data-venue-editor-view="preview" aria-pressed="false">${icon('eye')} Player preview</button></div>
+      <div class="venue-edit-layout"><div class="venue-edit-fields">
+        <nav class="venue-section-tabs" role="tablist" aria-label="Venue detail sections">${[['about', 'About'], ['visit', 'Visit'], ['contact', 'Contact']].map(([key,label]) => `<button type="button" role="tab" id="venue-section-${key}" aria-controls="venue-field-${key}" aria-selected="${key === 'about'}" tabindex="${key === 'about' ? 0 : -1}" data-venue-section="${key}">${label}</button>`).join('')}</nav>
+        <section id="venue-field-about" data-venue-field-section="about" role="tabpanel" aria-labelledby="venue-section-about"><h3>Introduce your venue</h3><p class="venue-field-intro">Give players a reason to visit.</p>
+          <div class="form-field"><label for="business-name">Venue name</label><input type="text" id="business-name" maxlength="120" value="${e(b.name || '')}" placeholder="Your club or facility name" /></div>
+          <div class="form-field"><label for="business-description">About your venue</label><textarea id="business-description" rows="4" maxlength="2000" placeholder="Courts, atmosphere, and who you welcome…">${e(b.description || '')}</textarea></div>
+          <div class="form-field"><label for="business-announcement">Latest update <span>Optional</span></label><textarea id="business-announcement" rows="3" maxlength="500" placeholder="A timely announcement for players">${e(b.announcement || '')}</textarea></div>
+        </section>
+        <section id="venue-field-visit" data-venue-field-section="visit" role="tabpanel" aria-labelledby="venue-section-visit" hidden><h3>Plan a visit</h3><p class="venue-field-intro">The essentials before players arrive.</p>
+          <div class="form-field"><label for="business-hours">Opening hours</label><textarea id="business-hours" rows="4" maxlength="1000" placeholder="Mon–Fri 7 AM–9 PM&#10;Sat–Sun 8 AM–8 PM">${e(b.hours || '')}</textarea></div>
+          <div class="form-field"><label for="business-amenities">Amenities</label><textarea id="business-amenities" rows="3" maxlength="1800" placeholder="Paddle rentals, water station, parking">${e((b.amenities || []).join(', '))}</textarea><small>Separate each amenity with a comma.</small></div>
+        </section>
+        <section id="venue-field-contact" data-venue-field-section="contact" role="tabpanel" aria-labelledby="venue-section-contact" hidden><h3>Make it easy to reach you</h3><p class="venue-field-intro">Public contact details for your venue.</p>
+          <div class="form-field"><label for="business-phone">Phone</label><input type="tel" id="business-phone" maxlength="40" value="${e(b.phone || '')}" autocomplete="tel" /></div>
+          <div class="form-field"><label for="business-email">Email</label><input type="email" id="business-email" maxlength="255" value="${e(b.email || '')}" autocomplete="email" /></div>
+          <div class="form-field"><label for="business-website-url">Website</label><input type="url" id="business-website-url" value="${e(b.website_url || '')}" placeholder="https://yourclub.com" inputmode="url" /></div>
+          ${logoFields(b, { icon, hasManagedLogo })}
+        </section>
+      </div><aside class="venue-editor-preview" aria-label="Player preview"><p class="venue-preview-heading">As players will see it</p><div id="venue-details-preview"></div></aside></div>
+      <footer class="venue-editor-savebar"><div><b id="venue-details-dirty">All changes saved</b><p id="venue-details-save-impact"></p></div><button type="submit" class="btn btn-primary" id="business-details-save">Save venue details</button></footer></form>`;
+  }
+
   function bindTabs(root, onChange) {
     const tabs = [...root.querySelectorAll('[data-venue-panel]')];
     const activate = (button, focus = false) => {
@@ -174,5 +261,107 @@
       });
     });
   }
-  return { render, preview, bindTabs, mergeItem, logoFields, state, bindDetailsEditor, sessionIsCurrent, bookingForm };
+  function welcome(court = null, uiIcon) {
+    const esc = escape;
+    return `<section class="venue-welcome">
+      <span class="venue-welcome-icon">${uiIcon('building')}</span>
+      <h2>Your venue. Ready for players.</h2>
+      <p>Manage your court’s information and help players book, join sessions, and find your business.</p>
+      <ol class="venue-start-steps">
+        <li><span>1</span><div><b>Find your venue</b><small>Choose its existing court listing.</small></div></li>
+        <li><span>2</span><div><b>Confirm you manage it</b><small>We review your role before publishing.</small></div></li>
+        <li><span>3</span><div><b>Make it yours</b><small>Add details and your existing booking link.</small></div></li>
+      </ol>
+      <button type="button" class="btn btn-primary btn-block" id="business-claim-start">${court ? `Manage ${esc(court.name)}` : 'Find my venue'}</button>
+      <p class="venue-welcome-footnote">Already managing a venue? It appears here when you sign in with your business account.</p>
+    </section>`;
+  }
+
+  function task({ tool, icon, title, copy, disabled = false }, uiIcon) {
+    const esc = escape;
+    return `<button type="button" class="venue-task" data-business-tool="${tool}" ${disabled ? 'disabled' : ''}>
+      <span class="venue-task-icon" aria-hidden="true">${uiIcon(icon)}</span><span class="row-main"><b>${esc(title)}</b><small>${esc(copy)}</small></span>${uiIcon('chevron-right', 'chev')}
+    </button>`;
+  }
+
+  function unavailable(feature, error, uiIcon) {
+    const esc = escape;
+    const unavailable = error?.status === 404 || error?.status === 501;
+    return `<div class="business-feature-state ${unavailable ? 'is-neutral' : 'is-error'}" role="${unavailable ? 'status' : 'alert'}">
+      <span aria-hidden="true">${uiIcon(unavailable ? 'activity' : 'alert-triangle')}</span>
+      <div><b>${unavailable ? `${esc(feature)} is not enabled yet` : `${esc(feature)} could not load`}</b>
+      <p>${unavailable ? 'Your public listing and secure outbound links continue to work. This control will appear when the server capability is enabled.' : esc(error?.message || 'Try again in a moment.')}</p></div>
+    </div>`;
+  }
+
+  function revisionDiff(item) {
+    const esc = escape;
+    const before = item?.before_snapshot && typeof item.before_snapshot === 'object' ? item.before_snapshot : {};
+    const after = item?.after_snapshot && typeof item.after_snapshot === 'object' ? item.after_snapshot : {};
+    const beforeProfile = before.profile && typeof before.profile === 'object' ? before.profile : {};
+    const afterProfile = after.profile && typeof after.profile === 'object' ? after.profile : {};
+    const displayValue = (value) => {
+      if (value === true) return 'Yes';
+      if (value === false) return 'No';
+      if (value == null || String(value).trim() === '') return 'Not set';
+      const text = String(value);
+      return text.length > 180 ? `${text.slice(0, 177)}…` : text;
+    };
+    const label = (key) => String(key || '').replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
+    const changed = [...new Set([...Object.keys(beforeProfile), ...Object.keys(afterProfile)])]
+      .filter((key) => JSON.stringify(beforeProfile[key] ?? null) !== JSON.stringify(afterProfile[key] ?? null))
+      .map((key) => ({ key, before: displayValue(beforeProfile[key]), after: displayValue(afterProfile[key]) }));
+    for (const key of ['offerings', 'schedule']) {
+      const prior = Array.isArray(before[key]) ? before[key] : [];
+      const next = Array.isArray(after[key]) ? after[key] : [];
+      if (JSON.stringify(prior) !== JSON.stringify(next)) {
+        changed.push({ key, before: `${prior.length} item${prior.length === 1 ? '' : 's'}`, after: `${next.length} item${next.length === 1 ? '' : 's'}` });
+      }
+    }
+    if (!changed.length) return '<div class="business-operator-empty">No value-level difference is available for this legacy revision.</div>';
+    return `<div class="business-revision-diff" aria-label="Changed business fields">${changed.map((change) => `<div class="business-revision-diff-row"><b>${esc(label(change.key))}</b><small><span>Before</span>${esc(change.before)}</small><small><span>After</span>${esc(change.after)}</small></div>`).join('')}</div>`;
+  }
+
+  function fileSize(bytes) {
+    const size = Math.max(0, Number(bytes) || 0);
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+
+  function fileDescription(file, fallback = 'File') {
+    const type = String(file?.type || '').toLowerCase();
+    const extension = String(file?.name || '').split('.').pop()?.toUpperCase() || '';
+    const label = ({
+      'application/json': 'JSON', 'text/json': 'JSON',
+      'image/jpeg': 'JPEG image', 'image/png': 'PNG image', 'image/webp': 'WebP image',
+    })[type] || (extension && extension.length <= 5 ? extension : fallback);
+    return `${label} · ${fileSize(file?.size)}`;
+  }
+
+  function setFilePickerState(picker, {
+    state = 'idle', name = 'No file selected', meta = '', badge = 'Optional', icon = null,
+  } = {}, uiIcon) {
+    if (!picker) return;
+    picker.dataset.state = state;
+    picker.toggleAttribute('aria-busy', state === 'loading');
+    const button = picker.querySelector('[data-file-button]');
+    const feedback = picker.querySelector('[data-file-feedback]');
+    const stateIcon = picker.querySelector('[data-file-state-icon]');
+    picker.querySelector('[data-file-name]').textContent = name;
+    picker.querySelector('[data-file-meta]').textContent = meta;
+    picker.querySelector('[data-file-state]').textContent = badge;
+    stateIcon.innerHTML = uiIcon(icon || (state === 'success' ? 'check-circle' : state === 'error' ? 'alert-triangle' : state === 'loading' ? 'refresh' : picker.dataset.idleIcon || 'plus'));
+    if (state === 'error') {
+      feedback.setAttribute('role', 'alert');
+      feedback.setAttribute('aria-live', 'assertive');
+      button.setAttribute('aria-invalid', 'true');
+    } else {
+      feedback.setAttribute('role', 'status');
+      feedback.setAttribute('aria-live', 'polite');
+      button.removeAttribute('aria-invalid');
+    }
+  }
+
+  return { setFilePickerState, fileSize, fileDescription, revisionDiff, welcome, task, unavailable, render, preview, bindTabs, mergeItem, logoFields, state, bindDetailsEditor, sessionIsCurrent, bookingForm, detailsForm, changedDetails, assertCollectionUnchanged, bindBookingPreview };
 }));

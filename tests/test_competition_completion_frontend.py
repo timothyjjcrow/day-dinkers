@@ -94,7 +94,7 @@ def test_league_deadlines_show_on_cards_matches_details_and_blocker_copy():
     assert "absolutePrefix: 'Play by'" in match_card
     assert 'lg.round_deadline_at' in league_screen
     assert 'competition-round-deadline' in league_screen
-    assert 'it will count as not played when the round closes' in APP
+    assert 'Leave it blank if you don’t play.' in APP
     assert 'must be confirmed, decided, or marked not played before the round can close' in league_screen
     assert 'Moves up when the round closes' in league_screen
     assert 'Moves down when the round closes' in league_screen
@@ -345,3 +345,26 @@ def test_competition_chat_headers_keep_the_competition_name_and_room_type():
     assert 'League chat — only players in this league can read it' in league_chat
     assert '<div class="row-title">${esc(data.tournament.name)}</div>' in tournament_chat
     assert 'Tournament chat — ${Number(t.entry_count || 0)}' in tournament_chat
+
+
+def test_arrange_match_draft_uses_opponent_and_actual_deadline_without_internal_group_labels():
+    import json
+    import subprocess
+    helper = section('function competitionArrangeDraft', 'function competitionOpponents')
+    script = helper + """
+      Date.now = () => Date.parse('2026-09-08T12:00:00Z');
+      const parent = {name: 'OC Weekly Ladder', round_deadline_at: '2026-09-11T18:00:00Z'};
+      const match = {round: 1, box: 2};
+      const draft = competitionArrangeDraft('league', parent, match, 'Jordan Chen');
+      const expired = competitionArrangeDraft('league', {...parent, round_deadline_at: '2026-09-01T18:00:00Z'}, match, 'Jordan Chen');
+      const distant = competitionArrangeDraft('league', {...parent, round_deadline_at: '2026-10-02T18:00:00Z'}, match, 'Jordan Chen');
+      const tournament = competitionArrangeDraft('tournament', parent, match, 'Jordan Chen');
+      console.log(JSON.stringify({draft, expired, distant, tournament}));
+    """
+    result = subprocess.run(['node', '-e', script], check=True, text=True, capture_output=True)
+    drafts = json.loads(result.stdout)
+    assert drafts['draft'] == 'Hi Jordan, are you free to play our OC Weekly Ladder match before Friday?'
+    assert 'Oct' in drafts['distant'] and '2' in drafts['distant']
+    assert 'before' not in drafts['expired']
+    assert 'before' not in drafts['tournament']
+    assert all('box' not in text.lower() and 'round 1' not in text.lower() for text in drafts.values())

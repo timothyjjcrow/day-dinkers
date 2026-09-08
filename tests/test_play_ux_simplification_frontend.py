@@ -147,7 +147,9 @@ def test_fill_game_uses_one_inline_invite_row_and_a_focused_channel_panel():
 
 def test_join_becomes_a_stable_open_action_and_waitlist_remains_manageable():
     cards = section("function gameCardHtml", "// Share text")
-    assert "`${uiIcon('check')} Joined · Open ${esc(playNoun)}`" in cards
+    assert 'class="game-joined-chip"' in cards
+    assert "game.is_creator ? 'Hosting' : 'You’re in'" in cards
+    assert 'data-open-game="${game.id}"' in cards
     assert "showJoinedToast(Number(b.dataset.gameJoin)" in cards
     assert "label: 'Undo'" in cards
     assert "Waitlisted · Leave" in cards
@@ -157,8 +159,10 @@ def test_join_becomes_a_stable_open_action_and_waitlist_remains_manageable():
 
     detail = section("async function openGameScreen", "function safeNotificationOverlayRoute")
     assert "const rememberFresh = (fresh) =>" in detail
-    assert "showJoinedToast(gameId" in detail
-    assert "render(fresh);" in detail
+    assert "render(fresh, { joinedNow: true });" in detail
+    assert "box.querySelector('#gs-joined-state')?.focus({ preventScroll: true });" in detail
+    assert "#gs-leave-series, #gs-undo-join" in detail
+    assert 'confirmGameLeave(game, playNoun, btn)' in detail
     assert "button.dataset.undoJoin" not in detail
     assert "const fresh = await api(`/games/${gameId}/waitlist`" in detail
     assert "render(fresh);" in detail

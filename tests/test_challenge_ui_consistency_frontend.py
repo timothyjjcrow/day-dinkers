@@ -24,10 +24,13 @@ def test_challenge_actions_use_product_icons_and_an_explicit_dialog_label():
     assert ".challenge-hero-icon" in CSS
 
 
-def test_challenge_success_feedback_uses_semantic_toast_icons():
+def test_challenge_success_feedback_uses_semantic_icons_and_a_persistent_join_state():
     assert "toast(`Challenge sent to ${player.display_name}`, { tone: 'success', icon: 'trophy' })" in APP
-    assert "icon: isChallenge ? 'trophy' : 'pickleball'" in APP
-    assert "showJoinedToast(gameId, isChallenge ? 'Challenge accepted' : \"You're in\"" in APP
+    detail = section('function gameScreenHtml', 'async function openGameScreen')
+    assert "isChallenge ? `${uiIcon('trophy')} Accept challenge`" in detail
+    assert 'id="gs-joined-state" role="status"' in detail
+    assert "${uiIcon('check-circle')} ${game.is_creator ? 'You’re hosting' : 'You’re in'}" in detail
+    assert 'id="gs-undo-join">Undo</button>' in detail
     # Play again now opens a reviewable planner; it must not claim a rematch or
     # invitations already exist before the player submits that plan.
     planner = section("async function openPostGamePlanner", "function completedCrewConnectionsHtml")

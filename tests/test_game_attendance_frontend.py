@@ -31,14 +31,16 @@ def test_hosts_get_recruiting_as_the_primary_underfilled_action():
     assert 'data-roster-boost-channel="friends"' in APP
     assert 'data-roster-boost-channel="court"' in APP
     assert 'data-roster-boost-channel="share"' in APP
-    assert '${gameRosterStatusHtml(game)}' in detail
+    assert 'aria-label="Players"' in detail
+    assert 'const openSpots = Math.max(0, Number(game.spots_left) || 0);' in detail
+    assert "game.attendance_confirmation_due && !p.attending && p.user_id !== game.creator_id" in detail
     assert 'Confirmed ${confirmed}' not in detail
     assert 'Unconfirmed ${unconfirmed}' not in detail
 
 
 def test_reminder_decline_uses_the_same_guarded_leave_flow():
     screen = section('async function openGameScreen', 'function safeNotificationOverlayRoute')
-    assert "querySelectorAll('#gs-leave, #gs-not-coming, #gs-leave-series')" in screen
+    assert "querySelectorAll('#gs-leave, #gs-not-coming, #gs-leave-series, #gs-undo-join')" in screen
     assert "title: skipOnly ? 'Skip only this date?' : 'Leave this series?'" in screen
     assert "skipOnly ? `/games/${gameId}/skip-occurrence`" in screen
     assert 'decision = await confirmGameLeave(game, playNoun, btn);' in screen

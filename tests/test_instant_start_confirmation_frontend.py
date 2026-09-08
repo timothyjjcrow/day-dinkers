@@ -55,7 +55,8 @@ def test_joining_an_existing_rally_opens_detail_and_puts_undo_in_a_safe_toast():
     assert "Joined · Undo" not in join
     assert "showJoinedToast(gameId" in join
     assert "label: 'Undo'" in helper
-    assert "api(`/games/${gameId}/leave`, { method: 'POST' })" in helper
+    assert "recurring = false" in helper
+    assert "api(`/games/${gameId}/${recurring ? 'skip-occurrence' : 'leave'}`, { method: 'POST' })" in helper
     assert ".catch((error) =>" in helper
     assert "if (!error.isStaleSession) toast(error.message" in helper
     assert "openResolvedRallyGame(gameId, sourceModal || null);" in join

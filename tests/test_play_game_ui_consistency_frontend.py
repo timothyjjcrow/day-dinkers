@@ -21,16 +21,12 @@ def test_rally_and_game_cards_use_the_shared_product_icon_sprite():
         assert old not in assembly
 
     cards = section("function gameCardHtml", "function bindGameButtons")
+    assert "uiIcon(game.is_instant ? 'zap' : isRankedMatch ? 'trophy' : 'pickleball')" in cards
     for icon in (
-        "zap",
-        "trophy",
         "lock",
         "users",
         "refresh",
-        "building",
         "message",
-        "sliders",
-        "target",
         "clock",
         "edit",
         "activity",
@@ -188,8 +184,9 @@ def test_core_play_sheets_use_product_icons_in_their_titles():
 
 def test_play_action_completion_states_do_not_fall_back_to_font_checkmarks():
     assert "button.innerHTML = `${uiIcon('check')} Sent`;" in APP
-    assert "b.innerHTML = `${uiIcon('check')} Joined · Open ${esc(playNoun)}`;" in APP
-    assert "showJoinedToast(gameId" in APP
+    assert 'class="game-joined-chip">${uiIcon(\'check\')}' in APP
+    assert 'id="gs-joined-state" role="status"' in APP
+    assert "showJoinedToast(Number(b.dataset.gameJoin)" in APP
     assert "b.innerHTML = `${uiIcon('check')} Left waitlist`;" in APP
     assert 'class="arrival-status-icon" aria-hidden="true">${uiIcon(\'check\')}' in APP
     assert 'class="postgame-connected-icon" aria-hidden="true">${uiIcon(\'check-circle\')}' in APP

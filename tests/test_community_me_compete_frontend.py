@@ -203,7 +203,7 @@ def test_me_is_a_dashboard_with_five_settings_destinations():
     assert "el.querySelector('#pf-dashboard-error').classList.remove('hidden');" in profile
     assert 'id="pf-dashboard-retry"' in profile
     assert "renderProfile();" in profile
-    for heading in ("Next session or match", "Saved courts", "Recent play", "Your play stats"):
+    for heading in ("Up next", "Saved courts", "Recent play", "Your play stats"):
         assert f'<div class="section-label">{heading}</div><div class="profile-section-unavailable">' in profile
 
     settings = section("function openSettingsHub", "async function renderProfile")
@@ -275,7 +275,7 @@ def test_compete_has_one_create_path_and_true_detail_tabs():
 
     league = section("async function openLeagueScreen", "async function openCreateTournamentSheet")
     assert "['lg-overview', 'Overview']" in league
-    assert "['lg-matches', 'Matches']" in league
+    assert "['lg-matches', lg.joined ? 'Your matches' : 'Matches']" in league
     assert "['lg-standings', 'Standings']" in league
     assert "['lg-chat', 'Chat']" not in league
     assert 'id="lg-chat"' in league
@@ -315,7 +315,7 @@ def test_competition_statuses_and_detail_actions_use_app_native_presentation():
     assert 'type="button" class="btn btn-secondary btn-block competition-chat-action" id="lg-chat"' in competition
     assert competition.count('class="competition-chat-image-loading"') == 2
     assert competition.count('data-img-id="${m.id}" aria-hidden="true"') >= 2
-    assert 'data-select-title="Players per box" data-select-prefix="Box size"' in competition
+    assert 'id="lc-box" data-select-title="Players matched together" data-select-prefix="Players"' in competition
     assert competition.count('data-select-title="Tournament field size" data-select-prefix="Players or teams"') == 2
 
     for selector in (

@@ -35,7 +35,9 @@ def test_pickup_game_cards_and_details_use_plain_time_aware_copy():
 
     assert "game.is_instant\n      ? `${fmtDateTime(game.scheduled_at)}${assembly ? ' · Live' : ''}`" in card
     assert 'Open until ${fmtTimeShort(game.assembly_expires_at)}' in card
-    assert "`${assembly ? 'Live pickup game' : 'Pickup game'} · ${gameTypeAndFormat}`" in detail
+    assert 'esc(gameActivityLabel(game))' in detail
+    assert 'headline = assembly.title;' in detail
+    assert 'subline = assembly.sub;' in detail
     assert 'Game didn’t fill up' in detail
 
 

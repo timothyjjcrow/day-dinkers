@@ -13,6 +13,48 @@ APP = (ROOT / "public/app-v15.js").read_text()
 VENUE = ROOT / "public/venue-workspace-v15.js"
 
 
+DETAILS_DOM = """
+  function detailsDom(business) {
+    const nodes = {}, navigation = [], sections = ['about', 'visit', 'contact'];
+    const modal = {
+      querySelector(selector) {
+        if (nodes[selector]) return nodes[selector];
+        const field = selector.replace('#business-', '').replaceAll('-', '_');
+        const key = selector.replace('#venue-section-', '');
+        const section = selector.replace('#venue-field-', '');
+        const view = selector === '#venue-jump-preview' ? 'preview' : 'edit';
+        return nodes[selector] = {
+          value: Array.isArray(business[field]) ? business[field].join(', ') : String(business[field] ?? ''),
+          validity: {valid: true}, handlers: {}, attributes: {},
+          dataset: selector.startsWith('#venue-section-') ? {venueSection: key}
+            : selector.startsWith('#venue-field-') ? {venueFieldSection: section}
+            : selector === '#business-details-form' ? {view: 'edit'} : {venueEditorView: view},
+          hidden: selector.startsWith('#venue-field-') && section !== 'about',
+          classList: {add() {}},
+          querySelector: selector => modal.querySelector(selector),
+          setAttribute(name, value) {this.attributes[name] = value;},
+          addEventListener(name, handler) {this.handlers[name] = handler;},
+          closest(query) {
+            if (query !== '[data-venue-field-section]') return null;
+            const parent = ['hours', 'amenities'].includes(field) ? 'visit'
+              : ['name', 'description', 'announcement'].includes(field) ? 'about' : 'contact';
+            return modal.querySelector(`#venue-field-${parent}`);
+          },
+          scrollIntoView(options) {navigation.push({selector, scroll: options.block});},
+          focus(options = {}) {navigation.push({selector, focused: true, preventScroll: options.preventScroll});},
+        };
+      },
+      querySelectorAll(selector) {
+        return (selector === '[data-venue-section]' ? sections.map(key => `#venue-section-${key}`)
+          : selector === '[data-venue-editor-view]' ? ['#venue-back-edit', '#venue-jump-preview'] : [])
+          .map(selector => modal.querySelector(selector));
+      },
+    };
+    return {modal, nodes, navigation};
+  }
+"""
+
+
 def run_js(script):
     result = subprocess.run(
         ["node", "--input-type=module", "-e", f"""
@@ -20,10 +62,10 @@ def run_js(script):
           import vm from 'node:vm';
           const fixedNow = '2026-09-08T12:00:00Z';
           const FrozenDate = class extends Date {{constructor(...args) {{super(...(args.length ? args : [fixedNow]));}}}};
-          const sandbox = {{module: {{exports: {{}}}}, Date: FrozenDate}};
+          const sandbox = {{module: {{exports: {{}}}}, Date: FrozenDate, URL}};
           vm.runInNewContext(fs.readFileSync({json.dumps(str(VENUE))}, 'utf8'), sandbox);
           const Venue = sandbox.module.exports;
-        """ + script], check=True, capture_output=True, text=True,
+        """ + DETAILS_DOM + script], check=True, capture_output=True, text=True,
     )
     return json.loads(result.stdout)
 
@@ -33,10 +75,21 @@ class Markup(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.tags = []
         self.words = []
+        self.parents = {}
+        self.stack = []
         self.feed(source)
 
     def handle_starttag(self, tag, attrs):
-        self.tags.append((tag, dict(attrs)))
+        attributes = dict(attrs)
+        self.tags.append((tag, attributes))
+        if attributes.get("id"):
+            self.parents[attributes["id"]] = tuple(self.stack)
+        if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag):
+        if tag in self.stack:
+            del self.stack[len(self.stack) - 1 - self.stack[::-1].index(tag):]
 
     def handle_data(self, data):
         self.words.append(data)
@@ -71,6 +124,133 @@ def render(data, **options):
         time: time => time, canEdit: true, workspace: {{publicNow: false}}, ...{json.dumps(options)}}};
       console.log(JSON.stringify(Venue.render({json.dumps(data)}, options)));
     """))
+
+
+def test_extracted_presentation_helpers_are_exported_and_app_wrappers_forward_arguments():
+    wrappers = []
+    for name in ('businessHubEmptyHtml', 'venueTaskHtml', 'businessUnavailableHtml',
+                 'businessRevisionDiffHtml', 'businessFileSize', 'businessFileDescription', 'setBusinessFilePickerState'):
+        body = APP.split(f'  function {name}(', 1)[1].split('\n  }', 1)[0]
+        wrappers.append(f'function {name}(' + body + '\n}')
+    output = run_js('\n'.join(wrappers) + """
+      const window = {VenueWorkspace: Venue}, uiIcon = name => `<span data-icon="${name}"></span>`;
+      const names = ['welcome', 'task', 'unavailable', 'revisionDiff', 'fileSize', 'fileDescription', 'setFilePickerState'];
+      const court = {name: 'Sunset & Coast'}, options = {tool: 'team', icon: 'users', title: 'Team', copy: 'Invite staff'};
+      const error = {status: 503, message: 'Temporary failure'}, revision = {before_snapshot: {}, after_snapshot: {}};
+      const file = {type: 'image/png', name: 'courts.png', size: 2048};
+      console.log(JSON.stringify({
+        exported: names.map(name => typeof Venue[name]), global: sandbox.VenueWorkspace === Venue,
+        forwarding: [
+          businessHubEmptyHtml(court) === Venue.welcome(court, uiIcon),
+          venueTaskHtml(options) === Venue.task(options, uiIcon),
+          businessUnavailableHtml('Bookings', error) === Venue.unavailable('Bookings', error, uiIcon),
+          businessRevisionDiffHtml(revision) === Venue.revisionDiff(revision),
+          businessFileSize(2048) === Venue.fileSize(2048),
+          businessFileDescription(file, 'Image') === Venue.fileDescription(file, 'Image'),
+          setBusinessFilePickerState(null) === Venue.setFilePickerState(null, {}, uiIcon),
+        ],
+      }));
+    """)
+    assert output == {'exported': ['function'] * 7, 'global': True, 'forwarding': [True] * 7}
+
+
+def test_extracted_welcome_task_and_unavailable_states_preserve_escaping_and_semantics():
+    malicious = '<img src=x onerror="attack()"> & " onclick="attack()'
+    output = run_js(f'const malicious = {json.dumps(malicious)};' + """
+      const icon = name => `<span data-icon="${name}" aria-hidden="true"></span>`;
+      console.log(JSON.stringify({
+        welcome: Venue.welcome({name: malicious}, icon),
+        initial: Venue.welcome(null, icon),
+        task: Venue.task({tool: 'ownership', icon: 'lock', title: malicious, copy: malicious, disabled: true}, icon),
+        failures: [404, 501, 503].map(status => Venue.unavailable(malicious, {status, message: malicious}, icon)),
+      }));
+    """)
+    for source in [output['welcome'], output['task'], *output['failures']]:
+        markup = Markup(source)
+        assert malicious in markup.text
+        assert not [tag for tag, _ in markup.tags if tag in {'img', 'script'}]
+        assert not [attrs for _, attrs in markup.tags if any(key.startswith('on') for key in attrs)]
+    welcome = Markup(output['welcome'])
+    assert len([tag for tag, _ in welcome.tags if tag == 'li']) == 3
+    assert any(tag == 'button' and attrs.get('id') == 'business-claim-start' for tag, attrs in welcome.tags)
+    assert 'Find my venue' in Markup(output['initial']).text
+    task = Markup(output['task'])
+    assert any(tag == 'button' and attrs.get('data-business-tool') == 'ownership' and 'disabled' in attrs for tag, attrs in task.tags)
+    for index, source in enumerate(output['failures']):
+        markup = Markup(source)
+        assert any(attrs.get('role') == ('status' if index < 2 else 'alert') for _, attrs in markup.tags)
+        assert ('not enabled yet' in markup.text) == (index < 2)
+
+
+def test_extracted_revision_diff_keeps_changed_values_and_collection_counts_readable():
+    data = {
+        'before_snapshot': {'profile': {'name': 'Old name', 'published': False, 'unchanged': 'Same'}, 'schedule': []},
+        'after_snapshot': {'profile': {'name': '<img src=x onerror="attack()">', 'published': True, 'unchanged': 'Same'},
+                           'schedule': [{'id': 7}]},
+    }
+    markup = Markup(run_js(f'console.log(JSON.stringify(Venue.revisionDiff({json.dumps(data)})));'))
+    for text in ['Name', 'Old name', data['after_snapshot']['profile']['name'], 'Published', 'No', 'Yes', 'Schedule', '0 items', '1 item']:
+        assert text in markup.text
+    assert 'Unchanged' not in markup.text
+    assert not [tag for tag, _ in markup.tags if tag in {'img', 'script'}]
+    assert any(attrs.get('aria-label') == 'Changed business fields' for _, attrs in markup.tags)
+    empty = Markup(run_js('console.log(JSON.stringify(Venue.revisionDiff({})));'))
+    assert 'No value-level difference' in empty.text
+
+
+def test_extracted_file_metadata_retains_size_units_type_names_and_fallbacks():
+    output = run_js("""
+      console.log(JSON.stringify({
+        sizes: [null, -10, 42, 1024, 2097152, 12582912].map(Venue.fileSize),
+        descriptions: [
+          Venue.fileDescription({type: 'IMAGE/PNG', name: 'venue.png', size: 1024}),
+          Venue.fileDescription({type: 'application/json', name: 'catalog.txt', size: 42}),
+          Venue.fileDescription({name: 'schedule.csv', size: 2048}),
+          Venue.fileDescription({name: 'unknown-extension', size: 0}, 'Document'),
+          Venue.fileDescription(null),
+        ],
+      }));
+    """)
+    assert output['sizes'] == ['0 B', '0 B', '42 B', '1 KB', '2.0 MB', '12 MB']
+    assert output['descriptions'] == ['PNG image · 1 KB', 'JSON · 42 B', 'CSV · 2 KB', 'Document · 0 B', 'File · 0 B']
+
+
+def test_extracted_file_picker_renderer_preserves_busy_errors_recovery_and_literal_filenames():
+    output = run_js("""
+      const nodes = {};
+      const picker = {
+        dataset: {idleIcon: 'upload'}, attributes: {},
+        toggleAttribute(name, on) {this.attributes[name] = on;},
+        querySelector(selector) {
+          return nodes[selector] ||= {attributes: {},
+            setAttribute(name, value) {this.attributes[name] = value;},
+            removeAttribute(name) {delete this.attributes[name];},
+          };
+        },
+      };
+      const transitions = [];
+      for (const state of ['loading', 'error', 'success', 'idle']) {
+        Venue.setFilePickerState(picker, {state, name: '<img src=x onerror="attack()">', meta: 'PNG image · 1 KB', badge: state},
+          name => `icon:${name}`);
+        transitions.push({state: picker.dataset.state, busy: picker.attributes['aria-busy'],
+          role: nodes['[data-file-feedback]'].attributes.role,
+          live: nodes['[data-file-feedback]'].attributes['aria-live'],
+          invalid: nodes['[data-file-button]'].attributes['aria-invalid'] || null,
+          icon: nodes['[data-file-state-icon]'].innerHTML,
+          name: nodes['[data-file-name]'].textContent,
+          nameHtml: nodes['[data-file-name]'].innerHTML || null,
+        });
+      }
+      console.log(JSON.stringify(transitions));
+    """)
+    for index, row in enumerate(output):
+        assert row['name'] == '<img src=x onerror="attack()">'
+        assert row['nameHtml'] is None
+        assert row['busy'] == (index == 0)
+        assert row['role'] == ('alert' if index == 1 else 'status')
+        assert row['live'] == ('assertive' if index == 1 else 'polite')
+        assert row['invalid'] == ('true' if index == 1 else None)
+    assert [row['icon'] for row in output] == ['icon:refresh', 'icon:alert-triangle', 'icon:check-circle', 'icon:upload']
 
 
 def test_venue_content_and_preview_escape_names_copy_and_saved_links():
@@ -149,6 +329,118 @@ def test_rendered_tabs_have_one_selected_panel_and_safe_fallback():
             assert ("hidden" not in panel) == active
 
 
+def test_detail_sections_keep_backend_limits_labels_and_save_inside_the_form():
+    markup = Markup(run_js(f"""
+      console.log(JSON.stringify(Venue.detailsForm({json.dumps(venue())},
+        {{head: '', icon: () => '', hasManagedLogo: false}})));
+    """))
+    nodes = {attrs["id"]: (tag, attrs) for tag, attrs in markup.tags if "id" in attrs}
+    expected_limits = {"name": "120", "description": "2000", "announcement": "500", "hours": "1000", "email": "255"}
+    for field, limit in expected_limits.items():
+        assert nodes[f"business-{field}"][1]["maxlength"] == limit
+    for section in ["about", "visit", "contact"]:
+        tab = nodes[f"venue-section-{section}"][1]
+        panel = nodes[tab["aria-controls"]][1]
+        assert tab["aria-selected"] == str(section == "about").lower()
+        assert tab["tabindex"] == ("0" if section == "about" else "-1")
+        assert panel["aria-labelledby"] == f"venue-section-{section}"
+        assert ("hidden" in panel) == (section != "about")
+    labels = {attrs.get("for") for tag, attrs in markup.tags if tag == "label"}
+    assert {f"business-{field}" for field in expected_limits} <= labels
+    # The save action belongs to the same form in both mobile editor views.
+    structure = [tag for tag, _ in markup.tags]
+    assert structure.count("form") == 1
+    assert "form" in markup.parents["business-details-save"]
+    assert "footer" in markup.parents["business-details-save"]
+    assert nodes["business-details-save"][1]["type"] == "submit"
+    assert nodes["business-details-form"][1]["data-view"] == "edit"
+    assert nodes["venue-back-edit"][1]["aria-pressed"] == "true"
+    assert nodes["venue-jump-preview"][1]["aria-pressed"] == "false"
+    assert not [attrs for _, attrs in markup.tags if any(key.startswith("on") for key in attrs)]
+
+
+def test_mobile_preview_keeps_edits_and_validation_reveals_the_right_section():
+    result = run_js("""
+      const business = {name: 'Venue', description: 'Saved copy', amenities: []};
+      const {modal, nodes, navigation} = detailsDom(business), errors = [];
+      const formUX = {isDirty: () => true, showError(message, target) {
+        const section = target.closest('[data-venue-field-section]');
+        errors.push({message, visible: !section.hidden, view: nodes['#business-details-form'].dataset.view});
+        target.focus();
+      }};
+      const sync = Venue.bindDetailsEditor(modal, business, {formUX, icon: () => '', verified: true, publicNow: false});
+      const active = () => ['about', 'visit', 'contact'].filter(key => !modal.querySelector(`#venue-field-${key}`).hidden);
+      const states = [];
+      nodes['#business-description'].value = 'My unsaved introduction';
+      nodes['#business-details-form'].handlers.input();
+      nodes['#venue-jump-preview'].handlers.click();
+      states.push({view: nodes['#business-details-form'].dataset.view,
+        pressed: nodes['#venue-jump-preview'].attributes['aria-pressed'], draft: nodes['#business-description'].value});
+      formUX.showError('Enter a valid email.', nodes['#business-email']);
+      states.push({view: nodes['#business-details-form'].dataset.view, active: active(),
+        pressed: nodes['#venue-back-edit'].attributes['aria-pressed']});
+      sync.reveal(nodes['#business-hours']); states.push({active: active()});
+      const prevented = [];
+      nodes['#venue-section-visit'].handlers.keydown({key: 'End', preventDefault() {prevented.push('End');}});
+      states.push({active: active()});
+      nodes['#venue-section-contact'].handlers.keydown({key: 'ArrowRight', preventDefault() {prevented.push('ArrowRight');}});
+      states.push({active: active()});
+      nodes['#venue-section-about'].handlers.keydown({key: 'Escape', preventDefault() {prevented.push('Escape');}});
+      console.log(JSON.stringify({states, errors, prevented, navigation,
+        draft: nodes['#business-description'].value, preview: nodes['#venue-details-preview'].innerHTML}));
+    """)
+    assert result["states"] == [
+        {"view": "preview", "pressed": "true", "draft": "My unsaved introduction"},
+        {"view": "edit", "active": ["contact"], "pressed": "true"},
+        {"active": ["visit"]}, {"active": ["contact"]}, {"active": ["about"]},
+    ]
+    assert result["errors"] == [{"message": "Enter a valid email.", "visible": True, "view": "edit"}]
+    assert result["prevented"] == ["End", "ArrowRight"]
+    assert [event["selector"] for event in result["navigation"]] == ["#business-email", "#venue-section-contact", "#venue-section-about"]
+    assert result["draft"] in result["preview"]
+
+
+def test_changed_details_omits_untouched_fields_and_preserves_explicit_clears_and_arrays():
+    result = run_js("""
+      const original = {name: 'Venue', description: 'Saved', phone: '555-0100', amenities: ['Lights', 'Water'],
+        announcement: null, updated_at: 'old', is_public: true};
+      const fields = {name: 'Venue', description: 'New introduction', phone: '', amenities: ['Lights', 'Water'], announcement: '', website_url: ''};
+      const before = JSON.stringify({original, fields});
+      const changed = Venue.changedDetails(original, fields);
+      console.log(JSON.stringify({changed, unchangedInputs: before === JSON.stringify({original, fields}),
+        unchanged: Venue.changedDetails(original, {name: 'Venue', amenities: ['Lights', 'Water']}),
+        reordered: Venue.changedDetails(original, {amenities: ['Water', 'Lights']}),
+        cleared: Venue.changedDetails(original, {amenities: []}),
+        emptyMissing: Venue.changedDetails({}, {amenities: [], description: ''}),
+        added: Venue.changedDetails({}, {amenities: ['Parking']})}));
+    """)
+    assert result == {
+        "changed": {"description": "New introduction", "phone": ""}, "unchangedInputs": True,
+        "unchanged": {}, "reordered": {"amenities": ["Water", "Lights"]},
+        "cleared": {"amenities": []}, "emptyMissing": {}, "added": {"amenities": ["Parking"]},
+    }
+
+
+def test_bulk_collection_guard_accepts_metadata_refresh_but_rejects_added_removed_or_changed_rows():
+    result = run_js("""
+      const original = [{id: 1, title: 'Open play', active: true, source_updated_at: 'old', sort_order: 0},
+        {id: 2, title: 'Hidden clinic', active: false, booking_url: 'https://venue.test/book', freshness: {updated_at: 'old'}}];
+      const refreshed = [{freshness: {updated_at: 'new'}, booking_url: 'https://venue.test/book', active: false, title: 'Hidden clinic', id: 2},
+        {...original[0], source_updated_at: 'new', created_at: 'today', updated_at: 'today', sort_order: 1}];
+      const before = JSON.stringify({original, refreshed});
+      const attempt = items => {try {Venue.assertCollectionUnchanged(items, original); return null;} catch (error) {return error.message;}};
+      console.log(JSON.stringify({accepted: attempt(refreshed), unchangedInputs: before === JSON.stringify({original, refreshed}),
+        added: attempt([...original, {id: 3, title: 'Added elsewhere'}]), removed: attempt(original.slice(0, 1)),
+        changedTitle: attempt([{...original[0], title: 'Renamed elsewhere'}, original[1]]),
+        changedHidden: attempt([original[0], {...original[1], active: true}]),
+        changedLink: attempt([original[0], {...original[1], booking_url: 'https://venue.test/new'}]),
+        changedId: attempt([original[0], {...original[1], id: 3}])}));
+    """)
+    assert result.pop("accepted") is None
+    assert result.pop("unchangedInputs") is True
+    assert all("changed elsewhere" in message for message in result.values())
+
+
 def test_extracted_logo_fields_keep_accessible_picker_states_and_escape_saved_urls():
     url = 'https://venue.test/logo.png?q=" onfocus="alert(1)'
     for managed in [False, True]:
@@ -174,19 +466,12 @@ def test_extracted_logo_fields_keep_accessible_picker_states_and_escape_saved_ur
         assert "Logo uploads save immediately" in markup.text
 
 
-def test_details_preserve_multiline_hours_in_editor_preview_and_save_and_restore_edit_focus():
+def test_details_preserve_multiline_hours_and_save_only_changed_fields():
     start = APP.index("function openBusinessDetailsEditor(")
     source = APP[start:APP.index("function openBusinessIntegrationRequest", start)]
     result = run_js("""
       const business = {id: 7, name: 'Venue', hours: 'Monday 8 AM–8 PM\\nTuesday closed', amenities: [], logo_url: ''};
-      const values = Object.fromEntries(Object.entries(business).map(([key, value]) => [`#business-${key}`, String(value)]));
-      const nodes = {}, navigation = [], requests = [];
-      const modal = {querySelector(selector) {
-        return nodes[selector] ||= {value: values[selector] || '', validity: {valid: true}, handlers: {},
-          classList: {add() {}}, addEventListener(name, handler) {this.handlers[name] = handler;},
-          scrollIntoView(options) {navigation.push({selector, scroll: options.block});},
-          focus(options) {navigation.push({selector, focused: true, preventScroll: options.preventScroll});}};
-      }};
+      const {modal, nodes} = detailsDom(business), requests = [];
       let html, saved;
       const window = {VenueWorkspace: Venue}, uiIcon = () => '', esc = String, modalHead = () => '';
       const normalizeBusinessProfile = value => value, businessCourtName = () => '', businessVerificationState = () => 'verified';
@@ -200,12 +485,11 @@ def test_details_preserve_multiline_hours_in_editor_preview_and_save_and_restore
     """ + source + """
       openBusinessDetailsEditor(business, updated => {saved = updated;});
       const initialPreview = nodes['#venue-details-preview'].innerHTML;
-      nodes['#venue-jump-preview'].handlers.click(); nodes['#venue-back-edit'].handlers.click();
       nodes['#business-hours'].value = ' Monday 7 AM–9 PM\\nTuesday closed\\nSaturday 9 AM–2 PM ';
       nodes['#business-details-form'].handlers.input();
       const editedPreview = nodes['#venue-details-preview'].innerHTML;
       await nodes['#business-details-form'].handlers.submit({preventDefault() {}});
-      console.log(JSON.stringify({html, initialPreview, editedPreview, requests, saved, navigation}));
+      console.log(JSON.stringify({html, initialPreview, editedPreview, requests, saved}));
     """)
     nodes = {attrs["id"]: (tag, attrs) for tag, attrs in Markup(result["html"]).tags if "id" in attrs}
     assert nodes["business-hours"][0] == "textarea"
@@ -214,13 +498,7 @@ def test_details_preserve_multiline_hours_in_editor_preview_and_save_and_restore
     edited = "Monday 7 AM–9 PM\nTuesday closed\nSaturday 9 AM–2 PM"
     assert edited in result["editedPreview"]
     assert result["requests"][0]["path"] == "/businesses/7"
-    assert result["requests"][0]["body"]["hours"] == result["saved"]["hours"] == edited
-    assert result["navigation"] == [
-        {"selector": ".venue-editor-preview", "scroll": "start"},
-        {"selector": ".venue-editor-preview", "focused": True, "preventScroll": True},
-        {"selector": "#business-name", "scroll": "center"},
-        {"selector": "#business-name", "focused": True, "preventScroll": True},
-    ]
+    assert result["requests"][0]["body"] == result["saved"] == {"hours": edited}
     styles = (ROOT / "public/styles-v15.css").read_text()
     facts = styles[styles.index(".venue-facts dd {"):].split("}", 1)[0]
     assert "white-space: pre-wrap" in facts
@@ -231,17 +509,10 @@ def test_logo_mutation_refresh_failure_keeps_text_edits_and_updates_private_visi
     start = APP.index("function openBusinessDetailsEditor(")
     source = APP[start:APP.index("function openBusinessIntegrationRequest", start)]
     result = run_js("""
-      const business = {id: 7, name: 'Venue', is_public: true, published: true,
+      const business = {id: 7, name: 'Venue', amenities: [], is_public: true, published: true,
         content_review_status: 'approved', logo_url: '/api/businesses/7/logo', has_logo_upload: true};
-      const nodes = {}, requests = [], updates = [], errors = [];
+      const {modal, nodes} = detailsDom(business), requests = [], updates = [], errors = [];
       let confirm, cleared = 0;
-      const modal = {querySelector(selector) {
-        return nodes[selector] ||= {value: String(business[selector.replace('#business-', '').replaceAll('-', '_')] || ''),
-          validity: {valid: true}, handlers: {}, classList: {add() {}},
-          querySelector: selector => modal.querySelector(selector),
-          addEventListener(name, handler) {this.handlers[name] = handler;},
-          scrollIntoView() {}, focus() {}};
-      }};
       const window = {VenueWorkspace: Venue}, uiIcon = () => '', esc = String, modalHead = () => '';
       const normalizeBusinessProfile = value => value, businessCourtName = () => '', businessVerificationState = () => 'verified';
       const businessWorkspaceState = business => Venue.state(business, 'verified');
@@ -270,8 +541,8 @@ def test_logo_mutation_refresh_failure_keeps_text_edits_and_updates_private_visi
       console.log(JSON.stringify({{initial, after: nodes['#venue-details-save-impact'].textContent,
         requests, updates, errors, cleared, description: nodes['#business-description'].value}}));
     """)
-    assert result["initial"] == "Saved changes appear on your player listing."
-    assert result["after"] == "Changes save to your venue. Your listing is currently private."
+    assert result["initial"] == "Saved changes appear on your listing."
+    assert result["after"] == "Only managers can see this preview. Your listing is private."
     assert result["description"] == "My unsaved description"
     assert result["cleared"] == 0 and result["errors"] == []
     assert result["requests"] == [
@@ -283,6 +554,110 @@ def test_logo_mutation_refresh_failure_keeps_text_edits_and_updates_private_visi
     assert saved["content_review_status"] == "pending"
     assert saved["has_logo_upload"] == (operation == "upload")
     assert saved["logo_url"] == ("/api/businesses/7/logo" if operation == "upload" else "")
+
+
+@pytest.mark.parametrize("operation", ["upload", "remove"])
+@pytest.mark.parametrize("phone_edited", [False, True])
+def test_logo_refresh_does_not_turn_untouched_contact_details_into_edits(operation, phone_edited):
+    start = APP.index("function openBusinessDetailsEditor(")
+    source = APP[start:APP.index("function openBusinessIntegrationRequest", start)]
+    result = run_js("""
+      const business = {id: 7, name: 'Venue', description: 'Original description', phone: '111', amenities: [],
+        is_public: true, published: true, content_review_status: 'approved', logo_url: '/api/businesses/7/logo', has_logo_upload: true};
+      const {modal, nodes} = detailsDom(business), patches = [], updates = [], errors = [];
+      let confirm;
+      const window = {VenueWorkspace: Venue}, uiIcon = () => '', modalHead = () => '';
+      const normalizeBusinessProfile = value => value, businessCourtName = () => '', businessVerificationState = () => 'verified';
+      const businessWorkspaceState = value => Venue.state(value, 'verified');
+      const openModal = () => modal, openBusinessConfirmAction = options => {confirm = options;};
+      const bindModalDiscardConfirmation = () => {}, closeModal = () => {}, toast = () => {};
+      const bindModalFormUX = () => ({isDirty: () => true, clearError() {}, clearDraft() {},
+        showError: message => errors.push(message), startSubmitting: () => () => {}});
+      const businessFileDescription = () => 'PNG image', setBusinessFilePickerState = () => {};
+      const imageFileToDataUrl = async () => 'data:image/png;base64,fixture', optionalBusinessUrl = () => '';
+      const api = async (path, options) => {
+        if (!options) return {...business, phone: '222', is_public: false, published: false, content_review_status: 'pending',
+    """ + f"""logo_url: {json.dumps('/api/businesses/7/logo' if operation == 'upload' else '')}}};
+    """ + """
+        if (options.method === 'PATCH') patches.push(JSON.parse(options.body));
+        return options.method === 'POST' ? {logo_url: '/api/businesses/7/logo'} : {...business, ...(options.body ? JSON.parse(options.body) : {})};
+      };
+    """ + source + f"""
+      openBusinessDetailsEditor(business, updated => updates.push({{...updated}}));
+      nodes['#business-description'].value = 'My unsaved description';
+      if ({str(phone_edited).lower()}) nodes['#business-phone'].value = '333';
+      if ({json.dumps(operation)} === 'upload') {{
+        const input = nodes['#business-logo-file']; input.files = [{{name: 'logo.png', type: 'image/png', size: 400}}];
+        await input.handlers.change({{currentTarget: input}});
+      }} else {{ nodes['#business-logo-remove'].handlers.click(); await confirm.onConfirm({{}}); }}
+      const impact = nodes['#venue-details-save-impact'].textContent;
+      await nodes['#business-details-form'].handlers.submit({{preventDefault() {{}}}});
+      console.log(JSON.stringify({{patches, impact, errors, refreshedPhone: updates[0].phone,
+        phone: nodes['#business-phone'].value, description: nodes['#business-description'].value}}));
+    """)
+    expected = {"description": "My unsaved description"}
+    if phone_edited:
+        expected["phone"] = "333"
+    assert result["patches"] == [expected]
+    assert result["refreshedPhone"] == "222"
+    assert result["phone"] == ("333" if phone_edited else "111")
+    assert result["description"] == "My unsaved description"
+    assert result["errors"] == []
+    assert result["impact"] == ("These changes make your listing private until reviewed." if phone_edited
+        else "Only managers can see this preview. Your listing is private.")
+
+
+def test_booking_destination_preview_uses_only_safe_url_hostnames_as_text():
+    result = run_js("""
+      const input = {value: 'https://www.booking.example.test/courts', handlers: {},
+        addEventListener(name, handler) {this.handlers[name] = handler;}};
+      const destination = {};
+      Venue.bindBookingPreview({querySelector: selector => selector === '#venue-booking-url' ? input : destination});
+      const labels = [destination.textContent];
+      for (const value of ['', 'https://', 'booking.example.test', 'javascript:alert(1)', 'data:text/html,<script>alert(1)</script>',
+        'https://trusted.test@actual-provider.test/book', 'https://venue.test/path?q=<script>']) {
+        input.value = value; input.handlers.input(); labels.push(destination.textContent);
+      }
+      input.value = 'https://new-provider.test/book'; input.handlers.change(); labels.push(destination.textContent);
+      console.log(JSON.stringify({labels, properties: Object.keys(destination)}));
+    """)
+    assert result["labels"] == [
+        "Continue to booking.example.test", *(["Add a link to your booking page"] * 5),
+        "Continue to actual-provider.test", "Continue to venue.test", "Continue to new-provider.test",
+    ]
+    assert result["properties"] == ["textContent"]
+
+
+def test_booking_save_omits_untouched_membership_even_after_child_refresh():
+    start = APP.index("function openBusinessBookingSetup(")
+    source = APP[start:APP.index("function renderBusinessHubDashboard", start)]
+    result = run_js("""
+      const business = {id: 7, name: 'Venue', manager_role: 'owner', booking_url: 'https://old.test/book', membership_url: 'https://venue.test/join'};
+      const nodes = {}, requests = [], events = [];
+      let childSaved;
+      const modal = {querySelector(selector) {return nodes[selector] ||= {
+        value: selector === '#venue-booking-url' ? business.booking_url : selector === '#venue-membership-url' ? business.membership_url : '',
+        handlers: {}, addEventListener(name, handler) {this.handlers[name] = handler;}};}};
+      const window = {VenueWorkspace: Venue}, uiIcon = () => '', modalHead = () => '';
+      const normalizeBusinessProfile = value => value, openModal = () => modal, openChildModal = (modal, open) => open();
+      const openBusinessScheduleEditor = (business, onSaved) => {childSaved = onSaved;};
+      const bindModalFormUX = () => ({isDirty: () => true, clearError() {}, clearDraft() {events.push('clear');},
+        startSubmitting: () => () => {}, showError(message) {throw new Error(message);}});
+      const bindModalDiscardConfirmation = () => {}, closeModal = () => events.push('close'), toast = () => {};
+      const optionalBusinessUrl = (modal, selector) => modal.querySelector(selector).value;
+      const api = async (path, options) => {requests.push({path, method: options.method, body: JSON.parse(options.body)});
+        events.push('persisted'); return {...business, ...JSON.parse(options.body)};};
+    """ + source + """
+      openBusinessBookingSetup(business, () => events.push('saved'));
+      nodes['#venue-booking-schedule'].handlers.click();
+      childSaved({...business, membership_url: 'https://teammate.test/join'});
+      events.length = 0;
+      nodes['#venue-booking-url'].value = 'https://new.test/book';
+      await nodes['#venue-booking-form'].handlers.submit({preventDefault() {}});
+      console.log(JSON.stringify({requests, events}));
+    """)
+    assert result["requests"] == [{"path": "/businesses/7", "method": "PATCH", "body": {"booking_url": "https://new.test/book"}}]
+    assert result["events"] == ["persisted", "clear", "close", "saved"]
 
 
 def test_field_errors_open_nested_optional_sections_before_focusing_the_field():
@@ -543,6 +918,57 @@ def test_direct_workspace_save_merges_a_fresh_get_and_only_reports_success_after
     assert success["savedBeforePut"] == 0 and len(success["saved"]) == 1
     assert len(conflict["requests"]) == 1 and conflict["saved"] == []
     assert "changed elsewhere" in conflict["error"]
+
+
+@pytest.mark.parametrize("kind", ["offerings", "schedule"])
+@pytest.mark.parametrize("outcome", ["saved", "conflict", "failed"])
+def test_bulk_editors_check_fresh_collection_before_put_and_keep_drafts_on_failure(kind, outcome):
+    start = APP.index(f"    modal.querySelector('#business-{kind}-save').addEventListener('click'")
+    source = APP[start:APP.index("    return modal;", start)]
+    result = run_js(f"""
+      const kind = {json.dumps(kind)}, outcome = {json.dumps(outcome)};
+      const original = [{{id: 1, title: 'First', name: 'First', active: true}},
+        {{id: 2, title: 'Hidden', name: 'Hidden', active: false}}];
+      const business = {{id: 7, [kind]: original}};
+      const draft = [{{...original[0], title: 'My edit', name: 'My edit'}}, original[1]];
+      const offerings = draft, schedule = draft, requests = [], events = [], errors = [];
+      const button = {{addEventListener(name, callback) {{this[name] = callback;}}}};
+      const modal = {{querySelector: () => button}}, window = {{VenueWorkspace: Venue}};
+      const normalizeBusinessProfile = value => value;
+      const formUX = {{startSubmitting() {{events.push('submitting'); return () => events.push('reset');}},
+        showError: message => errors.push(message)}};
+      const closeModal = () => events.push('close'), toast = () => events.push('toast'), onSaved = () => events.push('saved');
+      let finishPut;
+      const api = async (path, options) => {{
+        requests.push({{path, method: options?.method || 'GET', ...(options ? {{items: JSON.parse(options.body).items}} : {{}})}});
+        if (!options) return {{id: 7, [kind]: outcome === 'conflict'
+          ? [...original, {{id: 3, title: 'Added elsewhere', name: 'Added elsewhere', active: false}}] : original}};
+        return new Promise((resolve, reject) => {{finishPut = () => outcome === 'failed'
+          ? reject(new Error('Save unavailable. Try again.')) : resolve({{id: 7, [kind]: draft}});}});
+      }};
+    """ + source + """
+      const pending = button.click();
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      const before = [...events];
+      finishPut?.(); await pending;
+      console.log(JSON.stringify({requests, before, events, errors, draft}));
+    """)
+    assert result["requests"][0] == {"path": "/businesses/7", "method": "GET"}
+    assert result["draft"][0]["title"] == "My edit"
+    assert result["draft"][1]["active"] is False
+    if outcome == "conflict":
+        assert len(result["requests"]) == 1
+        assert result["events"] == ["submitting", "reset"]
+        assert "changed elsewhere" in result["errors"][0]
+    else:
+        assert result["before"] == ["submitting"]
+        assert result["requests"][1] == {"path": f"/businesses/7/{kind}", "method": "PUT", "items": result["draft"]}
+        if outcome == "failed":
+            assert result["events"] == ["submitting", "reset"]
+            assert result["errors"] == ["Save unavailable. Try again."]
+        else:
+            assert result["events"] == ["submitting", "close", "toast", "saved"]
+            assert result["errors"] == []
 
 
 @pytest.mark.parametrize("kind", ["offering", "schedule"])

@@ -231,8 +231,9 @@ def test_visible_play_feed_revalidates_live_cards_and_joins_from_fresh_state():
     assert "!game.is_instant && !startsAhead" in detail
     assert "Game full." in detail
     assert "Join at the court to see who’s playing." in detail
-    assert "At the court (${readyCount}/${game.max_players})" in detail
-    assert "Players (${readyCount}/${game.max_players})" in detail
+    assert "const readyCount = assembly ? assembly.readyCount : game.players.length;" in detail
+    assert "${assembly ? 'At the court' : 'Players'} <span>${readyCount}</span>" in detail
+    assert 'const openSpots = Math.max(0, Number(game.spots_left) || 0);' in detail
 
     play = section("async function renderPlay", "function updatePlayHeader")
     assert "g.status === 'upcoming' && (g.can_enter_score || g.can_complete_session)" in play
@@ -243,7 +244,8 @@ def test_visible_play_feed_revalidates_live_cards_and_joins_from_fresh_state():
     assert "? instantRallyScorePending(game)" in profile
     assert "const wrapPending = (mine.items || []).filter((game) =>" in profile
     assert "? instantSessionWrapPending(game)" in profile
-    assert "Played — enter the score" in profile
+    assert "scorePending.includes(nextGame) ? 'Add a score'" in profile
+    assert "wrapPending.includes(nextGame) ? 'Finish session'" in profile
     assert "!instantRallyClosed(game)" in profile
 
     closed = section("function instantRallyClosed", "function renderActiveGameBanner")

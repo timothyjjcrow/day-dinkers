@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = (ROOT / "public" / "app-v15.js").read_text()
 INDEX = (ROOT / "public" / "index.html").read_text()
 STYLES = (ROOT / "public" / "styles-v15.css").read_text()
+VENUE_WORKSPACE = (ROOT / "public" / "venue-workspace-v15.js").read_text()
 
 
 def app_section(start: str, end: str) -> str:
@@ -448,8 +449,8 @@ def test_confirmation_and_single_select_controls_expose_the_actual_state():
 
 
 def test_game_cards_use_a_semantic_main_button_with_sibling_actions():
-    card = app_section("function gameCardHtml", "function bindGameButtons")
-    template = card[card.index("return `") :]
+    card = app_section("function gameCardHtml", "function showJoinedToast")
+    template = card[card.rindex("return `") :]
 
     article = re.search(r"<article\b[^>]*>", template)
     assert article and re.search(r'class="[^"]*\bcard\b[^"]*\bgame-card\b[^"]*"', article.group(0))
@@ -465,13 +466,14 @@ def test_game_cards_use_a_semantic_main_button_with_sibling_actions():
     dynamic_actions_at = template.index("${action}", actions_at)
     assert main_close < actions_at < dynamic_actions_at
     assert template.index("</article>", dynamic_actions_at) > dynamic_actions_at
-    assert 'class="game-card-title-wrap"' in template
+    assert 'class="game-card-context"' in template
     assert 'class="row-title game-card-title">${gameTitle}</span>' in template
-    assert 'class="game-card-tags">${typeTag}${visTag}${inviteTag}${recurTag}${clubTag}${levelTag}${chatTag}</span>' in template
+    assert '${typeTag}${joinedState || inviteTag || chatTag}' in template
+    assert 'class="game-card-tags"' in template
 
-    title_wrap_css = "\n".join(css_declarations(".game-card-title-wrap"))
-    assert "min-width: 0" in title_wrap_css
-    assert "flex-wrap: wrap" in title_wrap_css
+    context_css = "\n".join(css_declarations(".game-card-context"))
+    assert "flex-wrap: wrap" in context_css
+    assert "white-space: normal" in "\n".join(css_declarations(".game-card-title"))
     tags_css = "\n".join(css_declarations(".game-card-tags"))
     assert "flex-wrap: wrap" in tags_css
     assert ".game-card-tags .tag" in STYLES
@@ -971,7 +973,10 @@ def test_remaining_cross_app_destinations_use_native_controls_and_product_icons(
     assert '<button type="button" class="profile-relationship-link" data-view-user=' in profile
     assert "openToolChild(() => openBusinessDetailsEditor" in business
     assert "window.VenueWorkspace.render(business, { icon: uiIcon" in business
-    assert "uiIcon('chevron-right', 'chev')" in js_function("venueTaskHtml")
+    assert "window.VenueWorkspace.task(options, uiIcon)" in js_function("venueTaskHtml")
+    task = VENUE_WORKSPACE.split('function task(', 1)[1].split('function unavailable(', 1)[0]
+    assert "uiIcon('chevron-right', 'chev')" in task
+    assert '<button type="button" class="venue-task"' in task
 
     assert not re.search(r'<span class="(?:chev|agb-chev)"[^>]*>›</span>', APP)
     assert '>✕</button>' not in APP
@@ -1099,7 +1104,9 @@ def test_invite_join_commits_before_the_best_effort_profile_refresh():
 
 def test_leave_failure_restores_the_action_and_stays_visible_in_the_game_sheet():
     game = js_function("openGameScreen")
-    leave = game[game.index("box.querySelectorAll('#gs-leave, #gs-not-coming, #gs-leave-series')") : game.index("box.querySelector('#gs-cancel')")]
+    leave = game[game.index("box.querySelectorAll('#gs-leave, #gs-not-coming, #gs-leave-series, #gs-undo-join')") : game.index("box.querySelector('#gs-cancel')")]
+    assert 'confirmGameLeave(game, playNoun, btn)' in leave
+    assert 'if (!decision.accepted) return;' in leave
     assert "beginButtonAction(btn, 'Leaving…')" in leave
     assert "resetAction();" in leave
     assert "showInlineActionError(box, err.message);" in leave
@@ -1324,7 +1331,8 @@ def test_operator_connection_health_check_is_a_guarded_form():
 
 
 def test_business_onboarding_value_cards_use_product_icons():
-    empty = js_function("businessHubEmptyHtml")
+    assert 'window.VenueWorkspace.welcome(court, uiIcon)' in js_function('businessHubEmptyHtml')
+    empty = VENUE_WORKSPACE.split('function welcome(', 1)[1].split('function task(', 1)[0]
     for icon in ("building",):
         assert f"uiIcon('{icon}')" in empty
     for emoji in ("📅", "🎯", "🏓", "📣"):

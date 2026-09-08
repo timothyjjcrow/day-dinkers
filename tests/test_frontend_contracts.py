@@ -167,18 +167,18 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r76';" in SERVICE_WORKER
+    assert "const CACHE = 'thirdshot-v15-r77';" in SERVICE_WORKER
     for asset in (
-        "/release-assets/r74/styles-v15.min.css",
-        "/release-assets/r74/crew-planner-v15.min.js",
-        "/release-assets/r74/tournament-bracket-v15.min.js",
-        "/release-assets/r74/venue-workspace-v15.min.js",
-        "/release-assets/r74/app-v15.min.js",
+        "/release-assets/r75/styles-v15.min.css",
+        "/release-assets/r75/crew-planner-v15.min.js",
+        "/release-assets/r75/tournament-bracket-v15.min.js",
+        "/release-assets/r75/venue-workspace-v15.min.js",
+        "/release-assets/r75/app-v15.min.js",
     ):
         assert asset in SERVICE_WORKER
-    assert 'href="/release-assets/r74/styles-v15.min.css"' in INDEX
-    assert 'src="/release-assets/r74/crew-planner-v15.min.js"' in INDEX
-    assert 'src="/release-assets/r74/app-v15.min.js"' in INDEX
+    assert 'href="/release-assets/r75/styles-v15.min.css"' in INDEX
+    assert 'src="/release-assets/r75/crew-planner-v15.min.js"' in INDEX
+    assert 'src="/release-assets/r75/app-v15.min.js"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -327,7 +327,9 @@ def test_competition_result_actions_cover_review_resolution_and_audit():
         assert f'data-result-action="{action}"' in APP
     assert "competitionResultProvenanceHtml" in APP
     assert "competitionResultHistoryHtml" in APP
-    assert "Standings and bracket progression wait until the score is confirmed or resolved." in APP
+    assert "The score counts once it is confirmed." in APP
+    assert 'const currentResult = normalizeCompetitionResult(currentMatch);' in APP
+    assert "currentResult.terminal\n          ? ''" in APP
     assert "err.code === 'stale_result'" in APP
     assert "hooks.adoptFresh?.(fresh, { render: false })" in APP
     assert "const syncVisibleResult = () =>" in APP

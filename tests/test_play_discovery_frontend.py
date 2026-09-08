@@ -34,17 +34,17 @@ def test_roster_status_distinguishes_capacity_from_confirmed_attendance():
     output = run(function('gameRosterStatus', 'gameRosterStatusHtml') + '''
       const base = {status:'upcoming',max_players:4,players:[{}, {}, {}, {}]};
       console.log(JSON.stringify([
-        gameRosterStatus({...base,attendance_confirmed_count:2}),
+        gameRosterStatus({...base,attendance_confirmed_count:2,attendance_confirmation_due:true}),
         gameRosterStatus({...base,attendance_confirmed_count:4}),
         gameRosterStatus({...base,players:[{}],attendance_confirmed_count:1}),
         gameRosterStatus({...base,attendance_confirmation_due:true,is_joined:true}),
         gameRosterStatus({...base,status:'cancelled'}),
         gameRosterStatus({...base,is_instant:true})]));
     ''')
-    assert output[0]['label'] == 'Roster full'
+    assert output[0]['label'] == 'Full'
     assert output[0]['detail'] == '2 still need to confirm'
-    assert output[1]['label'] == 'Roster confirmed'
-    assert output[2]['label'] == '3 open spots'
+    assert output[1] == {'tone': 'ready', 'label': '4 joined', 'detail': 'Full'}
+    assert output[2] == {'tone': 'forming', 'label': '1 joined', 'detail': '3 spots left'}
     assert output[3]['label'] == 'Confirm your spot'
     assert output[4:] == [None, None]
 

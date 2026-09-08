@@ -26,7 +26,9 @@ def test_business_file_inputs_are_hidden_behind_named_keyboard_buttons():
 
     assert "fileButton.addEventListener('click', () => fileInput.click())" in catalog
     assert "logoFileButton.addEventListener('click', () => logoFileInput.click())" in details
-    assert "window.VenueWorkspace.logoFields(business, { icon: uiIcon, hasManagedLogo })" in details
+    assert "window.VenueWorkspace.detailsForm(business," in details
+    form = VENUE_WORKSPACE[VENUE_WORKSPACE.index("function detailsForm("):VENUE_WORKSPACE.index("function bindTabs(")]
+    assert "logoFields(b, { icon, hasManagedLogo })" in form
 
     assert 'class="sr-only" type="file" id="business-catalog-file"' not in catalog
     assert '<input type="file" id="business-logo-file"' not in LOGO_MARKUP
@@ -37,14 +39,19 @@ def test_business_file_pickers_expose_selection_metadata_and_live_status():
     catalog = section("function openBusinessCatalogUpload", "function openBusinessAddConnection")
     details = section("function openBusinessDetailsEditor", "function openBusinessIntegrationRequest")
 
-    assert "businessFileSize(file?.size)" in helpers
+    assert "window.VenueWorkspace.fileSize(bytes)" in helpers
+    assert "window.VenueWorkspace.fileDescription(file, fallback)" in helpers
+    file_description = VENUE_WORKSPACE.split('function fileDescription(', 1)[1]
+    assert "fileSize(file?.size)" in file_description
     for label in ("JSON", "JPEG image", "PNG image", "WebP image"):
-        assert f"'{label}'" in helpers
-    assert "picker.dataset.state = state" in helpers
-    assert "picker.toggleAttribute('aria-busy', state === 'loading')" in helpers
-    assert "feedback.setAttribute('role', 'alert')" in helpers
-    assert "button.setAttribute('aria-invalid', 'true')" in helpers
-    assert "feedback.setAttribute('aria-live', 'polite')" in helpers
+        assert f"'{label}'" in file_description
+    assert "window.VenueWorkspace.setFilePickerState(picker, options, uiIcon)" in helpers
+    picker_state = VENUE_WORKSPACE.split('function setFilePickerState(', 1)[1]
+    assert "picker.dataset.state = state" in picker_state
+    assert "picker.toggleAttribute('aria-busy', state === 'loading')" in picker_state
+    assert "feedback.setAttribute('role', 'alert')" in picker_state
+    assert "button.setAttribute('aria-invalid', 'true')" in picker_state
+    assert "feedback.setAttribute('aria-live', 'polite')" in picker_state
 
     for markup in (catalog, LOGO_MARKUP):
         assert 'class="business-file-feedback"' in markup

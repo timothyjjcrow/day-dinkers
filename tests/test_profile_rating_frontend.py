@@ -56,7 +56,11 @@ def test_match_rating_is_opt_in_and_confined_to_rankings_or_completed_results():
     game_start = APP.index('function gameScreenHtml')
     game_end = APP.index('async function openGameScreen', game_start)
     game_screen = APP[game_start:game_end]
-    assert "includeMatchRating: game.game_type === 'ranked' && game.status === 'completed'" in game_screen
+    assert "const ratingChanges = hasScore && isRankedMatch && game.status === 'completed'" in game_screen
+    assert '<summary>Match rating changes</summary>' in game_screen
+    assert 'player.rating_delta != null' in game_screen
+    assert '${ratingChanges}' in game_screen
+    assert '${p.rating}' not in game_screen
     assert 'Match rating ${Number(mine.rating || 1200)}' not in APP
 
     rankings_start = APP.index("if (seg === 'scores')")

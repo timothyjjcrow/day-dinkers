@@ -22,7 +22,7 @@
     if (isBronze(t, m)) return '3rd place';
     const remaining = Number(t.total_rounds) - Number(m.round);
     if (remaining === 0) return 'Final';
-    return `${remaining === 1 ? 'SF' : remaining === 2 ? 'QF' : `R${m.round} · M`} ${Number(m.position) + 1}`;
+    return `${remaining === 1 ? 'Semifinal' : remaining === 2 ? 'Quarterfinal' : `Round ${m.round} · Match`} ${Number(m.position) + 1}`;
   }
 
   function resultMeta(m) {
@@ -31,7 +31,7 @@
     const state = aliases[raw] || raw;
     if (state === 'bye') return { state, label: 'Advances with a bye', tone: 'quiet', decided: true };
     if (state === 'void') return { state, label: 'Not played', tone: 'quiet', decided: true };
-    if (state === 'confirmed') return { state, label: m.resolution_kind === 'organizer_forfeit' ? 'Forfeit' : 'Final', tone: 'final', decided: true };
+    if (state === 'confirmed') return { state, label: m.resolution_kind === 'organizer_forfeit' ? 'Forfeit' : 'Final score', tone: 'final', decided: true };
     if (state === 'awaiting_confirmation') return { state, label: 'Awaiting confirmation', tone: 'pending', decided: false };
     if (state === 'disputed') return { state, label: 'Under review', tone: 'review', decided: false };
     return { state: 'unreported', label: !id(m.entry1_id) || !id(m.entry2_id)
@@ -70,8 +70,8 @@
       const showGames = bestOfThree && games.length > 0;
       const label = matchLabel(t, m);
       const next = nextMatch(m);
-      const destination = t.format === 'round_robin' ? `Round ${m.round}` : isBronze(t, m) ? 'Winner takes 3rd place'
-        : next ? `${meta.decided ? 'Advances' : 'Winner'} → ${matchLabel(t, next)}` : 'Winner takes the title';
+      const destination = t.format === 'round_robin' ? `Round ${m.round}` : isBronze(t, m) ? (meta.state === 'confirmed' ? 'Third place decided' : 'Winner takes 3rd place')
+        : next ? `${meta.decided ? 'Advances' : 'Winner'} → ${matchLabel(t, next)}` : meta.state === 'confirmed' ? 'Tournament winner decided' : 'Winner takes the title';
       const sideHtml = (entryId, side) => {
         const entry = entries[id(entryId)];
         const winner = ['confirmed', 'bye'].includes(meta.state) && same(m.winner_entry_id, entryId);
@@ -129,10 +129,10 @@
       ['2nd', same(final.winner_entry_id, final.entry1_id) ? final.entry2_id : final.entry1_id],
       ...(bronze && resultMeta(bronze).state === 'confirmed' ? [['3rd', bronze.winner_entry_id]] : []),
     ].filter(([, entryId]) => entries[id(entryId)]) : [];
-    const podium = places.length && connected ? `<div class="bracket-placings" aria-label="Confirmed tournament places">${places.map(([place, entryId]) => `<div class="bracket-place"><span>${place}</span><b>${escape(sideName(entries[id(entryId)]))}</b></div>`).join('')}</div>` : '';
+    const podium = places.length && connected ? `<div class="bracket-placings" aria-label="Confirmed tournament places">${places.map(([place, entryId]) => `<div class="bracket-place"><span>${place}${place === '1st' ? ' · Tournament winner' : ' place'}</span><b>${escape(sideName(entries[id(entryId)]))}</b></div>`).join('')}</div>` : '';
     return `<section class="tournament-bracket-view${connected ? ' is-connected' : ' is-filtered'}" aria-label="Tournament bracket">
       ${podium}
-      <div class="bracket-overview"><div><h3>Road to the title</h3><p>${decided} of ${playable.length} matches decided</p></div><span class="bracket-progress" aria-hidden="true" style="--bracket-progress:${playable.length ? 100 * decided / playable.length : 0}%"></span></div>
+      <div class="bracket-overview"><div><h3>${t.status === 'completed' ? 'Final results' : 'Tournament bracket'}</h3><p>${decided} of ${playable.length} matches decided${rounds.length > 1 ? ' · Follow each round below' : ''}</p></div><span class="bracket-progress" aria-hidden="true" style="--bracket-progress:${playable.length ? 100 * decided / playable.length : 0}%"></span></div>
       ${rounds.length > 1 ? `<nav class="bracket-round-nav" aria-label="Jump to a round">${rounds.map((r) => `<button type="button" data-bracket-round="${r.round}">${escape(r.name)}<span aria-hidden="true">→</span></button>`).join('')}</nav>` : ''}
       <div class="bracket" role="region" aria-label="Tournament bracket. Scroll horizontally to follow winners through the rounds." tabindex="0">
         <div class="bracket-track">${connected && rounds.length > 1 ? '<svg class="bracket-connectors" aria-hidden="true"></svg>' : ''}
@@ -142,7 +142,7 @@
           </section>`).join('')}
         </div>
       </div>
-      ${bronze ? `<section class="bracket-placement" aria-label="Third-place playoff"><div class="bracket-placement-heading"><h4>Third-place playoff</h4><p>The semifinalists play for the last podium spot.</p></div>${matchHtml(bronze)}</section>` : ''}
+      ${bronze ? `<section class="bracket-placement" aria-label="Third-place playoff"><div class="bracket-placement-heading"><h4>Third-place playoff</h4><p>${resultMeta(bronze).state === 'confirmed' ? 'The match that decided third place.' : 'The two other semifinalists play for third place.'}</p></div>${matchHtml(bronze)}</section>` : ''}
     </section>`;
   }
 

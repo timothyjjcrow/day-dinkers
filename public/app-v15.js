@@ -15480,6 +15480,40 @@
     return `&${params}`;
   }
 
+  function gameActivityLabel(game) {
+    const size = Number(game.max_players);
+    const format = size === 2 ? 'singles' : size === 4 ? 'doubles' : '';
+    if (game.game_type === 'ranked') return `Ranked ${format || 'match'}`;
+    if (format) return `Casual ${format}`;
+    return game.visibility === 'open' ? 'Pickup session' : 'Group session';
+  }
+
+  function gameResultScoreboardHtml(game, { compact = false } = {}) {
+    const final = game.status === 'completed';
+    const series = Array.isArray(game.score_games) && game.score_games.length > 1;
+    const winner = !final || Number(game.score_team1) === Number(game.score_team2)
+      ? null : Number(game.score_team1) > Number(game.score_team2) ? 1 : 2;
+    const teamHtml = (number) => {
+      const players = (game.players || []).filter((player) => Number(player.team) === number);
+      const score = game[`score_team${number}`];
+      return `<div class="match-score-side${winner === number ? ' is-winner' : ''}">
+        <div class="match-score-people">
+          ${!compact && winner === number ? `<span class="match-winner-label">${uiIcon('trophy')} ${players.length > 1 ? 'Winners' : 'Winner'}</span>` : ''}
+          ${compact ? `<span class="match-score-names">${esc(players.map((player) => player.display_name).join(' & ') || `Team ${number}`)}</span>`
+            : players.map((player) => `<button type="button" class="match-score-player" data-view-user="${player.user_id}" aria-label="View ${esc(player.display_name)}'s profile">
+              ${avatarHtml(player, 'sm', 'span')}<span>${esc(player.display_name)}${player.user_id === state.me?.id ? '<small>You</small>' : ''}</span>
+            </button>`).join('')}
+        </div>
+        <strong class="match-score-number" aria-label="${score == null ? 'No score' : `${score} ${series ? 'games won' : 'points'}`}">${score == null ? '–' : esc(score)}</strong>
+      </div>`;
+    };
+    return `<section class="match-scoreboard${compact ? ' is-compact' : ''}" aria-label="${esc(gameActivityLabel(game))} ${final ? 'result' : 'reported score'}">
+      ${series ? '<div class="match-score-caption">Games won</div>' : ''}
+      ${teamHtml(1)}${teamHtml(2)}
+      ${series && !compact ? `<div class="match-score-games">${game.score_games.map((row, index) => `<span>Game ${index + 1} <b>${esc(row.score_team1)}–${esc(row.score_team2)}</b></span>`).join('')}</div>` : ''}
+    </section>`;
+  }
+
   function gameRosterStatus(game) {
     if (game.status !== 'upcoming' || game.is_instant) return null;
     const joined = (game.players || []).length;
@@ -15491,11 +15525,11 @@
       return { tone: 'attention', label: 'Confirm your spot', detail: 'Let the group know you’re still coming.' };
     }
     const open = Math.max(0, capacity - joined);
-    if (open) return { tone: 'forming', label: `${open} open spot${open === 1 ? '' : 's'}`,
-      detail: `${confirmed} of ${joined} players confirmed` };
-    if (confirmed < joined) return { tone: 'forming', label: 'Roster full',
+    if (open) return { tone: 'forming', label: `${joined} joined`,
+      detail: `${open} spot${open === 1 ? '' : 's'} left` };
+    if (game.attendance_confirmation_due && confirmed < joined) return { tone: 'forming', label: 'Full',
       detail: `${joined - confirmed} still need${joined - confirmed === 1 ? 's' : ''} to confirm` };
-    return joined ? { tone: 'ready', label: 'Roster confirmed', detail: `All ${joined} players confirmed attendance` } : null;
+    return joined ? { tone: 'ready', label: `${joined} joined`, detail: 'Full' } : null;
   }
 
   function gameRosterStatusHtml(game) {
@@ -15526,16 +15560,20 @@
 
   function gameCardHtml(game, { compact = false } = {}) {
     const court = game.court || {};
+    if (game.status === 'completed' && game.completion_kind !== 'session'
+        && game.score_team1 != null && game.score_team2 != null) {
+      return `<article class="card game-card game-result-card">
+        <button type="button" class="game-card-main" data-open-game="${game.id}" aria-label="Open ${esc(gameActivityLabel(game))} result, ${gameScoreText(game)} at ${esc(court.name || 'court')}">
+          <span class="game-card-context"><b>${esc(gameActivityLabel(game))}</b><span>${game.game_type === 'ranked' ? 'Confirmed' : 'Final'}</span></span>
+          ${gameResultScoreboardHtml(game, { compact: true })}
+          <span class="game-card-result-place">${esc(court.name || 'Court')} · ${esc(fmtDateTime(game.completed_at || game.scheduled_at))}</span>
+        </button>
+      </article>`;
+    }
     const assembly = instantRallyAssembly(game);
     const isRankedMatch = game.game_type === 'ranked';
     const playNoun = isRankedMatch ? 'match' : 'session';
-    const format = Number(game.max_players) === 2
-      ? 'Singles' : Number(game.max_players) === 4 ? 'Doubles' : `${game.max_players} players`;
-    const typeTag = game.is_instant
-      ? `<span class="tag${isRankedMatch ? ' ranked' : (assembly ? ' live' : '')}" style="margin:0 0 0 8px">${uiIcon('zap')} ${isRankedMatch ? 'Ranked match' : Number(game.max_players) > 4 ? 'Group session' : 'Casual game'} · ${esc(format)}</span>`
-      : isRankedMatch
-      ? `<span class="tag ranked" style="margin:0 0 0 8px">${uiIcon('trophy')} Ranked match · ${esc(format)}</span>`
-      : `<span class="tag" style="margin:0 0 0 8px">Play session · ${esc(format)}</span>`;
+    const typeTag = `<span class="game-activity-label${isRankedMatch ? ' is-ranked' : ''}">${uiIcon(game.is_instant ? 'zap' : isRankedMatch ? 'trophy' : 'pickleball')} ${esc(gameActivityLabel(game))}</span>`;
     const visTag = game.visibility === 'private'
       ? `<span class="tag" style="margin:0 0 0 6px">${uiIcon('lock')} Invite</span>`
       : game.visibility === 'friends'
@@ -15547,28 +15585,10 @@
     const recurTag = game.recurrence === 'weekly'
       ? `<span class="tag" style="margin:0 0 0 6px">${uiIcon('refresh')} Weekly</span>`
       : '';
-    const clubTag = game.club_name
-      ? `<span class="tag" style="margin:0 0 0 6px">${uiIcon('building')} ${esc(game.club_name)}</span>`
-      : '';
     const chatTag = game.is_joined && game.chat_unread
       ? `<span class="tag live" style="margin:0 0 0 6px">${uiIcon('message')} ${game.chat_unread > 9 ? '9+' : game.chat_unread} new</span>`
       : '';
-    // Discovery aids: flag joinable games near your rating or at your usual slot.
-    const reasons = gameMatchReasons(game);
-    let levelTag = '';
-    // Host's stated level hint comes first; the personal match badges follow.
     const levelRangeLabel = gameLevelRangeLabel(game);
-    if (levelRangeLabel !== 'Any level') {
-      levelTag += `<span class="tag" style="margin:0 0 0 6px">${uiIcon('sliders')} ${esc(levelRangeLabel)}</span>`;
-    }
-    if (!compact && reasons.includes('skill')) {
-      levelTag += `<span class="tag live" style="margin:0 0 0 6px">${uiIcon('target')} Your level</span>`;
-    }
-    if (!compact && reasons.includes('time')) {
-      levelTag += `<span class="tag live" style="margin:0 0 0 6px">${uiIcon('clock')} Your usual time</span>`;
-    }
-    const host = game.players.find((p) => p.user_id === game.creator_id);
-    const hostLabel = host ? ` · Host: ${esc(host.display_name)}` : '';
     const avatars = game.players.slice(0, 5).map((p) => avatarHtml(p, 'sm')).join('');
 
     let action = '';
@@ -15623,13 +15643,11 @@
               : `${isRankedMatch ? 'Match time! Enter the score when it ends.' : 'Pickup game time! Finish with no score or add one.'}`)
             : `Live — waiting for ${isRankedMatch ? 'an opponent' : 'players'} to join.`}</span>`;
         } else {
-          const mins = Math.round((startMs - Date.now()) / 60000);
-          banner = `<span class="status-banner">${uiIcon('clock')} Starts in ${fmtDuration(mins)}</span>`;
-          action = `<button type="button" class="btn btn-secondary btn-sm" data-game-quick-share="${game.id}">${uiIcon('send')} ${game.is_creator ? 'Invite' : 'Share'}</button>
+          action = `<button type="button" class="btn btn-primary btn-sm" data-open-game="${game.id}">Open ${playNoun}</button>
             <button type="button" class="btn btn-secondary btn-sm" data-game-quick-calendar="${game.id}" aria-label="Add this ${playNoun} to calendar">${uiIcon('calendar')} Calendar</button>`;
         }
       } else if (game.spots_left > 0) {
-        action = `<button class="btn btn-primary btn-sm" data-game-join="${game.id}" data-play-noun="${playNoun}">Join ${playNoun}</button>`;
+        action = `<button class="btn btn-primary btn-sm" data-game-join="${game.id}" data-play-noun="${playNoun}">${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}</button>`;
       } else if (game.waitlist_position) {
         action = `<button class="btn btn-secondary btn-sm" data-game-waitlist-manage="${game.id}">Waitlisted #${game.waitlist_position}</button>`;
       } else {
@@ -15682,45 +15700,37 @@
     const costLabel = game.cost_cents == null ? ''
       : Number(game.cost_cents) === 0 ? 'Free'
         : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
-    const planMeta = [
-      customTitle && !game.is_instant ? scheduledLabel : '',
-      game.court_number || '',
-      costLabel,
-    ].filter(Boolean);
     const courtSummary = `${court.name || 'Game'}${!compact && court.city ? ` · ${court.city}` : ''}`;
     const rosterStatus = gameRosterStatusHtml(game);
+    const playerNames = game.players.slice(0, 3).map((player) => player.user_id === state.me?.id ? 'You' : (player.display_name || 'Player').split(' ')[0]);
+    const peopleLabel = playerNames.join(', ') + (game.players.length > 3 ? ` +${game.players.length - 3}` : '');
+    const joinedState = game.is_joined && game.status === 'upcoming'
+      ? `<span class="game-joined-chip">${uiIcon('check')} ${game.is_creator ? 'Hosting' : 'You’re in'}</span>` : '';
     return `
       <article class="card game-card" style="${cardStyle}">
         <button type="button" class="game-card-main" data-open-game="${game.id}" aria-label="Open ${esc(customTitle || defaultGameTitle)} at ${esc(courtSummary)}">
-          <span class="row game-card-heading">
-            <span class="row-main">
-              <span class="game-card-title-wrap">
-                <span class="row-title game-card-title">${gameTitle}</span>
-                <span class="game-card-tags">${typeTag}${visTag}${inviteTag}${recurTag}${clubTag}${levelTag}${chatTag}</span>
-              </span>
-              <span class="row-sub">${planMeta.length ? `${esc(planMeta.join(' · '))} · ` : ''}${esc(court.name || '')}${!compact && court.city ? ` · ${esc(court.city)}` : ''}${game.distance_miles != null ? ` · ${game.distance_miles} mi` : ''}${hostLabel}</span>
-            </span>
-            <span class="chev" aria-hidden="true">${uiIcon('chevron-right')}</span>
-          </span>
+          <span class="game-card-context">${typeTag}${joinedState || inviteTag || chatTag}</span>
+          <span class="row-title game-card-title">${gameTitle}</span>
+          ${customTitle && !game.is_instant ? `<span class="game-card-when">${uiIcon('calendar')} ${esc(scheduledLabel)}</span>` : ''}
+          <span class="game-card-place">${uiIcon('map-pin')} <span>${esc(court.name || 'Court')}${game.court_number ? ` · ${esc(game.court_number)}` : ''}</span></span>
+          ${visTag || recurTag || levelRangeLabel !== 'Any level' || costLabel ? `<span class="game-card-tags">${visTag}${recurTag}${levelRangeLabel !== 'Any level' ? `<span class="game-card-level">Level ${esc(levelRangeLabel)}</span>` : ''}${costLabel ? `<span class="game-card-level">${esc(costLabel)}</span>` : ''}</span>` : ''}
           ${banner}
-          ${game.description ? `<span class="row-sub game-card-description">${esc(game.description)}</span>` : ''}
-          ${game.notes && !(game.is_instant && game.notes === '⚡ Instant rally') ? `<span class="row-sub game-card-notes">“${esc(game.notes)}”</span>` : ''}
         </button>
         <div class="row game-card-footer">
-          <div class="avatar-stack">${avatars}</div>
-          <div class="row-sub game-card-roster">${rosterStatus || (assembly ? esc(rallyCountsText(assembly)) : `${game.players.length}/${game.max_players} players`)}${game.waitlist_count ? `<span class="game-card-waiting">${game.waitlist_count} waiting</span>` : ''}</div>
+          <div class="game-card-people"><div class="avatar-stack">${avatars}</div><span>${esc(peopleLabel || 'Be the first to join')}</span></div>
+          <div class="game-card-roster">${rosterStatus || (assembly ? esc(rallyCountsText(assembly)) : `${game.players.length}/${game.max_players} players`)}${game.waitlist_count ? `<span class="game-card-waiting">${game.waitlist_count} waiting</span>` : ''}</div>
           <div class="game-card-actions">${action}</div>
         </div>
       </article>`;
   }
 
-  function showJoinedToast(gameId, message, { onUndone = null, icon = 'pickleball' } = {}) {
+  function showJoinedToast(gameId, message, { onUndone = null, icon = 'pickleball', recurring = false } = {}) {
     toast(message, {
-      tone: 'success', icon, duration: 6500,
+      tone: 'success', icon, duration: 3500,
       action: {
         label: 'Undo',
         onClick: () => {
-          api(`/games/${gameId}/leave`, { method: 'POST' }).then((fresh) => {
+          api(`/games/${gameId}/${recurring ? 'skip-occurrence' : 'leave'}`, { method: 'POST' }).then((fresh) => {
             state.playGamesCache = null;
             toast('Join undone');
             refreshMe().catch(() => {});
@@ -15785,17 +15795,18 @@
           unavailable.code = fresh.status !== 'upcoming' ? 'game_not_open' : 'game_full';
           throw unavailable;
         }
-        await api(`/games/${gameId}/join`, { method: 'POST' });
+        const joined = await api(`/games/${gameId}/join`, { method: 'POST' });
         state.playGamesCache = null;
-        b.removeAttribute('aria-busy');
-        b.dataset.openJoinedGame = 'true';
-        b.disabled = false;
-        b.innerHTML = `${uiIcon('check')} Joined · Open ${esc(playNoun)}`;
-        b.setAttribute('aria-label', `Joined. Open this ${playNoun}`);
+        const template = document.createElement('template');
+        template.innerHTML = gameCardHtml(joined);
+        const updatedCard = template.content.firstElementChild;
+        card.replaceWith(updatedCard);
+        bindGameButtons(updatedCard, refresh);
+        updatedCard.querySelector('[data-open-game]')?.focus({ preventScroll: true });
         showJoinedToast(Number(b.dataset.gameJoin), `Joined ${playNoun}`, {
           onUndone: refresh,
+          recurring: joined.recurrence === 'weekly',
         });
-        maybeOfferPhoneNotifications('Get a reminder and a ping when this game changes?');
         refreshMe();
       } catch (err) {
         b.disabled = false;
@@ -21305,7 +21316,7 @@
   function leagueCardHtml(lg) {
     const statusTag = leagueStatusChip(lg);
     const joinedTag = lg.joined && lg.status !== 'completed'
-      ? `<span class="tag competition-context-tag is-joined">${uiIcon('check-circle')}<span>${lg.my_box ? `Your box: ${esc(lg.my_box)}` : 'You’re in'}</span></span>` : '';
+      ? `<span class="tag competition-context-tag is-joined">${uiIcon('check-circle')}<span>You’re in</span></span>` : '';
     const deadline = lg.status === 'active'
       ? competitionDeadlineHtml(lg.round_deadline_at, {
           futurePrefix: `Round ${lg.current_round} ends in`,
@@ -21316,7 +21327,7 @@
         <span class="nav-row-leading" aria-hidden="true">${uiIcon('grid')}</span>
         <span class="row-main">
           <span class="row-title">${esc(lg.name)}</span>
-          <span class="row-sub">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size}</span>
+          <span class="row-sub">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · Singles league</span>
           ${deadline}
           ${competitionPendingActionHtml(lg)}
           <span class="competition-nav-tags">${statusTag}${joinedTag}${lg.is_organizer ? `<span class="tag competition-context-tag">${uiIcon('shield')}<span>Organizer</span></span>` : ''}</span>
@@ -21562,7 +21573,7 @@
 
   // ---------- Shared competition results ----------
   const COMPETITION_RESULT_STATES = {
-    unreported: { label: 'Score needed', tone: 'neutral' },
+    unreported: { label: 'No score yet', tone: 'neutral' },
     awaiting_confirmation: { label: 'Waiting for opponent', tone: 'pending' },
     disputed: { label: 'Score needs review', tone: 'danger' },
     confirmed: { label: 'Final', tone: 'success' },
@@ -21598,7 +21609,7 @@
       return {
         side1: match.player1 || { display_name: 'Player 1' },
         side2: match.player2 || { display_name: 'Player 2' },
-        context: `Round ${match.round} · Box ${match.box}`,
+        context: `Singles · ${Number(parent.round_days) === 7 ? 'Week' : 'Round'} ${match.round}`,
       };
     }
     const entries = Object.fromEntries((parent.entries || []).map((entry) => [entry.id, entry]));
@@ -21613,6 +21624,18 @@
   }
 
   const competitionSideName = (side) => side.display_name || side.name || 'TBD';
+
+  function competitionArrangeDraft(kind, parent, match, playerName) {
+    const firstName = String(playerName || '').trim().split(/\s+/)[0] || 'there';
+    const deadline = kind === 'league' ? Date.parse(parent.round_deadline_at || '') : NaN;
+    const daysAway = (deadline - Date.now()) / 86400000;
+    const before = Number.isFinite(deadline) && daysAway > 0
+      ? new Date(deadline).toLocaleDateString([], daysAway <= 7
+        ? { weekday: 'long' } : { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+    return before
+      ? `Hi ${firstName}, are you free to play our ${parent.name} match before ${before}?`
+      : `Hi ${firstName}, when would you like to play our ${parent.name} match?`;
+  }
 
   function competitionOpponents(kind, parent, match, viewerId = state.me?.id) {
     const viewer = Number(viewerId);
@@ -21653,10 +21676,10 @@
         const id = Number(opponent.id);
         const name = opponent.display_name || 'Opponent';
         return `<div class="competition-card-opponent" data-card-opponent-user="${id}">
-          <span class="competition-card-opponent-name">${esc(name)}</span>
+          ${kind === 'league' ? '' : `<span class="competition-card-opponent-name">${esc(name)}</span>`}
+          ${canPropose ? `<button type="button" class="btn btn-primary btn-sm" data-card-opponent-propose="${id}" data-card-opponent-name="${esc(name)}" data-card-opponent-match="${Number(match.id)}" aria-label="Arrange match with ${esc(name)}">${uiIcon('calendar')} Arrange match</button>` : ''}
           <button type="button" class="btn btn-secondary btn-sm" data-card-opponent-profile="${id}" aria-label="View ${esc(name)}'s profile">Profile</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-card-opponent-message="${id}" aria-label="Message ${esc(name)}">Message</button>
-          ${canPropose ? `<button type="button" class="btn btn-secondary btn-sm" data-card-opponent-propose="${id}" data-card-opponent-name="${esc(name)}" data-card-opponent-match="${Number(match.id)}" aria-label="Propose a time to ${esc(name)}">Propose time</button>` : ''}
+          ${canPropose ? `<button type="button" class="btn btn-secondary btn-sm" data-card-match-score="${Number(match.id)}" aria-label="Add score against ${esc(name)}">Add score</button>` : `<button type="button" class="btn btn-secondary btn-sm" data-card-opponent-message="${id}" aria-label="Message ${esc(name)}">Message</button>`}
         </div>`;
       }).join('')}
     </div>`;
@@ -21683,9 +21706,8 @@
         const match = (parent.matches || []).find(
           (item) => Number(item.id) === Number(target.dataset.cardOpponentMatch),
         );
-        const context = match ? competitionMatchContext(kind, parent, match).context : 'match';
         const name = target.dataset.cardOpponentName || 'there';
-        const draft = `Hi ${name}, what time works for our ${parent.name} ${context.toLowerCase()} match?`;
+        const draft = competitionArrangeDraft(kind, parent, match, name);
         openChildModal(parentModal, () => openThread(
           Number(target.dataset.cardOpponentPropose), { draft },
         ));
@@ -21773,8 +21795,11 @@
     if (!deadline) return '';
     const absolutePrefix = !deadline.expired && options.absolutePrefix
       ? `${esc(options.absolutePrefix)} ` : '';
-    const relativeCopy = absolutePrefix ? ` · ${esc(deadline.text)}` : '';
-    return `<span class="competition-deadline${deadline.nearDue ? ' is-near' : ''}${deadline.expired ? ' is-expired' : ''}">${uiIcon(deadline.expired ? 'alert-triangle' : 'clock')}<span>${absolutePrefix || `${esc(deadline.text)} · `}<time datetime="${esc(deadline.deadlineAt)}">${esc(deadline.exact)}</time>${relativeCopy}</span></span>`;
+    const relativeCopy = absolutePrefix && options.showRelative !== false ? ` · ${esc(deadline.text)}` : '';
+    const displayedDate = options.shortDate
+      ? new Date(deadline.deadlineMs).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+      : deadline.exact;
+    return `<span class="competition-deadline${deadline.nearDue ? ' is-near' : ''}${deadline.expired ? ' is-expired' : ''}">${uiIcon(deadline.expired ? 'alert-triangle' : 'clock')}<span>${absolutePrefix || `${esc(deadline.text)} · `}<time datetime="${esc(deadline.deadlineAt)}" title="${esc(deadline.exact)}">${esc(displayedDate)}</time>${relativeCopy}</span></span>`;
   }
 
   function competitionReviewDeadlineText(match) {
@@ -21829,17 +21854,21 @@
         };
       }
       if (match.can_report_result) {
+        const myTournamentMatch = kind === 'tournament' && result.state === 'unreported'
+          && [match.entry1_id, match.entry2_id].some((id) => Number(id) > 0 && Number(id) === Number(parent.my_entry_id));
         const roundDeadline = kind === 'league'
           ? competitionDeadlineState(parent.round_deadline_at, {
               futurePrefix: 'Round ends in', expiredLabel: 'Round deadline reached',
             })?.text : '';
         return {
           match,
-          priority: result.state === 'disputed' ? 2 : 3,
-          title: result.state === 'disputed' ? 'Submit corrected score' : 'Enter match score',
+          priority: result.state === 'disputed' ? 2 : myTournamentMatch ? 3 : 4,
+          title: result.state === 'disputed' ? 'Submit corrected score' : myTournamentMatch ? 'Your next match' : 'Enter match score',
           detail: result.state === 'disputed'
             ? (match.dispute_reason || 'The previous report was disputed.')
-            : `The result is still unreported.${roundDeadline ? ` ${roundDeadline}.` : ''}`,
+            : myTournamentMatch
+              ? `${parent.event_type === 'doubles' ? 'Doubles' : 'Singles'} · ${match.scheduled_at ? `${fmtDateTime(match.scheduled_at)}${match.court_number ? ` · Court ${match.court_number}` : ''}.` : 'Open the match to arrange a time or add your score.'}`
+              : `The result is still unreported.${roundDeadline ? ` ${roundDeadline}.` : ''}`,
         };
       }
       return null;
@@ -21933,9 +21962,10 @@
     }
     const { match, title, detail } = next;
     const context = competitionMatchContext(kind, parent, match);
+    const isMyMatch = competitionOpponents(kind, parent, match).length > 0;
     return `
       <section class="competition-actions" aria-labelledby="${kind}-actions-title">
-        <div class="section-label" id="${kind}-actions-title">Your next action</div>
+        <div class="section-label" id="${kind}-actions-title">${parent.is_organizer && !isMyMatch ? 'Organizer action' : 'Your next action'}</div>
         <button type="button" class="card competition-action-card" data-result-match="${match.id}" data-match-key="${match.id}" aria-label="${esc(title)}. ${esc(competitionSideName(context.side1))} versus ${esc(competitionSideName(context.side2))}. ${esc(detail)}">
           <span class="row-main">
             <span class="row-title">${esc(title)}</span>
@@ -22046,7 +22076,7 @@
             <span class="competition-opponent-actions">
               <button type="button" class="btn btn-secondary btn-sm" data-opponent-profile="${Number(opponent.id)}">Profile</button>
               <button type="button" class="btn btn-secondary btn-sm" data-opponent-message="${Number(opponent.id)}">Message</button>
-              ${canProposeTime ? `<button type="button" class="btn btn-secondary btn-sm" data-opponent-propose="${Number(opponent.id)}" data-opponent-name="${esc(opponent.display_name || 'there')}">Propose time</button>` : ''}
+              ${canProposeTime ? `<button type="button" class="btn btn-primary btn-sm" data-opponent-propose="${Number(opponent.id)}" data-opponent-name="${esc(opponent.display_name || 'there')}">Arrange match</button>` : ''}
             </span>
           </div>`).join('')}
       </section>` : '';
@@ -22058,10 +22088,10 @@
     const progressionNoteFor = (currentMatch) => {
       const currentResult = normalizeCompetitionResult(currentMatch);
       return kind === 'league' && currentResult.state === 'unreported'
-        ? 'Report a score only if this match was played. If it was not played, leave it blank; it will count as not played when the round closes.'
+        ? 'After you play, add the score for your opponent to confirm. Leave it blank if you don’t play.'
         : currentResult.terminal
-          ? 'This result is final, so standings or bracket progression can continue.'
-          : 'Standings and bracket progression wait until the score is confirmed or resolved.';
+          ? ''
+          : 'The score counts once it is confirmed.';
     };
     const progressionNote = progressionNoteFor(match);
     const nudgeState = competitionNudgeState(match);
@@ -22113,11 +22143,13 @@
       ${modalHead('Match result')}
       <form id="competition-result-form" class="competition-result-form" novalidate>
         <div class="row-sub" style="margin:-4px 0 4px">${esc(liveParent.name)} · ${esc(context.context)}</div>
-        ${opponentsHtml}
+        <div class="competition-score-format">${kind === 'tournament' ? (liveParent.event_type === 'doubles' ? 'Doubles' : 'Singles') : 'Singles'}${result.confirmed ? ' · Confirmed result' : ''}</div>
+        ${scoreFieldsHtml}
         <div class="competition-result-summary" id="competition-result-summary" role="status">
           ${competitionResultStatusHtml(match)}
           ${competitionResultProvenanceHtml(match)}
         </div>
+        ${opponentsHtml}
         <div class="competition-result-deadline" id="competition-result-deadline" aria-live="polite">
           ${result.state === 'awaiting_confirmation' ? competitionDeadlineHtml(match.review_deadline_at, {
             futurePrefix: 'Confirmation due in', expiredLabel: 'Confirmation window ended',
@@ -22126,18 +22158,18 @@
             absolutePrefix: 'Play by', futurePrefix: 'Due in', expiredLabel: 'Play deadline reached',
           }) : ''}
         </div>
-        ${kind === 'tournament' ? `<div id="competition-match-scheduling">${tournamentMatchScheduleHtml(match)}</div>${liveParent.is_organizer && liveParent.status === 'active' ? '<button type="button" class="btn btn-secondary" id="competition-edit-schedule">Edit match time &amp; court</button>' : ''}` : ''}
-        ${scoreFieldsHtml}
+        ${kind === 'tournament' ? `<div id="competition-match-scheduling" ${result.terminal ? 'hidden' : ''}>${tournamentMatchScheduleHtml(match)}</div>${liveParent.is_organizer && liveParent.status === 'active' ? '<button type="button" class="btn btn-secondary" id="competition-edit-schedule">Edit match time &amp; court</button>' : ''}` : ''}
         ${needsReason ? `
           <div class="form-field competition-reason-field">
             <label for="competition-result-reason">What happened? <span class="row-sub">(required when challenging or changing a result)</span></label>
             <textarea id="competition-result-reason" maxlength="500" rows="3" placeholder="What needs to be corrected?"></textarea>
           </div>` : ''}
-        <p class="competition-progression-note" id="competition-progression-note">${esc(progressionNote)}</p>
+        <p class="competition-progression-note" id="competition-progression-note" ${progressionNote ? '' : 'hidden'}>${esc(progressionNote)}</p>
         <div id="competition-result-history">${competitionResultHistoryHtml(match)}</div>
-        <div class="competition-result-actions">${actionButtons || `<p class="row-sub">${result.state === 'awaiting_confirmation' ? 'Waiting for the other side to review this score.' : 'No action is available for this result.'}</p>`}</div>
+        <div class="competition-result-actions">${actionButtons || (result.state === 'awaiting_confirmation' ? '<p class="row-sub">Waiting for your opponent to confirm.</p>' : '')}</div>
       </form>
     `, { route, label: 'Match result' });
+    modal.querySelector('.modal')?.classList.add('competition-match-sheet');
     const form = modal.querySelector('#competition-result-form');
     const score1 = modal.querySelector('#competition-score-1, #competition-game-0-1');
     const score2 = modal.querySelector('#competition-score-2, #competition-game-0-2');
@@ -22157,7 +22189,7 @@
     modal.querySelectorAll('[data-opponent-propose]').forEach((button) => {
       button.addEventListener('click', () => {
         const opponentName = button.dataset.opponentName || 'there';
-        const draft = `Hi ${opponentName}, what time works for our ${liveParent.name} ${context.context.toLowerCase()} match?`;
+        const draft = competitionArrangeDraft(kind, liveParent, match, opponentName);
         openChildModal(modal, () => openThread(
           Number(button.dataset.opponentPropose), { draft },
         ));
@@ -22205,7 +22237,10 @@
           ? competitionDeadlineHtml(match.review_deadline_at, {
               futurePrefix: 'Confirmation due in',
               expiredLabel: 'Confirmation window ended',
-            }) : '';
+            }) : kind === 'league' && currentResult.state === 'unreported' && liveParent.round_deadline_at
+              ? competitionDeadlineHtml(liveParent.round_deadline_at, {
+                  absolutePrefix: 'Play by', expiredLabel: 'Play deadline reached', showRelative: false,
+                }) : '';
       }
       const nudgeButton = modal.querySelector('[data-result-nudge]');
       if (nudgeButton) {
@@ -22252,7 +22287,10 @@
       const history = modal.querySelector('#competition-result-history');
       if (history) history.innerHTML = competitionResultHistoryHtml(match);
       const progression = modal.querySelector('#competition-progression-note');
-      if (progression) progression.textContent = progressionNoteFor(match);
+      if (progression) {
+        progression.textContent = progressionNoteFor(match);
+        progression.hidden = !progression.textContent;
+      }
       syncTemporalResult();
     };
     const readScores = () => {
@@ -22495,33 +22533,36 @@
           ${rounds.map((round) => `<option value="${round}" ${String(selectedRound) === String(round) ? 'selected' : ''}>${esc(roundLabel ? roundLabel(round) : `Round ${round}`)}</option>`).join('')}
         </select>
       </div>
-      <button type="button" class="btn btn-secondary" id="${prefix}-mine-filter" aria-pressed="${mineOnly}" ${hasMine ? '' : 'disabled'}>${uiIcon('user')} My matches</button>
+      <button type="button" class="btn btn-secondary" id="${prefix}-mine-filter" aria-pressed="${mineOnly}" ${hasMine ? '' : 'disabled'}>${uiIcon('user')} ${prefix === 'lg' ? 'Your matches only' : 'My matches'}</button>
     </div>`;
   }
 
   function leagueMatchCardHtml(match, { mine = false, parent = null } = {}) {
     const result = normalizeCompetitionResult(match);
-    const score = match.score1 != null && match.score2 != null ? `${match.score1}–${match.score2}` : '—';
+    const score = match.score1 != null && match.score2 != null ? `${match.score1}–${match.score2}` : '';
     const player1Won = result.confirmed && match.winner_id === match.player1?.id;
     const player2Won = result.confirmed && match.winner_id === match.player2?.id;
+    const opponent = mine && parent ? competitionOpponents('league', parent, match)[0] : null;
+    const roundName = Number(parent?.round_days) === 7 ? 'Week' : 'Round';
+    const currentRound = Number(match.round) === Number(parent?.current_round);
     return `
-      <div class="card competition-match-card${mine ? ' is-mine' : ''}" data-result-match="${match.id}" data-match-key="${match.id}">
+      <div class="card competition-match-card league-opponent-card${mine ? ' is-mine' : ''}" data-result-match="${match.id}" data-match-key="${match.id}">
         <div class="competition-match-main">
-          <div class="competition-match-names">
+          ${opponent ? `<div class="league-opponent-identity">${avatarHtml(opponent, 'sm', 'span')}<div><span class="league-opponent-eyebrow">Your opponent</span><strong>${esc(opponent.display_name || 'Opponent')}</strong></div></div>` : `<div class="competition-match-names">
             <span class="${player1Won ? 'competition-winner' : ''}">${esc(match.player1?.display_name || 'Player 1')}</span>
             <span class="competition-versus">vs</span>
             <span class="${player2Won ? 'competition-winner' : ''}">${esc(match.player2?.display_name || 'Player 2')}</span>
-          </div>
-          <div class="row-sub">Round ${match.round} · Box ${match.box}</div>
+          </div>`}
+          <div class="row-sub league-match-format">Singles · ${roundName} ${match.round}${result.confirmed && mine ? ` · ${Number(match.winner_id) === Number(state.me?.id) ? 'You won' : 'You lost'}` : ''}</div>
           ${result.state === 'awaiting_confirmation' ? competitionDeadlineHtml(match.review_deadline_at, {
             futurePrefix: 'Confirmation due in', expiredLabel: 'Confirmation window ended',
           }) : ''}
-          ${result.state === 'unreported' && parent?.round_deadline_at ? competitionDeadlineHtml(parent.round_deadline_at, {
-            absolutePrefix: 'Play by', futurePrefix: 'Due in', expiredLabel: 'Play deadline reached',
+          ${result.state === 'unreported' && parent?.round_deadline_at && currentRound ? competitionDeadlineHtml(parent.round_deadline_at, {
+            absolutePrefix: 'Play by', futurePrefix: 'Due in', expiredLabel: 'Play deadline reached', shortDate: true, showRelative: false,
           }) : ''}
         </div>
         <div class="competition-match-result">
-          <b>${score}</b>
+          ${score ? `<b>${score}</b>` : ''}
           ${competitionResultStatusHtml(match, { compact: true })}
         </div>
         ${parent ? competitionCardOpponentActionsHtml('league', parent, match) : ''}
@@ -22565,6 +22606,7 @@
     if (!routedOverlayLoadIsCurrent(routeLoad) || !box.isConnected) return;
     content.removeAttribute('aria-busy');
     setDialogLabel(content, 'League');
+    content.classList.add('league-detail', 'competition-player-detail');
     let deepLinkOpened = false;
     const requestedLeagueMatch = (lg.matches || []).find(
       (match) => Number(match.id) === Number(requestedMatchId),
@@ -22572,7 +22614,7 @@
     let selectedLeagueRound = String(
       requestedLeagueMatch?.round || lg.current_round || 'all',
     );
-    let leagueMineOnly = false;
+    let leagueMineOnly = !!lg.joined;
     const refreshGuard = createCompetitionRefreshGuard();
     const setCompetitionMutation = (busy) => {
       if (busy) refreshGuard.invalidate();
@@ -22628,7 +22670,7 @@
       const statusChip = leagueStatusChip(lg);
       const rankMember = (a, b) => (b.points - a.points) || (b.wins - a.wins) || ((b.user?.rating || 0) - (a.user?.rating || 0));
       const leagueNav = [['lg-overview', 'Overview']];
-      if (lg.status === 'active' || lg.status === 'completed') leagueNav.push(['lg-matches', 'Matches'], ['lg-standings', 'Standings']);
+      if (lg.status === 'active' || lg.status === 'completed') leagueNav.push(['lg-matches', lg.joined ? 'Your matches' : 'Matches'], ['lg-standings', 'Standings']);
       else if (lg.status === 'registration') leagueNav.push(['lg-standings', 'Players']);
       const currentRoundMatches = (lg.matches || []).filter((match) => match.round === lg.current_round);
       const finishPreviewBoxes = {};
@@ -22645,7 +22687,7 @@
       const finishUnplayedCount = currentRoundMatches.filter((match) => (
         normalizeCompetitionResult(match).state === 'unreported'
       )).length;
-      const finishLeader = finishPreviewBoxes[finishBoxNumbers[0]]?.slice().sort(rankMember)[0]?.user?.display_name || 'the current box 1 leader';
+      const finishLeader = finishPreviewBoxes[finishBoxNumbers[0]]?.slice().sort(rankMember)[0]?.user?.display_name || 'the current league leader';
       const leagueMatchesById = new Map();
       [...(lg.match_history || []), ...(lg.matches || [])].forEach((match) => {
         leagueMatchesById.set(Number(match.id), match);
@@ -22657,23 +22699,22 @@
       if (selectedLeagueRound !== 'all' && !availableRounds.includes(Number(selectedLeagueRound))) {
         selectedLeagueRound = String(lg.current_round || availableRounds.at(-1) || 'all');
       }
-      const nextActionHtml = competitionActionNeededHtml('league', { ...lg, matches: currentRoundMatches });
+      const nextActionHtml = competitionActionNeededHtml('league', {
+        ...lg, matches: currentRoundMatches.filter((match) => normalizeCompetitionResult(match).state !== 'unreported'),
+      });
+      const myRoundMatches = currentRoundMatches.filter((match) => Number(match.player1?.id) === Number(state.me?.id) || Number(match.player2?.id) === Number(state.me?.id));
+      const myRemainingMatches = myRoundMatches.filter((match) => !normalizeCompetitionResult(match).terminal).length;
+      const leagueRoundWord = Number(lg.round_days) === 7 ? 'Week' : 'Round';
       let body = `
         ${modalHead(lg.name)}
-        <div class="row-sub" style="margin:-6px 0 6px">${lg.court ? `${esc(lg.court.name)} · ` : ''}${lg.member_count} player${lg.member_count === 1 ? '' : 's'} · boxes of ${lg.box_size} · new round every ${lg.round_days} days</div>
+        <div class="competition-identity"><span class="competition-format-label">Singles league</span><span>${lg.member_count} players${lg.court ? ` · ${esc(lg.court.name)}` : ''}</span></div>
+        ${lg.status === 'active' ? `<div class="league-round-summary"><div><span>${leagueRoundWord} ${lg.current_round}</span><strong>${lg.joined ? `${myRemainingMatches} match${myRemainingMatches === 1 ? '' : 'es'} to finish` : 'This round is in progress'}</strong></div>${lg.round_deadline_at ? `<div class="competition-round-deadline">${competitionDeadlineHtml(lg.round_deadline_at, { absolutePrefix: 'Play by', expiredLabel: 'Round deadline reached', showRelative: false })}</div>` : ''}</div>` : ''}
         ${nextActionHtml}
+        <details class="competition-how-it-works"><summary>How this league works</summary><p>You play each assigned opponent before the round ends. Players start at a similar level; results determine who moves up or down for the next round.</p></details>
         ${competitionDetailTabsHtml(leagueNav)}
         <div id="lg-overview" class="competition-overview-status" tabindex="-1">${statusChip}${lg.club_name ? ` <span class="tag competition-context-tag">${uiIcon('building')}<span>${esc(lg.club_name)}</span></span>` : ''}</div>
-        ${lg.status === 'active' ? `<div class="competition-round-deadline">${competitionDeadlineHtml(lg.round_deadline_at, {
-          futurePrefix: `Round ${lg.current_round} ends in`,
-          expiredLabel: `Round ${lg.current_round} deadline reached`,
-        })}</div>` : ''}
         ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}
-        <div class="card competition-settings-summary">
-          <b>Season settings</b>
-          <span>${lg.member_count}/${lg.max_players} players · boxes of ${lg.box_size} · ${lg.round_days} days per round</span>
-          <span>Organizer start target: ${esc(fmtDateTime(lg.starts_at))}</span>
-        </div>
+        <details class="competition-settings-summary"><summary>League details</summary><span>${lg.member_count}/${lg.max_players} players · ${lg.round_days} days to play each round</span>${lg.status === 'registration' ? `<span>Planned start: ${esc(fmtDateTime(lg.starts_at))}</span>` : ''}</details>
         ${lg.status !== 'cancelled' ? `<div class="competition-share-actions">
           <button type="button" class="btn btn-secondary" id="lg-share">${uiIcon('send')} Share league</button>
           ${lg.status !== 'completed' ? `<button type="button" class="btn btn-secondary" id="lg-ics">${uiIcon('calendar')} Add season dates</button>` : ''}
@@ -22692,7 +22733,7 @@
       }
 
       if (lg.status === 'registration') {
-        body += `<div class="row-sub" style="margin-bottom:10px">The organizer plans to start round 1 on or after ${fmtDateTime(lg.starts_at)}; it does not start automatically. Players are seeded into boxes by rating, play everyone in their box, then winners move up and each last-place player moves down.</div>`;
+        body += `<p class="row-sub">The organizer will start the league on or after ${fmtDateTime(lg.starts_at)}. Your opponents will appear here when play begins.</p>`;
         body += '<div class="section-label" id="lg-standings" tabindex="-1">Players</div>';
         body += lg.members.map((member) => `
           <button type="button" class="card row nav-row-button competition-member-row" data-view-user="${member.user.id}" aria-label="View ${esc(member.user.display_name)}'s profile">
@@ -22728,7 +22769,7 @@
         body += '<div id="lg-matches" tabindex="-1"></div>';
         body += competitionRoundControlsHtml(
           'lg', availableRounds, selectedLeagueRound, leagueMineOnly,
-          { hasMine: !!lg.joined },
+          { hasMine: !!lg.joined, roundLabel: (round) => `${leagueRoundWord} ${round}` },
         );
         const matchesByBox = {};
         roundMatches.forEach((match) => {
@@ -22743,11 +22784,11 @@
         if (matchBoxes.length) {
           matchBoxes.forEach((groupKey) => {
             const [roundNumber, boxNumber] = groupKey.split(':').map(Number);
-            body += `<div class="section-label">${selectedLeagueRound === 'all' ? `Round ${roundNumber} · ` : ''}Box ${boxNumber} matches</div>`;
-            body += matchesByBox[groupKey].map((match) => leagueMatchCardHtml(match, {
+            body += `<div class="section-label league-match-section">${leagueMineOnly ? 'Your opponents' : `${selectedLeagueRound === 'all' ? `${leagueRoundWord} ${roundNumber} · ` : ''}${matchBoxes.length > 1 ? `Division ${boxNumber}` : 'All matches'}`}</div>`;
+            body += '<div class="competition-box-matches">' + matchesByBox[groupKey].map((match) => leagueMatchCardHtml(match, {
               mine: match.player1?.id === myId || match.player2?.id === myId,
               parent: { ...lg, matches: allLeagueMatches },
-            })).join('');
+            })).join('') + '</div>';
           });
         } else {
           body += `<div class="empty-state" style="padding:16px">${leagueMineOnly ? 'You have no matches in this round.' : 'No matches are scheduled for this round.'}</div>`;
@@ -22773,14 +22814,10 @@
         lg.members.forEach((member) => { if (member.box) (boxes[member.box] = boxes[member.box] || []).push(member); });
         const standingBoxNumbers = Object.keys(boxes).map(Number).sort((a, b) => a - b);
         body += '<div id="lg-standings" tabindex="-1"></div>';
-        body += `<div class="competition-standings-legend" role="note">
-          <b>How standings work</b>
-          <span>Win: 3 points · Played loss: 1 point · Not played: 0 points. Ties break by wins, then rating.</span>
-          <span>At each round close, a box winner moves up and a last-place player moves down. Use the Matches round picker to review earlier rounds.</span>
-        </div>`;
+        body += `<details class="competition-standings-legend"><summary>How points and movement work</summary><p>A win earns 3 points and a played loss earns 1; an unplayed match earns 0. At the end of a round, each division winner moves up and the last player moves down where there is another division.</p><p>Ties break by wins, then match rating.</p></details>`;
         standingBoxNumbers.forEach((boxNumber, boxIndex) => {
           const standing = boxes[boxNumber].sort(rankMember);
-          body += `<div class="section-label">Box ${boxNumber}${Number(boxNumber) === 1 ? ' · top box' : ''}</div>`;
+          body += `<div class="section-label">${standingBoxNumbers.length > 1 ? `Division ${boxNumber}${Number(boxNumber) === 1 ? ' · highest level' : ''}` : 'League standings'}</div>`;
           body += standing.map((member, index) => {
             const movement = lg.status === 'active' && index === 0 && boxIndex > 0
               ? 'Moves up when the round closes'
@@ -22805,7 +22842,7 @@
       enhanceAppSelects(content);
       setDialogLabel(content, 'League');
       bindCompetitionDetailTabs(
-        content, snapshot?.activeCompetitionTab || (requestedMatchId ? 'lg-matches' : null),
+        content, snapshot?.activeCompetitionTab || (requestedMatchId || lg.status === 'active' ? 'lg-matches' : lg.status === 'completed' ? 'lg-standings' : null),
       );
       bindUserButtons(box);
       content.querySelector('#lg-chat')?.addEventListener('click', () => openChildModal(box, () => openLeagueChat(lg)));
@@ -22918,7 +22955,7 @@
       content.querySelector('#lg-start')?.addEventListener('click', act('start', {
         eyebrow: 'Close league signups',
         title: 'Start this league now?',
-        message: 'Registration closes and players are seeded into their first boxes.',
+        message: 'Registration closes and players are matched with opponents at a similar level.',
         detail: 'Review the signed-up field first; round-one matchups are created immediately.',
         confirmLabel: 'Start league',
         cancelLabel: 'Keep signups open',
@@ -22928,7 +22965,7 @@
       content.querySelector('#lg-advance')?.addEventListener('click', act('advance', {
         eyebrow: 'League progression',
         title: `Close round ${lg.current_round}?`,
-        message: 'Box winners move up and each last-place finisher moves down.',
+        message: 'The highest finishers move up and the lowest finishers move down for their next opponents.',
         detail: 'Standings for this round are locked before the next matchups are created.',
         confirmLabel: `Close round ${lg.current_round}`,
         cancelLabel: 'Keep round open',
@@ -22966,6 +23003,14 @@
       bindCompetitionCardOpponentActions(
         content, box, 'league', { ...lg, matches: allLeagueMatches },
       );
+      content.querySelectorAll('[data-card-match-score]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const match = allLeagueMatches.find((item) => Number(item.id) === Number(button.dataset.cardMatchScore));
+          if (match) openMatch(match);
+        });
+      });
       if (snapshot) restoreCompetitionViewState(box, snapshot);
 
       if (requestedMatchId && !deepLinkOpened) {
@@ -23025,8 +23070,8 @@
           </div>
           <div class="form-grid">
             <div class="form-field">
-              <label for="le-box">Players per box</label>
-              <select id="le-box" data-select-title="Players per box">${[3, 4, 5, 6].map((value) => `<option value="${value}" ${Number(lg.box_size) === value ? 'selected' : ''}>${value}</option>`).join('')}</select>
+              <label for="le-box">Players matched together</label>
+              <select id="le-box" data-select-title="Players matched together">${[3, 4, 5, 6].map((value) => `<option value="${value}" ${Number(lg.box_size) === value ? 'selected' : ''}>${value}</option>`).join('')}</select>
             </div>
             <div class="form-field">
               <label for="le-max">Player limit</label>
@@ -23036,7 +23081,7 @@
           <div class="form-field">
             <label for="le-round-days">Days per round</label>
             <select id="le-round-days" data-select-title="Days per round">${[3, 5, 7, 10, 14, 21, 28].map((value) => `<option value="${value}" ${Number(lg.round_days) === value ? 'selected' : ''}>${value} days</option>`).join('')}</select>
-          </div>` : '<p class="field-help">Box size, player limit, and round timing are locked after round 1 starts so published matches stay consistent.</p>'}
+          </div>` : '<p class="field-help">Match assignments, player limits, and round timing are fixed once the league starts.</p>'}
         <button type="submit" class="btn btn-primary btn-block" id="le-save">Save league settings</button>
       </form>
     `, { label: 'Edit league settings' });
@@ -23219,7 +23264,7 @@
     const modal = hydrateDetailLoadShell(shell, `
       ${modalHead('Start a ladder league')}
       <form id="lc-form" novalidate>
-      <p class="row-sub" style="margin:-6px 0 12px">A season-long ladder: players are seeded into boxes by rating and play everyone in their box each round. Winners move up a box, last place drops.</p>
+      <p class="row-sub" style="margin:-6px 0 12px">Players face opponents at a similar level each round. Results decide who moves up or down for the next round.</p>
       <div class="form-field">
         <label for="lc-name">Name</label>
         <input type="text" id="lc-name" maxlength="120" placeholder="e.g. Riverside Winter Ladder" />
@@ -23237,8 +23282,8 @@
           <small class="field-help" id="lc-when-help">You still choose when to start round 1.</small>
         </div>
         <div class="form-field">
-          <label for="lc-box">Players per box</label>
-          <select id="lc-box" data-select-title="Players per box" data-select-prefix="Box size"><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
+          <label for="lc-box">Players matched together</label>
+          <select id="lc-box" data-select-title="Players matched together" data-select-prefix="Players"><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
         </div>
       </div>
       <div class="form-grid">
@@ -23262,7 +23307,7 @@
       </div>` : ''}
       <div class="form-field">
         <label class="sr-only" for="lc-desc">League details</label>
-        <input type="text" id="lc-desc" maxlength="200" placeholder="Details (optional) — e.g. Play your box by Sunday each week" />
+        <input type="text" id="lc-desc" maxlength="200" placeholder="Optional details, e.g. Finish your matches by Sunday" />
       </div>
       <button type="submit" class="btn btn-primary btn-block" id="lc-submit" style="padding:15px">Create league</button>
       </form>
@@ -23967,7 +24012,7 @@
     if (!routedOverlayLoadIsCurrent(routeLoad) || !box.isConnected) return;
     content.removeAttribute('aria-busy');
     setDialogLabel(content, 'Tournament');
-    content.classList.add('tournament-detail');
+    content.classList.add('tournament-detail', 'competition-player-detail');
     let deepLinkOpened = false;
     const requestedTournamentMatch = (t.matches || []).find(
       (match) => Number(match.id) === Number(requestedMatchId),
@@ -24068,18 +24113,15 @@
 
       let body = `
         ${modalHead(t.name)}
-        <div class="row-sub" style="margin:-6px 0 6px">${meta.map(esc).join(' · ')}</div>
+        <div class="competition-identity"><span class="competition-format-label">${isDoubles ? 'Doubles' : 'Singles'} tournament</span><span>${t.entry_count} ${isDoubles ? 'teams' : 'players'} · ${esc(T_GAME_FORMAT_LABEL[t.game_format] || 'One game to 11')}</span></div>
+        ${t.court ? `<div class="competition-location">${esc(t.court.name)}${t.court.city ? `, ${esc(t.court.city)}` : ''}</div>` : ''}
         ${nextActionHtml}
         ${competitionDetailTabsHtml(tournamentNav)}
         <div id="td-overview" class="competition-overview-status" tabindex="-1">${tournamentStatusChip(t)}${t.club_name ? ` <span class="tag competition-context-tag">${uiIcon('building')}<span>${esc(t.club_name)}</span></span>` : ''}</div>
         ${arrivalCountdownCopy ? `<div class="competition-arrival-summary" role="status" data-tournament-arrival-countdown>${uiIcon('clock')}<span>${esc(arrivalCountdownCopy)}</span></div>` : ''}
         ${t.status === 'registration' ? `<p class="row-sub competition-manual-start-copy">${t.is_organizer ? 'This is your start target. Review the field and start the tournament when everyone is ready.' : 'The organizer starts the tournament manually when the field is ready.'}</p>` : ''}
         ${t.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(t.description)}</div>` : ''}
-        <div class="card competition-settings-summary">
-          <b>Tournament setup</b>
-          <span>${esc(tournamentDivisionLabel(t))} · ${esc(T_GAME_FORMAT_LABEL[t.game_format] || 'One game to 11')}</span>
-          <span>${Number(t.court_count || 1)} court${Number(t.court_count || 1) === 1 ? '' : 's'} available · ${Number(t.match_minutes || 30)} minutes planned per match</span>
-        </div>
+        <details class="competition-how-it-works"><summary>Format and tournament details</summary><p>${t.format === 'round_robin' ? 'Each player or team faces every other entry. The standings decide the winner.' : `Winners advance to the next round. The final decides the champion${Number(t.total_rounds) > 1 ? '; the other semifinalists play for third place' : ''}.`}</p><p>${esc(tournamentDivisionLabel(t))} · ${Number(t.court_count || 1)} court${Number(t.court_count || 1) === 1 ? '' : 's'} · ${Number(t.match_minutes || 30)} minutes planned per match</p>${t.status === 'registration' ? `<p>Planned start: ${esc(fmtDateTime(t.starts_at))}</p>` : ''}</details>
         ${t.status !== 'cancelled' ? `<div class="competition-share-actions">
           <button type="button" class="btn btn-secondary" id="td-share">${uiIcon('send')} Share tournament</button>
           ${t.status !== 'completed' ? `<button type="button" class="btn btn-secondary" id="td-ics">${uiIcon('calendar')} Add to calendar</button>` : ''}
@@ -24221,7 +24263,7 @@
       enhanceAppSelects(content);
       setDialogLabel(content, 'Tournament');
       bindCompetitionDetailTabs(
-        content, snapshot?.activeCompetitionTab || (requestedMatchId ? 'td-matches' : null),
+        content, snapshot?.activeCompetitionTab || (requestedMatchId || ['active', 'completed'].includes(t.status) ? 'td-matches' : null),
       );
       bindUserButtons(box);
       cleanupBracket = window.TournamentBracket.bind(content);
@@ -30149,36 +30191,25 @@
   }
 
   function businessHubEmptyHtml(court = null) {
-    return `<section class="venue-welcome">
-      <span class="venue-welcome-icon">${uiIcon('building')}</span>
-      <h2>Your venue. Ready for players.</h2>
-      <p>Manage your court’s information and help players book, join sessions, and find your business.</p>
-      <ol class="venue-start-steps">
-        <li><span>1</span><div><b>Find your venue</b><small>Choose its existing court listing.</small></div></li>
-        <li><span>2</span><div><b>Confirm you manage it</b><small>We review your role before publishing.</small></div></li>
-        <li><span>3</span><div><b>Make it yours</b><small>Add details and your existing booking link.</small></div></li>
-      </ol>
-      <button type="button" class="btn btn-primary btn-block" id="business-claim-start">${court ? `Manage ${esc(court.name)}` : 'Find my venue'}</button>
-      <p class="venue-welcome-footnote">Already managing a venue? It appears here when you sign in with your business account.</p>
-    </section>`;
+    return window.VenueWorkspace.welcome(court, uiIcon);
   }
 
   function businessWorkspaceState(business) {
     return window.VenueWorkspace.state(business, businessVerificationState(business));
   }
 
-  function venueTaskHtml({ tool, icon, title, copy, disabled = false }) {
-    return `<button type="button" class="venue-task" data-business-tool="${tool}" ${disabled ? 'disabled' : ''}>
-      <span class="venue-task-icon" aria-hidden="true">${uiIcon(icon)}</span><span class="row-main"><b>${esc(title)}</b><small>${esc(copy)}</small></span>${uiIcon('chevron-right', 'chev')}
-    </button>`;
+  function venueTaskHtml(options) {
+    return window.VenueWorkspace.task(options, uiIcon);
   }
 
   function openBusinessBookingSetup(rawBusiness, onSaved) {
     let business = normalizeBusinessProfile(rawBusiness);
+    const initialLinks = { booking_url: business.booking_url || '', membership_url: business.membership_url || '' };
     const adoptSaved = (updated) => { business = normalizeBusinessProfile(updated); onSaved?.(business); };
     const role = String(business.manager_role || (business.is_owner ? 'owner' : 'viewer'));
     const canEdit = ['owner', 'admin', 'editor'].includes(role);
     const modal = openModal(window.VenueWorkspace.bookingForm(business, { icon: uiIcon, head: modalHead('Bookings'), canEdit }), { label: 'Business bookings' });
+    window.VenueWorkspace.bindBookingPreview(modal);
     const openChild = (fn) => openChildModal(modal, fn);
     modal.querySelector('#venue-booking-schedule').addEventListener('click', () => {
       if (!canEdit) { toast('Ask an owner or editor to update the schedule'); return; }
@@ -30199,7 +30230,7 @@
         if (booking === null || membership === null) return;
         const finish = formUX.startSubmitting('Saving…'); if (!finish) return;
         try {
-          const updated = await api(`/businesses/${business.id}`, { method: 'PATCH', body: JSON.stringify({ booking_url: booking, membership_url: membership }) });
+          const updated = await api(`/businesses/${business.id}`, { method: 'PATCH', body: JSON.stringify(window.VenueWorkspace.changedDetails(initialLinks, { booking_url: booking, membership_url: membership })) });
           formUX.clearDraft({ disable: true }); closeModal(modal); adoptSaved(updated); toast('Booking links saved');
         } catch (error) { finish(); formUX.showError(error.message); }
       });
@@ -30218,18 +30249,18 @@
     const isPublic = workspace.publicNow;
     const publicationEnabled = business.published === true;
     const canPublish = canAdminister && status === 'verified' && contentReview === 'approved' && !business.suspended;
-    body.classList.add('venue-workspace');
+    body.classList.add('venue-workspace', 'venue-owner-v2');
     modal.querySelector('.modal')?.classList.add('venue-owner-modal');
     body.innerHTML = `
       ${context.businesses.length > 1 ? `<button type="button" class="business-hub-back" id="business-hub-locations">${uiIcon('arrow-left')} Your venues</button>` : ''}
-      <header class="venue-owner-heading"><span class="venue-owner-mark" aria-hidden="true">${uiIcon('building')}</span><div class="row-main"><p class="simple-eyebrow">VENUE MANAGER</p><h2>${esc(business.name || businessCourtName(business))}</h2><p>${esc(businessCourtName(business))}</p></div><button type="button" class="btn btn-secondary" id="business-player-preview">${uiIcon('eye')} Player preview</button></header>
+      <header class="venue-owner-heading"><span class="venue-owner-mark" aria-hidden="true">${uiIcon('building')}</span><div class="row-main"><p class="simple-eyebrow">YOUR VENUE</p><h2>${esc(business.name || businessCourtName(business))}</h2><p>${esc(businessCourtName(business))}</p></div><div class="venue-owner-header-actions"><button type="button" class="btn btn-secondary" id="business-player-preview">${uiIcon('eye')} Preview</button><button type="button" class="venue-settings-button" id="venue-open-settings" aria-label="Venue settings and team">${uiIcon('settings')}</button></div></header>
       <section class="venue-owner-status ${isPublic ? 'is-live' : ''}" aria-label="Publishing status"><span>${uiIcon(isPublic ? 'check-circle' : 'eye')}</span><div class="row-main"><b>${esc(workspace.title)}</b><p>${esc(workspace.copy)}</p></div>
         ${workspace.tool === 'publish' ? '<button type="button" class="btn btn-primary" id="business-publish-toggle">Publish venue</button>' : !isPublic ? `<button type="button" class="btn btn-secondary" data-business-tool="${workspace.tool}">${esc(workspace.action)}</button>` : ''}
         ${status === 'rejected' && canOwn ? '<button type="button" class="btn-link" id="business-resubmit-claim">Update and resubmit claim</button>' : ''}
       </section>
       ${context.savedMessage ? `<p class="venue-save-success" role="status">${uiIcon('check-circle')} ${esc(context.savedMessage)}</p>` : ''}
       ${window.VenueWorkspace.render(business, { icon: uiIcon, day: businessDayLabel, time: businessTimeLabel, workspace, canEdit: canEditContent, panel: context.venuePanel })}
-      <details class="simple-disclosure venue-management"><summary>Team, activity &amp; settings</summary>
+      <details class="simple-disclosure venue-management"><summary>Venue settings &amp; team</summary>
         <p class="simple-note">${esc(managerRole.replace(/^./, (c) => c.toUpperCase()))} access</p>
         ${venueTaskHtml({tool:'team',icon:'users',title:'Team access',copy:'Add staff and manage their permissions'})}
         ${venueTaskHtml({tool:'analytics',icon:'chart',title:'Player activity',copy:'Listing views and booking-link clicks'})}
@@ -30291,9 +30322,9 @@
         openToolChild(() => openBusinessBookingSetup(business, savedBusiness));
       } else if (tool === 'preview') {
         openToolChild(() => openBusinessPlayerPreview(business));
-      } else if (tool === 'details' || tool === 'contact' || tool === 'announcement') {
+      } else if (tool === 'details' || tool === 'visit' || tool === 'contact' || tool === 'announcement') {
         if (!canEditContent) { toast('Viewer access is read-only'); return; }
-        openToolChild(() => openBusinessDetailsEditor(business, savedBusiness, { focusField: tool === 'announcement' ? '#business-announcement' : null }));
+        openToolChild(() => openBusinessDetailsEditor(business, savedBusiness, { focusField: tool === 'announcement' ? '#business-announcement' : tool === 'visit' ? '#business-hours' : tool === 'contact' ? '#business-phone' : null }));
       } else if (tool === 'offerings') {
         if (!canEditContent) { toast('Viewer access is read-only'); return; }
         openToolChild(() => openBusinessOfferingsEditor(business, savedBusiness));
@@ -30373,6 +30404,7 @@
         onMissing: context.onMissing,
       }));
     });
+    body.querySelector('#venue-open-settings').addEventListener('click', () => { const settings = body.querySelector('.venue-management'); settings.open = true; settings.scrollIntoView({ block: 'start' }); settings.querySelector('summary').focus(); });
     body.querySelector('#business-player-preview').addEventListener('click', () => openToolChild(
       () => openBusinessPlayerPreview(business),
     ));
@@ -30400,12 +30432,7 @@
   }
 
   function businessUnavailableHtml(feature, error) {
-    const unavailable = error?.status === 404 || error?.status === 501;
-    return `<div class="business-feature-state ${unavailable ? 'is-neutral' : 'is-error'}" role="${unavailable ? 'status' : 'alert'}">
-      <span aria-hidden="true">${uiIcon(unavailable ? 'activity' : 'alert-triangle')}</span>
-      <div><b>${unavailable ? `${esc(feature)} is not enabled yet` : `${esc(feature)} could not load`}</b>
-      <p>${unavailable ? 'Your public listing and secure outbound links continue to work. This control will appear when the server capability is enabled.' : esc(error?.message || 'Try again in a moment.')}</p></div>
-    </div>`;
+    return window.VenueWorkspace.unavailable(feature, error, uiIcon);
   }
 
   function openBusinessConfirmAction({ title, message, confirmLabel, tone = 'danger', requireText = '', stepUp = false, onConfirm }) {
@@ -30631,44 +30658,15 @@
   }
 
   function businessFileSize(bytes) {
-    const size = Math.max(0, Number(bytes) || 0);
-    if (size < 1024) return `${size} B`;
-    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
-    return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+    return window.VenueWorkspace.fileSize(bytes);
   }
 
   function businessFileDescription(file, fallback = 'File') {
-    const type = String(file?.type || '').toLowerCase();
-    const extension = String(file?.name || '').split('.').pop()?.toUpperCase() || '';
-    const label = ({
-      'application/json': 'JSON', 'text/json': 'JSON',
-      'image/jpeg': 'JPEG image', 'image/png': 'PNG image', 'image/webp': 'WebP image',
-    })[type] || (extension && extension.length <= 5 ? extension : fallback);
-    return `${label} · ${businessFileSize(file?.size)}`;
+    return window.VenueWorkspace.fileDescription(file, fallback);
   }
 
-  function setBusinessFilePickerState(picker, {
-    state = 'idle', name = 'No file selected', meta = '', badge = 'Optional', icon = null,
-  } = {}) {
-    if (!picker) return;
-    picker.dataset.state = state;
-    picker.toggleAttribute('aria-busy', state === 'loading');
-    const button = picker.querySelector('[data-file-button]');
-    const feedback = picker.querySelector('[data-file-feedback]');
-    const stateIcon = picker.querySelector('[data-file-state-icon]');
-    picker.querySelector('[data-file-name]').textContent = name;
-    picker.querySelector('[data-file-meta]').textContent = meta;
-    picker.querySelector('[data-file-state]').textContent = badge;
-    stateIcon.innerHTML = uiIcon(icon || (state === 'success' ? 'check-circle' : state === 'error' ? 'alert-triangle' : state === 'loading' ? 'refresh' : picker.dataset.idleIcon || 'plus'));
-    if (state === 'error') {
-      feedback.setAttribute('role', 'alert');
-      feedback.setAttribute('aria-live', 'assertive');
-      button.setAttribute('aria-invalid', 'true');
-    } else {
-      feedback.setAttribute('role', 'status');
-      feedback.setAttribute('aria-live', 'polite');
-      button.removeAttribute('aria-invalid');
-    }
+  function setBusinessFilePickerState(picker, options = {}) {
+    return window.VenueWorkspace.setFilePickerState(picker, options, uiIcon);
   }
 
   function openBusinessCatalogUpload(business, connection, onComplete) {
@@ -31115,30 +31113,7 @@
   }
 
   function businessRevisionDiffHtml(item) {
-    const before = item?.before_snapshot && typeof item.before_snapshot === 'object' ? item.before_snapshot : {};
-    const after = item?.after_snapshot && typeof item.after_snapshot === 'object' ? item.after_snapshot : {};
-    const beforeProfile = before.profile && typeof before.profile === 'object' ? before.profile : {};
-    const afterProfile = after.profile && typeof after.profile === 'object' ? after.profile : {};
-    const displayValue = (value) => {
-      if (value === true) return 'Yes';
-      if (value === false) return 'No';
-      if (value == null || String(value).trim() === '') return 'Not set';
-      const text = String(value);
-      return text.length > 180 ? `${text.slice(0, 177)}…` : text;
-    };
-    const label = (key) => String(key || '').replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
-    const changed = [...new Set([...Object.keys(beforeProfile), ...Object.keys(afterProfile)])]
-      .filter((key) => JSON.stringify(beforeProfile[key] ?? null) !== JSON.stringify(afterProfile[key] ?? null))
-      .map((key) => ({ key, before: displayValue(beforeProfile[key]), after: displayValue(afterProfile[key]) }));
-    for (const key of ['offerings', 'schedule']) {
-      const prior = Array.isArray(before[key]) ? before[key] : [];
-      const next = Array.isArray(after[key]) ? after[key] : [];
-      if (JSON.stringify(prior) !== JSON.stringify(next)) {
-        changed.push({ key, before: `${prior.length} item${prior.length === 1 ? '' : 's'}`, after: `${next.length} item${next.length === 1 ? '' : 's'}` });
-      }
-    }
-    if (!changed.length) return '<div class="business-operator-empty">No value-level difference is available for this legacy revision.</div>';
-    return `<div class="business-revision-diff" aria-label="Changed business fields">${changed.map((change) => `<div class="business-revision-diff-row"><b>${esc(label(change.key))}</b><small><span>Before</span>${esc(change.before)}</small><small><span>After</span>${esc(change.after)}</small></div>`).join('')}</div>`;
+    return window.VenueWorkspace.revisionDiff(item);
   }
 
   function openBusinessOperatorHub() {
@@ -31599,53 +31574,15 @@
 
   function openBusinessDetailsEditor(rawBusiness, onSaved, { focusField = null } = {}) {
     const business = normalizeBusinessProfile(rawBusiness);
+    const initialDetails = { ...business, amenities: [...business.amenities] };
     const hasManagedLogo = business.has_logo_upload || /^\/api\/businesses\/\d+\/logo$/.test(business.logo_url || '');
-    const modal = openModal(`
-      ${modalHead('Edit venue details')}
-      <div class="venue-editor-context-row"><p class="venue-editor-context">${esc(business.name || businessCourtName(business))}</p><button type="button" class="btn btn-secondary btn-sm venue-mobile-preview" id="venue-jump-preview">${uiIcon('eye')} Preview changes</button></div>
-      <div class="venue-edit-layout">
-      <form id="business-details-form" novalidate>
-        <div class="venue-edit-fields">
-        <fieldset class="venue-form-section"><legend>About your venue</legend>
-        <div class="form-field">
-          <label for="business-name">Venue name</label>
-          <input type="text" id="business-name" maxlength="120" value="${esc(business.name || '')}" placeholder="e.g. Third Shot Pickleball Club" />
-        </div>
-        <div class="form-field">
-          <label for="business-description">What should players know?</label>
-          <textarea id="business-description" rows="4" maxlength="800" placeholder="Indoor club with open play, clinics, leagues, and court reservations.">${esc(business.description || '')}</textarea>
-        </div>
-        <div class="form-field">
-          <label for="business-announcement">Current announcement</label>
-          <input type="text" id="business-announcement" maxlength="300" value="${esc(business.announcement || '')}" placeholder="e.g. Labor Day open play starts at 9 AM" />
-          <small class="field-help">Use this for a timely update. Leave it blank when there is nothing to announce.</small>
-        </div>
-        </fieldset>
-        <fieldset class="venue-form-section"><legend>Plan a visit</legend>
-        <div class="form-field"><label for="business-hours">Facility hours</label><textarea id="business-hours" rows="2" maxlength="300" placeholder="Mon–Fri 6 AM–10 PM · Sat–Sun 7 AM–8 PM">${esc(business.hours || '')}</textarea></div>
-        <div class="form-field"><label for="business-amenities">Amenities</label><input type="text" id="business-amenities" maxlength="400" value="${esc(Array.isArray(business.amenities) ? business.amenities.join(', ') : business.amenities || '')}" placeholder="Pro shop, showers, ball machine, café" /></div>
-
-        </fieldset>
-        <details class="simple-disclosure venue-form-contact"><summary>Contact &amp; website</summary>
-        <div class="form-grid">
-          <div class="form-field"><label for="business-phone">Public phone</label><input type="tel" id="business-phone" maxlength="40" value="${esc(business.phone || '')}" autocomplete="tel" /></div>
-          <div class="form-field"><label for="business-email">Public email</label><input type="email" id="business-email" maxlength="160" value="${esc(business.email || '')}" autocomplete="email" /></div>
-        </div>
-        <div class="form-field"><label for="business-website-url">Website</label><input type="url" id="business-website-url" value="${esc(business.website_url || '')}" placeholder="https://yourclub.com" inputmode="url" /></div>
-        </details>
-        ${window.VenueWorkspace.logoFields(business, { icon: uiIcon, hasManagedLogo })}
-        </div>
-        <footer class="venue-editor-savebar"><div><b id="venue-details-dirty">Your saved details</b><p id="venue-details-save-impact"></p></div><button type="submit" class="btn btn-primary" id="business-details-save">Save venue details</button></footer>
-      </form>
-      <aside class="venue-editor-preview" aria-label="Player preview"><p class="venue-preview-heading">See it as you edit</p><div id="venue-details-preview"></div><button type="button" class="btn btn-secondary btn-block venue-mobile-preview" id="venue-back-edit">Back to editing</button></aside>
-      </div>
-    `, { page: true, label: 'Edit venue details' });
+    const modal = openModal(window.VenueWorkspace.detailsForm(business, { head: modalHead('Edit venue details'), icon: uiIcon, hasManagedLogo }), { page: true, label: 'Edit venue details' });
     modal.querySelector('.modal').classList.add('venue-details-modal');
     const formUX = bindModalFormUX(modal, '#business-details-save', { draftKey: `business-details-${business.id}` });
-    const syncPreview = window.VenueWorkspace.bindDetailsEditor(modal, business, { formUX, icon: uiIcon, verified: businessVerificationState(business) === 'verified', publicNow: businessWorkspaceState(business).publicNow });
+    const syncPreview = window.VenueWorkspace.bindDetailsEditor(modal, business, { formUX, icon: uiIcon, baseline: initialDetails, verified: businessVerificationState(business) === 'verified', publicNow: businessWorkspaceState(business).publicNow });
     bindModalDiscardConfirmation(modal, { isDirty: formUX.isDirty, onDiscard: () => formUX.clearDraft({ disable: true }), title: 'Discard unsaved venue details?', message: 'Your text edits have not been saved. Logo uploads or removals already completed are kept.' });
-    if (focusField) requestAnimationFrame(() => { const input = modal.querySelector(focusField); input?.scrollIntoView({ block: 'center' }); input?.focus({ preventScroll: true }); });
-    const adoptLogoState = (updated) => { Object.assign(business, normalizeBusinessProfile(updated)); syncPreview(); onSaved?.(business); };
+    if (focusField) requestAnimationFrame(() => { const input = modal.querySelector(focusField); syncPreview.reveal(input); input?.scrollIntoView({ block: 'center' }); input?.focus({ preventScroll: true }); });
+    const adoptLogoState = (updated) => { initialDetails.logo_url = updated.logo_url || ''; Object.assign(business, normalizeBusinessProfile(updated)); syncPreview(); onSaved?.(business); };
     const logoFileInput = modal.querySelector('#business-logo-file');
     const logoFileButton = modal.querySelector('#business-logo-file-button');
     const logoFilePicker = modal.querySelector('#business-logo-file-picker');
@@ -31741,7 +31678,7 @@
       try {
         const updated = await api(`/businesses/${business.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({
+          body: JSON.stringify(window.VenueWorkspace.changedDetails(initialDetails, {
             name,
             description: modal.querySelector('#business-description').value.trim(),
             announcement: modal.querySelector('#business-announcement').value.trim(),
@@ -31750,7 +31687,7 @@
             hours: modal.querySelector('#business-hours').value.trim(),
             amenities: modal.querySelector('#business-amenities').value.split(',').map((item) => item.trim()).filter(Boolean),
             ...urls,
-          }),
+          })),
         });
         formUX.clearDraft({ disable: true });
         closeModal(modal);
@@ -31957,7 +31894,7 @@
     const initialOfferings = JSON.stringify(offerings);
     const modal = openModal(`
       ${modalHead('Offerings')}
-      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved changes update your listing. Changed booking links make the listing private until reviewed.</p></div>` : ''}
+      ${businessWorkspaceState(business).publicNow ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved changes update your listing. Changed booking links make the listing private until reviewed.</p></div>` : ''}
       <p class="row-sub business-editor-intro">Show players exactly what they can book or join. Each item can use its own direct link.</p>
       <div id="business-offerings-list"></div>
       <button type="button" class="btn btn-secondary btn-block" id="business-offering-add">${uiIcon('plus')} Add offering</button>
@@ -31996,6 +31933,8 @@
       const finish = formUX.startSubmitting('Saving offerings…');
       if (!finish) return;
       try {
+        const fresh = normalizeBusinessProfile(await api(`/businesses/${business.id}`));
+        window.VenueWorkspace.assertCollectionUnchanged(fresh.offerings, business.offerings);
         const updated = await api(`/businesses/${business.id}/offerings`, {
           method: 'PUT', body: JSON.stringify({ items: offerings }),
         });
@@ -32319,7 +32258,7 @@
     });
     const modal = openModal(`
       ${modalHead('Weekly schedule')}
-      ${business.published ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved changes update your listing. Changed registration links make the listing private until reviewed.</p></div>` : ''}
+      ${businessWorkspaceState(business).publicNow ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved changes update your listing. Changed registration links make the listing private until reviewed.</p></div>` : ''}
       <p class="row-sub business-editor-intro">Add weekly sessions or one-time events. Review your changes here, then choose Save schedule.</p>
       <div id="business-schedule-import-status" class="business-form-note" role="status" aria-live="polite"></div>
       <div id="business-schedule-list"></div>
@@ -32383,6 +32322,8 @@
       const finish = formUX.startSubmitting('Saving schedule…');
       if (!finish) return;
       try {
+        const fresh = normalizeBusinessProfile(await api(`/businesses/${business.id}`));
+        window.VenueWorkspace.assertCollectionUnchanged(fresh.schedule, business.schedule);
         const updated = await api(`/businesses/${business.id}/schedule`, {
           method: 'PUT', body: JSON.stringify({ items: schedule }),
         });
@@ -33544,7 +33485,7 @@
         <button type="button" class="btn btn-secondary btn-sm" id="pf-dashboard-retry">Try again</button>
       </div>
       <div id="pf-upcoming" aria-busy="true" style="min-height:108px">
-        <div class="section-label">Next session or match</div>${skeletonHtml(1)}
+        <div class="section-label">Up next</div>${skeletonHtml(1)}
       </div>
       <div id="pf-courts" aria-busy="true" style="min-height:108px">
         <div class="section-label">Saved courts</div>${skeletonHtml(1)}
@@ -33681,7 +33622,7 @@
     };
     if (dashboardFailed) {
       el.querySelector('#pf-dashboard-error').classList.remove('hidden');
-      upcomingEl.innerHTML = '<div class="section-label">Next session or match</div><div class="profile-section-unavailable">Upcoming play is unavailable right now.</div>';
+      upcomingEl.innerHTML = '<div class="section-label">Up next</div><div class="profile-section-unavailable">Upcoming play is unavailable right now.</div>';
       courtsEl.innerHTML = '<div class="section-label">Saved courts</div><div class="profile-section-unavailable">Saved courts are unavailable right now.</div>';
       historyEl.innerHTML = '<div class="section-label">Recent play</div><div class="profile-section-unavailable">Recent play is unavailable right now.</div>';
       statsEl.innerHTML = '<div class="section-label">Your play stats</div><div class="profile-section-unavailable">Play stats are unavailable right now.</div>';
@@ -33709,8 +33650,8 @@
       const ordered = [...scorePending, ...wrapPending, ...up];
       const nextGame = ordered[0] || null;
       if (nextGame) {
-        const nextLabel = scorePending.includes(nextGame) ? 'Played — enter the score'
-          : wrapPending.includes(nextGame) ? 'Played — wrap up session' : 'Next session or match';
+        const nextLabel = scorePending.includes(nextGame) ? 'Add a score'
+          : wrapPending.includes(nextGame) ? 'Finish session' : 'Up next';
         upcomingEl.innerHTML = `<div class="section-label">${nextLabel}</div>${gameCardHtml(nextGame)}`;
         const remaining = ordered.slice(1);
         upcomingMoreEl.innerHTML = remaining.length
@@ -33719,7 +33660,7 @@
         bindGameButtons(upcomingEl, renderProfile);
         bindGameButtons(upcomingMoreEl, renderProfile);
       } else {
-        upcomingEl.innerHTML = '<div class="section-label">Next session or match</div><div class="empty-state" style="padding:14px">Nothing planned yet.<br><button type="button" class="btn btn-primary btn-sm" id="pf-plan-game" style="margin-top:9px">Plan a play session</button></div>';
+        upcomingEl.innerHTML = '<div class="section-label">Up next</div><div class="empty-state" style="padding:14px">Nothing planned yet.<br><button type="button" class="btn btn-primary btn-sm" id="pf-plan-game" style="margin-top:9px">Plan a play session</button></div>';
         upcomingEl.querySelector('#pf-plan-game').addEventListener('click', () => openNewGameModal({
           gameType: 'casual',
           maxPlayers: 6,
@@ -33734,7 +33675,7 @@
     } catch {
       upcomingMoreEl.replaceChildren();
       if (!dashboardFailed) showProfileSectionUnavailable(
-        upcomingEl, 'Next session or match', 'Upcoming play is unavailable right now.',
+        upcomingEl, 'Up next', 'Upcoming play is unavailable right now.',
       );
     }
 
@@ -34847,11 +34788,13 @@
     return `${clock} ${zoneLabel}`;
   }
 
-  function gameScreenHtml(game) {
+  function gameScreenHtml(game, { joinedNow = false } = {}) {
     const court = game.court || {};
     const isRankedMatch = game.game_type === 'ranked';
-    const playNoun = isRankedMatch ? 'match' : 'play session';
-    const playNounTitle = isRankedMatch ? 'Match' : 'Play session';
+    const playNoun = isRankedMatch ? 'match' : 'session';
+    const playNounTitle = isRankedMatch ? 'Match' : 'Session';
+    const hasScore = ['completed', 'awaiting_confirmation'].includes(game.status)
+      && game.completion_kind !== 'session' && game.score_team1 != null && game.score_team2 != null;
     const isChallenge = gameIsChallenge(game);
     const assembly = instantRallyAssembly(game);
     const rally = assembly ? rallySummaryFromValue(game) : null;
@@ -34944,6 +34887,11 @@
         : 'Waiting for players to join';
     }
 
+    if (hasScore) headline = esc(gameActivityLabel(game));
+    else if (game.status === 'upcoming' && !game.is_instant) {
+      headline = esc(game.title || gameActivityLabel(game));
+      if (live) subline = 'In progress';
+    }
     const team1 = game.players.filter((p) => p.team === 1);
     const team2 = game.players.filter((p) => p.team === 2);
     // Host can remove other players from an upcoming game (no-show swap).
@@ -34954,15 +34902,13 @@
         <button type="button" class="player-profile-link" data-view-user="${p.user_id}" aria-label="View ${esc(p.display_name)}'s profile">
           ${avatarHtml(p, 'sm', 'span')}
           <span class="row-main">
-            <span class="row-title">${esc(p.display_name)}${p.user_id === game.creator_id ? ' <span class="tag" style="margin:0 0 0 6px;font-size:var(--text-xs);padding:2px 8px">Host</span>' : ''}${game.status === 'upcoming' && !game.is_instant && (p.attending || game.is_creator) ? ` <span class="tag ${p.attending ? 'live' : 'warn'}" style="margin:0 0 0 6px;font-size:var(--text-xs);padding:2px 8px">${p.attending ? `${uiIcon('check-circle')} Confirmed` : 'Unconfirmed'}</span>` : ''}</span>
-            <span class="row-sub">${playerSkillIdentityHtml(p, {
-              includeMatchRating: game.game_type === 'ranked' && game.status === 'completed',
-            })}${p.rating_delta != null ? ` · Match-rating change <span class="${p.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${p.rating_delta >= 0 ? '+' : ''}${p.rating_delta}</span>` : ''}</span>
+            <span class="row-title">${esc(p.display_name)}${p.user_id === state.me?.id ? ' <span class="game-player-role">You</span>' : ''}${p.user_id === game.creator_id ? ' <span class="game-player-role">Host</span>' : ''}</span>
+            ${game.attendance_confirmation_due && !p.attending && p.user_id !== game.creator_id ? '<span class="row-sub game-attendance-pending">Not confirmed yet</span>' : ''}
           </span>
         </button>
         ${canRemove(p) ? `<button type="button" class="game-player-overflow" data-remove-player="${p.user_id}" title="Player actions" aria-label="Actions for ${esc(p.display_name)}"><span aria-hidden="true">•••</span></button>` : ''}
       </div>`;
-    let playersHtml = (team1.length && team2.length)
+    let playersHtml = hasScore ? gameResultScoreboardHtml(game) : (team1.length && team2.length)
       ? `<div class="form-grid">
           <div><div class="section-label" style="margin-top:0">Team 1</div>${team1.map(playerRow).join('')}</div>
           <div><div class="section-label" style="margin-top:0">Team 2</div>${team2.map(playerRow).join('')}</div>
@@ -35036,7 +34982,7 @@
         const skipped = game.recurrence === 'weekly' && game.my_recurrence_rsvp?.is_skipped;
         const inviteCopy = game.my_invite_status === 'pending' && game.invited_by
           ? `<div class="game-invite-context"><b>${esc(game.invited_by.display_name)} invited you</b><span>Accept to join the roster, or let the host know you can’t make it.</span></div>` : '';
-        actions = `${inviteCopy}${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : `${uiIcon('pickleball')} Join this ${playNoun}`}</button>`;
+        actions = `${inviteCopy}${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
         } else if (game.my_invite_status === 'pending') {
@@ -35085,9 +35031,7 @@
         // A live, underfilled rally still needs recruiting; hiding these once
         // its start time passed was the sharpest post-create dead end.
         if (canFillRoster && !hostNeedsPlayers) {
-          const fill = fillRosterAction(!actions);
-          if (actions) moreActions.push(fill);
-          else actions = fill;
+          moreActions.push(fillRosterAction(false));
         }
         if (!game.is_instant && startsAhead) {
           moreActions.push(`<button class="btn btn-secondary btn-block" id="gs-calendar">${uiIcon('calendar')} Add to calendar</button>`);
@@ -35099,7 +35043,9 @@
             ${game.is_creator ? '<small>Hosts stay RSVP’d. Edit the series to change its days or end date.</small>' : `<button type="button" class="btn btn-secondary btn-block" id="gs-standing-rsvp" aria-pressed="${standing}">${standing ? 'Confirm each date instead' : 'Turn on standing RSVP'}</button><button type="button" class="btn btn-secondary btn-block" id="gs-skip-occurrence">Skip only this date</button>`}
           </section>`);
         }
-        moreActions.push(`<button class="btn btn-secondary btn-block" id="gs-leave">Leave ${playNoun}</button>`);
+        moreActions.push(game.recurrence === 'weekly'
+          ? '<button class="btn btn-secondary btn-block" id="gs-leave-series">Leave weekly series</button>'
+          : `<button class="btn btn-secondary btn-block" id="gs-leave">Leave ${playNoun}</button>`);
         if (game.is_creator) {
           actions += `<details class="game-host-toolbar simple-disclosure" aria-label="Host tools">
             <summary>${uiIcon('shield')} Manage ${playNoun}<small>You’re hosting</small></summary>
@@ -35110,7 +35056,7 @@
             </div>
           </details>`;
         }
-        if (moreActions.length) actions += `<div class="game-player-secondary-actions">${moreActions.join('')}</div>`;
+        if (moreActions.length) actions += `<details class="game-player-options simple-disclosure"><summary>Session options</summary><div class="game-player-secondary-actions">${moreActions.join('')}</div></details>`;
       }
       if (
         !game.is_joined && game.recurrence === 'weekly'
@@ -35155,47 +35101,43 @@
             <button type="button" class="btn btn-secondary btn-block" id="gs-fix-completed-score">Fix score</button>
           </section>`
         : '';
-      actions = `${automaticReview}${casualScoreFix}${mvpBanner}${voteChips}
+      actions = `${automaticReview}${casualScoreFix}
         <div class="postgame-next">
-          <div class="postgame-next-copy"><b>Play again</b><span>Review the same court, players, and a suggested time before anything is created.</span></div>
           <button class="btn btn-primary btn-block" id="gs-play-again">${uiIcon('calendar')} Play again</button>
           <button type="button" class="btn btn-secondary btn-block" id="gs-save-group">${uiIcon('users')} Start a play group</button>
-          <small id="gs-save-group-hint">Keep in touch before you pick the next date.</small>
+          <small id="gs-save-group-hint"></small>
         </div>
-        <div id="gs-crew-connect" aria-live="polite"><div class="postgame-connection-loading">Checking who you still need to connect with…</div></div>`;
+        <details class="game-result-extras simple-disclosure"><summary>Players &amp; highlights</summary>${mvpBanner}${voteChips}<div id="gs-crew-connect" aria-live="polite"><div class="postgame-connection-loading">Loading players…</div></div></details>`;
     } else if (['cancelled', 'expired', 'unresolved'].includes(game.status) || closedRally) {
       actions = whatNowHtml;
     }
 
-    const gameFormat = Number(game.max_players) === 2
-      ? 'Singles' : Number(game.max_players) === 4 ? 'Doubles' : `${game.max_players} players`;
-    const gameTypeAndFormat = `${isRankedMatch ? 'Ranked' : 'Casual'} · ${gameFormat}`;
-    const detailMetaItems = [
-      game.is_instant ? `${assembly ? 'Live pickup game' : 'Pickup game'} · ${gameTypeAndFormat}` : gameTypeAndFormat,
-      game.visibility === 'private' ? 'Invite only'
-        : game.visibility === 'friends' ? 'Friends' : game.visibility === 'open' ? 'Open game' : '',
-      gameLevelRangeLabel(game) !== 'Any level' ? gameLevelRangeLabel(game) : '',
+    const detailMetaItems = game.status === 'upcoming' ? [
+      gameLevelRangeLabel(game) !== 'Any level' ? `Level ${gameLevelRangeLabel(game)}` : '',
+      game.visibility === 'private' ? 'Invite only' : game.visibility === 'friends' ? 'Friends' : '',
+      game.recurrence === 'weekly' ? 'Weekly' : '',
       game.club_name || '',
-    ].filter(Boolean);
-    const detailMeta = detailMetaItems.length > 2
-      ? `<div class="game-detail-meta is-compact">${esc(detailMetaItems.join(' · '))}</div>`
-      : `<div class="game-detail-meta">${detailMetaItems.map((item, index) => `<span class="tag${index === 0 && isRankedMatch ? ' ranked' : ''}">${esc(item)}</span>`).join('')}</div>`;
-    const durationLabel = game.duration_minutes
-      ? `${game.duration_minutes} minutes${game.ends_at ? ` · ends ${fmtTimeShort(game.ends_at)}` : ''}` : '';
+    ].filter(Boolean) : [];
+    const detailMeta = detailMetaItems.length
+      ? `<div class="game-detail-meta">${detailMetaItems.map((item) => `<span>${esc(item)}</span>`).join('')}</div>` : '';
     const costLabel = game.cost_cents == null ? ''
       : Number(game.cost_cents) === 0 ? 'Free'
         : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
     const courtScaleLabel = game.court_count
       ? `${game.court_count} court${Number(game.court_count) === 1 ? '' : 's'} reserved` : '';
-    const planningFacts = [durationLabel, costLabel, courtScaleLabel].filter(Boolean);
-    const planningDetails = !game.is_instant && (
-      game.title || game.description || planningFacts.length || recurrencePattern
-    ) ? `<section class="game-detail-plan" aria-label="Game plan">
-      ${game.title ? `<h4>${esc(game.title)}</h4>` : ''}
-      ${game.description ? `<p>${esc(game.description)}</p>` : ''}
-      ${planningFacts.length ? `<div class="game-detail-plan-facts">${planningFacts.map((fact) => `<span>${esc(fact)}</span>`).join('')}</div>` : ''}
-      ${recurrencePattern ? `<div class="game-detail-recurrence"><b>${esc(recurrencePattern)}</b>${recurrenceEndLabel ? `<small>Through ${esc(recurrenceEndLabel)}</small>` : ''}</div>` : ''}
-    </section>` : '';
+    const notes = game.notes && !(game.is_instant && game.notes === '⚡ Instant rally') ? game.notes : '';
+    const planningFacts = [costLabel, courtScaleLabel, recurrencePattern,
+      recurrenceEndLabel ? `Through ${recurrenceEndLabel}` : ''].filter(Boolean);
+    const planningDetails = game.description || notes || planningFacts.length
+      ? `<details class="game-detail-plan simple-disclosure"><summary>${game.description || notes ? 'Host note &amp; details' : 'Session details'}</summary>
+        ${game.description ? `<p>${esc(game.description)}</p>` : ''}
+        ${notes ? `<p>${esc(notes)}</p>` : ''}
+        ${planningFacts.length ? `<div class="game-detail-plan-facts">${planningFacts.map((fact) => `<span>${esc(fact)}</span>`).join('')}</div>` : ''}
+      </details>` : '';
+    const ratingChanges = hasScore && isRankedMatch && game.status === 'completed'
+      ? `<details class="match-rating-details simple-disclosure"><summary>Match rating changes</summary>
+          ${game.players.filter((player) => player.rating_delta != null).map((player) => `<div><span>${esc(player.display_name)}</span><b class="${player.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${player.rating_delta >= 0 ? '+' : ''}${esc(player.rating_delta)}</b></div>`).join('')}
+        </details>` : '';
     const startMs = new Date(game.scheduled_at).getTime();
     const conditionsExpected = game.status === 'upcoming' && court.id
       && startMs - Date.now() < 6 * 3600e3 && startMs - Date.now() > -3600e3;
@@ -35218,41 +35160,53 @@
       </span>${uiIcon('chevron-right', 'chev')}
     </button>` : '';
 
+    const resultState = hasScore
+      ? game.status === 'awaiting_confirmation' ? 'Awaiting confirmation'
+        : isRankedMatch ? 'Confirmed result' : 'Final score'
+      : '';
+    const joinedState = game.is_joined && game.status === 'upcoming' && !closedRally
+      ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${uiIcon('check-circle')} ${game.is_creator ? 'You’re hosting' : 'You’re in'}</span>${joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>' : ''}</div>` : '';
+    const when = game.status === 'upcoming' && !game.is_instant
+      ? `<div class="session-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
+    const openSpots = Math.max(0, Number(game.spots_left) || 0);
     return `
       <div class="modal-head game-detail-header">
+        <div class="session-heading-copy">
+          <span class="session-eyebrow">${hasScore ? 'Match result' : esc(gameActivityLabel(game))}</span>
           <h3 class="game-detail-title" data-status="${esc(game.status)}"><span class="game-detail-status-icon" aria-hidden="true">${statusIcon}</span><span class="game-detail-headline">${headline}</span></h3>
+        </div>
         <button class="modal-close" aria-label="Close">${uiIcon('x')}</button>
       </div>
+      ${joinedState}
       <div class="game-detail-summary">
-          ${subline ? `<div class="row-sub">${subline}</div>` : ''}
-          ${gameRosterStatusHtml(game)}
-          ${detailMeta}
-        <div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
-          ${game.is_joined ? `<button type="button" class="btn btn-secondary" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} Chat${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
-          <button type="button" class="btn btn-secondary" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
-        </div>
+        ${resultState ? `<span class="match-result-state${game.status === 'awaiting_confirmation' ? ' is-pending' : ''}">${uiIcon(game.status === 'awaiting_confirmation' ? 'clock' : 'check-circle')} ${resultState}</span>` : ''}
+        ${subline ? `<div class="row-sub">${subline}</div>` : ''}
+        ${detailMeta}
       </div>
-      ${planningDetails}
-      <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
-        <span class="nav-row-leading">${uiIcon('map-pin')}</span>
-        <span class="row-main">
-          <span class="row-title">${esc(court.name || 'Court')}</span>
-          <span class="row-sub">${esc([
-            court.city || '', game.court_number || '', courtScaleLabel,
-          ].filter(Boolean).join(' · '))}</span>
-        </span>
-        ${uiIcon('chevron-right', 'chev')}
-      </button>
-      ${game.status === 'upcoming' && courtDirectionsUrl(court)
-        ? `<a class="btn btn-secondary btn-block gs-directions" href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name || 'the court')} (opens Maps)">${uiIcon('external')}<span>Directions</span></a>` : ''}
-      ${infoStrip}
-      ${game.notes && !(game.is_instant && game.notes === '⚡ Instant rally') ? `<div class="row-sub" style="margin:0 0 12px 4px">“${esc(game.notes)}”</div>` : ''}
-      <div class="section-label">${assembly ? `At the court (${readyCount}/${game.max_players})` : `Players (${readyCount}/${game.max_players})`}</div>
-      ${playersHtml}
-      ${waitlistHtml}
-      ${arrivalsHtml}
-      ${chatPreview}
-      <div style="margin-top:16px">${actions}</div>`;
+      ${hasScore ? playersHtml : ''}
+      ${when}
+      <div class="session-place-wrap">
+        <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
+          <span class="nav-row-leading">${uiIcon('map-pin')}</span>
+          <span class="row-main"><span class="row-title">${esc(court.name || 'Court')}</span>
+            <span class="row-sub">${esc([court.city || '', game.court_number || ''].filter(Boolean).join(' · '))}</span>
+          </span>${uiIcon('chevron-right', 'chev')}
+        </button>
+        ${game.status === 'upcoming' && courtDirectionsUrl(court)
+          ? `<a class="btn btn-secondary btn-block gs-directions" href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name || 'the court')} (opens Maps)">${uiIcon('external')}<span>Directions</span></a>` : ''}
+      </div>
+      ${!hasScore ? `<section class="session-roster" aria-label="Players">
+        <div class="session-roster-head"><h4>${assembly ? 'At the court' : 'Players'} <span>${readyCount}</span></h4><span>${game.status === 'upcoming' && !closedRally ? openSpots ? `${openSpots} spot${openSpots === 1 ? '' : 's'} left` : 'Full' : ''}</span></div>
+        ${playersHtml}
+      </section>` : ''}
+      ${waitlistHtml}${arrivalsHtml}
+      ${ratingChanges}
+      <div class="session-main-actions">${actions}</div>
+      <div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
+        ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
+        <button type="button" class="btn btn-secondary" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
+      </div>
+      ${chatPreview}${infoStrip}${planningDetails}`;
   }
 
   async function openGameScreen(gameId, options = {}) {
@@ -35306,12 +35260,12 @@
       return crewPromise;
     };
 
-    const render = (fresh, { preserve = false, announce = false } = {}) => {
+    const render = (fresh, { preserve = false, announce = false, joinedNow = false } = {}) => {
       const snapshot = preserve ? captureGameViewState(box) : null;
       game = fresh;
       fingerprint = gameFingerprint(game);
       options.onUpdated?.(game);
-      box.innerHTML = gameScreenHtml(game);
+      box.innerHTML = gameScreenHtml(game, { joinedNow });
       if (modal.classList.contains('flow-child-modal')) decorateFlowChildModal(modal);
       injectScoreConflictBanner(box, game);
       box.removeAttribute('aria-busy');
@@ -35364,7 +35318,7 @@
                 : 'Start a play group'}`;
               const groupHint = box.querySelector('#gs-save-group-hint');
               if (groupHint) groupHint.textContent = savedGroup
-                ? savedGroup.name : 'Keep in touch before you pick the next date.';
+                ? savedGroup.name : '';
             }
             crewTarget.innerHTML = completedCrewConnectionsHtml(response.items || []);
             bindUserButtons(crewTarget);
@@ -35489,6 +35443,7 @@
         }
       });
       box.querySelector('#gs-skip-occurrence')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
         if (!await openActionConfirmation({
           eyebrow: 'Recurring play',
           title: 'Skip only this date?',
@@ -35499,9 +35454,9 @@
           confirmLabel: 'Skip this date',
           cancelLabel: 'Keep my spot',
           icon: 'calendar',
-          trigger: event.currentTarget,
+          trigger: button,
         })) return;
-        const resetAction = beginButtonAction(event.currentTarget, 'Skipping…');
+        const resetAction = beginButtonAction(button, 'Skipping…');
         if (!resetAction) return;
         try {
           const fresh = await api(`/games/${game.id}/skip-occurrence`, { method: 'POST' });
@@ -35736,15 +35691,9 @@
           const fresh = await api(`/games/${gameId}/join`, { method: 'POST' });
           rememberFresh(fresh);
           state.playGamesCache = null;
-          render(fresh);
-          showJoinedToast(gameId, isChallenge ? 'Challenge accepted' : "You're in", {
-            icon: isChallenge ? 'trophy' : 'pickleball',
-            onUndone: (updated) => {
-              rememberFresh(updated);
-              if (modal.isConnected) render(updated);
-            },
-          });
-          maybeOfferPhoneNotifications('Get a reminder and a ping when this game changes?');
+          render(fresh, { joinedNow: true });
+          box.querySelector('#gs-joined-state')?.focus({ preventScroll: true });
+          announceViewStatus('You’re in. Your name is on the player list.');
           refreshMe();
           if (state.tab === 'play') renderPlay();
         } catch (e) {
@@ -35966,12 +35915,14 @@
       box.querySelector('#gs-play-again')?.addEventListener('click', (event) => {
         openPostGamePlanner(game, modal, event.currentTarget, loadCrew());
       });
-      box.querySelectorAll('#gs-leave, #gs-not-coming, #gs-leave-series').forEach((leaveButton) => leaveButton.addEventListener('click', async (e) => {
+      box.querySelectorAll('#gs-leave, #gs-not-coming, #gs-leave-series, #gs-undo-join').forEach((leaveButton) => leaveButton.addEventListener('click', async (e) => {
         const btn = e.currentTarget;
-        const skipOnly = game.recurrence === 'weekly' && btn.id === 'gs-not-coming';
+        const skipOnly = game.recurrence === 'weekly' && ['gs-not-coming', 'gs-undo-join'].includes(btn.id);
         const leaveSeries = btn.id === 'gs-leave-series';
         let decision;
-        if (skipOnly || leaveSeries) {
+        if (leaveSeries && game.is_creator) {
+          decision = await confirmGameLeave(game, 'weekly series', btn);
+        } else if (skipOnly || leaveSeries) {
           decision = {
             accepted: await openActionConfirmation({
               eyebrow: 'Recurring play',
