@@ -2266,11 +2266,12 @@ a.card:active,
 }
 .game-card-description { color: var(--ink-soft); }
 .game-card-footer {
-  min-height: 58px; display: flex; align-items: center; gap: 10px;
+  min-height: 58px; display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
   padding: 9px 12px; border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg) 58%, var(--card));
 }
-.game-card-footer > .row-sub { min-width: 0; flex: 1; line-height: 1.35; }
+.game-card-footer > .avatar-stack { flex: 0 0 auto; }
+.game-card-footer > .row-sub { min-width: 120px; flex: 1 1 140px; line-height: 1.35; }
 .game-card-footer > .row-sub .ui-icon { width: 12px; height: 12px; vertical-align: -2px; }
 .game-card-actions {
   min-width: 0; margin-left: auto; display: flex; align-items: center;
@@ -2281,7 +2282,7 @@ a.card:active,
 .game-action-state { display: flex; align-items: flex-start; justify-content: center; gap: 7px; }
 .game-action-state > .ui-icon { width: 17px; height: 17px; flex: 0 0 17px; margin-top: 1px; }
 .game-action-state > span { min-width: 0; }
-@media (max-width: 360px) {
+@media (max-width: 600px) {
   .game-card-footer { align-items: flex-start; flex-wrap: wrap; }
   .game-card-actions { width: 100%; margin-left: 0; }
   .game-card-actions .btn { flex: 1 1 auto; }
@@ -3643,6 +3644,7 @@ button.tag, a.tag, .tag[role="button"] {
   padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-md);
   background: var(--card); box-shadow: 0 12px 32px rgba(0,0,0,.24);
 }
+.profile-more-menu[hidden] { display: none; }
 .profile-more-menu .btn { width: 100%; min-height: var(--tap-min); }
 .profile-report-intro { margin-bottom: 12px; line-height: 1.45; }
 .profile-report-choices { display: grid; gap: 8px; }

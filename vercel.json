@@ -559,6 +559,17 @@
       "destination": "/assets/r73/app-v15.min.js.br"
     },
     {
+      "source": "/release-assets/r74/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r74/app-v15.min.js.br"
+    },
+    {
       "source": "/release-assets/r69/crew-planner-v15.min.js",
       "has": [
         {
@@ -614,6 +625,17 @@
       "destination": "/assets/r73/crew-planner-v15.min.js.br"
     },
     {
+      "source": "/release-assets/r74/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r74/crew-planner-v15.min.js.br"
+    },
+    {
       "source": "/release-assets/r73/venue-workspace-v15.min.js",
       "has": [
         {
@@ -623,6 +645,17 @@
         }
       ],
       "destination": "/assets/r73/venue-workspace-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r74/venue-workspace-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r74/venue-workspace-v15.min.js.br"
     },
     {
       "source": "/release-assets/r72/tournament-bracket-v15.min.js",
@@ -645,6 +678,17 @@
         }
       ],
       "destination": "/assets/r73/tournament-bracket-v15.min.js.br"
+    },
+    {
+      "source": "/release-assets/r74/tournament-bracket-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r74/tournament-bracket-v15.min.js.br"
     },
     {
       "source": "/release-assets/r69/styles-v15.min.css",
@@ -702,6 +746,17 @@
       "destination": "/assets/r73/styles-v15.min.css.br"
     },
     {
+      "source": "/release-assets/r74/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "destination": "/assets/r74/styles-v15.min.css.br"
+    },
+    {
       "source": "/release-assets/r69/app-v15.min.js",
       "destination": "/assets/r69/app-v15.min.js"
     },
@@ -720,6 +775,10 @@
     {
       "source": "/release-assets/r73/app-v15.min.js",
       "destination": "/assets/r73/app-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r74/app-v15.min.js",
+      "destination": "/assets/r74/app-v15.min.js"
     },
     {
       "source": "/release-assets/r69/crew-planner-v15.min.js",
@@ -742,8 +801,16 @@
       "destination": "/assets/r73/crew-planner-v15.min.js"
     },
     {
+      "source": "/release-assets/r74/crew-planner-v15.min.js",
+      "destination": "/assets/r74/crew-planner-v15.min.js"
+    },
+    {
       "source": "/release-assets/r73/venue-workspace-v15.min.js",
       "destination": "/assets/r73/venue-workspace-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r74/venue-workspace-v15.min.js",
+      "destination": "/assets/r74/venue-workspace-v15.min.js"
     },
     {
       "source": "/release-assets/r72/tournament-bracket-v15.min.js",
@@ -752,6 +819,10 @@
     {
       "source": "/release-assets/r73/tournament-bracket-v15.min.js",
       "destination": "/assets/r73/tournament-bracket-v15.min.js"
+    },
+    {
+      "source": "/release-assets/r74/tournament-bracket-v15.min.js",
+      "destination": "/assets/r74/tournament-bracket-v15.min.js"
     },
     {
       "source": "/release-assets/r69/styles-v15.min.css",
@@ -772,6 +843,10 @@
     {
       "source": "/release-assets/r73/styles-v15.min.css",
       "destination": "/assets/r73/styles-v15.min.css"
+    },
+    {
+      "source": "/release-assets/r74/styles-v15.min.css",
+      "destination": "/assets/r74/styles-v15.min.css"
     }
   ],
   "headers": [
@@ -1980,6 +2055,23 @@
       ]
     },
     {
+      "source": "/release-assets/r74/app-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
       "source": "/release-assets/r69/app-v15.min.js",
       "has": [
         {
@@ -2060,6 +2152,22 @@
       ]
     },
     {
+      "source": "/release-assets/r74/app-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
       "source": "/release-assets/r69/crew-planner-v15.min.js",
       "headers": [
         {
@@ -2145,7 +2253,41 @@
       ]
     },
     {
+      "source": "/release-assets/r74/crew-planner-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
       "source": "/release-assets/r73/venue-workspace-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r74/venue-workspace-v15.min.js",
       "headers": [
         {
           "key": "Content-Type",
@@ -2180,6 +2322,23 @@
     },
     {
       "source": "/release-assets/r73/tournament-bracket-v15.min.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r74/tournament-bracket-v15.min.js",
       "headers": [
         {
           "key": "Content-Type",
@@ -2276,7 +2435,39 @@
       ]
     },
     {
+      "source": "/release-assets/r74/crew-planner-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
       "source": "/release-assets/r73/venue-workspace-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r74/venue-workspace-v15.min.js",
       "has": [
         {
           "type": "header",
@@ -2309,6 +2500,22 @@
     },
     {
       "source": "/release-assets/r73/tournament-bracket-v15.min.js",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r74/tournament-bracket-v15.min.js",
       "has": [
         {
           "type": "header",
@@ -2409,6 +2616,23 @@
       ]
     },
     {
+      "source": "/release-assets/r74/styles-v15.min.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept-Encoding"
+        }
+      ]
+    },
+    {
       "source": "/release-assets/r69/styles-v15.min.css",
       "has": [
         {
@@ -2474,6 +2698,22 @@
     },
     {
       "source": "/release-assets/r73/styles-v15.min.css",
+      "has": [
+        {
+          "type": "header",
+          "key": "Accept-Encoding",
+          "value": "(^|.*,\\s*)[bB][rR](\\s*;\\s*[qQ]\\s*=\\s*(1(\\.0{0,3})?|0\\.([1-9][0-9]{0,2}|0[1-9][0-9]?|00[1-9])))?\\s*(,.*|$)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Encoding",
+          "value": "br"
+        }
+      ]
+    },
+    {
+      "source": "/release-assets/r74/styles-v15.min.css",
       "has": [
         {
           "type": "header",
