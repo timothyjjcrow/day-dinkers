@@ -5,7 +5,7 @@ import csv
 import io
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -37,14 +37,28 @@ from backend.services.business_governance import (
     BusinessGovernanceError,
     business_access_role,
     business_snapshot,
+    content_precondition_error,
     record_revision,
 )
 from backend.services.business_visibility import (
     business_is_public,
     public_business_query,
+    reviewed_profile_search_value,
 )
 
 businesses_bp = Blueprint('businesses', __name__)
+
+from backend.services.venue_locations import pending_court_request_guard
+businesses_bp.before_app_request(pending_court_request_guard)
+
+@businesses_bp.after_request
+def business_content_etag(response):
+    payload = response.get_json(silent=True) if response.is_json else None
+    if isinstance(payload, dict) and payload.get('content_version'):
+        response.set_etag(payload['content_version'])
+        response.headers['Cache-Control'] = 'private, no-store'
+    return response
+
 
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 _TIME_RE = re.compile(r'^(?:[01]\d|2[0-3]):[0-5]\d$')
@@ -62,7 +76,7 @@ _PROTECTED_PROFILE_FIELDS = {
     'id', 'owner_id', 'verified', 'verified_at', 'claim_status',
     'governance_status', 'suspension_reason', 'suspended_at', 'suspended_by',
     'content_review_status', 'content_reviewed_at', 'logo_data',
-    'created_at', 'updated_at',
+    'created_at', 'updated_at', 'reviewed_public_snapshot',
 }
 _MAX_ITEMS = 100
 _SCHEDULE_CSV_MAX_BYTES = 256 * 1024
@@ -236,6 +250,36 @@ def _apply_profile_payload(business, payload, *, creating=False):
                 business, attr,
                 _text(payload.get(field), field=field, maximum=maximum),
             )
+    if 'timezone' in payload:
+        timezone = _text(payload.get('timezone'), field='timezone', maximum=64)
+        if timezone:
+            try:
+                ZoneInfo(timezone)
+            except (ValueError, ZoneInfoNotFoundError):
+                raise PayloadError('invalid_timezone')
+        business.timezone = timezone
+        if 'structured_hours' not in payload and business.structured_hours not in ('{}', ''):
+            from backend.services.court_hours import hours_dict, normalize_hours
+            try:
+                business.structured_hours = json.dumps(normalize_hours({**hours_dict(business.structured_hours), 'timezone':timezone}), sort_keys=True)
+            except ValueError as exc:
+                raise PayloadError(str(exc))
+    if 'structured_hours' in payload:
+        from backend.services.court_hours import normalize_hours
+        try:
+            business.structured_hours = json.dumps(normalize_hours(payload['structured_hours'], business.timezone), sort_keys=True)
+        except ValueError as exc:
+            raise PayloadError(str(exc))
+    if 'visitor_info' in payload:
+        from backend.services.court_visiting import normalize_visiting
+        try:
+            business.visitor_info = json.dumps(normalize_visiting(payload['visitor_info']), sort_keys=True)
+        except ValueError as exc:
+            raise PayloadError(str(exc))
+    if 'hours_dawn_to_dusk' in payload:
+        business.hours_dawn_to_dusk = _boolean(payload['hours_dawn_to_dusk'], field='hours_dawn_to_dusk')
+    if business.hours_dawn_to_dusk and business.structured_hours not in ('{}', ''):
+        raise PayloadError('choose_one_hours_mode')
     if 'email' in payload:
         email = _text(payload.get('email'), field='email', maximum=255).lower()
         if email and not _EMAIL_RE.fullmatch(email):
@@ -271,6 +315,8 @@ def _apply_profile_payload(business, payload, *, creating=False):
         if publish and business.content_review_status != 'approved':
             raise PayloadError('business_content_review_required')
         business.published = publish
+        if publish:
+            business.reviewed_public_snapshot = ''
 
 
 def _profile_payload(business, *, owner=False, manager_role=None):
@@ -355,8 +401,8 @@ def list_businesses():
     if q:
         like = f'%{q[:120]}%'
         query = query.filter(db.or_(
-            BusinessProfile.name.ilike(like),
-            BusinessProfile.description.ilike(like),
+            reviewed_profile_search_value('name').ilike(like),
+            reviewed_profile_search_value('description').ilike(like),
         ))
     items = query.order_by(BusinessProfile.verified_at.desc(), BusinessProfile.id).limit(100)
     return jsonify({'items': [_profile_payload(item) for item in items]})
@@ -428,6 +474,100 @@ def court_business(court_id):
     })
 
 
+def _validated_venue_location(payload):
+    if not isinstance(payload, dict):
+        raise PayloadError('venue_location_required')
+    values = {key: _text(payload.get(key), field=key, maximum=maximum, required=True) for key, maximum in [('name', 120), ('address', 255), ('city', 120), ('state', 2)]}
+    values['state'] = values['state'].upper()
+    if not re.fullmatch('[A-Z]{2}', values['state']):
+        raise PayloadError('invalid_state')
+    try:
+        values['latitude'] = float(payload.get('latitude'))
+        values['longitude'] = float(payload.get('longitude'))
+        values['num_courts'] = int(payload.get('num_courts') or 1)
+    except (ValueError, TypeError):
+        raise PayloadError('invalid_venue_location')
+    if not (18 <= values['latitude'] <= 72 and -180 <= values['longitude'] <= -66 and 1 <= values['num_courts'] <= 100):
+        raise PayloadError('invalid_venue_location')
+    values['indoor'] = _boolean(payload.get('indoor', False), field='indoor')
+    return values
+
+
+def _duplicate_location_response(rows):
+    public = [row for row in rows if not row.pending_submission]
+    return jsonify({'error': 'venue_location_already_listed', 'message': 'A matching location already exists. Choose the existing venue or contact support about a pending location.', 'items': [{'id': row.id, 'name': row.name, 'address': row.address, 'city': row.city, 'state': row.state} for row in public]}), 409
+
+
+@businesses_bp.post('/businesses/claims/new-location')
+@rate_limit(5, 3600)
+@login_required
+def submit_missing_venue_claim():
+    from backend.services.venue_locations import possible_venue_duplicates, lock_venue_submission_review
+    try:
+        payload = _request_object()
+        values = _validated_venue_location(payload.get('location'))
+        _require_authorized_attestation(payload)
+        _claim_submission_evidence(payload)
+        _text(payload.get('role'), field='role', maximum=80, required=True)
+    except PayloadError as exc:
+        return jsonify({'error': str(exc)}), 400
+    actor_error = _lock_current_actor()
+    if actor_error:
+        return actor_error
+    lock_venue_submission_review()
+    duplicates = possible_venue_duplicates(values)
+    if duplicates:
+        return _duplicate_location_response(duplicates)
+    try:
+        court = Court(**values, county_slug='venue_submission', verified=False, pending_submission=True)
+        db.session.add(court)
+        db.session.flush()
+        response = _submit_business_claim({**payload, 'court_id': court.id})
+        if isinstance(response, tuple) and response[1] >= 400:
+            db.session.rollback()
+        return response
+    except Exception:
+        db.session.rollback()
+        raise
+
+
+@businesses_bp.patch('/businesses/<int:business_id>/location')
+@login_required
+@rate_limit(10, 3600)
+def update_pending_venue_location(business_id):
+    from backend.services.venue_locations import possible_venue_duplicates, lock_venue_submission_review
+    business, error = _owned_profile_or_error(business_id)
+    if error:
+        return error
+    if g.business_role != 'owner' or not business.court.pending_submission:
+        return jsonify({'error': 'pending_location_owner_only'}), 403
+    precondition = content_precondition_error(business)
+    if precondition:
+        return precondition
+    try:
+        values = _validated_venue_location(_request_object())
+        lock_venue_submission_review()
+        duplicates = possible_venue_duplicates(values, exclude_id=business.court_id)
+        if duplicates:
+            return _duplicate_location_response(duplicates)
+        before = business_snapshot(business)
+        court = business.court
+        old_location = {key: getattr(court, key) for key in values}
+        if business.name == court.name:
+            business.name = values['name']
+        for key, value in values.items():
+            setattr(court, key, value)
+        record_revision(business, actor_user_id=g.current_user.id, action='pending_location_update', before_snapshot=before, sensitive=False)
+        from backend.services.business_governance import record_governance_event
+        if old_location != values:
+            record_governance_event(business, 'pending_location_update', actor_user_id=g.current_user.id, details={'before':old_location, 'after':values})
+        db.session.commit()
+    except PayloadError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    return jsonify(_profile_payload(business, owner=True, manager_role='owner'))
+
+
 @businesses_bp.post('/businesses/claims')
 @rate_limit(10, 3600)
 @login_required
@@ -436,6 +576,10 @@ def submit_business_claim():
         payload = _request_object()
     except PayloadError as exc:
         return jsonify({'error': str(exc)}), 400
+    return _submit_business_claim(payload)
+
+
+def _submit_business_claim(payload):
     try:
         court_id = int(payload.get('court_id'))
     except (TypeError, ValueError):
@@ -661,6 +805,10 @@ def update_business(business_id):
             return jsonify({'error': 'court_id_cannot_change'}), 400
         if requested_court_id != business.court_id:
             return jsonify({'error': 'court_id_cannot_change'}), 400
+    precondition = content_precondition_error(business)
+    if precondition:
+        return precondition
+    was_public = business_is_public(business)
     before_snapshot = business_snapshot(business)
     sensitive = False
     try:
@@ -680,6 +828,7 @@ def update_business(business_id):
             action='profile_update',
             before_snapshot=before_snapshot,
             sensitive=sensitive,
+            was_public=was_public,
         )
         db.session.commit()
     except PayloadError as exc:
@@ -722,6 +871,18 @@ def _validated_offering(raw, position):
     }
 
 
+def _validate_schedule_services(business, values):
+    from backend.services.business_schedule import overrides_dict
+    ids = {values.get('offering_id')} - {None}
+    for entries in overrides_dict(values.get('occurrence_overrides')).values():
+        for changes in entries.values():
+            if changes.get('offering_id') is not None:
+                ids.add(changes['offering_id'])
+    allowed = {item.id for item in business.offerings}
+    if not ids.issubset(allowed):
+        raise PayloadError('service_not_at_this_venue')
+
+
 def _replace_items(business, raw_items, *, relationship, model, validator, error_name):
     if not isinstance(raw_items, list):
         raise PayloadError('items_must_be_a_list')
@@ -740,9 +901,34 @@ def _replace_items(business, raw_items, *, relationship, model, validator, error
                 item = by_id.pop(int(raw_id))
             except (TypeError, ValueError, KeyError):
                 raise PayloadError(error_name)
+        if model is BusinessScheduleItem:
+            _validate_schedule_services(business, values)
+            checked = values.pop('availability_checked', False)
+            if values.get('spots_remaining') is None:
+                values['availability_updated_at'] = None
+            elif checked or item.spots_remaining != values.get('spots_remaining'):
+                values['availability_updated_at'] = utcnow()
+            from backend.services.business_schedule import overrides_dict
+            values['occurrence_overrides'] = json.dumps(_stamp_availability_overrides(overrides_dict(item.occurrence_overrides), overrides_dict(values['occurrence_overrides']), {**item.to_dict(), **values}), sort_keys=True)
+        changed = any(getattr(item, key, None) != value for key, value in values.items() if key != 'source_updated_at')
         for key, value in values.items():
-            setattr(item, key, value)
+            if key != 'source_updated_at' or changed:
+                setattr(item, key, value)
         retained.append(item)
+    if model is BusinessOffering and by_id:
+        from backend.services.business_schedule import overrides_dict
+        for session in business.schedule_items:
+            if session.offering_id in by_id:
+                session.offering_id = None
+            overrides = overrides_dict(session.occurrence_overrides)
+            changed = False
+            for entries in overrides.values():
+                for changes in entries.values():
+                    if changes.get('offering_id') in by_id:
+                        changes['offering_id'] = None
+                        changed = True
+            if changed:
+                session.occurrence_overrides = json.dumps(overrides, sort_keys=True)
     for item in by_id.values():
         db.session.delete(item)
     setattr(business, relationship, retained)
@@ -758,6 +944,9 @@ def replace_business_offerings(business_id):
     business, err = _owned_profile_or_error(business_id)
     if err:
         return err
+    precondition = content_precondition_error(business)
+    if precondition:
+        return precondition
     before_snapshot = business_snapshot(business)
     try:
         payload = _request_object()
@@ -795,7 +984,7 @@ def replace_business_offerings(business_id):
     ))
 
 
-def _validated_schedule_item(raw, position):
+def _validated_schedule_item(raw, position, *, validate_overrides=True):
     if not isinstance(raw, dict):
         raise PayloadError('schedule_item_must_be_an_object')
 
@@ -880,7 +1069,17 @@ def _validated_schedule_item(raw, position):
         raise PayloadError('invalid_schedule_status')
     if spots_remaining == 0 and status == 'scheduled':
         status = 'sold_out'
+    overrides = _validated_occurrence_overrides(raw, position) if validate_overrides else {}
+    offering_id = raw.get('offering_id')
+    if offering_id in ('', None):
+        offering_id = None
+    elif isinstance(offering_id, bool) or not str(offering_id).isdigit() or not 0 < int(offering_id) < 2147483648:
+        raise PayloadError('invalid_offering_id')
+    else:
+        offering_id = int(offering_id)
     return {
+        'offering_id': offering_id,
+        'occurrence_overrides': json.dumps(overrides, sort_keys=True),
         'id': raw.get('id'),
         'title': _text(
             raw.get('title'), field='schedule_title', maximum=120, required=True,
@@ -905,6 +1104,7 @@ def _validated_schedule_item(raw, position):
         'instructor': _text(
             raw.get('instructor'), field='instructor', maximum=120,
         ),
+        'availability_checked': _boolean(raw.get('availability_checked', False), field='availability_checked'),
         'source_updated_at': utcnow(),
         'skill_level': _text(
             raw.get('skill_level') or 'all', field='skill_level', maximum=40,
@@ -913,6 +1113,73 @@ def _validated_schedule_item(raw, position):
         'active': _boolean(raw.get('active', True), field='active'),
         'sort_order': position,
     }
+
+
+_OVERRIDE_FIELDS = {'title', 'kind', 'day_of_week', 'start_time', 'end_time', 'timezone', 'offering_id',
+                    'skill_level', 'booking_url', 'capacity', 'spots_remaining', 'status',
+                    'location_note', 'instructor', 'active', 'availability_checked', 'availability_updated_at'}
+
+
+def _validated_occurrence_overrides(raw, position):
+    from backend.services.business_schedule import overrides_dict
+    supplied = raw.get('occurrence_overrides') or {}
+    if not isinstance(supplied, (dict, str)):
+        raise PayloadError('invalid_occurrence_overrides')
+    if isinstance(supplied, str):
+        try:
+            supplied = json.loads(supplied)
+        except ValueError:
+            raise PayloadError('invalid_occurrence_overrides')
+        if not isinstance(supplied, dict):
+            raise PayloadError('invalid_occurrence_overrides')
+    rules = supplied
+    if set(rules) - {'dates', 'following'}:
+        raise PayloadError('invalid_occurrence_overrides')
+    result = {}
+    for scope in ('dates', 'following'):
+        entries = rules.get(scope) or {}
+        if not isinstance(entries, dict) or len(entries) > 366:
+            raise PayloadError('invalid_occurrence_overrides')
+        clean = {}
+        for key, changes in entries.items():
+            try:
+                date.fromisoformat(key)
+            except (ValueError, TypeError):
+                raise PayloadError('invalid_occurrence_date')
+            if not isinstance(changes, dict) or set(changes) - _OVERRIDE_FIELDS:
+                raise PayloadError('invalid_occurrence_fields')
+            if scope == 'dates' and 'day_of_week' in changes:
+                raise PayloadError('occurrence_day_cannot_change')
+            normalized = _validated_schedule_item({**raw, **changes, 'occurrence_overrides': {}}, position, validate_overrides=False)
+            clean[key] = {field: normalized[field] for field in changes if field != 'availability_updated_at'}
+            if 'availability_updated_at' in changes:
+                clean[key]['availability_updated_at'] = str(changes['availability_updated_at'] or '')
+        if clean:
+            result[scope] = clean
+    from backend.services.business_schedule import occurrence_fields
+    for key in set(result.get('dates', {})) | set(result.get('following', {})):
+        effective = occurrence_fields({**raw, 'occurrence_overrides': result}, date.fromisoformat(key))
+        _validated_schedule_item(effective, position, validate_overrides=False)
+    return result
+
+
+def _stamp_availability_overrides(before, after, base_row=None):
+    """Only server-observed inventory edits may refresh the availability date."""
+    stamped = {}
+    for scope, entries in after.items():
+        stamped[scope] = {}
+        for day, changes in entries.items():
+            previous = before.get(scope, {}).get(day, {})
+            clean = {key: value for key, value in changes.items() if key not in {'availability_updated_at', 'availability_checked'}}
+            changed_spots = 'spots_remaining' in clean and clean.get('spots_remaining') != previous.get('spots_remaining')
+            if changes.get('availability_checked') or changed_spots:
+                from backend.services.business_schedule import occurrence_fields
+                effective = occurrence_fields({**(base_row or {}), 'occurrence_overrides': after}, date.fromisoformat(day))
+                clean['availability_updated_at'] = utcnow().isoformat() + 'Z' if effective.get('spots_remaining') is not None else None
+            elif previous.get('availability_updated_at'):
+                clean['availability_updated_at'] = previous['availability_updated_at']
+            stamped[scope][day] = clean
+    return stamped
 
 
 def _schedule_csv_header(value):
@@ -1096,7 +1363,7 @@ def preview_business_schedule_csv(business_id):
     try:
         payload = _request_object()
         timezone = _text(
-            payload.get('timezone') or 'UTC', field='timezone', maximum=64,
+            payload.get('timezone') or business.venue_timezone() or 'UTC', field='timezone', maximum=64,
             required=True,
         )
         ZoneInfo(timezone)
@@ -1121,6 +1388,102 @@ def preview_business_schedule_csv(business_id):
     })
 
 
+def _schedule_booking_urls(rows):
+    from backend.services.business_schedule import overrides_dict
+    urls = set()
+    for row in rows:
+        if row.get('booking_url'):
+            urls.add(row['booking_url'])
+        for rules in overrides_dict(row.get('occurrence_overrides')).values():
+            for changes in rules.values():
+                if changes.get('booking_url'):
+                    urls.add(changes['booking_url'])
+    return urls
+
+
+@businesses_bp.get('/businesses/<int:business_id>/agenda')
+def business_agenda(business_id):
+    from backend.services.business_schedule import dated_occurrences, local_today
+    from backend.services.business_visibility import hide_unsafe_public_links
+    business, error = _profile_or_404(business_id)
+    if error:
+        return error
+    viewer = optional_current_user()
+    role = business_access_role(business, viewer.id) if viewer else None
+    draft = request.args.get('draft') == '1'
+    if draft and not role:
+        return jsonify({'error': 'business_manager_only'}), 403
+    if not draft and not business_is_public(business):
+        return jsonify({'error': 'business_not_found'}), 404
+    snapshot = business_snapshot(business) if draft or not business.reviewed_public_snapshot else business.reviewed_snapshot_dict()
+    timezone = business.venue_timezone() if draft else snapshot.get('profile', {}).get('timezone') or business.venue_timezone()
+    today = local_today(timezone)
+    try:
+        start = date.fromisoformat(request.args.get('from') or today.isoformat())
+        end = date.fromisoformat(request.args.get('to') or (start + timedelta(days=6)).isoformat())
+    except ValueError:
+        return jsonify({'error': 'invalid_schedule_range'}), 400
+    if end < start or (end - start).days > 92:
+        return jsonify({'error': 'invalid_schedule_range'}), 400
+    rows = snapshot.get('schedule', [])
+    if not draft:
+        rows = hide_unsafe_public_links(business, {'schedule': rows})['schedule']
+    items = dated_occurrences(rows, start, end, include_hidden=draft)
+    payload = {'items': items, 'from': start.isoformat(), 'to': end.isoformat(), 'timezone': timezone, 'draft': draft}
+    if draft:
+        from backend.services.business_governance import content_version
+        payload['content_version'] = content_version(business)
+    return jsonify(payload)
+
+
+@businesses_bp.route('/businesses/<int:business_id>/schedule/<int:item_id>/occurrences/<on>', methods=['PATCH', 'DELETE'])
+@rate_limit(60, 3600)
+@login_required
+def edit_business_occurrence(business_id, item_id, on):
+    from backend.services.business_schedule import occurrence_fields, occurs_on, overrides_dict
+    business, error = _owned_profile_or_error(business_id)
+    if error:
+        return error
+    precondition = content_precondition_error(business)
+    if precondition:
+        return precondition
+    item = next((row for row in business.schedule_items if row.id == item_id), None)
+    if item is None:
+        return jsonify({'error': 'schedule_item_not_found'}), 404
+    try:
+        on_date = date.fromisoformat(on)
+        payload = _request_object()
+        scope = payload.get('scope', 'this_date')
+        if scope not in {'this_date', 'following_dates'} or (scope == 'following_dates' and item.recurrence == 'dated'):
+            raise PayloadError('invalid_occurrence_scope')
+        row = item.to_dict()
+        rules = overrides_dict(row.get('occurrence_overrides'))
+        key = 'dates' if scope == 'this_date' else 'following'
+        removing_existing_rule = request.method == 'DELETE' and on in rules.get(key, {})
+        if not removing_existing_rule and not occurs_on(occurrence_fields(row, on_date), on_date):
+            raise PayloadError('occurrence_not_scheduled')
+        before = business_snapshot(business)
+        rules.setdefault(key, {})
+        if request.method == 'DELETE':
+            rules[key].pop(on, None)
+        else:
+            changes = payload.get('changes')
+            if not isinstance(changes, dict) or not changes:
+                raise PayloadError('occurrence_changes_required')
+            rules[key][on] = {**rules[key].get(on, {}), **changes}
+        normalized = _validated_schedule_item({**row, 'occurrence_overrides': rules}, item.sort_order)
+        _validate_schedule_services(business, normalized)
+        item.occurrence_overrides = json.dumps(_stamp_availability_overrides(overrides_dict(item.occurrence_overrides), overrides_dict(normalized['occurrence_overrides']), row), sort_keys=True)
+        item.source_updated_at = utcnow()
+        record_revision(business, actor_user_id=g.current_user.id, action='schedule_occurrence_update', before_snapshot=before,
+                        sensitive=_schedule_booking_urls(before['schedule']) != _schedule_booking_urls([value.to_dict() for value in business.schedule_items]))
+        db.session.commit()
+    except (ValueError, PayloadError) as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    return jsonify(_profile_payload(business, owner=g.business_role == 'owner', manager_role=g.business_role))
+
+
 @businesses_bp.put('/businesses/<int:business_id>/schedule')
 @rate_limit(30, 3600)
 @login_required
@@ -1131,6 +1494,9 @@ def replace_business_schedule(business_id):
     business, err = _owned_profile_or_error(business_id)
     if err:
         return err
+    precondition = content_precondition_error(business)
+    if precondition:
+        return precondition
     before_snapshot = business_snapshot(business)
     try:
         payload = _request_object()
@@ -1140,17 +1506,11 @@ def replace_business_schedule(business_id):
         _replace_items(
             business, payload.get('items'),
             relationship='schedule_items', model=BusinessScheduleItem,
-            validator=_validated_schedule_item,
+            validator=lambda raw, position: _validated_schedule_item({**raw, 'timezone': raw.get('timezone') or business.venue_timezone() or 'UTC'} if isinstance(raw, dict) else raw, position),
             error_name='schedule_item_not_found',
         )
-        after_urls = {
-            item.booking_url for item in business.schedule_items if item.booking_url
-        }
-        before_urls = {
-            str(item.get('booking_url') or '')
-            for item in before_snapshot.get('schedule', [])
-            if item.get('booking_url')
-        }
+        after_urls = _schedule_booking_urls([item.to_dict() for item in business.schedule_items])
+        before_urls = _schedule_booking_urls(before_snapshot.get('schedule', []))
         record_revision(
             business,
             actor_user_id=g.current_user.id,

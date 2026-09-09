@@ -64,8 +64,9 @@ def test_closed_court_checkin_is_rejected_without_creating_presence(closed_court
 def test_closed_detail_replaces_every_new_play_surface_but_keeps_exit_and_correction():
     detail = section(APP, "async function openCourtDetail", "function openCheckInSheet")
 
-    assert "if (court.closed === true)" in detail
-    assert "Player-organized sessions are paused while this court is marked closed." in detail
+    timeline = section(APP, "function loadCourtTimeline", "function courtConditionReportsHtml")
+    assert "create.disabled=data.closed" in timeline
+    assert "Existing plans remain in My plans" in timeline
     assert "const primaryAction = courtClosed ? ''" in detail
     assert "const secondaryActions = courtClosed ?" in detail
     assert "courtClosed ? '' : myOpenGame" in detail
@@ -102,7 +103,7 @@ def test_court_facts_reviews_and_reservations_are_visible_without_disclosures():
     assert "openCourtReviews" in detail
     assert "const reservationHref = businessActionHref(court.reservation_url);" in detail
     assert "Reserve a court" in detail
-    assert "<b>Busiest:</b>" in detail
+    assert "courtCheckinHistoryHtml(court.checkin_history)" in detail
     assert "courtOpenStatusFact(c)" in card
     assert "c.reservation_url ? 'Online reservations available'" in card
     assert ".cd-hero-facts" in STYLES
@@ -127,8 +128,10 @@ def test_empty_sessions_offer_a_context_preserving_action_and_detail_has_a_loadi
     assert detail.index("const modal = reuseModal || openModal") < detail.index(
         "court = await api(`/courts/${normalizedCourtId}`)",
     )
-    assert 'id="cd-schedule-empty">Plan the first session</button>' in detail
-    assert "modal.querySelector('#cd-schedule-empty')?.addEventListener" in detail
+    timeline = section(APP, "function loadCourtTimeline", "function courtConditionReportsHtml")
+    assert "No dated play is listed this week" in timeline
+    assert "data-timeline-create" in timeline
+    assert "openChildModal(modal,()=>openNewGameModal({court}))" in timeline
     assert "openChildModal(modal, () => openNewGameModal" in detail
     assert "openChildModal(modal, () => openConditionSheet" in detail
     assert "openChildModal(modal, () => openCourtGallery" in detail

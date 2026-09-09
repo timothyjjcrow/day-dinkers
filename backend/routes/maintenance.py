@@ -29,13 +29,16 @@ def _maintenance_jobs():
         expire_abandoned_instant_rallies,
         expire_stale_unscored,
         roll_forward_recurring,
+        maintain_game_consent,
         send_game_reminders,
     )
     from backend.routes.leagues import (
         advance_due_league_rounds,
         maintain_league_results,
+        send_league_schedule_reminders,
     )
     from backend.routes.tournaments import (
+        maintain_tournament_waitlists,
         maintain_tournament_results,
         send_tournament_reminders,
     )
@@ -43,12 +46,15 @@ def _maintenance_jobs():
         ('presence_cleanup', cleanup_stale_presence),
         ('score_auto_confirm', auto_confirm_stale_scores),
         ('recurring_games', roll_forward_recurring),
+        ('game_consent', maintain_game_consent),
         ('instant_game_expiry', expire_abandoned_instant_rallies),
         ('unscored_game_expiry', expire_stale_unscored),
         ('game_reminders', send_game_reminders),
         ('tournament_reminders', send_tournament_reminders),
+        ('tournament_waitlists', maintain_tournament_waitlists),
         ('tournament_result_maintenance', maintain_tournament_results),
         ('league_result_maintenance', maintain_league_results),
+        ('league_schedule_reminders', send_league_schedule_reminders),
         ('league_advancement', advance_due_league_rounds),
         ('club_digests', send_club_digests),
     ]

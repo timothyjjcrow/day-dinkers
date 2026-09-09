@@ -5,7 +5,7 @@ import json
 import re
 import secrets
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from html import escape as html_escape
 
@@ -351,6 +351,7 @@ def presence_payload(user_id):
     expires_at = checkin_expires_at(checkin)
     return {
         'checked_in': True,
+        **checkin.source_payload(),
         'court_id': checkin.court_id,
         'court_name': court.name if court else 'Court',
         'court_latitude': court.latitude if court else None,
@@ -611,7 +612,11 @@ def _active_tournament_payload(user):
     data = tournament.to_dict(user.id)
     data['banner_state'] = 'live' if tournament.status == 'active' else 'soon'
     my_entry = tournament.entry_for(user.id)
-    data['my_checked_in'] = bool(my_entry and my_entry.checked_in_at)
+    data['my_checked_in'] = bool(my_entry and (
+        my_entry.player1_arrived_at if my_entry.player1_id == user.id
+        else my_entry.player2_arrived_at
+    ))
+    data['arrival_open'] = now >= tournament.starts_at - timedelta(hours=2)
     # Who this player faces next — the banner's live-state headline.
     data['my_next_opponent'] = None
     if my_entry and tournament.status == 'active':
@@ -638,6 +643,7 @@ def _active_league_payload(user):
 
     joined = db.session.query(LeagueMember.league_id).filter(
         LeagueMember.user_id == user.id,
+        LeagueMember.withdrawn_at.is_(None),
     )
     leagues = (
         League.query
@@ -926,7 +932,7 @@ def register():
 
     if not _EMAIL_RE.match(email):
         return jsonify({'error': 'invalid_email'}), 400
-    if len(password) < 6:
+    if len(password) < 8:
         return jsonify({'error': 'password_too_short'}), 400
     if not display_name:
         return jsonify({'error': 'display_name_required'}), 400
@@ -1379,7 +1385,7 @@ def change_password():
     if not user.check_password(str(payload.get('current_password') or '')):
         return jsonify({'error': 'invalid_credentials'}), 403
     new_password = str(payload.get('new_password') or '')
-    if len(new_password) < 6:
+    if len(new_password) < 8:
         return jsonify({'error': 'password_too_short'}), 400
     user.set_password(new_password)
     user.auth_version = int(user.auth_version or 1) + 1
@@ -1500,6 +1506,45 @@ def revoke_other_sessions():
     user.auth_version = int(user.auth_version or 1) + 1
     db.session.commit()
     return jsonify({'revoked': True, 'token': _issue_token(user)})
+
+
+@auth_bp.post('/me/export')
+@rate_limit(5, 3600)
+@login_required
+def export_player_data():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_request'}), 400
+    user = db.session.get(User, g.current_user.id, populate_existing=True)
+    if not user or user.deleted_at or user.suspended_at:
+        return jsonify({'error': 'authentication_required'}), 401
+    if not user.check_password(str(payload.get('current_password') or '')):
+        return jsonify({'error': 'invalid_credentials'}), 403
+    if user.mfa_enabled:
+        from backend.services.mfa import MFAError, verify_user_mfa
+        try:
+            valid, _ = verify_user_mfa(user, payload.get('mfa_code'), allow_recovery=False)
+        except MFAError:
+            return jsonify({'error': 'mfa_unavailable'}), 503
+        if not valid:
+            return jsonify({'error': 'invalid_mfa_code'}), 403
+    from backend.services.player_export import player_data_export
+    export_app = current_app._get_current_object()
+    export_user_id = user.id
+    def generate_export():
+        # WSGI starts consuming the response after the route's ORM session may
+        # have been removed. Give deferred photos and all paged collections a
+        # fresh stream-owned session instead of retaining the detached User.
+        with export_app.app_context():
+            export_user = db.session.get(User, export_user_id)
+            if not export_user or export_user.deleted_at or export_user.suspended_at:
+                raise RuntimeError('export_account_unavailable')
+            yield from player_data_export(export_user)
+    response = Response(generate_export(), mimetype='application/json')
+    response.headers['Content-Disposition'] = f'attachment; filename="third-shot-player-data-{utcnow().date()}.json"'
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 
 def _account_deletion_crew_lock_snapshot(user_id):
@@ -2483,6 +2528,22 @@ def update_me():
             return jsonify({'error': 'invalid_availability'}), 400
         cleaned = [s for s in dict.fromkeys(slots) if s in AVAILABILITY_SLOTS]
         user.availability = _json.dumps(cleaned)
+    if 'away_until' in payload:
+        raw_until = payload.get('away_until')
+        if raw_until in (None, ''):
+            user.away_until = None
+        else:
+            try:
+                until = datetime.fromisoformat(str(raw_until).replace('Z', '+00:00'))
+                if until.tzinfo is None:
+                    raise ValueError('timezone_required')
+                until = until.astimezone(timezone.utc).replace(tzinfo=None)
+            except (TypeError, ValueError, OverflowError):
+                return jsonify({'error': 'invalid_away_until', 'message': 'Choose a return date within the next 90 days.'}), 400
+            now = utcnow()
+            if until <= now or until > now + timedelta(days=90):
+                return jsonify({'error': 'invalid_away_until', 'message': 'Choose a return date within the next 90 days.'}), 400
+            user.away_until = until
     if 'nearby_visibility' in payload:
         nearby_visibility = str(payload.get('nearby_visibility') or '').strip().lower()
         if nearby_visibility not in {'everyone', 'friends', 'hidden'}:

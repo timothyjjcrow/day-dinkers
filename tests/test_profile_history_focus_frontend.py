@@ -6,8 +6,8 @@ APP = (ROOT / "public" / "app-v15.js").read_text()
 
 
 def test_profile_history_filter_restores_focus_after_its_results_rerender():
-    start = APP.index("// Saved courts (primary court first)")
-    end = APP.index("function openEditProfile", start)
+    start = APP.index("async function renderProfile(")
+    end = APP.index("function profileChangesForSection(", start)
     profile = APP[start:end]
     assert "const render = ({ restoreFilterFocus = false } = {})" in profile
     assert "render({ restoreFilterFocus: true });" in profile

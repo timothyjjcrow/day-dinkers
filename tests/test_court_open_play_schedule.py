@@ -116,6 +116,7 @@ def test_pending_corrections_can_be_read_confirmed_or_marked_not_right(client):
         'confirmed_by_me': False,
         'rejected_by_me': False,
         'needed': 1,
+        'requires_review': False,
     }]
 
     rejected = browser.post(

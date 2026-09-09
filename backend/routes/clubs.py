@@ -1071,13 +1071,29 @@ def club_chat(club_id):
     from backend.routes.chat import room_heart_counts
     return jsonify({
         'conversation': conversation.to_dict(club.name),
-        'club': {'id': club.id, 'name': club.name},
+        'club': {'id': club.id, 'name': club.name, 'joined': True, 'member_count': len(club.members)},
+        'next_game': _club_chat_next_game(club, g.current_user.id),
         'items': [m.to_dict() for m in messages],
         'heart_counts': room_heart_counts('club_id', club_id),
         'has_more': has_more,
         'has_older': has_older,
         'next_before_id': next_before_id,
     })
+
+
+def _club_chat_next_game(club, viewer_id):
+    """Membership in a public group does not grant private session access."""
+    from backend.routes.social import friend_ids
+    from backend.routes.games import _game_has_blocked_participant
+    viewer_friends = friend_ids(viewer_id)
+    for game in Game.query.filter(Game.club_id == club.id, Game.status == 'upcoming',
+            Game.scheduled_at >= utcnow()).order_by(Game.scheduled_at.asc(), Game.id.asc()).all():
+        if not game.visible_to(viewer_id, viewer_friends) or _game_has_blocked_participant(game, viewer_id):
+            continue
+        data = game.to_dict(viewer_id, slim_players=True)
+        return {key: data[key] for key in ('id', 'title', 'game_type', 'visibility', 'scheduled_at', 'court',
+            'max_players', 'spots_left', 'is_joined', 'is_invited', 'waitlist_position')}
+    return None
 
 
 @clubs_bp.patch('/clubs/<int:club_id>/notification-settings')

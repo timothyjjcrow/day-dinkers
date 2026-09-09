@@ -101,7 +101,7 @@ def test_claim_flow_is_explicit_private_and_never_overstates_pending_status():
     assert "Submitted for review" in APP
     assert "Claim submitted — only you can see this draft." in APP
     assert "I confirm I’m authorized to represent this business." in APP
-    assert "api('/businesses/claims'" in APP
+    assert "missingLocation ? '/businesses/claims/new-location' : '/businesses/claims'" in APP
     assert "court_id: courtId" in APP
     assert "role: modal.querySelector('#business-claim-role').value" in APP
     assert "verification_contact_email: contactInput.value.trim()" in APP
@@ -114,7 +114,7 @@ def test_claim_flow_is_explicit_private_and_never_overstates_pending_status():
     assert "Claim its profile to add booking, schedules, lessons, and programs." in APP
     assert 'id="business-claim-authorized" data-no-draft' in APP
     assert "Can’t find your venue?" in APP
-    assert "Add it on the Courts map" in APP
+    assert "Add a missing venue" in APP
     assert "Missing a court? Add it." in APP
 
 
@@ -123,7 +123,7 @@ def test_business_profile_has_explicit_publish_control_and_private_preview():
     workspace = section("function businessWorkspaceState", "function venueTaskHtml")
     assert "window.VenueWorkspace.state(business, businessVerificationState(business))" in workspace
     assert "verified && business.published === true && review === 'approved' && !business.suspended" in VENUE_WORKSPACE
-    assert "JSON.stringify({ published: !publicationEnabled })" in dashboard
+    assert "JSON.stringify({ published: workspace.tool === 'publish' || !publicationEnabled })" in dashboard
     assert 'id="business-player-preview"' in dashboard
     assert "Only business managers can see this draft preview" in dashboard
     assert "transitionModal(modal, () => openCourtDetail(business.court_id))" not in dashboard
@@ -136,12 +136,11 @@ def test_business_management_uses_complete_rest_contracts():
     for contract in (
         "api('/businesses/mine')",
         "api(`/businesses/${business.id}`",
-        "api(`/businesses/${business.id}/offerings`",
-        "api(`/businesses/${business.id}/schedule`",
     ):
         assert contract in APP
     assert "method: 'PATCH'" in APP
-    assert APP.count("method: 'PUT'") >= 2
+    assert "window.VenueWorkspace.saveEdits(business, {kind" in APP
+    assert "method: kind ? 'PUT' : 'PATCH'" in VENUE_WORKSPACE
     assert "amenities: modal.querySelector('#business-amenities').value.split(',').map" in APP
     assert "booking_url" in APP
     assert "membership_url" in APP
@@ -182,8 +181,9 @@ def test_court_detail_loads_verified_business_value_before_social_sections():
     assert "api(`/courts/${court.id}/business`)" in APP
     business_slot = detail.index('id="cd-business"')
     players = detail.index('id="cd-sec-players"')
-    games = detail.index('id="cd-sec-games"')
-    assert business_slot < games < players
+    timeline = detail.index('id="cd-play-here"')
+    assert timeline < business_slot < players
+    assert 'loadCourtTimeline(modal,court)' in detail
     assert "loadCourtBusiness(modal, court, { expanded: focusBusiness });" in detail
     assert "Official information from" in APP
     assert "Venue-submitted information from" in APP
@@ -193,18 +193,19 @@ def test_court_detail_loads_verified_business_value_before_social_sections():
     assert "View all ${activeOfferings.length} offerings" in APP
     assert "activeSchedule.slice(0, 8).map((item) => businessScheduleLine" in APP
     assert "businessActionHref(item.booking_url)" in APP
-    assert 'aria-label="${bookingLabel} ${esc(title)}"' in APP
+    assert 'aria-label="${bookingLabel} ${esc(title)} at ${esc(new URL(bookingHref).hostname)} (opens another site)"' in APP
     assert "Book a court" in APP
     assert "Book a lesson" in APP
     assert "Book venue open play" in APP
     assert "Venue services &amp; schedule" in APP
-    assert "Official facility hours" in APP
+    assert "Venue opening hours" in APP
     assert ".court-business-card" in STYLES
     assert ".business-action-grid" in STYLES
     assert "function bindBusinessLogoFallback" in APP
     assert "data-business-logo" in APP
     assert ".business-logo-frame img" in STYLES
-    assert "(!venueBusiness || !venueBusiness.hours)" in detail
+    assert "if (openStatusFact) tags.push" in detail
+    assert "court.hours_source === 'venue'" in detail
     assert "(!venueBusiness || !venueBusiness.website_url)" in detail
     assert "(!venueBusiness || !venueBusiness.phone)" in detail
     assert "!venueBusiness.schedule.some((item) => item && item.active !== false)" in detail
@@ -261,7 +262,7 @@ def test_non_owner_business_staff_receive_a_visible_management_entry():
 
 def test_business_dashboard_shows_named_content_and_keeps_active_completion_checks():
     assert "item.title || 'Untitled session'" in VENUE_WORKSPACE
-    assert "item.name || 'Untitled lesson'" in VENUE_WORKSPACE
+    assert "item.name || 'Untitled service'" in VENUE_WORKSPACE
     completion = section("function businessCompletion", "function businessCourtName")
     assert "item.active !== false" in completion
 
@@ -275,7 +276,7 @@ def test_booking_readiness_counts_active_item_links_and_preview_hides_owner_cont
     dashboard = section("function businessCompletion", "function businessCourtName")
     assert "businessHasBookingLink(business)" in dashboard
     preview = section("function openBusinessPlayerPreview", "async function openBusinessHub")
-    assert "courtBusinessHtml({ ...business, is_owner: false, is_manager: false, preview_only: true })" in preview
+    assert "courtBusinessHtml({ ...business, logo_url: business.logo_preview_url || business.logo_url, is_owner: false, is_manager: false, preview_only: true })" in preview
 
 
 def test_operator_links_are_filtered_before_entering_player_facing_hrefs():
@@ -507,7 +508,7 @@ def test_staged_business_editors_confirm_before_discarding_every_unsaved_layer()
 
     assert "bindModalDiscardConfirmation(modal, {" in offering_form
     assert "isDirty: formUX.isDirty" in offering_form
-    assert "Discard this offering draft?" in offering_form
+    assert "Discard this service draft?" in offering_form
 
     assert "const initialOfferings = JSON.stringify(offerings);" in offerings
     assert "isDirty: () => JSON.stringify(offerings) !== initialOfferings" in offerings
@@ -528,7 +529,7 @@ def test_staged_business_editors_confirm_before_discarding_every_unsaved_layer()
         assert "formUX.clearDraft({ disable: true });" in item_form
         assert "catch (error) { finish(); formUX.showError(error.message); }" in item_form
         assert "'Update list'" in item_form
-    assert "Next, choose Save offerings to save the updated list." in offering_form
+    assert "Next, choose Save services to save the updated list." in offering_form
     assert "Next, choose Save schedule to save the updated list." in schedule_form
     assert "closeModal(modal);\n        toast('Offerings updated')" in offerings
     assert "closeModal(modal);\n        toast('Schedule updated')" in schedule
@@ -538,7 +539,7 @@ def test_booking_links_keep_a_dirty_guard_and_clear_it_only_after_saving():
     booking = section("function openBusinessBookingSetup", "function renderBusinessHubDashboard")
     assert "bindModalDiscardConfirmation(modal, { isDirty: formUX.isDirty" in booking
     assert "Discard unsaved booking links?" in booking
-    assert booking.index("const updated = await api(") < booking.index("formUX.clearDraft({ disable: true });")
+    assert booking.index("const updated = await window.VenueWorkspace.saveEdits(") < booking.index("formUX.clearDraft({ disable: true });")
 
 
 def test_successful_child_edits_refresh_one_retained_community_or_crew_parent():

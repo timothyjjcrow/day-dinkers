@@ -16,6 +16,9 @@ from backend.services.mfa import _totp_at
 PASSWORD = 'strong-password-123'
 
 
+from business_test_support import venue_write
+
+
 @pytest.fixture()
 def app():
     app = create_app('testing')
@@ -83,7 +86,7 @@ def test_claim_review_publish_team_catalog_and_analytics_story(app, client):
     reviewer = register(client, 'reviewer@example.com', 'Business reviewer')
     viewer = register(client, 'viewer@example.com', 'Location viewer')
 
-    claimed = client.post('/api/businesses/claims', json={
+    claimed = venue_write(client, 'post', '/api/businesses/claims', json={
         'court_id': 1,
         'role': 'Owner',
         'authorized_attestation': True,
@@ -92,14 +95,14 @@ def test_claim_review_publish_team_catalog_and_analytics_story(app, client):
     business_id = claimed.get_json()['business']['id']
     claim_id = claimed.get_json()['claim']['id']
 
-    configured_profile = client.patch(
+    configured_profile = venue_write(client, 'patch',
         f'/api/businesses/{business_id}',
         json={'booking_url': 'https://whole-story.example/book'},
         headers=auth(owner),
     )
     assert configured_profile.status_code == 200, configured_profile.get_json()
 
-    evidence = client.post(
+    evidence = venue_write(client, 'post',
         f'/api/businesses/{business_id}/verification/evidence',
         json={
             'type': 'business_email',
@@ -111,7 +114,7 @@ def test_claim_review_publish_team_catalog_and_analytics_story(app, client):
     evidence_id = evidence.get_json()['evidence']['id']
     delivered = app.extensions['email_outbox'][-1]
     code = re.search(r'\b(\d{6})\b', delivered['text']).group(1)
-    verified = client.post(
+    verified = venue_write(client, 'post',
         f'/api/businesses/{business_id}/verification/evidence/{evidence_id}/verify',
         json={'token': code},
         headers=auth(owner),
@@ -152,7 +155,7 @@ def test_claim_review_publish_team_catalog_and_analytics_story(app, client):
     )
     assert content_reviewed.status_code == 200, content_reviewed.get_json()
 
-    published = client.patch(
+    published = venue_write(client, 'patch',
         f'/api/businesses/{business_id}',
         json={'published': True},
         headers=auth(owner),
@@ -160,7 +163,7 @@ def test_claim_review_publish_team_catalog_and_analytics_story(app, client):
     assert published.status_code == 200, published.get_json()
     assert published.get_json()['published'] is True
 
-    invitation = client.post(
+    invitation = venue_write(client, 'post',
         f'/api/businesses/{business_id}/team/invitations',
         json={'email': 'viewer@example.com', 'role': 'viewer'},
         headers=auth(owner),
@@ -179,7 +182,7 @@ def test_claim_review_publish_team_catalog_and_analytics_story(app, client):
             business_id=business_id,
         ).count() == 0
 
-    connected = client.post(
+    connected = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections',
         json={
             'provider_key': 'link_catalog',
@@ -213,7 +216,7 @@ def test_claim_review_publish_team_catalog_and_analytics_story(app, client):
         }],
         'conversions': [],
     }
-    synced = client.put(
+    synced = venue_write(client, 'put',
         f'/api/businesses/{business_id}/connections/{connection_id}/catalog',
         json=catalog,
         headers={**auth(owner), 'Idempotency-Key': 'whole-story-v1'},
@@ -247,14 +250,14 @@ def test_claim_review_publish_team_catalog_and_analytics_story(app, client):
         headers=auth(viewer),
     )
     assert viewer_connections.status_code == 200
-    forbidden_create = client.post(
+    forbidden_create = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections',
         json={'provider_key': 'link_catalog', 'config': {}},
         headers=auth(viewer),
     )
     assert forbidden_create.status_code == 403
 
-    event = client.post(f'/api/businesses/{business_id}/events', json={
+    event = venue_write(client, 'post', f'/api/businesses/{business_id}/events', json={
         'client_event_id': 'whole-story-booking-click-1',
         'action': 'booking',
         'connection_id': connection_id,

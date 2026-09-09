@@ -61,6 +61,7 @@ REQUIRED_COLUMNS = {
         'id', 'business_id', 'connection_id', 'occurrence_id', 'event_type',
         'event_key', 'external_event_id', 'action', 'occurred_at',
         'value_minor', 'currency', 'source', 'created_at', 'updated_at',
+        'schedule_item_id', 'schedule_occurrence_on', 'subject_label',
     },
     'business_link_health_check': {
         'id', 'business_id', 'connection_id', 'link_kind', 'url_hash', 'final_url_hash',
@@ -251,6 +252,9 @@ REQUIRED_FOREIGN_KEYS = {
         'business_booking_event_occurrence_id_fkey': (
             ('occurrence_id',), 'business_schedule_occurrence', ('id',),
         ),
+        'business_booking_event_schedule_item_id_fkey': (
+            ('schedule_item_id',), 'business_schedule_item', ('id',),
+        ),
     },
     'business_link_health_check': {
         'business_link_health_business_id_fkey': (
@@ -323,13 +327,15 @@ def _foreign_key_matches(
     item, name, columns, referred_table, referred_columns, schema,
 ):
     options = item.get('options') or {}
+    expected_delete = ('SET NULL' if name == 'business_booking_event_schedule_item_id_fkey'
+                       else 'NO ACTION')
     return (
         item.get('name') == name
         and tuple(item.get('constrained_columns') or ()) == columns
         and item.get('referred_table') == referred_table
         and tuple(item.get('referred_columns') or ()) == referred_columns
         and item.get('referred_schema') in (None, schema)
-        and str(options.get('ondelete') or 'NO ACTION').upper() == 'NO ACTION'
+        and str(options.get('ondelete') or 'NO ACTION').upper() == expected_delete
         and str(options.get('onupdate') or 'NO ACTION').upper() == 'NO ACTION'
         and options.get('deferrable') in (None, False)
         and options.get('initially') is None

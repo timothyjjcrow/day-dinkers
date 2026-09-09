@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from tests.schedule_test_support import post_with_schedule_review
 import pytest
 
 from backend.app import create_app, db
@@ -72,7 +73,7 @@ def create_game(client, owner, court, **overrides):
         'max_players': 4,
     }
     payload.update(overrides)
-    response = client.post(
+    response = post_with_schedule_review(client,
         '/api/games', json=payload, headers=headers(owner),
     )
     assert response.status_code == 201, response.get_json()
@@ -275,7 +276,10 @@ def test_live_card_tracks_roster_waitlist_and_reopens_without_reposting(client):
         f'/api/courts/{court}/chat', headers=headers(waiter),
     ).get_json()['items'][0]['open_call']
     assert promoted['state'] == 'full'
-    assert promoted['is_joined'] is True
+    assert promoted['is_joined'] is False
+    assert promoted['offer_pending'] is True
+    accepted = client.post(f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=headers(waiter))
+    assert accepted.status_code == 200, accepted.get_json()
 
     assert client.post(
         f"/api/games/{game['id']}/leave", headers=headers(player3),
@@ -305,10 +309,13 @@ def test_host_transfer_and_message_delete_preserve_retry_ledgers(client):
     ).get_json()['open_call']
 
     left = client.post(
-        f"/api/games/{game['id']}/leave", headers=headers(old_host),
+        f"/api/games/{game['id']}/leave", json={'transfer_to_user_id':new_host['user']['id']}, headers=headers(old_host),
     )
-    assert left.status_code == 200
-    assert left.get_json()['creator_id'] == new_host['user']['id']
+    assert left.status_code == 202
+    accepted = client.post(f"/api/games/{game['id']}/host-handoff/{left.get_json()['host_handoff']['id']}/respond",
+                           json={'accept':True}, headers=headers(new_host))
+    assert accepted.status_code == 200
+    assert accepted.get_json()['creator_id'] == new_host['user']['id']
 
     # An exact lost-response retry resolves for the former host even though
     # they can no longer mutate the game.

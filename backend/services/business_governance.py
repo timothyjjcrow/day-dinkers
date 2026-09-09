@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from datetime import date
+from datetime import date, datetime, UTC
 from datetime import timedelta
 
 from backend.app import db
@@ -24,11 +24,11 @@ MANAGE_ROLES = {'owner', 'admin', 'editor'}
 ADMIN_ROLES = {'owner', 'admin'}
 SENSITIVE_PROFILE_FIELDS = {
     'name', 'email', 'phone', 'website_url', 'booking_url',
-    'membership_url', 'logo_url', 'logo_data',
+    'membership_url', 'logo_url', 'logo_data', 'structured_hours', 'hours_dawn_to_dusk', 'timezone', 'visitor_info',
 }
 PROFILE_SNAPSHOT_FIELDS = (
     'name', 'description', 'announcement', 'contact_email', 'contact_phone',
-    'hours', 'amenities', 'website_url', 'booking_url', 'membership_url',
+    'hours', 'timezone', 'structured_hours', 'hours_dawn_to_dusk', 'visitor_info', 'amenities', 'website_url', 'booking_url', 'membership_url',
     'logo_url', 'logo_data',
 )
 
@@ -122,6 +122,55 @@ def snapshot_fingerprint(snapshot):
     return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 
 
+def content_version(business):
+    """Stable precondition across details, collections, logos and review state."""
+    return snapshot_fingerprint({
+        'content': business_snapshot(business),
+        'pending_location': ({key: getattr(business.court, key) for key in ('name', 'address', 'city', 'state', 'latitude', 'longitude', 'num_courts', 'indoor')} if business.court and business.court.pending_submission else None),
+        'published': bool(business.published),
+        'review': business.content_review_status,
+        'reviewed_public_snapshot': business.reviewed_public_snapshot or '',
+    })
+
+
+def content_precondition_error(business):
+    """Called after a locked, permission-checked load; never bypass stale writes."""
+    from flask import jsonify, request
+    version = content_version(business)
+    supplied = request.headers.get('If-Match', '').strip()
+    if not supplied:
+        return jsonify({
+            'error': 'business_version_required',
+            'message': 'Refresh this venue before saving. Your edits have not been changed.',
+            'content_version': version,
+        }), 428
+    if supplied != version and supplied != f'"{version}"':
+        return jsonify({
+            'error': 'business_version_conflict',
+            'message': 'Another manager saved changes. Your edits are still here; compare the latest venue before saving again.',
+            'content_version': version,
+        }), 412
+    return None
+
+
+def revision_change_summary(before, after):
+    labels = {
+        'contact_email': 'Contact email', 'contact_phone': 'Phone',
+        'website_url': 'Website', 'booking_url': 'Booking link',
+        'membership_url': 'Membership link', 'logo_url': 'Logo', 'logo_data': 'Logo',
+    }
+    fields = []
+    for key in PROFILE_SNAPSHOT_FIELDS:
+        if before.get('profile', {}).get(key) != after.get('profile', {}).get(key):
+            label = labels.get(key, key.replace('_', ' ').capitalize())
+            if label not in fields:
+                fields.append(label)
+    for key, label in [('offerings', 'Services'), ('schedule', 'Schedule')]:
+        if before.get(key) != after.get(key):
+            fields.append(label)
+    return ', '.join(fields) or 'Venue details'
+
+
 def record_governance_event(
     business, event_type, *, actor_user_id=None, operator_identifier='', details=None,
 ):
@@ -144,6 +193,7 @@ def record_revision(
     before_snapshot,
     sensitive=False,
     restored_from_id=None,
+    was_public=None,
 ):
     after_snapshot = business_snapshot(business)
     before_hash = snapshot_fingerprint(before_snapshot)
@@ -155,7 +205,7 @@ def record_revision(
         business=business,
         actor_user_id=actor_user_id,
         action=str(action)[:40],
-        change_summary=f'{before_hash[:10]} → {after_hash[:10]}',
+        change_summary=revision_change_summary(before_snapshot, after_snapshot),
         previous_snapshot=json.dumps(before_snapshot, sort_keys=True),
         snapshot=json.dumps(after_snapshot, sort_keys=True),
         sensitive=bool(sensitive),
@@ -165,9 +215,15 @@ def record_revision(
     )
     db.session.add(revision)
     if needs_review:
+        if was_public is None:
+            from backend.services.business_visibility import business_is_public
+            was_public = business_is_public(business)
+        if was_public and business.content_review_status == 'approved' and not business.reviewed_public_snapshot:
+            business.reviewed_public_snapshot = json.dumps(before_snapshot, sort_keys=True)
+        if not business.reviewed_public_snapshot:
+            business.published = False
         business.content_review_status = 'pending'
         business.content_reviewed_at = None
-        business.published = False
         record_governance_event(
             business,
             'sensitive_change_pending',
@@ -200,6 +256,16 @@ def _snapshot_date(value):
         raise BusinessGovernanceError('revision_snapshot_invalid')
 
 
+def _snapshot_time(value):
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
+    except ValueError:
+        raise BusinessGovernanceError('revision_snapshot_invalid')
+
+
 def restore_snapshot(business, snapshot):
     profile = snapshot.get('profile')
     offerings = snapshot.get('offerings')
@@ -207,13 +273,15 @@ def restore_snapshot(business, snapshot):
     if not isinstance(profile, dict) or not isinstance(offerings, list) \
             or not isinstance(schedule, list):
         raise BusinessGovernanceError('revision_snapshot_invalid')
+    profile = {**{'structured_hours':'{}', 'hours_dawn_to_dusk':False, 'visitor_info':'{}'}, **profile}
     for field in PROFILE_SNAPSHOT_FIELDS:
         if field in profile:
-            setattr(business, field, profile[field] or '')
+            setattr(business, field, bool(profile[field]) if field == 'hours_dawn_to_dusk' else profile[field] or '')
     _clear_children(business.offerings)
     db.session.flush()
+    offering_ids = {}
     for position, item in enumerate(offerings):
-        db.session.add(BusinessOffering(
+        restored_offering = BusinessOffering(
             business=business,
             name=str(item.get('name') or '')[:120],
             category=str(item.get('category') or 'other')[:32],
@@ -223,12 +291,21 @@ def restore_snapshot(business, snapshot):
             booking_url=str(item.get('booking_url') or '')[:500],
             active=bool(item.get('active', True)),
             sort_order=position,
-        ))
+        )
+        db.session.add(restored_offering)
+        db.session.flush()
+        offering_ids[item.get('id')] = restored_offering.id
     _clear_children(business.schedule_items)
     db.session.flush()
     for position, item in enumerate(schedule):
+        overrides = json.loads(json.dumps(item.get('occurrence_overrides') or {}))
+        for entries in overrides.values():
+            for changes in entries.values():
+                if 'offering_id' in changes:
+                    changes['offering_id'] = offering_ids.get(changes['offering_id'])
         db.session.add(BusinessScheduleItem(
             business=business,
+            offering_id=offering_ids.get(item.get('offering_id')),
             title=str(item.get('title') or '')[:120],
             kind=str(item.get('kind') or 'other')[:32],
             day_of_week=str(item.get('day_of_week') or '')[:12],
@@ -246,7 +323,9 @@ def restore_snapshot(business, snapshot):
             status=str(item.get('status') or 'scheduled')[:24],
             location_note=str(item.get('location_note') or '')[:240],
             instructor=str(item.get('instructor') or '')[:120],
+            occurrence_overrides=json.dumps(overrides, sort_keys=True),
             source_updated_at=utcnow(),
+            availability_updated_at=_snapshot_time(item.get('availability_updated_at')),
             active=bool(item.get('active', True)),
             sort_order=position,
         ))
@@ -255,7 +334,8 @@ def restore_snapshot(business, snapshot):
 def expire_pending_invitations(organization):
     now = utcnow()
     changed = False
-    for invitation in organization.invitations:
+    invitations = BusinessStaffInvitation.query.filter_by(organization_id=organization.id).with_for_update().execution_options(populate_existing=True).all()
+    for invitation in invitations:
         if invitation.status == 'pending' and invitation.expires_at <= now:
             invitation.status = 'expired'
             changed = True
@@ -264,13 +344,9 @@ def expire_pending_invitations(organization):
 
 def create_staff_invitation(organization, *, invited_by_id, email, role):
     expire_pending_invitations(organization)
-    existing = next(
-        (
-            invitation for invitation in organization.invitations
-            if invitation.email == email and invitation.status == 'pending'
-        ),
-        None,
-    )
+    existing = BusinessStaffInvitation.query.filter_by(
+        organization_id=organization.id, email=email, status='pending',
+    ).with_for_update().execution_options(populate_existing=True).first()
     raw_token = new_one_time_token()
     if existing is None:
         existing = BusinessStaffInvitation(

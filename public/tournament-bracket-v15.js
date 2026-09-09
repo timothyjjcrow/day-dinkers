@@ -35,7 +35,7 @@
     if (state === 'awaiting_confirmation') return { state, label: 'Awaiting confirmation', tone: 'pending', decided: false };
     if (state === 'disputed') return { state, label: 'Under review', tone: 'review', decided: false };
     return { state: 'unreported', label: !id(m.entry1_id) || !id(m.entry2_id)
-      ? 'Awaiting players' : m.scheduled_at ? 'Scheduled' : 'Ready to play', tone: 'quiet', decided: false };
+      ? 'Awaiting players' : m.play_state === 'playing' ? 'Playing now' : m.play_state === 'called' ? 'Called to court' : m.scheduled_at ? 'Estimated' : 'Ready to play', tone: m.play_state === 'playing' ? 'pending' : 'quiet', decided: false };
   }
 
   function feeders(t, m) {
@@ -87,7 +87,7 @@
         </div>`;
       };
       const schedule = meta.state !== 'bye' && !meta.decided && (m.scheduled_at || m.court_number)
-        ? [m.scheduled_at ? formatDateTime(m.scheduled_at) : '', m.court_number ? `Court ${m.court_number}` : ''].filter(Boolean).join(' · ') : '';
+        ? [!['called','playing'].includes(m.play_state) && m.scheduled_at ? formatDateTime(m.scheduled_at) : '', m.court_number ? `Court ${m.court_number}` : ''].filter(Boolean).join(' · ') : '';
       const gameLedger = showGames ? `<div class="bm-games" aria-label="Points by game">
         <span class="bm-games-label">Game scores</span>
         ${games.map((game, i) => `<span class="bm-game"><small>G${i + 1}</small><b>${Number(game.score1)}–${Number(game.score2)}</b></span>`).join('')}

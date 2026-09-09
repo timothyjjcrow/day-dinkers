@@ -65,8 +65,9 @@ def run_js(script):
           const sandbox = {{module: {{exports: {{}}}}, Date: FrozenDate, URL}};
           vm.runInNewContext(fs.readFileSync({json.dumps(str(VENUE))}, 'utf8'), sandbox);
           const Venue = sandbox.module.exports;
-        """ + DETAILS_DOM + script], check=True, capture_output=True, text=True,
+        """ + DETAILS_DOM + script], check=False, capture_output=True, text=True,
     )
+    assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
 
@@ -189,7 +190,7 @@ def test_extracted_revision_diff_keeps_changed_values_and_collection_counts_read
                            'schedule': [{'id': 7}]},
     }
     markup = Markup(run_js(f'console.log(JSON.stringify(Venue.revisionDiff({json.dumps(data)})));'))
-    for text in ['Name', 'Old name', data['after_snapshot']['profile']['name'], 'Published', 'No', 'Yes', 'Schedule', '0 items', '1 item']:
+    for text in ['Name', 'Old name', data['after_snapshot']['profile']['name'], 'Published', 'No', 'Yes', 'Schedule', 'Not listed', 'Listed']:
         assert text in markup.text
     assert 'Unchanged' not in markup.text
     assert not [tag for tag, _ in markup.tags if tag in {'img', 'script'}]
@@ -277,7 +278,7 @@ def test_owner_lists_keep_hidden_rows_and_distinguish_saved_from_public():
         assert ("Saved · listing private" if public else "On your listing") not in markup.text
         assert "cancelled" in markup.text
         assert "2026-12-01 to 2027-01-31" in markup.text
-        assert "2026-09-12" in markup.text and "America/Los_Angeles" in markup.text
+        assert "Sat, Sep 12" in markup.text and "America/Los_Angeles" in markup.text
         assert {attrs["data-item-id"] for _, attrs in markup.tags if "data-venue-edit" in attrs} == {"21", "22", "31", "32"}
     viewer = render(data, canEdit=False)
     tools = [attrs for _, attrs in viewer.tags if "data-business-tool" in attrs]
@@ -463,14 +464,14 @@ def test_extracted_logo_fields_keep_accessible_picker_states_and_escape_saved_ur
         assert feedback["role"] == "status" and feedback["aria-live"] == "polite"
         assert ("hidden" not in nodes["business-logo-remove"][1]) == managed
         assert ("Replace uploaded logo" if managed else "Choose logo image") in markup.text
-        assert "Logo uploads save immediately" in markup.text
+        assert "Each logo upload saves a draft immediately" in markup.text
 
 
 def test_details_preserve_multiline_hours_and_save_only_changed_fields():
     start = APP.index("function openBusinessDetailsEditor(")
     source = APP[start:APP.index("function openBusinessIntegrationRequest", start)]
     result = run_js("""
-      const business = {id: 7, name: 'Venue', hours: 'Monday 8 AM–8 PM\\nTuesday closed', amenities: [], logo_url: ''};
+      const business = {content_version: 'version-1', id: 7, name: 'Venue', hours: 'Monday 8 AM–8 PM\\nTuesday closed', amenities: [], logo_url: ''};
       const {modal, nodes} = detailsDom(business), requests = [];
       let html, saved;
       const window = {VenueWorkspace: Venue}, uiIcon = () => '', esc = String, modalHead = () => '';
@@ -481,7 +482,7 @@ def test_details_preserve_multiline_hours_and_save_only_changed_fields():
         showError(message) {throw new Error(message);}, startSubmitting: () => () => {}});
       const bindModalDiscardConfirmation = () => {};
       const optionalBusinessUrl = () => '', closeModal = () => {}, toast = () => {};
-      const api = async (path, options) => {requests.push({path, body: JSON.parse(options.body)}); return requests.at(-1).body;};
+      const api = async (path, options) => {if (!options) return business; requests.push({path, body: JSON.parse(options.body)}); return requests.at(-1).body;};
     """ + source + """
       openBusinessDetailsEditor(business, updated => {saved = updated;});
       const initialPreview = nodes['#venue-details-preview'].innerHTML;
@@ -505,11 +506,11 @@ def test_details_preserve_multiline_hours_and_save_only_changed_fields():
 
 
 @pytest.mark.parametrize("operation", ["upload", "remove"])
-def test_logo_mutation_refresh_failure_keeps_text_edits_and_updates_private_visibility(operation):
+def test_logo_mutation_response_keeps_text_edits_and_reviewed_listing_live(operation):
     start = APP.index("function openBusinessDetailsEditor(")
     source = APP[start:APP.index("function openBusinessIntegrationRequest", start)]
     result = run_js("""
-      const business = {id: 7, name: 'Venue', amenities: [], is_public: true, published: true,
+      const business = {content_version: 'version-1', id: 7, name: 'Venue', amenities: [], is_public: true, published: true,
         content_review_status: 'approved', logo_url: '/api/businesses/7/logo', has_logo_upload: true};
       const {modal, nodes} = detailsDom(business), requests = [], updates = [], errors = [];
       let confirm, cleared = 0;
@@ -525,7 +526,7 @@ def test_logo_mutation_refresh_failure_keeps_text_edits_and_updates_private_visi
       const api = async (path, options) => {
         requests.push({path, method: options?.method || 'GET'});
         if (!options) throw new Error('Refresh is offline');
-        return {logo_url: '/api/businesses/7/logo'};
+        return {logo_url: '/api/businesses/7/logo', business: {...business, logo_url: options.method === 'DELETE' ? '' : '/api/businesses/7/logo', has_logo_upload: options.method !== 'DELETE', content_version: 'version-2', has_unpublished_changes: true, content_review_status: 'pending'}};
       };
     """ + source + f"""
       openBusinessDetailsEditor(business, updated => updates.push({{...updated}}));
@@ -542,15 +543,14 @@ def test_logo_mutation_refresh_failure_keeps_text_edits_and_updates_private_visi
         requests, updates, errors, cleared, description: nodes['#business-description'].value}}));
     """)
     assert result["initial"] == "Saved changes appear on your listing."
-    assert result["after"] == "Only managers can see this preview. Your listing is private."
+    assert result["after"] == "Saved to your draft. Your approved listing stays live."
     assert result["description"] == "My unsaved description"
     assert result["cleared"] == 0 and result["errors"] == []
     assert result["requests"] == [
         {"path": "/businesses/7/logo", "method": "POST" if operation == "upload" else "DELETE"},
-        {"path": "/businesses/7", "method": "GET"},
     ]
     saved = result["updates"][0]
-    assert saved["is_public"] is False and saved["published"] is False
+    assert saved["is_public"] is True and saved["published"] is True
     assert saved["content_review_status"] == "pending"
     assert saved["has_logo_upload"] == (operation == "upload")
     assert saved["logo_url"] == ("/api/businesses/7/logo" if operation == "upload" else "")
@@ -562,10 +562,11 @@ def test_logo_refresh_does_not_turn_untouched_contact_details_into_edits(operati
     start = APP.index("function openBusinessDetailsEditor(")
     source = APP[start:APP.index("function openBusinessIntegrationRequest", start)]
     result = run_js("""
-      const business = {id: 7, name: 'Venue', description: 'Original description', phone: '111', amenities: [],
+      const business = {content_version: 'version-1', id: 7, name: 'Venue', description: 'Original description', phone: '111', amenities: [],
         is_public: true, published: true, content_review_status: 'approved', logo_url: '/api/businesses/7/logo', has_logo_upload: true};
       const {modal, nodes} = detailsDom(business), patches = [], updates = [], errors = [];
       let confirm;
+      const openBusinessConflictReview = async (modal, conflicts) => Object.fromEntries(conflicts.map(c => [c.key, 'mine']));
       const window = {VenueWorkspace: Venue}, uiIcon = () => '', modalHead = () => '';
       const normalizeBusinessProfile = value => value, businessCourtName = () => '', businessVerificationState = () => 'verified';
       const businessWorkspaceState = value => Venue.state(value, 'verified');
@@ -580,7 +581,7 @@ def test_logo_refresh_does_not_turn_untouched_contact_details_into_edits(operati
     """ + f"""logo_url: {json.dumps('/api/businesses/7/logo' if operation == 'upload' else '')}}};
     """ + """
         if (options.method === 'PATCH') patches.push(JSON.parse(options.body));
-        return options.method === 'POST' ? {logo_url: '/api/businesses/7/logo'} : {...business, ...(options.body ? JSON.parse(options.body) : {})};
+        return ['POST', 'DELETE'].includes(options.method) ? {logo_url: '/api/businesses/7/logo', business: {...business, phone: '222', logo_url: options.method === 'DELETE' ? '' : '/api/businesses/7/logo', has_logo_upload: options.method !== 'DELETE', content_version: 'version-2', has_unpublished_changes: true, content_review_status: 'pending'}} : {...business, ...(options.body ? JSON.parse(options.body) : {})};
       };
     """ + source + f"""
       openBusinessDetailsEditor(business, updated => updates.push({{...updated}}));
@@ -603,8 +604,8 @@ def test_logo_refresh_does_not_turn_untouched_contact_details_into_edits(operati
     assert result["phone"] == ("333" if phone_edited else "111")
     assert result["description"] == "My unsaved description"
     assert result["errors"] == []
-    assert result["impact"] == ("These changes make your listing private until reviewed." if phone_edited
-        else "Only managers can see this preview. Your listing is private.")
+    assert result["impact"] == ("Saved as a draft for review. Your approved listing stays live." if phone_edited
+        else "Saved to your draft. Your approved listing stays live.")
 
 
 def test_booking_destination_preview_uses_only_safe_url_hostnames_as_text():
@@ -632,7 +633,7 @@ def test_booking_save_omits_untouched_membership_even_after_child_refresh():
     start = APP.index("function openBusinessBookingSetup(")
     source = APP[start:APP.index("function renderBusinessHubDashboard", start)]
     result = run_js("""
-      const business = {id: 7, name: 'Venue', manager_role: 'owner', booking_url: 'https://old.test/book', membership_url: 'https://venue.test/join'};
+      const business = {content_version: 'version-1', id: 7, name: 'Venue', manager_role: 'owner', booking_url: 'https://old.test/book', membership_url: 'https://venue.test/join'};
       const nodes = {}, requests = [], events = [];
       let childSaved;
       const modal = {querySelector(selector) {return nodes[selector] ||= {
@@ -645,7 +646,7 @@ def test_booking_save_omits_untouched_membership_even_after_child_refresh():
         startSubmitting: () => () => {}, showError(message) {throw new Error(message);}});
       const bindModalDiscardConfirmation = () => {}, closeModal = () => events.push('close'), toast = () => {};
       const optionalBusinessUrl = (modal, selector) => modal.querySelector(selector).value;
-      const api = async (path, options) => {requests.push({path, method: options.method, body: JSON.parse(options.body)});
+      const api = async (path, options) => {if (!options) return {...business, membership_url: 'https://teammate.test/join'}; requests.push({path, method: options.method, body: JSON.parse(options.body)});
         events.push('persisted'); return {...business, ...JSON.parse(options.body)};};
     """ + source + """
       openBusinessBookingSetup(business, () => events.push('saved'));
@@ -753,7 +754,7 @@ def test_manager_can_unpublish_an_enabled_listing_even_when_players_cannot_see_i
     binding = APP[binding_start:APP.index("    body.querySelector('#business-hub-locations')", binding_start)]
     result = run_js("""
       async function scenario(review) {
-        const business = {id: 7, name: 'Venue', manager_role: 'owner', is_public: false,
+        const business = {content_version: 'version-1', id: 7, name: 'Venue', manager_role: 'owner', is_public: false,
           published: true, content_review_status: review, offerings: [], schedule: []};
         const requests = [], confirmations = [], updates = [];
         let accepted = false;
@@ -884,8 +885,9 @@ def test_direct_workspace_save_merges_a_fresh_get_and_only_reports_success_after
     source = APP[start:APP.index("    const editItem =", start)]
     result = run_js("""
       async function scenario(conflict = false) {
-        const business = {id: 7}, original = {id: 21, name: 'Original lesson', active: true};
-        const requests = [], saved = [], fresh = {id: 7, offerings: [
+        const original = {id: 21, name: 'Original lesson', active: true}, business = {id: 7, offerings: [original]};
+        const modal = {}, openBusinessConflictReview = async () => null;
+        const requests = [], saved = [], fresh = {content_version: 'version-1', id: 7, offerings: [
           {...original, name: conflict ? 'Changed elsewhere' : original.name},
           {id: 22, name: 'New sibling', active: false},
         ]};
@@ -917,12 +919,12 @@ def test_direct_workspace_save_merges_a_fresh_get_and_only_reports_success_after
     ]
     assert success["savedBeforePut"] == 0 and len(success["saved"]) == 1
     assert len(conflict["requests"]) == 1 and conflict["saved"] == []
-    assert "changed elsewhere" in conflict["error"]
+    assert "Your edits are still here" in conflict["error"]
 
 
 @pytest.mark.parametrize("kind", ["offerings", "schedule"])
 @pytest.mark.parametrize("outcome", ["saved", "conflict", "failed"])
-def test_bulk_editors_check_fresh_collection_before_put_and_keep_drafts_on_failure(kind, outcome):
+def test_bulk_editors_merge_fresh_siblings_before_put_and_keep_drafts_on_failure(kind, outcome):
     start = APP.index(f"    modal.querySelector('#business-{kind}-save').addEventListener('click'")
     source = APP[start:APP.index("    return modal;", start)]
     result = run_js(f"""
@@ -932,6 +934,7 @@ def test_bulk_editors_check_fresh_collection_before_put_and_keep_drafts_on_failu
       const business = {{id: 7, [kind]: original}};
       const draft = [{{...original[0], title: 'My edit', name: 'My edit'}}, original[1]];
       const offerings = draft, schedule = draft, requests = [], events = [], errors = [];
+      const startImport = false;
       const button = {{addEventListener(name, callback) {{this[name] = callback;}}}};
       const modal = {{querySelector: () => button}}, window = {{VenueWorkspace: Venue}};
       const normalizeBusinessProfile = value => value;
@@ -941,7 +944,7 @@ def test_bulk_editors_check_fresh_collection_before_put_and_keep_drafts_on_failu
       let finishPut;
       const api = async (path, options) => {{
         requests.push({{path, method: options?.method || 'GET', ...(options ? {{items: JSON.parse(options.body).items}} : {{}})}});
-        if (!options) return {{id: 7, [kind]: outcome === 'conflict'
+        if (!options) return {{content_version: 'version-1', id: 7, [kind]: outcome === 'conflict'
           ? [...original, {{id: 3, title: 'Added elsewhere', name: 'Added elsewhere', active: false}}] : original}};
         return new Promise((resolve, reject) => {{finishPut = () => outcome === 'failed'
           ? reject(new Error('Save unavailable. Try again.')) : resolve({{id: 7, [kind]: draft}});}});
@@ -956,19 +959,15 @@ def test_bulk_editors_check_fresh_collection_before_put_and_keep_drafts_on_failu
     assert result["requests"][0] == {"path": "/businesses/7", "method": "GET"}
     assert result["draft"][0]["title"] == "My edit"
     assert result["draft"][1]["active"] is False
-    if outcome == "conflict":
-        assert len(result["requests"]) == 1
+    assert result["before"] == ["submitting"]
+    expected_items = result["draft"] + ([{"id": 3, "title": "Added elsewhere", "name": "Added elsewhere", "active": False}] if outcome == "conflict" else [])
+    assert result["requests"][1] == {"path": f"/businesses/7/{kind}", "method": "PUT", "items": expected_items}
+    if outcome == "failed":
         assert result["events"] == ["submitting", "reset"]
-        assert "changed elsewhere" in result["errors"][0]
+        assert result["errors"] == ["Save unavailable. Try again."]
     else:
-        assert result["before"] == ["submitting"]
-        assert result["requests"][1] == {"path": f"/businesses/7/{kind}", "method": "PUT", "items": result["draft"]}
-        if outcome == "failed":
-            assert result["events"] == ["submitting", "reset"]
-            assert result["errors"] == ["Save unavailable. Try again."]
-        else:
-            assert result["events"] == ["submitting", "close", "toast", "saved"]
-            assert result["errors"] == []
+        assert result["events"] == ["submitting", "close", "toast", "saved"]
+        assert result["errors"] == []
 
 
 @pytest.mark.parametrize("kind", ["offering", "schedule"])
@@ -980,6 +979,7 @@ def test_direct_forms_wait_for_persistence_and_keep_edits_when_saving_fails(kind
     source = APP[start:APP.index(end_name, start)]
     result = run_js("""
       const events = [], errors = [], nodes = {};
+      const window = {VenueWorkspace: Venue};
       const values = {
         'business-offering-name': 'My lesson', 'business-offering-category': 'lesson', 'business-offering-duration': '60',
         'business-schedule-title': 'My session', 'business-schedule-kind': 'open_play', 'business-schedule-day': 'monday',
@@ -987,7 +987,7 @@ def test_direct_forms_wait_for_persistence_and_keep_edits_when_saving_fails(kind
         'business-schedule-capacity': '24', 'business-schedule-spots': '0', 'business-schedule-status': 'scheduled',
         'business-schedule-timezone': 'America/Los_Angeles',
       };
-      const modal = {querySelector(selector) {
+      const modal = {querySelectorAll() {return [];}, querySelector(selector) {
         return nodes[selector] ||= {value: values[selector.slice(1)] || '', checked: true, handlers: {},
           closest: () => ({}), addEventListener(name, handler) {this.handlers[name] = handler;}};
       }};
@@ -997,6 +997,7 @@ def test_direct_forms_wait_for_persistence_and_keep_edits_when_saving_fails(kind
       const BUSINESS_SCHEDULE_KINDS = {open_play: ['calendar', 'Open play']};
       const BUSINESS_DAY_LABELS = ['Monday'];
       const businessDayLabel = value => value, optionalBusinessUrl = () => 'https://venue.test/book';
+      const safePositiveId = value => Number(value) > 0 && Number.isSafeInteger(Number(value)) ? Number(value) : null;
       const bindModalDiscardConfirmation = () => {};
       const bindModalFormUX = () => ({
         isDirty: () => true, clearError() {}, showError: message => errors.push(message),
@@ -1025,7 +1026,7 @@ def test_direct_forms_wait_for_persistence_and_keep_edits_when_saving_fails(kind
         assert "Save session" in result["html"]
     else:
         assert result["submitted"]["duration_minutes"] == 60
-        assert "Save lesson or service" in result["html"]
+        assert "Save service" in result["html"]
     assert "Update list" not in result["html"]
     if failed:
         assert result["events"] == ["submitting", "persist", "reset"]
@@ -1033,3 +1034,86 @@ def test_direct_forms_wait_for_persistence_and_keep_edits_when_saving_fails(kind
     else:
         assert result["events"] == ["submitting", "persist", "clear draft", "close"]
         assert result["errors"] == []
+
+
+def test_reviewed_draft_status_and_null_metrics_do_not_claim_live_changes_or_zero():
+    result = run_js("""
+      const business = {is_public: true, published: true, content_review_status: 'pending',
+        has_unpublished_changes: true, manager_role: 'owner', name: 'Draft venue'};
+      console.log(JSON.stringify({status: Venue.state(business, 'verified'),
+        saved: Venue.savedStatus(business), preview: Venue.preview(business, () => '', {saved: true, publicNow: true}),
+        metrics: [null, undefined, 0, 12, '0%'].map(Venue.metricValue),
+        headers: Venue.contentHeaders({content_version: 'abc123'})}));
+    """)
+    assert result['status']['publicNow'] is True
+    assert 'approved listing stays live' in result['status']['copy']
+    assert 'Draft saved for review' in result['saved']
+    assert 'Private preview' in Markup(result['preview']).text
+    assert result['metrics'] == ['—', '—', '0', '12', '0%']
+    assert result['headers'] == {'If-Match': '"abc123"'}
+
+
+def test_analytics_waiter_cannot_replace_newer_range_with_old_response():
+    start = APP.index('function openBusinessAnalytics(')
+    source = APP[start:APP.index('function openBusinessRevisionHistory', start)]
+    result = run_js("""
+      let change; const pending=[];
+      const results={isConnected:true,innerHTML:'',querySelector(){return null;}};
+      const range={value:'30d',addEventListener(type,fn){change=fn;}};
+      const modal={querySelector(sel){return sel==='[data-analytics-results]' ? results : range;}};
+      const openModal=()=>modal,modalHead=()=>'',skeletonHtml=()=> 'Loading',window={VenueWorkspace:Venue},fmtDateTime=v=>v;
+      const api=path=>new Promise((resolve,reject)=>pending.push({path,resolve,reject}));
+      const businessUnavailableHtml=()=> 'Request failed';
+    """+source+"""
+      openBusinessAnalytics({id:7}); range.value='7d'; const latest=change();
+      pending[1].resolve({profile_views:12,booking_clicks:4,lesson_clicks:0,previous:{profile_views:10,booking_clicks:1,lesson_clicks:0},top_sessions:[{title:'Latest session',clicks:4}]}); await latest;
+      const current=results.innerHTML;
+      pending[0].resolve({profile_views:999,top_sessions:[{title:'Old session',clicks:999}]}); await Promise.resolve(); await Promise.resolve();
+      console.log(JSON.stringify({current,after:results.innerHTML,requests:pending.map(item=>item.path)}));
+    """)
+    assert result['after'] == result['current']
+    assert 'Latest session' in result['after'] and 'Old session' not in result['after']
+    assert '+3 vs previous period' in result['after']
+    assert result['requests'][-1].endswith('range=7d')
+
+
+def test_analytics_and_team_capabilities_do_not_invent_booking_conversion_or_access():
+    result = run_js("""
+      console.log(JSON.stringify({html:Venue.analyticsHtml({profile_views:0,booking_clicks:0,conversions:null,top_sessions:[]},v=>v),editor:Venue.teamCapabilities('editor'),viewer:Venue.teamCapabilities('viewer'),admin:Venue.teamCapabilities('admin')}));
+    """)
+    assert 'Booking reports are not connected' in result['html']
+    assert 'conversion rate is unavailable' in result['html']
+    assert '0%' not in result['html']
+    assert 'cannot publish or invite' in result['editor']
+    assert 'cannot edit, publish or invite' in result['viewer']
+    assert 'publish' in result['admin']
+
+
+def test_visiting_edits_reconcile_independent_facts_and_name_overlaps():
+    result = run_js("""
+      const original = {visitor_info:{entrance:'North gate',parking:'Old lot'}};
+      const edits = {visitor_info:{entrance:'South gate',parking:'Old lot'}};
+      const current = {visitor_info:{entrance:'North gate',parking:'New lot'}};
+      const merged = Venue.reconcileProfile(original, edits, current);
+      const changed = {visitor_info:{entrance:'East gate',parking:'New lot'}};
+      const conflict = Venue.reconcileProfile(original, edits, changed);
+      const resolved = Venue.reconcileProfile(original, edits, changed, {'visitor_info:entrance':'mine'});
+      console.log(JSON.stringify({merged,conflict,resolved}));
+    """)
+    assert result['merged']['value']['visitor_info'] == {'entrance':'South gate','parking':'New lot'}
+    assert result['merged']['conflicts'] == []
+    assert result['conflict']['conflicts'][0]['label'] == 'Finding the entrance'
+    assert result['conflict']['conflicts'][0]['mine'] == 'South gate'
+    assert result['resolved']['value']['visitor_info'] == {'entrance':'South gate','parking':'New lot'}
+
+
+def test_revision_explains_visitor_facts_and_service_names():
+    result = run_js("""
+      console.log(JSON.stringify(Venue.revisionDiff({
+        before_snapshot:{profile:{visitor_info:'{"parking":"Old lot"}'},offerings:[{id:7,name:'Beginner clinic'}],schedule:[{id:4,title:'Tuesday class',offering_id:null}]},
+        after_snapshot:{profile:{visitor_info:'{"parking":"North lot"}'},offerings:[{id:7,name:'Beginner clinic'}],schedule:[{id:4,title:'Tuesday class',offering_id:7}]},
+      })));
+    """)
+    assert 'Parking: Old lot' in result and 'Parking: North lot' in result
+    assert 'Standalone session' in result and 'Beginner clinic' in result
+    assert 'Visitor info' not in result

@@ -213,13 +213,18 @@ def test_play_launcher_is_intent_specific_while_map_and_court_keep_compatibility
     assert "target === 'game-flow'" in ctas
     assert "openPlaySoonFlow();" in ctas
     assert "target === 'new-game'" in ctas
-    assert "openNewGameModal({" in ctas
+    assert "openCreatePlaySheet();" in ctas
+    create = section("function openCreatePlaySheet", "function rallyLauncherHtml")
+    assert "openNewGameModal({" in create
+    assert "gameType: ranked ? 'ranked' : 'casual'" in create
+    assert "sessionMode: !ranked, rankedMatchMode: ranked" in create
     assert "target === 'ranked-match' || target === 'new-ranked-game'" in ctas
     assert "openRankedMatchFlow();" in ctas
 
     preview = section("function selectCourtOnMap", "function autoCheckInStorageKey")
-    assert "data-preview-play>Play options</button>" in preview
-    assert "openCourtPlayMenu(court);" in preview
+    assert "data-preview-detail>All dates & court details</button>" in preview
+    assert "openCourtFromDiscovery(court)" in preview
+    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court)" in preview
     assert "startInstantRally" not in preview
 
     detail = section("async function openCourtDetail", "function openCheckInSheet")

@@ -1,0 +1,9 @@
+# Rankings implementation evidence
+
+PL-24 and PL-25 are implemented locally; production remains unchanged.
+
+The leaderboard returns an independent viewer status, scoped rank and row on every page. Eligibility includes losses. The client distinguishes no ranked results, no results this month, no player location, outside-area and failed viewer loading. Your place precedes the board; rating terminology remains Third Shot and monthly movement is distinct from an absolute rating. More players fetches actual pages, ignores stale renders, handles errors and avoids duplicate rows. Podium entries retain full names and the mobile heading is compact.
+
+API tests cover rank 66 outside the first 50, all 66 unique positions across pages, friends/area/location eligibility, negative monthly changes, previous-month exclusion, authentication and malformed cursors. An executed JavaScript test verifies the independent viewer row and appropriate recovery controls. A targeted ranking/leaderboard run passed 21 tests, with 275 unrelated tests deselected. A broader run passed 103 checks and caught one unsupported icon name; that icon is corrected and final regression is running.
+
+Browser fixture: tests/e2e/fixtures/rankings_server.py, isolated SQLite at port 8054. All standings are explicitly synthetic. Actual DOM viewport was 390×844 with scrollWidth 390. The first view showed rank 66, 0W–1L and rating 700 above the board. More players progressed from Showing 50 of 66 to Showing 66 of 66, with 55 unique rows below the top ten and the separately pinned viewer. The last newly loaded player opened the correct profile. This month showed an accurate no-results explanation; View all time restored rank 66. Final compact layout retained the visible viewer card within the first viewport and browser error logs were empty. No production writes or real messages.

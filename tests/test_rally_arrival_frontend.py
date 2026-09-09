@@ -341,7 +341,7 @@ def test_here_on_the_way_and_open_language_is_consistent_everywhere():
 
     detail = section("function gameScreenHtml", "async function openGameScreen")
     assert "const readyCount = assembly ? assembly.readyCount : game.players.length;" in detail
-    assert "${assembly ? 'At the court' : 'Players'} <span>${readyCount}</span>" in detail
+    assert "${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Going' : 'Signed up'} <span>${readyCount}</span>" in detail
     assert "On the way (${rally.onWayCount})" in detail
     assert "game.arrivals" in detail
     assert "ETA ${esc(fmtTimeShort(arrival.arrivesAt))}" in detail

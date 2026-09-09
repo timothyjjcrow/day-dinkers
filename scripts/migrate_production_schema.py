@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -27,14 +28,14 @@ REQUIRED_COLUMNS = {
         'auth_version', 'operator_role', 'mfa_secret_encrypted',
         'mfa_enabled', 'mfa_enabled_at', 'mfa_recovery_codes',
         'skill_rating', 'dupr_rating', 'dupr_id', 'email_verified_at', 'avatar_data',
-        'onboarding_completed_at',
+        'onboarding_completed_at', 'away_until',
         'nearby_visibility',
         'invited_by_user_id',
         'suspended_at', 'suspension_reason', 'suspended_by_id',
     },
     'court': {
-        'structured_hours', 'hours_dawn_to_dusk', 'reservation_url',
-        'fee_type', 'open_play_schedule_rows',
+        'structured_hours', 'hours_dawn_to_dusk', 'reservation_url', 'visitor_info',
+        'fee_type', 'open_play_schedule_rows', 'pending_submission',
     },
     'account_action_token': {
         'id', 'created_at', 'updated_at', 'user_id', 'purpose', 'token_hash',
@@ -69,6 +70,7 @@ REQUIRED_COLUMNS = {
         'membership_url', 'logo_url', 'logo_data', 'organization_id',
         'governance_status', 'suspension_reason', 'suspended_at',
         'suspended_by', 'content_review_status', 'content_reviewed_at',
+        'reviewed_public_snapshot', 'timezone', 'structured_hours', 'hours_dawn_to_dusk', 'visitor_info',
     },
     'business_claim': {
         'id', 'created_at', 'updated_at', 'user_id', 'court_id',
@@ -91,7 +93,8 @@ REQUIRED_COLUMNS = {
         'day_of_week', 'start_time', 'end_time', 'skill_level', 'booking_url',
         'active', 'sort_order', 'timezone', 'recurrence', 'start_date',
         'end_date', 'event_date', 'capacity', 'spots_remaining', 'status',
-        'location_note', 'instructor', 'source_updated_at',
+        'location_note', 'instructor', 'source_updated_at', 'occurrence_overrides',
+        'availability_updated_at', 'offering_id',
     },
     'business_integration_request': {
         'id', 'created_at', 'updated_at', 'business_id', 'requested_by_id',
@@ -144,7 +147,7 @@ REQUIRED_COLUMNS = {
         'id', 'actor_identifier', 'target_user_id', 'action',
         'previous_role', 'new_role', 'reason', 'created_at',
     },
-    'message': {'crew_id', 'conversation_id'},
+    'message': {'crew_id', 'conversation_id', 'reply_to_id'},
     'community_group': {
         'id', 'created_at', 'updated_at', 'kind', 'privacy',
         'legacy_scope_id', 'name', 'description', 'owner_id',
@@ -163,16 +166,30 @@ REQUIRED_COLUMNS = {
         'client_attempt_fingerprint', 'title', 'description',
         'duration_minutes', 'cost_cents', 'court_number', 'court_count',
         'auto_fill_waitlist', 'score_dispute_count', 'score_dispute_reason',
+        'score_version', 'score_history', 'score_correction_pending',
+        'invite_link_version', 'invite_link_expires_at',
         'score_confirmation_kind', 'score_confirmed_by_id',
         'score_confirmation_reminded_at',
         'recurrence_timezone', 'recurrence_local_time',
         'recurrence_weekdays', 'recurrence_ends_on',
+        'recurrence_series_id', 'recurrence_occurrence_on',
+        'recurrence_template', 'recurrence_stopped_at',
         'level_min', 'level_max',
+    },
+    'game_player': {'recurrence_rsvp_automatic'},
+    'game_waitlist': {'id', 'game_id', 'user_id', 'offered_at', 'offer_expires_at', 'offer_status'},
+    'game_host_handoff': {
+        'id', 'game_id', 'requested_by_id', 'target_user_id', 'scope', 'status',
+        'leave_on_accept', 'expires_at', 'resolved_at', 'created_at', 'updated_at',
+    },
+    'game_session_attendance': {
+        'id', 'game_id', 'user_id', 'rsvp_joined_at', 'rsvp_left_at', 'rsvp_status',
+        'history', 'attended', 'recorded_by_id', 'recorded_at',
     },
     'game_recurrence_rsvp': {
         'id', 'created_at', 'updated_at', 'game_id', 'user_id',
         'standing_rsvp', 'skipped_occurrence_on',
-        'last_rsvp_occurrence_on',
+        'last_rsvp_occurrence_on', 'skipped_occurrences',
     },
     'game_score_line': {
         'id', 'created_at', 'updated_at', 'game_id', 'game_number',
@@ -180,8 +197,12 @@ REQUIRED_COLUMNS = {
     },
     'check_in': {
         'user_id', 'court_id', 'looking_for_game', 'checked_in_at',
-        'checked_out_at', 'last_presence_ping_at',
+        'checked_out_at', 'last_presence_ping_at', 'location_verified_at',
     },
+    'court_edit_suggestion': {
+        'id', 'court_id', 'user_id', 'reviewed_by_id', 'reviewed_at', 'review_note',
+    },
+    'court_photo': {'id', 'court_id', 'category', 'captured_on'},
     'game_arrival_intent': {
         'id', 'created_at', 'updated_at', 'game_id', 'user_id',
         'eta_minutes', 'declared_at', 'arrives_at', 'expires_at',
@@ -237,10 +258,14 @@ REQUIRED_COLUMNS = {
     'tournament_entry': {
         'id', 'tournament_id', 'player1_id', 'player2_id', 'checked_in_at',
         'partner_invitee_id', 'partner_status', 'partner_pending_on',
+        'player1_arrived_at', 'player2_arrived_at', 'arrival_history',
+        'partner_response_deadline_at', 'partner_history',
     },
     'tournament': {
         'id', 'division_name', 'division_min_rating', 'division_max_rating',
         'game_format', 'court_count', 'match_minutes',
+        'schedule_version', 'schedule_history', 'rest_minutes',
+        'entry_fee_cents', 'payment_method', 'withdrawal_policy',
     },
     'tournament_match': {
         'id', 'tournament_id', 'result_state', 'result_version',
@@ -248,12 +273,26 @@ REQUIRED_COLUMNS = {
         'disputed_by_id', 'disputed_at', 'dispute_reason', 'resolution_kind',
         'review_reminded_at', 'stall_alerted_at', 'last_nudged_at',
         'scheduled_at', 'court_number', 'game_scores_json',
+        'play_state', 'called_at', 'started_at',
+    },
+    'tournament_waitlist': {
+        'id', 'created_at', 'updated_at', 'tournament_id', 'user_id', 'status',
+        'offered_at', 'expires_at', 'history',
     },
     'league': {
         'id', 'current_round', 'round_started_at', 'deadline_alerted_round',
+        'total_rounds', 'round_version', 'round_history', 'round_deadline_override_at',
+    },
+    'league_member': {
+        'id', 'league_id', 'user_id', 'unavailable_round', 'withdraw_after_round',
+        'withdrawn_at', 'availability_history',
     },
     'league_match': {
         'id', 'league_id', 'result_state', 'result_version',
+        'scheduled_at', 'scheduled_court_id', 'scheduled_duration_minutes',
+        'schedule_version', 'schedule_proposals', 'schedule_proposed_by_id',
+        'schedule_day_reminded_at', 'schedule_hour_reminded_at',
+        'closed_round_review',
         'reported_by_id', 'reported_at', 'confirmed_by_id', 'confirmed_at',
         'disputed_by_id', 'disputed_at', 'dispute_reason', 'resolution_kind',
         'review_reminded_at', 'stall_alerted_at', 'last_nudged_at',
@@ -264,6 +303,9 @@ REQUIRED_COLUMNS = {
     },
 }
 REQUIRED_INDEXES = {
+    'tournament_waitlist': {'ix_tournament_waitlist_tournament_id', 'ix_tournament_waitlist_user_id'},
+    'game_host_handoff': {'ix_game_host_handoff_game_id'},
+    'game_session_attendance': {'ix_game_session_attendance_game_id', 'ix_game_session_attendance_user_id'},
     'user': {
         'ix_user_operator_role', 'ix_user_mfa_enabled',
         'ix_user_suspended_at', 'ix_user_invited_by_user_id',
@@ -323,6 +365,7 @@ REQUIRED_INDEXES = {
         'ix_business_schedule_item_active',
         'ix_business_schedule_item_event_date',
         'ix_business_schedule_item_status',
+        'ix_business_schedule_item_offering_id',
     },
     'business_integration_request': {
         'ix_business_integration_request_business_id',
@@ -387,7 +430,7 @@ REQUIRED_INDEXES = {
         'ix_operator_security_event_action',
         'ix_operator_security_event_created_at',
     },
-    'message': {'ix_message_crew_id', 'ix_message_conversation_id'},
+    'message': {'ix_message_crew_id', 'ix_message_conversation_id', 'ix_message_reply_to_id'},
     'community_group': {
         'ix_community_group_kind', 'ix_community_group_privacy',
         'ix_community_group_legacy_scope_id', 'ix_community_group_owner_id',
@@ -401,7 +444,7 @@ REQUIRED_INDEXES = {
         'ix_conversation_read_user_id',
         'ix_conversation_read_conversation_id',
     },
-    'game': {'ix_game_crew_id', 'ix_game_is_instant'},
+    'game': {'ix_game_crew_id', 'ix_game_is_instant', 'ix_game_recurrence_series_id'},
     'notification': {'ix_notification_related_crew_id'},
     'game_arrival_intent': {
         'ix_game_arrival_intent_game_id',
@@ -442,6 +485,7 @@ REQUIRED_INDEXES = {
     'league_match': {
         'ix_league_match_result_state',
         'ix_league_match_result_state_reported_at',
+        'ix_league_match_scheduled_at',
     },
     'competition_result_event': {
         'ix_competition_result_event_competition_type',
@@ -450,6 +494,9 @@ REQUIRED_INDEXES = {
     },
 }
 REQUIRED_PARTIAL_UNIQUE_INDEXES = {
+    'game_host_handoff': {
+        'uq_game_host_handoff_pending': (('game_id',), "status = 'pending'"),
+    },
     'check_in': {
         'uq_check_in_active_user': (
             ('user_id',), 'checked_out_at is null',
@@ -483,9 +530,12 @@ REQUIRED_EXACT_UNIQUE_INDEXES = {
     },
     'game': {
         'uq_game_creator_attempt': ('creator_id', 'client_attempt_id'),
+        'uq_game_series_occurrence': ('recurrence_series_id', 'recurrence_occurrence_on'),
     },
 }
 REQUIRED_UNIQUES = {
+    'tournament_waitlist': {'uq_tournament_waitlist'},
+    'game_session_attendance': {'uq_game_session_attendance'},
     'business_profile': {'uq_business_profile_court'},
     'business_claim': {'uq_business_claim_user_court'},
     'business_organization_member': {'uq_business_organization_member'},
@@ -566,6 +616,31 @@ REQUIRED_CHECK_CONSTRAINTS = {
     },
 }
 REQUIRED_FOREIGN_KEYS = {
+    'tournament_waitlist': {
+        'tournament_waitlist_tournament_id_fkey': (('tournament_id',), 'tournament', ('id',)),
+        'tournament_waitlist_user_id_fkey': (('user_id',), 'user', ('id',)),
+    },
+    'court_edit_suggestion': {
+        'court_edit_suggestion_reviewed_by_id_fkey': (('reviewed_by_id',), 'user', ('id',)),
+    },
+    'game_host_handoff': {
+        'game_host_handoff_game_id_fkey': (('game_id',), 'game', ('id',)),
+        'game_host_handoff_requested_by_id_fkey': (('requested_by_id',), 'user', ('id',)),
+        'game_host_handoff_target_user_id_fkey': (('target_user_id',), 'user', ('id',)),
+    },
+    'game_session_attendance': {
+        'game_session_attendance_game_id_fkey': (('game_id',), 'game', ('id',)),
+        'game_session_attendance_user_id_fkey': (('user_id',), 'user', ('id',)),
+        'game_session_attendance_recorded_by_id_fkey': (('recorded_by_id',), 'user', ('id',)),
+    },
+    'league_match': {
+        'league_match_scheduled_court_id_fkey': (
+            ('scheduled_court_id',), 'court', ('id',),
+        ),
+        'league_match_schedule_proposed_by_id_fkey': (
+            ('schedule_proposed_by_id',), 'user', ('id',),
+        ),
+    },
     'user': {
         'user_invited_by_user_id_fkey': (
             ('invited_by_user_id',), 'user', ('id',),
@@ -671,6 +746,7 @@ REQUIRED_FOREIGN_KEYS = {
         'business_schedule_item_business_id_fkey': (
             ('business_id',), 'business_profile', ('id',),
         ),
+        'business_schedule_item_offering_id_fkey': (('offering_id',), 'business_offering', ('id',)),
     },
     'business_integration_request': {
         'business_integration_request_business_id_fkey': (
@@ -765,6 +841,7 @@ REQUIRED_FOREIGN_KEYS = {
         ),
     },
     'message': {
+        'message_reply_to_id_fkey': (('reply_to_id',), 'message', ('id',)),
         'message_crew_id_fkey': (
             ('crew_id',), 'crew', ('id',),
         ),
@@ -799,6 +876,9 @@ REQUIRED_FOREIGN_KEYS = {
         ),
         'game_score_confirmed_by_id_fkey': (
             ('score_confirmed_by_id',), 'user', ('id',),
+        ),
+        'game_recurrence_series_id_fkey': (
+            ('recurrence_series_id',), 'game', ('id',),
         ),
     },
     'notification': {
@@ -971,8 +1051,8 @@ def _schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
             if predicate is None:
                 predicate = options.get('sqlite_where')
             normalized_predicate = ' '.join(
-                str(predicate if predicate is not None else '')
-                .lower()
+                re.sub(r'::(?:text|character varying|varchar)\b', '',
+                       str(predicate if predicate is not None else '').lower())
                 .replace('"', '')
                 .replace('(', ' ')
                 .replace(')', ' ')
@@ -1045,6 +1125,7 @@ def _schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
                 constraint.get('referred_table'),
                 tuple(constraint.get('referred_columns') or ()),
                 constraint.get('referred_schema'),
+                constraint.get('options') or {},
             )
             for constraint in inspector.get_foreign_keys(table, schema=schema)
         ]
@@ -1054,6 +1135,8 @@ def _schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
                 found[1:4]
                 == (local_columns, referred_table, referred_columns)
                 and found[4] in (None, schema)
+                and (name not in {'court_edit_suggestion_reviewed_by_id_fkey', 'business_schedule_item_offering_id_fkey', 'message_reply_to_id_fkey'}
+                     or (found[0] == name and str(found[5].get('ondelete') or 'NO ACTION').upper() == 'SET NULL'))
                 for found in actual
             ):
                 continue

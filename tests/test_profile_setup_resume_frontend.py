@@ -22,12 +22,12 @@ def test_pause_is_account_scoped_and_explicit_resume_skips_completed_fields():
       function resumePlayerInviteIntentAfterAuth() {resumes++;}
       function openPlayerBasicsOnboarding(next, options) {opens.push({next, options});}
     """ + 'function runNewPlayerOnboarding(' + function + """
-      runNewPlayerOnboarding();
+      runNewPlayerOnboarding({profileOnly: true});
       opens[0].options.onPause();
-      runNewPlayerOnboarding();
+      runNewPlayerOnboarding({profileOnly: true});
       const afterPaused = opens.length;
       state.me.id = 2;
-      runNewPlayerOnboarding();
+      runNewPlayerOnboarding({profileOnly: true});
       const otherAccount = opens.length;
       state.me.id = 1;
       runNewPlayerOnboarding({replay: true, profileOnly: true});

@@ -74,6 +74,9 @@ from scripts.migrate_business_integration_foundation import (
 )
 
 
+from business_test_support import venue_write
+
+
 @pytest.fixture()
 def app(monkeypatch):
     monkeypatch.setenv('CRON_SECRET', 'test-cron-secret')
@@ -178,7 +181,7 @@ def catalog(*, source_version='v1', occurrences=None, conversions=None,
 
 
 def create_connection(client, account, business_id, *, source_url=''):
-    response = client.post(
+    response = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections',
         json={
             'provider_key': 'link_catalog',
@@ -294,7 +297,7 @@ def test_connection_create_distinguishes_duplicate_from_schema_failure(
     owner = register(client, 'connection-errors@example.com')
     business_id = verified_business(app, owner['user']['id'])
     create_connection(client, owner, business_id)
-    duplicate = client.post(
+    duplicate = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections',
         json={'provider_key': 'link_catalog', 'config': {}},
         headers=auth(owner),
@@ -314,7 +317,7 @@ def test_connection_create_distinguishes_duplicate_from_schema_failure(
         )
 
     monkeypatch.setattr(integration_routes, 'create_connection', fail_persistence)
-    failed = client.post(
+    failed = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections',
         json={'provider_key': 'link_catalog', 'config': {}},
         headers=auth(owner),
@@ -732,7 +735,7 @@ def test_owner_push_reconciles_structured_schedule_and_is_idempotent(app, client
     business_id = verified_business(app, owner['user']['id'])
     connection = create_connection(client, owner, business_id)
 
-    first = client.put(
+    first = venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=catalog(),
         headers={**auth(owner), 'Idempotency-Key': 'catalog-v1'},
@@ -741,7 +744,7 @@ def test_owner_push_reconciles_structured_schedule_and_is_idempotent(app, client
     assert first.get_json()['run']['status'] == 'succeeded'
     assert first.get_json()['run']['metrics']['occurrences_created'] == 1
 
-    duplicate = client.put(
+    duplicate = venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=catalog(),
         headers={**auth(owner), 'Idempotency-Key': 'catalog-v1'},
@@ -771,7 +774,7 @@ def test_owner_push_reconciles_structured_schedule_and_is_idempotent(app, client
     assert occurrence['instructor'] == 'Venue staff'
     assert occurrence['booking_url'].startswith('https://')
 
-    removed = client.put(
+    removed = venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=catalog(source_version='v2', occurrences=[]),
         headers={**auth(owner), 'Idempotency-Key': 'catalog-v2'},
@@ -790,7 +793,7 @@ def test_provider_only_schedule_is_discoverable_after_publication_gate(app, clie
         business = db.session.get(BusinessProfile, business_id)
         business.booking_url = ''
         db.session.commit()
-    created = client.post(
+    created = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections',
         json={
             'provider_key': 'link_catalog',
@@ -811,7 +814,7 @@ def test_provider_only_schedule_is_discoverable_after_publication_gate(app, clie
         'end_time': '11:00',
         'timezone': 'America/Chicago',
     }])
-    synced = client.put(
+    synced = venue_write(client, 'put',
         f'/api/businesses/{business_id}/connections/{connection_id}/catalog',
         json=schedule,
         headers=auth(owner),
@@ -843,7 +846,7 @@ def test_imported_booking_links_require_review_scope_and_current_health(app, cli
     owner = register(client, 'booking-boundary-owner@example.com')
     business_id = verified_business(app, owner['user']['id'])
 
-    unapproved = client.post(
+    unapproved = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections',
         json={
             'provider_key': 'link_catalog',
@@ -871,7 +874,7 @@ def test_imported_booking_links_require_review_scope_and_current_health(app, cli
         'timezone': 'UTC',
         'booking_url': 'https://attacker.example/phish',
     }])
-    rejected = client.put(
+    rejected = venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=hostile,
         headers=auth(owner),
@@ -881,7 +884,7 @@ def test_imported_booking_links_require_review_scope_and_current_health(app, cli
         'occurrence_booking_url_outside_approved_base'
     )
 
-    accepted = client.put(
+    accepted = venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=catalog(),
         headers=auth(owner),
@@ -945,7 +948,7 @@ def test_daily_cron_cadence_does_not_hide_last_known_healthy_schedule(
     owner = register(client, 'daily-health-owner@example.com')
     business_id = verified_business(app, owner['user']['id'])
     connection = create_connection(client, owner, business_id)
-    pushed = client.put(
+    pushed = venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=catalog(), headers=auth(owner),
     )
@@ -1031,7 +1034,7 @@ def test_public_schedule_range_keeps_timestamp_and_recurring_items(app, client):
             'timezone': 'America/Chicago',
         },
     ]
-    pushed = client.put(
+    pushed = venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=catalog(occurrences=occurrences),
         headers=auth(owner),
@@ -1072,25 +1075,25 @@ def test_team_roles_and_governance_gate_connection_operations(app, client):
         ))
         db.session.commit()
 
-    pushed = client.put(
+    pushed = venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=catalog(), headers=auth(editor),
     )
     assert pushed.status_code == 202, pushed.get_json()
-    forbidden = client.delete(
+    forbidden = venue_write(client, 'delete',
         f"/api/businesses/{business_id}/connections/{connection['id']}",
         headers=auth(editor),
     )
     assert forbidden.status_code == 403
-    assert client.delete(
+    assert venue_write(client, 'delete',
         f"/api/businesses/{business_id}/connections/{connection['id']}",
         headers=auth(owner),
     ).status_code == 200
-    assert client.post(
+    assert venue_write(client, 'post',
         f"/api/businesses/{business_id}/connections/{connection['id']}/reconnect",
         headers=auth(editor),
     ).status_code == 403
-    assert client.post(
+    assert venue_write(client, 'post',
         f"/api/businesses/{business_id}/connections/{connection['id']}/reconnect",
         headers=auth(owner),
     ).status_code == 200
@@ -1106,7 +1109,7 @@ def test_team_roles_and_governance_gate_connection_operations(app, client):
         business = db.session.get(BusinessProfile, business_id)
         business.governance_status = 'suspended'
         db.session.commit()
-    assert client.put(
+    assert venue_write(client, 'put',
         f"/api/businesses/{business_id}/connections/{connection['id']}/catalog",
         json=catalog(source_version='blocked'), headers=auth(owner),
     ).status_code == 403
@@ -1137,7 +1140,7 @@ def test_integration_audit_uses_the_actual_business_team_role(app, client):
         ])
         db.session.commit()
 
-    created = client.post(
+    created = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections',
         json={
             'provider_key': 'link_catalog',
@@ -1148,28 +1151,28 @@ def test_integration_audit_uses_the_actual_business_team_role(app, client):
     )
     assert created.status_code == 201, created.get_json()
     connection_id = created.get_json()['connection']['id']
-    edited = client.patch(
+    edited = venue_write(client, 'patch',
         f'/api/businesses/{business_id}/connections/{connection_id}',
         json={'config': {'label': 'Updated by admin'}},
         headers=auth(admin),
     )
     assert edited.status_code == 200, edited.get_json()
-    pushed = client.put(
+    pushed = venue_write(client, 'put',
         f'/api/businesses/{business_id}/connections/{connection_id}/catalog',
         json=catalog(occurrences=[]),
         headers=auth(editor),
     )
     assert pushed.status_code == 202, pushed.get_json()
-    rechecked = client.post(
+    rechecked = venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections/{connection_id}/recheck',
         headers=auth(editor),
     )
     assert rechecked.status_code == 200, rechecked.get_json()
-    assert client.delete(
+    assert venue_write(client, 'delete',
         f'/api/businesses/{business_id}/connections/{connection_id}',
         headers=auth(admin),
     ).status_code == 200
-    assert client.post(
+    assert venue_write(client, 'post',
         f'/api/businesses/{business_id}/connections/{connection_id}/reconnect',
         headers=auth(admin),
     ).status_code == 200
@@ -1261,11 +1264,11 @@ def test_privacy_safe_events_and_business_analytics(app, client):
     for index, action in enumerate((
         'profile_view', 'website', 'contact', 'schedule', 'booking', 'lesson',
     )):
-        response = client.post(f'/api/businesses/{business_id}/events', json={
+        response = venue_write(client, 'post', f'/api/businesses/{business_id}/events', json={
             'client_event_id': f'event-{index}', 'action': action,
         })
         assert response.status_code == 201, response.get_json()
-    duplicate = client.post(f'/api/businesses/{business_id}/events', json={
+    duplicate = venue_write(client, 'post', f'/api/businesses/{business_id}/events', json={
         'client_event_id': 'event-4', 'action': 'booking',
     })
     assert duplicate.status_code == 200
@@ -1411,7 +1414,7 @@ def test_operator_role_mfa_vault_and_cron_are_bounded(app, client, monkeypatch):
         'health_claimed', 'health_checked', 'profile_health_claimed',
     }
 
-    owner_disconnected = client.delete(
+    owner_disconnected = venue_write(client, 'delete',
         f"/api/businesses/{business_id}/connections/{connection['id']}",
         headers=auth(owner),
     )
@@ -1420,7 +1423,7 @@ def test_operator_role_mfa_vault_and_cron_are_bounded(app, client, monkeypatch):
         secret_row = BusinessCredentialSecret.query.one()
         assert secret_row.deleted_at is not None
         assert secret_row.ciphertext == ''
-    owner_reconnected = client.post(
+    owner_reconnected = venue_write(client, 'post',
         f"/api/businesses/{business_id}/connections/{connection['id']}/reconnect",
         headers=auth(owner),
     )

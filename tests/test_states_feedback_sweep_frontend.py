@@ -67,7 +67,8 @@ def test_offline_copy_matches_available_snapshot_and_transient_failures_recover(
     assert "setConnectionState('degraded')" in connectivity
     assert "await probeConnection()" in connectivity
     assert "showing details saved ${age}" in states
-    assert "Actions wait until you reconnect" in states
+    assert "Reconnect, then retry unsent actions." in states
+    assert "flushChatOutboxForAccount" in states
     api_error = section("async function api", "function persistReplacementToken")
     assert "if (!navigator.onLine) setConnectionState('offline')" in api_error
     assert "else setConnectionState('degraded')" in api_error

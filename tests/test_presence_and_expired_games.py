@@ -210,11 +210,11 @@ def test_expired_game_stays_in_history_calendar_and_uses_normal_score_review(
 
     disputed = client.post(
         f"/api/games/{game['id']}/dispute",
-        json={'details': 'The final score was different.'}, headers=auth(opponent),
+        json={**({'details': 'The final score was different.'}), 'expected_score_version': db.session.get(Game, game['id']).score_version}, headers=auth(opponent),
     )
     assert disputed.status_code == 200, disputed.get_json()
-    assert disputed.get_json()['status'] == 'expired'
-    assert disputed.get_json()['can_enter_score'] is True
+    assert disputed.get_json()['status'] == 'unresolved'
+    assert disputed.get_json()['can_propose_score_correction'] is True
     assert game['id'] in {
         item['id'] for item in client.get(
             '/api/games/history', headers=auth(host),
@@ -223,12 +223,12 @@ def test_expired_game_stays_in_history_calendar_and_uses_normal_score_review(
 
     reported_again = client.post(
         f"/api/games/{game['id']}/complete",
-        json=score_payload(host, opponent),
+        json={**score_payload(host, opponent), 'expected_score_version': disputed.get_json()['score_version']},
         headers=auth(host),
     )
     assert reported_again.get_json()['status'] == 'awaiting_confirmation'
     confirmed = client.post(
-        f"/api/games/{game['id']}/confirm", headers=auth(opponent),
+        f"/api/games/{game['id']}/confirm", json={'expected_score_version': db.session.get(Game, game['id']).score_version}, headers=auth(opponent),
     )
     assert confirmed.status_code == 200, confirmed.get_json()
     assert confirmed.get_json()['status'] == 'completed'

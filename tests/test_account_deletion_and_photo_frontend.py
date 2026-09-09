@@ -63,7 +63,7 @@ def test_court_photo_preview_and_progress_reuse_the_launching_modal():
     assert "formUX.startSubmitting('Adding photo…')" in upload
     assert 'contextBox.innerHTML =' in upload
     assert 'const becomesCoverPhoto =' in upload
-    assert 'This becomes the court cover photo.' in upload
+    assert 'Court views are preferred for the cover.' in upload
     assert 'The venue-supplied cover photo will remain in place.' in upload
     assert 'ERROR_TEXT.photo_too_large' in upload
     assert 'ERROR_TEXT.invalid_photo' in upload

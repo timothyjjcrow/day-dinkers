@@ -11,6 +11,7 @@ def run(script):
       const assert=require('node:assert/strict');
       const esc=value=>String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const uiIcon=()=>'',modalHead=()=>'',compactCourtFact=value=>value;
+      const state={me:null};
     ''' + source + script], check=True, capture_output=True, text=True)
 
 
@@ -44,7 +45,7 @@ def test_visit_sheet_keeps_complete_open_play_cost_and_access_notes_and_focuses_
     run(r'''
       let html,focused='',scrolled=false,frame;
       const heading={focus(){focused='openplay';},scrollIntoView(){scrolled=true;}};
-      const modal={isConnected:true,querySelector:()=>heading};
+      const modal={isConnected:true,querySelector:selector=>selector==='#court-visit-correction'?null:heading};
       const openModal=value=>{html=value;return modal;};
       const requestAnimationFrame=callback=>{frame=callback;};
       const businessActionHref=value=>/^https:\/\//.test(value||'')?value:'';

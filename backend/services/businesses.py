@@ -39,12 +39,17 @@ def _reset_profile_for_ownership_transfer(business):
     business.contact_email = ''
     business.contact_phone = ''
     business.hours = ''
+    business.timezone = ''
+    business.structured_hours = '{}'
+    business.hours_dawn_to_dusk = False
+    business.visitor_info = '{}'
     business.amenities = '[]'
     business.website_url = ''
     business.booking_url = ''
     business.membership_url = ''
     business.logo_url = ''
     business.logo_data = ''
+    business.reviewed_public_snapshot = ''
     business.published = False
     business.governance_status = 'active'
     business.suspension_reason = ''
@@ -218,6 +223,15 @@ def review_business_claim(
     if ownership_transferred and not confirm_transfer:
         raise BusinessClaimReviewError('ownership_transfer_requires_confirmation')
     if decision == 'approve':
+        if business.court.pending_submission:
+            from backend.services.venue_locations import possible_venue_duplicates, lock_venue_submission_review
+            lock_venue_submission_review()
+            court = business.court
+            if court.latitude is None or court.longitude is None or not court.address:
+                raise BusinessClaimReviewError('venue_location_incomplete')
+            if possible_venue_duplicates({'name': court.name, 'address': court.address, 'latitude': court.latitude, 'longitude': court.longitude}, exclude_id=court.id):
+                raise BusinessClaimReviewError('venue_location_duplicate_needs_review')
+            court.pending_submission = False
         # A successful control check explicitly transfers the venue draft to
         # this claimant. Competing requests are closed in the same transaction.
         if ownership_transferred:

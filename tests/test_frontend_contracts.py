@@ -78,9 +78,10 @@ def test_long_mobile_forms_have_recoverable_non_sensitive_drafts():
         "create-league",
         "create-tournament",
         "create-club",
-        "edit-profile",
     ):
         assert f"draftKey: '{key}'" in APP
+    # Focused editors must not restore a photo draft into the availability form.
+    assert "draftKey: `edit-profile-${focusSection}`" in APP
     assert "formUX.clearDraft({ disable: true });" in APP
 
 
@@ -167,18 +168,18 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r78';" in SERVICE_WORKER
+    assert "const CACHE = 'thirdshot-v15-r79';" in SERVICE_WORKER
     for asset in (
-        "/release-assets/r76/styles-v15.min.css",
-        "/release-assets/r76/crew-planner-v15.min.js",
-        "/release-assets/r76/tournament-bracket-v15.min.js",
-        "/release-assets/r76/venue-workspace-v15.min.js",
-        "/release-assets/r76/app-v15.min.js",
+        "/release-assets/r77/styles-v15.min.css",
+        "/release-assets/r77/crew-planner-v15.min.js",
+        "/release-assets/r77/tournament-bracket-v15.min.js",
+        "/release-assets/r77/venue-workspace-v15.min.js",
+        "/release-assets/r77/app-v15.min.js",
     ):
         assert asset in SERVICE_WORKER
-    assert 'href="/release-assets/r76/styles-v15.min.css"' in INDEX
-    assert 'src="/release-assets/r76/crew-planner-v15.min.js"' in INDEX
-    assert 'src="/release-assets/r76/app-v15.min.js"' in INDEX
+    assert 'href="/release-assets/r77/styles-v15.min.css"' in INDEX
+    assert 'src="/release-assets/r77/crew-planner-v15.min.js"' in INDEX
+    assert 'src="/release-assets/r77/app-v15.min.js"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -261,7 +262,7 @@ def test_community_is_a_universal_attention_aware_inbox():
     assert "['courts', 'Courts']" in APP
     assert 'id="chat-tab-groups"' in INDEX
     assert "Private groups" in APP
-    assert "Your community groups" in APP
+    assert "Your public groups" in APP
     assert "function renderPeopleLane" in APP
     assert "Everything else" in APP
     assert "state.communityRoomUnread" in APP
@@ -424,7 +425,7 @@ def test_logout_is_a_hard_account_privacy_boundary():
     assert "profileRenderGeneration += 1;" in APP
     assert "panel.replaceChildren();" in APP
     assert "function areaViewKey()" in APP
-    assert "`${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}:${discoveryKey}`" in APP
+    assert "`${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}:${discoveryKey}:${seg === 'scores' ? `${state.boardScope}:${state.boardPeriod}` : ''}`" in APP
     assert "const peopleKey = seg === 'friends' ? `:${state.peopleMode}` : '';" in APP
     assert "`${state.me?.id || 'signed-out'}:chat:${seg}${peopleKey}:${areaViewKey()}`" in APP
     assert "const CHAT_DRAFT_TTL = 24 * 60 * 60 * 1000;" in APP

@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
+from sqlalchemy.sql.expression import Grouping
 
 from backend.app import db
 
@@ -117,6 +118,7 @@ class User(TimestampMixin, db.Model):
     home_area = db.Column(db.String(120))
     # "Usually plays" slots as a JSON array of AVAILABILITY_SLOTS tokens.
     availability = db.Column(db.Text, nullable=False, default='[]')
+    away_until = db.Column(db.DateTime)
     # Last ISO week ('YYYY-Www') a weekly recap was generated for.
     last_recap_week = db.Column(db.String(10), nullable=False, default='')
     # JSON array of notification kinds this user has muted (only MUTEABLE ones).
@@ -204,6 +206,7 @@ class User(TimestampMixin, db.Model):
             'home_court_id': self.home_court_id,
             'home_court_name': self.home_court.name if self.home_court else None,
             'availability': self.availability_list(),
+            'away_until': iso(self.away_until),
             # Coarse on purpose — "in the app within ~10 minutes", nothing finer.
             'active_now': bool(
                 self.nearby_visibility == 'everyone'
@@ -306,6 +309,7 @@ class Court(TimestampMixin, db.Model):
     # "mon":{"open":"06:00","close":"22:00"}, ...}. Free text above
     # remains as an honest fallback for unstructured community data.
     structured_hours = db.Column(db.Text, nullable=False, default='{}')
+    visitor_info = db.Column(db.Text, nullable=False, default='{}', server_default='{}')
     hours_dawn_to_dusk = db.Column(db.Boolean, nullable=False, default=False)
     reservation_url = db.Column(db.String(500), nullable=False, default='')
     fee_type = db.Column(db.String(24), nullable=False, default='')
@@ -322,6 +326,7 @@ class Court(TimestampMixin, db.Model):
     # Community-flagged permanently closed (via 2-user suggest consensus).
     # Hidden from map/list/search but kept for historical game/check-in refs.
     closed = db.Column(db.Boolean, nullable=False, default=False)
+    pending_submission = db.Column(db.Boolean, nullable=False, default=False)
 
     checkins = db.relationship('CheckIn', back_populates='court', lazy='dynamic')
     games = db.relationship('Game', back_populates='court', lazy='dynamic')
@@ -356,75 +361,12 @@ class Court(TimestampMixin, db.Model):
         return parsed.strftime('%-I:%M %p').replace(':00 ', ' ')
 
     def hours_status(self, as_of=None):
-        if self.closed:
-            return {'state': 'closed', 'is_open': False, 'label': 'Closed'}
-        schedule = self.structured_hours_dict()
-        if self.hours_dawn_to_dusk:
-            return {
-                'state': 'dawn_to_dusk', 'is_open': None,
-                'label': 'Dawn to dusk',
-            }
-        if not schedule:
-            return {
-                'state': 'unavailable', 'is_open': None,
-                'label': self.hours or '',
-            }
-        zone_name = str(schedule.get('timezone') or 'America/Los_Angeles')
-        try:
-            zone = ZoneInfo(zone_name)
-        except (ZoneInfoNotFoundError, ValueError):
-            zone = UTC
-            zone_name = 'UTC'
-        instant = as_of or utcnow()
-        if instant.tzinfo is None:
-            instant = instant.replace(tzinfo=UTC)
-        local_now = instant.astimezone(zone)
-        day_keys = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
-        intervals = []
-        for offset in range(-1, 8):
-            day = local_now.date() + timedelta(days=offset)
-            raw = schedule.get(day_keys[day.weekday()])
-            values = raw if isinstance(raw, list) else [raw]
-            for value in values:
-                if not isinstance(value, dict):
-                    continue
-                opens = value.get('open')
-                closes = value.get('close')
-                try:
-                    open_time = datetime.strptime(opens, '%H:%M').time()
-                    close_time = datetime.strptime(closes, '%H:%M').time()
-                except (TypeError, ValueError):
-                    continue
-                start = datetime.combine(day, open_time, tzinfo=zone)
-                end = datetime.combine(day, close_time, tzinfo=zone)
-                if end <= start:
-                    end += timedelta(days=1)
-                intervals.append((start, end))
-        current = next(
-            ((start, end) for start, end in intervals if start <= local_now < end),
-            None,
-        )
-        if current:
-            return {
-                'state': 'open', 'is_open': True,
-                'label': f'Open until {self._hours_clock_label(current[1].strftime("%H:%M"))}',
-                'timezone': zone_name,
-            }
-        upcoming = next(
-            ((start, end) for start, end in sorted(intervals) if start > local_now),
-            None,
-        )
-        if upcoming:
-            day_prefix = '' if upcoming[0].date() == local_now.date() \
-                else upcoming[0].strftime('%a ')
-            return {
-                'state': 'closed', 'is_open': False,
-                'label': f'Opens {day_prefix}{self._hours_clock_label(upcoming[0].strftime("%H:%M"))}',
-                'timezone': zone_name,
-            }
-        return {'state': 'closed', 'is_open': False, 'label': 'Closed today'}
+        from backend.services.court_hours import hours_status
+        return hours_status(self.structured_hours_dict(), dawn=self.hours_dawn_to_dusk,
+                            notes=self.hours, closed=self.closed, as_of=as_of)
 
     def to_summary_dict(self):
+        from backend.services.court_visiting import visiting_dict
         return {
             'id': self.id,
             'name': self.name,
@@ -442,6 +384,7 @@ class Court(TimestampMixin, db.Model):
             'open_status': self.hours_status(),
             'reservation_url': self.reservation_url or '',
             'fee_type': self.fee_type or '',
+            'visitor_info': visiting_dict(self.visitor_info),
         }
 
     def to_dict(self):
@@ -466,6 +409,7 @@ class Court(TimestampMixin, db.Model):
             'has_water': bool(self.has_water),
             'nets_provided': bool(self.nets_provided),
             'closed': bool(self.closed),
+            'pending_submission': bool(self.pending_submission),
         })
         return data
 
@@ -564,11 +508,17 @@ class BusinessProfile(TimestampMixin, db.Model):
         db.String(20), nullable=False, default='approved', index=True,
     )
     content_reviewed_at = db.Column(db.DateTime)
+    # Last approved player-visible content while managers prepare/review edits.
+    reviewed_public_snapshot = db.Column(db.Text, nullable=False, default='')
     description = db.Column(db.String(2000), nullable=False, default='')
     announcement = db.Column(db.String(500), nullable=False, default='')
     contact_email = db.Column(db.String(255), nullable=False, default='')
     contact_phone = db.Column(db.String(40), nullable=False, default='')
     hours = db.Column(db.String(1000), nullable=False, default='')
+    structured_hours = db.Column(db.Text, nullable=False, default='{}', server_default='{}')
+    visitor_info = db.Column(db.Text, nullable=False, default='{}', server_default='{}')
+    hours_dawn_to_dusk = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    timezone = db.Column(db.String(64), nullable=False, default='')
     amenities = db.Column(db.Text, nullable=False, default='[]')
     website_url = db.Column(db.String(500), nullable=False, default='')
     booking_url = db.Column(db.String(500), nullable=False, default='')
@@ -623,11 +573,18 @@ class BusinessProfile(TimestampMixin, db.Model):
             return []
         return [str(item) for item in parsed if str(item).strip()]
 
+    def venue_timezone(self):
+        configured = self.timezone or (self.court.structured_hours_dict().get('timezone', '') if self.court else '')
+        existing = {item.timezone for item in self.schedule_items if item.timezone}
+        return configured or (next(iter(existing)) if len(existing) == 1 else '')
+
     @property
     def verified(self):
         return self.claim_status == 'verified' and self.verified_at is not None
 
     def to_dict(self, *, include_inactive=False):
+        from backend.services.court_hours import hours_dict, project_hours
+        from backend.services.court_visiting import visiting_dict, project_visiting
         offerings = self.offerings if include_inactive else (
             item for item in self.offerings if item.active
         )
@@ -639,6 +596,7 @@ class BusinessProfile(TimestampMixin, db.Model):
             'name': self.name,
             'court_id': self.court_id,
             'court_name': self.court.name if self.court else None,
+            'location_pending_review': bool(self.court and self.court.pending_submission),
             'court_city': self.court.city if self.court else None,
             'court_state': self.court.state if self.court else None,
             'role': self.claimant_role,
@@ -655,6 +613,10 @@ class BusinessProfile(TimestampMixin, db.Model):
             'email': self.contact_email,
             'phone': self.contact_phone,
             'hours': self.hours,
+            'structured_hours': hours_dict(self.structured_hours),
+            'visitor_info': visiting_dict(self.visitor_info),
+            'hours_dawn_to_dusk': bool(self.hours_dawn_to_dusk),
+            'timezone': self.venue_timezone(),
             'amenities': self.amenities_list(),
             'website_url': self.website_url,
             'booking_url': self.booking_url,
@@ -666,7 +628,25 @@ class BusinessProfile(TimestampMixin, db.Model):
             'created_at': iso(self.created_at),
             'updated_at': iso(self.updated_at),
         }
+        data['effective_hours'] = project_hours(self.court, data)
+        data['effective_visiting'] = project_visiting(self.court, data)
         if include_inactive:
+            data['community_hours'] = project_hours(self.court)
+            if self.court and self.court.pending_submission:
+                data['proposed_location'] = {key: getattr(self.court, key) for key in ('name', 'address', 'city', 'state', 'latitude', 'longitude', 'num_courts', 'indoor')}
+            from backend.services.business_governance import content_version, business_snapshot, snapshot_fingerprint
+            data['content_version'] = content_version(self)
+            data['logo_content_version'] = __import__('hashlib').sha256((self.logo_data or self.logo_url or '').encode()).hexdigest()
+            data['logo_preview_url'] = f'/api/businesses/{self.id}/logo?draft=1' if self.logo_data else self.logo_url
+            data['has_reviewed_public_version'] = bool(self.reviewed_public_snapshot)
+            data['has_unpublished_changes'] = bool(
+                self.reviewed_public_snapshot and
+                snapshot_fingerprint(self.reviewed_snapshot_dict()) != snapshot_fingerprint(business_snapshot(self))
+            )
+            from backend.services.business_schedule import dated_occurrences, local_today
+            today = local_today(self.venue_timezone())
+            data['schedule_occurrences'] = dated_occurrences(data['schedule'], today, today + timedelta(days=6), include_hidden=True)
+            data['schedule_range'] = {'from': today.isoformat(), 'to': (today + timedelta(days=6)).isoformat()}
             data['integration_requests'] = [
                 item.to_dict()
                 for item in sorted(
@@ -677,14 +657,64 @@ class BusinessProfile(TimestampMixin, db.Model):
             ]
         return data
 
-    def to_public_dict(self):
-        """Player-facing profile without ownership or claim workflow state."""
+    def reviewed_snapshot_dict(self):
+        try:
+            value = json.loads(self.reviewed_public_snapshot or '{}')
+        except (TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def to_public_dict(self, *, link_health_checks=None):
+        """Use reviewed content on every player surface while a draft is held."""
         data = self.to_dict()
         data['schedule'] = [
             item.to_dict()
             for item in self.schedule_items
             if item.active and item.is_current()
         ]
+        if self.reviewed_public_snapshot:
+            snapshot = self.reviewed_snapshot_dict()
+            profile = snapshot.get('profile') or {}
+            for field in ('name', 'description', 'announcement', 'hours',
+                          'website_url', 'booking_url', 'membership_url', 'logo_url', 'timezone'):
+                data[field] = profile.get(field) or ''
+            from backend.services.court_hours import hours_dict
+            data['structured_hours'] = hours_dict(profile.get('structured_hours'))
+            from backend.services.court_visiting import visiting_dict
+            data['visitor_info'] = visiting_dict(profile.get('visitor_info'))
+            data['hours_dawn_to_dusk'] = bool(profile.get('hours_dawn_to_dusk'))
+            data['email'] = profile.get('contact_email') or ''
+            data['phone'] = profile.get('contact_phone') or ''
+            data['has_logo_upload'] = bool(profile.get('logo_data'))
+            try:
+                amenities = json.loads(profile.get('amenities') or '[]')
+            except (TypeError, ValueError):
+                amenities = []
+            data['amenities'] = amenities if isinstance(amenities, list) else []
+            data['offerings'] = [item for item in snapshot.get('offerings', []) if item.get('active')]
+            data['schedule'] = []
+            for item in snapshot.get('schedule', []):
+                if not item.get('active'):
+                    continue
+                today = local_date_for_timezone(item.get('timezone')).isoformat()
+                end = item.get('event_date') if item.get('recurrence') == 'dated' else item.get('end_date')
+                if item.get('recurrence') in {'dated', 'date_range'} and (not end or end < today):
+                    continue
+                data['schedule'].append(item)
+        # A known unsafe destination is suppressed on its own; the rest of the
+        # reviewed listing remains usable. Match hashes so a new URL does not
+        # inherit an old URL's health decision.
+        from backend.services.business_visibility import hide_unsafe_public_links
+        data = hide_unsafe_public_links(self, data, checks=link_health_checks)
+        from backend.services.court_hours import project_hours
+        data['effective_hours'] = project_hours(self.court, data)
+        from backend.services.court_visiting import project_visiting
+        data['effective_visiting'] = project_visiting(self.court, data)
+        from backend.services.business_schedule import dated_occurrences, local_today
+        today = local_today(data.get('timezone'))
+        data['schedule_occurrences'] = dated_occurrences(data['schedule'], today, today + timedelta(days=6))
+        # Keep legacy patterns readable without disclosing hidden per-date edits.
+        data['schedule'] = [{key: value for key, value in item.items() if key != 'occurrence_overrides'} for item in data['schedule']]
         for field in (
             'role', 'claim_status', 'published', 'governance_status',
             'suspension_reason', 'suspended_at', 'content_review_status',
@@ -1139,10 +1169,13 @@ class BusinessProfileRevision(db.Model):
             'created_at': iso(self.created_at),
         }
         if include_snapshot:
-            snapshot = self.snapshot_dict()
-            profile = dict(snapshot.get('profile') or {})
-            profile['has_logo_upload'] = bool(profile.pop('logo_data', ''))
-            data['snapshot'] = {**snapshot, 'profile': profile}
+            def safe_snapshot(snapshot):
+                profile = dict(snapshot.get('profile') or {})
+                profile['has_logo_upload'] = bool(profile.pop('logo_data', ''))
+                return {**snapshot, 'profile': profile}
+            data['snapshot'] = safe_snapshot(self.snapshot_dict())
+            data['before_snapshot'] = safe_snapshot(self.previous_snapshot_dict())
+            data['after_snapshot'] = data['snapshot']
         return data
 
 
@@ -1444,6 +1477,9 @@ class BusinessScheduleItem(TimestampMixin, db.Model):
         index=True,
     )
     title = db.Column(db.String(120), nullable=False)
+    offering_id = db.Column(db.Integer, db.ForeignKey(
+        'business_offering.id', name='business_schedule_item_offering_id_fkey', ondelete='SET NULL',
+    ), index=True)
     kind = db.Column(db.String(32), nullable=False, default='other')
     day_of_week = db.Column(db.String(12), nullable=False, default='')
     start_time = db.Column(db.String(5), nullable=False, default='')
@@ -1462,6 +1498,8 @@ class BusinessScheduleItem(TimestampMixin, db.Model):
     )
     location_note = db.Column(db.String(240), nullable=False, default='')
     instructor = db.Column(db.String(120), nullable=False, default='')
+    occurrence_overrides = db.Column(db.Text, nullable=False, default='{}')
+    availability_updated_at = db.Column(db.DateTime)
     source_updated_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     active = db.Column(db.Boolean, nullable=False, default=True, index=True)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
@@ -1480,6 +1518,7 @@ class BusinessScheduleItem(TimestampMixin, db.Model):
     def to_dict(self):
         return {
             'id': self.id,
+            'offering_id': self.offering_id,
             'title': self.title,
             'kind': self.kind,
             'day_of_week': self.day_of_week,
@@ -1498,7 +1537,9 @@ class BusinessScheduleItem(TimestampMixin, db.Model):
             'cancelled': self.status == 'cancelled',
             'location_note': self.location_note,
             'instructor': self.instructor,
+            'availability_updated_at': iso(self.availability_updated_at),
             'source_updated_at': iso(self.source_updated_at),
+            'occurrence_overrides': json.loads(self.occurrence_overrides or '{}'),
             # Manual availability is useful, but it is not a provider-backed
             # real-time inventory promise. Keep that distinction explicit.
             'freshness': {
@@ -1639,9 +1680,17 @@ class CheckIn(TimestampMixin, db.Model):
     checked_in_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     checked_out_at = db.Column(db.DateTime)
     last_presence_ping_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    location_verified_at = db.Column(db.DateTime)
 
     user = db.relationship('User', back_populates='checkins', foreign_keys=[user_id])
     court = db.relationship('Court', back_populates='checkins')
+
+    def source_payload(self):
+        return {
+            'presence_source': 'location_confirmed' if self.location_verified_at else 'self_reported',
+            'location_verified_at': iso(self.location_verified_at),
+            'last_confirmed_at': iso(self.last_presence_ping_at),
+        }
 
 
 FRIENDSHIP_STATUSES = ['pending', 'accepted']
@@ -1670,14 +1719,14 @@ class Friendship(TimestampMixin, db.Model):
 # portable across both SQLite and PostgreSQL (unlike LEAST/GREATEST on SQLite).
 db.Index(
     'uq_friendship_unordered_pair',
-    db.case(
+    Grouping(db.case(
         (Friendship.requester_id < Friendship.addressee_id, Friendship.requester_id),
         else_=Friendship.addressee_id,
-    ),
-    db.case(
+    )),
+    Grouping(db.case(
         (Friendship.requester_id < Friendship.addressee_id, Friendship.addressee_id),
         else_=Friendship.requester_id,
-    ),
+    )),
     unique=True,
 )
 
@@ -2228,11 +2277,19 @@ class Message(TimestampMixin, db.Model):
     client_attempt_id = db.Column(db.String(64), nullable=True)
     client_attempt_fingerprint = db.Column(db.String(64), nullable=True)
 
+    reply_to_id = db.Column(
+        db.Integer,
+        db.ForeignKey('message.id', ondelete='SET NULL', name='message_reply_to_id_fkey'),
+        nullable=True, index=True,
+    )
+
     sender = db.relationship('User', foreign_keys=[sender_id])
     recipient = db.relationship('User', foreign_keys=[recipient_id])
     conversation = db.relationship('Conversation', foreign_keys=[conversation_id])
+    reply_to = db.relationship('Message', remote_side='Message.id', foreign_keys=[reply_to_id])
 
     def to_dict(self):
+        from backend.routes.chat import message_reply_preview
         return {
             'id': self.id,
             'sender_id': self.sender_id,
@@ -2246,6 +2303,8 @@ class Message(TimestampMixin, db.Model):
             'crew_id': self.crew_id,
             'league_id': self.league_id,
             'body': self.body,
+            'reply_to_id': self.reply_to_id,
+            'reply_to': message_reply_preview(self),
             'has_image': bool(self.image_data),
             'hearted': self.hearted,
             'heart_count': len(self.hearts),
@@ -2522,6 +2581,8 @@ class Game(TimestampMixin, db.Model):
             'client_attempt_id',
             unique=True,
         ),
+        db.Index('uq_game_series_occurrence', 'recurrence_series_id',
+                 'recurrence_occurrence_on', unique=True),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -2534,6 +2595,8 @@ class Game(TimestampMixin, db.Model):
     # SHA-256 of the normalized immutable create request. It distinguishes a
     # legitimate retry from accidental reuse of the key for a different game.
     client_attempt_fingerprint = db.Column(db.String(64), nullable=True)
+    invite_link_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    invite_link_expires_at = db.Column(db.DateTime)
     # Set when the game is hosted on behalf of a club — members get pinged
     # and the game carries the club's tag.
     club_id = db.Column(db.Integer, db.ForeignKey('club.id'), index=True)
@@ -2558,6 +2621,17 @@ class Game(TimestampMixin, db.Model):
         db.Text, nullable=False, default='[]', server_default='[]',
     )
     recurrence_ends_on = db.Column(db.Date)
+    # A series is anchored to its first retained date. Every later date is a
+    # separate Game: its URL, roster, attendance and results never roll forward.
+    recurrence_series_id = db.Column(
+        db.Integer, db.ForeignKey('game.id', name='game_recurrence_series_id_fkey'),
+        index=True,
+    )
+    recurrence_occurrence_on = db.Column(db.Date)
+    # Future defaults live separately from the first date's historical fields.
+    recurrence_template = db.Column(db.Text)
+    recurrence_stopped_at = db.Column(db.DateTime)
+
     max_players = db.Column(db.Integer, nullable=False, default=4)
     # Optional planning details for scheduled sessions. Empty/null defaults keep
     # every pre-upgrade game valid while allowing hosts to describe larger open
@@ -2619,9 +2693,11 @@ class Game(TimestampMixin, db.Model):
         db.ForeignKey('user.id', name='game_score_confirmed_by_id_fkey'),
     )
     score_confirmation_reminded_at = db.Column(db.DateTime)
-    # Count opposing-player disagreements for the current result.  The first
-    # dispute opens a counter-score round; a second closes the result as
-    # unresolved without ever applying rating changes.
+    score_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    score_history = db.Column(db.Text, nullable=False, default='[]', server_default='[]')
+    score_correction_pending = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    # Count opposing-player disagreements. The append-only score history
+    # separately bounds corrected proposals to two within the dispute window.
     score_dispute_count = db.Column(
         db.Integer, nullable=False, default=0, server_default='0',
     )
@@ -2648,6 +2724,10 @@ class Game(TimestampMixin, db.Model):
         'GameWaitlist', back_populates='game', lazy='selectin',
         order_by='GameWaitlist.id', cascade='all, delete-orphan',
     )
+    host_handoffs = db.relationship('GameHostHandoff', back_populates='game',
+                                   cascade='all, delete-orphan', order_by='GameHostHandoff.id')
+    session_attendance = db.relationship('GameSessionAttendance', back_populates='game',
+                                        cascade='all, delete-orphan', order_by='GameSessionAttendance.id')
     open_calls = db.relationship(
         'GameOpenCall', back_populates='game', lazy='selectin',
         order_by='GameOpenCall.id', cascade='all, delete-orphan',
@@ -2708,6 +2788,10 @@ class Game(TimestampMixin, db.Model):
         if user_id and (self.creator_id == user_id
                         or any(p.user_id == user_id for p in self.players)):
             return True
+        if user_id and self.status in ('completed', 'expired', 'cancelled') and any(
+            row.user_id == user_id for row in self.session_attendance
+        ):
+            return True
         # A direct invitation remains an explicit visibility grant even when
         # the broader audience is ``friends`` or ``open``. Crew-hosted casual
         # sessions use this to include every accepted group member without
@@ -2730,6 +2814,33 @@ class Game(TimestampMixin, db.Model):
         if self.score_team1 is not None and self.score_team2 is not None:
             return 'score'
         return 'session'
+
+    def score_correction_state(self, as_of=None):
+        """Bound a same-match correction without extending it on every proposal."""
+        try:
+            history = json.loads(self.score_history or '[]')
+        except (ValueError, TypeError):
+            history = []
+        history = history if isinstance(history, list) else []
+        opening = next((row for row in history if row.get('kind') in (
+            'disputed', 'late_disputed', 'withdrawn',
+        )), None)
+        anchor = None
+        if opening:
+            try:
+                anchor = datetime.fromisoformat(opening['at'].replace('Z', '+00:00')).replace(tzinfo=None)
+            except (ValueError, KeyError, TypeError):
+                pass
+        if not anchor and self.status == 'unresolved':
+            anchor = self.completed_at
+        deadline = anchor + timedelta(days=7) if anchor else None
+        attempts = sum(row.get('kind') == 'correction_proposed' for row in history)
+        expired = bool(deadline and (as_of or utcnow()) > deadline)
+        return {'history': history, 'deadline': deadline, 'attempts': attempts,
+                'expired': expired, 'can_propose': bool(
+                    self.game_type == 'ranked' and self.status == 'unresolved'
+                    and deadline and not expired and attempts < 2
+                )}
 
     def to_dict(self, viewer_id=None, perspective_user_id=None, *,
                 slim_players=False):
@@ -2773,7 +2884,9 @@ class Game(TimestampMixin, db.Model):
             you_won = (
                 (self.score_team1 > self.score_team2) == (perspective.team == 1)
             )
-        spots_left = max(0, self.max_players - len(players))
+        active_offers = [r for r in self.waitlist if r.offer_status == 'offered'
+                         and r.offer_expires_at and r.offer_expires_at > now]
+        spots_left = max(0, self.max_players - len(players) - len(active_offers))
         assembly_state = None
         if self.is_instant:
             if self.status != 'upcoming':
@@ -2800,7 +2913,6 @@ class Game(TimestampMixin, db.Model):
                     and expired_score_deadline >= now
                 )
             )
-            and self.recurrence == 'none'
             and len(players) >= 2
             and self.max_players <= 4
             # Instant games are happening now by provenance, not by comparing
@@ -2809,9 +2921,11 @@ class Game(TimestampMixin, db.Model):
         )
         can_complete_session = bool(
             viewer
-            and self.status == 'upcoming'
+            and (self.status == 'upcoming' or (
+                self.status == 'expired' and expired_score_deadline
+                and expired_score_deadline >= now
+            ))
             and self.game_type == 'casual'
-            and self.recurrence == 'none'
             and len(players) >= 2
             and self.scheduled_at <= now
         )
@@ -2845,13 +2959,18 @@ class Game(TimestampMixin, db.Model):
         except (ZoneInfoNotFoundError, ValueError):
             recurrence_zone = 'UTC'
             zone = UTC
-        occurrence_on = (
+        occurrence_on = self.recurrence_occurrence_on or (
             self.scheduled_at.replace(tzinfo=UTC).astimezone(zone).date()
             if self.scheduled_at else None
         )
+        series_root = (
+            db.session.get(Game, self.recurrence_series_id)
+            if self.recurrence_series_id and self.recurrence_series_id != self.id
+            else self
+        )
         my_recurrence = next(
             (
-                row for row in self.recurrence_rsvps
+                row for row in series_root.recurrence_rsvps
                 if viewer_id and row.user_id == viewer_id
             ),
             None,
@@ -2866,8 +2985,12 @@ class Game(TimestampMixin, db.Model):
         score_auto_confirms_at = (
             self.score_submitted_at + timedelta(hours=GAME_SCORE_AUTO_CONFIRM_HOURS)
             if self.status == 'awaiting_confirmation' and self.score_submitted_at
+            and not self.score_correction_pending
             else None
         )
+        correction_state = self.score_correction_state(now)
+        if self.score_correction_pending and correction_state['expired']:
+            awaiting_mine = False
         score_confirmed_by = (
             'timeout'
             if self.score_confirmation_kind == 'timeout'
@@ -2905,8 +3028,9 @@ class Game(TimestampMixin, db.Model):
             )
             else None
         )
+        active_queue = [r for r in self.waitlist if r.offer_status == 'queued' or r in active_offers]
         waitlist_position = next(
-            (i + 1 for i, row in enumerate(self.waitlist) if row.user_id == viewer_id),
+            (i + 1 for i, row in enumerate(active_queue) if row.user_id == viewer_id),
             None,
         )
         score_games = [row.to_dict() for row in self.score_lines]
@@ -2938,10 +3062,18 @@ class Game(TimestampMixin, db.Model):
                     **row.user.to_public_dict(),
                     'user_id': row.user_id,
                     'position': index + 1,
+                    'offer_status': row.offer_status,
+                    'offer_expires_at': iso(row.offer_expires_at),
                 }
-                for index, row in enumerate(self.waitlist)
+                for index, row in enumerate(active_queue)
                 if row.user and not row.user.deleted_at
             ]
+        my_offer = next((r for r in active_offers if r.user_id == viewer_id), None)
+        handoff = next((r for r in reversed(self.host_handoffs)
+                        if r.status == 'pending' and r.expires_at > now), None)
+        attendance_rows = self.session_attendance if self.status in ('completed', 'cancelled', 'expired') else []
+        my_attendance = next((r for r in attendance_rows if r.user_id == viewer_id), None)
+        can_view_attendance = viewer_id == self.creator_id or my_attendance is not None
         return {
             'id': self.id,
             'court': self.court.to_summary_dict() if self.court else None,
@@ -2955,6 +3087,13 @@ class Game(TimestampMixin, db.Model):
             'game_type': self.game_type,
             'visibility': self.visibility,
             'recurrence': self.recurrence,
+            'recurrence_series_id': self.recurrence_series_id,
+            'recurrence_series_active': bool(
+                self.recurrence_series_id and not series_root.recurrence_stopped_at
+            ),
+            'recurrence_edit_scopes': (
+                ['this_date', 'following_dates'] if self.recurrence_series_id else []
+            ),
             'recurrence_timezone': recurrence_zone,
             'recurrence_local_time': self.recurrence_local_time or '',
             'recurrence_weekdays': recurrence_weekdays,
@@ -3017,11 +3156,20 @@ class Game(TimestampMixin, db.Model):
                 0, int((score_auto_confirms_at - now).total_seconds()),
             ) if score_auto_confirms_at else None,
             'score_dispute_count': int(self.score_dispute_count or 0),
+            'score_version': int(self.score_version or 0),
+            'score_history': correction_state['history'] if viewer else [],
+            'score_correction_pending': bool(self.score_correction_pending),
+            'score_correction_attempts': correction_state['attempts'],
+            'ranked_correction_deadline_at': iso(correction_state['deadline']),
+            'ranked_correction_expired': correction_state['expired'],
+            'can_propose_score_correction': bool(viewer and viewer.team in (1, 2)
+                                                 and correction_state['can_propose']),
             'score_dispute_reason': self.score_dispute_reason or '',
             'late_dispute_deadline_at': iso(late_dispute_deadline),
             'can_late_dispute': can_late_dispute,
             'can_fix_score': bool(
                 viewer_id == self.score_submitted_by_id
+                and not (self.score_correction_pending and correction_state['expired'])
                 and (
                     self.status == 'awaiting_confirmation'
                     or (
@@ -3045,9 +3193,24 @@ class Game(TimestampMixin, db.Model):
             'spots_left': spots_left,
             'is_joined': viewer is not None,
             'is_creator': self.creator_id == viewer_id,
-            'waitlist_count': len(self.waitlist),
+            'waitlist_count': len(active_queue),
             'waitlist_position': waitlist_position,
             'waitlist_people': waitlist_people,
+            'waitlist_offer': {'expires_at': iso(my_offer.offer_expires_at)} if my_offer else None,
+            'reserved_offer_count': len(active_offers),
+            'host_handoff': handoff.to_dict(viewer_id) if handoff and viewer_id in (
+                self.creator_id, handoff.target_user_id,
+            ) else None,
+            'attendance_record': {'signed_up_count': len(attendance_rows),
+                'played_count': sum(r.attended is True for r in attendance_rows),
+                'my_attended': my_attendance.attended if my_attendance else None,
+                'people': [{'user_id': r.user_id, 'display_name': r.user.display_name,
+                            'rsvp_status': r.rsvp_status, 'attended': r.attended,
+                            'rsvp_joined_at': iso(r.rsvp_joined_at), 'rsvp_left_at': iso(r.rsvp_left_at),
+                            'recorded_at': iso(r.recorded_at), 'history': json.loads(r.history or '[]')}
+                           for r in attendance_rows if r.user and not r.user.deleted_at and
+                           not is_blocked_between(viewer_id, r.user_id)],
+            } if attendance_rows and can_view_attendance else None,
             'is_invited': personal_invite is not None,
             'my_invite_status': 'pending' if personal_invite else None,
             'invited_by': (
@@ -3130,9 +3293,13 @@ class GamePlayer(TimestampMixin, db.Model):
     rating_delta = db.Column(db.Integer)
     reminded_at = db.Column(db.DateTime)          # hour-before reminder sent
     day_reminded_at = db.Column(db.DateTime)      # day-before reminder sent
-    # "I'm coming 👋" — set when the player confirms attendance for this
-    # occurrence; cleared when a weekly session rolls forward.
+    # Explicit RSVP for this date. Actual attendance is recorded separately
+    # when a completed session is submitted.
     attending_at = db.Column(db.DateTime)
+    recurrence_rsvp_automatic = db.Column(
+        db.Boolean, nullable=False, default=False, server_default=db.false(),
+    )
+
 
     game = db.relationship('Game', back_populates='players')
     user = db.relationship('User')
@@ -3201,10 +3368,36 @@ class GameRecurrenceRsvp(TimestampMixin, db.Model):
         db.Boolean, nullable=False, default=False, server_default=db.false(),
     )
     skipped_occurrence_on = db.Column(db.Date)
+    # Multiple upcoming dates can now be skipped independently.
+    skipped_occurrences = db.Column(
+        db.Text, nullable=False, default='[]', server_default='[]',
+    )
+
     last_rsvp_occurrence_on = db.Column(db.Date)
 
     game = db.relationship('Game', back_populates='recurrence_rsvps')
     user = db.relationship('User')
+
+    def skipped_dates(self):
+        try:
+            values = set(json.loads(self.skipped_occurrences or '[]'))
+        except (TypeError, ValueError):
+            values = set()
+        if self.skipped_occurrence_on:
+            values.add(self.skipped_occurrence_on.isoformat())
+        return values
+
+    def set_skipped(self, occurrence_on, skipped):
+        values = self.skipped_dates()
+        key = occurrence_on.isoformat()
+        if skipped:
+            values.add(key)
+            self.skipped_occurrence_on = occurrence_on
+        else:
+            values.discard(key)
+            if self.skipped_occurrence_on == occurrence_on:
+                self.skipped_occurrence_on = None
+        self.skipped_occurrences = json.dumps(sorted(values))
 
     def to_dict(self, occurrence_on=None):
         return {
@@ -3219,7 +3412,7 @@ class GameRecurrenceRsvp(TimestampMixin, db.Model):
             ),
             'is_skipped': bool(
                 occurrence_on
-                and self.skipped_occurrence_on == occurrence_on
+                and occurrence_on.isoformat() in self.skipped_dates()
             ),
         }
 
@@ -3241,7 +3434,7 @@ class GameMvpVote(TimestampMixin, db.Model):
 
 
 class GameWaitlist(TimestampMixin, db.Model):
-    """FIFO queue for a full game — earliest entry is promoted when a spot opens."""
+    """FIFO queue with expiring offers that require the player's acceptance."""
     __table_args__ = (
         db.UniqueConstraint('game_id', 'user_id', name='uq_game_waitlist'),
     )
@@ -3249,9 +3442,62 @@ class GameWaitlist(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    offered_at = db.Column(db.DateTime)
+    offer_expires_at = db.Column(db.DateTime)
+    offer_status = db.Column(db.String(16), nullable=False, default='queued', server_default='queued')
 
     game = db.relationship('Game', back_populates='waitlist')
     user = db.relationship('User')
+
+
+class GameHostHandoff(TimestampMixin, db.Model):
+    __table_args__ = (db.Index(
+        'uq_game_host_handoff_pending', 'game_id', unique=True,
+        postgresql_where=db.text("status = 'pending'"), sqlite_where=db.text("status = 'pending'"),
+    ),)
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id', name='game_host_handoff_game_id_fkey'), nullable=False, index=True)
+    requested_by_id = db.Column(db.Integer, db.ForeignKey('user.id', name='game_host_handoff_requested_by_id_fkey'), nullable=False)
+    target_user_id = db.Column(db.Integer, db.ForeignKey('user.id', name='game_host_handoff_target_user_id_fkey'), nullable=False)
+    scope = db.Column(db.String(24), nullable=False, default='this_date', server_default='this_date')
+    status = db.Column(db.String(16), nullable=False, default='pending', server_default='pending')
+    leave_on_accept = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    expires_at = db.Column(db.DateTime, nullable=False)
+    resolved_at = db.Column(db.DateTime)
+    game = db.relationship('Game', back_populates='host_handoffs')
+    requested_by = db.relationship('User', foreign_keys=[requested_by_id])
+    target_user = db.relationship('User', foreign_keys=[target_user_id])
+
+    def to_dict(self, viewer_id=None):
+        return {
+            'id': self.id, 'requested_by_id': self.requested_by_id,
+            'requested_by_name': self.requested_by.display_name if self.requested_by else 'Host',
+            'target_user_id': self.target_user_id,
+            'target_name': self.target_user.display_name if self.target_user else 'Player',
+            'scope': self.scope, 'status': self.status, 'leave_on_accept': self.leave_on_accept,
+            'expires_at': iso(self.expires_at), 'resolved_at': iso(self.resolved_at),
+            'can_respond': bool(self.target_user_id == viewer_id and self.status == 'pending'
+                and self.expires_at > utcnow() and self.game.status == 'upcoming'
+                and self.game.creator_id == self.requested_by_id
+                and any(player.user_id == viewer_id for player in self.game.players)),
+        }
+
+
+class GameSessionAttendance(db.Model):
+    """RSVP/cancellation ledger preserved separately from the completed roster."""
+    __table_args__ = (db.UniqueConstraint('game_id', 'user_id', name='uq_game_session_attendance'),)
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id', name='game_session_attendance_game_id_fkey'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', name='game_session_attendance_user_id_fkey'), nullable=False, index=True)
+    rsvp_joined_at = db.Column(db.DateTime)
+    rsvp_left_at = db.Column(db.DateTime)
+    rsvp_status = db.Column(db.String(16), nullable=False, default='joined', server_default='joined')
+    history = db.Column(db.Text, nullable=False, default='[]', server_default='[]')
+    attended = db.Column(db.Boolean)
+    recorded_by_id = db.Column(db.Integer, db.ForeignKey('user.id', name='game_session_attendance_recorded_by_id_fkey'))
+    recorded_at = db.Column(db.DateTime)
+    game = db.relationship('Game', back_populates='session_attendance')
+    user = db.relationship('User', foreign_keys=[user_id])
 
 
 class GameInvite(TimestampMixin, db.Model):
@@ -3340,7 +3586,8 @@ class GameOpenCall(TimestampMixin, db.Model):
             or game.scheduled_at < now - timedelta(hours=2)
         ):
             return 'closed'
-        if len(game.players) >= game.max_players:
+        reserved = sum(row.offer_status == 'offered' and bool(row.offer_expires_at) and row.offer_expires_at > now for row in game.waitlist)
+        if len(game.players) + reserved >= game.max_players:
             return 'full'
         return 'open'
 
@@ -3349,14 +3596,15 @@ class GameOpenCall(TimestampMixin, db.Model):
         game = self.game
         state = self.live_state(now)
         player_count = len(game.players) if game else 0
-        spots_left = max(0, game.max_players - player_count) if game else 0
+        offers = [r for r in game.waitlist if r.offer_status == 'offered' and r.offer_expires_at and r.offer_expires_at > now] if game else []
+        spots_left = max(0, game.max_players - player_count - len(offers)) if game else 0
         viewer_joined = bool(
             viewer_id and game
             and any(player.user_id == viewer_id for player in game.players)
         )
         viewer_waitlisted = bool(
             viewer_id and game
-            and any(entry.user_id == viewer_id for entry in game.waitlist)
+            and any(entry.user_id == viewer_id and entry.offer_status != 'expired' for entry in game.waitlist)
         )
         return {
             'id': self.id,
@@ -3374,7 +3622,8 @@ class GameOpenCall(TimestampMixin, db.Model):
             'max_players': game.max_players if game else 0,
             'player_count': player_count,
             'spots_left': spots_left,
-            'waitlist_count': len(game.waitlist) if game else 0,
+            'waitlist_count': sum(r.offer_status != 'expired' for r in game.waitlist) if game else 0,
+            'offer_pending': any(r.user_id == viewer_id for r in offers),
             'is_joined': viewer_joined,
             'can_join': bool(
                 viewer_id and state == 'open'
@@ -3572,6 +3821,8 @@ class CourtPhoto(TimestampMixin, db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     photo_data = db.Column(db.Text, nullable=False)
     caption = db.Column(db.String(140), nullable=False, default='')
+    category = db.Column(db.String(16), nullable=False, default='', server_default='')
+    captured_on = db.Column(db.Date)
 
     court = db.relationship('Court')
     user = db.relationship('User')
@@ -3621,15 +3872,20 @@ class CourtReview(TimestampMixin, db.Model):
 
 class CourtEditSuggestion(TimestampMixin, db.Model):
     """A player's proposed corrections to scraped court data, as a JSON object
-    of {field: value}. Applied automatically once two distinct users agree."""
+    of {field: value}. Closure needs operator review; ordinary facts use consensus."""
     id = db.Column(db.Integer, primary_key=True)
     court_id = db.Column(db.Integer, db.ForeignKey('court.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     payload = db.Column(db.Text, nullable=False, default='{}')
     status = db.Column(db.String(16), nullable=False, default='pending', index=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey(
+        'user.id', name='court_edit_suggestion_reviewed_by_id_fkey', ondelete='SET NULL',
+    ))
+    reviewed_at = db.Column(db.DateTime)
+    review_note = db.Column(db.String(500), nullable=False, default='', server_default='')
 
     court = db.relationship('Court')
-    user = db.relationship('User')
+    user = db.relationship('User', foreign_keys=[user_id])
 
 
 class Notification(TimestampMixin, db.Model):
@@ -3765,7 +4021,8 @@ COMPETITION_RESULT_STATES = (
 COMPETITION_TYPES = ('tournament', 'league')
 COMPETITION_RESULT_ACTIONS = (
     'reported', 'confirmed', 'disputed', 'resolved', 'corrected', 'voided',
-    'auto_confirmed', 'legacy_imported',
+    'auto_confirmed', 'legacy_imported', 'reopened',
+    'late_review_requested', 'late_review_response', 'late_review_approved', 'late_review_rejected',
 )
 
 
@@ -3887,6 +4144,12 @@ class Tournament(TimestampMixin, db.Model):
     game_format = db.Column(db.String(32), nullable=False, default='single_11')
     court_count = db.Column(db.Integer, nullable=False, default=1)
     match_minutes = db.Column(db.Integer, nullable=False, default=30)
+    rest_minutes = db.Column(db.Integer, nullable=False, default=5, server_default='5')
+    entry_fee_cents = db.Column(db.Integer)
+    payment_method = db.Column(db.String(80), nullable=False, default='', server_default='')
+    withdrawal_policy = db.Column(db.String(300), nullable=False, default='', server_default='')
+    schedule_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    schedule_history = db.Column(db.Text, nullable=False, default='[]', server_default='[]')
     max_entries = db.Column(db.Integer, nullable=False, default=8)
     # Ranked tournaments feed every decided match into ELO at completion.
     ranked = db.Column(db.Boolean, nullable=False, default=False)
@@ -3911,6 +4174,8 @@ class Tournament(TimestampMixin, db.Model):
         order_by='TournamentEntry.id', cascade='all, delete-orphan',
         foreign_keys='TournamentEntry.tournament_id',
     )
+    waitlist = db.relationship('TournamentWaitlist', back_populates='tournament', lazy='selectin',
+        order_by='TournamentWaitlist.created_at, TournamentWaitlist.id', cascade='all, delete-orphan')
     matches = db.relationship(
         'TournamentMatch', back_populates='tournament', lazy='selectin',
         order_by='(TournamentMatch.round, TournamentMatch.position)',
@@ -3964,6 +4229,13 @@ class Tournament(TimestampMixin, db.Model):
         partner_offer = self.partner_offer_for(current_user_id) \
             if current_user_id else None
         ready_entries = sum(entry.partner_ready(self.event_type) for entry in self.entries)
+        now = utcnow()
+        queued = [row for row in self.waitlist if row.status == 'queued'] if self.status == 'registration' else []
+        queued.sort(key=lambda row: (row.updated_at or row.created_at, row.id))
+        offers = [row for row in self.waitlist if row.status == 'offered' and row.expires_at and row.expires_at > now] if self.status == 'registration' else []
+        mine = next((row for row in self.waitlist if row.user_id == current_user_id), None)
+        mine_status = ('closed' if self.status != 'registration' and mine.status in ('queued', 'offered') else
+            'expired' if mine.status == 'offered' and (not mine.expires_at or mine.expires_at <= now) else mine.status) if mine else None
         data = {
             'id': self.id,
             'name': self.name,
@@ -3976,6 +4248,11 @@ class Tournament(TimestampMixin, db.Model):
             'game_format': self.game_format or 'single_11',
             'court_count': self.court_count or 1,
             'match_minutes': self.match_minutes or 30,
+            'rest_minutes': self.rest_minutes if self.rest_minutes is not None else 5,
+            'entry_fee_cents': self.entry_fee_cents,
+            'payment_method': self.payment_method or '',
+            'withdrawal_policy': self.withdrawal_policy or '',
+            'schedule_version': self.schedule_version or 0,
             'status': self.status,
             'ranked': bool(self.ranked),
             'starts_at': iso(self.starts_at),
@@ -3986,6 +4263,13 @@ class Tournament(TimestampMixin, db.Model):
             'club_id': self.club_id,
             'club_name': self.club.name if self.club else None,
             'entry_count': len(self.entries),
+            'waitlist_count': len(queued),
+            'held_offer_count': len(offers),
+            # Queued players retain priority even between an offer expiring
+            # and the next maintenance run issuing its replacement.
+            'registration_spots_left': max(0, self.max_entries - len(self.entries) - len(offers) - len(queued)),
+            'my_waitlist': {'id': mine.id, 'status': mine_status, 'position': queued.index(mine) + 1 if mine in queued else None,
+                'expires_at': iso(mine.expires_at) if mine_status == 'offered' else None} if mine else None,
             'ready_entry_count': ready_entries,
             'pending_partner_count': sum(
                 entry.partner_status == 'pending' for entry in self.entries
@@ -3995,6 +4279,8 @@ class Tournament(TimestampMixin, db.Model):
             ) if self.event_type == 'doubles' else 0,
             'is_organizer': self.organizer_id == current_user_id,
             'my_entry_id': my_entry.id if my_entry else None,
+            'my_entry_ready': my_entry.partner_ready(self.event_type) if my_entry else None,
+            'my_entry_partner_status': my_entry.partner_status if my_entry else None,
             'my_partner_action': partner_action.partner_action_dict(current_user_id)
             if partner_action else None,
             'my_pending_partner_offer': partner_offer.partner_action_dict(current_user_id)
@@ -4003,6 +4289,8 @@ class Tournament(TimestampMixin, db.Model):
             'completed_at': iso(self.completed_at),
         }
         if detail:
+            data['waitlist'] = [{'id': row.id, 'name': row.user.display_name, 'status': row.status, 'expires_at': iso(row.expires_at)}
+                for row in queued + offers] if current_user_id == self.organizer_id else []
             data['entries'] = [
                 e.to_dict(current_user_id, self.organizer_id)
                 for e in self.entries
@@ -4019,6 +4307,21 @@ class Tournament(TimestampMixin, db.Model):
             ]
             data['total_rounds'] = self.total_rounds()
         return data
+
+
+class TournamentWaitlist(TimestampMixin, db.Model):
+    __table_args__ = (db.UniqueConstraint('tournament_id', 'user_id', name='uq_tournament_waitlist'),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    tournament_id = db.Column(db.Integer, db.ForeignKey('tournament.id', name='tournament_waitlist_tournament_id_fkey'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', name='tournament_waitlist_user_id_fkey'), nullable=False, index=True)
+    status = db.Column(db.String(16), nullable=False, default='queued', server_default='queued')
+    offered_at = db.Column(db.DateTime)
+    expires_at = db.Column(db.DateTime)
+    history = db.Column(db.Text, nullable=False, default='[]', server_default='[]')
+
+    tournament = db.relationship('Tournament', back_populates='waitlist')
+    user = db.relationship('User')
 
 
 class TournamentEntry(TimestampMixin, db.Model):
@@ -4042,9 +4345,14 @@ class TournamentEntry(TimestampMixin, db.Model):
         db.String(20), nullable=False, default='accepted',
     )
     partner_pending_on = db.Column(db.String(20), nullable=False, default='')
+    partner_response_deadline_at = db.Column(db.DateTime)
+    partner_history = db.Column(db.Text, nullable=False, default='[]', server_default='[]')
     seed = db.Column(db.Integer)
     # Day-of arrival confirmation ("we're here"), settable from 24h out.
     checked_in_at = db.Column(db.DateTime)
+    player1_arrived_at = db.Column(db.DateTime)
+    player2_arrived_at = db.Column(db.DateTime)
+    arrival_history = db.Column(db.Text, nullable=False, default='[]', server_default='[]')
 
     tournament = db.relationship(
         'Tournament', back_populates='entries', foreign_keys=[tournament_id],
@@ -4072,8 +4380,9 @@ class TournamentEntry(TimestampMixin, db.Model):
 
     def partner_action_dict(self, current_user_id=None):
         candidate = self.partner_invitee
+        expired = bool(self.partner_response_deadline_at and self.partner_response_deadline_at <= utcnow())
         decision_for_me = bool(
-            current_user_id and self.partner_status == 'pending'
+            current_user_id and self.partner_status == 'pending' and not expired
             and (
                 self.partner_pending_on == 'invitee'
                 and self.partner_invitee_id == current_user_id
@@ -4086,6 +4395,8 @@ class TournamentEntry(TimestampMixin, db.Model):
             'status': self.partner_status,
             'pending_on': self.partner_pending_on or None,
             'decision_for_me': decision_for_me,
+            'response_deadline_at': iso(self.partner_response_deadline_at),
+            'deadline_expired': expired,
             'owner': self.player1.to_public_dict() if self.player1 else None,
             'candidate': candidate.to_public_dict() if candidate else None,
         }
@@ -4104,7 +4415,12 @@ class TournamentEntry(TimestampMixin, db.Model):
             'seed': self.seed,
             'name': name,
             'rating': self.avg_rating(),
-            'checked_in': self.checked_in_at is not None,
+            'checked_in': bool(self.player1_arrived_at and (not is_doubles or self.player2_id and self.player2_arrived_at)),
+            'arrived_count': int(bool(self.player1_arrived_at)) + int(bool(self.player2_id and self.player2_arrived_at)),
+            'arrival_expected_count': 2 if is_doubles else 1,
+            'my_arrived': bool(self.player1_arrived_at if current_user_id == self.player1_id else self.player2_arrived_at if current_user_id == self.player2_id else False),
+            'legacy_team_checkin': bool(self.checked_in_at and not (self.player1_arrived_at or self.player2_arrived_at)),
+            'arrivals': [{'user_id': person.id, 'display_name': person.display_name, 'arrived_at': iso(self.player1_arrived_at if person.id == self.player1_id else self.player2_arrived_at)} for person in self.players()],
             'players': [p.to_public_dict() for p in self.players()],
             'partner_status': status,
             'partner_ready': not is_doubles or bool(
@@ -4112,7 +4428,15 @@ class TournamentEntry(TimestampMixin, db.Model):
             ),
             'needs_partner': is_doubles and status == 'needed',
             'partner_invite_pending': is_doubles and status == 'pending',
+            'partner_offer_available': is_doubles and status == 'needed' and (not self.partner_response_deadline_at or self.partner_response_deadline_at > utcnow()),
         }
+        if current_user_id and current_user_id in {
+            self.player1_id, self.player2_id, self.partner_invitee_id, organizer_id,
+        }:
+            data['partner_response_deadline_at'] = iso(self.partner_response_deadline_at)
+            data['partner_deadline_expired'] = bool(not self.partner_ready('doubles')
+                and self.partner_response_deadline_at and self.partner_response_deadline_at <= utcnow())
+            data['partner_history'] = json.loads(self.partner_history or '[]')
         if self.partner_invitee and current_user_id in {
             self.player1_id, self.partner_invitee_id, organizer_id,
         }:
@@ -4162,6 +4486,9 @@ class TournamentMatch(TimestampMixin, db.Model):
     # adjusted by the organizer without rewriting the bracket itself.
     scheduled_at = db.Column(db.DateTime)
     court_number = db.Column(db.Integer)
+    play_state = db.Column(db.String(16), nullable=False, default='estimated', server_default='estimated')
+    called_at = db.Column(db.DateTime)
+    started_at = db.Column(db.DateTime)
     # JSON array of {score1, score2}; aggregate game wins stay in score1/score2
     # so existing standings, rating, and result-history code remains valid.
     game_scores_json = db.Column(db.Text, nullable=False, default='[]')
@@ -4272,6 +4599,9 @@ class TournamentMatch(TimestampMixin, db.Model):
             'game_scores': self.game_scores(),
             'scheduled_at': iso(self.scheduled_at),
             'court_number': self.court_number,
+            'play_state': self.play_state or 'estimated',
+            'called_at': iso(self.called_at),
+            'started_at': iso(self.started_at),
             'winner_entry_id': self.winner_entry_id,
             'status': self.status(),
             'result_state': state,
@@ -4616,9 +4946,14 @@ class League(TimestampMixin, db.Model):
     max_players = db.Column(db.Integer, nullable=False, default=16)
     status = db.Column(db.String(20), nullable=False, default='registration', index=True)
     current_round = db.Column(db.Integer, nullable=False, default=0)
+    # NULL preserves the honest, open-ended contract of older seasons.
+    total_rounds = db.Column(db.Integer)
+    round_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    round_history = db.Column(db.Text, nullable=False, default='[]', server_default='[]')
     # When the current round opened — the auto-advance sweep closes the round
     # once round_days have elapsed.
     round_started_at = db.Column(db.DateTime)
+    round_deadline_override_at = db.Column(db.DateTime)
     deadline_alerted_round = db.Column(db.Integer, nullable=False, default=0)
     champion_user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     completed_at = db.Column(db.DateTime)
@@ -4657,8 +4992,13 @@ class League(TimestampMixin, db.Model):
             'max_players': self.max_players,
             'status': self.status,
             'current_round': self.current_round,
-            'member_count': len(self.members),
+            'total_rounds': self.total_rounds,
+            'round_version': int(self.round_version or 0),
+            'member_count': sum(not m.withdrawn_at for m in self.members),
             'joined': mine is not None,
+            'my_unavailable_round': mine.unavailable_round if mine else None,
+            'my_withdraw_after_round': mine.withdraw_after_round if mine else None,
+            'my_withdrawn_at': iso(mine.withdrawn_at) if mine else None,
             'my_box': mine.box if mine else None,
             'is_organizer': self.organizer_id == current_user_id,
             'round_started_at': iso(self.round_started_at),
@@ -4704,6 +5044,10 @@ class LeagueMember(TimestampMixin, db.Model):
     losses = db.Column(db.Integer, nullable=False, default=0)
     # Last round we nagged this member about unplayed matches (deadline pings).
     reminded_round = db.Column(db.Integer, nullable=False, default=0)
+    unavailable_round = db.Column(db.Integer)
+    withdraw_after_round = db.Column(db.Integer)
+    withdrawn_at = db.Column(db.DateTime)
+    availability_history = db.Column(db.Text, nullable=False, default='[]', server_default='[]')
 
     league = db.relationship('League', back_populates='members')
     user = db.relationship('User')
@@ -4715,6 +5059,9 @@ class LeagueMember(TimestampMixin, db.Model):
             'points': self.points,
             'wins': self.wins,
             'losses': self.losses,
+            'unavailable_round': self.unavailable_round,
+            'withdraw_after_round': self.withdraw_after_round,
+            'withdrawn_at': iso(self.withdrawn_at),
         }
 
 
@@ -4732,6 +5079,14 @@ class LeagueMatch(TimestampMixin, db.Model):
     box = db.Column(db.Integer, nullable=False)
     player1_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     player2_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    scheduled_at = db.Column(db.DateTime, index=True)
+    scheduled_court_id = db.Column(db.Integer, db.ForeignKey('court.id', name='league_match_scheduled_court_id_fkey'))
+    scheduled_duration_minutes = db.Column(db.Integer, nullable=False, default=60)
+    schedule_version = db.Column(db.Integer, nullable=False, default=0)
+    schedule_proposals = db.Column(db.Text, nullable=False, default='[]')
+    schedule_day_reminded_at = db.Column(db.DateTime)
+    schedule_hour_reminded_at = db.Column(db.DateTime)
+    schedule_proposed_by_id = db.Column(db.Integer, db.ForeignKey('user.id', name='league_match_schedule_proposed_by_id_fkey'))
     score1 = db.Column(db.Integer)
     score2 = db.Column(db.Integer)
     winner_id = db.Column(db.Integer, db.ForeignKey('user.id'))
@@ -4750,8 +5105,10 @@ class LeagueMatch(TimestampMixin, db.Model):
     review_reminded_at = db.Column(db.DateTime)
     stall_alerted_at = db.Column(db.DateTime)
     last_nudged_at = db.Column(db.DateTime)
+    closed_round_review = db.Column(db.Text, nullable=False, default='{}', server_default='{}')
 
     league = db.relationship('League', back_populates='matches')
+    scheduled_court = db.relationship('Court', foreign_keys=[scheduled_court_id])
     player1 = db.relationship('User', foreign_keys=[player1_id])
     player2 = db.relationship('User', foreign_keys=[player2_id])
     reported_by = db.relationship('User', foreign_keys=[reported_by_id])

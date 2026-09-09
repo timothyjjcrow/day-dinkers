@@ -18,16 +18,16 @@
     } catch { /* storage can be disabled; CSS media queries remain the fallback */ }
   </script>
   <title>Third Shot — Find courts, players & play</title>
-  <link rel="stylesheet" href="/release-assets/r76/styles-v15.min.css" />
+  <link rel="stylesheet" href="/release-assets/r77/styles-v15.min.css" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-512.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
   <!-- Start downloading the large application files early, but execute them
        with defer so the useful boot shell can paint before bundle parsing. -->
-  <link rel="preload" href="/release-assets/r76/crew-planner-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r76/tournament-bracket-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r76/venue-workspace-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r76/app-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r77/crew-planner-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r77/tournament-bracket-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r77/venue-workspace-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r77/app-v15.min.js" as="script" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -110,15 +110,32 @@
       <button type="button" id="connection-retry">Retry</button>
     </div>
     <!-- Auth screen -->
-    <section id="auth-screen" class="screen hidden" aria-labelledby="auth-title">
-      <div class="auth-card">
+    <section id="auth-screen" class="screen hidden" aria-labelledby="auth-explore-title">
+      <div class="auth-layout">
+      <section class="auth-explore" aria-labelledby="auth-explore-title">
+        <div class="auth-explore-brand"><img src="icon-512.png" alt="" /><span>Third Shot</span></div>
+        <h2 id="auth-explore-title">Find your next place to play.</h2>
+        <p class="auth-explore-copy">Browse courts and public sessions. Join when you’re ready.</p>
+        <div id="auth-share-context" class="auth-share-context hidden" role="note"></div>
+        <details id="auth-court-discovery" open>
+          <summary>Browse courts</summary>
+          <form id="auth-court-search-form" role="search">
+            <label class="sr-only" for="auth-court-query">Court or city</label>
+            <input type="search" id="auth-court-query" placeholder="Court or city" autocomplete="off" maxlength="120" required />
+            <button type="submit" class="btn btn-primary">Search</button>
+          </form>
+          <div id="auth-court-results" aria-live="polite"><p class="auth-explore-copy">Search a city or a court you know.</p></div>
+        </details>
+        <button type="button" class="btn btn-secondary btn-block" id="auth-access-toggle">Log in or create an account</button>
+      </section>
+      <div class="auth-card hidden" id="auth-access">
+        <button type="button" class="btn-link" id="auth-access-back">Back to browsing</button>
         <img src="icon-512.png" alt="" class="auth-logo-img" />
         <div class="auth-intro">
           <span class="auth-eyebrow" id="auth-eyebrow">Welcome back</span>
           <h1 id="auth-title">Log in to Third Shot</h1>
           <p class="auth-tagline" id="auth-support">Find courts, meet players, and get on the court.</p>
         </div>
-        <div id="auth-share-context" class="auth-share-context hidden" role="note"></div>
         <form id="auth-form" novalidate aria-describedby="auth-support">
           <div class="auth-field hidden" id="auth-name-field">
             <label for="auth-name">Display name</label>
@@ -144,7 +161,7 @@
                 <span>Show</span>
               </button>
             </div>
-            <small id="auth-password-help" class="auth-field-help hidden">Use at least 6 characters; a longer passphrase is safer.</small>
+            <small id="auth-password-help" class="auth-field-help hidden">Use at least 8 characters; a longer passphrase is safer.</small>
             <button type="button" class="auth-inline-link" id="auth-forgot-password">Forgot password?</button>
           </div>
           <div id="auth-mfa-field" class="auth-mfa-field hidden">
@@ -163,6 +180,7 @@
           <button type="button" data-auth-policy="terms">Terms</button> and
           <button type="button" data-auth-policy="privacy">Privacy notice</button>.
         </p>
+      </div>
       </div>
     </section>
 
@@ -400,9 +418,9 @@
       syncBoot();
     })();
   </script>
-  <script defer src="/release-assets/r76/crew-planner-v15.min.js"></script>
-  <script defer src="/release-assets/r76/tournament-bracket-v15.min.js"></script>
-  <script defer src="/release-assets/r76/venue-workspace-v15.min.js"></script>
-  <script defer src="/release-assets/r76/app-v15.min.js"></script>
+  <script defer src="/release-assets/r77/crew-planner-v15.min.js"></script>
+  <script defer src="/release-assets/r77/tournament-bracket-v15.min.js"></script>
+  <script defer src="/release-assets/r77/venue-workspace-v15.min.js"></script>
+  <script defer src="/release-assets/r77/app-v15.min.js"></script>
 </body>
 </html>

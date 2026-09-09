@@ -7,12 +7,12 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from datetime import UTC, timedelta
+from datetime import UTC, date, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, Response, current_app, g, jsonify, request
-from sqlalchemy import and_, false, func, or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy import and_, case, false, func, or_
+from sqlalchemy.orm import joinedload, selectinload
 
 from backend.app import db
 from backend.models import (
@@ -35,6 +35,7 @@ from backend.routes.social import friend_ids, nearby_visibility_allows
 from backend.security import rate_limit
 from backend.services.business_governance import business_access_role
 from backend.services.business_visibility import public_business_query
+from backend.services.court_visiting import normalize_visiting, visiting_dict, project_visiting
 from backend.services.presence_proof import (
     issue_instant_rally_presence_proof,
     validate_court_presence_location,
@@ -42,6 +43,7 @@ from backend.services.presence_proof import (
 from backend.integrations.models import (
     BusinessProviderConnection,
     BusinessScheduleOccurrence,
+    BusinessLinkHealthCheck,
 )
 from backend.integrations.services import publication_ready_connection_ids
 
@@ -363,6 +365,8 @@ def _court_search_relevance(court, raw_query, *, allow_fuzzy=False):
 def _court_discovery_summary(court):
     """Compact decision facts shared by map search and saved-court lists."""
     item = court.to_summary_dict()
+    from backend.services.court_hours import project_hours
+    item.update(project_hours(court))
     item.update({
         'surface_type': court.surface_type,
         'court_type': court.court_type,
@@ -394,7 +398,7 @@ def _rating_summary_for(court_ids):
     }
 
 
-def _active_counts_for(court_ids, current_user=None):
+def _active_counts_for(court_ids, current_user=None, *, presence_summaries=None):
     """Return fresh players plus upcoming and near-term visible open games.
 
     Court summaries used to count every future game, including full and
@@ -405,17 +409,29 @@ def _active_counts_for(court_ids, current_user=None):
     if not court_ids:
         return {}, {}, {}
     rows = (
-        db.session.query(CheckIn.court_id, func.count(CheckIn.id))
+        db.session.query(CheckIn.court_id, CheckIn.location_verified_at.isnot(None),
+                         func.count(CheckIn.id), func.max(CheckIn.last_presence_ping_at))
+        .join(User, User.id == CheckIn.user_id)
         .filter(
             CheckIn.court_id.in_(court_ids),
             CheckIn.checked_out_at.is_(None),
             CheckIn.checked_in_at >= presence_absolute_cutoff(),
             CheckIn.last_presence_ping_at >= presence_stale_cutoff(),
+            User.deleted_at.is_(None),
+            ~CheckIn.user_id.in_(blocked_pair_ids(current_user.id) if current_user else set()),
         )
-        .group_by(CheckIn.court_id)
+        .group_by(CheckIn.court_id, CheckIn.location_verified_at.isnot(None))
         .all()
     )
-    players = {court_id: count for court_id, count in rows}
+    players = {}
+    for court_id, verified, count, updated in rows:
+        players[court_id] = players.get(court_id, 0) + count
+        if presence_summaries is not None:
+            summary = presence_summaries.setdefault(court_id, {
+                'location_confirmed': 0, 'self_reported': 0, 'updated_at': None,
+            })
+            summary['location_confirmed' if verified else 'self_reported'] += count
+            summary['updated_at'] = max(summary['updated_at'] or '', iso(updated) or '') or None
     now = utcnow()
     game_rows = (
         Game.query
@@ -465,6 +481,7 @@ def list_courts():
         Court.latitude.isnot(None),
         Court.longitude.isnot(None),
         Court.closed.is_(False),
+        Court.pending_submission.is_(False),
     )
 
     text = str(request.args.get('q') or '').strip()
@@ -512,10 +529,8 @@ def list_courts():
         # midnight, which cannot be expressed portably across SQLite and
         # Postgres. Resolve the already area-bounded candidate set with the
         # canonical Court.hours_status implementation before pagination.
-        open_ids = [
-            court.id for court in query.order_by(None).all()
-            if court.hours_status().get('is_open') is True
-        ]
+        from backend.services.court_hours import public_hours_for
+        open_ids = [court_id for court_id, hours in public_hours_for(query.order_by(None).all()).items() if hours['open_status'].get('is_open') is True]
         query = query.filter(Court.id.in_(open_ids)) if open_ids \
             else query.filter(false())
 
@@ -676,52 +691,30 @@ def list_courts():
     })
 
 
-def _public_business_summaries(court_ids):
+def _public_business_summaries(court_ids, *, hour_overrides=None):
     """Batch compact venue signals for court discovery without claim metadata."""
     if not court_ids:
         return {}
-    rows = public_business_query().filter(
+    rows = public_business_query().options(
+        joinedload(BusinessProfile.court),
+        selectinload(BusinessProfile.offerings),
+        selectinload(BusinessProfile.schedule_items),
+    ).filter(
         BusinessProfile.court_id.in_(sorted(set(court_ids))),
     ).all()
     profile_ids = [profile.id for profile in rows]
+    # A map page must not add one relationship/safety query per venue. Keep
+    # exactly the same reviewed projection and destination-specific safety rule.
+    checks_by_business = {profile_id: [] for profile_id in profile_ids}
+    if profile_ids:
+        for check in BusinessLinkHealthCheck.query.filter(
+            BusinessLinkHealthCheck.business_id.in_(profile_ids),
+        ).order_by(BusinessLinkHealthCheck.checked_at.desc(), BusinessLinkHealthCheck.id.desc()).all():
+            checks_by_business[check.business_id].append(check)
     now = utcnow()
     # IANA offsets span both sides of UTC midnight. Keep a one-day coarse DB
     # window, then apply the exact per-row timezone rule in Python.
     coarse_date = (now - timedelta(days=1)).date()
-    offering_rows = db.session.query(
-        BusinessOffering.business_id, BusinessOffering.booking_url,
-    ).filter(
-        BusinessOffering.business_id.in_(profile_ids),
-        BusinessOffering.active.is_(True),
-    ).all() if rows else []
-    schedule_rows = BusinessScheduleItem.query.filter(
-        BusinessScheduleItem.business_id.in_(profile_ids),
-        BusinessScheduleItem.active.is_(True),
-        BusinessScheduleItem.status.notin_(('cancelled', 'completed')),
-        or_(
-            BusinessScheduleItem.recurrence.notin_(('dated', 'date_range')),
-            and_(
-                BusinessScheduleItem.recurrence == 'dated',
-                BusinessScheduleItem.event_date >= coarse_date,
-            ),
-            and_(
-                BusinessScheduleItem.recurrence == 'date_range',
-                BusinessScheduleItem.end_date >= coarse_date,
-            ),
-        ),
-    ).all() if rows else []
-    schedule_rows = [item for item in schedule_rows if item.is_current(now)]
-    offering_ids = {business_id for business_id, _ in offering_rows}
-    offering_booking_ids = {
-        business_id for business_id, booking_url in offering_rows if booking_url
-    }
-    schedule_ids = {item.business_id for item in schedule_rows}
-    schedule_booking_ids = {
-        item.business_id for item in schedule_rows
-        if item.booking_url
-        and item.status == 'scheduled'
-        and (item.spots_remaining is None or item.spots_remaining > 0)
-    }
     integrated_rows = BusinessScheduleOccurrence.query.filter(
         BusinessScheduleOccurrence.business_id.in_(profile_ids),
         BusinessScheduleOccurrence.status.notin_(('cancelled', 'completed')),
@@ -771,31 +764,31 @@ def _public_business_summaries(court_ids):
         and item.status == 'scheduled'
         and (item.spots_remaining is None or item.spots_remaining > 0)
     }
-    return {
-        profile.court_id: {
+    summaries = {}
+    for profile in rows:
+        public = profile.to_public_dict(link_health_checks=checks_by_business[profile.id])
+        if hour_overrides is not None:
+            hour_overrides[profile.court_id] = {**public['effective_hours'], **public['effective_visiting']}
+        schedule = [item for item in public.get('schedule_occurrences', public['schedule']) if item.get('status') not in {'cancelled', 'completed'}]
+        offerings = public['offerings']
+        summaries[profile.court_id] = {
             'id': profile.id,
-            'name': profile.name,
-            'logo_url': profile.logo_url,
+            'name': public['name'],
+            'logo_url': public['logo_url'],
             'verified': True,
             'booking_available': bool(
-                profile.booking_url
-                or profile.id in offering_booking_ids
-                or profile.id in schedule_booking_ids
+                public['booking_url']
+                or any(item.get('booking_url') for item in offerings)
+                or any(item.get('booking_url') and item.get('status') == 'scheduled'
+                       and (item.get('spots_remaining') is None or item['spots_remaining'] > 0)
+                       for item in schedule)
                 or profile.id in integrated_booking_ids
             ),
-            'membership_available': bool(profile.membership_url),
-            'schedule_available': bool(
-                profile.id in schedule_ids
-                or profile.id in integrated_schedule_ids
-            ),
-            'programs_available': bool(
-                profile.id in offering_ids
-                or profile.id in schedule_ids
-                or profile.id in integrated_schedule_ids
-            ),
+            'membership_available': bool(public['membership_url']),
+            'schedule_available': bool(schedule or profile.id in integrated_schedule_ids),
+            'programs_available': bool(offerings or schedule or profile.id in integrated_schedule_ids),
         }
-        for profile in rows
-    }
+    return summaries
 
 
 def _public_business_detail(court_id, current_user=None):
@@ -988,6 +981,7 @@ def court_detail(court_id):
         if not can_discover_identity:
             continue
         entry = checkin.user.to_public_dict()
+        entry.update(checkin.source_payload())
         entry['looking_for_game'] = bool(checkin.looking_for_game)
         entry['checked_in_at'] = checkin.checked_in_at.isoformat() + 'Z' if checkin.checked_in_at else None
         entry['minutes_here'] = (
@@ -1031,6 +1025,11 @@ def court_detail(court_id):
 
     payload = court.to_dict()
     payload['business'] = _public_business_detail(court.id, current_user)
+    from backend.services.court_hours import project_hours
+    payload.update(project_hours(court, payload['business']))
+    payload.update(project_visiting(court, payload['business']))
+    payload['community_visitor_info'] = visiting_dict(court.visitor_info)
+    payload['condition_reports'] = _recent_condition_reports(court.id, current_user)
     payload['photo_count'] = CourtPhoto.query.filter_by(court_id=court.id).count()
     payload['latest_condition'] = _latest_condition_for(
         court.id, include_identity=current_user is not None,
@@ -1086,7 +1085,8 @@ def court_detail(court_id):
                 user, current_user.id, viewer_friends,
             )
         ]
-    payload['busy_times'] = _busy_times(court)
+    payload['checkin_history'] = _busy_times(court, timezone_name=(payload.get('structured_hours') or {}).get('timezone'), detailed=True, hidden_ids=hidden_ids)
+    payload['busy_times'] = payload['checkin_history']['windows']
     payload['court_leaders'] = (
         _court_leaders(court, hidden_ids) if current_user else []
     )
@@ -1125,6 +1125,10 @@ def court_detail(court_id):
         default=None,
     )
     payload['players_here_last_confirmed_at'] = iso(last_confirmed_at)
+    confirmed_count = sum(1 for row in active if row.user and not row.user.deleted_at
+                          and row.user_id not in hidden_ids and row.location_verified_at)
+    payload['presence_summary'] = {'location_confirmed': confirmed_count,
+        'self_reported': visible_player_count - confirmed_count, 'updated_at': iso(last_confirmed_at)}
     payload['friends_here'] = sum(1 for p in players_here if p['is_friend'])
     viewer_id = current_user.id if current_user else None
     # Tournaments hosted here — anything open for registration or under way.
@@ -1237,6 +1241,21 @@ def court_detail(court_id):
         if current_user else None
     )
     payload['my_review'] = my_review.to_dict() if my_review else None
+    return jsonify(payload)
+
+
+@courts_bp.get('/courts/<int:court_id>/play')
+def court_play(court_id):
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error':'court_not_found'}), 404
+    from backend.services.court_play import court_play_payload
+    try:
+        start = date.fromisoformat(request.args['from']) if request.args.get('from') else None
+        end = date.fromisoformat(request.args['to']) if request.args.get('to') else None
+        payload = court_play_payload(court, optional_current_user(), start, end)
+    except ValueError:
+        return jsonify({'error':'invalid_schedule_range'}), 400
     return jsonify(payload)
 
 
@@ -1390,6 +1409,8 @@ def _norm_open_play_rows(value):
 
 
 def _court_suggest_value(court, field):
+    if field == 'visitor_info':
+        return visiting_dict(court.visitor_info)
     if field == 'open_play_schedule_rows':
         return court.open_play_schedule_rows_list()
     value = getattr(court, field)
@@ -1397,13 +1418,16 @@ def _court_suggest_value(court, field):
 
 
 def _set_court_suggest_value(court, field, value):
-    if field == 'open_play_schedule_rows':
+    if field == 'visitor_info':
+        court.visitor_info = json.dumps(value, sort_keys=True)
+    elif field == 'open_play_schedule_rows':
         court.open_play_schedule_rows = json.dumps(value, separators=(',', ':'))
     else:
         setattr(court, field, value)
 
 
 SUGGESTABLE_FIELDS = {
+    'visitor_info': normalize_visiting,
     'num_courts': _norm_courts,
     'indoor': _norm_bool,
     'lighted': _norm_bool,
@@ -1447,18 +1471,28 @@ def _apply_court_suggestion_consensus(court):
                 )
     applied = {}
     for (field, packed), users in votes.items():
-        if len(users) >= SUGGESTION_CONSENSUS:
+        if field != 'closed' and len(users) >= SUGGESTION_CONSENSUS:
             value = json.loads(packed)
             _set_court_suggest_value(court, field, value)
             applied[field] = value
     if applied:
         for suggestion in pending:
+            original = _court_suggestion_payload(suggestion)
             remaining = {
                 field: value
-                for field, value in _court_suggestion_payload(suggestion).items()
-                if field not in applied or value != applied[field]
+                for field, value in original.items()
+                if not field.startswith('_') and (field not in applied or value != applied[field])
             }
             if remaining:
+                applied_values = {field: value for field, value in original.items()
+                                  if field in applied and value == applied[field]}
+                before = original.get('_before', {})
+                if applied_values:
+                    db.session.add(CourtEditSuggestion(court_id=court.id, user_id=suggestion.user_id,
+                        status='applied', payload=json.dumps({**applied_values, '_before':{key:before.get(key) for key in applied_values}})))
+                remaining['_before'] = {key:before.get(key) for key in remaining}
+                if 'closed' in remaining:
+                    remaining['_evidence'] = original.get('_evidence', '')
                 suggestion.payload = json.dumps(remaining, separators=(',', ':'))
             else:
                 suggestion.status = 'applied'
@@ -1490,7 +1524,8 @@ def _pending_court_suggestion_items(court_id, user_id):
             'rejections': len(rejections),
             'confirmed_by_me': user_id in confirmations,
             'rejected_by_me': user_id in rejections,
-            'needed': max(0, SUGGESTION_CONSENSUS - len(confirmations)),
+            'needed': None if field == 'closed' else max(0, SUGGESTION_CONSENSUS - len(confirmations)),
+            'requires_review': field == 'closed',
         })
     return sorted(items, key=lambda item: (item['field'], json.dumps(item['value'], sort_keys=True)))
 
@@ -1518,6 +1553,12 @@ def suggest_court_edit(court_id):
             changes[field] = value
     if not changes:
         return jsonify({'error': 'no_changes'}), 400
+    if 'closed' in changes:
+        evidence = str(body.get('evidence') or '').strip()
+        if not 12 <= len(evidence) <= 500:
+            return jsonify({'error': 'closure_evidence_required'}), 400
+        changes['_evidence'] = evidence
+    changes['_before'] = {field: _court_suggest_value(court, field) for field in changes if not field.startswith('_')}
 
     # One live suggestion per user per court — resubmitting replaces it.
     suggestion = CourtEditSuggestion.query.filter_by(
@@ -1548,6 +1589,12 @@ def list_court_edit_suggestions(court_id):
     return jsonify({
         'items': _pending_court_suggestion_items(court.id, g.current_user.id),
         'consensus_required': SUGGESTION_CONSENSUS,
+        'my_history': [{'id': row.id, 'changes': {key: value for key, value in _court_suggestion_payload(row).items() if not key.startswith('_')},
+                        'before': _court_suggestion_payload(row).get('_before', {'closed':_court_suggestion_payload(row).get('_previous_closed')} if row.reviewed_at else {}),
+                        'status': row.status, 'submitted_at': iso(row.created_at),
+                        'reviewed_at': iso(row.reviewed_at), 'review_note': row.review_note}
+                       for row in CourtEditSuggestion.query.filter_by(court_id=court.id, user_id=g.current_user.id)
+                       .order_by(CourtEditSuggestion.id.desc()).limit(20).all()],
     })
 
 
@@ -1591,6 +1638,7 @@ def decide_court_edit_suggestion(court_id):
 
     if decision == 'confirm':
         own_changes[field] = value
+        own_changes.setdefault('_before', {})[field] = _court_suggest_value(court, field)
         if not own_pending:
             own_pending = CourtEditSuggestion(
                 court_id=court.id, user_id=g.current_user.id, status='pending',
@@ -1602,7 +1650,8 @@ def decide_court_edit_suggestion(court_id):
     else:
         if own_changes.get(field) == value:
             own_changes.pop(field, None)
-            if own_changes:
+            own_changes.get('_before', {}).pop(field, None)
+            if any(not key.startswith('_') for key in own_changes):
                 own_pending.payload = json.dumps(own_changes, separators=(',', ':'))
             else:
                 own_pending.status = 'withdrawn'
@@ -1627,6 +1676,104 @@ def decide_court_edit_suggestion(court_id):
         'court': court.to_dict(),
         'items': _pending_court_suggestion_items(court.id, g.current_user.id),
     })
+
+
+def _closure_review_payload(suggestion):
+    court = suggestion.court
+    proposed = _court_suggestion_payload(suggestion)
+    games = Game.query.filter(Game.court_id == court.id, Game.status == 'upcoming',
+                              Game.scheduled_at >= utcnow() - timedelta(hours=2)).order_by(Game.scheduled_at).all()
+    return {'id': suggestion.id, 'court_id': court.id, 'court_name': court.name,
+            'current_closed': bool(court.closed), 'proposed_closed': proposed.get('closed'),
+            'evidence': proposed.get('_evidence', ''), 'submitted_at': iso(suggestion.created_at),
+            'status': suggestion.status, 'review_note': suggestion.review_note, 'reviewed_at': iso(suggestion.reviewed_at),
+            'impact': {'upcoming_sessions': len(games), 'players': len({p.user_id for game in games for p in game.players}),
+                       'sessions': [{'id': game.id, 'title': game.title or 'Player session', 'scheduled_at': iso(game.scheduled_at)} for game in games[:20]],
+                       'effect': 'New play and check-ins pause. Existing sessions remain in history; their organizers and players are notified to review the venue.' if proposed.get('closed') else 'New play and check-ins resume. Existing schedules are unchanged.'}}
+
+
+@courts_bp.get('/operator/courts/corrections')
+@login_required
+def operator_court_corrections():
+    from backend.routes.business_governance import _operator_error
+    error = _operator_error()
+    if error:
+        return error
+    status = request.args.get('status', 'pending')
+    if status not in ('pending', 'reviewed'):
+        return jsonify({'error': 'invalid_review_status'}), 400
+    query = CourtEditSuggestion.query.filter_by(status='pending') if status == 'pending' else CourtEditSuggestion.query.filter(CourtEditSuggestion.reviewed_at.isnot(None))
+    rows = query.order_by(CourtEditSuggestion.id.desc()).all()
+    return jsonify({'items': [_closure_review_payload(row) for row in rows if 'closed' in _court_suggestion_payload(row)][:100]})
+
+
+@courts_bp.get('/operator/courts/corrections/<int:suggestion_id>')
+@login_required
+def operator_court_correction(suggestion_id):
+    from backend.routes.business_governance import _operator_error
+    error = _operator_error()
+    if error:
+        return error
+    row = db.session.get(CourtEditSuggestion, suggestion_id)
+    if not row or 'closed' not in _court_suggestion_payload(row):
+        return jsonify({'error': 'suggestion_not_found'}), 404
+    data = _closure_review_payload(row)
+    data['history'] = [{'closed': _court_suggestion_payload(item).get('closed'), 'status': item.status,
+                        'reviewed_at': iso(item.reviewed_at), 'review_note': item.review_note}
+                       for item in CourtEditSuggestion.query.filter(CourtEditSuggestion.court_id == row.court_id,
+                            CourtEditSuggestion.reviewed_at.isnot(None)).order_by(CourtEditSuggestion.id.desc()).limit(20).all()]
+    return jsonify(data)
+
+
+@courts_bp.post('/operator/courts/corrections/<int:suggestion_id>/review')
+@rate_limit(20, 3600)
+@login_required
+def review_court_closure(suggestion_id):
+    from backend.routes.business_governance import _operator_error
+    error = _operator_error(mutating=True)
+    if error:
+        return error
+    row = db.session.get(CourtEditSuggestion, suggestion_id)
+    if not row:
+        return jsonify({'error': 'suggestion_not_found'}), 404
+    court = Court.query.filter_by(id=row.court_id).with_for_update().execution_options(populate_existing=True).first()
+    db.session.refresh(row)
+    changes = _court_suggestion_payload(row)
+    if row.status != 'pending' or 'closed' not in changes:
+        return jsonify({'error': 'suggestion_not_pending'}), 409
+    body = request.get_json(silent=True) or {}
+    decision = body.get('decision')
+    note = str(body.get('review_note') or '').strip()
+    if decision not in ('approve', 'reject') or not 12 <= len(note) <= 500:
+        return jsonify({'error': 'review_reason_required'}), 400
+    if type(body.get('expected_closed')) is not bool or body['expected_closed'] != bool(court.closed):
+        return jsonify({'error': 'court_review_conflict'}), 409
+    previous = bool(court.closed)
+    target = bool(changes['closed'])
+    for candidate in CourtEditSuggestion.query.filter_by(court_id=court.id, status='pending').all():
+        payload = _court_suggestion_payload(candidate)
+        if payload.get('closed') is not target:
+            continue
+        remaining = {key: value for key, value in payload.items() if key != 'closed' and not key.startswith('_')}
+        if remaining:
+            remaining['_before'] = {key: payload.get('_before', {}).get(key) for key in remaining}
+            db.session.add(CourtEditSuggestion(court_id=court.id, user_id=candidate.user_id, payload=json.dumps(remaining)))
+        candidate.payload = json.dumps({'closed': target, '_previous_closed': previous, '_evidence': payload.get('_evidence', '')})
+        candidate.status = 'applied' if decision == 'approve' else 'declined'
+        candidate.reviewed_by_id = g.current_user.id
+        candidate.reviewed_at = utcnow()
+        candidate.review_note = note
+    if decision == 'approve':
+        court.closed = target
+        if target != previous:
+            games = Game.query.filter(Game.court_id == court.id, Game.status == 'upcoming', Game.scheduled_at >= utcnow()).all()
+            for game in games:
+                for user_id in {p.user_id for p in game.players} | {game.creator_id}:
+                    if user_id:
+                        notify(user_id, 'court_status', f'{court.name}: listing updated',
+                               'This court is marked closed. Review the venue for your session.' if target else 'This court is open to new play again.', related_game_id=game.id)
+    db.session.commit()
+    return jsonify(_closure_review_payload(row))
 
 
 _PHOTO_DATA_RE = re.compile(r'^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$')
@@ -1729,21 +1876,47 @@ def _conditions_for(court_ids):
 def _enrich_court_summaries(items, current_user=None):
     """Add the same live discovery signals to every court summary payload."""
     ids = [item['id'] for item in items]
-    players, games, active_games = _active_counts_for(ids, current_user)
+    presence_summaries = {}
+    players, games, active_games = _active_counts_for(ids, current_user, presence_summaries=presence_summaries)
     ratings = _rating_summary_for(ids)
     conditions = _conditions_for(ids)
-    businesses = _public_business_summaries(ids)
+    hour_overrides = {}
+    businesses = _public_business_summaries(ids, hour_overrides=hour_overrides)
     for item in items:
         court_id = item['id']
         item['players_here'] = players.get(court_id, 0)
+        item['presence_summary'] = presence_summaries.get(court_id, {
+            'location_confirmed': 0, 'self_reported': 0, 'updated_at': None,
+        })
         item['upcoming_games'] = games.get(court_id, 0)
         item['active_games'] = active_games.get(court_id, 0)
         item['condition'] = conditions.get(court_id)
         item['business'] = businesses.get(court_id)
+        item.update(hour_overrides.get(court_id, {}))
         rating = ratings.get(court_id)
         item['rating_avg'] = rating['rating_avg'] if rating else None
         item['rating_count'] = rating['rating_count'] if rating else 0
     return items
+
+
+def _recent_condition_reports(court_id, viewer=None):
+    query = CourtCondition.query.join(User, User.id == CourtCondition.user_id).filter(
+        CourtCondition.court_id == court_id, User.deleted_at.is_(None),
+        CourtCondition.created_at >= utcnow() - timedelta(hours=CONDITION_FRESH_HOURS))
+    hidden = blocked_pair_ids(viewer.id) if viewer else set()
+    if hidden:
+        query = query.filter(~CourtCondition.user_id.in_(hidden))
+    rows = query.order_by(CourtCondition.id.desc()).limit(30).all()
+    reports, seen = [], set()
+    for row in rows:
+        if row.user_id in seen:
+            continue
+        seen.add(row.user_id)
+        reports.append({'condition':row.condition, 'reported_at':iso(row.created_at),
+                        'user_name':row.user.display_name if viewer and row.user else 'Player'})
+        if len(reports) == 5:
+            break
+    return reports
 
 
 def _latest_condition_for(court_id, include_identity=True):
@@ -1781,8 +1954,7 @@ def _photo_response(data_url):
 @login_required
 @rate_limit(10, 3600)
 def upload_court_photo(court_id):
-    """Add a community photo to the court's gallery. The newest one becomes
-    the hero unless a curated/external photo exists."""
+    """Add a categorized photo; court views are preferred for the gallery hero."""
     court = db.session.get(Court, court_id)
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
@@ -1799,12 +1971,25 @@ def upload_court_photo(court_id):
         return jsonify({'error': 'invalid_photo'}), 400
     if not (100 <= len(raw) <= MAX_PHOTO_BYTES):
         return jsonify({'error': 'photo_too_large' if len(raw) > MAX_PHOTO_BYTES else 'invalid_photo'}), 400
+    category = str(payload.get('category') or '').strip()
+    if category not in ('', 'court', 'entrance', 'parking', 'nets', 'accessibility', 'other'):
+        return jsonify({'error': 'invalid_photo_category'}), 400
+    captured_on = None
+    if payload.get('captured_on'):
+        try:
+            captured_on = date.fromisoformat(str(payload['captured_on']))
+            if captured_on > utcnow().date():
+                raise ValueError
+        except ValueError:
+            return jsonify({'error': 'invalid_photo_date'}), 400
 
     photo = CourtPhoto(
         court_id=court.id,
         user_id=g.current_user.id,
         photo_data=f'data:image/{match.group(1)};base64,{match.group(2)}',
         caption=str(payload.get('caption') or '').strip()[:140],
+        category=category,
+        captured_on=captured_on,
     )
     db.session.add(photo)
     db.session.flush()
@@ -1820,13 +2005,13 @@ def upload_court_photo(court_id):
 
 @courts_bp.get('/courts/<int:court_id>/photo')
 def court_photo(court_id):
-    """The court's hero image: newest gallery photo, else the legacy single."""
+    """Prefer a court view, then an unclassified legacy photo, then other views."""
     court = db.session.get(Court, court_id)
     if not court:
         return jsonify({'error': 'photo_not_found'}), 404
     newest = (
         CourtPhoto.query.filter_by(court_id=court.id)
-        .order_by(CourtPhoto.id.desc())
+        .order_by(case((CourtPhoto.category == 'court', 0), (CourtPhoto.category == '', 1), else_=2), CourtPhoto.id.desc())
         .first()
     )
     return _photo_response(newest.photo_data if newest else court.photo_data)
@@ -1865,6 +2050,8 @@ def court_photos(court_id):
         'url': f'/api/courts/{court_id}/photos/{p.id}',
         'user_name': p.user.display_name if viewer and p.user else 'Player',
         'caption': p.caption or '',
+        'category': p.category or '',
+        'captured_on': p.captured_on.isoformat() if p.captured_on else None,
         'likes': likes.get(p.id, 0),
         'liked_by_me': p.id in mine,
         'can_delete': bool(viewer and p.user_id == viewer.id),
@@ -2021,18 +2208,23 @@ def _court_leaders(court, hidden_ids=None):
     ]
 
 
-def _busy_times(court):
+def _busy_times(court, *, timezone_name=None, detailed=False, hidden_ids=()):
     """Top two-hour visit windows from the last 90 days of check-ins.
 
     Prefer the court's structured-hours timezone so the result remains correct
     across DST. Legacy courts without one retain the longitude approximation
     instead of presenting UTC as local time.
     """
-    rows = CheckIn.query.filter(
-        CheckIn.court_id == court.id,
-        CheckIn.checked_in_at >= utcnow() - timedelta(days=90),
-    ).all()
-    timezone_name = str(court.structured_hours_dict().get('timezone') or '').strip()
+    until = utcnow()
+    since = until - timedelta(days=90)
+    query = CheckIn.query.join(User, User.id == CheckIn.user_id).filter(
+        CheckIn.court_id == court.id, CheckIn.checked_in_at >= since,
+        CheckIn.checked_in_at <= until, User.deleted_at.is_(None),
+    )
+    if hidden_ids:
+        query = query.filter(~CheckIn.user_id.in_(hidden_ids))
+    rows = query.all()
+    timezone_name = str(timezone_name or court.structured_hours_dict().get('timezone') or '').strip()
     timezone = None
     if timezone_name:
         try:
@@ -2071,11 +2263,19 @@ def _busy_times(court):
         compact_start = start_value if start_suffix == end_suffix else start
         return f'{days[weekday]} {compact_start}–{end}'
 
-    return [
+    windows = [
         {'label': window_label(weekday, start_hour), 'count': count}
         for (weekday, start_hour), count in ranked[:3]
         if count >= 2
     ]
+
+    if not detailed:
+        return windows
+    sufficient = len(rows) >= 10 and len({row.user_id for row in rows}) >= 3
+    return {'sample_size':len(rows), 'unique_players':len({row.user_id for row in rows}),
+            'range_start':iso(since), 'range_end':iso(until), 'timezone':timezone_name if timezone else None,
+            'timezone_source':'venue_local' if timezone else 'approximate',
+            'sufficient_sample':sufficient, 'windows':windows if sufficient else []}
 
 
 def _notify_friends_looking(court):
@@ -2116,7 +2316,10 @@ def check_in(court_id):
     looking = bool(payload.get('looking_for_game'))
     presence_intent = payload.get('presence_intent')
     verified_location = None
-    if presence_intent is not None or 'presence_location' in payload:
+    if presence_intent == 'self_reported':
+        if payload.get('confirm_at_court') is not True or 'presence_location' in payload:
+            return jsonify({'error': 'self_report_confirmation_required'}), 400
+    elif presence_intent is not None or 'presence_location' in payload:
         if presence_intent not in {
             'manual_checkin', 'instant_rally', 'arrival_join', 'auto_checkin',
         }:
@@ -2153,6 +2356,9 @@ def check_in(court_id):
                 instant_games, g.current_user.id, existing.court_id, now,
             )
             existing.checked_in_at = now
+            existing.location_verified_at = None
+        if verified_location:
+            existing.location_verified_at = now
         existing.looking_for_game = looking
         existing.last_presence_ping_at = now
     else:
@@ -2170,6 +2376,7 @@ def check_in(court_id):
             looking_for_game=looking,
             checked_in_at=now,
             last_presence_ping_at=now,
+            location_verified_at=now if verified_location else None,
         ))
     # Physical presence supersedes the separate remote "available this hour"
     # signal. User -> Game -> CheckIn -> pulse is the shared lock order.
@@ -2185,7 +2392,7 @@ def check_in(court_id):
         g.current_user.last_location_at = now
 
     db.session.commit()
-    response = {'presence': presence_payload(g.current_user.id)}
+    response = {'presence': presence_payload(g.current_user.id), 'presence_verified': bool(verified_location)}
     if verified_location:
         response['presence_verified'] = True
         response['presence_accuracy_meters'] = verified_location['accuracy_meters']

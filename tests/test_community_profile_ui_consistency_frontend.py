@@ -18,7 +18,9 @@ def test_people_filters_expose_selection_and_use_the_app_picker():
     nearby = section("async function renderNearbyPlayers", "async function renderFriends")
     friends = section("async function renderFriends", "async function openThread")
 
-    assert "const skills = [['', 'All'], ['3.0', '3.0'], ['3.5', '3.5'], ['4.0', '4.0+']]" in nearby
+    assert "['', 'All levels'], ['beginner', 'Beginner · under 3.0']" in nearby
+    assert "['3.0', '3.0'], ['3.5', '3.5'], ['4.0', '4.0+']" in nearby
+    assert 'id="nearby-radius"' in nearby
     assert "&level=${encodeURIComponent(skill)}" in nearby
     assert 'section-label section-label-icon' in nearby
     assert "uiIcon('bell')" in nearby

@@ -16,7 +16,7 @@ def css(selector: str) -> str:
 
 
 def test_auth_has_visible_hierarchy_labeled_controls_and_password_reveal():
-    assert 'aria-labelledby="auth-title"' in INDEX
+    assert 'id="auth-screen" class="screen hidden" aria-labelledby="auth-explore-title"' in INDEX
     assert 'class="auth-eyebrow" id="auth-eyebrow">Welcome back' in INDEX
     assert '<h1 id="auth-title">Log in to Third Shot</h1>' in INDEX
     assert '<form id="auth-form" novalidate aria-describedby="auth-support">' in INDEX
@@ -30,7 +30,7 @@ def test_auth_has_visible_hierarchy_labeled_controls_and_password_reveal():
     assert "showAuthError('Enter the name players should see.', nameInput)" in auth
     assert "showAuthError('Enter your email address.', emailInput)" in auth
     assert "showAuthError('Enter a complete email address.', emailInput)" in auth
-    assert "showAuthError('Password must be at least 6 characters.', passwordInput)" in auth
+    assert "Password must be at least 8 characters." in auth
     assert "target.setAttribute('aria-invalid', 'true')" in auth
     assert "submitButton.setAttribute('aria-busy', 'true')" in auth
     assert "form.setAttribute('aria-busy', 'true')" in auth

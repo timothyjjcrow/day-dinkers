@@ -68,8 +68,10 @@ def test_incomplete_teams_cannot_look_startable():
     assert 'Number(parent.ready_entry_count) === Number(parent.entry_count)' in action_helper
     screen = section('async function openTournamentScreen', '// Live sync while open')
     assert 'Number(t.ready_entry_count) === Number(t.entry_count)' in screen
-    assert 'partners still pending' in screen
-    assert 'need 2 complete teams' in screen
+    assert 'Preview bracket &amp; start' in screen
+    preview = section('async function openTournamentPreviewSheet', 'function openTournamentDelaySheet')
+    assert "preview.can_start ? '' : 'disabled'" in preview
+    assert 'preview.preview_warnings.map' in preview
 
 
 def test_partner_consent_surfaces_have_mobile_safe_layout():

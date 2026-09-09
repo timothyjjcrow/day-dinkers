@@ -113,11 +113,15 @@ def test_claim_requires_a_selected_court_and_supports_back_navigation():
     end = APP.index("    modal.querySelector('#business-claim-form').addEventListener", start)
     output = run_js('''
       const court = null;
+      let missingLocation = false;
+      const readLocation = () => null;
       let error = '', focused = '';
       const nodes = {};
       for (const id of ['claim-step-venue','claim-step-role','claim-selected-name',
         'claim-trail-venue','claim-trail-role','bh-court-search','bh-court-id',
-        'business-claim-role','claim-next','claim-back']) {
+        'business-claim-role','claim-next','claim-back','claim-step-location',
+        'business-add-missing-venue','claim-location-back','claim-location-next',
+        'venue-location-name']) {
         nodes['#'+id] = {value: '',dataset: {},setAttribute(k,v) {this[k]=v;},
           focus() {focused=id;},addEventListener(type,fn) {this[type]=fn;}};
       }

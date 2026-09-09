@@ -558,7 +558,7 @@ def test_overlapping_ordinary_game_consumes_pulse_but_future_game_does_not(clien
     assert immediate_conflict.get_json() == {'error': 'active_game'}
 
 
-def test_waitlist_promotion_and_reschedule_consume_overlapping_pulses(client):
+def test_waitlist_acceptance_and_reschedule_consume_overlapping_pulses(client):
     host = _register(client, 'pulse-lifecycle-host', 'Host')
     occupant = _register(client, 'pulse-lifecycle-occupant', 'Occupant')
     waiter = _register(client, 'pulse-lifecycle-waiter', 'Waiter')
@@ -588,6 +588,13 @@ def test_waitlist_promotion_and_reschedule_consume_overlapping_pulses(client):
         f"/api/games/{full_game['id']}/leave", headers=_headers(occupant),
     )
     assert left.status_code == 200, left.get_json()
+    # An offer reserves a place; it does not accept a commitment for the player.
+    with client.application.app_context():
+        assert db.session.get(PlayAvailabilityPulse, waiter_pulse['id']).end_reason == ''
+        assert GamePlayer.query.filter_by(game_id=full_game['id'], user_id=waiter['user']['id']).count() == 0
+    accepted = client.post(f"/api/games/{full_game['id']}/waitlist/respond",
+        json={'accept': True}, headers=_headers(waiter))
+    assert accepted.status_code == 200, accepted.get_json()
 
     future_game = client.post('/api/games', json={
         'court_id': court['id'],
@@ -620,7 +627,7 @@ def test_waitlist_promotion_and_reschedule_consume_overlapping_pulses(client):
         waiter_row = db.session.get(
             PlayAvailabilityPulse, waiter_pulse['id'],
         )
-        assert waiter_row.end_reason == 'waitlist_promoted'
+        assert waiter_row.end_reason == 'game_joined'
         assert GamePlayer.query.filter_by(
             game_id=full_game['id'], user_id=waiter['user']['id'],
         ).count() == 1

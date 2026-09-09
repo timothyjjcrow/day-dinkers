@@ -23,6 +23,7 @@ def tournament(**overrides):
         'format': 'single_elim',
         'court_count': 2,
         'match_minutes': 30,
+        'rest_minutes': 0,
         'max_entries': 8,
         'starts_at': utcnow(),
         'matches': [],
@@ -71,9 +72,11 @@ def test_calendar_exports_use_real_game_and_tournament_durations():
 
 def test_activity_has_a_first_class_unread_filter():
     activity = section('async function openActivity', '// ---------- Presence banner ----------')
-    assert "['all', 'All'], ['unread', 'Unread']" in activity
+    assert "['action', 'Needs your action'], ['all', 'All updates']" in activity
+    assert "['unread', 'Unread']" in activity
     assert "activityFilter === 'unread'" in activity
-    assert 'items.filter((notification) => !notification.read)' in activity
+    assert 'filter=${encodeURIComponent(activityFilter)}' in activity
+    assert 'filter=${encodeURIComponent(activityFilter)}&before_id=' in activity
 
 
 def test_toast_calls_do_not_put_emoji_in_live_region_copy():

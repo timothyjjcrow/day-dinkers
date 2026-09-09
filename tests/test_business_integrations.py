@@ -41,6 +41,9 @@ REVIEW_KWARGS = {
 }
 
 
+from business_test_support import venue_write
+
+
 @pytest.fixture()
 def app():
     app = create_app('testing')
@@ -160,12 +163,12 @@ def test_claim_creates_private_pending_draft_and_profile_completion(
     account = register(client, 'manager@example.com')
     court = court_id(client)
 
-    unauthenticated = client.post('/api/businesses/claims', json={
+    unauthenticated = venue_write(client, 'post', '/api/businesses/claims', json={
         'court_id': court, 'role': 'Manager', 'authorized_attestation': True,
     })
     assert unauthenticated.status_code == 401
 
-    unattested = client.post(
+    unattested = venue_write(client, 'post',
         '/api/businesses/claims',
         json={'court_id': court, 'role': 'General manager'},
         headers=headers(account['token']),
@@ -173,7 +176,7 @@ def test_claim_creates_private_pending_draft_and_profile_completion(
     assert unattested.status_code == 400
     assert unattested.get_json() == {'error': 'authorized_attestation_required'}
 
-    claim = client.post(
+    claim = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'General manager',
@@ -250,7 +253,7 @@ def test_direct_profile_creation_requires_role_and_attestation_and_is_unpublishe
     assert created.get_json()['published'] is False
     assert client.get('/api/businesses').get_json()['items'] == []
     pending_id = created.get_json()['id']
-    blocked_publish = client.patch(
+    blocked_publish = venue_write(client, 'patch',
         f'/api/businesses/{pending_id}',
         json={'published': True}, headers=headers(owner['token']),
     )
@@ -258,7 +261,7 @@ def test_direct_profile_creation_requires_role_and_attestation_and_is_unpublishe
     assert blocked_publish.get_json() == {
         'error': 'business_verification_required',
     }
-    insecure_link = client.patch(
+    insecure_link = venue_write(client, 'patch',
         f'/api/businesses/{pending_id}',
         json={'booking_url': 'http://booking.example.com'},
         headers=headers(owner['token']),
@@ -275,7 +278,7 @@ def test_owner_manages_offerings_and_schedule_then_verified_profile_is_public(ap
     court = court_id(client)
     profile = create_profile(client, owner['token'], court).get_json()
 
-    pending_request = client.post(
+    pending_request = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/integration-requests",
         json={'provider': 'CourtReserve'}, headers=headers(owner['token']),
     )
@@ -285,7 +288,7 @@ def test_owner_manages_offerings_and_schedule_then_verified_profile_is_public(ap
     }
     verify_profile(app, profile['id'], published=False)
 
-    offerings = client.put(
+    offerings = venue_write(client, 'put',
         f"/api/businesses/{profile['id']}/offerings",
         json={'items': [
             {
@@ -308,7 +311,7 @@ def test_owner_manages_offerings_and_schedule_then_verified_profile_is_public(ap
     assert offerings.status_code == 200, offerings.get_json()
     assert len(offerings.get_json()['offerings']) == 2  # owners see inactive drafts
 
-    schedule = client.put(
+    schedule = venue_write(client, 'put',
         f"/api/businesses/{profile['id']}/schedule",
         json={'items': [
             {
@@ -421,19 +424,19 @@ def test_owner_can_preview_free_csv_schedule_import_without_saving(client):
         'Sold out,Center court,Alex,,no,09/12/2026,\n'
     )
 
-    unauthorized = client.post(
+    unauthorized = venue_write(client, 'post',
         f'/api/businesses/{business_id}/schedule/import-preview',
         json={'csv': csv_text, 'timezone': 'America/Chicago'},
     )
     assert unauthorized.status_code == 401
-    forbidden = client.post(
+    forbidden = venue_write(client, 'post',
         f'/api/businesses/{business_id}/schedule/import-preview',
         json={'csv': csv_text, 'timezone': 'America/Chicago'},
         headers=headers(viewer['token']),
     )
     assert forbidden.status_code == 403
 
-    response = client.post(
+    response = venue_write(client, 'post',
         f'/api/businesses/{business_id}/schedule/import-preview',
         json={'csv': csv_text, 'timezone': 'America/Chicago'},
         headers=headers(owner['token']),
@@ -478,7 +481,7 @@ def test_owner_can_preview_free_csv_schedule_import_without_saving(client):
     assert mine.status_code == 200
     assert mine.get_json()['items'][0]['schedule'] == []
 
-    invalid = client.post(
+    invalid = venue_write(client, 'post',
         f'/api/businesses/{business_id}/schedule/import-preview',
         json={
             'csv': 'Title,Day,Start,End\nBad row,Monday,25:00,26:00\n',
@@ -632,7 +635,7 @@ def test_schedule_booking_link_sets_compact_court_booking_signal(app, client):
     profile = create_profile(
         client, owner['token'], court, booking_url='', membership_url='',
     ).get_json()
-    schedule = client.put(
+    schedule = venue_write(client, 'put',
         f"/api/businesses/{profile['id']}/schedule",
         json={'items': [{
             'title': 'Friday open play', 'kind': 'open_play',
@@ -655,7 +658,7 @@ def test_competing_claim_never_overwrites_owner_or_content(app, client):
     court = court_id(client)
     profile = create_profile(client, owner['token'], court).get_json()
 
-    claim = client.post(
+    claim = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'Assistant manager',
@@ -666,7 +669,7 @@ def test_competing_claim_never_overwrites_owner_or_content(app, client):
     assert claim.status_code == 201
     assert claim.get_json()['claim']['status'] == 'pending'
     assert claim.get_json()['business'] is None
-    forbidden = client.patch(
+    forbidden = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'name': 'Hijacked listing'},
         headers=headers(competitor['token']),
@@ -685,7 +688,7 @@ def test_owner_cannot_self_verify_and_validation_is_atomic(app, client):
     court = court_id(client)
     profile = create_profile(client, owner['token'], court).get_json()
 
-    verify_attempt = client.patch(
+    verify_attempt = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'claim_status': 'verified', 'verified': True},
         headers=headers(owner['token']),
@@ -693,7 +696,7 @@ def test_owner_cannot_self_verify_and_validation_is_atomic(app, client):
     assert verify_attempt.status_code == 400
     assert verify_attempt.get_json()['error'] == 'verification_fields_are_server_managed'
 
-    bad_url = client.patch(
+    bad_url = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'name': 'Must not persist', 'booking_url': 'javascript:alert(1)'},
         headers=headers(owner['token']),
@@ -705,7 +708,7 @@ def test_owner_cannot_self_verify_and_validation_is_atomic(app, client):
         assert persisted.claim_status == 'pending'
         assert persisted.verified_at is None
 
-    bad_time = client.put(
+    bad_time = venue_write(client, 'put',
         f"/api/businesses/{profile['id']}/schedule",
         json={'items': [{
             'title': 'Open play', 'kind': 'open_play',
@@ -714,7 +717,7 @@ def test_owner_cannot_self_verify_and_validation_is_atomic(app, client):
         headers=headers(owner['token']),
     )
     assert bad_time.status_code == 400
-    reversed_time = client.put(
+    reversed_time = venue_write(client, 'put',
         f"/api/businesses/{profile['id']}/schedule",
         json={'items': [{
             'title': 'Late open play', 'kind': 'open_play',
@@ -735,7 +738,7 @@ def test_integration_requests_are_durable_private_and_owner_scoped(
     profile = create_profile(client, owner['token'], court).get_json()
     verify_profile(app, profile['id'], published=False)
 
-    created = client.post(
+    created = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/integration-requests",
         json={
             'provider': 'CourtReserve',
@@ -757,14 +760,14 @@ def test_integration_requests_are_durable_private_and_owner_scoped(
     )
     assert all('CourtReserve' not in record.getMessage() for record in caplog.records)
 
-    secret = client.post(
+    secret = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/integration-requests",
         json={'provider': 'Custom', 'details': 'api_key = do-not-store-this'},
         headers=headers(owner['token']),
     )
     assert secret.status_code == 400
     assert secret.get_json() == {'error': 'integration_request_may_contain_secret'}
-    blank_contact = client.post(
+    blank_contact = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/integration-requests",
         json={'provider': 'Custom', 'contact_email': ''},
         headers=headers(owner['token']),
@@ -772,11 +775,11 @@ def test_integration_requests_are_durable_private_and_owner_scoped(
     assert blank_contact.status_code == 400
     assert blank_contact.get_json() == {'error': 'contact_email_required'}
 
-    assert client.post(
+    assert venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/integration-requests",
         json={'provider': 'Hijack'}, headers=headers(other['token']),
     ).status_code == 403
-    invalid = client.post(
+    invalid = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/integration-requests",
         json={'capabilities': ['arbitrary_database_access']},
         headers=headers(owner['token']),
@@ -874,7 +877,7 @@ def test_claim_cli_preserves_review_syntax_and_has_pending_inbox():
 def test_closed_court_cannot_be_approved_or_exposed(app, client):
     owner = register(client, 'owner@example.com')
     court = court_id(client)
-    claim = client.post(
+    claim = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'Owner',
@@ -897,7 +900,7 @@ def test_closed_court_cannot_be_approved_or_exposed(app, client):
 def test_operator_review_is_explicit_and_does_not_silently_publish(app, client):
     owner = register(client, 'owner@example.com')
     court = court_id(client)
-    claim_response = client.post(
+    claim_response = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'Owner',
@@ -936,7 +939,7 @@ def test_operator_review_is_explicit_and_does_not_silently_publish(app, client):
 def test_reopened_claim_preserves_immutable_review_history(app, client):
     owner = register(client, 'history-owner@example.com')
     court = court_id(client)
-    submitted = client.post(
+    submitted = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'Owner',
@@ -956,7 +959,7 @@ def test_reopened_claim_preserves_immutable_review_history(app, client):
         )
         db.session.commit()
 
-    reopened = client.post(
+    reopened = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'Owner',
@@ -987,7 +990,7 @@ def test_operator_takeover_demotes_old_claim_and_requires_fresh_pending_request(
     court = court_id(client)
     profile = create_profile(client, owner['token'], court).get_json()
     verify_profile(app, profile['id'], published=False)
-    private_request = client.post(
+    private_request = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/integration-requests",
         json={
             'provider': 'Prior owner system',
@@ -997,7 +1000,7 @@ def test_operator_takeover_demotes_old_claim_and_requires_fresh_pending_request(
         headers=headers(owner['token']),
     )
     assert private_request.status_code == 201
-    assert client.put(
+    assert venue_write(client, 'put',
         f"/api/businesses/{profile['id']}/offerings",
         json={'items': [{
             'name': 'Prior owner lesson', 'category': 'lesson',
@@ -1005,7 +1008,7 @@ def test_operator_takeover_demotes_old_claim_and_requires_fresh_pending_request(
         }]},
         headers=headers(owner['token']),
     ).status_code == 200
-    assert client.put(
+    assert venue_write(client, 'put',
         f"/api/businesses/{profile['id']}/schedule",
         json={'items': [{
             'title': 'Prior owner clinic', 'kind': 'clinic',
@@ -1015,7 +1018,7 @@ def test_operator_takeover_demotes_old_claim_and_requires_fresh_pending_request(
         }]},
         headers=headers(owner['token']),
     ).status_code == 200
-    competing = client.post(
+    competing = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'New owner',
@@ -1047,14 +1050,14 @@ def test_operator_takeover_demotes_old_claim_and_requires_fresh_pending_request(
         db.session.commit()
         assert db.session.get(BusinessClaim, competing['id']).status == 'rejected'
     approve_profile_content(app, profile['id'])
-    published = client.patch(
+    published = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'published': True}, headers=headers(owner['token']),
     )
     assert published.status_code == 200
     assert client.get(f'/api/courts/{court}/business').get_json()['business'] is not None
 
-    reopened = client.post(
+    reopened = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'New owner',
@@ -1098,7 +1101,7 @@ def test_operator_takeover_demotes_old_claim_and_requires_fresh_pending_request(
         ).first().status == 'rejected'
 
     assert client.get(f'/api/courts/{court}/business').get_json()['business'] is None
-    republished = client.patch(
+    republished = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={
             'description': 'Reviewed by the new owner.',
@@ -1111,7 +1114,7 @@ def test_operator_takeover_demotes_old_claim_and_requires_fresh_pending_request(
     assert republished.get_json()['published'] is False
     assert client.get(f'/api/courts/{court}/business').get_json()['business'] is None
     approve_profile_content(app, profile['id'])
-    publish_after_review = client.patch(
+    publish_after_review = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'published': True},
         headers=headers(replacement['token']),
@@ -1128,7 +1131,7 @@ def test_account_deletion_retires_listing_and_allows_pending_reclaim(app, client
     court = court_id(client)
     profile = create_profile(client, owner['token'], court).get_json()
     verify_profile(app, profile['id'], published=False)
-    request_result = client.post(
+    request_result = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/integration-requests",
         json={
             'provider': 'Private provider',
@@ -1147,7 +1150,7 @@ def test_account_deletion_retires_listing_and_allows_pending_reclaim(app, client
     assert deleted.status_code == 200, deleted.get_json()
     assert client.get(f'/api/courts/{court}/business').get_json()['business'] is None
 
-    reclaim = client.post(
+    reclaim = venue_write(client, 'post',
         '/api/businesses/claims',
         json={
             'court_id': court, 'role': 'New general manager',

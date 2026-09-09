@@ -39,10 +39,10 @@ def test_weekly_open_play_is_a_first_class_play_and_court_section():
     detail = section(APP, 'async function openCourtDetail', 'function openCourtPlayerActions')
     play = section(APP, 'async function renderPlay', 'function updatePlayHeader')
 
-    assert "const regularPlaySessions = allCourtGames.filter" in detail
-    assert "game.recurrence === 'weekly' && game.game_type !== 'ranked'" in detail
-    assert 'Regular play sessions' in detail
-    assert 'a live RSVP list, openings, and waitlist for each date' in detail
+    assert 'const playerOrganizedGames = allCourtGames;' in detail
+    assert 'loadCourtTimeline(modal,court)' in detail
+    assert 'id="cd-play-here"' in detail
+    assert 'function loadCourtTimeline' in APP
     assert 'const weeklySessions =' in play
     assert 'Regular group sessions' in play
     assert 'data-host-play-session' in play
@@ -129,11 +129,14 @@ def test_court_corrections_expose_the_pending_value_and_explicit_decisions():
     detail = section(APP, 'async function openCourtDetail', 'function openCourtPlayerActions')
     assert 'id="cd-report-closure"' in detail
     assert 'Report permanent closure' in detail
-    assert 'A second player must independently confirm the report' in detail
-    assert "JSON.stringify({ closed: true })" in detail
+    assert 'openCourtClosureReport(court' in detail
+    report = section(APP, 'function openCourtClosureReport', 'function openCheckInSheet')
+    assert 'stays as listed until an operator reviews the evidence' in report
+    assert 'id="closure-evidence"' in report
+    assert "JSON.stringify({closed:!court.closed,evidence})" in report
 
 
-def test_structured_open_play_rows_launch_a_prefilled_weekly_session():
+def test_structured_open_play_rows_confirm_entry_before_creating_a_dated_player_plan():
     helpers = section(APP, 'const COURT_WEEKDAY_LABELS', 'function courtFeeFact')
     detail = section(APP, 'async function openCourtDetail', 'function openCourtPlayerActions')
 
@@ -141,11 +144,14 @@ def test_structured_open_play_rows_launch_a_prefilled_weekly_session():
     assert 'function courtOpenPlayDuration' in helpers
     assert 'data-plan-open-play' in helpers
     assert "modal.querySelectorAll('[data-plan-open-play]')" in detail
-    assert "recurrence: 'weekly'" in detail
-    assert 'recurrenceWeekdays: [row.weekday]' in detail
-    assert 'scheduledAt: start.toISOString()' in detail
-    assert 'durationMinutes: courtOpenPlayDuration(row)' in detail
-    assert "title: 'Open play'" in detail
+    plan = section(APP, 'function openCourtWindowPlan', 'function bindCourtTimelineActions')
+    assert 'openCourtWindowPlan(court,' in detail
+    assert 'Continue to player plan' in plan
+    assert 'Book or register with the venue separately' in plan
+    assert "scheduledAt:listed.starts_at || start.toISOString()" in plan
+    assert "durationMinutes:courtOpenPlayDuration(listed.window)" in plan
+    assert "recurrence:'weekly'" not in plan
+    assert "calendarDateInTimeZone(start,zone)!==item.event_date" in plan
 
 
 def test_map_uses_one_context_strip_and_court_controls_meet_touch_and_type_minimums():

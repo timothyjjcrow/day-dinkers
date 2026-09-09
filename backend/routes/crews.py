@@ -229,7 +229,7 @@ def _crew_chat_next_game(crew, viewer_id):
     game = upcoming[0].to_dict(viewer_id, slim_players=True)
     return {
         key: game[key] for key in (
-            'id', 'scheduled_at', 'court', 'max_players', 'spots_left',
+            'id', 'title', 'game_type', 'visibility', 'scheduled_at', 'court', 'max_players', 'spots_left',
             'is_joined', 'is_invited', 'waitlist_position',
         )
     }

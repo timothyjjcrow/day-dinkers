@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from tests.schedule_test_support import post_with_schedule_review
 import pytest
 
 from backend.app import create_app, db
@@ -101,7 +102,7 @@ def invite_to_crew(client, crew_id, owner, player):
 
 
 def schedule_crew_game(client, owner, crew, court_id, visibility, suffix):
-    response = client.post('/api/games', json={
+    response = post_with_schedule_review(client, '/api/games', json={
         'court_id': court_id,
         'scheduled_at': (utcnow() + timedelta(days=2)).isoformat() + 'Z',
         'game_type': 'casual',

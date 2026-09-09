@@ -201,8 +201,10 @@ def test_league_round_history_and_manual_start_nudge_are_durable(client, app):
         f"/api/leagues/{league['id']}/start", headers=auth(organizer),
     ).get_json()
     round_one_ids = {match['id'] for match in started['matches']}
+    preview = client.get(f"/api/leagues/{league['id']}/round/preview", headers=auth(organizer)).get_json()
     advanced = client.post(
         f"/api/leagues/{league['id']}/advance", headers=auth(organizer),
+        json={'preview_fingerprint': preview['preview_fingerprint']},
     )
     assert advanced.status_code == 200, advanced.get_json()
     assert round_one_ids.isdisjoint({match['id'] for match in advanced.get_json()['matches']})

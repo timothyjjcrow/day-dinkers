@@ -68,7 +68,7 @@ def test_planner_snapshots_preserve_numeric_ratings_and_do_not_invent_missing_le
     '''
     result = json.loads(subprocess.run(['node', '-e', script], check=True,
                                       capture_output=True, text=True).stdout)
-    assert result['identity'] == 'Self-rating 3.5 · DUPR 4.125 · DUPR ID ABC123'
+    assert result['identity'] == 'Self-rating 3.5 · DUPR 4.125 · player-entered · DUPR ID ABC123'
     assert result['restored'] == result['identity']
     assert result['missing'] == 'Self-rating not set'
-    assert result['legacy'] == 'Self-rating 4.0 (from earlier level)'
+    assert result['legacy'] == 'Self-rating not set'

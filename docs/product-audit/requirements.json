@@ -1,0 +1,1226 @@
+{
+  "objective": "Implement the complete product audit; verify every finding and end-to-end flow before completion.",
+  "baseline_commit": "42b567c",
+  "requirements": [
+    {
+      "id": "PL-01",
+      "area": "1. Play home, discovery and live refresh",
+      "finding": "P1 \u2014 a refresh interrupts browsing. Confirmed and browser-observed by main auditor.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 a refresh interrupts browsing. Confirmed and browser-observed by main auditor.** `startPlayLiveRefresh` clears the cache and renders the whole Play view repeatedly ([public/app-v15.js:37499](</Users/timothycrowley/pickleball local /public/app-v15.js:37499>)). `commitViewRender` replaces all child nodes and preserves only scroll (`:1816`). Open Play now / more-game disclosures and focused controls are not restored. The main auditor opened Play now and watched it collapse during the next refresh without acting. This makes the interface feel unstable even when data is correct. Preserve stable rows and action controls, update changing counts in place, and preserve open disclosures, active focus and scroll. Acceptance: leave Play now or \u201cSee all nearby play\u201d open through two refreshes; the menu remains open and keyboard focus stays on the same control.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/play-agenda-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/play-agenda-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-02",
+      "area": "1. Play home, discovery and live refresh",
+      "finding": "P2 \u2014 choose play intent before asking implementation choices. Judgment supported by source.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 choose play intent before asking implementation choices. Judgment supported by source.** The primary button says Create game, but the common entry is a locked casual six-player session. Ranked creation is inside the separate Play now menu, which also contains at-court, on-my-way and free-this-hour modes (`:17062`, `:17766`). A user planning a ranked game for next weekend should not need to discover it under \u201cnow.\u201d Use a single task entry with three clear choices: **Casual session**, **Ranked match**, **Competition**; Then **Now / Schedule** where relevant. Keep the at-court and availability shortcuts on the discovery screen. Each resulting page should display its type consistently in the header, roster, chat, calendar and result.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/play-agenda-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/play-agenda-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-03",
+      "area": "1. Play home, discovery and live refresh",
+      "finding": "P2 \u2014 make discovery searchable by actual constraint. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 make discovery searchable by actual constraint. Judgment.** Current time chips are Any time, Now, Today and Next 7 days (`:17564`); radius is 10/25/50/100 miles and the level dropdown is numeric (`:17570`). Add a date and time window, court filter, and plain-language level labels (for example \u201cBeginner \u00b7 2.0\u20132.5\u201d). An \u201copen spots only\u201d choice avoids inspecting full sessions when a player needs somewhere to join. A saved alert for a specific filter is a useful later feature, but fix discovery and schedule correctness first. Avoid another large category system.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-04",
+      "area": "1. Play home, discovery and live refresh",
+      "finding": "P2 \u2014 feed completeness. Confirmed structural limitation.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 feed completeness. Confirmed structural limitation.** The aggregate feed returns `has_more`/`next_cursor` for up to 100 items, but the Play renderer expands only the loaded array and never loads the next page ([backend/routes/games.py:2543](</Users/timothycrowley/pickleball local /backend/routes/games.py:2543>), `:2668`; [public/app-v15.js:17631](</Users/timothycrowley/pickleball local /public/app-v15.js:17631>)). Add a real Load more or date-paged list with honest counts. This is a scale edge case, not evidence that the current pre-launch list is missing 100 real games.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/play-agenda-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/play-agenda-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-05",
+      "area": "2. My plans and calendar",
+      "finding": "P1 \u2014 future commitments can disappear from My plans. Confirmed rendering path.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 future commitments can disappear from My plans. Confirmed rendering path.** The page counts all `upcoming` items, renders just the first priority item, then calls `playScheduleHtml`, which only renders the next seven days ([public/app-v15.js:17101](</Users/timothycrowley/pickleball local /public/app-v15.js:17101>), `:17507`, `:17530`). Remaining upcoming items are excluded from \u201cmore items need attention\u201d; there is no Later section. If two games fall beyond seven days, at most the first appears; if the first priority item is a score review, neither future game appears. Render **Needs attention / Today / This week / Later** with a complete list and one calendar view. Acceptance: games at +1, +8 and +20 days, plus a pending score, are all reachable without another page.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/play-agenda-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/play-agenda-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-06",
+      "area": "2. My plans and calendar",
+      "finding": "P1 \u2014 personal schedule is not a unified schedule. Confirmed.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 personal schedule is not a unified schedule. Confirmed.** The backend contributes only future tournaments whose event start falls in the next seven days; leagues are not included ([backend/routes/games.py:2718](</Users/timothycrowley/pickleball local /backend/routes/games.py:2718>), `:2775`). The client explicitly accepts only `kind === 'tournament'` in addition to ordinary games ([public/app-v15.js:17111](</Users/timothycrowley/pickleball local /public/app-v15.js:17111>)). Individual tournament matches and agreed league matches should appear alongside casual play, with their own court, opponent, time and next action. Keep unarranged league matches in a separate **Arrange a time** section. Calendar downloads and subscription already exist; improve the shared underlying agenda rather than introducing another calendar.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-07",
+      "area": "3. Create game / planner",
+      "finding": "P2 \u2014 group capacity and match format are mixed together. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 group capacity and match format are mixed together. Judgment.** `gameCapacityChoicesHtml` presents Singles/2, Doubles/4 and Group/6\u201312 as one \u201cFormat and players\u201d choice (`:13566`). These are not mutually exclusive concepts: six people can rotate through doubles. The current six-player default is described as Casual \u00b7 6 players and hidden behind Change in Who (`:18995`), while title/description are under More options. Let a casual session define **Maximum players** and optionally **Play style: rotating doubles / singles / mixed**; let a ranked match define Singles/Doubles and named sides. Show the type and capacity summary persistently without repeating editable copies.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-08",
+      "area": "3. Create game / planner",
+      "finding": "P2 \u2014 practical essentials are buried with optional prose. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 practical essentials are buried with optional prose. Judgment.** Cost, court/area and \u201cCourts reserved\u201d are under More options alongside notes, title and description (`:19056\u201319095`). On paid or multi-court play, these are decision-critical. Ask for a short session name and cost/free status in the main flow when needed. Collapse truly optional notes. Use a structured court-access choice **Reserved by host / Public drop-in / Booking still needed** instead of making a numeric field imply an actual reservation.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-09",
+      "area": "3. Create game / planner",
+      "finding": "P2 \u2014 numeric level selection is clearer for experienced players than new ones. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 numeric level selection is clearer for experienced players than new ones. Judgment.** The matching range correctly says it is a hint, not a gate (`:19059`). Preserve that honesty. Add the same brief skill descriptions available in profile setup, or a compact beginner/intermediate/advanced range picker, while retaining numeric values for people who use them. Do not present Third Shot match rating as the same scale.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-10",
+      "area": "4. Invitations and joining",
+      "finding": "P1 \u2014 Invite by link does not invite into the draft being created. Confirmed.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 Invite by link does not invite into the draft being created. Confirmed.** Planner button `ng-copy-invite-link` calls global `shareInviteLink` ([public/app-v15.js:19863](</Users/timothycrowley/pickleball local /public/app-v15.js:19863>)). That function chooses the earliest existing public scheduled game from active/cached games, otherwise creates a general player-invite URL (`:4169`). It can therefore share an unrelated existing game while the user is composing a new one. Change the planner action to **Create session & get invite link** only after a real session exists, or label a pre-creation action explicitly as **Invite a friend to Third Shot**. The URL and preview must show the same session the user is viewing.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-11",
+      "area": "4. Invitations and joining",
+      "finding": "P1 \u2014 a new user cannot straightforwardly create a private game for existing offline friends. Confirmed limitation.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 a new user cannot straightforwardly create a private game for existing offline friends. Confirmed limitation.** Invite only is disabled without existing invite candidates, and submission requires at least one selected existing player ([public/app-v15.js:19008](</Users/timothycrowley/pickleball local /public/app-v15.js:19008>), `:20389`). This demands building an in-app social graph before arranging a simple private game. Add revocable, unlisted session invitation links, with host approval or explicit link access rules; preserve the currently strong private-roster safeguards. Account creation should complete the selected RSVP, not force the user back through Community.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-12",
+      "area": "4. Invitations and joining",
+      "finding": "P2 \u2014 joined state should summarize the commitment. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 joined state should summarize the commitment. Judgment.** The existing \u201cYou\u2019re in\u201d and Undo are good (`:35170`). Immediately show **Date/time, court/meeting point, free/cost, who is hosting** and useful **Add to calendar** / directions actions. Add no automatic permission prompt before this success state. Public preview and authentication-gate observations are in the main audit, rather than repeated here.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-13",
+      "area": "5. Session detail, roster and payment/access expectations",
+      "finding": "P1 \u2014 cost and reservation status can be below the join decision. Confirmed layout; priority is a design judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 cost and reservation status can be below the join decision. Confirmed layout; priority is a design judgment.** Cost and court-count facts render inside a closed details disclosure at the very end, after roster, join/actions, chat and info strips (`:35126`, `:35214`). Show cost/free status and booking/access status next to date and venue, before Join. Any \u201creserved\u201d fact must say **Host says courts are reserved** unless verified by a booking integration. Setting a count is not a reservation.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-14",
+      "area": "5. Session detail, roster and payment/access expectations",
+      "finding": "P2 \u2014 clearer roster state distinctions. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 clearer roster state distinctions. Judgment.** Keep separate headings/counts for **Going**, **Needs reconfirmation**, **Waitlist**, and **Here**. Do not let one checkmark cover intent, an automatic promotion and physical arrival. The existing code already has the relevant states but combines some into a general roster count. Large sessions should default to a compact face/name grid, show host + first few players, and expand the rest without moving the action button off-screen.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-15",
+      "area": "6. Waitlist, arrival and host changes",
+      "finding": "P1 \u2014 waitlist promotion can falsely imply a confirmed commitment. Confirmed.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 waitlist promotion can falsely imply a confirmed commitment. Confirmed.** `_promote_from_waitlist` immediately adds a roster row with `attending_at=utcnow()` and sends \u201cyou\u2019re in\u201d ([backend/routes/games.py:6153](</Users/timothycrowley/pickleball local /backend/routes/games.py:6153>)). A player who joined a waitlist days ago may no longer be available. Offer a time-limited spot with **Accept / Pass**, particularly near start time; preserve optional automatic acceptance only when the player explicitly chooses it. The roster should show Offered until accepted and advance the queue when the offer expires.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-16",
+      "area": "6. Waitlist, arrival and host changes",
+      "finding": "P2 \u2014 host handoff lacks the new host\u2019s consent. Confirmed behavior, design improvement.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 host handoff lacks the new host\u2019s consent. Confirmed behavior, design improvement.** The old host can choose a replacement; backend otherwise selects the first remaining player and immediately gives them hosting plus a standing RSVP for recurring sessions ([backend/routes/games.py:6389](</Users/timothycrowley/pickleball local /backend/routes/games.py:6389>)). Replace implicit takeover with **Request handoff** and explicit acceptance, plus a clear fallback if nobody accepts. Existing transfer and cancellation confirmations should be reused; this is not a request to remove those tools.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-17",
+      "area": "6. Waitlist, arrival and host changes",
+      "finding": "P2 \u2014 immediate-play concepts need visual continuity. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 immediate-play concepts need visual continuity. Judgment.** Availability for an hour, ETA holds, physical check-in and session membership are distinct. Current protections against stale presence/duplicate rallies are substantial. Present them as a small progression **Available \u2192 On my way \u2192 Here \u2192 Playing** with the current court, expiry/ETA and one change/cancel control. Do not imply that \u201cFree this hour\u201d guarantees an available court or another person\u2019s presence. No GPS permission or distance enforcement was tested by this source audit.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-18",
+      "area": "7. Weekly sessions and completed play",
+      "finding": "P1 \u2014 recurring sessions need separate dates as durable records. Confirmed architectural gap.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 recurring sessions need separate dates as durable records. Confirmed architectural gap.** `roll_forward_recurring` moves the same Game row\u2019s `scheduled_at` to the next date ([backend/routes/games.py:2252](</Users/timothycrowley/pickleball local /backend/routes/games.py:2252>), `:2287`), updates its roster, and does not create a completed occurrence. Completion and scoring explicitly reject recurring games (`:7332`, `:7198`). Thus the app cannot reliably show the actual attendance/results for each past weekly date, and an old shared game link changes meaning as the row advances. Use **Series \u2192 Occurrences**, with a stable series overview plus a distinct URL, roster, attendance and chat context for each date. Add an upcoming-date strip and an explicit **This date / Future dates** editing scope.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see tmp/product-audit/recurrence-ui/verification.md"
+      ],
+      "verification": [
+        "tmp/product-audit/recurrence-ui/verification.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-19",
+      "area": "7. Weekly sessions and completed play",
+      "finding": "P1 \u2014 current recurring completion controls can promise an unsupported action. Confirmed code-path mismatch, not exercised in browser.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 current recurring completion controls can promise an unsupported action. Confirmed code-path mismatch, not exercised in browser.** For a scheduled group session that has started, the renderer offers **Wrap up session** based on group size and roster count ([public/app-v15.js:35010](</Users/timothycrowley/pickleball local /public/app-v15.js:35010>)), even though the API rejects weekly recurrence. A weekly two/four-player game can similarly get a score-entry branch. Render capabilities returned by the server consistently; then implement per-occurrence wrap-up rather than merely hiding it.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see tmp/product-audit/recurrence-ui/verification.md"
+      ],
+      "verification": [
+        "tmp/product-audit/recurrence-ui/verification.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-20",
+      "area": "7. Weekly sessions and completed play",
+      "finding": "P1 \u2014 recurrence rollover ignores session duration. Confirmed.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 recurrence rollover ignores session duration. Confirmed.** Due rows are selected three hours after start ([backend/routes/games.py:2254](</Users/timothycrowley/pickleball local /backend/routes/games.py:2254>)), despite the planner allowing longer durations. A six-hour weekly event can advance while it is still in progress. Occurrence completion/expiry must use its explicit end time (with a documented fallback when none exists).",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see tmp/product-audit/recurrence-ui/verification.md"
+      ],
+      "verification": [
+        "tmp/product-audit/recurrence-ui/verification.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-21",
+      "area": "7. Weekly sessions and completed play",
+      "finding": "P2 \u2014 actual attendance should not overwrite all participation history. Confirmed behavior; feature recommendation.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 actual attendance should not overwrite all participation history. Confirmed behavior; feature recommendation.** Casual wrap-up accepts an attendee subset but removes non-attendees from the roster ([backend/routes/games.py:7359](</Users/timothycrowley/pickleball local /backend/routes/games.py:7359>)). Preserve RSVP, cancellation and actual attendance separately, and let players correct a mistaken attendance report. A friendly \u201cWe played\u201d check should not silently erase another person\u2019s prior RSVP. Existing casual no-score completion and Play again are good foundations.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-22",
+      "area": "8. Ranked matches, results and disputes",
+      "finding": "P1 \u2014 unresolved results need an honest next step. Confirmed mismatch.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 unresolved results need an honest next step. Confirmed mismatch.** After a late dispute, notification copy says to coordinate before reporting a replacement result ([backend/routes/games.py:7516](</Users/timothycrowley/pickleball local /backend/routes/games.py:7516>)), but the original match becomes unresolved, submit-score rejects that state (`:7193`), and detail offers only generic Find/Plan/Message actions ([public/app-v15.js:35114](</Users/timothycrowley/pickleball local /public/app-v15.js:35114>)). Add a bounded **Agree a corrected result** flow on the same match with both sides\u2019 approval and an audit trail, or explicitly label it permanently excluded with a visible reason and support/report path. Do not send people toward a replacement score that the same page cannot accept.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-23",
+      "area": "8. Ranked matches, results and disputes",
+      "finding": "P2 \u2014 result history should explain provenance compactly. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 result history should explain provenance compactly. Judgment.** Show **Reported by Alex / Confirmed by Sam / Confirmed automatically** as a small status line, with deadlines and history in a disclosure. Keep points versus match wins explicit for multi-game results. Preserve original score reports in dispute history rather than only the latest note. No need for more stat badges before the game identity and result are understood.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-24",
+      "area": "9. Rankings",
+      "finding": "P1 \u2014 a player outside the first page can be told to win their first match. Confirmed.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 a player outside the first page can be told to win their first match. Confirmed.** The leaderboard API defaults to 50 rows and supplies pagination ([backend/routes/games.py:7874](</Users/timothycrowley/pickleball local /backend/routes/games.py:7874>)); the UI requests `/leaderboard` without loading additional pages. If the current user is absent from the returned array it renders \u201cWin a ranked match to enter the leaderboard\u201d ([public/app-v15.js:17327](</Users/timothycrowley/pickleball local /public/app-v15.js:17327>)), even when that user is simply rank 51 or outside the selected geography/month. The all-time backend eligibility is any ranked win **or loss**, making \u201cwin\u201d inaccurate as well ([backend/routes/games.py:7942](</Users/timothycrowley/pickleball local /backend/routes/games.py:7942>)). Return a separate scoped `viewer_rank`/eligibility result, provide real pagination, and explain when the viewer does not match a filter.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/rankings-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/rankings-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-25",
+      "area": "9. Rankings",
+      "finding": "P2 \u2014 use rankings as a clear optional view. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 use rankings as a clear optional view. Judgment.** Current local/friends/everyone and all-time/month filters are useful. Keep match-rating explanation available, show the viewer\u2019s place first, and distinguish monthly rating change from absolute rating. Do not imply these are verified external ratings; the UI already uses the Third Shot name and should continue to do so.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/rankings-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/rankings-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-26",
+      "area": "10. Competition hub and creation",
+      "finding": "P2 \u2014 browsing needs a player-first entry. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 browsing needs a player-first entry. Judgment.** The first full-width action is Create competition. Show **Your next match / Open signups / Past results** before creator tools for ordinary players. Add date, level, singles/doubles and competition-type filters. Explain the formats with one-line concrete examples at creation: \u201cKnockout: winners advance\u201d and \u201cLeague: arrange matches over several weeks.\u201d Current league pages already replace most \u201cbox\u201d labels with Division, but remaining backend notification copy says \u201cyou are in box \u2026\u201d ([backend/routes/leagues.py:1327](</Users/timothycrowley/pickleball local /backend/routes/leagues.py:1327>)). Make the terminology consistent everywhere, including push, email/calendar and share messages.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-27",
+      "area": "11. Tournament registration, teams and arrival",
+      "finding": "P1 \u2014 \u201cHere\u201d does not mean both doubles partners have arrived. Confirmed.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 \u201cHere\u201d does not mean both doubles partners have arrived. Confirmed.** Either partner can check in the entire entry from 24 hours before the event ([backend/routes/tournaments.py:2442](</Users/timothycrowley/pickleball local /backend/routes/tournaments.py:2442>)), and the UI counts it as a team here with \u201cI\u2019m here at the court\u201d ([public/app-v15.js:24108](</Users/timothycrowley/pickleball local /public/app-v15.js:24108>), `:24145`). Separate each player\u2019s arrival. Use **1 of 2 here** until both arrive, or let the organizer mark a complete team ready. If check-in is intended only as advance confirmation, call it **Confirmed for tomorrow**, not physical presence.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-28",
+      "area": "11. Tournament registration, teams and arrival",
+      "finding": "P2 \u2014 fuller registration expectations. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 fuller registration expectations. Judgment.** Before signup show competition date, expected end, exact location, level eligibility, complete-team requirement, capacity, fee/payment method if any, and withdrawal rules. Add a tournament waitlist if actual tournaments need it; none of the tournament registration routes exposes a waitlist today. Do not add payments merely for completeness before deciding what can be booked or paid inside the product.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-29",
+      "area": "12. Tournament bracket, match times and organizer operations",
+      "finding": "P1 \u2014 estimated match times look firmer than the scheduling system supports. Confirmed behavior; improvement judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 estimated match times look firmer than the scheduling system supports. Confirmed behavior; improvement judgment.** Generation allocates fixed time waves from the event\u2019s planned start ([backend/routes/tournaments.py:96](</Users/timothycrowley/pickleball local /backend/routes/tournaments.py:96>)). Match cards show Scheduled and exact times without an Estimated label ([public/tournament-bracket-v15.js:37](</Users/timothycrowley/pickleball local /public/tournament-bracket-v15.js:37>), `:92`). Organizer edits validate date and court range but not court overlap, player overlap, feeder completion order or rest time ([backend/routes/tournaments.py:1022](</Users/timothycrowley/pickleball local /backend/routes/tournaments.py:1022>)). Add a clear **Estimated / Called / Playing / Final** state; warn when a new time overlaps a court/player or precedes a feeder; provide **Delay remaining matches by \u2026** and an explicit notification summary. The organiser needs a court-based Now/Next board in addition to the bracket, not just a long list of per-match edit buttons.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-30",
+      "area": "12. Tournament bracket, match times and organizer operations",
+      "finding": "P2 \u2014 participant default should center the actual next match. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 participant default should center the actual next match. Judgment.** Current detail has a useful Your next match action and a My matches filter, but defaults to full bracket ([public/app-v15.js:24026](</Users/timothycrowley/pickleball local /public/app-v15.js:24026>), `:24239`). Preserve the full bracket for understanding the competition while pinning a compact personal card with opponent(s), court, estimated/confirmed start, arrival and score action. On mobile, keep a visible route back from a matchup to its bracket round; root should validate actual touch behavior and large fields.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-31",
+      "area": "12. Tournament bracket, match times and organizer operations",
+      "finding": "P2 \u2014 organizer preview before start. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 organizer preview before start. Judgment.** Give a read-only bracket + time estimate preview before Start, including seeds, byes, incomplete teams and courts in use. Let the organizer correct obvious setup issues before notifying players. Once matches are active, show correction consequences and preserve existing downstream-result protection and result audit history.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-32",
+      "area": "13. League opponents, scheduling, standings and season management",
+      "finding": "P1 \u2014 arranging a league match stops at chat. Confirmed missing workflow.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 arranging a league match stops at chat. Confirmed missing workflow.** Arrange time creates a generic DM draft ([public/app-v15.js:21631](</Users/timothycrowley/pickleball local /public/app-v15.js:21631>), `:21713`, `:22195`). `LeagueMatch` stores opponents/results but no planned match time or agreed venue ([backend/models.py:4729](</Users/timothycrowley/pickleball local /backend/models.py:4729>)). Add **Propose 2\u20133 times \u2192 opponent accepts \u2192 match scheduled**, with change/cancel handling, a visible agreed slot, calendar entry and reminder. Keep chat for discussion. A time accepted in chat must become structured match state to be useful across the site.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/league-scheduling-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/league-scheduling-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-33",
+      "area": "13. League opponents, scheduling, standings and season management",
+      "finding": "P1 \u2014 movement uses season totals rather than the round just completed. Confirmed behavior; product-rule decision needed.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P1 \u2014 movement uses season totals rather than the round just completed. Confirmed behavior; product-rule decision needed.** `_boxes_of` ranks members by accumulated points/wins and `_do_advance` moves top/bottom members without resetting points ([backend/routes/leagues.py:67](</Users/timothycrowley/pickleball local /backend/routes/leagues.py:67>), `:1305`). UI standings explicitly say \u201cthis season,\u201d while how-it-works describes movement at the end of each round. A player\u2019s strong old results can dominate movement after joining a new division. Decide the intended rule: recommend **This round** standings for promotion/relegation, and a distinct **Season** record for overall history. Show the exact tie-breaker. Do not label a player \u201cMoves up\u201d before the remaining results are settled; use **Currently in promotion place**.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-34",
+      "area": "13. League opponents, scheduling, standings and season management",
+      "finding": "P2 \u2014 league lifecycle needs clear absence and season boundaries. Judgment.",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "**P2 \u2014 league lifecycle needs clear absence and season boundaries. Judgment.** Existing organizer result resolution, round closure and finish-season tools are meaningful; don\u2019t rebuild them. Add a simple **Unavailable this round / Withdraw after this round** participant route and a participant-readable season end/number of rounds. Preview the effects of closing a round: unresolved, unplayed, movements and next deadline. Avoid counting an unplayed match as a played loss; current points legend already distinguishes 0 for unplayed.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-35",
+      "area": "Browser corroboration",
+      "finding": "League task order",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "- **League task order (P1/P2):** The current mobile screen correctly names opponents, but an unarranged match leads with \u201cNo score yet\u201d and Add score alongside Arrange match. Use **Choose a time \u2192 Waiting for reply \u2192 Scheduled \u2192 Played \u2192 Result review** as the normal lifecycle; keep premature score reporting secondary. The browser opened only the draft message; it did not send it. Source support is [public/app-v15.js:21631](</Users/timothycrowley/pickleball local /public/app-v15.js:21631>), `:22543` and `:21831`.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/league-scheduling-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/league-scheduling-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "PL-36",
+      "area": "Browser corroboration",
+      "finding": "Competition first viewport",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "- **Competition first viewport (P2):** In 390px-wide screenshots, the first opponent/matchup begins roughly 450px down the league view and 600px down the tournament view. These are visual estimates from the populated demo, not instrumented or universal measurements. Compact the header and duplicated explanations, keep a concise sticky round selector, and make the next matchup visible sooner. Preserve full context in expandable details.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "PL-37",
+      "area": "Browser corroboration",
+      "finding": "Agenda scope",
+      "source": "docs/product-audit/play-competition.md",
+      "requirement": "- **Agenda scope (P1):** The current personal feed joins `GamePlayer` only ([backend/routes/games.py:2389](</Users/timothycrowley/pickleball local /backend/routes/games.py:2389>)), so unaccepted invitations and waitlist entries are not part of that returned schedule even though the frontend has labels for those states. They may remain accessible through notifications or a game link; the gap is that My plans is not yet an authoritative list of all commitments and pending decisions.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-01",
+      "area": "1. Welcome, login, signup and recovery",
+      "finding": "the account form still dominates the entry page.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 design:** the account form still dominates the entry page. A prospective player cannot inspect enough of a public court/session to decide whether the app helps them. Expand the existing safe preview into a useful public detail view; make signup the joining step, preserve private audiences and location privacy. This is presentation/access scope work, not a missing deep-link system. Evidence: [public/index.html:113](</Users/timothycrowley/pickleball local /public/index.html:113>); [public/app-v15.js:8090](</Users/timothycrowley/pickleball local /public/app-v15.js:8090>).",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-02",
+      "area": "1. Welcome, login, signup and recovery",
+      "finding": "registration and change-password accept six characters, while reset-password requires eight.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 consistency:** registration and change-password accept six characters, while reset-password requires eight. Use one clear policy and matching UI text across all three flows. This is a confirmed UX inconsistency, not a claim of an exploited vulnerability. Evidence: [backend/routes/auth.py:929](</Users/timothycrowley/pickleball local /backend/routes/auth.py:929>), `:1008`; [public/app-v15.js:32965](</Users/timothycrowley/pickleball local /public/app-v15.js:32965>), `:33110`.\n\n**Check before release:** expired link, link opened while another account is active, verification-email failure, wrong MFA code, long offline attempt, browser password manager and retained game intent after reauthentication. Source includes targeted safeguards and tests; this audit did not send real account emails.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-03",
+      "area": "2. New-player setup",
+      "finding": "a skippable flow can still feel like too much setup.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 design:** a skippable flow can still feel like too much setup. \u201cProfile step 3 of 3\u201d is followed by multiple other onboarding screens. Let generic entrants choose a court/area and view play first, then request a level when it affects suitability and a photo when joining. Move inviting and the feature tour out of the initial chain. Keep the existing resume card and independent saves.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-04",
+      "area": "2. New-player setup",
+      "finding": "self-rating choices use button-based `role=\"radio\"`, but the visible binding handles click only, with all choices in the tab sequence; there is no radio-group arrow/roving-focus behavior in those handlers.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 accessibility:** self-rating choices use button-based `role=\"radio\"`, but the visible binding handles click only, with all choices in the tab sequence; there is no radio-group arrow/roving-focus behavior in those handlers. Use native radio inputs or the shared keyboard pattern. Same issue applies to self-rating in Edit profile and private/public group notification choice sheets. Evidence: `:37403\u201337422`, `:33986\u201333987`, `:34075\u201334088`, `:27745\u201327765`. Confirm with keyboard/screen reader; source inspection is not a completed accessibility certification.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-05",
+      "area": "3. Me / personal dashboard",
+      "finding": "only the first upcoming session is outside the disclosure.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 confirmed information-architecture problem:** only the first upcoming session is outside the disclosure. `pf-upcoming-more`, containing all remaining upcoming games, lives inside **\u201cYour progress & history.\u201d** Future commitments are hidden under a label for past activity. Keep all upcoming sessions under Up next with a \u201cSee all plans\u201d expansion; isolate history/stats below. Evidence: [public/app-v15.js:33500](</Users/timothycrowley/pickleball local /public/app-v15.js:33500>), `:33647\u201333655`.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-06",
+      "area": "3. Me / personal dashboard",
+      "finding": "\u201cUsually plays\u201d and avatar shortcuts both open the entire long profile editor.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 design:** \u201cUsually plays\u201d and avatar shortcuts both open the entire long profile editor. Open the relevant small section directly, with its own save/cancel. A returning user changing Tuesday evening should not traverse ratings, DUPR, photo and court fields. Evidence: `:33534\u201333535`, `:33951\u201334069`.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-07",
+      "area": "3. Me / personal dashboard",
+      "finding": "empty Up next offers creating a six-person session as its one main action.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 design:** empty Up next offers creating a six-person session as its one main action. A new player may want to join first. Make \u201cFind a game\u201d primary; retain \u201cPlan a session\u201d secondary. Evidence: `:33665\u201333675`.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-08",
+      "area": "4. Profile editing and ratings identity",
+      "finding": "split About, Playing preferences, Photo and Home court into focused edits with a compact player-card preview.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 design:** split About, Playing preferences, Photo and Home court into focused edits with a compact player-card preview. Three rating concepts plus seven/eight numeric self-rating choices overwhelm the basic task of being recognizable and finding suitable play. Keep one self-rating prominent, put competition identities behind \u201cCompetition ratings.\u201d",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-09",
+      "area": "4. Profile editing and ratings identity",
+      "finding": "the DUPR field is user-entered, while help calls it a \u201cpublished\u201d rating.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 trust:** the DUPR field is user-entered, while help calls it a \u201cpublished\u201d rating. Display it clearly as **\u201cDUPR \u00b7 added by player\u201d** until verified/imported. Do not suggest a verified integration already exists. Evidence: [public/app-v15.js:33992](</Users/timothycrowley/pickleball local /public/app-v15.js:33992>).",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-10",
+      "area": "4. Profile editing and ratings identity",
+      "finding": "usual time blocks are helpful hints, not specific availability.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 feature:** usual time blocks are helpful hints, not specific availability. Keep the distinction visible and allow a temporary \u201cAway until\u2026\u201d or current-week exception if the app uses usual times for suggestions. Exact session time selection already exists elsewhere; no need to force a new scheduling product into profile editing.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-11",
+      "area": "5. Other-player profiles",
+      "finding": "primary social actions appear after stats, badges, competition titles, comparison cards and availability.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 design:** primary social actions appear after stats, badges, competition titles, comparison cards and availability. For a player deciding \u201cCan I play with this person?\u201d, lead with name/photo, level, common court/time and one **Invite to play** or Message action. Keep stats under \u201cPlay history.\u201d Evidence: [public/app-v15.js:29713](</Users/timothycrowley/pickleball local /public/app-v15.js:29713>).",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-12",
+      "area": "5. Other-player profiles",
+      "finding": "\u201cSchedule at a shared time\u201d only appears when both profiles have overlapping stored availability; ordinary invite is missing from that primary action row.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 consistency:** \u201cSchedule at a shared time\u201d only appears when both profiles have overlapping stored availability; ordinary invite is missing from that primary action row. A valid invitation should be available even without profile availability. Use the existing planner, showing best-fit suggestions only when data supports them. Ranked challenge remains a deliberate secondary action, not the default connection task.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-13",
+      "area": "6. Progress, stats and play history",
+      "finding": "filters are applied only to already-loaded history items.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 confirmed false-empty risk:** filters are applied only to already-loaded history items. If the initial page has no ranked results but older pages do, \u201cNo play matches this filter\u201d appears until the person manually loads older pages. Make the API filter before pagination, or explicitly say \u201cNo matches in the loaded results\u201d and offer \u201cSearch older play.\u201d Evidence: [public/app-v15.js:33860](</Users/timothycrowley/pickleball local /public/app-v15.js:33860>).",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-14",
+      "area": "6. Progress, stats and play history",
+      "finding": "the first three completed sessions render in Recent play, then appear again in the full Play history inside the same disclosure.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 design:** the first three completed sessions render in Recent play, then appear again in the full Play history inside the same disclosure. Choose one history list, expandable and filtered. Separate **Matches/results** from **Sessions attended** while retaining a combined activity timeline. Scope legends should sit beside stats rather than rely on remembering different cards.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-15",
+      "area": "6. Progress, stats and play history",
+      "finding": "new players see \u201cYour ranked story starts with one match,\u201d a ranked CTA and badge milestones.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 design:** new players see \u201cYour ranked story starts with one match,\u201d a ranked CTA and badge milestones. Favor \u201cYour play history\u201d and only foreground ranked progress for people using ranked play. Evidence: `:33473\u201333478`, `:33686\u201333729`.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-16",
+      "area": "7. Community navigation and inbox",
+      "finding": "the broad label Community is still both an app destination and a subtype of public group.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 design:** the broad label Community is still both an app destination and a subtype of public group. Keep stable user vocabulary: **Messages / Groups / Players**, with group badges **Public** and **Private**. Internal `crew`, `club` and league distinctions should not leak into new labels. A short consistency pass is sufficient; do not add more navigation levels. Evidence: [public/index.html:269](</Users/timothycrowley/pickleball local /public/index.html:269>); [public/app-v15.js:24798](</Users/timothycrowley/pickleball local /public/app-v15.js:24798>), `:25250\u201325390`, `:25663\u201325750`.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-17",
+      "area": "7. Community navigation and inbox",
+      "finding": "the inbox lacks a conversation-search control.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 feature:** the inbox lacks a conversation-search control. With seven conversation types, people will lose a court name or game thread as activity grows. Add one search over permitted conversations, and later optional archive/pin. Do not add a social feed just to fill an empty inbox.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-18",
+      "area": "8. Direct messages and chat continuity",
+      "finding": "any permitted non-friend conversation is called **\u201cMessage request\u201d**, but it is already a normal message thread, with read receipts and a reply composer, and no accept/decline request state.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 label/state issue:** any permitted non-friend conversation is called **\u201cMessage request\u201d**, but it is already a normal message thread, with read receipts and a reply composer, and no accept/decline request state. Either call it \u201cNot in your friends\u201d with why you are connected, or implement an actual Requests inbox with Accept/Ignore and explicit privacy behavior. Do not imply a consent gate that does not exist. Evidence: [backend/routes/chat.py:1668](</Users/timothycrowley/pickleball local /backend/routes/chat.py:1668>), `:1693\u20131717`; [public/app-v15.js:26443](</Users/timothycrowley/pickleball local /public/app-v15.js:26443>).",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-19",
+      "area": "8. Direct messages and chat continuity",
+      "finding": "add an inline **Plan a game** affordance to DMs, using the existing planner with the other player selected.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 feature:** add an inline **Plan a game** affordance to DMs, using the existing planner with the other player selected. Group chat already does this well; DMs currently send the user via profile/shared availability or other screens. Keep the important plan above chat so decisions do not disappear in messages.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-20",
+      "area": "8. Direct messages and chat continuity",
+      "finding": "reply-to and conversation text search would help recover a plan; editing a typo is less urgent.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 later:** reply-to and conversation text search would help recover a plan; editing a typo is less urgent. Existing durable sending and clear reconnect states matter more than typing animation, more reactions or media types.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-21",
+      "area": "9. Players, friends and \u201cPlayed together\u201d",
+      "finding": "Nearby hardcodes a 50-mile query and exposes All/3.0/3.5/4.0+ filters, omitting a dedicated beginner choice.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 design/capability gap:** Nearby hardcodes a 50-mile query and exposes All/3.0/3.5/4.0+ filters, omitting a dedicated beginner choice. Let players adjust distance and show beginner-friendly labels alongside numbers. A 2.5 player should not have to infer that All is their only option. Evidence: [public/app-v15.js:25796](</Users/timothycrowley/pickleball local /public/app-v15.js:25796>).",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-22",
+      "area": "9. Players, friends and \u201cPlayed together\u201d",
+      "finding": "Played together only shows Play again once friendship is accepted, although the model already permits contextual communication after shared play.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 friction:** Played together only shows Play again once friendship is accepted, although the model already permits contextual communication after shared play. Offer **Invite to play** to eligible past players with an explicit one-off invitation; keep Add friend secondary. Preserve existing block/private-game rules. Evidence: `:25558\u201325575`; [backend/models.py:1949](</Users/timothycrowley/pickleball local /backend/models.py:1949>).",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-23",
+      "area": "10. Private play groups and public communities",
+      "finding": "standardize both group headers around **Next session / Who is coming / Chat / Members**.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 design:** standardize both group headers around **Next session / Who is coming / Chat / Members**. Public community chat has an announcement but no equivalent next-plan card to the private group chat; the player must return to information to rediscover upcoming play. Reuse the existing private-group pattern. Evidence: [public/app-v15.js:27932](</Users/timothycrowley/pickleball local /public/app-v15.js:27932>), `:28137\u201328170`, `:28295\u201328374`.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-24",
+      "area": "10. Private play groups and public communities",
+      "finding": "private group planning is unavailable until at least one other invitee accepts.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 design:** private group planning is unavailable until at least one other invitee accepts. The empty state explains why, but a creator may naturally want to schedule first and invite people to the actual event. Let the owner create a draft group plan with pending invitees, clearly separating Invited and Going; do not silently RSVP anyone. Evidence: `:27482\u201327525`.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-25",
+      "area": "10. Private play groups and public communities",
+      "finding": "group notification settings require explicit Save, while global settings save automatically.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 consistency:** group notification settings require explicit Save, while global settings save automatically. Both can work; show \u201cChanges save automatically\u201d or a persistent Save bar consistently, and guard unsaved choice changes. Private group names, messages and members must retain their existing invitation/privacy boundaries.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-26",
+      "area": "11. Activity / notifications",
+      "finding": "all kinds outside people/groups fall into Games, including business and moderation/account-related activity.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 confirmed classification issue:** all kinds outside people/groups fall into Games, including business and moderation/account-related activity. Put **Needs your action** first, then chronology, with accurate categories or a separate operator inbox. Resolve stale action buttons from the entity's current state, not merely notification text. Evidence: [public/app-v15.js:36191](</Users/timothycrowley/pickleball local /public/app-v15.js:36191>), `:36206\u201336229`.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-27",
+      "area": "11. Activity / notifications",
+      "finding": "global settings say invitations/challenges/score confirmations **\u201calways come through\u201d**, even when device delivery is off or server push unavailable.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 copy/reliability:** global settings say invitations/challenges/score confirmations **\u201calways come through\u201d**, even when device delivery is off or server push unavailable. Say these remain in Activity, then state which channels can actually deliver. Source README explicitly documents daily push as unsuitable for time-sensitive alerts and keeping delivery disabled until appropriate scheduling exists. Do not claim live configuration or real delivery failures from source alone. Evidence: [public/app-v15.js:32375](</Users/timothycrowley/pickleball local /public/app-v15.js:32375>), `:32440\u201332455`; [README.md:318](</Users/timothycrowley/pickleball local /README.md:318>), `:338\u2013345`.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-28",
+      "area": "11. Activity / notifications",
+      "finding": "Activity filters also filter only the loaded 20-item page; \u201cNo groups activity yet\u201d can appear despite older matching items.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 false-empty risk:** Activity filters also filter only the loaded 20-item page; \u201cNo groups activity yet\u201d can appear despite older matching items. Apply category filters before server pagination, or label loaded scope. Evidence: [public/app-v15.js:36145](</Users/timothycrowley/pickleball local /public/app-v15.js:36145>), `:36253\u201336273`.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-29",
+      "area": "11. Activity / notifications",
+      "finding": "add quiet hours and digest cadence only after channel delivery is reliable.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 preference:** add quiet hours and digest cadence only after channel delivery is reliable. Existing per-conversation/group muting should remain easy to access.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-30",
+      "area": "12. Calendar and installation",
+      "finding": "\u201cupdates and cancellations stay in sync\u201d can suggest immediate changes.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 copy:** \u201cupdates and cancellations stay in sync\u201d can suggest immediate changes. State that subscribed calendars refresh on their own schedule; use the app's current game status for an urgent change. Keep one-time \u201cAdd this game\u201d visibly different from ongoing \u201cSubscribe to my plans.\u201d",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-31",
+      "area": "12. Calendar and installation",
+      "finding": "offer installation and calendar subscription after a person joins a plan, with a concrete benefit.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 design:** offer installation and calendar subscription after a person joins a plan, with a concrete benefit. Account security settings are an odd primary place for installation. Keep Settings as a reliable fallback rather than making setup a prerequisite.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-32",
+      "area": "13. Privacy, safety and help",
+      "finding": "when checked in, the heading always says **\u201cCourt presence \u00b7 Visible now\u201d**, even if nearby visibility is Hidden.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 confirmed contradictory display:** when checked in, the heading always says **\u201cCourt presence \u00b7 Visible now\u201d**, even if nearby visibility is Hidden. The paragraph below says the identity is hidden. Changing the visibility radio updates the server but does not update this summary in the open privacy sheet; it only rerenders the separate profile tab. Derive heading and audience text from the same current state and update together. Evidence: [public/app-v15.js:32582](</Users/timothycrowley/pickleball local /public/app-v15.js:32582>), `:32632\u201332639`, `:32687\u201332703`.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/identity-first-wave-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/identity-first-wave-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "ID-33",
+      "area": "13. Privacy, safety and help",
+      "finding": "Settings has no Help entry; contact details are buried in auth policy dialogs and feedback is on Me.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 help:** Settings has no Help entry; contact details are buried in auth policy dialogs and feedback is on Me. Add a compact Help & safety page answering real action questions: session vs match, how to join, what check-in reveals, cancellation, notifications, score dispute and support. Link each answer from the relevant control rather than making a long tour. Evidence: [public/app-v15.js:33363](</Users/timothycrowley/pickleball local /public/app-v15.js:33363>), `:2840\u20132865`, `:33561\u201333614`.",
+      "status": "in_progress",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-34",
+      "area": "13. Privacy, safety and help",
+      "finding": "reporting copy promises a trained operator/safety team.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 trust:** reporting copy promises a trained operator/safety team. Ensure the real support workflow matches those words; in a small prelaunch operation, accurately state who reviews and where an outcome appears. This audit verifies the queue/UI exists, not staffing or response times.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-35",
+      "area": "14. Account, settings and cross-app quality",
+      "finding": "simplify the frequent path, not just each isolated card.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P1 shared pattern:** simplify the frequent path, not just each isolated card. Use the same small vocabulary and ordering for every person/group/game detail: identity \u2192 next relevant information \u2192 primary action \u2192 secondary detail. Existing deep nesting is manageable technically but still makes basic tasks feel longer.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "ID-36",
+      "area": "14. Account, settings and cross-app quality",
+      "finding": "real iPhone/Android keyboard, 200% text scaling, keyboard-only self-rating, screen-reader announcements, 320px layouts, long names, denied permissions, stale/offline cached cards and logout/account-switch restoration.",
+      "source": "docs/product-audit/identity-social.md",
+      "requirement": "**P2 verification needed:** real iPhone/Android keyboard, 200% text scaling, keyboard-only self-rating, screen-reader announcements, 320px layouts, long names, denied permissions, stale/offline cached cards and logout/account-switch restoration. Static tests cover many contracts, but cannot prove readability, touch comfort or screen-reader coherence. No sweeping \u201caccessible\u201d or \u201csecure\u201d certification is justified by this source audit.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-01",
+      "area": "Courts map, list, search and saved courts",
+      "finding": "P1 \u2014 Make the map answer a player question.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Make the map answer a player question.** A selected venue can show four equal-looking actions: venue action, Court details, Play options and Directions. The preview still makes the user decide how to navigate instead of showing the useful opportunity. Show the next joinable session or next official open play directly: date, time, level, price/access and remaining spots where reliable. Give one primary action appropriate to that result; retain Directions and full details as secondary. \u201cActive now\u201d must remain distinct from \u201ccourt has posted opening hours.\u201d",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-02",
+      "area": "Courts map, list, search and saved courts",
+      "finding": "P1 \u2014 Unify hours.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Unify hours.** `applyCourtFilters` accepts Open now only when `court.open_status.is_open === true` (`app-v15.js:5187`). That state comes from the Court structured-hours record ([backend/models.py:360](</Users/timothycrowley/pickleball local /backend/models.py:360>)); venue managers edit separate free-text business hours (`app-v15.js:31694`). An owner can update displayed official hours without updating the data that drives map filtering. Use one authoritative structured weekly schedule, with venue timezone and holiday exceptions, and have filters, cards, detail and owner preview read it. Preserve \u201cHours unknown\u201d rather than interpreting missing data as closed.",
+      "status": "implemented",
+      "implementation": [
+        "Reviewed public hours projection and owner weekly/holiday editor; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-03",
+      "area": "Courts map, list, search and saved courts",
+      "finding": "P2 \u2014 Make search scope obvious.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Make search scope obvious.** Panning clears the typed query and reloads viewport results (`app-v15.js:4651`). That is intentional and avoids stale search results, but a small pan can appear to lose the search. Keep a persistent scope label (\u201cCourts near \u2026\u201d / \u201cResults for \u2026\u201d) and a visible \u201cSearch this area\u201d transition or explicit search reset. Also label distance origin (\u201cfrom map center\u201d) because map distance is not always distance from the person (`:5040`).",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-04",
+      "area": "Courts map, list, search and saved courts",
+      "finding": "P2 \u2014 Add decision filters, not more cosmetic filters.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Add decision filters, not more cosmetic filters.** Existing facility filters are useful; the absent high-value dimensions are public/free versus fee/membership access, reservable versus drop-in, and scheduled play by day and skill. Only expose a filter once its data is reliable. Avoid a \u201cno matches\u201d experience caused by unknown fields silently treated as false.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-05",
+      "area": "Courts map, list, search and saved courts",
+      "finding": "P2 \u2014 Saved courts should be actionable.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Saved courts should be actionable.** Keep the existing Save behavior, but use the saved list to show changes worth knowing\u2014next session, closure or updated hours\u2014rather than only a geographically sorted set. Clearly separate Save court from primary court and home area. These three concepts exist and are not interchangeable.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-06",
+      "area": "Court detail and planning a visit",
+      "finding": "P1 \u2014 Reorder by intent.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Reorder by intent.** The primary card is \u201cPlaying and forming now,\u201d with \u201cCheck in to find players\u201d as the default CTA; the venue slot and future player-organized sessions follow below (`app-v15.js:12120\u201312255`). That suits an arrival but not someone at home choosing tomorrow\u2019s game. Use three clear sections or tabs: **Play here / Visit / Photos & reviews**. Lead Play here with the next relevant dated opportunities; show the existing arrival action prominently only when physically nearby or explicitly selected. Keep owner administration out of normal player scanning.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-07",
+      "area": "Court detail and planning a visit",
+      "finding": "P1 \u2014 One timeline, explicit organizers.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 One timeline, explicit organizers.** Community open-play notes, community-verified recurring open-play rows, player-created recurring sessions, official venue schedule and imported venue schedule are separate concepts and separate UI blocks. A player needs \u201cTuesday, 6 PM, Beginner open play, Venue-run, register with provider,\u201d versus \u201cTuesday, 6 PM, Doubles with Alex, 3/4 players, Join.\u201d Present one dated schedule with source badges and action-specific buttons. Do not merge participant counts or claim a reservation between these systems. \u201cPlan this session\u201d on a community-maintained schedule currently starts a new player plan (`app-v15.js:7300`); rename it \u201cPlan to go with others\u201d and explain the venue entry requirements at confirmation.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-08",
+      "area": "Court detail and planning a visit",
+      "finding": "P2 \u2014 Reduce the visit uncertainty.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Reduce the visit uncertainty.** The existing Before you go sheet already contains hours, fees, open play, amenities, directions and contact (`app-v15.js:7339`). Expand the data model with entrance/parking instructions, court identifiers, paddle rotation/queue rules, guest eligibility and accessibility where supplied. Put missing information in a compact \u201cNot listed\u201d treatment with a correction action. A full screen of unknown facts and zero check-ins should not imply the physical court is empty or unsuitable.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-09",
+      "area": "Court detail and planning a visit",
+      "finding": "P2 \u2014 Better hierarchy for secondary activity.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Better hierarchy for secondary activity.** Court regulars, \u201cMayor,\u201d ranked leaders, tournaments and results already live under More at this court (`:12300`), which is preferable to foregrounding everything. Keep those secondary. The compelling court image is a recognizable entrance/court photo plus useful schedule; a generic hero and numbers cannot substitute for that.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-10",
+      "area": "Presence, check-in and current conditions",
+      "finding": "P1 \u2014 Reconcile presence enforcement. Source-observed contract gap.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Reconcile presence enforcement. Source-observed contract gap.** The current UI calls `freshCourtPresenceLocation` and requires a fresh, precise GPS fix (`app-v15.js:6978`); `check_in` validates location only if optional `presence_intent` or `presence_location` fields are supplied ([backend/routes/courts.py:2117](</Users/timothycrowley/pickleball local /backend/routes/courts.py:2117>)). A legacy request without those fields can still create presence. Decide whether all \u201chere now\u201d data must be verified, then enforce that policy on the server or explicitly label unverified self-reports. No live abuse or presence mutation was attempted in this audit.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-11",
+      "area": "Presence, check-in and current conditions",
+      "finding": "P1 \u2014 Presence is a signal, not guaranteed play.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Presence is a signal, not guaranteed play.** Show \u201c2 people shared a check-in \u00b7 updated X minutes ago,\u201d with an obvious duration/leave control. Keep \u201cI am here,\u201d \u201cI want a game,\u201d and \u201cI reserved a place in this session\u201d visually separate. Existing privacy copy is not fully consistent: automatic-check-in consent broadly says players viewing the court can see you (`app-v15.js:6904`), while detail and server apply friend/looking/privacy restrictions. Generate short audience copy from the actual visibility setting.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-12",
+      "area": "Presence, check-in and current conditions",
+      "finding": "P2 \u2014 Help when GPS fails.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Help when GPS fails.** Keep integrity checks, but offer a clear scheduled-session attendance path and a retry panel explaining inaccurate versus denied location. The existing suggestion to \u201cmove into the open\u201d is reasonable but is not a universal solution for indoor venues. Do not silently classify a failed GPS check as a no-show.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-13",
+      "area": "Presence, check-in and current conditions",
+      "finding": "P1 \u2014 Court data moderation needs impact tiers.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Court data moderation needs impact tiers.** Two distinct accounts can auto-apply suggested facts, including permanent closure ([backend/routes/courts.py:1406](</Users/timothycrowley/pickleball local /backend/routes/courts.py:1406>)). No verified-visit or trust threshold is shown in that consensus path. A closure disables new play and check-in. Require staff/verified owner review or stronger evidence for closure and other disruptive changes, while allowing low-impact amenities to use community confirmation. Show last confirmed date/source and allow a clear dispute/undo workflow.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-14",
+      "area": "Presence, check-in and current conditions",
+      "finding": "P2 \u2014 Conditions and crowd estimates need confidence labels.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Conditions and crowd estimates need confidence labels.** Conditions are a latest-report signal, with freshness expiry ([backend/routes/courts.py:1697](</Users/timothycrowley/pickleball local /backend/routes/courts.py:1697>)). \u201cBusiest\u201d is computed from Third Shot check-ins in 90 days, including buckets with as few as two check-ins (`:2024`), and the detail shows only a Busiest label. Rename to \u201cRecent Third Shot check-ins,\u201d show sample/date range, and suppress confident popularity language with tiny samples. Allow contradictory reports to be visible rather than replacing truth with a single report.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-15",
+      "area": "Reviews, photos and court contributions",
+      "finding": "P2 \u2014 Make contributions useful to a visit.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Make contributions useful to a visit.** Encourage tagged photos (entrance, parking, courts, nets), photo date and a nominated helpful cover; sort reviews by useful/recent details rather than only star value. Add small structured prompts for access, maintenance and beginner friendliness rather than a long review form. Do not represent ratings as verified visits: the review route requires login, not a completed visit ([backend/routes/courts.py:1273](</Users/timothycrowley/pickleball local /backend/routes/courts.py:1273>)). Clearly indicate review provenance if verified-attendance badges are introduced.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-16",
+      "area": "Reviews, photos and court contributions",
+      "finding": "P2 \u2014 Keep contributor progress visible.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Keep contributor progress visible.** An edit should show Submitted \u2192 Needs confirmation \u2192 Applied/rejected, with the old and proposed value. Closure decisions should explain what happens to existing sessions. The implementation already has suggestions/decisions; improve their visibility rather than building a second feedback system.",
+      "status": "pending",
+      "implementation": [],
+      "verification": []
+    },
+    {
+      "id": "CV-17",
+      "area": "Venue discovery, claim and verification",
+      "finding": "P1 \u2014 Finish the missing-venue journey.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Finish the missing-venue journey.** \u201cCan\u2019t find your venue?\u201d closes the workspace and sends the user to the map with a toast telling them to add a court (`app-v15.js:31331`). The owner must discover another form and then resume claiming. Keep this inside the claim flow: identify location/address, check duplicates, create a pending listing, continue the claim with progress preserved.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-18",
+      "area": "Venue discovery, claim and verification",
+      "finding": "P2 \u2014 Verification should have a clear next action.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Verification should have a clear next action.** The current state model is much clearer than the old management card. Add submission time, expected review window if operations can support one, outstanding evidence and one contact/support path. Do not offer made-up approval times. Prepare listing content while waiting; distinguish \u201crole verified\u201d from \u201ccontent approved\u201d and \u201cpublished\u201d with a short progress strip.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-19",
+      "area": "Venue editor, publishing and player preview",
+      "finding": "P1 \u2014 Ordinary editing must not unexpectedly remove a live venue.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Ordinary editing must not unexpectedly remove a live venue.** Any sensitive change\u2014including name, phone/email, logo or booking link\u2014sets the entire verified listing unpublished pending review ([backend/services/business_governance.py:25](</Users/timothycrowley/pickleball local /backend/services/business_governance.py:25>), `:139\u2013170`). Registration URL changes on a schedule or offering do the same ([backend/routes/businesses.py:751](</Users/timothycrowley/pickleball local /backend/routes/businesses.py:751>), `:1124`). The UI discloses this, but disclosure does not make the workflow convenient. Store a reviewed public version and separate draft; review changed links/content while continuing to show the last approved listing. If a specific link is unsafe, hold that link immediately. Present \u201cSaved draft / Awaiting review / Live\u201d consistently.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-20",
+      "area": "Venue editor, publishing and player preview",
+      "finding": "P1 \u2014 One save model.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 One save model.** Text saves when Save is pressed; logo upload/removal saves immediately; direct schedule-card edits persist immediately on Save session; the bulk schedule editor requires Update list and then Save schedule (`app-v15.js:31586`, `:31628`, `:31967`, `:32253`). All paths have explanatory copy, but people still have to learn multiple transaction boundaries. Stage everything in a draft with one save/publish checkpoint, or make each operation explicitly self-contained with a persistent saved-status row and undo.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-21",
+      "area": "Venue editor, publishing and player preview",
+      "finding": "P2 \u2014 Preview the full player journey.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Preview the full player journey.** The owner overview preview is a stylized venue card; the Player listing preview uses the real public business renderer, which is good. Add a \u201cView in court page\u201d preview including the surrounding court details and schedule. This reveals conflicting hours, duplicated booking links and missing instructions before publishing.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-22",
+      "area": "Venue schedule and services",
+      "finding": "P1 \u2014 Manage dated occurrences, not abstract rows.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Manage dated occurrences, not abstract rows.** The owner schedule renders each stored pattern as a card and counts saved rows (`venue-workspace-v15.js:128\u2013147`). Give a Week/Agenda view with actual upcoming dates, Today shortcut, past archive, visible status and one-tap duplicate/cancel. Add \u201cthis occurrence / this and future\u201d editing and holiday exceptions; the current schedule model accepts weekly/dated/date-range records but has no per-occurrence exception field ([backend/routes/businesses.py:798](</Users/timothycrowley/pickleball local /backend/routes/businesses.py:798>)). Avoid treating a recurring cancelled row as a permanent cancellation when the owner meant this Tuesday.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-23",
+      "area": "Venue schedule and services",
+      "finding": "P1 \u2014 Fix timezone setup.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Fix timezone setup.** New session timezone defaults to the manager\u2019s browser timezone and is editable as a raw IANA string (`app-v15.js:31971`, `:32012`). A remote manager can create the wrong venue time. Store and inherit timezone from venue location, use a human-readable selector when correction is needed, and show local date/time in previews. Source observation; no wrong-time live event was created.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-24",
+      "area": "Venue schedule and services",
+      "finding": "P1 \u2014 Be honest about availability.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Be honest about availability.** Spots remaining is editable, not a live inventory guarantee. Show \u201cVenue updated X ago\u201d next to that number; when stale, say \u201cCheck availability.\u201d Owner cards should expose spots/capacity and registration destination so an owner can spot errors without reopening every form. Current owner card displays capacity but not remaining spots (`venue-workspace-v15.js:132`).",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-25",
+      "area": "Venue schedule and services",
+      "finding": "P2 \u2014 Separate services from scheduled sessions.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Separate services from scheduled sessions.** A tab named Lessons also includes memberships, clinics and other services. Rename it Services or Programs, then give templates: private lesson, group clinic, membership, court rental. A service should link to its available dates or external inquiry/booking flow instead of becoming an isolated description. Do not promise payments or real-time booking that the app does not implement.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-26",
+      "area": "Booking links, connections and analytics",
+      "finding": "P1 \u2014 Make the handoff self-explanatory.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Make the handoff self-explanatory.** Use \u201cBook with [provider]\u201d and \u201cRegistration opens [provider]\u201d with a clear destination. Preserve the specific event/date when a link supports it. Return users to a useful court/session context; do not mark a reservation confirmed because a link was clicked. Existing analytics correctly say they do not infer completed bookings (`app-v15.js:30954`); keep that distinction.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-27",
+      "area": "Booking links, connections and analytics",
+      "finding": "P2 \u2014 Translate connections into manager tasks.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Translate connections into manager tasks.** \u201cFeed contract,\u201d \u201cSync JSON,\u201d health enums and publication capabilities are developer vocabulary. Hide the raw contract under Advanced. Main choices should be \u201cAdd booking link,\u201d \u201cImport schedule,\u201d \u201cConnect supported provider\u201d only when available, and \u201cGet setup help.\u201d Status should say what players currently see and how to fix a failure, with last successful update. Avoid adding unsupported provider logos as implied partnerships.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-28",
+      "area": "Booking links, connections and analytics",
+      "finding": "P2 \u2014 Simplify analytics.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Simplify analytics.** Lead with listing views, booking clicks and top clicked sessions; show trend and date range. Show confirmed bookings only when a validated connected source supplies them. The current numeric formatter can turn null/missing values into misleading zeroes because `Number(null)` is finite (`app-v15.js:30963`); represent unavailable measurements as \u201cNot connected\u201d or \u201c\u2014.\u201d Guard fast range changes against older requests overwriting a newer range.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-29",
+      "area": "Team, revisions, ownership, security and operator tools",
+      "finding": "P1 \u2014 Human-readable change history.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Human-readable change history.** Owner revision history prints `change_summary`; the backend generates that as two shortened hashes (`business_governance.py:157`, `app-v15.js:30979`). The owner cannot confidently restore an earlier version from a hash and actor/time. Show changed field names and before/after values; the reusable `VenueWorkspace.revisionDiff` helper already exists. Require a preview of what will change before restore, especially links and publication effects.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-30",
+      "area": "Team, revisions, ownership, security and operator tools",
+      "finding": "P1 \u2014 Prevent simultaneous edit loss at the server.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P1 \u2014 Prevent simultaneous edit loss at the server.** Frontend item edits re-fetch and compare collections, which is useful (`venue-workspace-v15.js:81\u2013103`). Schedule and service APIs still replace the whole collection without a submitted version/ETag check ([backend/routes/businesses.py:751](</Users/timothycrowley/pickleball local /backend/routes/businesses.py:751>), `:1124`). Two managers can both pass client checks and then overwrite each other. Add revision-aware conditional writes and a recovery UI that keeps the user's edits while showing the newer values. Source-inferred race; not reproduced by mutating data.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    },
+    {
+      "id": "CV-31",
+      "area": "Team, revisions, ownership, security and operator tools",
+      "finding": "P2 \u2014 Make permissions and pending invitations legible.",
+      "source": "docs/product-audit/courts-venues.md",
+      "requirement": "**P2 \u2014 Make permissions and pending invitations legible.** Keep the present confirmations for access changes. Show \u201cCan edit content / can publish / can invite staff\u201d in plain words next to each role; pending invitations need expiry and resend status. The operator page is functional but a stack of seven queues; add filters, search, assignment and overdue sorting before queue volume grows. Keep operator vocabulary and governance internals inside that privileged surface.",
+      "status": "implemented",
+      "implementation": [
+        "Working-tree implementation; see docs/product-audit/venue-integrity-evidence.md"
+      ],
+      "verification": [
+        "docs/product-audit/venue-integrity-evidence.md",
+        "Production deployment and integrated release verification remain outstanding."
+      ]
+    }
+  ]
+}

@@ -75,13 +75,14 @@ def test_checkin_sheet_commits_one_authoritative_visibility_choice():
     assert 'id="ci-submit"' in sheet
     assert "form.addEventListener('submit'" in sheet
     assert "const lookingForGame = form.elements['checkin-visibility'].value === 'looking';" in sheet
-    assert "const presenceLocation = await freshCourtPresenceLocation(court);" in sheet
-    assert "presence_intent: presenceIntent" in sheet
+    assert "const presenceLocation = selfReport ? null : await freshCourtPresenceLocation(court);" in sheet
+    assert "presence_intent: selfReport ? 'self_reported' : presenceIntent" in sheet
     assert "presence_location: presenceLocation" in sheet
     assert sheet.count("api(`/courts/${court.id}/checkin`") == 1
     assert "applyAuthoritativeCheckIn(court, response, lookingForGame);" in sheet
     assert "openGameFlow" not in sheet
-    assert "signed-in players nearby" in sheet
+    assert 'courtPresenceAudience(true)' in sheet
+    assert 'courtPresenceAudience(false)' in sheet
     assert "expires automatically" in sheet
 
     authoritative = section("function applyAuthoritativeCheckIn", "function openCheckInSheet")
@@ -220,7 +221,10 @@ def test_instant_games_stay_assembly_first_until_explicit_finish():
 def test_visible_play_feed_revalidates_live_cards_and_joins_from_fresh_state():
     refresh = section("function startPlayLiveRefresh", "async function showMain")
     assert "state.tab !== 'play' || state.playSeg !== 'games'" in refresh
-    assert "state.playGamesCache = null" in refresh
+    assert "Promise.resolve(renderPlay())" in refresh
+    assert "state.playLiveRefreshInFlight || state.playPageLoading" in refresh
+    assert "state.playLiveRefreshInFlight = false" in refresh
+    assert "state.playGamesCache = null" not in refresh
     assert "LIVE_DETAIL_POLL_INTERVAL_MS" in refresh
 
     cards = section("function bindGameButtons", "// Share text")
@@ -232,7 +236,7 @@ def test_visible_play_feed_revalidates_live_cards_and_joins_from_fresh_state():
     assert "Game full." in detail
     assert "Join at the court to see who’s playing." in detail
     assert "const readyCount = assembly ? assembly.readyCount : game.players.length;" in detail
-    assert "${assembly ? 'At the court' : 'Players'} <span>${readyCount}</span>" in detail
+    assert "${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Going' : 'Signed up'} <span>${readyCount}</span>" in detail
     assert 'const openSpots = Math.max(0, Number(game.spots_left) || 0);' in detail
 
     play = section("async function renderPlay", "function updatePlayHeader")

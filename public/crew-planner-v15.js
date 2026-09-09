@@ -62,6 +62,16 @@
     if (!now) return null;
     const minLeadMinutes = options.minLeadMinutes == null ? 50 : options.minLeadMinutes;
     const roster = rosterPlayers(players);
+    const availableAfter = Math.max(now.getTime(), ...roster.map((player) => {
+      const until = normalizedDate(player.away_until);
+      return until ? until.getTime() : 0;
+    }));
+    const nextAvailableOccurrence = (slot) => {
+      const date = nextOccurrence(slot, now, minLeadMinutes);
+      if (!date) return null;
+      while (date.getTime() < availableAfter) date.setDate(date.getDate() + 7);
+      return date;
+    };
     const hostId = Number(options.hostId);
     const host = Number.isSafeInteger(hostId) && hostId > 0
       ? roster.find((player) => Number(player.id) === hostId) : null;
@@ -81,7 +91,7 @@
       .map(([slot, coverage]) => ({
       slot,
       coverage,
-      occurrence: nextOccurrence(slot, now, minLeadMinutes),
+      occurrence: nextAvailableOccurrence(slot),
     })).filter((item) => item.occurrence).sort((a, b) => (
       b.coverage - a.coverage || a.occurrence.getTime() - b.occurrence.getTime()
         || a.slot.localeCompare(b.slot)
@@ -91,7 +101,7 @@
     let usedFallback = false;
     if (!winner && options.fallbackScheduledAt) {
       const fallbackSlot = slotFromDate(options.fallbackScheduledAt);
-      const occurrence = nextOccurrence(fallbackSlot, now, minLeadMinutes);
+      const occurrence = nextAvailableOccurrence(fallbackSlot);
       if (occurrence) {
         winner = { slot: fallbackSlot, coverage: 0, occurrence };
         usedFallback = true;

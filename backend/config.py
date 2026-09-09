@@ -64,8 +64,8 @@ def _is_pooled_database_url(url):
     return '-pooler.' in str(url or '').lower()
 
 
-def _engine_options():
-    url = _database_url()
+def _engine_options(url=None):
+    url = url or _database_url()
     if not url.startswith('postgresql'):
         return {}
     options = {
@@ -193,10 +193,10 @@ class TestingConfig(BaseConfig):
     # app contexts/requests within a test (otherwise pooled connections each get
     # their own empty :memory: database).
     from sqlalchemy.pool import StaticPool
-    SQLALCHEMY_ENGINE_OPTIONS = {
+    SQLALCHEMY_ENGINE_OPTIONS = ({
         'poolclass': StaticPool,
         'connect_args': {'check_same_thread': False},
-    }
+    } if SQLALCHEMY_DATABASE_URI.startswith('sqlite:') else _engine_options(SQLALCHEMY_DATABASE_URI))
     AUTO_CREATE_DB = True
     SCHEMA_MANAGEMENT_ENABLED = True
     SERVERLESS_RUNTIME = False

@@ -4,7 +4,7 @@ import json
 import re
 from datetime import timedelta
 
-from flask import Blueprint, current_app, g, jsonify, request
+from flask import Blueprint, current_app, g, has_request_context, jsonify, request
 from sqlalchemy import and_, case, or_
 from sqlalchemy.exc import IntegrityError
 
@@ -13,7 +13,7 @@ from backend.models import (
     Club, ClubChatRead, ClubMember, Court, CourtChatRead,
     CourtChatSubscription, Crew, CrewChatRead, CrewMember,
     DirectChatPreference, Friendship, Game, GameChatRead,
-    GameOpenCall, GamePlayer, League, LeagueChatRead, LeagueMember, Message,
+    GameOpenCall, GamePlayer, GameInvite, League, LeagueChatRead, LeagueMember, Message,
     MessageSendAttempt, Notification, Tournament, TournamentChatRead,
     TournamentEntry, User,
     blocked_pair_ids, can_direct_message, is_blocked_between, iso, notify, utcnow,
@@ -66,7 +66,7 @@ def _client_message_attempt_id(payload):
     return raw, True
 
 
-def _message_attempt_fingerprint(scope, body, image):
+def _message_attempt_fingerprint(scope, body, image, reply_to_id=None):
     canonical = {
         **scope,
         'body': body,
@@ -75,6 +75,9 @@ def _message_attempt_fingerprint(scope, body, image):
         'image_sha256': hashlib.sha256(image.encode('utf-8')).hexdigest()
         if image else None,
     }
+    # Omission retains byte-for-byte fingerprints for pre-reply outbox items.
+    if reply_to_id is not None:
+        canonical['reply_to_id'] = reply_to_id
     encoded = json.dumps(
         canonical, ensure_ascii=False, sort_keys=True, separators=(',', ':'),
     ).encode('utf-8')
@@ -96,6 +99,7 @@ def _stored_message_attempt_fingerprint(message):
         stored_scope,
         str(message.body or '').strip()[:2000],
         message.image_data,
+        message.reply_to_id,
     )
 
 
@@ -171,7 +175,11 @@ def prepare_chat_message(payload, sender_id, conversation=None, **scope):
             jsonify({'error': 'invalid_client_attempt_id'}), 400,
         )
 
-    fingerprint = _message_attempt_fingerprint(fingerprint_scope, body, image)
+    reply_id = payload.get('reply_to_id')
+    if reply_id is not None and (isinstance(reply_id, bool) or not isinstance(reply_id, int)
+            or reply_id <= 0 or reply_id > CHAT_CURSOR_MAX):
+        return None, False, body, (jsonify({'error': 'invalid_reply_target'}), 400)
+    fingerprint = _message_attempt_fingerprint(fingerprint_scope, body, image, reply_id)
     if attempt_id:
         attempt = MessageSendAttempt.query.filter_by(
             sender_id=sender_id, client_attempt_id=attempt_id,
@@ -227,12 +235,22 @@ def prepare_chat_message(payload, sender_id, conversation=None, **scope):
     else:
         attempt = None
 
+    if reply_id is not None:
+        original = Message.query.filter_by(id=reply_id).with_for_update().first()
+        if not original or not original.sender or original.sender.deleted_at \
+                or (not str(original.body or '').strip() and not original.image_data) \
+                or not _message_matches_scope(original, sender_id, fingerprint_scope) \
+                or not _can_read_message(original, sender_id):
+            db.session.rollback()
+            return None, False, body, (jsonify({'error': 'reply_unavailable'}), 409)
+
     message = Message(
         sender_id=sender_id,
         body=body,
         image_data=image,
         client_attempt_id=attempt_id,
         client_attempt_fingerprint=fingerprint if attempt_id else None,
+        reply_to_id=reply_id,
         **scope,
     )
     db.session.add(message)
@@ -1061,6 +1079,9 @@ def my_court_rooms():
     items.sort(key=lambda item: -(
         item['last_message']['id'] if item['last_message'] else 0
     ))
+    if request.endpoint == 'chat.search_conversations':
+        query = str(request.args.get('q') or '').strip()[:80].casefold()
+        return jsonify({'items': [item for item in items if query in item['court']['name'].casefold()]})
     # Every unread room stays reachable; recent read rooms fill the compact
     # default window without hiding older attention behind an arbitrary cap.
     unread_items = [item for item in items if item['unread']]
@@ -1216,7 +1237,7 @@ def _competition_rooms_payload(me):
             'tournament': {'registration', 'active'},
             'league': {'registration', 'active'},
         }[kind]
-        if status not in active_statuses and not unread and not (
+        if request.endpoint != 'chat.search_conversations' and status not in active_statuses and not unread and not (
             last and last.created_at and last.created_at >= cutoff
         ):
             return
@@ -1239,7 +1260,7 @@ def _competition_rooms_payload(me):
             else 'Casual play session'
         )
         add_room(
-            'game', game, f'{play_title} at {court_name}', game.status,
+            'game', game, (game.title or '').strip() or f'{play_title} at {court_name}', game.status,
             game.scheduled_at, court_name, game_unread.get(game.id),
         )
     for tournament in tournaments.values():
@@ -1258,7 +1279,11 @@ def _competition_rooms_payload(me):
 
     # Never cap away a room that is active or needs attention. Fill the rest
     # of the compact inbox with the freshest completed/read conversations.
-    rooms = _select_competition_rooms(rooms)
+    if request.endpoint == 'chat.search_conversations':
+        query = str(request.args.get('q') or '').strip()[:80].casefold()
+        rooms = [room for room in rooms if query in f"{room['title']} {room['court_name']}".casefold()]
+    else:
+        rooms = _select_competition_rooms(rooms)
     return {
         'items': rooms,
         'unread': sum(room['unread'] for room in rooms),
@@ -1312,6 +1337,41 @@ def unified_inbox():
                 components[key]['invitations'] = []
             errors[key] = 'unavailable'
     return jsonify({**components, 'errors': errors})
+
+
+@chat_bp.get('/inbox/search')
+@rate_limit(60, 60)
+@login_required
+def search_conversations():
+    """Find conversations within the caller's existing room permissions."""
+    query = str(request.args.get('q') or '').strip()[:80]
+    if len(query) < 2:
+        return jsonify({'items': [], 'has_more': False, 'next_offset': None, 'errors': {}})
+    data = unified_inbox.__wrapped__().get_json()
+    items = []
+    def add(kind, item_id, title, last_message=None, context='', event_at=None):
+        if query.casefold() in f'{title} {context}'.casefold():
+            items.append({'kind': kind, 'id': item_id, 'title': title,
+                          '_latest_message_id': int((last_message or {}).get('id') or 0), 'context': context,
+                          'event_at': event_at})
+    for row in data['direct']['items']:
+        add('dm', row['user']['id'], row['user']['display_name'], row.get('last_message'))
+    for row in data['courts']['items']:
+        add('court', row['court']['id'], row['court']['name'], row.get('last_message'))
+    for row in data['clubs']['items']:
+        add('club', row['id'], row['name'], row.get('last_message'), row.get('home_court_name') or '')
+    for row in data['crews']['items']:
+        add('crew', row['id'], row['name'], row.get('last_message'), row.get('default_court_name') or '')
+    for row in data['competitions']['items']:
+        add(row['kind'], row['id'], row['title'], row.get('last_message'), row.get('court_name') or '', row.get('event_at'))
+    items.sort(key=lambda item: (-item['_latest_message_id'], item['title'].casefold(), item['kind'], item['id']))
+    offset = max(0, request.args.get('offset', default=0, type=int))
+    page = items[offset:offset + 30]
+    for item in page:
+        item.pop('_latest_message_id')
+    more = offset + len(page) < len(items)
+    return jsonify({'items': page, 'has_more': more, 'next_offset': offset + len(page) if more else None,
+                    'total': len(items), 'errors': data.get('errors') or {}})
 
 
 def _mark_room_set_read(kind, message_scope_column, room_ids, user_id):
@@ -1502,18 +1562,20 @@ def conversations():
         latest_by_partner = latest_by_partner.filter(
             partner_id.notin_(hidden),
         )
+    if request.endpoint == 'chat.search_conversations':
+        query = str(request.args.get('q') or '').strip()[:80]
+        names = db.session.query(User.id).filter(User.deleted_at.is_(None), User.display_name.ilike(f'%{query}%'))
+        latest_by_partner = latest_by_partner.filter(partner_id.in_(names))
     latest_by_partner = latest_by_partner.group_by(partner_id)
     if before_id is not None:
         latest_by_partner = latest_by_partner.having(
             latest_message_id < before_id,
         )
-    page_rows = (
-        latest_by_partner.order_by(latest_message_id.desc())
-        .limit(limit + 1)
-        .all()
-    )
-    has_older = len(page_rows) > limit
-    rows = page_rows[:limit]
+    page_query = latest_by_partner.order_by(latest_message_id.desc())
+    search_mode = request.endpoint == 'chat.search_conversations'
+    page_rows = (page_query if search_mode else page_query.limit(limit + 1)).all()
+    has_older = not search_mode and len(page_rows) > limit
+    rows = page_rows if search_mode else page_rows[:limit]
     partner_ids = [int(row.partner_id) for row in rows]
     last_message_ids = [int(row.last_message_id) for row in rows]
 
@@ -1586,7 +1648,8 @@ def conversations():
                 0 if current_partner_id in muted_partner_ids
                 else unread.get(current_partner_id, 0)
             ),
-            'message_request': current_partner_id not in friend_partner_ids,
+            'message_request': False,
+            'is_friend': current_partner_id in friend_partner_ids,
             'muted': current_partner_id in muted_partner_ids,
         })
     return jsonify({
@@ -1596,6 +1659,154 @@ def conversations():
             int(rows[-1].last_message_id) if has_older and rows else None
         ),
     })
+
+
+def _shared_direct_plan(viewer_id, partner_id):
+    def included(user_id):
+        return or_(
+            db.session.query(GamePlayer.id).filter(GamePlayer.game_id == Game.id, GamePlayer.user_id == user_id).exists(),
+            db.session.query(GameInvite.id).filter(GameInvite.game_id == Game.id, GameInvite.user_id == user_id).exists(),
+        )
+    games = Game.query.filter(Game.status == 'upcoming', Game.scheduled_at >= utcnow() - timedelta(days=1),
+        included(viewer_id), included(partner_id)).order_by(Game.scheduled_at, Game.id).all()
+    for game in games:
+        end = game.scheduled_at + timedelta(minutes=game.duration_minutes or 60)
+        if end <= utcnow() or not game.visible_to(viewer_id) or not game.visible_to(partner_id):
+            continue
+        roster = {row.user_id for row in game.players}
+        return {'id': game.id, 'title': game.title or ('Ranked match' if game.game_type == 'ranked' else 'Play session'),
+            'scheduled_at': iso(game.scheduled_at), 'ends_at': iso(end),
+            'court': game.court.to_summary_dict(), 'viewer_status': 'going' if viewer_id in roster else 'invited',
+            'partner_status': 'going' if partner_id in roster else 'invited'}
+    return None
+
+
+def _message_matches_scope(message, sender_id, scope):
+    fields = ('recipient_id', 'court_id', 'game_id', 'tournament_id', 'club_id', 'crew_id', 'league_id')
+    if scope.get('recipient_id') is not None:
+        pair = {sender_id, scope['recipient_id']}
+        return {message.sender_id, message.recipient_id} == pair and all(
+            getattr(message, field) is None for field in fields if field != 'recipient_id')
+    return all(getattr(message, field) == scope.get(field) for field in fields)
+
+
+def message_reply_preview(message):
+    """A quote never bypasses the original message's current audience."""
+    if not message.reply_to_id:
+        return None
+    viewer = getattr(g, 'current_user', None) if has_request_context() else None
+    original = message.reply_to
+    scope = {field: getattr(message, field) for field in
+             ('recipient_id', 'court_id', 'game_id', 'tournament_id', 'club_id', 'crew_id', 'league_id')}
+    if not viewer or not original or not original.sender or original.sender.deleted_at \
+            or (not str(original.body or '').strip() and not original.image_data) \
+            or not _message_matches_scope(original, message.sender_id, scope) \
+            or not _can_read_message(original, viewer.id):
+        return {'unavailable': True}
+    return {'id': original.id, 'sender_id': original.sender_id,
+            'sender_name': original.sender.display_name, 'body': (original.body or '')[:240],
+            'has_image': bool(original.image_data), 'created_at': iso(original.created_at)}
+
+
+def _searchable_message_scope(channel, viewer_id):
+    """Use the same membership checks as opening a conversation, without marking it read."""
+    match = re.fullmatch(r'(dm|court|game|tournament|club|crew|league):([1-9][0-9]{0,17})', channel)
+    if not match:
+        return None, (jsonify({'error': 'invalid_conversation'}), 400)
+    kind, raw_id = match.groups()
+    scope_id = int(raw_id)
+    if kind == 'dm':
+        partner = db.session.get(User, scope_id)
+        if not partner or partner.deleted_at is not None:
+            return None, (jsonify({'error': 'user_not_found'}), 404)
+        if is_blocked_between(viewer_id, scope_id) or not can_direct_message(viewer_id, scope_id):
+            return None, (jsonify({'error': 'message_not_allowed'}), 403)
+        return Message.query.filter(or_(
+            and_(Message.sender_id == viewer_id, Message.recipient_id == scope_id),
+            and_(Message.sender_id == scope_id, Message.recipient_id == viewer_id))), None
+    if kind == 'court':
+        court = db.session.get(Court, scope_id)
+        if not court or court.pending_submission:
+            return None, (jsonify({'error': 'court_not_found'}), 404)
+    elif kind == 'game':
+        _, error = _game_member_or_403(scope_id)
+        if error:
+            return None, error
+    elif kind == 'tournament':
+        _, error = _tournament_member_or_403(scope_id)
+        if error:
+            return None, error
+    elif kind == 'club':
+        from backend.routes.clubs import _club_or_404, _membership
+        club, error = _club_or_404(scope_id)
+        if error:
+            return None, error
+        if not _membership(club):
+            return None, (jsonify({'error': 'members_only'}), 403)
+    elif kind == 'crew':
+        from backend.routes.crews import _member_crew_or_404
+        _, error = _member_crew_or_404(scope_id)
+        if error:
+            return None, error
+    elif kind == 'league':
+        from backend.routes.leagues import _league_or_404
+        league, error = _league_or_404(scope_id)
+        if error:
+            return None, error
+        if not league.member_for(viewer_id):
+            return None, (jsonify({'error': 'members_only'}), 403)
+    query = Message.query.filter(getattr(Message, f'{kind}_id') == scope_id)
+    hidden_ids = blocked_pair_ids(viewer_id)
+    if hidden_ids:
+        query = query.filter(Message.sender_id.notin_(hidden_ids))
+    if kind == 'court':
+        hidden = _hidden_game_open_call_message_ids(viewer_id, {scope_id}, hidden_ids)
+        if hidden:
+            query = query.filter(Message.id.notin_(hidden))
+    return query, None
+
+
+@chat_bp.get('/messages/search')
+@rate_limit(60, 60)
+@login_required
+def search_message_text():
+    query, error = _searchable_message_scope(str(request.args.get('channel') or ''), g.current_user.id)
+    if error:
+        return error
+    term = str(request.args.get('q') or '').strip()[:80]
+    if len(term) < 2:
+        return jsonify({'items': [], 'has_more': False, 'next_before_id': None})
+    before = request.args.get('before_id')
+    if before is not None:
+        if not before.isdigit() or not 0 < int(before) <= CHAT_CURSOR_MAX:
+            return jsonify({'error': 'invalid_cursor'}), 400
+        query = query.filter(Message.id < int(before))
+    escaped = term.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    rows = query.filter(Message.body.ilike(f'%{escaped}%', escape='\\')).order_by(Message.id.desc()).limit(31).all()
+    items = [{'id': row.id, 'sender_id': row.sender_id,
+              'sender_name': row.sender.display_name if row.sender else 'Player',
+              'body': row.body, 'has_image': bool(row.image_data), 'created_at': iso(row.created_at),
+              'reply_to': message_reply_preview(row)} for row in rows[:30]]
+    more = len(rows) > 30
+    return jsonify({'items': items, 'has_more': more,
+                    'next_before_id': items[-1]['id'] if more else None})
+
+
+@chat_bp.get('/messages/<int:message_id>/reference')
+@rate_limit(120, 60)
+@login_required
+def message_reference(message_id):
+    query, error = _searchable_message_scope(str(request.args.get('channel') or ''), g.current_user.id)
+    if error:
+        return error
+    original = query.filter(Message.id == message_id).first()
+    if not original or not original.sender or original.sender.deleted_at \
+            or (not str(original.body or '').strip() and not original.image_data):
+        return jsonify({'error': 'reply_unavailable'}), 404
+    return jsonify({'id': original.id, 'sender_id': original.sender_id,
+                    'sender_name': original.sender.display_name,
+                    'body': str(original.body or '')[:240], 'has_image': bool(original.image_data),
+                    'created_at': iso(original.created_at)})
 
 
 @chat_bp.get('/chat/<int:user_id>')
@@ -1665,7 +1876,9 @@ def thread(user_id):
         'has_more': has_more,
         'has_older': has_older,
         'next_before_id': next_before_id,
-        'message_request': not is_friend,
+        'message_request': False,
+        'is_friend': is_friend,
+        'shared_plan': _shared_direct_plan(me, user_id),
         'muted': _direct_chat_muted(me, user_id),
     })
 
@@ -1703,7 +1916,7 @@ def send_message(user_id):
         notify(
             partner.id,
             'direct_message',
-            f'{"New message" if is_friend else "Message request"} from {g.current_user.display_name}',
+            f'New message from {g.current_user.display_name}',
             body[:140] if body else 'Sent you a photo',
             related_user_id=g.current_user.id,
             action_url=f'/#chat/{g.current_user.id}',

@@ -1,6 +1,7 @@
 """Game scheduling, joining, and ranked match results."""
 import base64
 import hashlib
+import hmac
 import json
 import math
 import re
@@ -38,6 +39,8 @@ from backend.models import (
     GameRecurrenceRsvp,
     GameScoreLine,
     GameWaitlist,
+    GameHostHandoff,
+    GameSessionAttendance,
     Message,
     Notification,
     PlayAvailabilityPulse,
@@ -45,6 +48,7 @@ from backend.models import (
     Tournament,
     TournamentEntry,
     TournamentMatch,
+    TournamentWaitlist,
     User,
     award_new_badges,
     blocked_pair_ids,
@@ -66,6 +70,7 @@ from backend.routes.courts import haversine_miles
 from backend.routes.social import friend_ids
 from backend.security import rate_limit
 from backend.services.presence_proof import verify_instant_rally_presence_proof
+from backend.services.player_schedule import schedule_review_needed, schedule_batch_review_needed, personal_schedule_overlaps
 
 games_bp = Blueprint('games', __name__)
 
@@ -196,7 +201,7 @@ def calendar_feed(token):
             db.or_(
                 db.and_(
                     Game.status.in_(['upcoming', 'awaiting_confirmation']),
-                    Game.scheduled_at >= now - timedelta(hours=3),
+                    Game.scheduled_at >= now - timedelta(hours=12),
                 ),
                 db.and_(
                     Game.status == 'expired',
@@ -208,7 +213,6 @@ def calendar_feed(token):
             ),
         )
         .order_by(Game.scheduled_at.asc())
-        .limit(200)
         .all()
     )
     lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Third Shot//EN',
@@ -284,34 +288,90 @@ def calendar_feed(token):
         Tournament.query.filter(
             db.or_(Tournament.id.in_(entered), Tournament.organizer_id == user.id),
             Tournament.status.in_(['registration', 'active']),
-            Tournament.starts_at >= utcnow() - timedelta(hours=6),
+            db.or_(Tournament.status == 'active',
+                   Tournament.starts_at >= now - timedelta(hours=12)),
         )
         .order_by(Tournament.starts_at.asc())
-        .limit(50)
         .all()
     )
+    from backend.routes.tournaments import _tournament_schedule_estimate
     for tournament in tournaments:
         court = tournament.court
+        _, estimated_end = _tournament_schedule_estimate(tournament)
         fmt_label = 'round robin' if tournament.format == 'round_robin' else 'bracket'
         lines += [
             'BEGIN:VEVENT',
             f'UID:thirdshot-tournament-{tournament.id}@thirdshot.app',
             f'DTSTAMP:{now_stamp}',
             f'DTSTART:{_ics_stamp(tournament.starts_at)}',
-            f'DTEND:{_ics_stamp(tournament.starts_at + timedelta(hours=4))}',
+            f'DTEND:{_ics_stamp(estimated_end)}',
             f'SUMMARY:{_ics_escape("🏆 " + tournament.name)}',
             f'LOCATION:{_ics_escape(", ".join(filter(None, [court.name, court.city])) if court else "")}',
-            f'DESCRIPTION:{_ics_escape(f"Pickleball tournament ({fmt_label}, {tournament.event_type}) — {len(tournament.entries)} entries")}',
+            f'DESCRIPTION:{_ics_escape(f"Pickleball tournament ({fmt_label}, {tournament.event_type}) — {len(tournament.entries)} entries. End time is estimated; check your individual match in Third Shot.")}',
         ] + _ics_event_tail(
             f'{request.url_root.rstrip("/")}/#tournament/{tournament.id}',
             f'{tournament.name} starts in one hour',
         )
-    # Active box-league round deadlines: get your matches in before this.
+        entry = tournament.entry_for(user.id)
+        if not entry:
+            continue
+        for match in tournament.matches:
+            match_start = (match.started_at if match.play_state == 'playing' and match.started_at else
+                           match.called_at if match.play_state == 'called' and match.called_at else match.scheduled_at)
+            if not match_start or entry.id not in (match.entry1_id, match.entry2_id) \
+                    or match.effective_result_state() in {'confirmed', 'bye', 'void'}:
+                continue
+            opponent = match.entry2 if match.entry1_id == entry.id else match.entry1
+            opponent_name = opponent.display_name() if opponent else 'Opponent to be decided'
+            match_end = match_start + timedelta(minutes=tournament.match_minutes or 30)
+            match_state = match.play_state or 'estimated'
+            timing_copy = ('Match started. End time is estimated.' if match_state == 'playing' else
+                           'Called to court. End time is estimated.' if match_state == 'called' else
+                           'Estimated tournament match time; wait for the court call.')
+            lines += [
+                'BEGIN:VEVENT',
+                f'UID:thirdshot-tournament-match-{match.id}@thirdshot.app',
+                f'DTSTAMP:{now_stamp}',
+                f'SEQUENCE:{tournament.schedule_version or 0}',
+                f'DTSTART:{_ics_stamp(match_start)}',
+                f'DTEND:{_ics_stamp(match_end)}',
+                f'SUMMARY:{_ics_escape(tournament.name + " — vs " + opponent_name)}',
+                f'LOCATION:{_ics_escape(", ".join(filter(None, [court.name if court else "", "Court " + str(match.court_number) if match.court_number else ""])))}',
+                'STATUS:CONFIRMED' if match_state in ('called', 'playing') else 'STATUS:TENTATIVE',
+                f'DESCRIPTION:{_ics_escape(timing_copy + " Check Third Shot for the current court and start time.")}',
+            ] + _ics_event_tail(
+                f'{request.url_root.rstrip("/")}/#tournament/{tournament.id}/match/{match.id}',
+            )
+    # Accepted match times belong to the player's calendar; proposed choices do not.
+    from backend.routes.leagues import league_agenda_payload, _round_deadline
+    for match in league_agenda_payload(user.id)['items']:
+        if not match.get('scheduled_at'):
+            continue
+        start = _parse_scheduled_at(match['scheduled_at'])
+        if start < now - timedelta(hours=6):
+            continue
+        court = match.get('scheduled_court') or {}
+        end = start + timedelta(minutes=match.get('scheduled_duration_minutes') or 60)
+        summary = f"{match['league_name']} — vs {match['opponent']['display_name']}"
+        lines += [
+            'BEGIN:VEVENT',
+            f"UID:thirdshot-league-match-{match['id']}@thirdshot.app",
+            f'DTSTAMP:{now_stamp}',
+            f"SEQUENCE:{match['schedule_version']}",
+            f'DTSTART:{_ics_stamp(start)}',
+            f'DTEND:{_ics_stamp(end)}',
+            f'SUMMARY:{_ics_escape(summary)}',
+            f'LOCATION:{_ics_escape(", ".join(filter(None, [court.get("name"), court.get("city")])))}',
+            f'DESCRIPTION:{_ics_escape("Confirmed league match. Check Third Shot for the current plan before traveling.")}',
+        ] + _ics_event_tail(f"{request.url_root.rstrip('/')}{match['action_url']}")
+
+    # A round deadline is distinct from an appointment to play.
     from backend.models import League, LeagueMember
     leagues = (
         League.query.join(LeagueMember, LeagueMember.league_id == League.id)
         .filter(
             LeagueMember.user_id == user.id,
+            LeagueMember.withdrawn_at.is_(None),
             League.status == 'active',
             League.round_started_at.isnot(None),
         )
@@ -319,19 +379,20 @@ def calendar_feed(token):
         .all()
     )
     for league in leagues:
-        deadline = league.round_started_at + timedelta(days=league.round_days)
-        if deadline < utcnow() - timedelta(hours=6):
-            continue  # the lazy sweep will roll this round over shortly
+        deadline = _round_deadline(league)
+        if not deadline or deadline < now - timedelta(hours=6):
+            continue  # An overdue round awaits organizer review in the app.
         court = league.court
         lines += [
             'BEGIN:VEVENT',
             f'UID:thirdshot-league-{league.id}-round-{league.current_round}@thirdshot.app',
             f'DTSTAMP:{now_stamp}',
+            f'SEQUENCE:{league.round_version or 0}',
             f'DTSTART:{_ics_stamp(deadline - timedelta(hours=1))}',
             f'DTEND:{_ics_stamp(deadline)}',
-            f'SUMMARY:{_ics_escape(f"📦 {league.name} — round {league.current_round} deadline")}',
+            f'SUMMARY:{_ics_escape(f"{league.name} — round {league.current_round} deadline")}',
             f'LOCATION:{_ics_escape(", ".join(filter(None, [court.name, court.city])) if court else "")}',
-            f'DESCRIPTION:{_ics_escape("Play your box matches before the round closes")}',
+            f'DESCRIPTION:{_ics_escape("Complete your assigned matches before the round closes. This is a deadline, not a scheduled match.")}',
         ] + _ics_event_tail(
             f'{request.url_root.rstrip("/")}/#league/{league.id}',
             f'{league.name} round deadline is in one hour',
@@ -707,12 +768,348 @@ def _validated_recurrence_fields(
     }, None
 
 
+# Four weeks of real dates give calendars useful plans without creating an
+# unbounded series. Maintenance extends this horizon; existing rows are never
+# moved, deleted, or fabricated for previously lost dates.
+RECURRENCE_HORIZON_DAYS = 28
+SERIES_TEMPLATE_FIELDS = (
+    'court_id', 'creator_id', 'club_id', 'crew_id', 'crew_roster_version',
+    'game_type', 'visibility', 'max_players', 'title', 'description',
+    'duration_minutes', 'cost_cents', 'court_number', 'court_count',
+    'auto_fill_waitlist', 'notes', 'preferred_level', 'level_min', 'level_max',
+    'recurrence', 'recurrence_timezone', 'recurrence_local_time',
+    'recurrence_weekdays', 'recurrence_ends_on', 'scheduled_at',
+)
+
+
+def _series_template(game):
+    return {
+        key: value.isoformat() if isinstance(value, (date, datetime)) else value
+        for key in SERIES_TEMPLATE_FIELDS
+        for value in [getattr(game, key)]
+    }
+
+
+def _lock_series_root_for_game_id(game_id):
+    """Take a series lock before any occurrence lock, in stable ID order."""
+    series_id = db.session.query(Game.recurrence_series_id).filter(
+        Game.id == game_id,
+    ).scalar()
+    if series_id:
+        Game.query.filter(Game.id == series_id).with_for_update().execution_options(
+            populate_existing=True,
+        ).first()
+
+
+def _series_root(game, *, create=False):
+    if game.recurrence_series_id:
+        return db.session.get(Game, game.recurrence_series_id)
+    if not create or game.recurrence != 'weekly':
+        return game
+    db.session.flush()
+    game.recurrence_series_id = game.id
+    game.recurrence_occurrence_on = _game_occurrence_on(game)
+    game.recurrence_template = json.dumps(_series_template(game))
+    if game.status != 'upcoming':
+        game.recurrence_stopped_at = utcnow()
+    existing = {row.user_id for row in game.recurrence_rsvps}
+    for user_id in {row.user_id for row in game.players + game.invites} - existing:
+        db.session.add(GameRecurrenceRsvp(
+            game=game, user_id=user_id,
+            standing_rsvp=user_id == game.creator_id,
+            last_rsvp_occurrence_on=game.recurrence_occurrence_on,
+        ))
+    # Retain only the legacy record that actually exists; older dates were
+    # overwritten by previous releases and cannot be reconstructed honestly.
+    return game
+
+
+def _rule_from_template(root):
+    return _rule_from_fields(json.loads(root.recurrence_template))
+
+
+def _rule_from_fields(fields):
+    fields = dict(fields)
+    if isinstance(fields['scheduled_at'], str):
+        fields['scheduled_at'] = datetime.fromisoformat(fields['scheduled_at'])
+    if isinstance(fields.get('recurrence_ends_on'), str):
+        fields['recurrence_ends_on'] = date.fromisoformat(fields['recurrence_ends_on'])
+    rule = Game(**fields)
+    zone = _recurrence_zone(rule.recurrence_timezone or 'UTC') or ZoneInfo('UTC')
+    local = rule.scheduled_at.replace(tzinfo=UTC).astimezone(zone)
+    if not rule.recurrence_local_time:
+        rule.recurrence_local_time = local.strftime('%H:%M')
+    if not _stored_recurrence_weekdays(rule):
+        rule.recurrence_weekdays = json.dumps([RECURRENCE_WEEKDAYS[local.weekday()]])
+    return rule
+
+
+def _sync_series_rsvp(game, user_id):
+    """Apply standing preferences to future dates, preserving explicit RSVPs."""
+    root = _series_root(game, create=True)
+    preference = _recurrence_preference(root, user_id, create=False)
+    if not preference:
+        return
+    future = Game.query.filter(
+        Game.recurrence_series_id == root.id,
+        Game.status == 'upcoming',
+        Game.scheduled_at > max(utcnow(), game.scheduled_at),
+    ).order_by(Game.id).with_for_update().all()
+    for occurrence in future:
+        _apply_series_preference(occurrence, preference)
+
+
+def _apply_series_preference(occurrence, preference):
+    user = preference.user
+    if not user or user.deleted_at:
+        return
+    # A series preference grants no exception to blocks or to the capacity of
+    # a dated roster. Ask-each-time members receive an invitation, not a spot.
+    if _game_has_blocked_participant(occurrence, preference.user_id):
+        return
+    player = next((p for p in occurrence.players
+                   if p.user_id == preference.user_id), None)
+    skipped = _game_occurrence_on(occurrence).isoformat() in preference.skipped_dates()
+    standing = preference.standing_rsvp and not skipped
+    if player and player.recurrence_rsvp_automatic and not standing:
+        _participation_event(occurrence, player.user_id, 'left', actor_id=preference.user_id)
+        occurrence.players.remove(player)
+        player = None
+    if standing and not player and len(occurrence.players) + len(_active_waitlist_offers(occurrence)) < occurrence.max_players:
+        player = GamePlayer(
+            game=occurrence, user_id=preference.user_id,
+            recurrence_rsvp_automatic=True,
+            attending_at=utcnow(),
+        )
+        db.session.add(player)
+        _participation_event(occurrence, preference.user_id, 'standing_rsvp', actor_id=preference.user_id)
+    invite = next((i for i in occurrence.invites
+                   if i.user_id == preference.user_id), None)
+    if player and invite:
+        occurrence.invites.remove(invite)
+    elif not player and not invite:
+        db.session.add(GameInvite(game=occurrence, user_id=preference.user_id))
+
+
+def _materialize_series(game, *, now=None):
+    """Create independently addressable dates. Caller owns the transaction."""
+    root = _series_root(game, create=True)
+    if not root.recurrence_template or root.recurrence_stopped_at:
+        return []
+    # Serialize all creation for a series; the unique date index is a second
+    # guard when multiple workers reach the same maintenance interval.
+    Game.query.filter(Game.id == root.id).with_for_update().execution_options(
+        populate_existing=True,
+    ).first()
+    rule = _rule_from_template(root)
+    creator = db.session.get(User, rule.creator_id)
+    court = db.session.get(Court, rule.court_id)
+    if not creator or creator.deleted_at or not court or court.closed:
+        root.recurrence_stopped_at = now or utcnow()
+        return []
+    if rule.recurrence != 'weekly':
+        return []
+    now = now or utcnow()
+    horizon = max(now, rule.scheduled_at) + timedelta(days=RECURRENCE_HORIZON_DAYS)
+    known = Game.query.filter(Game.recurrence_series_id == root.id).all()
+    known_dates = {row.recurrence_occurrence_on for row in known}
+    # A moved date keeps its immutable occurrence identity. Do not create a
+    # duplicate session at its newly chosen start either.
+    known_starts = {row.scheduled_at for row in known}
+    created = []
+    cursor = max(now, rule.scheduled_at)
+    while True:
+        when, occurrence_on = _next_recurrence_start(rule, cursor)
+        if when is None or when > horizon:
+            break
+        cursor = when
+        if occurrence_on in known_dates or when in known_starts:
+            continue
+        fields = {key: getattr(rule, key) for key in SERIES_TEMPLATE_FIELDS}
+        fields['scheduled_at'] = when
+        occurrence = Game(
+            **fields, recurrence_series_id=root.id,
+            recurrence_occurrence_on=occurrence_on, status='upcoming',
+            is_challenge=False, is_instant=False,
+        )
+        db.session.add(occurrence)
+        db.session.flush()
+        for preference in sorted(root.recurrence_rsvps,
+                                 key=lambda row: (row.user_id != rule.creator_id, row.id or 0)):
+            _apply_series_preference(occurrence, preference)
+        created.append(occurrence)
+        known_dates.add(occurrence_on)
+    return created
+
+
+def _future_series_dates(game):
+    root = _series_root(game, create=True)
+    return Game.query.filter(
+        Game.recurrence_series_id == root.id,
+        Game.id != game.id,
+        Game.scheduled_at >= game.scheduled_at,
+        Game.status == 'upcoming',
+    ).order_by(Game.scheduled_at, Game.id).all()
+
+
+def _cancel_series_date(game, actor_id):
+    for player in game.players:
+        _participation_event(game, player.user_id, 'cancelled', actor_id=actor_id)
+    game.status = 'cancelled'
+    _end_game_open_calls(game, 'cancelled')
+    _end_game_arrivals(game, 'rally_cancelled')
+    recipients = {row.user_id for row in game.players + game.invites + game.waitlist}
+    for user_id in sorted(recipients - {actor_id}):
+        notify(user_id, 'game_cancelled',
+               'A date in your recurring session was cancelled',
+               related_game_id=game.id)
+    game.waitlist.clear()
+
+
+def _edited_series_template(root, game, proposed, changed):
+    template = json.loads(root.recurrence_template)
+    for key in changed:
+        value = proposed.get(key, getattr(game, key))
+        template[key] = value.isoformat() if isinstance(value, (date, datetime)) else value
+    template['scheduled_at'] = proposed.get('scheduled_at', game.scheduled_at).isoformat()
+    return template
+
+
+def _following_date_start(occurrence, rule, boundary, schedule_changed):
+    """The same date projection is used for conflict review and application."""
+    if rule.recurrence != 'weekly':
+        return None
+    if not schedule_changed:
+        return occurrence.scheduled_at
+    day = occurrence.recurrence_occurrence_on
+    weekdays = _stored_recurrence_weekdays(rule)
+    if (rule.recurrence_ends_on and day > rule.recurrence_ends_on) \
+            or RECURRENCE_WEEKDAYS[day.weekday()] not in weekdays:
+        return None
+    zone = _recurrence_zone(rule.recurrence_timezone) or ZoneInfo('UTC')
+    hour, minute = map(int, rule.recurrence_local_time.split(':'))
+    local = datetime.combine(day, time(hour, minute), tzinfo=zone)
+    start = local.astimezone(UTC).replace(tzinfo=None)
+    if start <= boundary or start.replace(tzinfo=UTC).astimezone(zone).time() != time(hour, minute):
+        return None
+    return start
+
+
+SERIES_SCHEDULE_FIELDS = {
+    'scheduled_at', 'recurrence_weekdays', 'recurrence_local_time',
+    'recurrence_timezone', 'recurrence_ends_on',
+}
+
+
+def _series_edit_schedule_plans(game, following, proposed, changed):
+    """Preview accepted dates, including new dates inside the materialization horizon."""
+    root = _series_root(game, create=True)
+    rule = _rule_from_fields(_edited_series_template(root, game, proposed, changed))
+    excluded_ids = sorted([game.id, *[row.id for row in following]])
+    exclusions = {'exclude_game_ids': excluded_ids}
+    plans = [{'user_ids': [row.user_id for row in game.players],
+              'start': rule.scheduled_at, 'duration_minutes': proposed.get('duration_minutes', game.duration_minutes) or 90,
+              'exclusions': exclusions}]
+    schedule_changed = bool(set(changed) & SERIES_SCHEDULE_FIELDS)
+    known = Game.query.filter(Game.recurrence_series_id == root.id).all()
+    known_dates = {row.recurrence_occurrence_on for row in known}
+    known_starts = {row.id: row.scheduled_at for row in known}
+    known_starts[game.id] = rule.scheduled_at
+    for occurrence in following:
+        start = _following_date_start(occurrence, rule, rule.scheduled_at, schedule_changed)
+        if start is None:
+            continue
+        known_starts[occurrence.id] = start
+        plans.append({'user_ids': [row.user_id for row in occurrence.players], 'start': start,
+                      'duration_minutes': proposed.get('duration_minutes', occurrence.duration_minutes) or 90,
+                      'exclusions': exclusions})
+    if rule.recurrence != 'weekly':
+        return plans
+    cursor = max(utcnow(), rule.scheduled_at)
+    horizon = cursor + timedelta(days=RECURRENCE_HORIZON_DAYS)
+    starts = set(known_starts.values())
+    preferences = sorted(root.recurrence_rsvps, key=lambda row: (row.user_id != rule.creator_id, row.id or 0))
+    hidden = {row.user_id: blocked_pair_ids(row.user_id) for row in preferences}
+    while True:
+        start, occurrence_on = _next_recurrence_start(rule, cursor)
+        if start is None or start > horizon:
+            break
+        cursor = start
+        if occurrence_on in known_dates or start in starts:
+            continue
+        players = []
+        for preference in preferences:
+            if (not preference.user or preference.user.deleted_at or not preference.standing_rsvp
+                    or occurrence_on.isoformat() in preference.skipped_dates()
+                    or len(players) >= rule.max_players
+                    or set(players) & hidden[preference.user_id]):
+                continue
+            players.append(preference.user_id)
+        plans.append({'user_ids': players, 'start': start,
+                      'duration_minutes': rule.duration_minutes or 90, 'exclusions': exclusions})
+    return plans
+
+
+def _edit_following_series_dates(game, following, proposed, changed, actor_id):
+    """Change future defaults and concrete future dates, leaving history intact."""
+    root = _series_root(game, create=True)
+    template = _edited_series_template(root, game, proposed, changed)
+    root.recurrence_template = json.dumps(template)
+    if template['recurrence'] != 'weekly':
+        root.recurrence_stopped_at = utcnow()
+        for occurrence in following:
+            _cancel_series_date(occurrence, actor_id)
+        return
+    rule = _rule_from_template(root)
+    schedule_changed = bool(set(changed) & SERIES_SCHEDULE_FIELDS)
+    for occurrence in following:
+        if schedule_changed:
+            new_start = _following_date_start(occurrence, rule, game.scheduled_at, True)
+            if new_start is None:
+                _cancel_series_date(occurrence, actor_id)
+                continue
+            occurrence.scheduled_at = new_start
+        for key in changed:
+            if key != 'scheduled_at':
+                setattr(occurrence, key, getattr(game, key))
+        if 'court_id' in changed:
+            occurrence.court = game.court
+        commitment_changed = schedule_changed or bool(
+            {'court_id', 'duration_minutes'} & set(changed)
+        )
+        for player in occurrence.players:
+            if commitment_changed:
+                player.reminded_at = None
+                player.day_reminded_at = None
+                player.attending_at = utcnow() if player.user_id == actor_id else None
+            if player.user_id != actor_id:
+                notify(player.user_id, 'game_updated',
+                       'An upcoming date in your recurring session changed',
+                       'Check the date, time and court before confirming your spot.',
+                       related_game_id=occurrence.id)
+    _materialize_series(game)
+
+
+def _recurrence_scope(payload, game):
+    scope = payload.get('edit_scope')
+    if not game.recurrence_series_id and game.recurrence != 'weekly':
+        return 'this_date', None
+    if scope not in ('this_date', 'following_dates'):
+        return None, ({'error': 'recurrence_scope_required',
+                       'edit_scopes': ['this_date', 'following_dates']}, 400)
+    return scope, None
+
+
 def _game_occurrence_on(game):
+    if game.recurrence_occurrence_on:
+        return game.recurrence_occurrence_on
     zone = _recurrence_zone(game.recurrence_timezone or 'UTC') or ZoneInfo('UTC')
     return game.scheduled_at.replace(tzinfo=UTC).astimezone(zone).date()
 
 
 def _recurrence_preference(game, user_id, *, create=False):
+    occurrence_on = _game_occurrence_on(game)
+    game = _series_root(game, create=create)
     preference = next(
         (row for row in game.recurrence_rsvps if row.user_id == user_id),
         None,
@@ -723,7 +1120,7 @@ def _recurrence_preference(game, user_id, *, create=False):
         game=game,
         user_id=user_id,
         standing_rsvp=user_id == game.creator_id,
-        last_rsvp_occurrence_on=_game_occurrence_on(game),
+        last_rsvp_occurrence_on=occurrence_on,
     )
     db.session.add(preference)
     return preference
@@ -862,6 +1259,7 @@ def _normalized_game_attempt(payload, creator_id):
         'max_players': max_players,
         'invite_user_ids': invite_user_ids,
         'require_all_invitees': payload.get('require_all_invitees') is True,
+        **({'invite_link_enabled': True} if payload.get('invite_link_enabled') is True else {}),
         'visibility': visibility,
         'recurrence': recurrence,
         'preferred_level': preferred_level,
@@ -2028,9 +2426,17 @@ def _closed_rally_replay_response(game, now=None):
 def auto_confirm_stale_scores():
     """Remind opponents, then finalize only after the full review window."""
     now = utcnow()
+    expired_corrections = []
+    for game in Game.query.filter_by(status='awaiting_confirmation', score_correction_pending=True).with_for_update().all():
+        if game.score_correction_state(now)['expired']:
+            _score_event(game, 'correction_expired')
+            game.status = 'unresolved'
+            game.score_correction_pending = False
+            expired_corrections.append(game)
     cutoff = now - timedelta(hours=SCORE_AUTO_CONFIRM_HOURS)
     stale = Game.query.filter(
         Game.status == 'awaiting_confirmation',
+        Game.score_correction_pending.is_(False),
         Game.score_submitted_at < cutoff,
     ).order_by(Game.id.asc()).with_for_update().execution_options(
         populate_existing=True,
@@ -2041,6 +2447,7 @@ def auto_confirm_stale_scores():
     reminder_cutoff = now - timedelta(hours=SCORE_CONFIRM_REMINDER_HOURS)
     reminders = Game.query.filter(
         Game.status == 'awaiting_confirmation',
+        Game.score_correction_pending.is_(False),
         Game.score_submitted_at <= reminder_cutoff,
         Game.score_submitted_at >= cutoff,
         Game.score_confirmation_reminded_at.is_(None),
@@ -2076,7 +2483,7 @@ def auto_confirm_stale_scores():
                 unread_dedupe_key=f'game:{game.id}:score-review',
             )
         game.score_confirmation_reminded_at = now
-    if stale or reminders:
+    if stale or reminders or expired_corrections:
         db.session.commit()
 
 
@@ -2250,135 +2657,58 @@ def send_game_reminders():
 
 
 def roll_forward_recurring():
-    """Advance local recurring sessions without losing series preferences."""
-    cutoff = utcnow() - timedelta(hours=3)
-    due = Game.query.filter(
-        Game.recurrence == 'weekly',
-        Game.status == 'upcoming',
-        Game.scheduled_at < cutoff,
-    ).all()
-    changed = False
+    """Maintain dated sessions; never rewrite a date's URL or roster."""
     now = utcnow()
-    for game in due:
-        # Lazily give every participant in a pre-upgrade weekly game a durable
-        # series preference before changing this occurrence.
-        for player in list(game.players):
-            preference = _recurrence_preference(
-                game, player.user_id, create=True,
-            )
-            if player.user_id == game.creator_id:
-                preference.standing_rsvp = True
-
-        nxt, occurrence_on = _next_recurrence_start(game, now)
-        court_name = game.court.name if game.court else 'the court'
-        if nxt is None:
-            game.recurrence = 'none'
-            game.status = 'expired'
-            for preference in game.recurrence_rsvps:
-                notify(
-                    preference.user_id,
-                    'session_rsvp',
-                    f'The recurring play session at {court_name} has ended',
-                    related_game_id=game.id,
-                )
-            changed = True
-            continue
-
-        game.scheduled_at = nxt
-        weekday = nxt.replace(tzinfo=UTC).astimezone(
-            _recurrence_zone(game.recurrence_timezone) or ZoneInfo('UTC')
-        ).strftime('%A')
-        by_user = {player.user_id: player for player in game.players}
-        preferences = list(game.recurrence_rsvps)
-
-        # Release ask-each-time spots before restoring standing RSVPs. Current
-        # standing members are then handled first, so a player who skipped the
-        # prior date cannot displace somebody already in this roster.
-        for preference in preferences:
-            player = by_user.get(preference.user_id)
-            if (
-                player is not None
-                and player.user_id != game.creator_id
-                and (
-                    not preference.standing_rsvp
-                    or preference.skipped_occurrence_on == occurrence_on
-                )
-            ):
-                game.players.remove(player)
-                by_user.pop(preference.user_id, None)
-
-        preferences.sort(key=lambda row: (
-            row.user_id not in by_user,
-            row.id or 0,
-        ))
-        for preference in preferences:
-            player = by_user.get(preference.user_id)
-            skipped = preference.skipped_occurrence_on == occurrence_on
-            if preference.standing_rsvp and not skipped:
-                if player is None and len(game.players) < game.max_players:
-                    player = GamePlayer(
-                        game=game, user_id=preference.user_id,
-                    )
-                    db.session.add(player)
-                    by_user[preference.user_id] = player
-                if player is not None:
-                    player.reminded_at = None
-                    player.day_reminded_at = None
-                    player.attending_at = now
-                    preference.last_rsvp_occurrence_on = occurrence_on
-                    personal_invite = next(
-                        (
-                            invite for invite in game.invites
-                            if invite.user_id == preference.user_id
-                        ),
-                        None,
-                    )
-                    if personal_invite:
-                        game.invites.remove(personal_invite)
-                    if preference.user_id != game.creator_id:
-                        notify(
-                            preference.user_id,
-                            'session_rsvp',
-                            f'Your standing RSVP is set for {weekday} at {court_name}',
-                            related_game_id=game.id,
-                        )
+    legacy = Game.query.filter(
+        Game.recurrence == 'weekly', Game.recurrence_series_id.is_(None),
+    ).all()
+    for game in legacy:
+        _series_root(game, create=True)
+        for player in game.players:
+            _recurrence_preference(game, player.user_id, create=True)
+        for invite in game.invites:
+            _recurrence_preference(game, invite.user_id, create=True)
+    db.session.flush()
+    roots = Game.query.filter(
+        Game.recurrence_series_id == Game.id,
+        Game.recurrence_stopped_at.is_(None),
+    ).order_by(Game.id).all()
+    for root in roots:
+        created = _materialize_series(root, now=now)
+        # One notification points to one concrete new date, even when recovery
+        # materializes several dates after a maintenance outage.
+        near_dates = [row for row in created if row.scheduled_at <= now + timedelta(days=7)]
+        if near_dates:
+            first = near_dates[0]
+            for preference in root.recurrence_rsvps:
+                if preference.user_id == first.creator_id:
                     continue
-
-            if not any(
-                invite.user_id == preference.user_id
-                for invite in game.invites
-            ):
-                db.session.add(GameInvite(
-                    game=game, user_id=preference.user_id,
-                ))
-            if preference.standing_rsvp and not skipped:
-                title = f'{weekday} play at {court_name} is full'
-                body = (
-                    'Your standing RSVP is still saved. A spot was not '
-                    'available for this date, so you can check again later.'
+                notify(
+                    preference.user_id, 'session_rsvp',
+                    'Another date is ready for your recurring session',
+                    'Open the dated session to see your RSVP and who is playing.',
+                    related_game_id=first.id,
                 )
-            else:
-                title = (
-                    f'{weekday} play at {court_name} is ready — '
-                    'RSVP again for this date'
-                )
-                body = 'Your recurring-series invite is still saved.'
-            notify(
-                preference.user_id,
-                'session_rsvp',
-                title,
-                body,
-                related_game_id=game.id,
-            )
-            if (
-                preference.skipped_occurrence_on
-                and preference.skipped_occurrence_on < occurrence_on
-            ):
-                preference.skipped_occurrence_on = None
-        _promote_from_waitlist(game)
-        changed = True
-    if changed:
-        db.session.commit()
+        rule = _rule_from_template(root)
+        if rule.recurrence_ends_on:
+            next_start, _ = _next_recurrence_start(rule, now)
+            last_date = Game.query.filter_by(recurrence_series_id=root.id).order_by(
+                Game.scheduled_at.desc(),
+            ).first()
+            last_end = last_date.scheduled_at + timedelta(minutes=last_date.duration_minutes or 180)
+            if next_start is None and now >= last_end:
+                root.recurrence_stopped_at = now
+    # Expiration means attendance is unknown, never that everyone attended.
+    # A long session remains live through its configured end; unscored results
+    # retain the ordinary grace window after that date's end.
+    for game in Game.query.filter(
+        Game.recurrence_series_id.isnot(None), Game.status == 'upcoming',
+        Game.scheduled_at <= now,
+    ).all():
+        ends_at = game.scheduled_at + timedelta(minutes=game.duration_minutes or 180)
+        if ends_at <= now:
+            game.status = 'expired'
+    db.session.commit()
 
 
 def _prepare_game_feeds():
@@ -2387,13 +2717,28 @@ def _prepare_game_feeds():
 
 
 def my_games_payload(user, lat=None, lng=None, *, limit=100, offset=0):
-    """Endpoint-shaped upcoming/awaiting games for one player's Profile."""
+    """Personal commitments and pending decisions, independent of discovery."""
     _prepare_game_feeds()
+    joined = Game.players.any(GamePlayer.user_id == user.id)
+    invited = Game.invites.any(GameInvite.user_id == user.id)
+    queued = Game.waitlist.any(db.and_(
+        GameWaitlist.user_id == user.id,
+        or_(GameWaitlist.offer_status == 'queued',
+            db.and_(GameWaitlist.offer_status == 'offered', GameWaitlist.offer_expires_at > utcnow())),
+    ))
+    friends = friend_ids(user.id)
+    hidden = blocked_pair_ids(user.id)
+    queued_visibility = or_(
+        Game.visibility == 'open',
+        db.and_(Game.visibility == 'friends', Game.creator_id.in_(friends)),
+    )
+    pending = or_(invited, db.and_(queued, queued_visibility))
+    if hidden:
+        pending = db.and_(pending, ~Game.players.any(GamePlayer.user_id.in_(hidden)))
     query = (
         Game.query.filter(Game.status.in_(['upcoming', 'awaiting_confirmation']))
-        .join(GamePlayer)
-        .filter(GamePlayer.user_id == user.id)
-        .order_by(Game.scheduled_at.asc())
+        .filter(or_(joined, Game.creator_id == user.id, pending))
+        .order_by(Game.scheduled_at.asc(), Game.id.asc())
     )
     total = query.order_by(None).count()
     games = query.offset(offset).limit(limit).all()
@@ -2521,7 +2866,7 @@ def _game_matches_level(game, rating):
 def _discovery_window_args():
     """Explicit UTC bounds keep player-local day choices correct across zones."""
     bounds = {}
-    for key in ('ends_after', 'starts_before'):
+    for key in ('ends_after', 'starts_after', 'starts_before'):
         raw = request.args.get(key)
         if raw is None:
             bounds[key] = None
@@ -2537,13 +2882,25 @@ def _discovery_window_args():
     if bounds['ends_after'] and bounds['starts_before'] \
             and bounds['starts_before'] <= bounds['ends_after']:
         return {}, 'invalid_discovery_window'
+    if bounds['starts_after'] and bounds['starts_before'] \
+            and bounds['starts_before'] <= bounds['starts_after']:
+        return {}, 'invalid_discovery_window'
+    raw_court = request.args.get('court_id')
+    court_id = _strict_whole_number(raw_court) if raw_court not in (None, '') else None
+    if raw_court not in (None, '') and (court_id is None or court_id <= 0):
+        return {}, 'invalid_court_id'
+    raw_spots = str(request.args.get('open_spots') or '').lower()
+    if raw_spots not in ('', '0', 'false', '1', 'true'):
+        return {}, 'invalid_open_spots'
+    bounds.update(court_id=court_id, open_spots=raw_spots in ('1', 'true'))
     return bounds, None
 
 
 def _games_feed_payload(current_user, *, lat=None, lng=None,
                         mine=False, friends_only=False, radius=50.0,
                         limit=100, offset=0, level=None,
-                        ends_after=None, starts_before=None):
+                        ends_after=None, starts_after=None, starts_before=None,
+                        court_id=None, open_spots=False):
     """Build one upcoming-games feed for both legacy and aggregate routes."""
     viewer_id = current_user.id
     viewer_friends = friend_ids(viewer_id)
@@ -2554,7 +2911,8 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
             current_user, lat, lng, limit=limit, offset=offset,
         )
 
-    earliest_start = ends_after - timedelta(hours=12) if ends_after else utcnow() - timedelta(hours=2)
+    active_after = max(ends_after, utcnow()) if ends_after is not None else utcnow()
+    earliest_start = active_after - timedelta(hours=12)
     if friends_only:
         if not viewer_friends:
             return _page_payload([], limit=limit, offset=offset)
@@ -2572,19 +2930,27 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
         # The general feed is geographic. Requiring an explicit coordinate
         # pair prevents clients from silently treating a product default as a
         # player's location and avoids a global upcoming-game directory.
-        if lat is None or lng is None:
+        if (lat is None or lng is None) and court_id is None:
             return None
         query = Game.query.filter(
             Game.scheduled_at >= earliest_start,
             Game.status == 'upcoming',
         )
+    # A deliberately selected court is its own location scope. Nearby radius
+    # must not silently hide a court the player explicitly chose.
+    query = query.join(Court).filter(Court.pending_submission.is_(False))
+    if court_id is not None:
+        query = query.filter(Game.court_id == court_id)
+        lat = lng = None
+    if starts_after is not None:
+        query = query.filter(Game.scheduled_at >= starts_after)
     if starts_before is not None:
         query = query.filter(Game.scheduled_at < starts_before)
     if lat is not None and lng is not None:
         radius = min(max(float(radius or 50.0), 1.0), 200.0)
         lat_delta = radius / 69.0
         lng_delta = radius / max(0.1, 69.0 * math.cos(math.radians(lat)))
-        query = query.join(Court).filter(
+        query = query.filter(
             Court.latitude.between(lat - lat_delta, lat + lat_delta),
             Court.longitude.between(lng - lng_delta, lng + lng_delta),
         )
@@ -2629,8 +2995,8 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
     for game in batched_games():
         # Apply time eligibility before pagination and privacy-safe serialization.
         # Unknown durations use the existing four-hour stale-session horizon.
-        if ends_after is not None and game.scheduled_at + timedelta(
-                minutes=game.duration_minutes or 240) <= ends_after:
+        if game.scheduled_at + timedelta(
+                minutes=game.duration_minutes or 240) <= active_after:
             continue
         # In the public/nearby and friends feeds, only show games the viewer may see.
         if not game.visible_to(viewer_id, viewer_friends) \
@@ -2642,6 +3008,8 @@ def _games_feed_payload(current_user, *, lat=None, lng=None,
         if level is not None and not _game_matches_level(game, level):
             continue
         item = _discovery_game_payload(game, current_user, viewer_friends)
+        if open_spots and item.get('spots_left', 0) <= 0:
+            continue
         item['level_match'] = _game_matches_level(
             game, current_user.skill_rating,
         ) if current_user.skill_rating is not None else None
@@ -2716,9 +3084,13 @@ def list_games():
 
 
 def _play_tournament_schedule(user, now=None):
-    """Upcoming tournaments the player is running, entered in, or deciding on."""
+    """All current tournament commitments, including the player's matches."""
     now = now or utcnow()
-    end = now + timedelta(days=7)
+    waiting = db.session.query(TournamentWaitlist.tournament_id).filter(
+        TournamentWaitlist.user_id == user.id,
+        or_(TournamentWaitlist.status == 'queued', db.and_(
+            TournamentWaitlist.status == 'offered', TournamentWaitlist.expires_at > now)),
+    )
     tournaments = (
         Tournament.query.outerjoin(
             TournamentEntry,
@@ -2726,31 +3098,60 @@ def _play_tournament_schedule(user, now=None):
         )
         .filter(
             Tournament.status.in_(['registration', 'active']),
-            Tournament.starts_at >= now,
-            Tournament.starts_at <= end,
             or_(
                 Tournament.organizer_id == user.id,
                 TournamentEntry.player1_id == user.id,
                 TournamentEntry.player2_id == user.id,
-                TournamentEntry.partner_invitee_id == user.id,
+                db.and_(Tournament.status == 'registration', Tournament.starts_at > now,
+                        Tournament.id.in_(waiting)),
+                db.and_(
+                    TournamentEntry.partner_invitee_id == user.id,
+                    TournamentEntry.partner_status == 'pending',
+                ),
             ),
         )
         .distinct()
         .order_by(Tournament.starts_at.asc(), Tournament.id.asc())
-        .limit(25)
         .all()
     )
-    return [{
-        'kind': 'tournament',
-        'id': tournament.id,
-        'name': tournament.name,
-        'starts_at': iso(tournament.starts_at),
-        'status': tournament.status,
-        'event_type': tournament.event_type,
-        'court': tournament.court.to_summary_dict() if tournament.court else None,
-        'is_organizer': tournament.organizer_id == user.id,
-        'is_entered': tournament.entry_for(user.id) is not None,
-    } for tournament in tournaments]
+    items = []
+    for tournament in tournaments:
+        entry = tournament.entry_for(user.id)
+        summary = tournament.to_dict(user.id)
+        items.append({
+            'kind': 'tournament', 'id': tournament.id,
+            'name': tournament.name, 'starts_at': iso(tournament.starts_at),
+            'status': tournament.status, 'event_type': tournament.event_type,
+            'court': tournament.court.to_summary_dict() if tournament.court else None,
+            'is_organizer': tournament.organizer_id == user.id,
+            'is_entered': entry is not None,
+            'my_waitlist': summary['my_waitlist'],
+            'my_partner_action': summary['my_partner_action'],
+            'partner_status': entry.partner_status if entry and tournament.event_type == 'doubles' else None,
+        })
+        if not entry:
+            continue
+        for match in tournament.matches:
+            if entry.id not in (match.entry1_id, match.entry2_id) \
+                    or match.effective_result_state() in {'confirmed', 'bye', 'void'}:
+                continue
+            opponent = match.entry2 if match.entry1_id == entry.id else match.entry1
+            items.append({
+                **match.to_dict(user.id, result_events=[]),
+                'kind': 'tournament_match', 'tournament_id': tournament.id,
+                'name': tournament.name, 'event_type': tournament.event_type,
+                'starts_at': iso(match.started_at if match.play_state == 'playing' and match.started_at else
+                                 match.called_at if match.play_state == 'called' and match.called_at else match.scheduled_at),
+                'duration_minutes': tournament.match_minutes or 30,
+                'court': tournament.court.to_summary_dict() if tournament.court else None,
+                'opponent_name': opponent.display_name() if opponent else 'Opponent to be decided',
+            })
+    return items
+
+
+def _play_competition_schedule(user):
+    from backend.routes.leagues import league_agenda_payload
+    return _play_tournament_schedule(user) + league_agenda_payload(user.id)['items']
 
 
 def _recent_completed_play(user):
@@ -2806,11 +3207,12 @@ def play_home():
             _games_feed_payload(
                 g.current_user, lat=lat, lng=lng, radius=radius,
                 level=level, **window,
-            ) if lat is not None and lng is not None else {'items': []}
+            ) if (lat is not None and lng is not None) or window.get('court_id') else {'items': []}
         ),
         'recent': _recent_completed_play(g.current_user),
         'progress': profile_stats_payload(g.current_user),
-        'competitions': _play_tournament_schedule(g.current_user),
+        'competitions': _play_competition_schedule(g.current_user),
+        'schedule_conflicts': personal_schedule_overlaps(g.current_user.id),
     })
 
 
@@ -2820,12 +3222,15 @@ def my_game_history():
     limit, offset, page_error = _page_args(default=30, maximum=100)
     if page_error:
         return jsonify({'error': page_error}), 400
+    history_filter = request.args.get('filter', 'all')
+    if history_filter not in {'all', 'wins', 'losses', 'ranked', 'casual'}:
+        return jsonify({'error': 'invalid_history_filter'}), 400
     return jsonify(game_history_payload(
-        g.current_user, limit=limit, offset=offset,
+        g.current_user, limit=limit, offset=offset, history_filter=history_filter,
     ))
 
 
-def game_history_payload(user, *, limit=30, offset=0):
+def game_history_payload(user, *, limit=30, offset=0, history_filter='all'):
     """Completed and unscored-expired history for one participant."""
     player_count = _game_player_count_subquery()
     base_query = (
@@ -2838,6 +3243,19 @@ def game_history_payload(user, *, limit=30, offset=0):
             ),
         )
     )
+    if history_filter in {'ranked', 'casual'}:
+        base_query = base_query.filter(Game.game_type == history_filter)
+    elif history_filter in {'wins', 'losses'}:
+        won = db.or_(
+            db.and_(GamePlayer.team == 1, Game.score_team1 > Game.score_team2),
+            db.and_(GamePlayer.team == 2, Game.score_team2 > Game.score_team1),
+        )
+        base_query = base_query.filter(
+            Game.status == 'completed', GamePlayer.team.in_([1, 2]),
+            Game.score_team1.isnot(None), Game.score_team2.isnot(None),
+            Game.score_team1 != Game.score_team2,
+            won if history_filter == 'wins' else ~won,
+        )
     total = base_query.count()
     status_rows = (
         db.session.query(Game.status, db.func.count(Game.id))
@@ -2866,6 +3284,7 @@ def game_history_payload(user, *, limit=30, offset=0):
     return _page_payload(
         items, limit=limit, offset=offset, total=total, already_sliced=True,
         extra={
+            'filter': history_filter,
             'completed_count': status_counts.get('completed', 0),
             'unscored_count': status_counts.get('expired', 0),
             'unresolved_count': status_counts.get('unresolved', 0),
@@ -4796,7 +5215,7 @@ def create_game():
             # attached Crew by ID/version and expected every accepted member.
             selected_member_ids = accepted_member_ids - {g.current_user.id}
         roster_ids = sorted({g.current_user.id, *selected_member_ids})
-        if len(roster_ids) < 2:
+        if len(roster_ids) < 2 and game_type != 'casual':
             return jsonify({'error': 'crew_needs_two_players'}), 409
         if len(roster_ids) > 12:
             return jsonify({'error': 'crew_changed'}), 409
@@ -4823,7 +5242,7 @@ def create_game():
         ):
             # Older clients omit the selection and present a private Crew as
             # one exact all-member session. Preserve that established contract.
-            max_players = len(roster_ids)
+            max_players = max(2, len(roster_ids))
         else:
             # Casual plans may reserve additional spots, but capacity can never
             # be lower than the explicitly selected group players.
@@ -4876,7 +5295,10 @@ def create_game():
 
     # Visibility: open (anyone nearby) / friends (all friends) / private (invited only)
     visibility = normalized_attempt['visibility']
-    if visibility == 'private' and not invited_ids:
+    wants_invite_link = normalized_attempt.get('invite_link_enabled') is True
+    if wants_invite_link and (visibility != 'private' or crew or normalized_attempt['club_id']):
+        return jsonify({'error': 'invite_link_not_available'}), 400
+    if visibility == 'private' and not invited_ids and not wants_invite_link and not crew:
         return jsonify({'error': 'no_invitees'}), 400
     if (
         visibility == 'friends'
@@ -4909,6 +5331,12 @@ def create_game():
         if visibility != 'open':
             return jsonify({'error': 'community_session_must_be_open'}), 400
 
+    conflict = schedule_review_needed(
+        [g.current_user.id], scheduled_at, normalized_attempt['duration_minutes'], payload,
+        scope=f'create_game:{attempt_fingerprint}', viewer_id=g.current_user.id,
+    )
+    if conflict:
+        return jsonify(conflict), 409
     game = Game(
         court_id=court.id,
         creator_id=g.current_user.id,
@@ -4964,11 +5392,14 @@ def create_game():
                 g.current_user.id,
             )
         raise
+    if wants_invite_link:
+        _enable_game_invite_link(game)
     # Creating a game is the host's RSVP; do not immediately ask them to
     # confirm the commitment they just made.
     db.session.add(GamePlayer(
         game_id=game.id, user_id=g.current_user.id, attending_at=utcnow(),
     ))
+    _participation_event(game, g.current_user.id, 'joined', actor_id=g.current_user.id)
     if recurrence == 'weekly':
         db.session.add(GameRecurrenceRsvp(
             game=game,
@@ -5035,6 +5466,12 @@ def create_game():
             excluded_user_ids=set(direct_invite_ids) | {g.current_user.id},
             club_pinged=club_pinged,
         )
+
+    if recurrence == 'weekly':
+        _series_root(game, create=True)
+        for uid in direct_invite_ids:
+            _recurrence_preference(game, uid, create=True)
+        _materialize_series(game)
 
     _end_play_pulse_for_game(
         g.current_user.id, game, 'game_created', utcnow(),
@@ -5479,6 +5916,7 @@ def confirm_attendance(game_id):
     # Refresh the timestamp even on a repeat confirmation so a reminder-window
     # response is recorded after the latest schedule change.
     mine.attending_at = utcnow()
+    mine.recurrence_rsvp_automatic = False
     db.session.commit()
     return jsonify(game.to_dict(g.current_user.id))
 
@@ -5492,8 +5930,14 @@ def update_recurrence_rsvp(game_id):
         payload.get('standing_rsvp'), bool,
     ):
         return jsonify({'error': 'invalid_standing_rsvp'}), 400
+    user = User.query.filter_by(id=g.current_user.id).with_for_update().first()
+    if not user or user.deleted_at:
+        return jsonify({'error': 'authentication_required'}), 401
+    _lock_series_root_for_game_id(game_id)
     game = db.session.get(Game, game_id)
     if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if not game.visible_to(g.current_user.id, friend_ids(g.current_user.id)) or _game_has_blocked_participant(game, g.current_user.id):
         return jsonify({'error': 'game_not_found'}), 404
     if game.recurrence != 'weekly' or game.status != 'upcoming':
         return jsonify({'error': 'game_not_recurring'}), 400
@@ -5513,6 +5957,7 @@ def update_recurrence_rsvp(game_id):
     if g.current_user.id == game.creator_id and not standing:
         return jsonify({'error': 'host_standing_rsvp_required'}), 409
     preference.standing_rsvp = standing
+    _sync_series_rsvp(game, g.current_user.id)
     db.session.commit()
     return jsonify(_game_payload(game, g.current_user.id))
 
@@ -5546,14 +5991,15 @@ def skip_game_occurrence(game_id):
     if not player:
         if (
             preference
-            and preference.skipped_occurrence_on == _game_occurrence_on(game)
+            and _game_occurrence_on(game).isoformat() in preference.skipped_dates()
         ):
             return jsonify(_game_payload(game, actor.id))
         return jsonify({'error': 'not_joined'}), 400
     preference = preference or _recurrence_preference(
         game, actor.id, create=True,
     )
-    preference.skipped_occurrence_on = _game_occurrence_on(game)
+    preference.set_skipped(_game_occurrence_on(game), True)
+    _participation_event(game, actor.id, 'skipped', actor_id=actor.id)
     game.players.remove(player)
     if not any(invite.user_id == actor.id for invite in game.invites):
         db.session.add(GameInvite(game=game, user_id=actor.id))
@@ -5593,6 +6039,7 @@ def join_game(game_id):
     if not user or user.deleted_at:
         return jsonify({'error': 'authentication_required'}), 401
     g.current_user = user
+    _lock_series_root_for_game_id(game_id)
     game = (
         Game.query.filter(Game.id == game_id)
         .with_for_update()
@@ -5635,7 +6082,8 @@ def join_game(game_id):
             )
             if isinstance(requested_standing, bool):
                 preference.standing_rsvp = requested_standing
-            preference.skipped_occurrence_on = None
+            preference.set_skipped(_game_occurrence_on(game), False)
+            existing_player.recurrence_rsvp_automatic = False
             preference.last_rsvp_occurrence_on = _game_occurrence_on(game)
             recurrence_changed = before != (
                 preference.standing_rsvp,
@@ -5650,6 +6098,9 @@ def join_game(game_id):
             'instant_rally' if game.is_instant else 'game_joined',
             utcnow(),
         )
+        if game.recurrence == 'weekly' and isinstance(requested_standing, bool):
+            _sync_series_rsvp(game, g.current_user.id)
+            recurrence_changed = True
         if target_arrival or pulse_ended or attendance_changed or recurrence_changed:
             db.session.commit()
         return jsonify(_game_payload(game, g.current_user.id))
@@ -5767,23 +6218,33 @@ def join_game(game_id):
             return jsonify({'error': 'game_full'}), 400
         if capacity['spots_left'] <= 0 and target_arrival is None:
             return jsonify({'error': 'game_full'}), 400
-    elif len(game.players) >= game.max_players:
+    elif any(r.user_id == g.current_user.id for r in _active_waitlist_offers(game)):
+        return jsonify({'error': 'accept_waitlist_offer'}), 409
+    elif len(game.players) + len(_active_waitlist_offers(game)) >= game.max_players:
         return jsonify({'error': 'game_full'}), 400
     # Respect visibility: you can only join games you'd be allowed to see.
     if not game.visible_to(g.current_user.id, friend_ids(g.current_user.id)):
         return jsonify({'error': 'not_invited'}), 403
 
+    conflict = schedule_review_needed(
+        [g.current_user.id], game.scheduled_at, game.duration_minutes, payload,
+        scope=f'join_game:{game.id}', viewer_id=g.current_user.id, exclude_game_id=game.id,
+    )
+    if conflict:
+        return jsonify(conflict), 409
     db.session.add(GamePlayer(
         game=game, user_id=g.current_user.id, attending_at=utcnow(),
     ))
+    _participation_event(game, g.current_user.id, 'joined', actor_id=g.current_user.id)
     if game.recurrence == 'weekly':
         preference = _recurrence_preference(
             game, g.current_user.id, create=True,
         )
         if isinstance(requested_standing, bool):
             preference.standing_rsvp = requested_standing
-        preference.skipped_occurrence_on = None
+        preference.set_skipped(_game_occurrence_on(game), False)
         preference.last_rsvp_occurrence_on = _game_occurrence_on(game)
+        _sync_series_rsvp(game, g.current_user.id)
     if target_arrival:
         _end_arrival_intent(target_arrival, 'arrived', now)
     personal_invite = GameInvite.query.filter_by(
@@ -5823,6 +6284,134 @@ def join_game(game_id):
             return jsonify(_game_payload(game, g.current_user.id))
         raise
     return jsonify(_game_payload(game, g.current_user.id))
+
+
+def _game_invite_link_eligible(game):
+    return bool(game and game.visibility == 'private' and not game.is_instant
+                and not game.crew_id and not game.club_id and not game.is_direct_challenge
+                and game.status == 'upcoming' and game.court and not game.court.closed
+                and not game.court.pending_submission and game.creator
+                and not game.creator.deleted_at and not game.creator.suspended_at)
+
+
+def _game_invite_link_token(game):
+    if not game or not game.invite_link_expires_at or not game.invite_link_version:
+        return None
+    # A dedicated HMAC domain cannot be used as an account authentication token.
+    message = f'game-invite:v1:{game.id}:{game.creator_id}:{game.invite_link_version}:{iso(game.invite_link_expires_at)}'
+    secret = current_app.config['SECRET_KEY']
+    if isinstance(secret, str):
+        secret = secret.encode()
+    return hmac.new(secret, message.encode(), hashlib.sha256).hexdigest()
+
+
+def _game_invite_link_valid(game, token, now=None):
+    now = now or utcnow()
+    if not _game_invite_link_eligible(game) or not isinstance(token, str) \
+            or not re.fullmatch(r'[a-f0-9]{64}', token):
+        return False
+    end = game.scheduled_at + timedelta(minutes=game.duration_minutes or 180)
+    if not game.invite_link_expires_at or min(game.invite_link_expires_at, end) <= now:
+        return False
+    expected = _game_invite_link_token(game)
+    return bool(expected and hmac.compare_digest(expected, token))
+
+
+def _enable_game_invite_link(game):
+    now = utcnow()
+    game.invite_link_version = int(game.invite_link_version or 0) + 1
+    game.invite_link_expires_at = min(now + timedelta(days=30),
+        game.scheduled_at + timedelta(minutes=game.duration_minutes or 180))
+
+
+def _private_invite_response(payload, status=200):
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    response.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
+
+
+def _game_invite_link_payload(game):
+    token = _game_invite_link_token(game)
+    enabled = _game_invite_link_valid(game, token)
+    return {'enabled': enabled, 'version': game.invite_link_version or 0,
+            'expires_at': iso(game.invite_link_expires_at) if enabled else None,
+            'url': f'{request.url_root.rstrip("/")}/#game/{game.id}/invite/{token}' if enabled else None}
+
+
+@games_bp.route('/games/<int:game_id>/invite-link', methods=['GET', 'POST', 'DELETE'])
+@rate_limit(30, 60)
+@login_required
+def manage_game_invite_link(game_id):
+    game = Game.query.filter_by(id=game_id, creator_id=g.current_user.id).with_for_update().execution_options(populate_existing=True).first()
+    if not game:
+        return _private_invite_response({'error': 'game_not_found'}, 404)
+    if request.method == 'GET':
+        return _private_invite_response(_game_invite_link_payload(game))
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _private_invite_response({'error': 'invalid_payload'}, 400)
+    version = payload.get('expected_version')
+    if not isinstance(version, int) or isinstance(version, bool):
+        return _private_invite_response({'error': 'invite_link_version_required'}, 428)
+    if version != (game.invite_link_version or 0):
+        return _private_invite_response({'error': 'invite_link_changed'}, 409)
+    if request.method == 'DELETE':
+        game.invite_link_version = version + 1
+        game.invite_link_expires_at = None
+    else:
+        if not _game_invite_link_eligible(game) or game.scheduled_at + timedelta(minutes=game.duration_minutes or 180) <= utcnow():
+            return _private_invite_response({'error': 'invite_link_not_available'}, 409)
+        _enable_game_invite_link(game)
+    db.session.commit()
+    return _private_invite_response(_game_invite_link_payload(game))
+
+
+@games_bp.post('/games/<int:game_id>/invite-link/preview')
+@rate_limit(90, 60)
+def preview_game_invite_link(game_id):
+    from backend.routes.auth import optional_current_user
+    payload = request.get_json(silent=True)
+    token = payload.get('token') if isinstance(payload, dict) else None
+    game = db.session.get(Game, game_id)
+    viewer = optional_current_user()
+    if not _game_invite_link_valid(game, token) or (viewer and _game_has_blocked_participant(game, viewer.id)):
+        return _private_invite_response({'error': 'invite_link_unavailable'}, 404)
+    court = game.court
+    return _private_invite_response({
+        'id': game.id, 'title': game.title, 'visibility': game.visibility,
+        'game_type': game.game_type, 'max_players': game.max_players,
+        'scheduled_at': iso(game.scheduled_at), 'duration_minutes': game.duration_minutes,
+        'expires_at': iso(game.invite_link_expires_at), 'cost_cents': game.cost_cents,
+        'host_name': game.creator.display_name,
+        'court': {'id': court.id, 'name': court.name, 'city': court.city, 'address': court.address},
+        'joined_count': len(game.players),
+        'spots_left': max(0, game.max_players - len(game.players) - len(_active_waitlist_offers(game))),
+    })
+
+
+@games_bp.post('/games/<int:game_id>/invite-link/redeem')
+@rate_limit(30, 60)
+@login_required
+def redeem_game_invite_link(game_id):
+    user = User.query.filter_by(id=g.current_user.id).with_for_update().execution_options(populate_existing=True).first()
+    if not user or user.deleted_at or user.suspended_at:
+        return _private_invite_response({'error': 'authentication_required'}, 401)
+    _lock_series_root_for_game_id(game_id)
+    game = Game.query.filter_by(id=game_id).with_for_update().execution_options(populate_existing=True).first()
+    if game:
+        db.session.expire(game, ['players', 'invites'])
+    payload = request.get_json(silent=True)
+    token = payload.get('token') if isinstance(payload, dict) else None
+    if not _game_invite_link_valid(game, token) or _game_has_blocked_participant(game, user.id):
+        return _private_invite_response({'error': 'invite_link_unavailable'}, 404)
+    if user.id != game.creator_id and not any(row.user_id == user.id for row in game.players + game.invites):
+        game.invites.append(GameInvite(user_id=user.id))
+    # Opening an invitation grants access to this date, never an RSVP or friendship.
+    db.session.commit()
+    return _private_invite_response(_game_payload(game, user.id))
 
 
 @games_bp.post('/games/<int:game_id>/invite')
@@ -6041,6 +6630,7 @@ def _lock_users_and_game_for_waitlist_mutation(game_id, actor_id):
             .execution_options(populate_existing=True)
             .all()
         )
+        _lock_series_root_for_game_id(game_id)
         game = (
             Game.query.filter(Game.id == game_id)
             .with_for_update()
@@ -6076,6 +6666,7 @@ def _lock_stable_game_roster_users(game_id, actor_id):
                 game_id=game_id,
             ).all()
         }
+        roster_ids.update(row[0] for row in db.session.query(GameSessionAttendance.user_id).filter_by(game_id=game_id).all())
         roster_ids.add(actor_id)
         users = (
             User.query.filter(User.id.in_(sorted(roster_ids)))
@@ -6084,6 +6675,7 @@ def _lock_stable_game_roster_users(game_id, actor_id):
             .execution_options(populate_existing=True)
             .all()
         )
+        _lock_series_root_for_game_id(game_id)
         game = (
             Game.query.filter(Game.id == game_id)
             .with_for_update()
@@ -6100,58 +6692,99 @@ def _lock_stable_game_roster_users(game_id, actor_id):
     raise RuntimeError('game roster lock closure kept changing')
 
 
-def _lock_stable_game_edit_scope(game_id, actor_id):
-    """Lock every User touched by an edit before its Game and queue rows.
+def _game_edit_lock_snapshot(game_id, actor_id, following_dates):
+    selected = db.session.query(Game.id, Game.recurrence_series_id, Game.scheduled_at).filter(Game.id == game_id).first()
+    game_ids, user_ids = {game_id}, {actor_id}
+    if selected and following_dates:
+        root_id = selected.recurrence_series_id or selected.id
+        game_ids.update(row[0] for row in db.session.query(Game.id).filter(
+            Game.recurrence_series_id == root_id,
+            Game.scheduled_at >= selected.scheduled_at,
+            Game.status == 'upcoming',
+        ).all())
+        # Standing preferences can create accepted participants on newly
+        # materialized dates, even if they skipped the selected occurrence.
+        user_ids.update(row[0] for row in db.session.query(GameRecurrenceRsvp.user_id).filter(
+            GameRecurrenceRsvp.game_id == root_id,
+        ).all())
+    user_ids.update(row[0] for row in db.session.query(GamePlayer.user_id).filter(GamePlayer.game_id.in_(game_ids)).all())
+    user_ids.update(row[0] for row in db.session.query(GameWaitlist.user_id).filter(GameWaitlist.game_id.in_(game_ids)).all())
+    user_ids.update(row[0] for row in db.session.query(Game.creator_id).filter(Game.id.in_(game_ids)).all())
+    return game_ids, {user_id for user_id in user_ids if user_id}
 
-    Capacity increases can promote the FIFO waitlist, so an edit owns both the
-    roster and queue closure under the same User -> Game -> waitlist order used
-    by join/leave mutations. Retry if either membership set grew meanwhile.
+
+def _lock_stable_game_edit_scope(game_id, actor_id, *, following_dates=False):
+    """Lock affected people before the series, dates and queues.
+
+    Re-read the closure after acquiring the series lock: a participant or
+    occurrence may have been added while we waited. Roll back and retry before
+    acquiring any newly discovered User lock, preserving global lock order.
     """
     for _attempt in range(3):
-        user_ids = {
-            row[0] for row in db.session.query(GamePlayer.user_id).filter_by(
-                game_id=game_id,
-            ).all()
-        }
-        user_ids.update(
-            row[0] for row in db.session.query(GameWaitlist.user_id).filter_by(
-                game_id=game_id,
-            ).all()
-        )
-        user_ids.add(actor_id)
-        users = (
-            User.query.filter(User.id.in_(sorted(user_ids)))
-            .order_by(User.id.asc())
-            .with_for_update()
-            .execution_options(populate_existing=True)
-            .all()
-        )
-        game = (
-            Game.query.filter(Game.id == game_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-            .first()
-        )
+        _, user_ids = _game_edit_lock_snapshot(game_id, actor_id, following_dates)
+        # NO KEY UPDATE still serializes each person's schedule mutations, but
+        # allows the FK key-share checks of a concurrent join's host notification.
+        # That join can already hold the series row this edit acquires next.
+        users = (User.query.filter(User.id.in_(sorted(user_ids))).order_by(User.id.asc())
+                 .with_for_update(key_share=True).execution_options(populate_existing=True).all())
+        _lock_series_root_for_game_id(game_id)
+        game_ids, current_ids = _game_edit_lock_snapshot(game_id, actor_id, following_dates)
+        if not current_ids <= {user.id for user in users}:
+            db.session.rollback()
+            continue
+        games = (Game.query.filter(Game.id.in_(sorted(game_ids))).order_by(Game.id.asc())
+                 .with_for_update().execution_options(populate_existing=True).all())
+        game = next((row for row in games if row.id == game_id), None)
         if not game:
             return users, None
-        db.session.expire(game, ['players', 'waitlist', 'open_calls'])
-        waitlist_rows = (
-            GameWaitlist.query.filter_by(game_id=game_id)
-            .order_by(GameWaitlist.id.asc())
-            .with_for_update()
-            .execution_options(populate_existing=True)
-            .all()
-        )
-        current_ids = {player.user_id for player in game.players}
-        current_ids.update(entry.user_id for entry in waitlist_rows)
+        for occurrence in games:
+            db.session.expire(occurrence, ['players', 'waitlist', 'open_calls'])
+        (GameWaitlist.query.filter(GameWaitlist.game_id.in_(game_ids))
+         .order_by(GameWaitlist.game_id.asc(), GameWaitlist.id.asc()).with_for_update()
+         .execution_options(populate_existing=True).all())
+        _, current_ids = _game_edit_lock_snapshot(game_id, actor_id, following_dates)
         if current_ids <= {user.id for user in users}:
             return users, game
         db.session.rollback()
     raise RuntimeError('game edit lock closure kept changing')
 
 
+def _participation_event(game, user_id, kind, *, actor_id=None, attended=None, now=None):
+    """Keep RSVP intent and departure evidence when the result roster changes."""
+    now = now or utcnow()
+    row = next((r for r in game.session_attendance if r.user_id == user_id), None)
+    player = next((p for p in game.players if p.user_id == user_id), None)
+    if row is None:
+        row = GameSessionAttendance(game=game, user_id=user_id,
+                                    rsvp_joined_at=(player.created_at or now) if player else now)
+        db.session.add(row)
+    history = json.loads(row.history or '[]')
+    event = {'kind': kind, 'at': iso(now), 'actor_id': actor_id}
+    if attended is not None:
+        event['attended'] = bool(attended)
+        row.attended = bool(attended)
+        row.recorded_at = now
+        row.recorded_by_id = actor_id
+    if kind in ('joined', 'rejoined', 'standing_rsvp'):
+        row.rsvp_status = 'joined'
+        row.rsvp_left_at = None
+    elif kind in ('left', 'skipped', 'removed', 'cancelled'):
+        row.rsvp_status = kind
+        row.rsvp_left_at = now
+    if not history or any(history[-1].get(k) != event.get(k) for k in ('kind', 'attended', 'actor_id')):
+        history.append(event)
+        row.history = json.dumps(history)
+    return row
+
+
+def _active_waitlist_offers(game, now=None):
+    now = now or utcnow()
+    return [row for row in game.waitlist if row.offer_status == 'offered'
+            and row.offer_expires_at and row.offer_expires_at > now]
+
+
 def _promote_from_waitlist(game, *, force=False, user_id=None):
-    """Fill open spots from the waitlist queue, in order."""
+    """Reserve FIFO offers; only explicit acceptance adds a roster row."""
     if game.is_instant:
         # A live rally is physical, immediate attendance. Legacy queue rows
         # must never turn into remote members after somebody leaves.
@@ -6164,40 +6797,98 @@ def _promote_from_waitlist(game, *, force=False, user_id=None):
             db.session.flush()
             db.session.expire(game, ['waitlist'])
         return []
+    now = utcnow()
+    for entry in list(game.waitlist):
+        if entry.offer_status == 'offered' and (not entry.offer_expires_at or entry.offer_expires_at <= now):
+            entry.offer_status = 'expired'
+    if game.status != 'upcoming' or game.scheduled_at <= now:
+        return []
     if not force and not game.auto_fill_waitlist:
         return []
-    promoted = []
-    while game.waitlist and len(game.players) < game.max_players:
-        entry = (
-            next((row for row in game.waitlist if row.user_id == user_id), None)
-            if user_id is not None else game.waitlist[0]
-        )
-        if entry is None:
+    offered = []
+    available = game.max_players - len(game.players) - len(_active_waitlist_offers(game, now))
+    queued = [row for row in game.waitlist if row.offer_status == 'queued'
+              and (user_id is None or row.user_id == user_id)]
+    for entry in queued:
+        if available <= 0:
             break
-        game.waitlist.remove(entry)
-        db.session.add(GamePlayer(
-            game=game, user_id=entry.user_id, attending_at=utcnow(),
-        ))
-        promoted.append(entry.user_id)
+        if not entry.user or entry.user.deleted_at or _game_has_blocked_participant(game, entry.user_id):
+            entry.offer_status = 'expired'
+            continue
+        entry.offer_status = 'offered'
+        entry.offered_at = now
+        entry.offer_expires_at = min(now + timedelta(minutes=30), game.scheduled_at)
+        offered.append(entry.user_id)
+        available -= 1
+        notify(entry.user_id, 'game_waitlist_offer', 'A spot is available — accept to join',
+               'Your spot is held for up to 30 minutes. Accept or pass before the offer expires.',
+               related_game_id=game.id, action_url=f'/#game/{game.id}',
+               unread_dedupe_key=f'game-offer:{entry.id}:{iso(now)}')
+    return offered
+
+
+def maintain_game_consent():
+    """Expire offers and handoffs; called by maintenance, never auto-accepts."""
+    now = utcnow()
+    ids = [row[0] for row in db.session.query(GameWaitlist.game_id).filter(
+        GameWaitlist.offer_status == 'offered', GameWaitlist.offer_expires_at <= now,
+    ).distinct().all()]
+    for game_id in ids:
+        game = Game.query.filter_by(id=game_id).with_for_update().first()
+        if game:
+            _promote_from_waitlist(game)
+        db.session.commit()
+    for row in GameHostHandoff.query.filter(
+        GameHostHandoff.status == 'pending', GameHostHandoff.expires_at <= now,
+    ).with_for_update().all():
+        row.status = 'expired'
+        row.resolved_at = now
+    db.session.commit()
+    return {'waitlist_games': len(ids)}
+
+
+@games_bp.post('/games/<int:game_id>/waitlist/respond')
+@rate_limit(30, 60)
+@login_required
+def respond_waitlist_offer(game_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get('accept'), bool):
+        return jsonify({'error': 'invalid_response'}), 400
+    _users, game = _lock_users_and_game_for_waitlist_mutation(game_id, g.current_user.id)
+    if not game or not game.visible_to(g.current_user.id, friend_ids(g.current_user.id)) or _game_has_blocked_participant(game, g.current_user.id):
+        return jsonify({'error': 'game_not_found'}), 404
+    entry = next((r for r in game.waitlist if r.user_id == g.current_user.id), None)
+    if not entry:
+        if any(p.user_id == g.current_user.id for p in game.players) and payload['accept']:
+            return jsonify(_game_payload(game, g.current_user.id))
+        return jsonify({'error': 'offer_not_available'}), 409
+    if entry not in _active_waitlist_offers(game) or game.status != 'upcoming' or game.scheduled_at <= utcnow():
+        _promote_from_waitlist(game)
+        db.session.commit()
+        return jsonify({'error': 'offer_expired'}), 409
+    if payload['accept']:
+        if len(game.players) >= game.max_players:
+            return jsonify({'error': 'game_full'}), 409
+        conflict = schedule_review_needed(
+            [g.current_user.id], game.scheduled_at, game.duration_minutes, payload,
+            scope=f'accept_place:{game.id}', viewer_id=g.current_user.id, exclude_game_id=game.id,
+        )
+        if conflict:
+            return jsonify(conflict), 409
+        db.session.add(GamePlayer(game=game, user_id=g.current_user.id, attending_at=utcnow()))
+        _participation_event(game, g.current_user.id, 'joined', actor_id=g.current_user.id)
         if game.recurrence == 'weekly':
-            preference = _recurrence_preference(
-                game, entry.user_id, create=True,
-            )
-            preference.skipped_occurrence_on = None
+            preference = _recurrence_preference(game, g.current_user.id, create=True)
+            preference.set_skipped(_game_occurrence_on(game), False)
             preference.last_rsvp_occurrence_on = _game_occurrence_on(game)
-        _end_play_pulse_for_game(
-            entry.user_id, game, 'waitlist_promoted', utcnow(),
-        )
-        notify(
-            entry.user_id,
-            'game_join',
-            # No emoji in titles — the feed prepends the per-kind icon.
-            f'A spot opened — you\'re in at {game.court.name if game.court else "the court"}!',
-            related_game_id=game.id,
-        )
-        if user_id is not None:
-            break
-    return promoted
+        for invite in list(game.invites):
+            if invite.user_id == g.current_user.id:
+                game.invites.remove(invite)
+        _end_play_pulse_for_game(g.current_user.id, game, 'game_joined', utcnow())
+    game.waitlist.remove(entry)
+    _promote_from_waitlist(game)
+    db.session.commit()
+    return jsonify(_game_payload(game, g.current_user.id))
 
 
 @games_bp.patch('/games/<int:game_id>/waitlist/settings')
@@ -6251,7 +6942,8 @@ def promote_waitlisted_player(game_id, user_id):
     promoted = _promote_from_waitlist(game, force=True, user_id=user_id)
     db.session.commit()
     response = _game_payload(game, g.current_user.id)
-    response['promoted_user_id'] = promoted[0] if promoted else None
+    response['offered_user_id'] = promoted[0] if promoted else None
+    response['promoted_user_id'] = None
     return jsonify(response)
 
 
@@ -6279,10 +6971,14 @@ def join_waitlist(game_id):
         return jsonify({'error': 'game_not_found'}), 404
     if any(p.user_id == g.current_user.id for p in game.players):
         return jsonify({'error': 'already_joined'}), 400
-    if len(game.players) < game.max_players:
+    if len(game.players) + len(_active_waitlist_offers(game)) < game.max_players:
         return jsonify({'error': 'game_not_full'}), 400
     if not game.visible_to(g.current_user.id, friend_ids(g.current_user.id)):
         return jsonify({'error': 'not_invited'}), 403
+    expired = next((w for w in game.waitlist if w.user_id == g.current_user.id and w.offer_status == 'expired'), None)
+    if expired:
+        game.waitlist.remove(expired)
+        db.session.flush()
     if not any(w.user_id == g.current_user.id for w in game.waitlist):
         db.session.add(GameWaitlist(game=game, user_id=g.current_user.id))
         db.session.commit()
@@ -6293,7 +6989,7 @@ def join_waitlist(game_id):
 @rate_limit(30, 60)
 @login_required
 def leave_waitlist(game_id):
-    game = db.session.get(Game, game_id)
+    _users, game = _lock_users_and_game_for_waitlist_mutation(game_id, g.current_user.id)
     if not game:
         return jsonify({'error': 'game_not_found'}), 404
     entry = next((w for w in game.waitlist if w.user_id == g.current_user.id), None)
@@ -6309,6 +7005,7 @@ def leave_waitlist(game_id):
         return jsonify({'error': 'game_not_found'}), 404
     if entry:
         game.waitlist.remove(entry)
+        _promote_from_waitlist(game)
         db.session.commit()
     if game.is_instant:
         if instant_discoverable:
@@ -6319,6 +7016,129 @@ def leave_waitlist(game_id):
         # now-private instant court or roster.
         return jsonify({'left_waitlist': True, 'game_id': game.id})
     return jsonify(game.to_dict(g.current_user.id))
+
+
+def _request_host_handoff(game, target_id, scope, leave_on_accept=False):
+    if game.creator_id != g.current_user.id:
+        return jsonify({'error': 'host_only'}), 403
+    if game.status != 'upcoming':
+        return jsonify({'error': 'game_not_open'}), 409
+    if target_id == game.creator_id or not any(p.user_id == target_id for p in game.players):
+        return jsonify({'error': 'invalid_new_host'}), 400
+    if _game_has_blocked_participant(game, target_id):
+        return jsonify({'error': 'invalid_new_host'}), 400
+    now = utcnow()
+    for pending in game.host_handoffs:
+        if pending.status != 'pending':
+            continue
+        if pending.expires_at <= now:
+            pending.status = 'expired'
+            pending.resolved_at = now
+        elif (pending.target_user_id, pending.scope, pending.leave_on_accept) == (target_id, scope, leave_on_accept):
+            return jsonify(_game_payload(game, g.current_user.id)), 202
+        else:
+            return jsonify({'error': 'handoff_already_pending'}), 409
+    db.session.flush()
+    expiry = min(now + timedelta(hours=24), game.scheduled_at) if game.scheduled_at > now else now + timedelta(minutes=30)
+    proposal = GameHostHandoff(game=game, requested_by_id=game.creator_id,
+                               target_user_id=target_id, scope=scope,
+                               leave_on_accept=leave_on_accept, expires_at=expiry)
+    db.session.add(proposal)
+    db.session.flush()
+    notify(target_id, 'game_host_handoff', f'{g.current_user.display_name} asked you to host',
+           'Review the session and accept or decline. Hosting stays with the current host until you accept.',
+           related_user_id=game.creator_id, related_game_id=game.id,
+           action_url=f'/#game/{game.id}', unread_dedupe_key=f'game-handoff:{proposal.id}')
+    db.session.commit()
+    return jsonify(_game_payload(game, g.current_user.id)), 202
+
+
+@games_bp.post('/games/<int:game_id>/host-handoff')
+@rate_limit(20, 60)
+@login_required
+def request_host_handoff(game_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    _users, game = _lock_stable_game_roster_users(game_id, g.current_user.id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    scope, error = _recurrence_scope(payload, game)
+    if error:
+        return jsonify(error[0]), error[1]
+    if not isinstance(payload.get('leave_on_accept', False), bool):
+        return jsonify({'error': 'invalid_payload'}), 400
+    return _request_host_handoff(game, _strict_whole_number(payload.get('target_user_id')),
+                                 scope, payload.get('leave_on_accept', False))
+
+
+@games_bp.post('/games/<int:game_id>/host-handoff/<int:handoff_id>/respond')
+@rate_limit(20, 60)
+@login_required
+def respond_host_handoff(game_id, handoff_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get('accept'), bool):
+        return jsonify({'error': 'invalid_response'}), 400
+    _users, game = _lock_stable_game_roster_users(game_id, g.current_user.id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    proposal = next((r for r in game.host_handoffs if r.id == handoff_id), None)
+    actor_id = g.current_user.id
+    if not proposal or actor_id not in (proposal.target_user_id, proposal.requested_by_id):
+        return jsonify({'error': 'handoff_not_found'}), 404
+    if payload['accept'] and actor_id != proposal.target_user_id:
+        return jsonify({'error': 'recipient_only'}), 403
+    if proposal.status != 'pending':
+        if (proposal.status == 'accepted') == payload['accept']:
+            return jsonify(_game_payload(game, actor_id))
+        return jsonify({'error': 'handoff_resolved'}), 409
+    now = utcnow()
+    if proposal.expires_at <= now or game.status != 'upcoming' or game.creator_id != proposal.requested_by_id:
+        proposal.status = 'expired'; proposal.resolved_at = now
+        db.session.commit()
+        return jsonify({'error': 'handoff_expired'}), 409
+    target = db.session.get(User, proposal.target_user_id)
+    if not target or target.deleted_at or _game_has_blocked_participant(game, proposal.target_user_id):
+        return jsonify({'error': 'handoff_not_available'}), 409
+    if payload['accept'] and not any(p.user_id == actor_id for p in game.players):
+        return jsonify({'error': 'host_must_be_joined'}), 409
+    affected = [game]
+    if proposal.scope == 'following_dates':
+        affected += _future_series_dates(game)
+    if payload['accept']:
+        if any(len(date.players) >= date.max_players and not any(p.user_id == actor_id for p in date.players)
+               for date in affected):
+            return jsonify({'error': 'future_session_full'}), 409
+        for occurrence in affected:
+            _end_game_open_calls(occurrence, 'host_changed')
+            occurrence.creator_id = actor_id
+            occurrence.creator = target
+            if not any(p.user_id == actor_id for p in occurrence.players):
+                db.session.add(GamePlayer(game=occurrence, user_id=actor_id, attending_at=now))
+                _participation_event(occurrence, actor_id, 'joined', actor_id=actor_id)
+            if proposal.leave_on_accept:
+                for old_player in list(occurrence.players):
+                    if old_player.user_id == proposal.requested_by_id:
+                        _participation_event(occurrence, old_player.user_id, 'left', actor_id=old_player.user_id)
+                        occurrence.players.remove(old_player)
+            for person_id in {p.user_id for p in occurrence.players} - {actor_id}:
+                notify(person_id, 'game_updated', f'{target.display_name} is now hosting', related_game_id=occurrence.id)
+        if proposal.scope == 'following_dates':
+            root = _series_root(game, create=True)
+            template = json.loads(root.recurrence_template)
+            template['creator_id'] = actor_id
+            root.recurrence_template = json.dumps(template)
+            _recurrence_preference(game, actor_id, create=True).standing_rsvp = True
+            previous = _recurrence_preference(game, proposal.requested_by_id, create=False)
+            if previous and proposal.leave_on_accept:
+                previous.standing_rsvp = False
+        proposal.status = 'accepted'
+    else:
+        proposal.status = 'cancelled' if actor_id == proposal.requested_by_id else 'declined'
+    proposal.resolved_at = now
+    notify(proposal.requested_by_id, 'game_updated', f'Host handoff {proposal.status}', related_game_id=game.id)
+    db.session.commit()
+    return jsonify(_game_payload(game, actor_id))
 
 
 @games_bp.post('/games/<int:game_id>/leave')
@@ -6366,14 +7186,47 @@ def leave_game(game_id):
             if row.user_id != g.current_user.id
         ):
             return jsonify({'error': 'invalid_new_host'}), 400
+    other_players_remain = any(p.user_id != g.current_user.id for p in game.players)
+    if game.is_instant:
+        other_players_remain = any(checkin.user_id != g.current_user.id
+                                   for checkin in _fresh_instant_roster_checkins(game, for_update=True))
+    if was_host and other_players_remain:
+        if not transfer_to_user_id:
+            return jsonify({'error': 'host_handoff_required'}), 409
+        scope, error = _recurrence_scope(payload, game)
+        if error:
+            return jsonify(error[0]), error[1]
+        return _request_host_handoff(game, transfer_to_user_id, scope, True)
+    if was_host and game.recurrence == 'weekly':
+        return jsonify({'error': 'recurring_host_requires_transfer_or_cancel'}), 409
     leave_outcome = 'left'
     new_host_name = None
     new_host_id = None
     if player:
+        _participation_event(game, g.current_user.id, 'left', actor_id=g.current_user.id)
         game.players.remove(player)
     if game.recurrence == 'weekly':
         if preference:
-            game.recurrence_rsvps.remove(preference)
+            preference_root = _series_root(game)
+            db.session.delete(preference)
+            db.session.flush()
+            db.session.expire(preference_root, ['recurrence_rsvps'])
+        remaining_dates = Game.query.filter(
+            Game.recurrence_series_id == _series_root(game).id,
+            Game.id != game.id, Game.status == 'upcoming',
+            Game.scheduled_at > utcnow(),
+        ).order_by(Game.id).all()
+        for occurrence in remaining_dates:
+            for row in list(occurrence.players):
+                if row.user_id == g.current_user.id:
+                    _participation_event(occurrence, row.user_id, 'left', actor_id=g.current_user.id)
+                    occurrence.players.remove(row)
+            for row in list(occurrence.invites):
+                if row.user_id == g.current_user.id:
+                    occurrence.invites.remove(row)
+            for row in list(occurrence.waitlist):
+                if row.user_id == g.current_user.id:
+                    occurrence.waitlist.remove(row)
         personal_invite = next(
             (
                 invite for invite in game.invites
@@ -6405,44 +7258,17 @@ def leave_game(game_id):
         db.session.commit()
         return jsonify({'left_series': True, 'game_id': game.id})
     if was_host:
-        remaining = [p for p in game.players if p.user_id != g.current_user.id]
-        if remaining:
-            successor = next(
-                (
-                    row for row in remaining
-                    if row.user_id == transfer_to_user_id
-                ),
-                remaining[0],
-            )
-            _end_game_open_calls(game, 'host_changed')
-            game.creator_id = successor.user_id
-            new_host_id = successor.user_id
-            new_host_name = (
-                successor.user.display_name if successor.user else 'another player'
-            )
-            leave_outcome = 'host_transferred'
-            successor.attending_at = utcnow()
-            if game.recurrence == 'weekly':
-                _recurrence_preference(
-                    game, game.creator_id, create=True,
-                ).standing_rsvp = True
-            # The player who inherits hosting should know.
-            notify(
-                game.creator_id,
-                'player_left',
-                f'You\'re now hosting the {_play_noun(game)} at {court_name} — {g.current_user.display_name} left',
-                related_game_id=game.id,
-            )
+        # With other players present, leaving already returned a pending
+        # consent request above. A sole host can close only this date.
+        if game.is_instant:
+            game.status = 'expired'
+            if game.assembly_closed_at is None:
+                game.assembly_closed_at = utcnow()
+            _end_game_arrivals(game, 'rally_closed')
         else:
-            if game.is_instant:
-                game.status = 'expired'
-                if game.assembly_closed_at is None:
-                    game.assembly_closed_at = utcnow()
-                _end_game_arrivals(game, 'rally_closed')
-            else:
-                game.status = 'cancelled'
-                _end_game_open_calls(game, 'cancelled')
-            leave_outcome = 'game_closed'
+            game.status = 'cancelled'
+            _end_game_open_calls(game, 'cancelled')
+        leave_outcome = 'game_closed'
     else:
         # Tell the host a spot just opened up in their game.
         notify(
@@ -6493,6 +7319,7 @@ def remove_player(game_id, user_id):
     if not player:
         return jsonify({'error': 'not_in_game'}), 404
 
+    _participation_event(game, player.user_id, 'removed', actor_id=g.current_user.id)
     game.players.remove(player)
     if game.recurrence == 'weekly':
         preference = _recurrence_preference(game, user_id, create=False)
@@ -6530,6 +7357,7 @@ def cancel_game(game_id):
     if not user or user.deleted_at:
         return jsonify({'error': 'authentication_required'}), 401
     g.current_user = user
+    _lock_series_root_for_game_id(game_id)
     game = (
         Game.query.filter(Game.id == game_id)
         .with_for_update()
@@ -6543,6 +7371,20 @@ def cancel_game(game_id):
         return jsonify({'error': 'forbidden'}), 403
     if game.status != 'upcoming':
         return jsonify({'error': 'game_not_open'}), 400
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    scope, error = _recurrence_scope(payload, game)
+    if error:
+        return jsonify(error[0]), error[1]
+    if game.recurrence == 'weekly':
+        root = _series_root(game, create=True)
+        if scope == 'following_dates':
+            for occurrence in _future_series_dates(game):
+                _cancel_series_date(occurrence, g.current_user.id)
+            root.recurrence_stopped_at = utcnow()
+    for player in game.players:
+        _participation_event(game, player.user_id, 'cancelled', actor_id=g.current_user.id)
     game.status = 'cancelled'
     _end_game_open_calls(game, 'cancelled')
     if game.is_instant and game.assembly_closed_at is None:
@@ -6581,7 +7423,7 @@ def edit_game(game_id):
         'preferred_level', 'level_min', 'level_max', 'notes', 'recurrence', 'title', 'description',
         'duration_minutes', 'ends_at', 'cost_cents', 'court_number',
         'court_count', 'recurrence_timezone', 'recurrence_weekdays',
-        'recurrence_ends_on',
+        'recurrence_ends_on', 'edit_scope', 'schedule_conflict_ack',
     }
     unknown = sorted(set(payload) - allowed)
     if unknown:
@@ -6589,7 +7431,7 @@ def edit_game(game_id):
 
     try:
         locked_users, game = _lock_stable_game_edit_scope(
-            game_id, g.current_user.id,
+            game_id, g.current_user.id, following_dates=payload.get('edit_scope') == 'following_dates',
         )
     except RuntimeError:
         return jsonify({'error': 'game_changed_retry'}), 409
@@ -6608,6 +7450,11 @@ def edit_game(game_id):
     if game.is_instant:
         return jsonify({'error': 'instant_rally_not_editable'}), 409
 
+    edit_scope, scope_error = _recurrence_scope(payload, game)
+    if scope_error:
+        return jsonify(scope_error[0]), scope_error[1]
+    series_root = _series_root(game, create=True) if game.recurrence == 'weekly' else None
+    following = _future_series_dates(game) if edit_scope == 'following_dates' else []
     proposed = {}
     if 'court_id' in payload:
         court_id = _strict_whole_number(payload.get('court_id'))
@@ -6647,7 +7494,7 @@ def edit_game(game_id):
             return jsonify({'error': 'invalid_max_players'}), 400
         if game.game_type == 'ranked' and max_players not in (2, 4):
             return jsonify({'error': 'invalid_max_players'}), 400
-        if max_players < len(game.players):
+        if max_players < max([len(row.players) + len(_active_waitlist_offers(row)) for row in [game, *following]]):
             return jsonify({
                 'error': 'capacity_below_roster',
                 'player_count': len(game.players),
@@ -6698,6 +7545,15 @@ def edit_game(game_id):
             return jsonify({'error': 'ranked_cannot_recur'}), 400
         proposed['recurrence'] = recurrence
 
+    if edit_scope == 'this_date' and game.recurrence_series_id:
+        rule_changes = (
+            ('recurrence' in payload and payload['recurrence'] != game.recurrence)
+            or ('recurrence_weekdays' in payload and sorted(payload['recurrence_weekdays'] or []) != sorted(_stored_recurrence_weekdays(game)))
+            or ('recurrence_ends_on' in payload and payload['recurrence_ends_on'] != (game.recurrence_ends_on.isoformat() if game.recurrence_ends_on else None))
+        )
+        if rule_changes:
+            return jsonify({'error': 'series_rule_requires_following_dates'}), 400
+
     if any(key in payload for key in (
         'recurrence', 'recurrence_timezone', 'recurrence_weekdays',
         'recurrence_ends_on', 'scheduled_at',
@@ -6717,6 +7573,22 @@ def edit_game(game_id):
             ),
         })
 
+    schedule_changes = [key for key in proposed if key in SERIES_TEMPLATE_FIELDS
+                        and proposed[key] != getattr(game, key)]
+    if set(schedule_changes) & (SERIES_SCHEDULE_FIELDS | {'duration_minutes'}):
+        if edit_scope == 'following_dates' and game.recurrence_series_id:
+            conflict = schedule_batch_review_needed(
+                _series_edit_schedule_plans(game, following, proposed, schedule_changes), payload,
+                scope=f'edit_game:{game.id}:following_dates', viewer_id=actor.id,
+            )
+        else:
+            conflict = schedule_review_needed(
+                [player.user_id for player in game.players],
+                proposed.get('scheduled_at', game.scheduled_at), proposed.get('duration_minutes', game.duration_minutes),
+                payload, scope=f'edit_game:{game.id}', viewer_id=actor.id, exclude_game_id=game.id,
+            )
+        if conflict:
+            return jsonify(conflict), 409
     old = {
         'court_id': game.court_id,
         'court_name': game.court.name if game.court else 'the court',
@@ -6756,14 +7628,18 @@ def edit_game(game_id):
     if 'recurrence' in changed:
         if game.recurrence == 'weekly':
             _recurrence_preference(game, actor.id, create=True).standing_rsvp = True
-        else:
-            for preference in list(game.recurrence_rsvps):
-                game.recurrence_rsvps.remove(preference)
+        elif series_root:
+            series_root.recurrence_stopped_at = utcnow()
 
     if not changed:
         data = _game_payload(game, actor.id)
         data['updated_fields'] = []
         return jsonify(data)
+
+    if edit_scope == 'following_dates' and game.recurrence_series_id:
+        _edit_following_series_dates(game, following, proposed, changed, actor.id)
+    elif game.recurrence == 'weekly' and series_root is None:
+        _materialize_series(game)
 
     now = utcnow()
     commitment_changed = bool(
@@ -6998,8 +7874,51 @@ def _apply_elo(team1_users, team2_users, team1_won):
     return deltas
 
 
+def _score_version_error(game, payload):
+    expected = payload.get('expected_score_version')
+    version = int(game.score_version or 0)
+    if expected is None and version == 0:
+        return None  # A first report from a pre-upgrade client has no prior score.
+    if type(expected) is not int or expected != version:
+        return jsonify({'error': 'score_changed', 'message': 'This result changed. Reopen it before responding.',
+                        'score_version': version}), 409
+    return None
+
+
+def _score_event(game, kind, actor_id=None, *, at=None, reason=''):
+    """Append a snapshot; never reconstruct an old report from a newer score."""
+    history = game.score_correction_state()['history']
+    game.score_version = int(game.score_version or 0) + 1
+    history.append({
+        'version': game.score_version, 'kind': kind,
+        'at': (at or utcnow()).isoformat() + 'Z', 'actor_id': actor_id,
+        'actor_name': next((p.user.display_name for p in game.players if p.user_id == actor_id), None),
+        'reported_by_id': game.score_submitted_by_id,
+        'confirmation_kind': game.score_confirmation_kind or None,
+        'score_team1': game.score_team1, 'score_team2': game.score_team2,
+        'score_games': [row.to_dict() for row in game.score_lines],
+        'sides': [{'user_id': p.user_id, 'name': p.user.display_name, 'team': p.team,
+                   'rating_delta': p.rating_delta} for p in game.players if p.team in (1, 2)],
+        'reason': reason,
+    })
+    game.score_history = json.dumps(history, separators=(',', ':'))
+
+
+def _preserve_legacy_score(game):
+    if not game.score_correction_state()['history']:
+        _score_event(game, 'legacy_snapshot', game.score_submitted_by_id,
+                     at=game.score_submitted_at or game.completed_at,
+                     reason='Existing result before detailed history was available.')
+
+
 def _finalize_game(game, actor_id=None, confirmation_kind=None, correction=False):
     """Mark the game completed; for ranked games apply ELO and notify everyone."""
+    if game.game_type == 'ranked':
+        if game.status == 'completed' or any(p.rating_delta is not None for p in game.players):
+            return False
+        if game.score_correction_pending and (not actor_id or game.score_correction_state()['expired']):
+            return False
+    _preserve_legacy_score(game)
     by_user = {p.user_id: p for p in game.players}
     game.status = 'completed'
     if not correction or not game.completed_at:
@@ -7056,6 +7975,14 @@ def _finalize_game(game, actor_id=None, confirmation_kind=None, correction=False
     # result. Profile/dashboard reads must stay free of commits and side effects.
     if not correction:
         award_new_badges(*(player.user for player in game.players))
+    _score_event(game, 'correction_confirmed' if game.score_correction_pending else 'confirmed', actor_id)
+    for player in game.players:
+        if player.team in (1, 2):
+            _participation_event(game, player.user_id, 'attendance',
+                                 actor_id=game.score_confirmed_by_id or game.score_submitted_by_id,
+                                 attended=True)
+    game.score_correction_pending = False
+    return True
 
 
 def _current_ranked_streak(user_id, excluded_game_id):
@@ -7176,6 +8103,23 @@ def submit_score(game_id):
         return jsonify({'error': 'game_not_found'}), 404
     db.session.expire(game, ['players'])
     now = utcnow()
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    player_ids = {p.user_id for p in game.players}
+    if g.current_user.id not in player_ids:
+        return jsonify({'error': 'forbidden'}), 403
+    version_error = _score_version_error(game, payload)
+    if version_error:
+        return version_error
+    correction_state = game.score_correction_state(now)
+    ranked_correction = bool(game.game_type == 'ranked' and game.status == 'unresolved')
+    if ranked_correction and not correction_state['can_propose']:
+        return jsonify({'error': 'score_correction_closed', 'message': 'The correction window or proposal limit has ended. This match remains unrated.'}), 409
+    if game.game_type == 'ranked' and game.status == 'awaiting_confirmation':
+        return jsonify({'error': 'score_review_pending', 'message': 'Respond to or withdraw the current score before proposing another.'}), 409
+    if game.game_type == 'ranked' and _game_has_blocked_participant(game, g.current_user.id):
+        return jsonify({'error': 'forbidden'}), 403
     casual_correction = bool(
         game.status == 'completed'
         and game.game_type == 'casual'
@@ -7192,10 +8136,8 @@ def submit_score(game_id):
         and game.scheduled_at + timedelta(days=EXPIRED_SCORE_GRACE_DAYS) >= now
     )
     if game.status not in ('upcoming', 'awaiting_confirmation') \
-            and not expired_scoreable and not casual_correction:
+            and not expired_scoreable and not casual_correction and not ranked_correction:
         return jsonify({'error': 'game_not_open'}), 400
-    if game.recurrence != 'none':
-        return jsonify({'error': 'recurring_open_play'}), 400
     player_ids = {p.user_id for p in game.players}
     if g.current_user.id not in player_ids:
         return jsonify({'error': 'forbidden'}), 403
@@ -7220,6 +8162,18 @@ def submit_score(game_id):
         return jsonify(body), status
     if not (set(team1_ids) | set(team2_ids)) <= player_ids:
         return jsonify({'error': 'unknown_player'}), 400
+    if game.game_type == 'ranked' and g.current_user.id not in set(team1_ids + team2_ids):
+        return jsonify({'error': 'reporter_must_play'}), 403
+    if ranked_correction:
+        original = next((row.get('sides') for row in correction_state['history'] if row.get('sides')), None)
+        original = original or [{'user_id': p.user_id, 'team': p.team} for p in game.players]
+        if (set(team1_ids) != {p['user_id'] for p in original if p['team'] == 1}
+                or set(team2_ids) != {p['user_id'] for p in original if p['team'] == 2}):
+            return jsonify({'error': 'original_sides_required', 'message': 'A correction must keep the original players and sides.'}), 409
+        if not correction_state['history']:
+            _score_event(game, 'disputed', at=game.completed_at, reason='Legacy unresolved result; the original score is unavailable.')
+    elif casual_correction:
+        _preserve_legacy_score(game)
 
     by_user = {p.user_id: p for p in game.players}
     # A score may be corrected while it is awaiting confirmation. Clear every
@@ -7238,6 +8192,8 @@ def submit_score(game_id):
     game.score_confirmation_kind = ''
     game.score_confirmed_by_id = None
     game.score_confirmation_reminded_at = None
+    game.score_correction_pending = ranked_correction
+    _score_event(game, 'correction_proposed' if ranked_correction else 'reported', g.current_user.id)
 
     my_team = by_user[g.current_user.id].team
     opposing_ids = team2_ids if my_team == 1 else team1_ids
@@ -7256,8 +8212,8 @@ def submit_score(game_id):
             notify(
                 uid,
                 'score_submitted',
-                f'{g.current_user.display_name} reported {score_text} — review it within {SCORE_AUTO_CONFIRM_HOURS} hours',
-                'Confirm the result or enter the score you remember.',
+                f'{g.current_user.display_name} proposed corrected {score_text}' if ranked_correction else f'{g.current_user.display_name} reported {score_text} — review it within {SCORE_AUTO_CONFIRM_HOURS} hours',
+                'Agree or reject this correction. It will never confirm automatically.' if ranked_correction else 'Confirm the result or enter the score you remember.',
                 related_user_id=g.current_user.id,
                 related_game_id=game.id,
                 action_url=f'/#game/{game.id}',
@@ -7312,12 +8268,13 @@ def complete_play_session(game_id):
     # the durable receipt, so return it without notifying anybody twice.
     if game.completion_kind == 'session':
         return jsonify(_game_payload(game, g.current_user.id)), 200
-    if game.status != 'upcoming':
+    if game.status != 'upcoming' and not (
+        game.status == 'expired'
+        and game.scheduled_at + timedelta(days=EXPIRED_SCORE_GRACE_DAYS) >= utcnow()
+    ):
         return jsonify({'error': 'game_not_open'}), 400
     if game.game_type != 'casual':
         return jsonify({'error': 'not_group_session'}), 409
-    if game.recurrence != 'none':
-        return jsonify({'error': 'recurring_open_play'}), 400
     if game.scheduled_at > utcnow():
         return jsonify({'error': 'game_not_started'}), 409
     payload = request.get_json(silent=True)
@@ -7327,7 +8284,7 @@ def complete_play_session(game_id):
         return jsonify({'error': 'invalid_payload'}), 400
     raw_attendees = payload.get('attendee_user_ids')
     if raw_attendees is None:
-        attendee_ids = set(player_ids)
+        return jsonify({'error': 'attendance_selection_required'}), 400
     else:
         if not isinstance(raw_attendees, list):
             return jsonify({'error': 'invalid_attendees'}), 400
@@ -7348,6 +8305,8 @@ def complete_play_session(game_id):
 
     now = utcnow()
     for player in list(game.players):
+        _participation_event(game, player.user_id, 'attendance', actor_id=g.current_user.id,
+                             attended=player.user_id in attendee_ids, now=now)
         if player.user_id not in attendee_ids:
             game.players.remove(player)
     # Nobody can be promoted into a session after it has been closed. The
@@ -7382,6 +8341,36 @@ def complete_play_session(game_id):
                 related_game_id=game.id,
             )
     award_new_badges(*(player.user for player in game.players))
+    db.session.commit()
+    return jsonify(_game_payload(game, g.current_user.id))
+
+
+@games_bp.patch('/games/<int:game_id>/attendance/<int:user_id>')
+@rate_limit(20, 60)
+@login_required
+def correct_session_attendance(game_id, user_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get('attended'), bool):
+        return jsonify({'error': 'invalid_attendance'}), 400
+    _users, game = _lock_stable_game_roster_users(game_id, g.current_user.id)
+    if not game or not game.visible_to(g.current_user.id, friend_ids(g.current_user.id)) or _game_has_blocked_participant(game, g.current_user.id):
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.completion_kind != 'session':
+        return jsonify({'error': 'session_not_completed'}), 409
+    row = next((r for r in game.session_attendance if r.user_id == user_id), None)
+    if not row or g.current_user.id not in (user_id, game.creator_id):
+        return jsonify({'error': 'attendance_not_editable'}), 403
+    if not row.user or row.user.deleted_at:
+        return jsonify({'error': 'attendance_not_editable'}), 403
+    if row.attended == payload['attended']:
+        return jsonify(_game_payload(game, g.current_user.id))
+    player = next((p for p in game.players if p.user_id == user_id), None)
+    _participation_event(game, user_id, 'attendance_corrected', actor_id=g.current_user.id,
+                         attended=payload['attended'])
+    if payload['attended'] and not player:
+        db.session.add(GamePlayer(game=game, user_id=user_id))
+    elif not payload['attended'] and player:
+        game.players.remove(player)
     db.session.commit()
     return jsonify(_game_payload(game, g.current_user.id))
 
@@ -7422,10 +8411,21 @@ def confirm_score(game_id):
         or (submitter.team and me.team == submitter.team)
     ):
         return jsonify({'error': 'opponent_confirmation_required'}), 403
-
-    _finalize_game(
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    version_error = _score_version_error(game, payload)
+    if version_error:
+        return version_error
+    if _game_has_blocked_participant(game, g.current_user.id):
+        return jsonify({'error': 'forbidden'}), 403
+    if game.score_correction_pending and game.score_correction_state()['expired']:
+        return jsonify({'error': 'score_correction_closed', 'message': 'The correction window has ended. This match remains unrated.'}), 409
+    finalized = _finalize_game(
         game, actor_id=g.current_user.id, confirmation_kind='player',
     )
+    if not finalized:
+        return jsonify({'error': 'score_changed'}), 409
     db.session.commit()
     return jsonify(_game_payload(game, g.current_user.id))
 
@@ -7489,100 +8489,59 @@ def dispute_score(game_id):
         or (submitter.team and me.team == submitter.team)
     ):
         return jsonify({'error': 'opponent_dispute_required'}), 403
-    previous_score1 = game.score_team1
-    previous_score2 = game.score_team2
-    previous_score_games = [row.to_dict() for row in game.score_lines] or [{
-        'game_number': 1,
-        'score_team1': previous_score1,
-        'score_team2': previous_score2,
-    }]
-    score_text = _game_score_text(game)
-    if not correction:
-        game.score_dispute_reason = dispute_reason
+    version_error = _score_version_error(game, payload)
+    if version_error:
+        return version_error
+    if _game_has_blocked_participant(game, g.current_user.id):
+        return jsonify({'error': 'forbidden'}), 403
+    if game.score_correction_pending and game.score_correction_state()['expired']:
+        return jsonify({'error': 'score_correction_closed'}), 409
+    previous_score = {
+        'score_team1': game.score_team1, 'score_team2': game.score_team2,
+        'score_games': [row.to_dict() for row in game.score_lines] or [{
+            'game_number': 1, 'score_team1': game.score_team1,
+            'score_team2': game.score_team2,
+        }],
+    }
+    _preserve_legacy_score(game)
+    kind = 'withdrawn' if correction else 'late_disputed' if late_auto_dispute else 'disputed'
+    if not game.score_correction_state()['deadline']:
+        game.completed_at = utcnow()  # The original settlement survives in history.
+    _score_event(game, kind, g.current_user.id, reason=dispute_reason)
     if late_auto_dispute:
         _reverse_auto_confirmed_ranked_result(game)
-        game.score_dispute_count = int(game.score_dispute_count or 0) + 1
-        game.status = 'unresolved'
-        game.score_team1 = None
-        game.score_team2 = None
-        game.score_lines.clear()
-        game.score_submitted_by_id = None
-        game.score_submitted_at = None
-        game.score_confirmation_kind = 'late_disputed'
-        game.score_confirmed_by_id = None
-        game.score_confirmation_reminded_at = None
-        for player in game.players:
-            if player.user_id == g.current_user.id:
-                continue
-            notify(
-                player.user_id,
-                'score_disputed',
-                f'{g.current_user.display_name} disputed the automatically confirmed {score_text} result',
-                f'“{dispute_reason}” The rating change was removed. Coordinate with the other players before reporting a replacement result.',
-                related_user_id=g.current_user.id,
-                related_game_id=game.id,
-                action_url=f'/#game/{game.id}',
-            )
-        db.session.commit()
-        response = _game_payload(game, g.current_user.id)
-        response['score_dispute_outcome'] = 'late_dispute'
-        return jsonify(response)
+        _score_event(game, 'rating_removed', g.current_user.id, reason=dispute_reason)
     if not correction:
         game.score_dispute_count = int(game.score_dispute_count or 0) + 1
-    unresolved = not correction and game.score_dispute_count >= 2
-    # A disputed late result stays in unscored history instead of briefly
-    # disappearing back into the upcoming-only lifecycle.
-    game.status = 'unresolved' if unresolved else (
-        'expired'
-        if (
-            game.recurrence != 'weekly'
-            and game.scheduled_at
-            and game.scheduled_at < utcnow() - timedelta(
-                days=UNSCORED_EXPIRY_DAYS,
-            )
-        )
-        else 'upcoming'
-    )
+        game.score_dispute_reason = dispute_reason
+    game.status = 'unresolved'
+    game.completed_at = game.completed_at or utcnow()
     game.score_team1 = None
     game.score_team2 = None
     game.score_lines.clear()
     game.score_submitted_by_id = None
     game.score_submitted_at = None
-    game.score_confirmation_kind = ''
+    game.score_confirmation_kind = 'late_disputed' if late_auto_dispute else ''
     game.score_confirmed_by_id = None
     game.score_confirmation_reminded_at = None
-    if unresolved:
-        game.completed_at = utcnow()
-        for player in game.players:
-            player.rating_delta = None
-            if player.user_id != g.current_user.id:
-                notify(
-                    player.user_id,
-                    'score_disputed',
-                    f'The score at {game.court.name if game.court else "the court"} is unresolved — no rating change was applied',
-                    related_user_id=g.current_user.id,
-                    related_game_id=game.id,
-                )
-    elif not correction and submitter_id and submitter_id != g.current_user.id:
+    game.score_correction_pending = False
+    can_propose = game.score_correction_state()['can_propose']
+    for player in game.players:
+        if player.user_id == g.current_user.id:
+            continue
         notify(
-            submitter_id,
-            'score_disputed',
-            f'{g.current_user.display_name} remembers a different score than {score_text} — review their counter-score',
-            f'Their note: “{dispute_reason}”',
-            related_user_id=g.current_user.id,
-            related_game_id=game.id,
+            player.user_id, 'score_disputed',
+            'Score withdrawn' if correction else 'Score disputed — no rating applied',
+            ('The previous rating change was removed. ' if late_auto_dispute else '')
+            + ('Propose a corrected score on this match. An opponent must agree.'
+               if can_propose else 'The correction limit has been reached. This match remains unrated.'),
+            related_user_id=g.current_user.id, related_game_id=game.id,
+            action_url=f'/#game/{game.id}',
         )
     db.session.commit()
     response = _game_payload(game, g.current_user.id)
-    response['score_dispute_outcome'] = (
-        'unresolved' if unresolved else 'correction' if correction else 'counter_score'
-    )
-    if not unresolved:
-        response['score_correction_prefill'] = {
-            'score_team1': previous_score1,
-            'score_team2': previous_score2,
-            'score_games': previous_score_games,
-        }
+    response['score_dispute_outcome'] = 'late_dispute' if late_auto_dispute else 'correction' if correction else 'unresolved'
+    response['score_correction_prefill'] = previous_score
     return jsonify(response)
 
 
@@ -7927,13 +8886,18 @@ def leaderboard():
             rows = query.order_by(*order).all()
 
         items = []
-        for user, delta, games in rows:
+        for rank, (user, delta, games) in enumerate(rows, start=1):
             entry = user.to_public_dict()
             entry['month_delta'] = int(delta)
             entry['month_games'] = int(games)
+            entry['rank'] = rank
             items.append(entry)
+        viewer_entry = next((item for item in items if item['id'] == g.current_user.id), None)
         return jsonify(_page_payload(
-            items, limit=limit, offset=offset, extra={'period': 'month'},
+            items, limit=limit, offset=offset, extra={
+                'period': 'month',
+                'viewer': _leaderboard_viewer(viewer_entry, period='month', area=area),
+            },
         ))
 
     query = User.query.filter(
@@ -7959,11 +8923,38 @@ def leaderboard():
         users = query.order_by(User.rating.desc(), User.id.asc()).all()
 
     total = len(users)
+    ranks = {user.id: rank for rank, user in enumerate(users, start=1)}
     page_users = users[offset:offset + limit]
+    # The viewer's place is independent of the returned page. A player below
+    # the first fifty remains ranked, even while browsing a different page.
+    viewer = g.current_user
+    lookup_users = list(page_users)
+    if viewer.id in ranks and viewer.id not in {user.id for user in page_users}:
+        lookup_users.append(viewer)
+    entries = {item['id']: {**item, 'rank': ranks[item['id']]}
+               for item in _with_title_counts(lookup_users)}
     return jsonify(_page_payload(
-        _with_title_counts(page_users), limit=limit, offset=offset,
+        [entries[user.id] for user in page_users], limit=limit, offset=offset,
         total=total, already_sliced=True,
+        extra={'period': 'all', 'viewer': _leaderboard_viewer(entries.get(viewer.id), area=area)},
     ))
+
+
+def _leaderboard_viewer(entry, *, period='all', area=None):
+    if entry:
+        return {'status': 'ranked', 'rank': entry['rank'], 'player': entry}
+    viewer = g.current_user
+    if not (viewer.ranked_wins + viewer.ranked_losses):
+        status = 'no_ranked_results'
+    elif area and not _leaderboard_user_within_radius(viewer, *area):
+        has_location = ((viewer.last_lat is not None and viewer.last_lng is not None)
+                        or (viewer.last_lat is None and viewer.home_court is not None))
+        status = 'outside_area' if has_location else 'location_not_set'
+    elif period == 'month':
+        status = 'no_results_this_month'
+    else:
+        status = 'not_available'
+    return {'status': status, 'rank': None, 'player': None}
 
 
 def _leaderboard_area_query(query, lat, lng, radius):
@@ -8026,3 +9017,32 @@ def _with_title_counts(users):
         data['tournament_titles'] = counts.get(user.id, 0)
         items.append(data)
     return items
+
+
+@games_bp.get('/games/<int:game_id>/occurrences')
+@login_required
+def game_occurrences(game_id):
+    game = db.session.get(Game, game_id)
+    viewer_id = g.current_user.id
+    friends = friend_ids(viewer_id)
+    if not game or not game.visible_to(viewer_id, friends) or _game_has_blocked_participant(game, viewer_id):
+        return jsonify({'error': 'game_not_found'}), 404
+    series_id = game.recurrence_series_id
+    if not series_id:
+        return jsonify({'series_id': None, 'occurrences': []})
+    rows = Game.query.filter(Game.recurrence_series_id == series_id).order_by(Game.scheduled_at).all()
+    visible = [row for row in rows if row.visible_to(viewer_id, friends)
+               and not _game_has_blocked_participant(row, viewer_id)]
+    preference = GameRecurrenceRsvp.query.filter_by(
+        game_id=series_id, user_id=viewer_id,
+    ).first()
+    skipped_dates = preference.skipped_dates() if preference else set()
+    return jsonify({'series_id': series_id, 'occurrences': [{
+        'id': row.id, 'scheduled_at': iso(row.scheduled_at),
+        'occurrence_on': row.recurrence_occurrence_on.isoformat(),
+        'status': row.status, 'title': row.title,
+        'court': row.court.to_summary_dict() if row.court else None,
+        'player_count': len(row.players), 'max_players': row.max_players,
+        'is_joined': any(p.user_id == viewer_id for p in row.players),
+        'is_skipped': row.recurrence_occurrence_on.isoformat() in skipped_dates,
+    } for row in visible]})

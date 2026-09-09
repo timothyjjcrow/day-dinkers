@@ -33,6 +33,9 @@ from scripts.manage_business_operators import _require_mfa_before_grant
 PASSWORD = 'secret123'
 
 
+from business_test_support import venue_write
+
+
 @pytest.fixture()
 def app():
     app = create_app('testing')
@@ -90,7 +93,7 @@ def enable_mfa(client, token):
 
 
 def create_claim(client, token, court_id):
-    response = client.post('/api/businesses/claims', json={
+    response = venue_write(client, 'post', '/api/businesses/claims', json={
         'court_id': court_id,
         'role': 'Owner',
         'authorized_attestation': True,
@@ -183,7 +186,7 @@ def test_initial_claim_fields_persist_as_private_operator_evidence(app, client):
         'evidence_url': 'https://official.example/team/manager',
         'evidence_notes': 'I manage programming; the front desk can confirm my role.',
     }
-    created = client.post(
+    created = venue_write(client, 'post',
         '/api/businesses/claims', json=payload,
         headers=auth(claimant['token']),
     )
@@ -192,7 +195,7 @@ def test_initial_claim_fields_persist_as_private_operator_evidence(app, client):
     business_id = created.get_json()['business']['id']
 
     # A harmless retry does not multiply the same pending evidence.
-    retried = client.post(
+    retried = venue_write(client, 'post',
         '/api/businesses/claims', json=payload,
         headers=auth(claimant['token']),
     )
@@ -213,7 +216,7 @@ def test_initial_claim_fields_persist_as_private_operator_evidence(app, client):
     assert by_type['other']['note'] == payload['evidence_notes']
     assert all(item['status'] == 'submitted' for item in evidence)
 
-    invalid = client.post('/api/businesses/claims', json={
+    invalid = venue_write(client, 'post', '/api/businesses/claims', json={
         **payload, 'court_id': 2, 'verification_contact_email': 'not-an-email',
     }, headers=auth(claimant['token']))
     assert invalid.status_code == 400
@@ -292,7 +295,7 @@ def test_email_code_is_keyed_domain_scoped_and_operator_reviewed(app, client):
     business_id = created['business']['id']
     claim_id = created['claim']['id']
 
-    submitted = client.post(
+    submitted = venue_write(client, 'post',
         f'/api/businesses/{business_id}/verification/evidence',
         json={'type': 'business_email', 'value': 'ops@official.example'},
         headers=auth(owner['token']),
@@ -305,7 +308,7 @@ def test_email_code_is_keyed_domain_scoped_and_operator_reviewed(app, client):
         assert evidence.challenge_token_hash != hashlib.sha256(code.encode()).hexdigest()
         assert evidence.domain_match is True
 
-    confirmed = client.post(
+    confirmed = venue_write(client, 'post',
         f'/api/businesses/{business_id}/verification/evidence/{evidence_id}/verify',
         json={'token': code}, headers=auth(owner['token']),
     )
@@ -335,7 +338,7 @@ def test_email_code_is_keyed_domain_scoped_and_operator_reviewed(app, client):
 def test_operator_evidence_decision_is_immutable(app, client):
     owner = register(client, 'evidence-owner@example.com')
     created = create_claim(client, owner['token'], 1)
-    submitted = client.post(
+    submitted = venue_write(client, 'post',
         f"/api/businesses/{created['business']['id']}/verification/evidence",
         json={
             'type': 'other',
@@ -383,30 +386,30 @@ def test_consumer_email_needs_manual_review_and_challenge_locks(app, client):
     owner = register(client, 'consumer-owner@example.com')
     created = create_claim(client, owner['token'], 1)
     business_id = created['business']['id']
-    submitted = client.post(
+    submitted = venue_write(client, 'post',
         f'/api/businesses/{business_id}/verification/evidence',
         json={'type': 'business_email', 'value': 'clubowner@gmail.com'},
         headers=auth(owner['token']),
     )
     evidence_id = submitted.get_json()['evidence']['id']
     for _ in range(5):
-        response = client.post(
+        response = venue_write(client, 'post',
             f'/api/businesses/{business_id}/verification/evidence/{evidence_id}/verify',
             json={'token': '999999'}, headers=auth(owner['token']),
         )
         assert response.status_code == 400
-    locked = client.post(
+    locked = venue_write(client, 'post',
         f'/api/businesses/{business_id}/verification/evidence/{evidence_id}/verify',
         json={'token': '999999'}, headers=auth(owner['token']),
     )
     assert locked.status_code == 423
-    resent = client.post(
+    resent = venue_write(client, 'post',
         f'/api/businesses/{business_id}/verification/evidence/{evidence_id}/resend',
         json={}, headers=auth(owner['token']),
     )
     assert resent.status_code == 200
     code = challenge_code(app)
-    confirmed = client.post(
+    confirmed = venue_write(client, 'post',
         f'/api/businesses/{business_id}/verification/evidence/{evidence_id}/verify',
         json={'token': code}, headers=auth(owner['token']),
     )
@@ -429,12 +432,12 @@ def test_multi_location_team_invitation_and_role_scope(app, client):
     assert client.get(
         f"/api/businesses/{first['id']}/team", headers=auth(owner['token']),
     ).status_code == 200
-    attached = client.post(
+    attached = venue_write(client, 'post',
         f"/api/businesses/{first['id']}/organization/locations",
         json={'business_id': second['id']}, headers=auth(owner['token']),
     )
     assert attached.status_code == 201, attached.get_json()
-    invited = client.post(
+    invited = venue_write(client, 'post',
         f"/api/businesses/{first['id']}/team/invitations",
         json={'email': 'staff@example.com', 'role': 'admin'},
         headers=auth(owner['token']),
@@ -467,7 +470,7 @@ def test_multi_location_team_invitation_and_role_scope(app, client):
 
     mine = client.get('/api/businesses/mine', headers=auth(staff['token']))
     assert {item['id'] for item in mine.get_json()['items']} == {first['id'], second['id']}
-    changed = client.patch(
+    changed = venue_write(client, 'patch',
         f"/api/businesses/{second['id']}",
         json={'announcement': 'North courts open early.'},
         headers=auth(staff['token']),
@@ -475,7 +478,7 @@ def test_multi_location_team_invitation_and_role_scope(app, client):
     assert changed.status_code == 200, changed.get_json()
     assert changed.get_json()['manager_role'] == 'admin'
     assert changed.get_json()['is_owner'] is False
-    editor_change = client.patch(
+    editor_change = venue_write(client, 'patch',
         f"/api/businesses/{second['id']}",
         json={'description': 'Edited by the location team.'},
         headers=auth(editor['token']),
@@ -483,21 +486,21 @@ def test_multi_location_team_invitation_and_role_scope(app, client):
     assert editor_change.status_code == 200
     assert editor_change.get_json()['is_owner'] is False
     assert editor_change.get_json()['manager_role'] == 'editor'
-    assert client.patch(
+    assert venue_write(client, 'patch',
         f"/api/businesses/{second['id']}",
         json={'published': False}, headers=auth(editor['token']),
     ).status_code == 403
-    assert client.patch(
+    assert venue_write(client, 'patch',
         f"/api/businesses/{second['id']}",
         json={'announcement': 'Viewer should not write.'},
         headers=auth(viewer['token']),
     ).status_code == 403
-    request_by_admin = client.post(
+    request_by_admin = venue_write(client, 'post',
         f"/api/businesses/{second['id']}/integration-requests",
         json={'provider': 'Venue system'}, headers=auth(staff['token']),
     )
     assert request_by_admin.status_code == 201, request_by_admin.get_json()
-    assert client.post(
+    assert venue_write(client, 'post',
         f"/api/businesses/{second['id']}/integration-requests",
         json={'provider': 'Editor system'}, headers=auth(editor['token']),
     ).status_code == 403
@@ -536,7 +539,7 @@ def test_multi_location_team_invitation_and_role_scope(app, client):
     assert owner_queue.status_code == 200
     assert owner_queue.get_json()['items'][0]['requested_by_id'] == staff['user']['id']
     member_id = accepted.get_json()['member']['id']
-    transferred = client.post(
+    transferred = venue_write(client, 'post',
         f"/api/businesses/{first['id']}/transfer",
         json={'member_id': member_id, 'current_password': PASSWORD},
         headers=auth(owner['token']),
@@ -556,7 +559,7 @@ def test_multi_location_team_invitation_and_role_scope(app, client):
         assert [item.user_id for item in owners] == [staff['user']['id']]
     # The promoted owner has no historical claim row, but owns the org and can
     # still release one location with step-up authentication.
-    released = client.delete(
+    released = venue_write(client, 'delete',
         f"/api/businesses/{first['id']}/claim",
         json={'current_password': PASSWORD},
         headers=auth(staff['token']),
@@ -633,7 +636,7 @@ def test_editor_revision_restore_response_preserves_manager_role(app, client):
         ))
         db.session.commit()
 
-    first = client.patch(
+    first = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'description': 'First editor version.'},
         headers=auth(editor['token']),
@@ -646,13 +649,13 @@ def test_editor_revision_restore_response_preserves_manager_role(app, client):
     )
     assert history.status_code == 200, history.get_json()
     first_revision_id = history.get_json()['items'][0]['id']
-    assert client.patch(
+    assert venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'description': 'Second editor version.'},
         headers=auth(editor['token']),
     ).status_code == 200
 
-    restored = client.post(
+    restored = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/revisions/{first_revision_id}/restore",
         headers=auth(editor['token']),
     )
@@ -674,7 +677,7 @@ def test_rich_manual_schedule_and_logo_revision_are_server_governed(app, client)
         business.verified_at = utcnow()
         business.content_review_status = 'approved'
         db.session.commit()
-    schedule = client.put(
+    schedule = venue_write(client, 'put',
         f"/api/businesses/{profile['id']}/schedule",
         json={'items': [{
             'title': 'Tuesday clinic', 'kind': 'clinic',
@@ -697,7 +700,7 @@ def test_rich_manual_schedule_and_logo_revision_are_server_governed(app, client)
     png = base64.b64decode(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
     )
-    upload = client.post(
+    upload = venue_write(client, 'post',
         f"/api/businesses/{profile['id']}/logo",
         json={
             'mime_type': 'image/png',
@@ -783,25 +786,25 @@ def test_sensitive_revision_chain_cannot_be_laundered_or_reviewed_out_of_order(
         business.content_review_status = 'approved'
         db.session.commit()
 
-    first_sensitive = client.patch(
+    first_sensitive = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'booking_url': 'https://official.example/book'},
         headers=auth(owner['token']),
     )
     assert first_sensitive.status_code == 200
-    harmless = client.patch(
+    harmless = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'description': 'Updated program details.'},
         headers=auth(owner['token']),
     )
     assert harmless.status_code == 200
     assert harmless.get_json()['content_review_status'] == 'pending'
-    blocked_publish = client.patch(
+    blocked_publish = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'published': True}, headers=auth(owner['token']),
     )
     assert blocked_publish.status_code == 400
-    second_sensitive = client.patch(
+    second_sensitive = venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'website_url': 'https://official.example/club'},
         headers=auth(owner['token']),
@@ -851,12 +854,12 @@ def test_sensitive_revision_chain_cannot_be_laundered_or_reviewed_out_of_order(
 
     # A later rejection restores only its immediate predecessor; the older
     # pending sensitive change remains held for its own decision.
-    assert client.patch(
+    assert venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'booking_url': 'https://official.example/new-book'},
         headers=auth(owner['token']),
     ).status_code == 200
-    assert client.patch(
+    assert venue_write(client, 'patch',
         f"/api/businesses/{profile['id']}",
         json={'membership_url': 'https://official.example/join'},
         headers=auth(owner['token']),

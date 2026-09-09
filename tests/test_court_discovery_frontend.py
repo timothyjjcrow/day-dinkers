@@ -122,8 +122,11 @@ def test_court_preview_actions_are_separate_from_the_selection_announcement():
     assert 'id="court-preview" class="court-preview hidden" role="region"' in INDEX
     preview = section("function selectCourtOnMap", "function autoCheckInStorageKey")
     assert "selectionStatus.textContent = `${court.name} selected. ${live}.`;" in preview
-    assert 'data-preview-play>Play options</button>' in preview
-    assert "openCourtPlayMenu(court);" in preview
+    assert '<div class="court-next-opportunity" data-preview-next></div>' in preview
+    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court);" in preview
+    assert 'data-preview-detail>All dates & court details</button>' in preview
+    assert "openCourtFromDiscovery(court)" in preview
+    assert 'data-preview-play' not in preview
     assert "gameType: 'casual'" not in preview
     assert 'aria-label="Directions to ${esc(court.name)} (opens Maps)"' in preview
     assert "uiIcon('external')" in preview
@@ -378,9 +381,13 @@ def test_verified_venue_programs_have_a_direct_accessible_discovery_path():
         assert signal in availability
 
     preview = section("function selectCourtOnMap", "function autoCheckInStorageKey")
-    assert 'data-preview-business>${esc(businessLabel)}</button>' in preview
-    assert "openCourtFromDiscovery(court, { focusBusiness: true })" in preview
-    assert 'court-preview-actions ${businessDiscovery ? \'has-business\'' in preview
+    assert 'Official profile from ${esc(court.business.name)}' in preview
+    assert 'data-preview-next' in preview
+    assert 'data-preview-detail>All dates & court details</button>' in preview
+    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court);" in preview
+    next_opportunity = section("async function loadCourtNextOpportunity", "function loadCourtTimeline")
+    assert "api(`/courts/${court.id}/play`)" in next_opportunity
+    assert 'courtTimelineItemHtml(item,{compact:true})' in next_opportunity
 
     card = section("function courtRowHtml", "function sortCourts")
     assert '<article class="court-decision-card' in card
@@ -431,13 +438,18 @@ def test_business_schedule_actions_exclude_past_inventory():
     assert "utcDateValue(to)" in hydration
 
 
-def test_court_detail_leads_with_now_and_defers_venue_management():
+def test_court_detail_leads_with_dated_play_and_defers_arrival_and_venue_management():
     detail = section("async function openCourtDetail", "function openCheckInSheet")
     now_at = detail.index('id="cd-now-heading"')
     players = detail.index('id="cd-sec-players"')
-    games = detail.index('id="cd-sec-games"')
+    timeline = detail.index('id="cd-play-here"')
+    arrival = detail.index('class="court-arrival-disclosure"')
+    business = detail.index('id="cd-business"')
     disclosure = detail.index('class="card cd-progressive cd-court-details"')
-    assert now_at < games < players < disclosure
+    assert timeline < arrival < now_at < business < players < disclosure
+    assert "loadCourtTimeline(modal,court)" in detail
+    assert "${checkedIn ? 'open' : ''}" in detail
+    assert 'At the court now? Check in or find players' in detail
     assert "courtClosed ? 'Closed to new play' : 'Playing and forming now'" in detail
     assert "const nowGames = Array.isArray(court.now_games) ? court.now_games" in detail
     assert "const actionableGames = nowGames.filter((game) => game.is_joined || Number(game.spots_left) > 0);" in detail
@@ -472,7 +484,9 @@ def test_closed_court_replaces_live_actions_and_favorite_writes_are_idempotent()
     assert "const primaryAction = courtClosed ? ''" in detail
     assert "const secondaryActions = courtClosed ?" in detail
     assert "Check-ins, new play sessions, ranked matches, and court chat are paused here." in detail
-    assert "Player-organized sessions are paused while this court is marked closed." in detail
+    timeline = section("function loadCourtTimeline", "function courtConditionReportsHtml")
+    assert "New play is paused while this court is marked closed. Existing plans remain in My plans." in timeline
+    assert 'create.disabled=data.closed' in timeline
     assert "? `<button type=\"button\" data-cd-suggest>" in detail
     assert "p.is_me || court.closed ? ''" in detail
     assert ": `<button type=\"button\" id=\"cd-condition\">" in detail

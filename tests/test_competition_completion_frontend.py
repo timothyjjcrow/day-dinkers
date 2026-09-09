@@ -96,8 +96,8 @@ def test_league_deadlines_show_on_cards_matches_details_and_blocker_copy():
     assert 'competition-round-deadline' in league_screen
     assert 'Leave it blank if you don’t play.' in APP
     assert 'must be confirmed, decided, or marked not played before the round can close' in league_screen
-    assert 'Moves up when the round closes' in league_screen
-    assert 'Moves down when the round closes' in league_screen
+    assert 'leagueStandingsHtml(lg, leagueStandingScope, selectedLeagueRound)' in league_screen
+    assert 'Currently in ${move.to_box < move.from_box' in APP
 
 
 def test_opponent_actions_use_real_users_and_preserve_a_proposed_time_draft():
@@ -205,7 +205,8 @@ def test_competition_sharing_settings_chat_and_polling_are_complete():
     assert 'id="lg-share"' in league
     assert 'id="lg-ics"' in league
     assert 'Add season dates' in league
-    assert '`RRULE:FREQ=DAILY;INTERVAL=${roundDays}`' in APP
+    assert "function leagueToIcs(" in APP
+    assert '`RRULE:FREQ=DAILY;INTERVAL=${roundDays}`' not in APP
     assert 'id="lg-edit"' in league
     assert "openChildModal(box, () => openLeagueChat(lg))" in league
     assert "leagueNav.push(['lg-chat'" not in league
@@ -318,14 +319,14 @@ def test_tournament_arrival_and_league_completion_copy_are_operational_and_hones
 
     assert 'data-tournament-arrival-countdown' in tournament
     assert 'Arrival status opens in' in tournament
-    assert 'planned start time reached' in tournament
-    assert 'const hereCount = (t.entries || []).filter((entry) => entry.checked_in).length;' in tournament
+    assert '${here} of ${total} players here' in tournament
+    assert 'sum + Number(entry.arrived_count || 0)' in tournament
     assert "if (!['registration', 'active'].includes(t.status)) { clearInterval(poll); return; }" in tournament
     assert '<details class="competition-organizer-tools">' in league
     assert 'Finish season' in league
     assert 'not played' in league
-    assert 'would move up' in league
-    assert 'would move down' in league
+    assert 'openLeagueRoundCloseSheet(lg, false' in league
+    assert 'openLeagueRoundCloseSheet(lg, true' in league
     assert 'Leave this league?' in league
     assert 'Leave league' in league
     assert 'data-remove-league-member' in league

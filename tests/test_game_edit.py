@@ -142,16 +142,19 @@ def test_host_edits_full_game_promotes_fifo_and_moves_typed_court_post(client):
     assert body['preferred_level'] == 'advanced'
     assert body['notes'] == 'Bring outdoor balls'
     assert {item['user_id'] for item in body['players']} == {
-        host['user']['id'], player['user']['id'], waiter['user']['id'],
+        host['user']['id'], player['user']['id'],
     }
-    assert body['waitlist_count'] == 0
+    assert body['waitlist_count'] == 1
+    accepted = client.post(f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=headers(waiter))
+    assert accepted.status_code == 200, accepted.get_json()
+    assert accepted.get_json()['is_joined']
 
     db.session.expire_all()
     row = db.session.get(Game, game['id'])
     by_user = {item.user_id: item for item in row.players}
     assert by_user[host['user']['id']].attending_at is not None
     assert by_user[player['user']['id']].attending_at is None
-    # Promotion is itself the waiter's fresh commitment to the edited slot.
+    # Acceptance is the waiter's fresh commitment to the edited slot.
     assert by_user[waiter['user']['id']].attending_at is not None
     call = db.session.get(GameOpenCall, call_id)
     message = db.session.get(Message, message_id)
@@ -163,7 +166,7 @@ def test_host_edits_full_game_promotes_fifo_and_moves_typed_court_post(client):
         related_game_id=game['id'],
     ).count() == 1
     assert Notification.query.filter_by(
-        user_id=waiter['user']['id'], kind='game_join',
+        user_id=waiter['user']['id'], kind='game_waitlist_offer',
         related_game_id=game['id'],
     ).count() == 1
 

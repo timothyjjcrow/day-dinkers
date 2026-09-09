@@ -15,7 +15,7 @@ def section(start: str, end: str) -> str:
 
 
 def test_play_launcher_exposes_the_three_plain_play_now_intents_and_planner():
-    launcher = section("function rallyLauncherHtml", "async function renderPlay")
+    launcher = section("function rallyLauncherHtml", "function playProgressCardHtml")
     assert launcher.count('data-goto="instant-rally"') == 1
     assert launcher.count('data-goto="on-my-way"') == 1
     assert launcher.count('data-goto="play-pulse"') == 1
@@ -63,13 +63,15 @@ def test_planner_reveals_where_then_when_then_who_and_never_offers_right_now():
 
 def test_when_starts_with_three_suggestions_and_expands_more_in_place():
     planner = section("async function openNewGameModal", "async function renderTournaments")
-    assert "const smartTimeSuggestions = []" in planner
-    assert "smartTimeSuggestions.length >= 9" in planner
+    suggestions = section("function plannerSuggestedTimes", "function playerAwayLabel")
+    assert "const slots = [], seen = new Set();" in suggestions
+    assert "slots.length >= 9" in suggestions
+    assert "plannerSuggestedTimes(selectedPlannerPeople(), selected)" in planner
     assert "index >= 3 ? 'hidden' : ''" in planner
     assert 'data-extra-time' in planner
     assert 'More common times' in planner
     assert "syncPlannerNounLabels" in planner
-    assert 'data-smart-time="${slot.date.toISOString()}"' in planner
+    assert 'data-smart-time="${date.toISOString()}"' in planner
     assert "scheduleDateTimePickerHtml('ng-when'" in planner
     assert 'id="ng-day-strip"' not in planner
     assert 'id="ng-time-grid"' not in planner
@@ -205,7 +207,7 @@ def test_home_area_city_search_is_labeled_race_safe_and_explains_empty_or_failed
 
 def test_community_group_search_has_an_accessible_name():
     sheet = section("async function openFindClubsSheet", "async function openCourtGallery")
-    assert '<label class="sr-only" for="fc-search">Search community groups</label>' in sheet
+    assert '<label class="sr-only" for="fc-search">Search public groups</label>' in sheet
 
 
 def test_play_shell_has_primary_segments_and_one_contextual_create_action():

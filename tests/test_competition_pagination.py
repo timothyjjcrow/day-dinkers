@@ -205,7 +205,7 @@ def test_compete_ui_exposes_action_badge_and_progressive_pages():
     assert "Events, ${actionCount} action" in app_source
 
 
-def test_play_home_schedule_includes_owned_tournaments_in_the_next_week(client, app):
+def test_play_home_schedule_includes_owned_tournaments_beyond_the_next_week(client, app):
     account = register(client)
     with app.app_context():
         user = db.session.get(User, account['user']['id'])
@@ -234,9 +234,10 @@ def test_play_home_schedule_includes_owned_tournaments_in_the_next_week(client, 
         db.session.add_all([mine, too_late, unrelated])
         db.session.commit()
         mine_id = mine.id
+        later_id = too_late.id
 
     payload = client.get('/api/play/home', headers=headers(account)).get_json()
-    assert [item['id'] for item in payload['competitions']] == [mine_id]
+    assert [item['id'] for item in payload['competitions']] == [mine_id, later_id]
     assert payload['competitions'][0]['kind'] == 'tournament'
     assert payload['competitions'][0]['is_organizer'] is True
 

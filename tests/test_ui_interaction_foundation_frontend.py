@@ -440,8 +440,12 @@ def test_confirmation_and_single_select_controls_expose_the_actual_state():
     assert "setAttribute('aria-labelledby', 'action-confirm-title')" in confirmation
 
     court = app_section("async function openCourtDetail", "function openCourtPlayerActions")
-    assert 'data-cd-day="${i}" aria-pressed="false"' in court
-    assert "b.setAttribute('aria-pressed', String(active));" in court
+    assert 'id="cd-looking-toggle" aria-pressed="${lookingForGame}"' in court
+    assert "body: JSON.stringify({ looking_for_game: desiredLooking })" in court
+    checkin = app_section("function openCheckInSheet", "// ---------- Games ----------")
+    assert 'type="radio" name="checkin-visibility" value="looking" ${defaultLooking ? \'checked\' : \'\'}' in checkin
+    assert 'type="radio" name="checkin-visibility" value="quiet" ${defaultLooking ? \'\' : \'checked\'}' in checkin
+    assert "form.elements['checkin-visibility'].value === 'looking'" in checkin
 
     planner = app_section("async function openNewGameModal", "// ---------- Tournaments ----------")
     assert 'data-club-id="" class="${initialClubId ? \'\' : \'active\'}" aria-pressed="${!initialClubId}"' in planner
@@ -730,8 +734,12 @@ def test_profile_title_and_court_destinations_use_native_navigation_controls():
     assert '<div class="row" data-open-tournament=' not in titles
     assert "uiIcon('chevron-right', 'chev')" in titles
 
+    assert '<button type="button" class="card row nav-row-button"' in public_profile
+    assert '<article class="card profile-saved-court"><button type="button" class="row nav-row-button"' in own_profile
+    # The next-opportunity control is a sibling, never a button inside the
+    # court-navigation button.
+    assert '</button><div class="court-next-opportunity" data-saved-next="${c.id}"></div></article>' in own_profile
     for section in (public_profile, own_profile):
-        assert '<button type="button" class="card row nav-row-button"' in section
         assert 'aria-label="Open ${esc(c.name)} court"' in section
         assert "uiIcon('chevron-right', 'chev')" in section
 
@@ -818,7 +826,7 @@ def test_community_identity_targets_preserve_composite_card_boundaries():
 def test_activity_is_paged_actionable_and_uses_explicit_read_clear_controls():
     activity = app_section("async function openActivity", "// ---------- Presence banner ----------")
 
-    assert "api('/notifications?limit=20')" in activity
+    assert "api('/notifications?limit=20&filter=action')" in activity
     assert 'before_id=${encodeURIComponent(requestedCursor)}' in activity
     assert "page.has_more === true" in activity
     assert "nextCursor !== requestedCursor" in activity

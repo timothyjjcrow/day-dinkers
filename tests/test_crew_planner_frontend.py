@@ -99,6 +99,22 @@ def test_invalid_duplicate_and_unknown_availability_has_honest_fallback():
     assert fallback['usedFallback'] is True
 
 
+def test_shared_time_and_fallback_wait_until_every_selected_player_returns():
+    result = run_planner("""
+      (() => {
+        const players=[{id:1,availability:['tue-am']},
+          {id:2,availability:['tue-am'],away_until:'2026-09-09T07:00:00Z'}];
+        const options={hostId:1,now:new Date(2026,7,31,9,0),fallbackScheduledAt:new Date(2026,7,25,10,0)};
+        return {shared:planner.bestSlot(players,options),
+          fallback:planner.bestSlot(players.map(p=>({...p,availability:[]})),options)};
+      })()
+    """)
+    assert result['shared']['scheduledAt'] == '2026-09-15T17:00:00.000Z'
+    assert result['shared']['coverage'] == 2
+    assert result['fallback']['scheduledAt'] == result['shared']['scheduledAt']
+    assert result['fallback']['usedFallback'] is True
+
+
 def test_postgame_ctas_open_the_reviewable_planner_before_any_mutation():
     assert 'id="cel-play-again"' in APP
     assert 'id="gs-play-again"' in APP
@@ -153,3 +169,27 @@ def test_play_again_never_creates_a_game_or_group_before_schedule_submit():
     assert 'gs-rematch' not in APP
     assert "api(`/games/${sourceGameId}/crew`, {" in APP
     assert "body: JSON.stringify({ name: saveGroupName })" in APP
+
+
+def test_common_time_suggestions_respect_every_selected_players_return_without_changing_preferences():
+    start=APP.index('function playerAwayUntil(')
+    source=APP[start:APP.index('function playerAwayLabel(',start)]
+    script=source+'''
+      const now=new Date('2030-09-08T12:00:00Z').getTime();
+      const people=[{id:1,away_until:'2030-09-20T13:00:00Z',availability:['tue-eve']},
+                    {id:2,away_until:'2030-09-22T16:00:00Z',availability:['tue-eve']}];
+      const original=JSON.stringify(people);
+      const slots=plannerSuggestedTimes(people,new Date('2030-09-09T18:00:00Z'),now);
+      const removed=plannerSuggestedTimes(people.slice(0,1),null,now);
+      const same=plannerSuggestedTimes([],new Date('2030-09-08T17:00:00Z'),now);
+      console.log(JSON.stringify({slots,removed,same,unchanged:original===JSON.stringify(people)}));
+    '''
+    completed=subprocess.run(['node','-e',script],capture_output=True,text=True,
+        env={**os.environ,'TZ':'UTC'},check=True)
+    result=json.loads(completed.stdout)
+    assert len(result['slots'])==9 and len(set(result['slots']))==9
+    assert all(value>='2030-09-22T16:00:00.000Z' for value in result['slots'])
+    assert result['removed'][0]=='2030-09-20T17:00:00.000Z'
+    assert result['same'][0]=='2030-09-08T17:00:00.000Z'
+    assert len(result['same'])==len(set(result['same']))
+    assert result['unchanged'] is True

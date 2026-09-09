@@ -71,7 +71,9 @@ def test_cards_and_detail_surface_the_saved_plan_without_hiding_time():
     assert 'game-card-description' not in card
     assert '${esc(game.court_number)}' in card
     assert '<details class="game-detail-plan simple-disclosure">' in detail
-    assert '${esc(game.description)}' in detail
+    assert 'courtEntryDescriptionParts(game).note' in detail
+    assert '${esc(descriptionNote)}' in detail
+    assert '${courtEntryNoticeHtml(game)}' in detail
     assert 'game.ends_at' in detail
     assert 'game.cost_cents' in detail
     assert 'game.court_count' in detail

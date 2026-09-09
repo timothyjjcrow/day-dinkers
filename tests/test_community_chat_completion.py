@@ -62,7 +62,7 @@ def share_game(app, first, second, suffix):
         db.session.commit()
 
 
-def test_single_inbox_keeps_direct_message_requests_and_partial_sources(
+def test_single_inbox_keeps_direct_conversations_and_partial_sources(
         client, app, monkeypatch):
     sender = register(client, 'sender@example.com', 'Sender')
     recipient = register(client, 'recipient@example.com', 'Recipient')
@@ -84,7 +84,8 @@ def test_single_inbox_keeps_direct_message_requests_and_partial_sources(
     row = payload['direct']['items'][0]
     assert row['user']['id'] == sender['user']['id']
     assert row['unread'] == 1
-    assert row['message_request'] is True
+    assert row['message_request'] is False
+    assert row['is_friend'] is False
 
     import backend.routes.chat as chat_routes
 
@@ -131,7 +132,8 @@ def test_direct_mute_suppresses_alerts_and_badges_until_unmuted(client, app):
         ).count() == 0
 
     thread = client.get(f'/api/chat/{sender_id}', headers=auth(recipient)).get_json()
-    assert thread['message_request'] is True
+    assert thread['message_request'] is False
+    assert thread['is_friend'] is False
     assert thread['muted'] is True
     unmuted = client.put(
         f'/api/chat/{sender_id}/settings', json={'muted': False},
@@ -147,7 +149,7 @@ def test_direct_mute_suppresses_alerts_and_badges_until_unmuted(client, app):
     assert client.get('/api/me', headers=auth(recipient)).get_json()['unread_messages'] == 1
     notices = client.get('/api/notifications', headers=auth(recipient)).get_json()['items']
     request_notice = next(item for item in notices if item['kind'] == 'direct_message')
-    assert request_notice['title'] == 'Message request from Sender'
+    assert request_notice['title'] == 'New message from Sender'
     assert request_notice['action_url'] == f'/#chat/{sender_id}'
 
     marked = client.post('/api/chat/read-all', json={}, headers=auth(recipient))

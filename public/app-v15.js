@@ -35,6 +35,7 @@
     chatConversationFilter: 'all',
     peopleMode: 'nearby',
     nearbySkill: '',
+    nearbyRadius: 25,
     boardPeriod: 'all',
     map: null,
     markers: null,
@@ -638,6 +639,8 @@
       availability: [...new Set(Array.isArray(value.availability)
         ? value.availability.filter((slot) => /^(sun|mon|tue|wed|thu|fri|sat)-(am|pm|eve)$/.test(slot))
         : [])],
+      away_until: typeof value.away_until === 'string' && Number.isFinite(Date.parse(value.away_until))
+        ? new Date(value.away_until).toISOString() : null,
       skill_level: ['beginner', 'intermediate', 'advanced', 'pro'].includes(value.skill_level)
         ? value.skill_level : null,
       skill_rating: typeof value.skill_rating === 'number' && Number.isFinite(value.skill_rating)
@@ -717,6 +720,7 @@
       scheduled_at: scheduled.toISOString(),
       game_type: value.game_type === 'ranked' ? 'ranked' : 'casual',
       visibility,
+      ...(value.invite_link_enabled === true ? { invite_link_enabled: true } : {}),
       recurrence,
       ...recurrenceFields,
       max_players: value.game_type === 'ranked'
@@ -958,8 +962,10 @@
       ifNoneMatch = '',
       responseMeta = false,
       _reauthAttempted = false,
+      _scheduleReviewCount = 0,
       ...requestOptions
     } = options;
+    const requestActiveElement = typeof document === 'undefined' ? null : document.activeElement;
     const headers = { 'Content-Type': 'application/json', ...(requestOptions.headers || {}) };
     if (ifNoneMatch) headers['If-None-Match'] = ifNoneMatch;
     let requestToken = state.token;
@@ -1076,6 +1082,39 @@
       // `_reauthAttempted` is the hard one-replay dedupe boundary.
       return api(path, { ...options, _reauthAttempted: true });
     }
+    if (res.status === 409 && data?.error === 'schedule_conflict'
+        && ['POST', 'PATCH', 'PUT'].includes(String(requestOptions.method || '').toUpperCase())) {
+      assertRequestStillActive();
+      if (requestActiveElement?.isConnected === false) {
+        const cancelled = new Error('The original action was closed. Review the plan and try again.');
+        cancelled.code = 'request_cancelled';
+        cancelled.isCancelled = true;
+        throw cancelled;
+      }
+      if (_scheduleReviewCount >= 3) {
+        const changed = new Error('The schedule kept changing. Review the latest plans and try again.');
+        changed.code = 'schedule_changed';
+        throw changed;
+      }
+      const accepted = await confirmScheduleConflict(data);
+      assertCurrentSession();
+      assertRequestStillActive();
+      if (requestActiveElement?.isConnected === false) {
+        const cancelled = new Error('The original action was closed. Review the plan and try again.');
+        cancelled.code = 'request_cancelled';
+        cancelled.isCancelled = true;
+        throw cancelled;
+      }
+      if (!accepted) {
+        const cancelled = new Error('No changes made. Your existing plans are saved.');
+        cancelled.code = 'schedule_conflict_cancelled';
+        cancelled.isCancelled = true;
+        throw cancelled;
+      }
+      const payload = requestOptions.body ? JSON.parse(requestOptions.body) : {};
+      return api(path, { ...options, _scheduleReviewCount: _scheduleReviewCount + 1,
+        body: JSON.stringify({ ...payload, schedule_conflict_ack: data.schedule_conflict_token }) });
+    }
     if (!res.ok) {
       const code = (data && data.error) || `error_${res.status}`;
       if (res.status >= 500) {
@@ -1113,7 +1152,7 @@
 
   const ERROR_TEXT = {
     invalid_email: 'Please enter a valid email.',
-    password_too_short: 'Password must be at least 6 characters.',
+    password_too_short: 'Password must be at least 8 characters.',
     reset_password_too_short: 'Your new password must be at least 8 characters.',
     reset_link_invalid_or_expired: 'That reset link is invalid, expired, or already used. Request a new one.',
     verification_link_invalid_or_expired: 'That email link is invalid, expired, or already used. Request a new one.',
@@ -1278,12 +1317,14 @@
     already_joined: "You're already in this game.",
     user_blocked: "You can't interact with this player.",
     message_not_allowed: 'You can message friends and players you have shared a game, group, competition, or court check-in with.',
+    reply_unavailable: 'The original message is no longer available. Remove this reply and send a new message.',
+    invalid_reply_target: 'Choose a message in this conversation to reply to.',
     crew_changed: 'Someone in this play group is no longer available. Review the selected players and try again.',
     crew_invitees_changed: 'The available players changed. Review the refreshed list, then start your group again.',
     too_many_invitees: 'Choose up to 11 players. A play group has room for 12 people, including you.',
     crew_invitation_changed: 'This invitation has changed. Refresh the group to see whether the player joined or was invited again.',
     invitation_version_required: 'Refresh the group before changing this invitation.',
-    community_session_must_be_open: 'Public community sessions must be open so every member can view and join them.',
+    community_session_must_be_open: 'Public group sessions must be open so every member can view and join them.',
     no_friends: 'Add a friend before making a friends-only game, or choose Anyone nearby.',
     court_id_required: 'Choose a club or court.',
     role_required: 'Choose the role you have at this venue.',
@@ -1291,6 +1332,8 @@
     court_business_already_managed: 'This venue already has a business profile. Submit a claim if you are its authorized representative.',
     business_owner_only: 'Only the verified business manager can change this profile.',
     business_not_found: 'That business profile is no longer available.',
+    business_version_required: 'Refresh this venue before saving. Your edits are still here.',
+    business_version_conflict: 'Another manager saved changes. Your edits are still here; compare the latest venue before saving again.',
     business_verification_required: 'Your venue must be verified before you can publish or request an integration.',
     verification_fields_are_server_managed: 'Verification is managed by the Third Shot review process.',
     invalid_website_url: 'Enter a valid website link.',
@@ -1327,6 +1370,11 @@
     business_report_details_required: 'Tell us what is incorrect or broken.',
     business_transfer_confirmation_required: 'Confirm the new owner before transferring this venue.',
     too_many_items: 'This list is too long. Remove a few items and try again.',
+    score_changed: 'This result changed. Reopen it before responding.',
+    score_review_pending: 'Respond to or withdraw the current score before proposing another.',
+    score_correction_closed: 'The correction window or proposal limit has ended. This match remains unrated.',
+    original_sides_required: 'A correction must keep the original players and sides.',
+    reporter_must_play: 'Only a player on one of the match sides can report its ranked result.',
   };
   function humanError(code, data = {}, status = 0) {
     if (code === 'rate_limited') {
@@ -1813,8 +1861,54 @@
     }
     return hasUsableContent;
   }
+  function feedControlIdentity(node) {
+    if (!node) return null;
+    if (node.id) return `id:${node.id}`;
+    if (node.tagName === 'SUMMARY') {
+      const detail = node.closest('details');
+      return detail?.dataset.viewStateKey ? `summary:${detail.dataset.viewStateKey}` : null;
+    }
+    const attributes = [...node.attributes]
+      .filter((attribute) => attribute.name.startsWith('data-') || attribute.name === 'name')
+      .map((attribute) => [attribute.name, attribute.value])
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    return attributes.length ? JSON.stringify([node.tagName, attributes]) : null;
+  }
+
+  function captureFeedInteraction(el) {
+    const active = document.activeElement;
+    const ownsFocus = !!active && el.contains(active);
+    return {
+      openDetails: [...el.querySelectorAll('details[data-view-state-key]')]
+        .filter((detail) => detail.open).map((detail) => detail.dataset.viewStateKey),
+      focus: ownsFocus ? feedControlIdentity(active) : null,
+      editing: ownsFocus && active.matches('input:not([type="checkbox"]):not([type="radio"]), textarea')
+        ? { value: active.value, start: active.selectionStart, end: active.selectionEnd } : null,
+    };
+  }
+
+  function restoreFeedInteraction(el, snapshot) {
+    if (!snapshot) return;
+    const openKeys = new Set(snapshot.openDetails);
+    el.querySelectorAll('details[data-view-state-key]').forEach((detail) => {
+      detail.open = openKeys.has(detail.dataset.viewStateKey);
+    });
+    if (!snapshot.focus) return;
+    const target = [...el.querySelectorAll('button, a, input, select, textarea, summary, [tabindex]')]
+      .find((node) => feedControlIdentity(node) === snapshot.focus);
+    if (!target || target.disabled || target.closest('[hidden], .hidden')) return;
+    if (snapshot.editing && target.matches('input, textarea')) {
+      target.value = snapshot.editing.value;
+      if (Number.isInteger(snapshot.editing.start) && typeof target.setSelectionRange === 'function') {
+        target.setSelectionRange(snapshot.editing.start, snapshot.editing.end);
+      }
+    }
+    target.focus({ preventScroll: true });
+  }
+
   function commitViewRender(el, stage, key) {
     const sameView = el.dataset.viewKey === key;
+    const interaction = sameView ? captureFeedInteraction(el) : null;
     const priorScrollTop = sameView ? Math.max(0, Number(el.scrollTop) || 0) : null;
     const tab = {
       'play-content': 'play',
@@ -1823,6 +1917,7 @@
     }[el.id] || null;
     if (tab && priorScrollTop != null) state.tabScrollPositions[tab] = priorScrollTop;
     el.replaceChildren(...stage.childNodes);
+    restoreFeedInteraction(el, interaction);
     el.dataset.viewKey = key;
     el.dataset.viewReadyAt = String(Date.now());
     el.setAttribute('aria-busy', 'false');
@@ -2369,6 +2464,9 @@
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(' ', ' ');
   }
   function scoreAutoConfirmCopy(game) {
+    if (game?.score_correction_pending) return game.ranked_correction_expired
+      ? 'Correction expired — this match remains unrated'
+      : `An opponent must agree by ${fmtDateTime(game.ranked_correction_deadline_at)}. No automatic confirmation.`;
     const deadline = game && game.score_auto_confirms_at
       ? new Date(game.score_auto_confirms_at).getTime() : NaN;
     const seconds = Number.isFinite(deadline)
@@ -2462,13 +2560,11 @@
     const parts = [];
     if (player?.skill_rating != null && Number.isFinite(Number(player.skill_rating))) {
       parts.push(`Self-rating ${Number(player.skill_rating).toFixed(1)}`);
-    } else if (legacySelfRatingValue(player?.skill_level)) {
-      parts.push(`Self-rating ${legacySelfRatingValue(player.skill_level).toFixed(1)} (from earlier level)`);
     } else {
       parts.push('Self-rating not set');
     }
     if (includeDupr && player?.dupr_rating != null && Number.isFinite(Number(player.dupr_rating))) {
-      parts.push(`DUPR ${Number(player.dupr_rating).toFixed(3)}`);
+      parts.push(`DUPR ${Number(player.dupr_rating).toFixed(3)} · player-entered`);
     }
     if (includeDupr && player?.dupr_id) parts.push(`DUPR ID ${esc(player.dupr_id)}`);
     if (includeMatchRating && player?.rating != null && Number.isFinite(Number(player.rating))) {
@@ -2484,7 +2580,7 @@
         <div class="rating-explainer">
           <p>Everyone starts at 1200. Wins against stronger opponents earn more points; losses to stronger opponents cost fewer.</p>
           <p>For doubles, Third Shot compares each team’s average match rating. A pre-match estimate can shift if the teams change.</p>
-          <p>An opponent has 72 hours to review a ranked score. We remind them after 12 hours; an unanswered result confirms automatically and can still be disputed for 7 days.</p>
+          <p>An opponent has 72 hours to review an initial ranked score. We remind them after 12 hours; an unanswered result confirms automatically and can still be disputed for 7 days. After a dispute, a corrected score requires the opponent’s agreement and never confirms automatically.</p>
         </div>
         ${showRankingsAction ? `<button type="button" class="btn btn-primary btn-block" data-open-rankings>${uiIcon('trophy')} View rankings</button>` : ''}
       `, { label: 'How Third Shot match ratings work' });
@@ -2557,6 +2653,39 @@
     if (!a || !b) return 0;
     const set = new Set(a);
     return b.reduce((n, s) => n + (set.has(s) ? 1 : 0), 0);
+  }
+  function playerAwayUntil(player, at = Date.now()) {
+    const until = new Date(player?.away_until || '').getTime();
+    return Number.isFinite(until) && until > Number(at) ? new Date(until) : null;
+  }
+  function plannerSuggestedTimes(people, selected, now = Date.now()) {
+    const slots = [], seen = new Set();
+    const add = (date) => {
+      const time = date?.getTime();
+      if (!Number.isFinite(time) || time <= now + 50 * 60000 || seen.has(time)
+          || people.some((person) => playerAwayUntil(person, time))) return;
+      seen.add(time);
+      slots.push(new Date(time));
+    };
+    add(selected);
+    const firstDay = new Date(Math.max(now, ...people.map((person) => (
+      playerAwayUntil(person, now)?.getTime() || now
+    ))));
+    firstDay.setHours(0, 0, 0, 0);
+    for (let day = 0; day < 8 && slots.length < 9; day++) {
+      for (const hour of [9, 12, 17, 18]) {
+        if (slots.length >= 9) break;
+        const date = new Date(firstDay);
+        date.setDate(date.getDate() + day);
+        date.setHours(hour, 0, 0, 0);
+        add(date);
+      }
+    }
+    return slots;
+  }
+  function playerAwayLabel(player) {
+    const until = playerAwayUntil(player);
+    return until ? `Away until ${until.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : '';
   }
   // Short natural summary of the slots two players share: "Sat AM · Wed PM".
   function sharedAvailabilityText(a, b) {
@@ -2961,6 +3090,7 @@
       nameField.classList.toggle('hidden', !registering);
       nameInput.required = registering;
       passwordInput.autocomplete = registering ? 'new-password' : 'current-password';
+      passwordInput.minLength = registering ? 8 : 1;
       $('#auth-password-help').classList.toggle('hidden', !registering);
       $('#auth-forgot-password').classList.toggle('hidden', registering);
       $('#auth-eyebrow').textContent = registering ? 'Join the local game' : 'Welcome back';
@@ -2968,7 +3098,7 @@
       $('#auth-support').textContent = registering
         ? (pendingInviteName
           ? `${pendingInviteName} invited you. Create an account to join them on court.`
-          : 'Set up your profile now. You can choose courts and availability next.')
+          : 'Create an account to join a session or save a court. Add profile details when you need them.')
         : 'Find courts, meet players, and get on the court.';
       $('#auth-toggle').textContent = registering
         ? 'Already have an account? Log in' : 'New here? Create an account';
@@ -3009,6 +3139,17 @@
       moveToAuthDestination(errorAction.dataset.authDestination);
     });
     $('#auth-forgot-password').addEventListener('click', openForgotPassword);
+    $('#auth-access-toggle')?.addEventListener('click', showAuthEntryForm);
+    $('#auth-access-back')?.addEventListener('click', () => {
+      const access = $('#auth-access');
+      access.dataset.userOpened = '';
+      access.classList.add('hidden');
+      $('#auth-access-toggle')?.focus({ preventScroll: true });
+    });
+    $('#auth-court-search-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      searchPublicCourts();
+    });
     document.querySelectorAll('[data-auth-policy]').forEach((button) => {
       button.addEventListener('click', () => openAccountPolicy(button.dataset.authPolicy));
     });
@@ -3029,8 +3170,8 @@
         showAuthError('Enter a complete email address.', emailInput);
         return;
       }
-      if (passwordInput.value.length < 6) {
-        showAuthError('Password must be at least 6 characters.', passwordInput);
+      if (authMode === 'register' ? passwordInput.value.length < 8 : !passwordInput.value) {
+        showAuthError(authMode === 'register' ? 'Password must be at least 8 characters.' : 'Enter your password.', passwordInput);
         return;
       }
       const mfaVisible = !$('#auth-mfa-field').classList.contains('hidden');
@@ -3170,6 +3311,7 @@
     Object.keys(state.courtFilters).forEach((key) => { state.courtFilters[key] = false; });
     state.courtFetchSeq += 1;
     state.nearbySkill = '';
+    state.nearbyRadius = 25;
     clearLookingBanner();
     state.searchQ = '';
     state.tab = 'play';
@@ -3856,9 +3998,9 @@
     const live = t.banner_state === 'live';
     const sub = live
       ? (t.my_next_opponent
-          ? `Next up: vs ${esc(t.my_next_opponent)} — tap to score`
-          : 'Bracket in progress — tap for scores')
-      : (t.my_entry_id && !t.my_checked_in)
+          ? `Next up: vs ${esc(t.my_next_opponent)} · open your match`
+          : 'Tournament in progress · open the court board')
+      : (t.my_entry_id && !t.my_checked_in && t.arrival_open)
         ? `${esc((t.court || {}).name || '')} · tap to check in`
         : `${esc((t.court || {}).name || '')} · tap for details`;
     el.className = `active-game-banner state-${live ? 'live' : 'upcoming'}`;
@@ -4120,7 +4262,7 @@
     });
     setupTablistKeyboard($('#play-segments'));
     setupTablistKeyboard($('#chat-segments'));
-    $('#profile-edit')?.addEventListener('click', openEditProfile);
+    $('#profile-edit')?.addEventListener('click', openProfileEditorHub);
     $('#profile-activity')?.addEventListener('click', openActivity);
     $('#profile-settings')?.addEventListener('click', openSettingsHub);
   }
@@ -4294,9 +4436,7 @@
           openRankedMatchFlow();
         } else if (target === 'new-game') {
           if (state.tab !== 'play') switchTab('play');
-          openNewGameModal({
-            gameType: 'casual', maxPlayers: 6, lockGameType: true, sessionMode: true,
-          });
+          openCreatePlaySheet();
         } else if (target === 'game-flow') {
           if (state.tab !== 'play') switchTab('play');
           openPlaySoonFlow();
@@ -4635,6 +4775,16 @@
         ));
       }
     });
+    if (!$('#court-search-area')) $('#court-list .court-sheet-summary')?.insertAdjacentHTML('beforebegin', '<button type="button" id="court-search-area" class="btn btn-secondary court-search-area hidden" hidden>Search this map area</button>');
+    $('#court-search-area')?.addEventListener('click', () => {
+      state.searchQ = '';
+      state.dismissedSearchSuggestionQuery = '';
+      $('#court-search').value = '';
+      $('#court-search-area').hidden = true;
+      $('#court-search-area').classList.add('hidden');
+      hideSearchSuggest(); syncSearchClear();
+      refreshCourtResults({label:'Searching the visible map area…'});
+    });
     $('#court-more-filters')?.addEventListener('click', openCourtFilterSheet);
     $('#court-auto-checkin')?.addEventListener('click', () => {
       if (!autoCheckInEnabled()) {
@@ -4657,16 +4807,13 @@
         state.suppressCourtMoveFetch = false;
         return;
       }
-      // A typed result set belongs to the previous view. An intentional pan
-      // returns discovery to the viewport instead of silently re-running that
-      // old query somewhere else.
       if (state.searchQ) {
-        state.searchQ = '';
-        state.dismissedSearchSuggestionQuery = '';
-        const search = $('#court-search');
-        if (search) search.value = '';
-        hideSearchSuggest();
-        syncSearchClear();
+        clearTimeout(state.courtMoveFetchTimer);
+        state.courtMoveFetchTimer = null;
+        const area = $('#court-search-area');
+        if (area) { area.hidden = false; area.classList.remove('hidden'); }
+        syncUseMapAreaAction();
+        return;
       }
       // Drag, touch, and Leaflet keyboard panning all finish at moveend. Show
       // the cross-app area action only after a meaningful user-owned move.
@@ -5980,6 +6127,7 @@
     const spin = $('#search-spin');
     if (!input || !clear || !spin) return;
     const busy = !spin.classList.contains('hidden');
+    if (!input.value.trim() && $('#court-search-area')) { $('#court-search-area').hidden = true; $('#court-search-area').classList.add('hidden'); }
     clear.classList.toggle('hidden', busy || !input.value.trim());
   }
 
@@ -6138,9 +6286,10 @@
       const partial = state.courtResultsTruncated && total > n
         ? `Showing ${n} of ${total}. ${searching ? 'Load more results' : 'Zoom in or load more'}.`
         : '';
-      context.textContent = active.length ? `${searching ? `For “${state.searchQ}” · ` : ''}Matching ${active.join(' · ')}${partial ? ` · ${partial}` : ''}`
+      const scope = savedOnly ? 'Your saved courts' : searching ? 'Matching court names and cities' : 'Visible map area';
+      context.textContent = `${scope} · Distances from map center · ` + (active.length ? `${searching ? `For “${state.searchQ}” · ` : ''}Matching ${active.join(' · ')}${partial ? ` · ${partial}` : ''}`
         : searching ? `For “${state.searchQ}”${partial ? ` · ${partial}` : ''}`
-          : partial || 'Tap a court to compare and act';
+          : partial || 'Tap a court to compare and act');
     }
     const status = $('#court-sheet-status');
     if (status && state.courtResultsTruncated && total > n) {
@@ -6486,7 +6635,7 @@
     const markerLabel = [
       court.name,
       integrated ? `Official venue profile from ${court.business.name}` : '',
-      busy ? `${court.players_here} checked in` : `${court.num_courts} court${court.num_courts === 1 ? '' : 's'}`,
+      busy ? `${court.players_here} shared check-ins. ${courtPresenceSummaryText(court.presence_summary)}` : `${court.num_courts} court${court.num_courts === 1 ? '' : 's'}`,
       court.active_games ? `${court.active_games} pickup game${court.active_games === 1 ? '' : 's'} in the next two hours` : '',
       fav ? 'Saved court' : '',
       court.condition && COURT_CONDITION_LABELS[court.condition]
@@ -6757,16 +6906,17 @@
             <p class="court-peek-eyebrow">Selected court</p>
             <h3 class="row-title court-preview-title" tabindex="-1">${esc(court.name)}${court.business ? `<span class="verified-venue-badge">${uiIcon('check-circle')} Verified venue</span>` : ''}</h3>
             <div class="row-sub">${[court.distance_miles != null ? `${court.distance_miles} mi` : '', esc(court.city || ''), live].filter(Boolean).join(' · ')}</div>
+            ${court.players_here ? `<p class="simple-note">${esc(courtPresenceSummaryText(court.presence_summary))}</p>` : ''}
             ${court.business ? `<div class="court-preview-venue">Official profile from ${esc(court.business.name)}${court.business.booking_available ? ' · Booking available' : ''}</div>` : ''}
           </div>
           <button type="button" class="court-preview-close" data-preview-close aria-label="Clear selected court">${uiIcon('x')}</button>
         </div>
-        <div class="court-preview-actions ${businessDiscovery ? 'has-business' : ''}">
-          ${businessDiscovery ? `<button type="button" class="btn btn-primary" data-preview-business>${esc(businessLabel)}</button>` : ''}
-          <button type="button" class="btn btn-secondary" data-preview-detail>Court details</button>
-          <button type="button" class="btn ${businessDiscovery ? 'btn-secondary' : 'btn-primary'}" data-preview-play>Play options</button>
+        <div class="court-next-opportunity" data-preview-next></div>
+        <div class="court-preview-actions">
+          <button type="button" class="btn btn-secondary" data-preview-detail>All dates & court details</button>
           <a class="btn btn-secondary" data-preview-directions href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name)} (opens Maps)">${uiIcon('external')}<span>Directions</span></a>
         </div>`;
+      loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court);
       preview.classList.remove('hidden');
       preview.scrollTop = 0;
       preview.querySelector('[data-preview-close]').addEventListener('click', () => {
@@ -6776,13 +6926,7 @@
       });
       const selectionStatus = $('#court-selection-status');
       if (selectionStatus) selectionStatus.textContent = `${court.name} selected. ${live}.`;
-      preview.querySelector('[data-preview-business]')?.addEventListener('click', () => {
-        openCourtFromDiscovery(court, { focusBusiness: true });
-      });
       preview.querySelector('[data-preview-detail]').addEventListener('click', () => openCourtFromDiscovery(court));
-      preview.querySelector('[data-preview-play]').addEventListener('click', () => {
-        openCourtPlayMenu(court);
-      });
     }
     document.querySelectorAll('#court-list-items [data-court-card]').forEach((card) => {
       const selected = Number(card.dataset.courtCard) === court.id;
@@ -6904,7 +7048,7 @@
       <p class="row-sub" style="margin-bottom:12px">When Third Shot is open, it can use your location to check you in near a court and check you out after you leave.</p>
       <div class="privacy-note">
         <b>Who can see it?</b>
-        <span>Players viewing that court can see that you're there. Your precise live location is never shown.</span>
+        <span>${esc(courtPresenceAudience(false))} Your precise live location is never shown.</span>
       </div>
       <button type="button" class="btn btn-primary btn-block" id="auto-checkin-enable" style="margin-top:14px">Allow while the app is open</button>
       <button type="button" class="btn btn-secondary btn-block modal-close" style="margin-top:8px">Not now</button>
@@ -6973,6 +7117,29 @@
     const error = new Error(message);
     error.code = code;
     return error;
+  }
+
+  function courtPresenceAudience(looking, visibility = state.me?.nearby_visibility) {
+    if (visibility === 'hidden') return 'Your profile stays hidden. Your check-in is included in the court total.';
+    if (visibility === 'friends' || !looking) return 'Friends can recognize you. Other people see only the court total.';
+    return 'Signed-in players can see your profile while you look for a game. Public visitors see only the total.';
+  }
+
+  function courtPresenceSourceText(presence) {
+    const source = presence?.location_verified_at ? 'Location confirmed' : 'Self-reported';
+    const timestamp = presence?.location_verified_at || presence?.last_confirmed_at;
+    const minutes = timestamp ? Math.max(0, Math.floor((Date.now() - new Date(timestamp).getTime()) / 60000)) : null;
+    return source + (Number.isFinite(minutes) ? ` · ${minutes < 1 ? 'just now' : `${minutes} min ago`}` : '');
+  }
+
+  function courtPresenceSummaryText(summary) {
+    if (!summary) return '';
+    const parts = [];
+    if (summary.location_confirmed) parts.push(`${summary.location_confirmed} location confirmed`);
+    if (summary.self_reported) parts.push(`${summary.self_reported} self-reported`);
+    const minutes = summary.updated_at ? Math.max(0, Math.floor((Date.now() - new Date(summary.updated_at).getTime()) / 60000)) : null;
+    if (parts.length && Number.isFinite(minutes)) parts.push(`updated ${minutes < 1 ? 'just now' : `${minutes} min ago`}`);
+    return parts.join(' · ');
   }
 
   async function freshCourtPresenceLocation(courtValue) {
@@ -7300,7 +7467,7 @@
         <div class="row-title section-label-icon">${uiIcon('calendar')} Community-verified open play</div>
         ${rows.map((row, index) => {
           const details = [row.level, row.cost, row.notes].filter(Boolean).join(' · ');
-          return `<div class="cd-open-play-row"><span><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start, row.end)}`)}</b>${details ? `<span>${esc(details)}</span>` : ''}</span><button type="button" class="btn btn-secondary btn-sm" data-plan-open-play="${index}" data-open-play-day="${row.weekday}" data-open-play-start="${row.start}">${uiIcon('plus')} Plan this session</button></div>`;
+          return `<div class="cd-open-play-row"><span><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start, row.end)}`)}</b>${details ? `<span>${esc(details)}</span>` : ''}</span><button type="button" class="btn btn-secondary btn-sm" data-plan-open-play="${index}" data-open-play-day="${row.weekday}" data-open-play-start="${row.start}">${uiIcon('plus')} Plan to go with others</button></div>`;
         }).join('')}
         ${court.open_play_schedule ? `<p class="cd-open-play-note"><b>General note:</b> ${esc(court.open_play_schedule)}</p>` : ''}
       </div>`;
@@ -7326,14 +7493,168 @@
         .filter((window) => window && validClock(window.open) && validClock(window.close))
         .map((window) => window.open === window.close ? '24 hours'
           : `${courtTimeRangeLabel(window.open, window.close)}${window.close < window.open ? ' (next day)' : ''}`);
-      return { label, windows };
+      return { label, windows, closed: Array.isArray(raw) && !raw.length };
     });
-    if (!rows.some((row) => row.windows.length)) {
+    if (!rows.some((row) => row.windows.length || row.closed)) {
       return `<p>${esc(court.hours || 'Hours have not been listed yet.')}</p>`;
     }
-    return `<dl class="court-visit-hours">${rows.map((row) => `<div><dt>${esc(row.label)}</dt><dd>${esc(row.windows.join(' · ') || 'Not listed')}</dd></div>`).join('')}</dl>
+    return `<dl class="court-visit-hours">${rows.map((row) => `<div><dt>${esc(row.label)}</dt><dd>${esc(row.windows.join(' · ') || (row.closed ? 'Closed' : 'Not listed'))}</dd></div>`).join('')}</dl>
+      ${Object.keys(schedule.exceptions || {}).length ? `<div class="court-hours-exceptions"><b>Special dates</b>${Object.entries(schedule.exceptions).sort(([a],[b])=>a.localeCompare(b)).map(([on,windows])=>`<p>${esc(on)} · ${esc(windows.length ? windows.map(row=>courtTimeRangeLabel(row.open,row.close)).join(' · ') : 'Closed')}</p>`).join('')}</div>` : ''}
       ${schedule.timezone ? `<p class="row-sub">Times at the court · ${esc(String(schedule.timezone).replaceAll('_', ' '))}</p>` : ''}
       ${court.hours ? `<p class="court-visit-note">${esc(court.hours)}</p>` : ''}`;
+  }
+
+  function courtTimelineDate(value) {
+    return new Date(`${value}T12:00:00`).toLocaleDateString([], {month:'short',day:'numeric'});
+  }
+
+  function courtTimelineTime(item) {
+    const row = item.schedule || item.window || {};
+    if (item.starts_at) {
+      try { return new Date(item.starts_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',...(item.timezone ? {timeZone:item.timezone} : {})}); } catch { return fmtTimeShort(item.starts_at); }
+    }
+    return businessTimeLabel(row.start_time || row.start) || 'Time not listed';
+  }
+
+  function courtTimelineItemHtml(item, {compact=false} = {}) {
+    const game = item.game || {}, row = item.schedule || item.window || {};
+    const status = item.status === 'cancelled' ? 'Cancelled' : item.status === 'sold_out' ? 'Full' : '';
+    const facts = item.source === 'player'
+      ? [game.game_type === 'ranked' ? 'Ranked match' : Number(game.max_players)>4 ? 'Pickup session' : 'Casual match', gameLevelRangeLabel(game), game.is_joined ? 'You’re going' : game.spots_left > 0 ? `${game.spots_left} spots left` : 'Full', game.cost_cents == null ? null : Number(game.cost_cents) === 0 ? 'Free' : `$${(Number(game.cost_cents)/100).toFixed(2)} per player`]
+      : [row.skill_level || row.level, row.price_text || row.cost, row.availability_label || (item.source === 'venue' ? 'Check availability with venue' : '')];
+    const booking = item.action === 'external' ? businessActionHref(row.booking_url) : '';
+    const action = item.action === 'open_session' ? `<button type="button" class="btn btn-primary btn-sm" data-court-timeline-game="${game.id}">${esc(item.action_label)}</button>`
+      : item.action === 'plan' ? `<button type="button" class="btn btn-secondary btn-sm" data-court-timeline-plan="${esc(item.key)}">Plan to go</button>`
+      : booking ? `<a class="btn btn-primary btn-sm" href="${esc(booking)}" target="_blank" rel="noopener"${businessTrackingAttributes('booking',row)}>${esc(item.action_label || 'Register externally')}${uiIcon('link')}<small>${esc(new URL(booking).hostname)}</small></a>`
+      : `<span class="court-timeline-status">${esc(status || (item.hours_conflict ? 'Check court hours' : 'Registration details not listed'))}</span>`;
+    const names = (game.players || []).slice(0,3).map(player=>player.display_name).filter(Boolean);
+    return `<article class="court-timeline-item is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-time">${esc(courtTimelineTime(item))}${compact ? `<small>${esc(upcomingDayLabel(item.starts_at || `${item.event_date}T12:00:00`))}</small>` : ''}</div><div class="court-timeline-content"><span class="court-timeline-source">${esc(item.source_label)}</span><h4>${esc(item.title)}</h4><p>${facts.filter(Boolean).map(esc).join(' · ')}</p>${!compact && names.length ? `<p>${esc(names.join(', '))}${game.players.length>names.length ? ` +${game.players.length-names.length}` : ''}</p>` : ''}${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${!compact && item.source==='community' ? '<small>A listed time. Planning does not register you with the venue.</small>' : ''}${action}</div></article>`;
+  }
+
+  const COURT_OPEN_PLAY_PLAN_SOURCE = 'Player plan for community-listed open play.';
+
+  function courtOpenPlayPlanDescription(court, row) {
+    const visiting = court.visitor_info || {};
+    const entry = [COURT_OPEN_PLAY_PLAN_SOURCE, 'Joining does not register you with the venue or reserve court space.',
+      ['reservation','both'].includes(visiting.play_access) ? 'Book or register with the venue separately when required.' : 'Check the court’s current entry rules before going.',
+      visiting.access_type === 'members' ? 'Venue membership or guest eligibility may be required.' : visiting.access_type === 'fee' ? 'Venue entry fees may apply.' : '',
+      row.cost ? `Community-listed play cost: ${String(row.cost).slice(0,100)}.` : '',
+    ].filter(Boolean).join(' ');
+    return [entry, String(row.notes || '').trim()].filter(Boolean).join('\n\n').slice(0,1000);
+  }
+
+  function courtEntryDescriptionParts(game) {
+    const description = String(game.description || '');
+    if (!description.startsWith(COURT_OPEN_PLAY_PLAN_SOURCE)) return {entry:'',note:description};
+    const [entry,...notes] = description.split(/\n\s*\n/);
+    return {entry,note:notes.join('\n\n')};
+  }
+
+  function courtEntryNoticeHtml(game) {
+    const {entry} = courtEntryDescriptionParts(game);
+    return entry ? `<section class="court-entry-notice" aria-label="Venue entry requirements"><b>Plan together · venue entry is separate</b><p>${esc(entry)}</p></section>` : '';
+  }
+
+  function openCourtWindowPlan(court, item, parent) {
+    const row = item.window || {};
+    const venueAccess = court.visitor_info?.play_access;
+    const open = opener => parent ? openChildModal(parent, opener) : opener();
+    const sheet = open(() => openModal(`${modalHead('Plan to go with others')}<p><b>${esc(court.name)}</b><br />${esc(courtTimelineDate(item.event_date))} · ${esc(businessTimeLabel(row.start))}–${esc(businessTimeLabel(row.end))}</p><p class="simple-note">This creates a player plan. ${venueAccess === 'reservation' || venueAccess === 'both' ? 'Book or register with the venue separately when required.' : 'Venue entry rules and fees still apply.'} ${esc(row.cost || '')}</p>${!item.timezone ? `<label class="form-field">Confirm the court’s time zone<select id="court-plan-timezone">${window.VenueWorkspace.timezoneOptions('')}</select></label>` : ''}<p class="form-error hidden" role="alert"></p><button type="button" class="btn btn-primary btn-block" data-create-court-plan>Continue to player plan</button>`, {label:'Plan a visit with other players'}));
+    sheet.querySelector('[data-create-court-plan]').addEventListener('click', async () => {
+      const zone = item.timezone || sheet.querySelector('#court-plan-timezone')?.value;
+      const anchor = new Date(Date.parse(`${item.event_date}T00:00:00Z`)-36*3600e3);
+      const start = zone ? nextCourtOpenPlayStart(row,anchor,zone) : null;
+      const error=sheet.querySelector('[role=alert]');
+      if (!start || calendarDateInTimeZone(start,zone)!==item.event_date) { error.textContent='Confirm the venue time zone to plan this date correctly.';error.classList.remove('hidden');return; }
+      const button = sheet.querySelector('[data-create-court-plan]');
+      button.disabled=true;button.textContent='Checking this date…';error.classList.add('hidden');
+      try {
+        const fresh = await api(`/courts/${court.id}/play?from=${item.event_date}&to=${item.event_date}`);
+        if (!sheet.isConnected) return;
+        const listed = (fresh.items || []).find(value => value.source==='community' && value.window?.weekday===row.weekday && value.window?.start===row.start);
+        if (!listed || listed.hours_conflict) throw new Error(listed?.hours_warning || 'This time is no longer listed. Check the court schedule before making a plan.');
+        openChildModal(sheet, () => openNewGameModal({court,gameType:'casual',lockGameType:true,sessionMode:true,maxPlayers:8,scheduledAt:listed.starts_at || start.toISOString(),durationMinutes:courtOpenPlayDuration(listed.window),title:'Open play together',description:courtOpenPlayPlanDescription(court,listed.window),sourceLabel:'Plan to go · venue entry is separate'}));
+      } catch(failure) { if(sheet.isConnected){error.textContent=failure.message;error.classList.remove('hidden');} }
+      finally { if(sheet.isConnected){button.disabled=false;button.textContent='Continue to player plan';} }
+    });
+    return sheet;
+  }
+
+  function bindCourtTimelineActions(root, court, items, parent) {
+    root.querySelectorAll('[data-court-timeline-game]').forEach(button=>button.addEventListener('click',()=>parent ? openChildModal(parent,()=>openGameScreen(Number(button.dataset.courtTimelineGame))) : openGameScreen(Number(button.dataset.courtTimelineGame))));
+    root.querySelectorAll('[data-court-timeline-plan]').forEach(button=>button.addEventListener('click',()=>{const item=items.find(row=>row.key===button.dataset.courtTimelinePlan);if(item)openCourtWindowPlan(court,item,parent);}));
+    bindBusinessActionTracking(root,null);
+  }
+
+  async function loadCourtNextOpportunity(slot, court) {
+    if (!slot || slot.dataset.loading) return;
+    slot.dataset.loading = 'true';
+    slot.innerHTML = '<p class="row-sub" role="status">Finding the next session…</p>';
+    try {
+      const data = await api(`/courts/${court.id}/play`);
+      if (!slot.isConnected) return;
+      const item = (data.items || []).find(row => row.status !== 'cancelled' && row.status !== 'sold_out' && row.action !== 'none');
+      slot.innerHTML = item ? `<span class="court-next-label">Next up</span>${courtTimelineItemHtml(item,{compact:true})}`
+        : `<p class="row-sub">${data.closed ? 'Court marked closed' : 'No dated play listed in the next 7 days'}</p>`;
+      bindCourtTimelineActions(slot,court,item ? [item] : [],null);
+      syncCourtDockLayout();
+    } catch {
+      if (!slot.isConnected) return;
+      slot.innerHTML = '<p class="row-sub">Next session unavailable.</p><button type="button" class="btn-link" data-next-retry>Retry schedule</button>';
+      slot.querySelector('[data-next-retry]').addEventListener('click',()=>{delete slot.dataset.loading;loadCourtNextOpportunity(slot,court);});
+    }
+  }
+
+  function loadCourtTimeline(modal,court) {
+    const root=modal.querySelector('#cd-play-here');if(!root)return;
+    let generation=0, from='', latest=null;
+    const load=async(newFrom='', {quiet=false}={})=>{
+      const seq=++generation;from=newFrom;
+      if (!quiet) root.innerHTML='<h3>Play here</h3><p role="status">Loading this court’s schedule…</p>';
+      root.setAttribute('aria-busy','true');
+      try {
+        const data=await api(`/courts/${court.id}/play${from ? `?from=${from}` : ''}`);
+        if(!root.isConnected || seq!==generation)return;
+        latest=data;
+        const groups=new Map();for(const item of data.items || []){if(!groups.has(item.event_date))groups.set(item.event_date,[]);groups.get(item.event_date).push(item);}
+        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Play here</h3><button type="button" class="btn-link" data-timeline-create>Create game</button></div><p class="court-timeline-zone">${data.timezone ? `Times at this court · ${esc(data.timezone.replaceAll('_',' '))}` : 'Player sessions use your time zone. Listed open-play times are local to the court.'}</p><div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev>Previous week</button><button type="button" class="btn btn-secondary btn-sm" data-timeline-today>This week</button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next>Next week</button></div><p class="court-timeline-dates">${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</p>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>`<section class="court-timeline-day"><h4>${esc(new Date(`${on}T12:00:00`).toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</h4>${items.map(item=>courtTimelineItemHtml(item)).join('')}</section>`).join('') : '<p class="court-timeline-empty">No dated play is listed this week. Try next week or create a game.</p>'}${data.undated_count ? '<p class="simple-note">Some venue programs have no confirmed dates. Check the venue details below.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
+        const shift=days=>{const date=new Date(`${data.from}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+days);load(date.toISOString().slice(0,10));};
+        root.querySelector('[data-timeline-prev]').addEventListener('click',()=>shift(-7));root.querySelector('[data-timeline-next]').addEventListener('click',()=>shift(7));root.querySelector('[data-timeline-today]').addEventListener('click',()=>load());
+        const create=root.querySelector('[data-timeline-create]');create.disabled=data.closed;create.addEventListener('click',()=>openChildModal(modal,()=>openNewGameModal({court})));
+        bindCourtTimelineActions(root,court,data.items,modal);
+      } catch(error){if(root.isConnected && seq===generation){root.innerHTML=`<h3>Play here</h3><p role="alert">${esc(error.message || 'The schedule could not load.')}</p><button type="button" class="btn btn-secondary" data-timeline-retry>Retry schedule</button>`;root.querySelector('[data-timeline-retry]').addEventListener('click',()=>load(from));}}
+      finally{if(root.isConnected && seq===generation)root.removeAttribute('aria-busy');}
+    };
+    modal._onResume = () => load(from,{quiet:true});
+    load();return()=>latest;
+  }
+
+  function courtConditionReportsHtml(court) {
+    const reports = court.condition_reports || (court.latest_condition ? [court.latest_condition] : []);
+    if (!reports.length) return '';
+    const mixed = new Set(reports.map(row => row.condition)).size > 1;
+    const line = report => {
+      const condition = COURT_CONDITION_LABELS[report.condition] || ['alert-triangle',report.condition];
+      return `<li><span>${uiIcon(condition[0])}<b>${esc(condition[1])}</b></span><small>${esc(report.user_name || 'Player')} · ${esc(fmtDateTime(report.reported_at))}</small></li>`;
+    };
+    return `<section class="court-condition-reports"><h4>${mixed ? 'Recent reports differ' : 'Latest player report'}</h4><ul>${line(reports[0])}</ul>${reports.length > 1 ? `<details><summary>${reports.length - 1} other recent report${reports.length === 2 ? '' : 's'}</summary><ul>${reports.slice(1).map(line).join('')}</ul></details>` : ''}<p>Player reports from the last 3 hours. Conditions may change.</p></section>`;
+  }
+
+  function courtCheckinHistoryHtml(history) {
+    if (!history) return '';
+    const count = Number(history.sample_size) || 0;
+    const range = [history.range_start,history.range_end].filter(Boolean).map(resultDayLabel).join(' – ');
+    return `<div class="cd-detail-note court-checkin-history">${uiIcon('chart')}<div><b>Recent Third Shot check-ins</b><p>${count} shared check-in${count === 1 ? '' : 's'}${range ? ` · ${esc(range)}` : ''}</p>${history.sufficient_sample && history.windows?.length ? `<ul>${history.windows.map(row => `<li>${esc(row.label)} <span>${row.count} check-ins</span></li>`).join('')}</ul>${history.timezone_source === 'approximate' ? '<p>Times are approximate; this court has no confirmed time zone.</p>' : ''}` : '<p>Too little app activity to show a useful pattern.</p>'}<p>This reflects app check-ins, not how busy the court will be.</p></div></div>`;
+  }
+
+  function courtVisitingInfoHtml(court) {
+    const facts = court.visitor_info || {}, sources = court.visitor_info_sources || {};
+    const rows = Object.entries(facts).filter(([,value]) => value).map(([key,value]) => {
+      const summary = window.VenueWorkspace.visitingSummary({[key]:value});
+      const colon = summary.indexOf(':');
+      return `<div><dt>${esc(summary.slice(0,colon))}<small>${sources[key] === 'venue' ? 'From the venue' : 'Community information'}</small></dt><dd>${esc(summary.slice(colon+1).trim())}</dd></div>`;
+    });
+    return rows.length ? `<dl class="court-visiting-facts">${rows.join('')}</dl>` : '<p class="simple-note">Entrance, parking and access details have not been added yet.</p>';
   }
 
   function openCourtVisitSheet(court, section = 'hours') {
@@ -7352,7 +7673,7 @@
     const phone = safeHref(court.phone && `tel:${court.phone}`, { tel: true });
     const modal = openModal(`
       ${modalHead('Before you go', 'map-pin')}
-      <p class="court-visit-intro"><b>${esc(court.name)}</b><span>Community-maintained court information</span></p>
+      <p class="court-visit-intro"><b>${esc(court.name)}</b><span>Venue and community information</span></p>
       ${court.closed ? '<p class="court-visit-closed">This court is reported permanently closed.</p>' : ''}
       <section class="court-visit-section" aria-labelledby="court-visit-hours-title">
         <h4 id="court-visit-hours-title" tabindex="-1">${uiIcon('clock')} Hours</h4>
@@ -7363,6 +7684,7 @@
         <p>${esc(court.fees || courtFeeTypeFact(court) || 'Fees have not been listed yet.')}</p>
         ${reservation ? `<a class="btn btn-secondary btn-block" href="${esc(reservation)}" target="_blank" rel="noopener">${uiIcon('external')} View reservation details</a>` : ''}
       </section>
+      <section class="court-visit-section"><h4>Arrival &amp; playing here</h4>${courtVisitingInfoHtml(court)}${state.me && !court.business?.preview_only ? '<button type="button" class="btn-link" id="court-visit-correction">Add or correct visiting details</button>' : ''}</section>
       <section class="court-visit-section" aria-labelledby="court-visit-openplay-title">
         <h4 id="court-visit-openplay-title" tabindex="-1">${uiIcon('calendar')} Open play</h4>
         ${rows.length ? `<div class="court-visit-openplay">${rows.map((row) => `<div><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start, row.end)}`)}</b>${row.level || row.cost ? `<p class="row-sub">${esc([row.level, row.cost].filter(Boolean).join(' · '))}</p>` : ''}${row.notes ? `<p>${esc(row.notes)}</p>` : ''}</div>`).join('')}</div>` : ''}
@@ -7378,6 +7700,7 @@
         ${phone ? `<a class="btn btn-secondary" href="${esc(phone)}">${uiIcon('phone')} Call the court</a>` : ''}
       </div>
     `, { label: `Before you go to ${court.name}` });
+    modal.querySelector('#court-visit-correction')?.addEventListener('click', () => openChildModal(modal, () => openSuggestEditSheet(court, () => transitionModal(modal, () => openCourtDetail(court.id)))));
     requestAnimationFrame(() => {
       if (!modal.isConnected) return;
       const key = ['hours', 'fees', 'openplay'].includes(section) ? section : 'hours';
@@ -7465,7 +7788,7 @@
     );
     const activityHtml = quietNow
       ? `<span class="court-card-quiet">No players checked in${c.upcoming_games > 0 ? ` · ${c.upcoming_games} later session${c.upcoming_games === 1 ? '' : 's'}` : c.rating_count > 0 && c.rating_avg ? ` · ${uiIcon('star')} ${c.rating_avg}` : ''}</span>`
-      : `<span class="court-card-metrics">${liveMetrics.join('')}</span>`;
+      : `<span class="court-card-metrics">${liveMetrics.join('')}</span>${c.players_here ? `<span class="court-card-reason">${esc(courtPresenceSummaryText(c.presence_summary))}</span>` : ''}`;
     const reasonHtml = location && c.distance_miles != null
       ? `<span class="court-card-reason">${esc(location)}</span>` : '';
     const accessibleActivity = [
@@ -7549,6 +7872,7 @@
           <span class="court-peek-eyebrow">${selected ? 'Selected court' : index === 0 ? 'Nearest result' : 'Nearby result'}</span>
           <span class="court-peek-name">${esc(c.name)}</span>
           <span class="court-peek-meta">${esc(location)}</span>
+          ${c.players_here ? `<span class="court-peek-meta">${esc(courtPresenceSummaryText(c.presence_summary))}</span>` : ''}
         </span>
         <span class="court-card-open-icon" aria-hidden="true">${uiIcon('chevron-right')}</span>
       </button>
@@ -7819,6 +8143,8 @@
         <p class="court-form-helper">Review the exact value before it can update the listing.</p>
         <div id="se-pending-list" aria-live="polite"></div>
       </section>
+      <details class="court-form-section hidden" id="se-history"><summary>Your submitted corrections</summary><div id="se-history-list"></div></details>
+      <details class="court-form-section"><summary>Access, parking &amp; arrival</summary>${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'community-visit')}</details>
       <section class="court-form-section" aria-labelledby="se-setup-label">
         <div class="section-label section-label-icon" id="se-setup-label">${uiIcon('grid')} Court setup</div>
         <div class="form-field">
@@ -7863,8 +8189,10 @@
         <legend class="section-label section-label-icon">${uiIcon('alert-triangle')} Closure</legend>
         <div class="choice-check-list">
           ${check('se-closed', 'x', 'This court is permanently closed or gone', court.closed)}
+          <label for="se-closure-evidence">Closure or reopening evidence<input id="se-closure-evidence" maxlength="500" placeholder="What changed, when, and where you confirmed it" /></label>
+          <small>Changing closure status requires an operator review. Other factual corrections use community confirmation.</small>
         </div>
-        <p class="row-sub">Once another player confirms, the court is hidden from the map and new play is paused.</p>
+        <p class="row-sub">An operator reviews the evidence and the effect on upcoming sessions before closure status changes.</p>
       </fieldset>
       <div class="court-contribution-actions">
         <button type="submit" class="btn btn-primary btn-block" id="se-submit">${uiIcon('check')} Submit suggestion</button>
@@ -7877,12 +8205,13 @@
     const suggestionLabels = {
       num_courts: 'Number of courts', indoor: 'Indoor', lighted: 'Lighted',
       nets_provided: 'Nets provided', has_restrooms: 'Restrooms', has_water: 'Water fountain',
-      surface_type: 'Surface', fees: 'Fees', hours: 'Hours',
+      surface_type: 'Surface', fees: 'Fees', hours: 'Hours', visitor_info: 'Access & arrival',
       open_play_schedule: 'Open-play note', open_play_schedule_rows: 'Open-play times',
       closed: 'Permanently closed',
     };
     const suggestionValueText = (field, value) => {
       if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+      if (field === 'visitor_info') return window.VenueWorkspace.visitingSummary(value) || 'Not listed';
       if (field === 'open_play_schedule_rows' && Array.isArray(value)) {
         return value.map((row) => {
           const day = COURT_WEEKDAY_LABELS[row.weekday] || row.weekday;
@@ -7901,7 +8230,7 @@
           <div class="court-pending-suggestion-copy">
             <b>${esc(suggestionLabels[item.field] || item.field)}</b>
             <span>${esc(suggestionValueText(item.field, item.value))}</span>
-            <small>${item.confirmations} of 2 confirmations${item.rejections ? ` · ${item.rejections} marked not right` : ''}</small>
+            <small>${item.requires_review ? 'Awaiting operator review · ' + item.confirmations + ' report(s)' : item.confirmations + ' of 2 confirmations'}${item.rejections ? ` · ${item.rejections} marked not right` : ''}</small>
           </div>
           <div class="court-pending-suggestion-actions">
             ${item.confirmed_by_me
@@ -7917,9 +8246,17 @@
     const loadPendingSuggestions = async () => {
       try {
         const result = await api(`/courts/${court.id}/suggestions`);
-        if (modal.isConnected) renderPendingSuggestions(result.items);
+        if (modal.isConnected) {
+          renderPendingSuggestions(result.items);
+          const history = result.my_history || [];
+          modal.querySelector('#se-history').classList.toggle('hidden', !history.length);
+          modal.querySelector('#se-history-list').innerHTML = history.map(item => `<article class="court-pending-suggestion"><div class="court-pending-suggestion-copy"><b>${({pending:'Awaiting confirmation or review',applied:'Applied',declined:'Not approved',withdrawn:'Withdrawn',rejected:'Marked not right'})[item.status] || esc(item.status)}</b><small>${esc(fmtDateTime(item.submitted_at))}</small>${Object.entries(item.changes || {}).map(([key,value]) => `<span><b>${esc(suggestionLabels[key] || key)}</b> ${Object.hasOwn(item.before || {},key) ? `${esc(suggestionValueText(key,item.before[key]))} → ` : ''}${esc(suggestionValueText(key,value))}</span>`).join('')}${item.review_note ? `<small>${esc(item.review_note)}</small>` : ''}</div></article>`).join('');
+        }
       } catch {
-        // This secondary review lane should never prevent submitting a fresh correction.
+        if (!modal.isConnected) return;
+        modal.querySelector('#se-history').classList.remove('hidden');
+        modal.querySelector('#se-history-list').innerHTML = '<p role="status">Submitted corrections could not load. You can still send a new correction.</p><button type="button" class="btn-link" data-retry-court-history>Retry history</button>';
+        modal.querySelector('[data-retry-court-history]').addEventListener('click', loadPendingSuggestions);
       }
     };
     pendingList.addEventListener('click', async (event) => {
@@ -8024,6 +8361,8 @@
         open_play_schedule: modal.querySelector('#se-open-play').value.trim(),
         open_play_schedule_rows: normalizedOpenPlayRows,
         closed: modal.querySelector('#se-closed').checked,
+        evidence: modal.querySelector('#se-closure-evidence').value.trim(),
+        visitor_info: window.VenueWorkspace.readVisitingForm(modal, 'community-visit'),
       };
       const finish = formUX.startSubmitting('Submitting suggestion…');
       if (!finish) return;
@@ -8035,7 +8374,7 @@
           toast('Court updated — thanks!', { tone: 'success', icon: 'edit' });
           if (onApplied) onApplied();
         } else {
-          toast('Suggestion recorded — one more confirmation applies it', { tone: 'success', icon: 'check-circle' });
+          toast(body.closed !== !!court.closed ? 'Closure update submitted for review.' : 'Suggestion recorded — one more confirmation applies it', { tone: 'success', icon: 'check-circle' });
         }
       } catch (e) {
         finish();
@@ -8070,26 +8409,127 @@
   const normalizeOverlayRoute = (route) => {
     if (!route) return null;
     if (typeof route === 'string') {
-      const match = route.match(/^#(court|game|tournament|club|crew|league|chat|player)\/(\d+)(?:\/match\/(\d+))?$/);
+      const match = route.match(/^#(court|game|tournament|club|crew|league|chat|player)\/(\d+)(?:\/match\/(\d+)|\/invite\/([a-f0-9]{64}))?$/);
       if (!match) return null;
       const normalized = { kind: match[1], id: Number(match[2]) };
-      if (match[3] && (normalized.kind === 'league' || normalized.kind === 'tournament')) {
+      if (!Number.isSafeInteger(normalized.id) || normalized.id <= 0) return null;
+      if (match[3]) {
+        if (!['league', 'tournament'].includes(normalized.kind)
+            || !Number.isSafeInteger(Number(match[3])) || Number(match[3]) <= 0) return null;
         normalized.matchId = Number(match[3]);
+      }
+      if (match[4]) {
+        if (normalized.kind !== 'game') return null;
+        normalized.inviteToken = match[4];
       }
       return normalized;
     }
     const id = Number(route.id);
     if (!OVERLAY_ROUTE_KINDS.has(route.kind) || !Number.isSafeInteger(id) || id <= 0) return null;
     const normalized = { kind: route.kind, id };
+    if (route.inviteToken != null) {
+      if (route.kind !== 'game' || typeof route.inviteToken !== 'string'
+          || !/^[a-f0-9]{64}$/.test(route.inviteToken)) return null;
+      normalized.inviteToken = route.inviteToken;
+    }
     const matchId = Number(route.matchId);
     if ((route.kind === 'league' || route.kind === 'tournament')
         && Number.isSafeInteger(matchId) && matchId > 0) normalized.matchId = matchId;
     return normalized;
   };
+  function showAuthEntryForm() {
+    const access = $('#auth-access');
+    if (!access) return;
+    access.dataset.userOpened = '1';
+    access.classList.remove('hidden');
+    syncAuthModeUi();
+    access.scrollIntoView({ block: 'start', behavior: 'auto' });
+    (authMode === 'register' ? $('#auth-name') : $('#auth-email'))?.focus({ preventScroll: true });
+  }
+
+  let publicCourtSearchSeq = 0;
+  let publicCourtSearchQuery = '';
+  let publicCourtSearchCursor = null;
+  async function searchPublicCourts({ more = false } = {}) {
+    const results = $('#auth-court-results');
+    const query = more ? publicCourtSearchQuery : $('#auth-court-query')?.value.trim();
+    if (!query || !results || state.token) return;
+    const seq = ++publicCourtSearchSeq;
+    publicCourtSearchQuery = query;
+    const params = new URLSearchParams({ q: query, limit: '6' });
+    if (more && publicCourtSearchCursor) params.set('cursor', publicCourtSearchCursor);
+    results.setAttribute('aria-busy', 'true');
+    if (!more) results.innerHTML = '<p class="auth-explore-copy">Finding courts…</p>';
+    try {
+      const response = await fetch(`/api/courts?${params}`, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('Court search is unavailable. Try again.');
+      const payload = await response.json();
+      if (seq !== publicCourtSearchSeq || state.token) return;
+      const rows = Array.isArray(payload.items) ? payload.items : [];
+      results.querySelector('[data-public-court-more]')?.remove();
+      results.querySelector('[data-public-court-error]')?.remove();
+      const html = rows.map((court) => `<button type="button" class="auth-court-result" data-public-court="${Number(court.id)}"><span><b>${esc(court.name)}</b><small>${esc([court.city, `${Number(court.num_courts || 0)} courts`, court.indoor ? 'Indoor' : 'Outdoor'].filter(Boolean).join(' · '))}</small></span>${uiIcon('chevron-right')}</button>`).join('');
+      if (more) results.insertAdjacentHTML('beforeend', html);
+      else results.innerHTML = html || '<p class="auth-explore-copy">No courts found. Try another city or court name.</p>';
+      publicCourtSearchCursor = payload.next_cursor || null;
+      if (publicCourtSearchCursor) results.insertAdjacentHTML('beforeend', '<button type="button" class="btn-link" data-public-court-more>Show more courts</button>');
+      results.querySelectorAll('[data-public-court]').forEach((button) => {
+        button.onclick = () => { location.hash = `#court/${button.dataset.publicCourt}`; };
+      });
+      results.querySelector('[data-public-court-more]')?.addEventListener('click', () => searchPublicCourts({ more: true }));
+    } catch (error) {
+      if (seq !== publicCourtSearchSeq || state.token) return;
+      const message = '<p class="form-error" role="alert" data-public-court-error>Court search is unavailable. Try Search again.</p>';
+      if (more) results.insertAdjacentHTML('beforeend', message);
+      else results.innerHTML = message;
+    } finally {
+      if (seq === publicCourtSearchSeq) results.removeAttribute('aria-busy');
+    }
+  }
+
+  function publicSessionFacts(game) {
+    const when = game.scheduled_at ? new Date(game.scheduled_at) : null;
+    const ended = game.status !== 'upcoming' || (when && when.getTime() + Number(game.duration_minutes || 90) * 60000 < Date.now());
+    const stateLabel = game.status === 'cancelled' ? 'Cancelled' : ended ? 'This date has ended'
+      : Number(game.spots_left) > 0 ? `${Number(game.spots_left)} ${Number(game.spots_left) === 1 ? 'place' : 'places'} available` : 'Full · waitlist available';
+    return { ended, stateLabel, format: game.game_type === 'ranked' ? `Ranked ${Number(game.max_players) === 2 ? 'singles' : 'doubles'}` : 'Casual session',
+      cost: game.cost_cents == null ? 'Cost not listed' : Number(game.cost_cents) === 0 ? 'Free' : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player` };
+  }
+
+  function publicShareDetailHtml(preview) {
+    const data = preview.details;
+    if (!preview.public || !data) return '';
+    if (preview.kind === 'game') {
+      const facts = publicSessionFacts(data);
+      return `<span class="auth-preview-kicker">${esc(facts.format)}</span><h3 data-share-preview-title tabindex="-1">${esc(preview.title)}</h3>
+        <p class="auth-preview-status">${esc(facts.stateLabel)}</p>
+        <dl class="auth-preview-facts"><div><dt>When</dt><dd>${esc(fmtDateTime(data.scheduled_at))}<small>Your local time${data.duration_minutes ? ` · ${Number(data.duration_minutes)} minutes` : ''}</small></dd></div><div><dt>Where</dt><dd>${esc(data.court?.name || 'Court not listed')}<small>${esc([data.court?.address, data.court?.city].filter(Boolean).join(', '))}</small></dd></div><div><dt>Level</dt><dd>${esc(gameLevelRangeLabel(data))}</dd></div><div><dt>Cost</dt><dd>${esc(facts.cost)}</dd></div></dl>
+        <p class="auth-preview-roster">${Number(data.player_count || 0)} going · ${Number(data.max_players)} places</p>
+        ${courtEntryNoticeHtml(data)}
+        ${courtEntryDescriptionParts(data).note ? `<details class="simple-disclosure"><summary>Session details</summary><p>${esc(courtEntryDescriptionParts(data).note)}</p></details>` : ''}
+        <button type="button" class="btn btn-primary btn-block" data-public-auth>${facts.ended ? 'Open session' : Number(data.spots_left) > 0 ? 'Join this session' : 'Join the waitlist'}</button>
+        <small class="auth-preview-footnote">Log in or create an account to continue. Your place is confirmed after you join.</small>
+        ${data.court?.id ? `<button type="button" class="btn-link" data-public-route="#court/${Number(data.court.id)}">View this court</button>` : ''}`;
+    }
+    const court = data.court;
+    if (preview.kind !== 'court' || !court) return '';
+    const photo = /^(https?:\/\/|\/(?!\/))/.test(String(court.photo_url || '')) ? court.photo_url : '';
+    const amenities = [[court.indoor, 'Indoor'], [court.lighted, 'Lights'], [court.nets_provided, 'Nets provided'], [court.has_water, 'Water'], [court.has_restrooms, 'Restrooms']].filter(([present]) => present).map(([, label]) => label);
+    const directions = courtDirectionsUrl(court);
+    return `${photo ? `<img class="auth-preview-photo" src="${esc(photo)}" alt="${esc(court.name)}" loading="lazy" />` : ''}<span class="auth-preview-kicker">${Number(court.num_courts)} courts · ${court.indoor ? 'Indoor' : 'Outdoor'}</span><h3 data-share-preview-title tabindex="-1">${esc(court.name)}</h3><p>${esc([court.address, court.city, court.state].filter(Boolean).join(', '))}</p>
+      ${amenities.length ? `<div class="auth-preview-tags">${amenities.map((label) => `<span>${esc(label)}</span>`).join('')}</div>` : ''}
+      <dl class="auth-preview-facts"><div><dt>Hours</dt><dd>${esc(data.hours?.open_status?.label || 'Hours not listed')}<small>${esc(data.hours?.hours || '')}</small></dd></div><div><dt>Cost</dt><dd>${esc(court.fees || (court.fee_type === 'free' ? 'Free' : court.fee_type ? court.fee_type.replaceAll('_', ' ') : 'Not listed'))}</dd></div></dl>
+      ${directions ? `<a class="btn btn-secondary btn-block" href="${esc(directions)}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
+      <h4>Next public sessions</h4>${data.sessions?.length ? data.sessions.map((game) => { const facts = publicSessionFacts(game); return `<button type="button" class="auth-court-result" data-public-route="#game/${Number(game.id)}"><span><b>${esc(game.title)}</b><small>${esc(fmtDateTime(game.scheduled_at))} · ${esc(facts.format)}</small><small>${esc(gameLevelRangeLabel(game))} · ${esc(facts.stateLabel)}</small></span>${uiIcon('chevron-right')}</button>`; }).join('') : '<p>No public sessions listed yet.</p>'}
+      <button type="button" class="btn btn-primary btn-block" data-public-auth>Save this court or plan a session</button><small class="auth-preview-footnote">Log in or create an account to continue.</small>`;
+  }
+
   function renderSignedOutShareContext() {
     const container = $('#auth-share-context');
     if (!container) return;
     const route = normalizeOverlayRoute(location.hash);
+    const access = $('#auth-access');
+    if (!state.token && access && access.dataset.userOpened !== '1') access.classList.toggle('hidden', !!route || localStorage.getItem('pp_has_account') !== '1');
     if (!route || state.token) {
       signedOutSharePreviewSeq += 1;
       container.replaceChildren();
@@ -8100,7 +8540,7 @@
       court: ['map-pin', 'A court was shared with you'],
       game: ['pickleball', 'A play session was shared with you'],
       tournament: ['trophy', route.matchId ? 'A tournament match was shared with you' : 'A tournament was shared with you'],
-      club: ['users', 'A Community was shared with you'],
+      club: ['users', 'A public group was shared with you'],
       crew: ['users', 'A private play group was shared with you'],
       league: ['trophy', route.matchId ? 'A league match was shared with you' : 'A league was shared with you'],
       chat: ['message', 'A conversation was shared with you'],
@@ -8109,14 +8549,25 @@
     if (!details) return;
     const routeKey = `${route.kind}:${route.id}:${route.matchId || ''}`;
     const requestSeq = ++signedOutSharePreviewSeq;
+    const stillCurrent = () => requestSeq === signedOutSharePreviewSeq && !state.token && container.dataset.shareRouteKey === routeKey;
     container.dataset.shareRouteKey = routeKey;
+    container.classList.remove('is-public-detail');
     container.innerHTML = `${uiIcon(details[0])}<span><b data-share-preview-title>${esc(details[1])}</b><span data-share-preview-copy>Log in or create an account, and we’ll take you straight there.</span></span>`;
     container.classList.remove('hidden');
+    $('#auth-court-discovery')?.removeAttribute('open');
+    if (route.inviteToken) {
+      renderSignedOutGameInvitation(container, route, stillCurrent);
+      return;
+    }
     const params = new URLSearchParams({ kind: route.kind, id: String(route.id) });
     if (route.matchId) params.set('match_id', String(route.matchId));
     fetch(`/api/share-preview?${params}`, { headers: { Accept: 'application/json' } })
       .then(async (response) => {
-        if (!response.ok) return null;
+        if (!response.ok) {
+          const error = new Error('Share preview unavailable');
+          error.status = response.status;
+          throw error;
+        }
         return response.json();
       })
       .then((preview) => {
@@ -8125,18 +8576,34 @@
             || overlayRouteHash(normalizeOverlayRoute(location.hash)) !== location.hash) return;
         const title = String(preview.title || '').trim();
         const subtitle = String(preview.subtitle || '').trim();
+        const detail = publicShareDetailHtml(preview);
+        container.classList.toggle('is-public-detail', !!detail);
+        if (detail) {
+          container.innerHTML = detail;
+          container.querySelector('[data-public-auth]')?.addEventListener('click', showAuthEntryForm);
+          container.querySelectorAll('[data-public-route]').forEach((button) => button.addEventListener('click', () => { location.hash = button.dataset.publicRoute; }));
+          container.querySelector('[data-share-preview-title]')?.focus({ preventScroll: false });
+          return;
+        }
         if (title) container.querySelector('[data-share-preview-title]').textContent = title;
         if (subtitle) {
           container.querySelector('[data-share-preview-copy]').textContent = `${subtitle} Log in or create an account to open it.`;
         }
       })
-      .catch(() => { /* generic context remains useful offline or on private links */ });
+      .catch((error) => {
+        if (!stillCurrent()) return;
+        const missing = error.status === 404;
+        container.innerHTML = `${uiIcon(missing ? 'search' : 'alert-triangle')}<span><b>${missing ? 'This link is unavailable' : 'Preview could not load'}</b><span>${missing ? 'Browse courts below to find another place or public session.' : 'Check your connection and try again.'}</span>${missing ? '' : '<button type="button" class="btn-link" data-preview-retry>Try again</button>'}</span>`;
+        container.querySelector('[data-preview-retry]')?.addEventListener('click', renderSignedOutShareContext);
+        if (missing) $('#auth-court-discovery')?.setAttribute('open', '');
+      });
   }
   const overlayRouteHash = (route) => route
-    ? `#${route.kind}/${route.id}${route.matchId ? `/match/${route.matchId}` : ''}` : '';
+    ? `#${route.kind}/${route.id}${route.inviteToken ? `/invite/${route.inviteToken}` : route.matchId ? `/match/${route.matchId}` : ''}` : '';
   const sameOverlayRoute = (left, right) => !!left && !!right
     && left.kind === right.kind && left.id === right.id
-    && (left.matchId || null) === (right.matchId || null);
+    && (left.matchId || null) === (right.matchId || null)
+    && (left.inviteToken || null) === (right.inviteToken || null);
   const overlayUrl = (route) => `${baseAppUrl()}${overlayRouteHash(route)}`;
   const overlayHistoryState = (id, depth, route) => ({
     ...(history.state || {}),
@@ -8206,6 +8673,16 @@
     const visibleParentIndex = Math.max(0, overlayStack.length - 2);
     overlayStack.forEach((entry, index) => {
       const active = entry === top;
+      const resumed = active && entry.wasActive === false;
+      entry.wasActive = active;
+      if (resumed && typeof entry.el._onResume === 'function') {
+        // Defer until Back/transition has reconciled the entire stack.
+        queueMicrotask(() => {
+          if (currentOverlayEntry() === entry && !entry.closing && !entry.el._destroyed) {
+            try { Promise.resolve(entry.el._onResume?.()).catch(() => {}); } catch { /* resume isolation */ }
+          }
+        });
+      }
       entry.el.toggleAttribute('inert', !active);
       entry.el.setAttribute('aria-hidden', String(!active));
       entry.el.classList.toggle('is-behind', !active);
@@ -8955,6 +9432,20 @@
     return `${accountId}:${attemptId}`;
   }
 
+  function normalizeChatReplyReference(raw) {
+    const id = Number(raw?.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    return { id, sender_name: String(raw.sender_name || 'Player').slice(0, 120),
+      body: String(raw.body || '').slice(0, 240), has_image: raw.has_image === true,
+      unavailable: raw.unavailable === true };
+  }
+
+  function chatReplyHtml(reference) {
+    if (!reference) return '';
+    if (reference.unavailable) return '<blockquote class="chat-reply-quote">Original message unavailable</blockquote>';
+    return `<blockquote class="chat-reply-quote"><b>${esc(reference.sender_name || 'Player')}</b><span>${esc(reference.body || (reference.has_image ? 'Photo' : 'Message'))}</span></blockquote>`;
+  }
+
   function normalizeChatOutboxRecord(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const accountId = chatOutboxAccountId(raw.accountId);
@@ -8976,6 +9467,7 @@
       attemptId,
       body,
       image,
+      reply: normalizeChatReplyReference(raw.reply),
       createdAt: Number.isFinite(createdAt) && createdAt > 0 && createdAt <= Date.now() + 60000
         ? createdAt : Date.now(),
       status,
@@ -9225,6 +9717,7 @@
             body: item.body,
             image: item.image,
             client_attempt_id: item.attemptId,
+            ...(item.reply?.id ? { reply_to_id: item.reply.id } : {}),
           }),
         });
         const terminalDeleted = delivered && delivered.deleted === true;
@@ -9329,7 +9822,7 @@
     }
   }
 
-  async function enqueueChatOutboxMessage(accountId, channelKey, body, image = null) {
+  async function enqueueChatOutboxMessage(accountId, channelKey, body, image = null, reply = null) {
     accountId = chatOutboxAccountId(accountId);
     if (!accountId || accountId !== state.me?.id || !chatEndpointForChannel(channelKey)) {
       throw new Error('This conversation is no longer available.');
@@ -9348,6 +9841,7 @@
       attemptId: newGameAttemptId(),
       body,
       image,
+      reply,
       createdAt: Date.now(),
       status: 'queued',
       retryCount: 0,
@@ -9609,6 +10103,8 @@
 
   function prepareChatRenderBatch(msgsEl, rawItems, append) {
     const items = Array.isArray(rawItems) ? rawItems : [];
+    if (!append || !msgsEl._messageReferences) msgsEl._messageReferences = new Map();
+    items.forEach((message) => { if (Number(message?.id) > 0) msgsEl._messageReferences.set(Number(message.id), message); });
     reconcileChatOutboxMessages(msgsEl, items);
     const newestId = items.reduce(
       (latest, message) => Math.max(latest, Number(message?.id) || 0), 0,
@@ -9735,6 +10231,29 @@
       ? `pp_chat_draft_v${CHAT_DRAFT_VERSION}:${accountId}:${encodeURIComponent(channelKey)}` : null;
     const thread = msgsEl.closest('.thread');
     const form = inputEl.closest('form');
+    let replyTarget = null;
+    const replyPreview = document.createElement('div');
+    replyPreview.className = 'chat-reply-composer';
+    replyPreview.hidden = true;
+    replyPreview.setAttribute('role', 'status');
+    const renderReply = () => {
+      replyPreview.hidden = !replyTarget;
+      replyPreview.innerHTML = replyTarget ? `${chatReplyHtml(replyTarget)}<button type="button" aria-label="Cancel reply">${uiIcon('x')}</button>` : '';
+      replyPreview.querySelector('button')?.addEventListener('click', () => {
+        replyTarget = null; renderReply(); persistDraft(); inputEl.focus();
+      });
+    };
+    const selectReply = (message) => {
+      replyTarget = normalizeChatReplyReference(message);
+      renderReply(); persistDraft(); inputEl.focus();
+    };
+    const searchButton = document.createElement('button');
+    searchButton.type = 'button'; searchButton.className = 'chat-search-button';
+    searchButton.setAttribute('aria-label', 'Search messages in this conversation');
+    searchButton.innerHTML = uiIcon('search');
+    searchButton.addEventListener('click', () => openChildModal(modal, () => openChatMessageSearch(channelKey, selectReply)));
+    thread?.querySelector('.thread-head')?.appendChild(searchButton);
+    if (thread && form) thread.insertBefore(replyPreview, form);
     const newMessages = document.createElement('button');
     newMessages.type = 'button';
     newMessages.className = 'chat-new-messages hidden';
@@ -9816,6 +10335,7 @@
         sessionStorage.setItem(storageKey, JSON.stringify({
           v: CHAT_DRAFT_VERSION,
           body: inputEl.value,
+          reply: replyTarget ? { id: replyTarget.id } : null,
           revision: draftRevision,
           updatedAt: Date.now(),
         }));
@@ -9835,6 +10355,14 @@
             && Date.now() - saved.updatedAt <= CHAT_DRAFT_TTL) {
           if (typeof saved.revision === 'string' && saved.revision) draftRevision = saved.revision;
           inputEl.value = saved.body.slice(0, Number(inputEl.maxLength) > 0 ? inputEl.maxLength : 2000);
+          const restoredReply = normalizeChatReplyReference(saved.reply);
+          if (restoredReply) {
+            replyTarget = { ...restoredReply, unavailable: true }; renderReply();
+            api(`/messages/${restoredReply.id}/reference?channel=${encodeURIComponent(channelKey)}`).then((message) => {
+              if (replyTarget?.id !== restoredReply.id || !replyPreview.isConnected || state.me?.id !== accountId) return;
+              replyTarget = normalizeChatReplyReference(message); renderReply();
+            }).catch(() => { /* Keep an honest unavailable reply with a visible cancel action. */ });
+          }
           if (inputEl.value) requestAnimationFrame(() => { draftStatus.textContent = 'Message draft restored.'; });
         } else if (saved) {
           sessionStorage.removeItem(storageKey);
@@ -9867,6 +10395,7 @@
       // and must survive this successful send.
       if (draftRevision === submittedRevision && inputEl.value.trim() === submittedBody) {
         inputEl.value = '';
+        replyTarget = null; renderReply();
         draftStatus.textContent = '';
         clearTimeout(draftTimer);
         draftTimer = null;
@@ -9896,7 +10425,7 @@
       buttons.forEach((button) => { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
       form?.setAttribute('aria-busy', 'true');
       try {
-        const result = await enqueueChatOutboxMessage(accountId, channelKey, submittedBody, image);
+        const result = await enqueueChatOutboxMessage(accountId, channelKey, submittedBody, image, replyTarget);
         completeSend(submittedBody, submittedRevision);
         return result;
       } finally {
@@ -9948,6 +10477,7 @@
         return `
           <div class="chat-outbox-item is-${item.status}" data-client-attempt-id="${item.attemptId}" role="group" aria-label="Unsent message">
             <div class="bubble me chat-outbox-bubble">
+              ${chatReplyHtml(item.reply)}
               ${item.image ? `<img class="chat-outbox-image" src="${esc(item.image)}" alt="Photo awaiting send" />` : ''}
               ${item.body ? `<div>${esc(item.body)}</div>` : ''}
               <div class="bubble-time chat-outbox-state">${esc(stateText)}</div>
@@ -9982,6 +10512,14 @@
       }
     };
     msgsEl.addEventListener('click', onOutboxAction);
+    const onReply = (event) => {
+      const button = event.target.closest('[data-message-action="reply"]');
+      if (!button || !msgsEl.contains(button)) return;
+      event.stopPropagation();
+      const message = msgsEl._messageReferences?.get(Number(button.dataset.messageId));
+      if (message) selectReply(message);
+    };
+    msgsEl.addEventListener('click', onReply);
     const onMessageActionReveal = (event) => {
       if (event.target.closest('.chat-message-action, .chat-link')) return;
       const row = event.target.closest('.chat-message-row');
@@ -10013,6 +10551,7 @@
     modal._cleanupFns?.push(() => {
       msgsEl.removeEventListener('scroll', syncFollowing);
       msgsEl.removeEventListener('click', onOutboxAction);
+      msgsEl.removeEventListener('click', onReply);
       msgsEl.removeEventListener('click', onMessageActionReveal);
       inputEl.removeEventListener('input', persistDraft);
       inputEl.removeEventListener('input', resizeComposer);
@@ -10266,6 +10805,23 @@
   // A single, branded decision sheet replaces native browser confirmations.
   // It works above an existing modal, resolves false for every dismissal path,
   // and keeps the consequence visible long enough to make a deliberate choice.
+  function confirmScheduleConflict(data) {
+    const conflicts = Array.isArray(data?.conflicts) ? data.conflicts : [];
+    const details = conflicts.slice(0, 4).map((item) => {
+      const time = item.starts_at ? fmtDateTime(item.starts_at) : '';
+      return [item.kind === 'busy' ? item.player_name || 'Player' : '', item.title || 'Another commitment', time,
+        item.proposed_start ? `New time: ${fmtDateTime(item.proposed_start)}` : '',
+        item.timing === 'estimated' ? 'Estimated time' : ''].filter(Boolean).join(' · ');
+    });
+    if (conflicts.length > 4) details.push(`And ${conflicts.length - 4} other overlapping plans.`);
+    return openActionConfirmation({
+      eyebrow: 'Overlapping plans', title: 'There’s already a plan at this time',
+      message: 'Continuing keeps both plans. Check that everyone can make it.',
+      detail: details.join('\n'), confirmLabel: 'Keep both plans', cancelLabel: 'Go back',
+      tone: 'primary', icon: 'calendar', trigger: document.activeElement,
+    });
+  }
+
   function openActionConfirmation({
     title = 'Continue with this action?',
     eyebrow = 'Confirm action',
@@ -10320,21 +10876,22 @@
     });
   }
 
-  function requestScoreDisputeReason({ trigger = null, late = false } = {}) {
+  function requestScoreDisputeReason({ trigger = null, late = false, correction = false, finalCorrection = false } = {}) {
     return new Promise((resolve) => {
       let settled = false;
       const sheet = openModal(`
-        ${modalHead(late ? 'Dispute automatic result' : 'Enter a different score')}
+        ${modalHead(late ? 'Dispute automatic result' : correction ? 'Reject correction' : 'Dispute score')}
         <form id="score-dispute-reason-form" novalidate>
           <p class="row-sub">${late
             ? 'Tell the other players what is wrong. The result will close as unresolved and its rating change will be removed.'
-            : 'Tell the other side what you remember before entering your counter-score.'}</p>
+            : finalCorrection ? 'This is the final proposal. Rejecting it leaves this match unrated. You can still open Result help.'
+              : 'Explain what is wrong. This match stays unrated until an opponent agrees to a corrected result.'}</p>
           <div class="form-field">
             <label for="score-dispute-reason">What is wrong with the score?</label>
             <textarea id="score-dispute-reason" rows="3" maxlength="500" required placeholder="For example: We played to 11, and the final was 11–8."></textarea>
           </div>
           <p class="form-error hidden" role="alert" aria-live="assertive"></p>
-          <button type="submit" class="btn btn-danger btn-block" id="score-dispute-reason-submit">${late ? 'Dispute and remove rating change' : 'Continue to my score'}</button>
+          <button type="submit" class="btn btn-danger btn-block" id="score-dispute-reason-submit">${late ? 'Dispute and remove rating change' : correction ? 'Reject correction' : 'Dispute score'}</button>
           <button type="button" class="btn btn-secondary btn-block modal-close">Keep reported score</button>
         </form>
       `, { label: late ? 'Dispute automatically confirmed result' : 'Explain score dispute' });
@@ -10389,14 +10946,14 @@
       return {
         accepted: await openActionConfirmation({
           eyebrow: 'Leave as host',
-          title: next ? `Make ${next.display_name} the host?` : `Leave and cancel this ${playNoun}?`,
+          title: next ? `Ask ${next.display_name} to host?` : `Leave and cancel this ${playNoun}?`,
           message: next
-            ? `You’re hosting. If you leave, ${next.display_name} will take over this ${playNoun}.`
+            ? `You stay the host until ${next.display_name} accepts. Then your spot opens.`
             : `You’re the only player. Leaving will cancel this ${playNoun}.`,
           detail: next
-            ? 'They will be notified immediately and everyone else keeps their spot.'
+            ? 'They can decline. Everyone else keeps their spot.'
             : 'Anyone you invited will no longer be able to join.',
-          confirmLabel: next ? 'Transfer and leave' : `Cancel ${playNoun}`,
+          confirmLabel: next ? 'Request handoff' : `Cancel ${playNoun}`,
           cancelLabel: 'Keep hosting',
           icon: next ? 'users' : 'trash',
           trigger,
@@ -10407,18 +10964,18 @@
     return new Promise((resolve) => {
       let settled = false;
       const sheet = openModal(`
-        ${modalHead('Choose the next host', 'users')}
-        <p class="row-sub">You’re hosting. Pick who will take over before you leave; everyone keeps their spot.</p>
+        ${modalHead('Ask someone to host', 'users')}
+        <p class="row-sub">You remain the host until they accept. Then your spot opens.</p>
         <fieldset class="host-transfer-options">
           <legend class="section-label">Next host</legend>
           ${candidates.map((person, index) => `<label class="host-transfer-option">
             <input type="radio" name="next-host" value="${person.user_id}" ${index === 0 ? 'checked' : ''} />
-            ${avatarHtml(person, 'sm', 'span')}<span><b>${esc(person.display_name)}</b><small>Will be notified immediately</small></span>
+            ${avatarHtml(person, 'sm', 'span')}<span><b>${esc(person.display_name)}</b><small>Needs to accept</small></span>
           </label>`).join('')}
         </fieldset>
         <div class="action-confirm-actions">
           <button type="button" class="btn btn-secondary" data-host-leave-cancel>Keep hosting</button>
-          <button type="button" class="btn action-confirm-danger" data-host-leave-accept>Transfer and leave</button>
+          <button type="button" class="btn action-confirm-danger" data-host-leave-accept>Request handoff</button>
         </div>
       `, { label: 'Choose the next host before leaving' });
       sheet._returnFocus = trigger;
@@ -10823,7 +11380,7 @@
     });
     const modal = openModal(`
       ${modalHead('Add to calendar', 'calendar')}
-      <p class="row-sub calendar-choice-copy">Add just this game, or subscribe once so future games stay in sync.</p>
+      <p class="row-sub calendar-choice-copy">Add this game once, or subscribe to your plans. Subscribed calendars refresh on their provider’s schedule.</p>
       <div class="calendar-choice-list">
         <a class="btn btn-primary btn-block" href="https://calendar.google.com/calendar/render?${esc(googleParams.toString())}" target="_blank" rel="noopener">${uiIcon('external')} Google Calendar</a>
         <button type="button" class="btn btn-secondary btn-block" id="calendar-download-event">${uiIcon('calendar')} Apple, Outlook, or another app</button>
@@ -10902,36 +11459,41 @@
     toast('Calendar event downloaded', { tone: 'success', icon: 'calendar' });
   }
 
-  function downloadLeagueIcs(league) {
-    const court = league.court || {};
+  function leagueToIcs(league, { matchOnly = null } = {}) {
     const pad = (n) => String(n).padStart(2, '0');
     const stamp = (d) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
-    const start = new Date(league.starts_at);
-    const end = new Date(start.getTime() + 2 * 3600e3);
-    const roundDays = Math.min(28, Math.max(3, Number(league.round_days) || 7));
     const escIcs = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/[,;]/g, (m) => '\\' + m).replace(/\n/g, '\\n');
-    const ics = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//Third Shot//EN',
-      'BEGIN:VEVENT',
-      `UID:thirdshot-league-${league.id}@thirdshot.app`,
-      `DTSTAMP:${stamp(new Date())}`,
-      `DTSTART:${stamp(start)}`,
-      `DTEND:${stamp(end)}`,
-      `RRULE:FREQ=DAILY;INTERVAL=${roundDays}`,
-      `SUMMARY:${escIcs(`${league.name} · round target`)}`,
-      `LOCATION:${escIcs([court.name, court.city].filter(Boolean).join(', '))}`,
-      `DESCRIPTION:${escIcs(`The organizer starts round 1 manually when the field is ready; planned round targets repeat every ${roundDays} days. Confirm each round in Third Shot. ${location.origin}/#league/${league.id}`)}`,
-      `URL:${escIcs(`${location.origin}/#league/${league.id}`)}`,
-      'BEGIN:VALARM',
-      'ACTION:DISPLAY',
-      'TRIGGER:-PT1H',
-      `DESCRIPTION:${escIcs(`${league.name} organizer start target is in one hour`)}`,
-      'END:VALARM',
-      'END:VEVENT',
-      'END:VCALENDAR',
-    ].join('\r\n');
+    const events = [];
+    (league.matches || []).filter((match) => match.scheduled_at && !['void', 'voided'].includes(match.result_state || match.status)
+      && !['player_unavailable', 'round_closed_unplayed'].includes(match.resolution_kind)
+      && (!matchOnly || Number(match.id) === Number(matchOnly))).forEach((match) => {
+      const start = new Date(match.scheduled_at);
+      if (!Number.isFinite(start.getTime())) return;
+      events.push({ id: `league-match-${match.id}`, start, end: new Date(start.getTime() + (Number(match.scheduled_duration_minutes) || 60) * 60000),
+        version: match.schedule_version || 0, title: `${league.name} · ${match.player1?.display_name || 'Player 1'} vs ${match.player2?.display_name || 'Player 2'}`,
+        court: match.scheduled_court || {}, path: `/#league/${league.id}/match/${match.id}`, description: 'Confirmed match. Open Third Shot for the latest plan.' });
+    });
+    if (!matchOnly && !league.my_withdrawn_at) {
+      const target = league.status === 'active' ? league.round_deadline_at : league.status === 'registration' ? league.starts_at : null;
+      const start = target && new Date(target);
+      if (start && Number.isFinite(start.getTime())) events.push({ id: `league-${league.id}-round-${league.current_round || 0}`,
+        start, end: new Date(start.getTime() + 60000), version: league.round_version || 0, court: {}, path: `/#league/${league.id}`,
+        title: `${league.name} · ${league.status === 'active' ? `Round ${league.current_round} deadline` : 'Organizer start target'}`,
+        description: 'This is a deadline or organizer target, not a scheduled match. Check the current round in Third Shot.' });
+    }
+    if (!events.length) return '';
+    return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Third Shot//EN', ...events.flatMap((event) => [
+      'BEGIN:VEVENT', `UID:thirdshot-${event.id}@thirdshot.app`, `DTSTAMP:${stamp(new Date())}`, `SEQUENCE:${event.version}`,
+      `DTSTART:${stamp(event.start)}`, `DTEND:${stamp(event.end)}`, `SUMMARY:${escIcs(event.title)}`,
+      `LOCATION:${escIcs([event.court.name, event.court.city].filter(Boolean).join(', '))}`,
+      `DESCRIPTION:${escIcs(event.description)}`, `URL:${escIcs(`${location.origin}${event.path}`)}`,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT1H', `DESCRIPTION:${escIcs(event.title)}`, 'END:VALARM', 'END:VEVENT',
+    ]), 'END:VCALENDAR'].join('\r\n');
+  }
+
+  function downloadLeagueIcs(league, options = {}) {
+    const ics = leagueToIcs(league, options);
+    if (!ics) { toast('No confirmed dates to add yet.'); return; }
     const blob = new Blob([ics], { type: 'text/calendar' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -10941,7 +11503,7 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    toast('League date downloaded', { tone: 'success', icon: 'calendar' });
+    toast('League calendar downloaded', { tone: 'success', icon: 'calendar' });
   }
 
   function formStripHtml(form, visibleOnly = false) {
@@ -10950,7 +11512,7 @@
       <div style="margin-top:10px;text-align:center">
         <div style="display:flex;gap:5px;justify-content:center;align-items:center;flex-wrap:wrap">
           <span class="row-sub" style="margin-right:2px">${visibleOnly ? 'Visible results' : 'Recent results'}:</span>
-          ${form.map((r) => `<span aria-label="${r === 'W' ? 'Win' : 'Loss'}" style="width:22px;height:22px;border-radius:var(--radius-pill);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:800;color:#fff;background:${r === 'W' ? 'var(--green-600)' : '#e03131'}">${r}</span>`).join('')}
+          ${form.map((r) => `<span aria-label="${r === 'W' ? 'Win' : 'Loss'}" style="width:22px;height:22px;border-radius: var(--radius-pill);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:800;color:#fff;background:${r === 'W' ? 'var(--green-600)' : '#e03131'}">${r}</span>`).join('')}
         </div>
         <div class="row-sub" style="font-size:var(--text-xs);margin-top:4px">Ranked + casual · newest first</div>
       </div>`;
@@ -11234,6 +11796,12 @@
   // Lazy-load photo attachments into any chat thread (payloads only carry
   // has_image; the image endpoint enforces per-thread permissions).
   function hydrateChatImages(msgsEl, chatUX) {
+    msgsEl.querySelectorAll('.bubble[data-message-id]').forEach((bubble) => {
+      const message = msgsEl._messageReferences?.get(Number(bubble.dataset.messageId));
+      if (!message) return;
+      bubble.querySelector('.chat-reply-quote')?.remove();
+      if (message.reply_to) bubble.insertAdjacentHTML('afterbegin', chatReplyHtml(message.reply_to));
+    });
     msgsEl.querySelectorAll('[data-img-id]:not([data-loaded])').forEach(async (slot) => {
       slot.dataset.loaded = 'loading';
       slot.classList.add('chat-image-loading');
@@ -11241,7 +11809,7 @@
         const { image } = await api(`/messages/${slot.dataset.imgId}/image`);
         const img = new Image();
         img.alt = 'Photo';
-        img.style.cssText = 'max-width:100%;border-radius:var(--radius-sm);display:block';
+        img.style.cssText = 'max-width:100%;border-radius: var(--radius-sm);display:block';
         img.src = image;
         if (typeof img.decode === 'function') await img.decode();
         else if (!img.complete) {
@@ -11404,7 +11972,7 @@
     if (!businessId || !action) return '';
     const connectionId = safePositiveId(item.connection_id);
     const occurrenceId = safePositiveId(item.occurrence_id || (item.is_integrated ? item.id : null));
-    return ` data-business-action="${esc(action)}" data-business-id="${businessId}"${connectionId ? ` data-connection-id="${connectionId}"` : ''}${occurrenceId ? ` data-occurrence-id="${occurrenceId}"` : ''}`;
+    return ` data-business-action="${esc(action)}" data-business-id="${businessId}"${connectionId ? ` data-connection-id="${connectionId}"` : ''}${occurrenceId ? ` data-occurrence-id="${occurrenceId}"` : ''}${!occurrenceId && safePositiveId(item.schedule_item_id) && /^\d{4}-\d{2}-\d{2}$/.test(item.occurrence_on || '') ? ` data-schedule-item-id="${safePositiveId(item.schedule_item_id)}" data-schedule-occurrence-on="${esc(item.occurrence_on)}"` : ''}`;
   }
 
   function businessScheduleLine(item) {
@@ -11430,9 +11998,9 @@
     const time = [start, end].filter(Boolean).join('–');
     const remaining = item.spots_remaining == null || item.spots_remaining === '' ? null : Number(item.spots_remaining);
     const capacity = item.capacity == null || item.capacity === '' ? null : Number(item.capacity);
-    const capacityLabel = remaining != null && Number.isFinite(remaining) && remaining >= 0
+    const capacityLabel = item.availability_label || (remaining != null && Number.isFinite(remaining) && remaining >= 0
       ? `${remaining} spot${remaining === 1 ? '' : 's'} left`
-      : capacity != null && Number.isFinite(capacity) && capacity > 0 ? `${capacity} spots` : '';
+      : capacity != null && Number.isFinite(capacity) && capacity > 0 ? `${capacity} spots` : '');
     const detail = [dateLabel || day, time, item.timezone, item.skill_level, item.instructor, item.location_note, item.price_text, capacityLabel]
       .filter(Boolean).join(' · ');
     const bookingHref = businessActionHref(item.booking_url);
@@ -11441,8 +12009,8 @@
         : /league|event|tournament/i.test(`${item.kind || ''} ${title}`) ? 'event' : 'booking';
     const bookingLabel = action === 'event'
       ? 'Register' : /lesson|clinic|open.?play/i.test(`${item.kind || ''} ${title}`) ? 'Book' : 'Details';
-    const unavailable = cancelled || String(item.status || '').toLowerCase() === 'sold_out'
-      || (remaining != null && remaining === 0);
+    const staleManualAvailability = item.availability_fresh === false;
+    const unavailable = cancelled || (!staleManualAvailability && (String(item.status || '').toLowerCase() === 'sold_out' || (remaining != null && remaining === 0)));
     const statusLabel = cancelled ? 'Cancelled' : unavailable ? 'Sold out' : '';
     const compactDate = item.event_date && eventDate && Number.isFinite(eventDate.getTime())
       ? eventDate.toLocaleDateString([], { month: 'short', day: 'numeric' })
@@ -11450,7 +12018,7 @@
     return `<div class="business-schedule-row ${cancelled ? 'is-cancelled' : ''}">
       <span class="business-schedule-day">${esc(compactDate)}</span>
       <span class="row-main"><b>${statusLabel ? `<span class="business-schedule-cancelled">${statusLabel}</span> ` : ''}${esc(title)}</b><small>${esc(detail || 'See business for details')}</small></span>
-      ${!unavailable && bookingHref ? `<a href="${esc(bookingHref)}" target="_blank" rel="noopener" aria-label="${bookingLabel} ${esc(title)}"${businessTrackingAttributes(action, item)}>${bookingLabel}</a>` : ''}
+      ${!unavailable && bookingHref ? `<a href="${esc(bookingHref)}" target="_blank" rel="noopener" aria-label="${bookingLabel} ${esc(title)} at ${esc(new URL(bookingHref).hostname)} (opens another site)"${businessTrackingAttributes(action, item)}>${staleManualAvailability ? 'Check availability' : bookingLabel}<small>${esc(new URL(bookingHref).hostname)} ${uiIcon('link')}</small></a>` : ''}
     </div>`;
   }
 
@@ -11461,17 +12029,17 @@
 
   function businessImageHref(value) {
     const raw = String(value || '').trim();
-    if (/^\/api\/businesses\/\d+\/logo$/.test(raw)) {
+    if (/^\/api\/businesses\/\d+\/logo(?:\?draft=1)?$/.test(raw)) {
       try { return new URL(raw, location.origin).href; } catch { return ''; }
     }
-    return businessActionHref(raw);
+    return raw.startsWith('/') ? '' : businessActionHref(raw);
   }
 
   function businessActionLink(label, iconName, url, tone = '', tracking = {}) {
     const href = businessActionHref(url);
     if (!href) return '';
     return `<a class="business-action ${tone}" href="${esc(href)}" target="_blank" rel="noopener"${businessTrackingAttributes(tracking.action, tracking)}>
-      <span aria-hidden="true">${uiIcon(iconName)}</span><b>${esc(label)}</b>
+      <span aria-hidden="true">${uiIcon(iconName)}</span><span><b>${esc(label)}</b><small class="business-external-destination">${esc(new URL(href).hostname)} ${uiIcon('link')}</small></span>
     </a>`;
   }
 
@@ -11488,11 +12056,16 @@
     const iconName = /lesson|coach|clinic/i.test(`${item.category || ''} ${item.name || ''}`)
       ? 'target' : /open.?play/i.test(`${item.category || ''} ${item.name || ''}`)
         ? 'pickleball' : 'map-pin';
-    return `<div class="business-offering-row">
+    const booking = businessActionHref(item.booking_url);
+    const email = safeHref(item.inquiry_email && `mailto:${item.inquiry_email}`, {mailto:true});
+    const phone = safeHref(item.inquiry_phone && `tel:${item.inquiry_phone}`, {tel:true});
+    const inquiry = email ? `${email}?subject=${encodeURIComponent(`Question about ${item.name || 'your service'}`)}` : phone || businessActionHref(item.inquiry_url);
+    const dates = Array.isArray(item._dates) ? item._dates : [];
+    return `<div class="business-service"><div class="business-offering-row">
       <span aria-hidden="true">${uiIcon(iconName)}</span>
       <span class="row-main"><b>${esc(item.name || item.title || 'Offering')}</b><small>${esc([item.price_text, item.duration_minutes ? `${item.duration_minutes} min` : '', item.description].filter(Boolean).join(' · '))}</small></span>
-      ${businessActionHref(item.booking_url) ? `<a href="${esc(businessActionHref(item.booking_url))}" target="_blank" rel="noopener" aria-label="${actionLabel} ${esc(item.name || item.title || 'offering')}"${businessTrackingAttributes(action, item)}>${actionLabel}</a>` : ''}
-    </div>`;
+      ${booking ? `<a href="${esc(booking)}" target="_blank" rel="noopener" aria-label="${actionLabel} ${esc(item.name || item.title || 'service')} at ${esc(new URL(booking).hostname)} (opens another site)"${businessTrackingAttributes(action, item)}>${actionLabel}<small>${esc(new URL(booking).hostname)} ${uiIcon('link')}</small></a>` : inquiry ? `<a href="${esc(inquiry)}"${inquiry.startsWith('https://') ? ' target="_blank" rel="noopener"' : ''}${businessTrackingAttributes('contact', item)}>Ask venue<small>${email ? 'Email' : phone ? 'Call' : esc(new URL(inquiry).hostname)}</small></a>` : '<small>Booking contact not listed</small>'}
+    </div>${dates.length ? `<details class="business-service-dates"><summary>${dates.length} date${dates.length === 1 ? '' : 's'} in the next 7 days</summary>${dates.map(date => businessScheduleLine({...date, _business_id:item._business_id})).join('')}</details>` : ''}</div>`;
   }
 
   function bindBusinessLogoFallback(root) {
@@ -11512,13 +12085,14 @@
   // Analytics must never make a player wait before leaving for a venue's
   // booking provider. sendBeacon is preferred; keepalive fetch is a quiet
   // fallback and intentionally has no user-visible failure path.
-  function recordBusinessAction({ businessId, action, connectionId = null, occurrenceId = null }) {
+  function recordBusinessAction({ businessId, action, connectionId = null, occurrenceId = null, scheduleItemId = null, scheduleOccurrenceOn = null }) {
     businessId = safePositiveId(businessId);
     if (!businessId || !action) return;
     const payload = JSON.stringify({
       client_event_id: businessClientEventId(), action,
       ...(safePositiveId(connectionId) ? { connection_id: safePositiveId(connectionId) } : {}),
       ...(safePositiveId(occurrenceId) ? { occurrence_id: safePositiveId(occurrenceId) } : {}),
+      ...(safePositiveId(scheduleItemId) && /^\d{4}-\d{2}-\d{2}$/.test(scheduleOccurrenceOn || '') ? {schedule_item_id:safePositiveId(scheduleItemId),schedule_occurrence_on:scheduleOccurrenceOn} : {}),
     });
     const endpoint = `/api/businesses/${businessId}/booking-clicks`;
     try {
@@ -11540,6 +12114,7 @@
           action: action.dataset.businessAction,
           connectionId: action.dataset.connectionId,
           occurrenceId: action.dataset.occurrenceId,
+          scheduleItemId: action.dataset.scheduleItemId, scheduleOccurrenceOn:action.dataset.scheduleOccurrenceOn,
         });
       }, { capture: true });
     }
@@ -11600,7 +12175,7 @@
     const business = normalizeBusinessProfile(rawBusiness);
     const verificationState = businessVerificationState(business);
     const activeOfferings = business.offerings.filter((item) => item && item.active !== false);
-    const activeSchedule = business.schedule.filter((item) => item && item.active !== false
+    const activeSchedule = (business.schedule_occurrences || business.schedule).filter((item) => item && item.active !== false
       && String(item.status || '').toLowerCase() !== 'completed'
       && businessScheduleItemIsCurrent(item))
       .sort(comparePublicBusinessSchedule);
@@ -11610,7 +12185,7 @@
       || activeSchedule.find((item) => String(item.status || '').toLowerCase() === 'scheduled' && /open.?play/i.test(`${item.kind || ''} ${item.title || ''}`) && businessActionHref(item.booking_url));
     const fallback = business.community_fallback && typeof business.community_fallback === 'object'
       ? business.community_fallback : {};
-    const displayHours = business.hours || fallback.hours || '';
+    const displayHours = business.effective_hours ? courtVisitHoursHtml(business.effective_hours) : esc(business.hours || fallback.hours || '');
     const displayPhone = business.phone || fallback.phone || '';
     const displayWebsite = business.website_url || fallback.website_url || '';
     const usingCommunityFallback = !!((!business.hours && fallback.hours)
@@ -11631,7 +12206,7 @@
     const moreActions = allActions.slice(primaryActionLimit);
     const connections = businessLiveConnections(business);
     const healthyConnection = connections.find((item) => String(item.status || '').toLowerCase() === 'connected' && (item.last_sync_succeeded_at || item.last_success_at));
-    const scheduleUpdatedAt = business.schedule_updated_at || activeSchedule.map((item) => item.manager_updated_at || item.updated_at)
+    const scheduleUpdatedAt = business.schedule_updated_at || activeSchedule.map((item) => item.source_updated_at || item.manager_updated_at || item.updated_at)
       .filter(Boolean).sort().at(-1) || business.updated_at || '';
     const contactLinks = [];
     const phone = safeHref(displayPhone && `tel:${displayPhone}`, { tel: true });
@@ -11666,9 +12241,10 @@
             ${business.amenities.length ? `<div class="business-amenity-list">${business.amenities.slice(0, 8).map((amenity) => `<span>${esc(amenity)}</span>`).join('')}</div>` : ''}
             ${activeOfferings.length ? `
               <div class="court-business-subhead">Lessons, programs &amp; services</div>
-              <div class="business-offering-list">${activeOfferings.slice(0, 4).map((item) => businessOfferingRowHtml({ ...item, _business_id: business.id })).join('')}</div>
-              ${activeOfferings.length > 4 ? `<details class="business-offering-more"><summary>View all ${activeOfferings.length} offerings</summary><div class="business-offering-list">${activeOfferings.slice(4).map((item) => businessOfferingRowHtml({ ...item, _business_id: business.id })).join('')}</div></details>` : ''}` : ''}
-            ${displayHours ? `<div class="business-hours"><b>${business.hours ? 'Official facility hours' : 'Community-maintained hours'}</b><span>${esc(displayHours)}</span></div>` : ''}
+              <div class="business-offering-list">${activeOfferings.slice(0, 4).map((item) => businessOfferingRowHtml({ ...item, _business_id: business.id, inquiry_email:business.email, inquiry_phone:business.phone, inquiry_url:business.website_url, _dates:activeSchedule.filter(date => Number(date.offering_id) === Number(item.id)) })).join('')}</div>
+              ${activeOfferings.length > 4 ? `<details class="business-offering-more"><summary>View all ${activeOfferings.length} offerings</summary><div class="business-offering-list">${activeOfferings.slice(4).map((item) => businessOfferingRowHtml({ ...item, _business_id: business.id, inquiry_email:business.email, inquiry_phone:business.phone, inquiry_url:business.website_url, _dates:activeSchedule.filter(date => Number(date.offering_id) === Number(item.id)) })).join('')}</div></details>` : ''}` : ''}
+            ${business.effective_hours?.hours_source === 'community' && business.hours ? `<p class="business-visiting-notes"><b>Venue visiting notes</b> ${esc(business.hours)}</p>` : ''}
+            ${displayHours ? `<div class="business-hours"><b>${business.effective_hours?.hours_source === 'venue' ? 'Venue opening hours' : 'Community court hours'}</b><div>${displayHours}</div></div>` : ''}
             ${!activeSchedule.length && fallback.open_play_schedule ? `<div class="business-hours"><b>Community-maintained open play notes</b><span>${esc(fallback.open_play_schedule)}</span></div>` : ''}
             ${activeSchedule.length ? `
               <details class="business-schedule-disclosure">
@@ -11742,8 +12318,8 @@
         render(business, { final: true });
         return;
       }
-      const baseSchedule = (Array.isArray(business.schedule) ? business.schedule : []).filter((item) => !item?.is_integrated);
-      const pending = { ...business, schedule: baseSchedule, integrated_schedule_state: 'loading' };
+      const baseSchedule = (Array.isArray(business.schedule_occurrences) ? business.schedule_occurrences : Array.isArray(business.schedule) ? business.schedule : []).filter((item) => !item?.is_integrated);
+      const pending = { ...business, schedule: baseSchedule, schedule_occurrences: baseSchedule, integrated_schedule_state: 'loading' };
       render(pending);
       slot.setAttribute('aria-busy', 'true');
       // Fetch a conservative UTC range, then filter each item against its venue
@@ -11760,9 +12336,9 @@
         const sources = (Array.isArray(data.sources) ? data.sources : []).map((item) => ({
           ...item, id: item.connection_id, last_sync_succeeded_at: item.last_sync_succeeded_at,
         }));
-        render({ ...business, schedule: [...baseSchedule, ...integrated], connections: sources, integrated_schedule_state: 'ready' }, { final: true });
+        render({ ...business, schedule: [...baseSchedule, ...integrated], schedule_occurrences: [...baseSchedule, ...integrated], connections: sources, integrated_schedule_state: 'ready' }, { final: true });
       } catch {
-        if (slot.isConnected) render({ ...business, schedule: baseSchedule, integrated_schedule_state: 'error' }, { final: true });
+        if (slot.isConnected) render({ ...business, schedule: baseSchedule, schedule_occurrences: baseSchedule, integrated_schedule_state: 'error' }, { final: true });
       } finally {
         if (slot.isConnected) slot.removeAttribute('aria-busy');
       }
@@ -11882,17 +12458,18 @@
     returnFocusFallback = null,
     reuseModal = null,
     restoreContext = null,
+    venuePreview = null,
   } = {}) {
     const normalizedCourtId = Number(courtId);
     if (!reuseModal && pendingCourtDetailOpen?.modal?.isConnected) {
-      if (pendingCourtDetailOpen.courtId === normalizedCourtId) {
+      if (pendingCourtDetailOpen.courtId === normalizedCourtId && pendingCourtDetailOpen.preview === !!venuePreview) {
         requestAnimationFrame(() => pendingCourtDetailOpen?.modal
           ?.querySelector('.modal')?.focus({ preventScroll: true }));
         return pendingCourtDetailOpen.modal;
       }
       const previousModal = pendingCourtDetailOpen.modal;
       transitionModal(previousModal, () => openCourtDetail(normalizedCourtId, {
-        focusBusiness, returnFocus, returnFocusFallback,
+        focusBusiness, returnFocus, returnFocusFallback, venuePreview,
       }));
       return previousModal;
     }
@@ -11915,7 +12492,7 @@
         </div>
       `, {
         court: true,
-        route: { kind: 'court', id: normalizedCourtId },
+        route: venuePreview ? null : { kind: 'court', id: normalizedCourtId },
         returnFocus,
         returnFocusFallback,
         label: 'Loading court details',
@@ -11925,7 +12502,7 @@
     modalBox.setAttribute('aria-busy', 'true');
     modalBox.classList.toggle('court-detail-refreshing', !!reuseModal);
     if (!reuseModal) {
-      pendingCourtDetailOpen = { courtId: normalizedCourtId, modal };
+      pendingCourtDetailOpen = { courtId: normalizedCourtId, modal, preview: !!venuePreview };
       modal._cleanupFns.push(() => {
         if (pendingCourtDetailOpen?.modal === modal) pendingCourtDetailOpen = null;
       });
@@ -11933,9 +12510,17 @@
 
     // Start the ownership token after the loading sheet exists, so dismissing
     // that sheet (or replacing it with a newer court) makes this request stale.
-    const routeLoad = beginRoutedOverlayLoad({ kind: 'court', id: normalizedCourtId });
+    const routeLoad = beginRoutedOverlayLoad(venuePreview ? null : { kind: 'court', id: normalizedCourtId });
     let court;
-    try { court = await api(`/courts/${normalizedCourtId}`); } catch (e) {
+    try {
+      court = await api(`/courts/${normalizedCourtId}`);
+      if (venuePreview) {
+        const draft = await api(`/businesses/${venuePreview.id}`);
+        if (!draft.is_manager || Number(draft.court_id) !== normalizedCourtId) throw new Error('Manager access is required to preview this venue.');
+        // Local view only: never write this draft into discovery caches/state.
+        court = {...court, ...(draft.effective_hours || {}), ...(draft.effective_visiting || {}), business: {...draft, logo_url: draft.logo_preview_url || draft.logo_url, is_owner: false, is_manager: false, preview_only: true}};
+      }
+    } catch (e) {
       if (!routedOverlayLoadIsCurrent(routeLoad) || !modal.isConnected) return;
       if (reuseModal) {
         modalBox.setAttribute('aria-busy', 'false');
@@ -11949,7 +12534,7 @@
           </div>`);
         modal.querySelector('[data-retry-court-refresh]')?.addEventListener('click', () => {
           refreshCourtDetailPreservingContext(modal, normalizedCourtId, {
-            focusBusiness, returnFocus, returnFocusFallback,
+            focusBusiness, returnFocus, returnFocusFallback, venuePreview,
           });
         });
         restoreCourtDetailContext(modal, restoreContext);
@@ -11971,7 +12556,7 @@
       setDialogLabel(modalBox, 'Court details could not load');
       modal.querySelector('[data-retry-court-detail]')?.addEventListener('click', () => {
         transitionModal(modal, () => openCourtDetail(normalizedCourtId, {
-          focusBusiness, returnFocus, returnFocusFallback,
+          focusBusiness, returnFocus, returnFocusFallback, venuePreview,
         }));
       });
       requestAnimationFrame(() => modal.querySelector('[data-retry-court-detail]')
@@ -11993,7 +12578,7 @@
     if (court.nets_provided) tags.push(`${uiIcon('net')} Nets provided`);
     if (court.has_restrooms) tags.push(`${uiIcon('restroom')} Restrooms`);
     if (court.has_water) tags.push(`${uiIcon('water')} Water`);
-    if (openStatusFact && (!venueBusiness || !venueBusiness.hours)) tags.push(`${uiIcon('clock')} ${esc(openStatusFact.label)}${venueBusiness ? ' · community maintained' : ''}`);
+    if (openStatusFact) tags.push(`${uiIcon('clock')} ${esc(openStatusFact.label)}${court.hours_source === 'venue' ? ' · venue hours' : ' · community hours'}`);
     if (feeFact) tags.push(`<span class="tag warn" style="margin:0">${uiIcon('ticket')} ${esc(feeFact)}</span>`);
     if (court.my_record) {
       const r = court.my_record;
@@ -12026,6 +12611,7 @@
               <span class="row-main">
                 <span class="row-title" style="display:flex;align-items:center;flex-wrap:wrap">${esc(p.display_name)}${badges.join('')}</span>
                 <span class="row-sub">${playerSkillIdentityHtml(p, { includeDupr: false, includeMatchRating: false })} · here ${fmtDuration(p.minutes_here)}</span>
+                <span class="row-sub">${esc(courtPresenceSourceText(p))}</span>
               </span>
             </button>
             ${actions}
@@ -12037,44 +12623,7 @@
       : `<div class="court-detail-empty"><span aria-hidden="true">${uiIcon('users')}</span><p>No players are checked in on Third Shot right now. Check in when you arrive to help others find you.</p></div>`;
 
     const allCourtGames = Array.isArray(court.games) ? court.games : [];
-    // A weekly occurrence is a regular player-organized session, not just
-    // another one-off game. Keep it visible as a first-class court activity while
-    // retaining the ordinary Game RSVP/waitlist model for each occurrence.
-    const regularPlaySessions = allCourtGames.filter((game) => (
-      game.recurrence === 'weekly' && game.game_type !== 'ranked'
-    ));
-    const playerOrganizedGames = allCourtGames.filter((game) => (
-      !regularPlaySessions.includes(game)
-    ));
-    const regularPlaySessionsHtml = !court.closed && regularPlaySessions.length
-      ? `<section class="court-regular-sessions" aria-labelledby="cd-regular-sessions-title">
-          <div class="section-label section-label-icon" id="cd-regular-sessions-title">${uiIcon('refresh')} Regular play sessions</div>
-          <p class="row-sub">Weekly sessions with a live RSVP list, openings, and waitlist for each date.</p>
-          ${regularPlaySessions.map((game) => gameCardHtml(game, { compact: true })).join('')}
-        </section>` : '';
-    let gamesHtml = '';
-    // Group by day (backend sends them sorted by scheduled_at).
-    const gamesByDay = [];
-    if (court.closed === true) {
-      gamesHtml = `<div class="court-detail-empty is-paused"><span aria-hidden="true">${uiIcon('alert-triangle')}</span><p>Player-organized sessions are paused while this court is marked closed.</p></div>`;
-    } else if (playerOrganizedGames.length) {
-      for (const g of playerOrganizedGames) {
-        const label = upcomingDayLabel(g.scheduled_at);
-        if (!gamesByDay.length || gamesByDay[gamesByDay.length - 1].label !== label) {
-          gamesByDay.push({ label, games: [] });
-        }
-        gamesByDay[gamesByDay.length - 1].games.push(g);
-      }
-      // Day chips filter the list below; tap again to see the whole week.
-      if (gamesByDay.length > 1) {
-        gamesHtml += `<div class="quick-times" id="cd-day-chips" style="margin:0 0 10px">${gamesByDay
-          .map((d, i) => `<button type="button" data-cd-day="${i}" aria-pressed="false">${esc(d.label)} · ${d.games.length}</button>`)
-          .join('')}</div>`;
-      }
-      gamesHtml += '<div id="cd-games-list"></div>';
-    } else {
-      gamesHtml = `<div class="court-detail-empty is-actionable"><span aria-hidden="true">${uiIcon('calendar')}</span><p>No player-organized sessions are scheduled yet.</p><button type="button" class="btn btn-secondary" id="cd-schedule-empty">Plan the first session</button></div>`;
-    }
+    const playerOrganizedGames = allCourtGames;
 
     const checkedIn = court.is_checked_in === true;
     const lookingForGame = checkedIn && court.is_looking_for_game === true;
@@ -12135,7 +12684,7 @@
           <button type="button" class="cd-now-signal${nHere ? ' hot' : ''}" data-scroll-to="cd-sec-players">
             <b>${nHere}</b><span>checked in</span>${uiIcon('chevron-right', 'chev')}
           </button>
-          <button type="button" class="cd-now-signal${nGames ? ' hot' : ''}" data-scroll-to="cd-sec-games">
+          <button type="button" class="cd-now-signal${nGames ? ' hot' : ''}" data-scroll-to="cd-play-here">
             <b>${nGames}</b><span>open session${nGames === 1 ? '' : 's'}</span>${uiIcon('chevron-right', 'chev')}
           </button>
         </div>`;
@@ -12151,9 +12700,8 @@
           <b>${courtClosed ? 'Still checked in' : lookingForGame ? 'Looking for a game' : 'Checked in quietly'}</b>
           <small>${courtClosed
             ? 'New play is paused here, but you can check out.'
-            : lookingForGame
-            ? 'Nearby signed-in players can see that you want to play.'
-            : 'You are at this court, but your profile is not shared with non-friends.'}</small>
+            : esc(courtPresenceAudience(lookingForGame))}</small>
+          <small>${esc(courtPresenceSourceText(state.presence))}${state.presence?.expires_at ? ` · Ends ${esc(fmtTimeShort(state.presence.expires_at))}` : ''}</small>
         </span>
         <span class="cd-presence-actions">
           ${courtClosed ? '' : `<button type="button" class="btn btn-secondary btn-sm" id="cd-looking-toggle" aria-pressed="${lookingForGame}">
@@ -12226,6 +12774,8 @@
       ${heroFactsHtml}
       ${visitFactsHtml}
       ${quickActions}
+      <section id="cd-play-here" class="court-play-timeline" aria-label="Dated play at this court"></section>
+      <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary>${checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</summary>
       <section class="card cd-now-card" aria-labelledby="cd-now-heading">
         <div class="cd-now-heading">
           <div>
@@ -12235,26 +12785,14 @@
           ${courtClosed ? '<span class="tag warn">Closed</span>' : ''}
         </div>
         ${nowSummary}
+        ${nHere ? `<p class="simple-note">${esc(courtPresenceSummaryText(court.presence_summary))}. Shared check-ins do not reserve a place.</p>` : ''}
         ${presenceControl}
         ${primaryAction}
         ${secondaryActions}
         <div id="cd-weather"></div>
-        ${court.latest_condition ? (() => {
-          const c = COURT_CONDITION_LABELS[court.latest_condition.condition] || ['alert-triangle', court.latest_condition.condition];
-          const mins = Math.max(1, Math.round((Date.now() - new Date(court.latest_condition.reported_at)) / 60000));
-          return `<div class="card row" style="margin-top:12px;padding:10px 14px;background:${court.latest_condition.condition === 'good' ? 'var(--green-50)' : 'var(--amber-50)'}">
-            <span class="court-condition-summary-icon">${uiIcon(c[0])}</span>
-            <div class="row-main">
-              <div class="row-title" style="font-size:14px">${c[1]}</div>
-              <div class="row-sub">reported ${mins < 60 ? `${mins}m` : `${Math.round(mins / 60)}h`} ago by ${esc(court.latest_condition.user_name)}</div>
-            </div>
-          </div>`;
-        })() : ''}
-      </section>
+        ${courtConditionReportsHtml(court)}
+      </section></details>
       <div id="cd-business" class="cd-business-slot" aria-live="polite"></div>
-      ${regularPlaySessionsHtml}
-      <div class="section-label section-label-icon" id="cd-sec-games">${uiIcon('calendar')} Player-organized sessions</div>
-      ${gamesHtml}
       <button type="button" class="card row nav-row-button cd-review-inline" id="cd-review-inline">
         <span class="nav-row-leading" aria-hidden="true">${uiIcon('star')}</span>
         <span class="row-main"><span class="row-title">${court.rating_avg ? `${court.rating_avg} from ${court.rating_count} review${court.rating_count === 1 ? '' : 's'}` : 'No court reviews yet'}</span><span class="row-sub">${state.me ? (court.my_review ? 'Update your review' : 'Write a review') : 'See what players say'}</span></span>
@@ -12272,9 +12810,7 @@
         <summary>${venueBusiness ? 'Community court details' : 'Court details'}</summary>
         <div class="cd-progressive-body">
           <div>${chipsHtml}</div>
-          ${court.busy_times && court.busy_times.length
-            ? `<div class="cd-detail-note">${uiIcon('chart')}<span><b>Busiest:</b> ${court.busy_times.map((b) => esc(b.label)).join(' · ')}</span></div>`
-            : ''}
+          ${courtCheckinHistoryHtml(court.checkin_history)}
           ${structuredOpenPlayHtml}
           ${!structuredOpenPlayHtml && court.open_play_schedule && (!venueBusiness || !venueBusiness.schedule.some((item) => item && item.active !== false)) ? `
             <div class="cd-hours">
@@ -12358,7 +12894,28 @@
     modal.querySelector('.cd-scroll')?.setAttribute('data-scroll', '');
     enhanceAppSelects(modalBox);
 
+    if (venuePreview || court.pending_submission) {
+      modalBox.dataset.venuePreview = 'true';
+      modal.querySelector('.cd-scroll')?.insertAdjacentHTML('afterbegin', `<div class="business-preview-note" role="status"><span>${uiIcon('eye')}</span><p><b>${venuePreview ? 'Manager draft · full court preview' : 'Private location · awaiting review'}</b><br />${venuePreview ? 'Your saved venue details appear in their court context.' : 'Only the submitting venue team and reviewers can see this location.'} Player actions and booking links are disabled in this preview.</p></div>`);
+      const slot = modal.querySelector('#cd-business');
+      slot.innerHTML = court.business ? courtBusinessHtml({...court.business, community_fallback: {hours: court.hours || '', phone: court.phone || '', website_url: court.website || '', open_play_schedule: court.open_play_schedule || ''}}) : '<p class="simple-note">This venue has not been approved for public discovery.</p>';
+      bindBusinessLogoFallback(slot);
+      slot.querySelectorAll('details').forEach(details => { details.open = true; });
+      const timeline = modal.querySelector('#cd-play-here');
+      timeline.innerHTML = `<h3>Play here</h3><p class="simple-note">Preview of player sessions. Your draft venue dates appear in the venue schedule below.</p>${playerOrganizedGames.map(game => courtTimelineItemHtml({source:'player',source_label:'Player-organized',title:game.title || 'Player session',starts_at:game.scheduled_at,game,status:'scheduled',action:'open_session',action_label:'View session'})).join('')}`;
+      modal.querySelector('#cd-reviews').innerHTML = `<p class="row-sub">${Number(court.rating_count) || 0} court reviews. The live court page contains the full review and contribution tools.</p>`;
+      modalBox.querySelectorAll('button:not(.modal-close), input, select, textarea').forEach(control => { control.disabled = true; });
+      modalBox.querySelectorAll('a, [data-goto], [data-view-user], [data-game]').forEach(link => { link.setAttribute('aria-disabled', 'true'); link.removeAttribute('href'); link.removeAttribute('data-goto'); link.removeAttribute('data-view-user'); link.removeAttribute('data-game'); });
+      // Capture prevents document-level delegated player actions as well.
+      modalBox.addEventListener('click', event => {
+        if (event.target.closest('a, button:not(.modal-close), [data-game-id], [data-open-game]')) { event.preventDefault(); event.stopPropagation(); }
+      }, true);
+      requestAnimationFrame(() => slot.scrollIntoView({block: 'center'}));
+      return modal;
+    }
+
     renderReviewSection(modal.querySelector('#cd-reviews'), court);
+    loadCourtTimeline(modal,court);
     loadCourtBusiness(modal, court, { expanded: focusBusiness });
     const addMorePreview = (label) => {
       if (!label || morePreviewParts.includes(label)) return;
@@ -12482,37 +13039,8 @@
         court, () => refreshCourtDetailPreservingContext(modal, court.id),
       ));
     }));
-    modal.querySelector('#cd-report-closure')?.addEventListener('click', async (event) => {
-      const button = event.currentTarget;
-      if (!await openActionConfirmation({
-        eyebrow: 'Court listing',
-        title: `Report ${court.name} as permanently closed?`,
-        message: 'Use this only when the courts have been removed or the venue has closed for good.',
-        detail: 'A second player must independently confirm the report before the court is hidden.',
-        confirmLabel: 'Submit closure report',
-        cancelLabel: 'Keep listing open',
-        icon: 'alert-triangle',
-        trigger: button,
-      })) return;
-      const resetAction = beginButtonAction(button, 'Submitting report…');
-      if (!resetAction) return;
-      try {
-        const result = await api(`/courts/${court.id}/suggest`, {
-          method: 'POST', body: JSON.stringify({ closed: true }),
-        });
-        if (result.applied_fields.includes('closed')) {
-          toast('Closure confirmed. This court is now hidden from new play.');
-          refreshCourtDetailPreservingContext(modal, court.id);
-        } else {
-          resetAction();
-          button.disabled = true;
-          button.innerHTML = `${uiIcon('check')} Closure report submitted`;
-          toast('Closure report submitted. One more confirmation is required.');
-        }
-      } catch (error) {
-        resetAction();
-        showInlineActionError(button.closest('.cd-progressive-body'), error.message);
-      }
+    modal.querySelector('#cd-report-closure')?.addEventListener('click', () => {
+      openChildModal(modal, () => openCourtClosureReport(court, () => refreshCourtDetailPreservingContext(modal, court.id)));
     });
     modal.querySelector('#cd-condition')?.addEventListener('click', () => {
       openChildModal(modal, () => openConditionSheet(
@@ -12594,13 +13122,15 @@
         contextBox.innerHTML = `
           ${modalHead('Add court photo')}
           <form id="cap-form" novalidate>
-            <img src="${photo}" alt="Selected court photo preview" style="width:100%;border-radius:var(--radius-md);margin-bottom:10px" />
+            <img src="${photo}" alt="Selected court photo preview" style="width:100%;border-radius: var(--radius-md);margin-bottom:10px" />
             <div class="form-field">
               <label for="cap-text">Caption <span class="row-sub">(optional)</span></label>
               <input type="text" id="cap-text" maxlength="140" placeholder="e.g. Fresh nets on courts 1–2!" />
             </div>
+            <label class="form-field" for="cap-category">What does this show?<select id="cap-category"><option value="">Choose a category</option>${courtPhotoCategories().map(([key,label]) => `<option value="${key}">${label}</option>`).join('')}</select></label>
+            <label class="form-field" for="cap-date">Date taken <span class="field-optional">Optional</span><input type="date" id="cap-date" max="${new Date().toISOString().slice(0,10)}" /><small>Leave blank if you do not know. The upload date is shown separately.</small></label>
             <p class="court-photo-cover-notice">${uiIcon('camera')} <span>${becomesCoverPhoto
-              ? '<b>This becomes the court cover photo.</b> You can delete your photo from the gallery later.'
+              ? '<b>Court views are preferred for the cover.</b> Other views help players find their way in the gallery.'
               : '<b>This joins the court gallery.</b> The venue-supplied cover photo will remain in place.'}</span></p>
             <button type="submit" class="btn btn-primary btn-block" id="cap-save" style="margin-top:12px">${uiIcon('camera')} Add photo</button>
             <button type="button" class="btn btn-secondary btn-block" data-photo-upload-cancel>Back without adding</button>
@@ -12617,7 +13147,7 @@
           try {
             await api(`/courts/${court.id}/photo`, {
               method: 'POST',
-              body: JSON.stringify({ photo, caption: activeContext.querySelector('#cap-text').value.trim() }),
+              body: JSON.stringify({ photo, caption: activeContext.querySelector('#cap-text').value.trim(), category: activeContext.querySelector('#cap-category').value, captured_on: activeContext.querySelector('#cap-date').value || null }),
             });
             restoreDismissBehavior();
             toast('Photo added. Thanks for contributing!', { tone: 'success', icon: 'camera' });
@@ -12752,40 +13282,11 @@
     });
     modal.querySelectorAll('[data-plan-open-play]').forEach((button) => {
       button.addEventListener('click', () => {
-        const row = courtOpenPlayRows(court).find((candidate) => (
-          candidate.weekday === button.dataset.openPlayDay
-          && candidate.start === button.dataset.openPlayStart
-        ));
-        const courtTimezone = court.structured_hours?.timezone || court.open_status?.timezone
-          || (String(court.state || '').toUpperCase() === 'CA' ? 'America/Los_Angeles' : null);
-        const start = nextCourtOpenPlayStart(row, new Date(), courtTimezone);
-        if (!row || !start) {
-          toast('That schedule time needs an update before it can be planned.');
-          return;
-        }
-        const ratings = (String(row.level || '').match(/[2-5](?:\.[0-9])?/g) || [])
-          .map(Number).filter((value) => value >= 2 && value <= 5.5);
-        const dollars = /^free\b/i.test(String(row.cost || '')) ? 0
-          : Number((String(row.cost || '').match(/\$\s*(\d+(?:\.\d{1,2})?)/) || [])[1]);
-        openChildModal(modal, () => openNewGameModal({
-          court,
-          gameType: 'casual',
-          lockGameType: true,
-          sessionMode: true,
-          recurrence: 'weekly',
-          recurrenceWeekdays: [row.weekday],
-          ...(courtTimezone ? { recurrenceTimezone: courtTimezone } : {}),
-          scheduledAt: start.toISOString(),
-          durationMinutes: courtOpenPlayDuration(row),
-          maxPlayers: 8,
-          title: 'Open play',
-          description: row.notes || '',
-          levelMin: ratings.length ? Math.min(...ratings) : undefined,
-          levelMax: ratings.length ? Math.max(...ratings) : undefined,
-          costCents: Number.isFinite(dollars) ? Math.round(dollars * 100) : undefined,
-          sourceLabel: `${COURT_WEEKDAY_LABELS[row.weekday]} open-play schedule`,
-          onCreated: refreshCourtAfterGameCreate,
-        }));
+        const row = courtOpenPlayRows(court).find(candidate => candidate.weekday === button.dataset.openPlayDay && candidate.start === button.dataset.openPlayStart);
+        const zone = court.structured_hours?.timezone || court.open_status?.timezone || '';
+        const start = nextCourtOpenPlayStart(row, new Date(), zone || null);
+        if (!row || !start) { toast('That schedule time needs an update before it can be planned.'); return; }
+        openCourtWindowPlan(court, {window:row, timezone:zone, event_date:calendarDateInTimeZone(start,zone || Intl.DateTimeFormat().resolvedOptions().timeZone)}, modal);
       });
     });
     modal.querySelector('#cd-schedule')?.addEventListener('click', () => {
@@ -12884,33 +13385,6 @@
     bindGameButtons(modal, () => refreshCourtDetailPreservingContext(modal, courtId));
     bindUserButtons(modal);
 
-    // Upcoming-games day filter: one chip narrows the list to that day,
-    // tapping it again brings the whole week back. Rendered after the
-    // modal-wide bind above so each card is only ever bound once.
-    let cdDayFilter = null;
-    const renderCdGames = () => {
-      const listEl = modal.querySelector('#cd-games-list');
-      if (!listEl) return;
-      const days = cdDayFilter == null ? gamesByDay : [gamesByDay[cdDayFilter]];
-      listEl.innerHTML = days.map((d) => `
-        <div class="section-label" style="font-size:var(--text-xs);margin-top:8px">${esc(d.label)}</div>
-        ${d.games.map((g) => gameCardHtml(g, { compact: true })).join('')}`).join('');
-      modal.querySelectorAll('#cd-day-chips [data-cd-day]').forEach((b) => {
-        const active = Number(b.dataset.cdDay) === cdDayFilter;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', String(active));
-      });
-      bindGameButtons(listEl, () => refreshCourtDetailPreservingContext(modal, courtId));
-      bindUserButtons(listEl);
-    };
-    renderCdGames();
-    modal.querySelectorAll('#cd-day-chips [data-cd-day]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const i = Number(b.dataset.cdDay);
-        cdDayFilter = cdDayFilter === i ? null : i;
-        renderCdGames();
-      });
-    });
     modal.querySelectorAll('[data-open-tournament]').forEach((card) => {
       card.addEventListener('click', () => openDrillInFrom(
         modal, () => openTournamentScreen(Number(card.dataset.openTournament)),
@@ -15186,6 +15660,22 @@
     fetchCourtsInView();
   }
 
+  function openCourtClosureReport(court, onSaved) {
+    const modal = openModal(`${modalHead(court.closed ? 'Report this court reopened' : 'Report permanent closure')}<form class="business-feature-body" id="court-closure-report"><p class="row-sub">${esc(court.name)} stays as listed until an operator reviews the evidence. Temporary weather or maintenance belongs in Report conditions.</p><div class="form-field"><label for="closure-evidence">What did you confirm?</label><textarea id="closure-evidence" required minlength="12" maxlength="500" rows="4" placeholder="What changed, when, and an official notice or other source"></textarea></div><p class="simple-note">A reviewed closure pauses new play and check-ins. Existing session participants receive an update.</p><p class="form-error hidden" role="alert"></p><button type="submit" class="btn btn-primary btn-block">Submit for review</button></form>`);
+    const form = modal.querySelector('form');
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const evidence = form.querySelector('textarea').value.trim();
+      const error = form.querySelector('[role="alert"]');
+      if (evidence.length < 12) { error.textContent = 'Add a short explanation and your source.'; error.classList.remove('hidden'); form.querySelector('textarea').focus(); return; }
+      const button = form.querySelector('[type="submit"]');
+      const reset = beginButtonAction(button, 'Submitting…'); if (!reset) return;
+      try { await api(`/courts/${court.id}/suggest`, {method:'POST', body:JSON.stringify({closed:!court.closed,evidence})}); closeModal(modal); toast('Report submitted for operator review.'); onSaved?.(); }
+      catch (failure) { reset(); error.textContent = failure.message; error.classList.remove('hidden'); }
+    });
+    return modal;
+  }
+
   function openCheckInSheet(court, onCheckedIn = null, {
     defaultLooking = true,
     presenceIntent = 'manual_checkin',
@@ -15194,23 +15684,24 @@
       <div class="checkin-sheet">
         <div class="checkin-sheet-icon" aria-hidden="true">${uiIcon('map-pin')}</div>
         <h3 style="margin:6px 0 2px">I’m at ${esc(court.name)}</h3>
-        <p class="row-sub checkin-sheet-intro">Choose who can see your fresh check-in. We’ll confirm that your device is at this court without saving its precise location.</p>
+        <p class="row-sub checkin-sheet-intro">Share that you’re here. Location confirmation does not save your precise coordinates or reserve a session place.</p>
         <form id="ci-form">
           <fieldset class="checkin-visibility-fieldset">
             <legend class="sr-only">Check-in visibility</legend>
             <label class="checkin-visibility-option">
               <input type="radio" name="checkin-visibility" value="looking" ${defaultLooking ? 'checked' : ''}>
-              <span>${uiIcon('users')}<span><b>Check in &amp; look for a game</b><small>Share your profile with signed-in players nearby.</small></span></span>
+              <span>${uiIcon('users')}<span><b>Check in &amp; look for a game</b><small>${esc(courtPresenceAudience(true))}</small></span></span>
             </label>
             <label class="checkin-visibility-option">
               <input type="radio" name="checkin-visibility" value="quiet" ${defaultLooking ? '' : 'checked'}>
-              <span>${uiIcon('shield')}<span><b>Check in quietly</b><small>Friends can still recognize you; non-friends only see the total.</small></span></span>
+              <span>${uiIcon('shield')}<span><b>Check in quietly</b><small>${esc(courtPresenceAudience(false))}</small></span></span>
             </label>
           </fieldset>
           <button type="submit" class="btn btn-primary btn-block" id="ci-submit">${uiIcon('check-circle')} Check in</button>
         </form>
-        <p class="play-now-privacy"><span aria-hidden="true">${uiIcon('eye')}</span> If you’re ready, signed-in players nearby may see that fresh status until it expires automatically.</p>
+        <p class="play-now-privacy"><span aria-hidden="true">${uiIcon('clock')}</span> Your check-in expires automatically. Check out whenever you leave.</p>
         <p class="form-error hidden" id="ci-error" role="alert" tabindex="-1"></p>
+        ${presenceIntent === 'manual_checkin' ? `<div id="ci-self-report" class="hidden"><p class="simple-note">Indoors or unable to use location? You can share an unconfirmed check-in. Starting an immediate game still needs location confirmation.</p><button type="button" class="btn btn-secondary btn-block" id="ci-self-report-submit">I’m here — share without location confirmation</button></div>` : ''}
         <button type="button" class="btn-link modal-close btn-block" style="margin-top:8px">Cancel</button>
       </div>
     `);
@@ -15218,8 +15709,9 @@
     const form = modal.querySelector('#ci-form');
     const button = modal.querySelector('#ci-submit');
     const callerSession = instantRallySession();
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
+    const selfReportPanel = modal.querySelector('#ci-self-report');
+    const selfReportButton = modal.querySelector('#ci-self-report-submit');
+    const submitCheckIn = async (selfReport = false) => {
       if (button.dataset.submitting === 'true') return;
       if (!callerSession || !instantRallySessionMatches(callerSession)) {
         errorEl.textContent = 'Sign in again before checking in.';
@@ -15231,21 +15723,22 @@
       const original = button.innerHTML;
       button.dataset.submitting = 'true';
       button.disabled = true;
+      if (selfReportButton) selfReportButton.disabled = true;
       form.querySelector('fieldset').disabled = true;
       button.setAttribute('aria-busy', 'true');
       button.textContent = 'Checking in…';
       errorEl.classList.add('hidden');
       try {
         button.textContent = 'Confirming your location…';
-        const presenceLocation = await freshCourtPresenceLocation(court);
+        const presenceLocation = selfReport ? null : await freshCourtPresenceLocation(court);
         if (!instantRallySessionMatches(callerSession) || !modal.isConnected) return;
         button.textContent = 'Checking in…';
         const response = await api(`/courts/${court.id}/checkin`, {
           method: 'POST',
           body: JSON.stringify({
             looking_for_game: lookingForGame,
-            presence_intent: presenceIntent,
-            presence_location: presenceLocation,
+            presence_intent: selfReport ? 'self_reported' : presenceIntent,
+            ...(selfReport ? {confirm_at_court: true} : {presence_location: presenceLocation}),
           }),
         });
         if (!instantRallySessionMatches(callerSession)) return;
@@ -15255,8 +15748,10 @@
         errorEl.textContent = error.message;
         errorEl.classList.remove('hidden');
         errorEl.focus({ preventScroll: true });
+        if (selfReportPanel && ['invalid_presence_location', 'location_accuracy_too_low', 'court_location_unavailable'].includes(error.code || error.error)) selfReportPanel.classList.remove('hidden');
         delete button.dataset.submitting;
         button.disabled = false;
+        if (selfReportButton) selfReportButton.disabled = false;
         button.removeAttribute('aria-busy');
         form.querySelector('fieldset').disabled = false;
         button.innerHTML = original;
@@ -15267,12 +15762,14 @@
         ? `You’re looking for a game at ${court.name}`
         : `Checked in quietly at ${court.name}`);
       refreshMe().catch(() => { /* the check-in response remains authoritative */ });
-      if (followupLoad && routedOverlayLoadIsCurrent(followupLoad)) {
+      if (!selfReport && followupLoad && routedOverlayLoadIsCurrent(followupLoad)) {
         maybeAskHours(court);
       }
       onCheckedIn?.();
-      maybeOfferAutoCheckInAfterManualCheckIn(court);
-    });
+      if (!selfReport) maybeOfferAutoCheckInAfterManualCheckIn(court);
+    };
+    form.addEventListener('submit', event => { event.preventDefault(); submitCheckIn(false); });
+    selfReportButton?.addEventListener('click', () => submitCheckIn(true));
     return modal;
   }
 
@@ -15350,6 +15847,37 @@
     };
   }
 
+  function gameHasDatedSeries(game) {
+    return Number(game?.recurrence_series_id) > 0 || game?.recurrence === 'weekly';
+  }
+
+  function recurrenceScopeChoicesHtml(game, prefix, action = 'Edit') {
+    if (!gameHasDatedSeries(game)) return '';
+    return `<fieldset class="recurrence-scope-picker"><legend>${esc(action)} which dates?</legend>
+      <label><input type="radio" name="${prefix}-scope" value="this_date" checked /><span><b>This date only</b><small>${esc(fmtDateTime(game.scheduled_at))}</small></span></label>
+      <label><input type="radio" name="${prefix}-scope" value="following_dates" /><span><b>This and future dates</b><small>Earlier sessions stay unchanged</small></span></label>
+    </fieldset>`;
+  }
+
+  function gameOccurrencesHtml(game, rows) {
+    const dates = (Array.isArray(rows) ? rows : []).filter((row) => safePositiveId(row.id));
+    if (!dates.length) return '<p class="row-sub">No other dates are available.</p>';
+    const statusLabel = (row) => row.status === 'cancelled' ? 'Cancelled'
+      : row.status === 'completed' ? 'Played'
+        : row.status === 'expired' ? 'Past · attendance not recorded'
+          : row.status === 'awaiting_confirmation' ? 'Result pending'
+            : row.is_skipped ? 'Skipped' : row.is_joined ? 'Going' : `${Math.max(0, Number(row.max_players) - Number(row.player_count))} spots`;
+    const upcoming = dates.filter((row) => row.status === 'upcoming' && Date.parse(row.scheduled_at) > Date.now());
+    const next = upcoming.find((row) => Number(row.id) !== Number(game.id));
+    const isPast = !['upcoming', 'awaiting_confirmation'].includes(game.status);
+    return `<div class="series-date-heading"><span>${uiIcon('calendar')} <b>Weekly sessions</b></span><small>${upcoming.length} upcoming</small></div>
+      <label class="series-date-select"><span class="sr-only">Choose a session date</span><select id="gs-occurrence-select" aria-label="Choose a session date" data-native-select>
+        ${dates.map((row) => `<option value="${row.id}" ${Number(row.id) === Number(game.id) ? 'selected' : ''}>${esc(fmtDateTime(row.scheduled_at))} · ${esc(statusLabel(row))}</option>`).join('')}
+      </select></label>
+      ${isPast && next ? `<a class="btn btn-primary btn-block series-next-date" href="#game/${next.id}" data-series-date="${next.id}">${uiIcon('arrow-right')} Next session · ${esc(fmtDateTime(next.scheduled_at))}</a>` : ''}
+      <small class="series-date-footnote">Each date has its own players and result.</small>`;
+  }
+
   function openGameCancellationConfirmation({
     game = {}, gameId = null, variant = 'scheduled', endpoint = null,
     trigger = null, onCancelled = null,
@@ -15357,6 +15885,7 @@
     const resolvedGameId = safePositiveId(gameId ?? game.id);
     if (!resolvedGameId || trigger?.dataset.cancelSheetOpen === 'true') return null;
     const config = gameCancellationVariant(variant, game);
+    const recurring = gameHasDatedSeries(game) && variant !== 'challenge';
     const playNoun = game.game_type === 'ranked' ? 'match' : 'play session';
     const courtName = game.court?.name || game.court_name || 'Court not listed';
     const format = Number(game.max_players) === 2 ? 'Singles'
@@ -15377,6 +15906,7 @@
           <div class="game-cancel-summary-court"><span aria-hidden="true">${uiIcon('map-pin')}</span><div><b>${esc(courtName)}</b><span>${esc(when)}</span></div></div>
           <div class="game-cancel-summary-tags"><span>${esc(type)}</span><span>${esc(format)}</span>${roster ? `<span>${esc(roster)}</span>` : ''}</div>
         </div>
+        ${recurring ? recurrenceScopeChoicesHtml(game, 'gc', 'Cancel') : ''}
         <div class="game-cancel-impact"><span class="game-cancel-impact-icon" aria-hidden="true">${uiIcon('alert-triangle')}</span><div><b>What happens next</b><p>${esc(config.impact)}</p></div></div>
         <div class="game-cancel-error hidden" role="alert" tabindex="-1"></div>
         <div class="game-cancel-actions">
@@ -15398,6 +15928,23 @@
     const confirmButton = sheet.querySelector('[data-game-cancel-confirm]');
     const error = sheet.querySelector('.game-cancel-error');
     const closeButton = sheet.querySelector('.modal-close');
+    const selectedScope = () => sheet.querySelector('input[name="gc-scope"]:checked')?.value || 'this_date';
+    const syncScope = () => {
+      if (!recurring) return;
+      const following = selectedScope() === 'following_dates';
+      config.heading = following ? 'Cancel this and future dates?' : 'Cancel only this date?';
+      config.action = following ? 'Cancel these dates' : 'Cancel this date';
+      config.success = following ? 'Upcoming dates cancelled' : 'This date cancelled';
+      config.successCopy = following ? 'The selected date and later sessions are cancelled. Earlier sessions stay unchanged.' : 'Your other session dates are unchanged.';
+      sheet.querySelector('.game-cancel-hero h2').textContent = config.heading;
+      sheet.querySelector('.game-cancel-hero p').textContent = fmtDateTime(game.scheduled_at);
+      sheet.querySelector('.game-cancel-impact p').textContent = following
+        ? 'Players on this and later dates will be notified. Earlier dates and results stay in their history.'
+        : 'Players on this date will be notified. The rest of the weekly schedule stays active.';
+      confirmButton.textContent = config.action;
+    };
+    sheet.querySelectorAll('input[name="gc-scope"]').forEach((input) => input.addEventListener('change', syncScope));
+    syncScope();
     keep.addEventListener('click', () => closeModal(sheet));
     confirmButton.addEventListener('click', async () => {
       if (committing) return;
@@ -15411,7 +15958,10 @@
       error.classList.add('hidden');
       error.textContent = '';
       try {
-        const fresh = await api(endpoint || `/games/${resolvedGameId}/cancel`, { method: 'POST' });
+        const fresh = await api(endpoint || `/games/${resolvedGameId}/cancel`, {
+          method: 'POST',
+          ...(recurring ? { body: JSON.stringify({ edit_scope: selectedScope() }) } : {}),
+        });
         committing = false;
         if (!document.body.contains(sheet)) return;
         try { onCancelled?.(fresh); } catch { /* refresh callbacks never hide a successful cancel */ }
@@ -15453,6 +16003,7 @@
     state.playLevelFilter = '';
     state.playRadius = 25;
     state.playWhen = 'any';
+    state.playFilters = null;
     try {
       const saved = JSON.parse(localStorage.getItem(`thirdshot-play-preferences:${id}`) || '{}');
       if ([10, 25, 50, 100].includes(saved.radius)) state.playRadius = saved.radius;
@@ -15477,10 +16028,93 @@
   }
 
   function playDiscoveryQuery() {
-    const window = playDiscoveryWindow(state.playWhen);
+    const filters = state.playFilters || {};
+    const window = filters.date ? playCustomDiscoveryWindow(filters) : playDiscoveryWindow(state.playWhen);
     const params = new URLSearchParams({ ends_after: window.endsAfter.toISOString() });
+    if (window.startsAfter) params.set('starts_after', window.startsAfter.toISOString());
     if (window.startsBefore) params.set('starts_before', window.startsBefore.toISOString());
+    if (filters.courtId) params.set('court_id', String(filters.courtId));
+    if (filters.openSpots) params.set('open_spots', '1');
     return `&${params}`;
+  }
+
+  function playCustomDiscoveryWindow(filters, now = new Date()) {
+    const startClock = filters.startTime || '00:00';
+    const startsAfter = new Date(`${filters.date}T${startClock}`);
+    const startsBefore = filters.endTime ? new Date(`${filters.date}T${filters.endTime}`)
+      : new Date(`${filters.date}T00:00`);
+    if (!filters.endTime) startsBefore.setDate(startsBefore.getDate() + 1);
+    const clockMatches = (date, clock) => date.getHours() === Number(clock.slice(0, 2))
+      && date.getMinutes() === Number(clock.slice(3, 5));
+    const dateMatches = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` === filters.date;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(filters.date) || !Number.isFinite(startsAfter.getTime())
+        || !Number.isFinite(startsBefore.getTime()) || !dateMatches(startsAfter)
+        || !/^\d{2}:\d{2}$/.test(startClock) || !clockMatches(startsAfter, startClock)
+        || (filters.endTime && (!/^\d{2}:\d{2}$/.test(filters.endTime)
+          || !dateMatches(startsBefore) || !clockMatches(startsBefore, filters.endTime)))) {
+      throw new Error('Choose a valid date and time. This time may not exist when the clocks change.');
+    }
+    if (startsBefore <= startsAfter) throw new Error('The latest start must be after the earliest start.');
+    // Keep the requested interval valid if the page stays open past that day.
+    // The server also checks current time, so expired games cannot reappear.
+    const endsAfter = new Date(Math.min(now.getTime(), startsAfter.getTime()));
+    return { endsAfter, startsAfter, startsBefore };
+  }
+
+  function openPlayDiscoveryFilters(onApply) {
+    const filters = state.playFilters || {};
+    const ownerId = state.me?.id;
+    const today = scheduleDateTimeValue(new Date()).slice(0, 10);
+    const modal = openModal(`${modalHead('Find a game')}
+      <form id="pd-form" class="play-filter-form">
+        <label for="pd-date">Date</label><input type="date" id="pd-date" min="${today}" value="${esc(filters.date || '')}">
+        <div class="play-filter-time-row"><label>Earliest start<input type="time" id="pd-start" value="${esc(filters.startTime || '')}"></label><label>Starts before<input type="time" id="pd-end" value="${esc(filters.endTime || '')}"></label></div>
+        <p class="play-filter-hint">Times use your timezone. Leave blank for the whole day.</p>
+        <label for="pd-court-search">Court <small>Optional</small></label>
+        <input id="pd-court-search" placeholder="Any court, or search by name" value="${esc(filters.courtName || '')}" autocomplete="off">
+        <input type="hidden" id="pd-court-id" value="${filters.courtId || ''}"><div id="pd-court-results"></div>
+        <label class="play-filter-spots"><input type="checkbox" id="pd-spots" ${filters.openSpots ? 'checked' : ''}><span>Open spots only</span></label>
+        <button type="submit" class="btn btn-primary btn-block" id="pd-apply">Show games</button>
+        <button type="button" class="btn-link btn-block" id="pd-clear">Clear filters</button>
+      </form>`, { label: 'Find a game filters' });
+    clubCourtPicker(modal, 'pd');
+    const formUX = bindModalFormUX(modal, '#pd-apply');
+    const updateTimes = () => {
+      for (const id of ['#pd-start', '#pd-end']) modal.querySelector(id).disabled = !modal.querySelector('#pd-date').value;
+    };
+    modal.querySelector('#pd-date').addEventListener('change', updateTimes);
+    updateTimes();
+    const apply = (next) => {
+      if (state.me?.id !== ownerId) return;
+      closeModal(modal);
+      onApply(next);
+    };
+    modal.querySelector('#pd-clear').addEventListener('click', () => apply({playFilters:null,playWhen:'any',playLevelFilter:''}));
+    modal.querySelector('#pd-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const date = modal.querySelector('#pd-date').value;
+      const courtId = Number(modal.querySelector('#pd-court-id').value) || null;
+      const courtName = modal.querySelector('#pd-court-search').value.trim();
+      if (courtName && !courtId) return formUX.showError('Choose a court from the search results, or clear the court name.', modal.querySelector('#pd-court-search'));
+      const next = {date, startTime:date ? modal.querySelector('#pd-start').value : '',
+        endTime:date ? modal.querySelector('#pd-end').value : '',courtId,courtName,
+        openSpots:modal.querySelector('#pd-spots').checked};
+      try { if (date) playCustomDiscoveryWindow(next); }
+      catch (error) { formUX.showError(error.message, modal.querySelector('#pd-date')); return; }
+      apply({playFilters:next,playWhen:date ? 'custom' : state.playWhen === 'custom' ? 'any' : state.playWhen});
+    });
+    return modal;
+  }
+
+  function playDiscoveryFilterLabel() {
+    const filters = state.playFilters || {};
+    const clock = (value) => new Date(`${filters.date || '2000-01-01'}T${value}`)
+      .toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+    const time = filters.startTime && filters.endTime ? `${clock(filters.startTime)}–${clock(filters.endTime)}`
+      : filters.startTime ? `From ${clock(filters.startTime)}`
+        : filters.endTime ? `Before ${clock(filters.endTime)}` : '';
+    return [filters.date ? new Date(`${filters.date}T12:00`).toLocaleDateString([], {month:'short',day:'numeric'}) : '',
+      time,filters.courtName,filters.openSpots ? 'Open spots' : ''].filter(Boolean).join(' · ');
   }
 
   function gameActivityLabel(game) {
@@ -15517,6 +16151,19 @@
     </section>`;
   }
 
+  function playGameDecision(game, now = Date.now()) {
+    if (game.status !== 'upcoming' || game.is_instant) return null;
+    const offerDeadline = Date.parse(game.waitlist_offer?.expires_at || '');
+    if (!game.is_joined && offerDeadline > now) return {
+      kind: 'offer', label: 'Spot offered', action: 'Review spot offer', deadline: offerDeadline,
+    };
+    const hostDeadline = Date.parse(game.host_handoff?.expires_at || '');
+    if (game.is_joined && game.host_handoff?.can_respond && hostDeadline > now) return {
+      kind: 'host', label: 'Host request', action: 'Review host request', deadline: hostDeadline,
+    };
+    return null;
+  }
+
   function gameRosterStatus(game) {
     if (game.status !== 'upcoming' || game.is_instant) return null;
     const joined = (game.players || []).length;
@@ -15527,9 +16174,13 @@
     if (game.attendance_confirmation_due && game.is_joined && !game.is_creator) {
       return { tone: 'attention', label: 'Confirm your spot', detail: 'Let the group know you’re still coming.' };
     }
-    const open = Math.max(0, capacity - joined);
+    const held = Math.max(0, Number(game.reserved_offer_count) || 0);
+    const supplied = game.spots_left == null ? NaN : Number(game.spots_left);
+    const open = Math.max(0, Number.isFinite(supplied) ? supplied : capacity - joined - held);
     if (open) return { tone: 'forming', label: `${joined} joined`,
-      detail: `${open} spot${open === 1 ? '' : 's'} left` };
+      detail: `${open} spot${open === 1 ? '' : 's'} left${held ? ` · ${held} held` : ''}` };
+    if (held) return { tone: 'forming', label: `${joined} joined`,
+      detail: `${held} spot${held === 1 ? '' : 's'} held` };
     if (game.attendance_confirmation_due && confirmed < joined) return { tone: 'forming', label: 'Full',
       detail: `${joined - confirmed} still need${joined - confirmed === 1 ? 's' : ''} to confirm` };
     return joined ? { tone: 'ready', label: `${joined} joined`, detail: 'Full' } : null;
@@ -15662,8 +16313,8 @@
       if (game.awaiting_your_confirmation) {
         cardStyle = 'border:2px solid var(--amber-500)';
         banner = `<span class="status-banner confirm-banner">${uiIcon('edit')} <span>${esc(game.score_submitted_by_name || 'Opponent')} reported <b>${scoreText}</b> — is that right?<small>${esc(scoreAutoConfirmCopy(game))}</small></span></span>`;
-        action = `<button class="btn btn-primary btn-sm" data-game-confirm="${game.id}">${uiIcon('check-circle')} Confirm</button>
-                  <button type="button" class="btn btn-danger btn-sm" data-game-dispute="${game.id}" aria-label="Dispute this score">${uiIcon('x')}</button>`;
+        action = `<button class="btn btn-primary btn-sm" data-game-confirm="${game.id}" data-score-version="${Number(game.score_version || 0)}">${uiIcon('check-circle')} Confirm</button>
+                  <button type="button" class="btn btn-danger btn-sm" data-game-dispute="${game.id}" data-score-version="${Number(game.score_version || 0)}" aria-label="Dispute this score">${uiIcon('x')}</button>`;
       } else {
         banner = `<span class="status-banner">${uiIcon('clock')} ${scoreText} reported — ${esc(scoreAutoConfirmCopy(game))}</span>`;
       }
@@ -15692,9 +16343,13 @@
       action = `<button type="button" class="btn btn-primary btn-sm" data-game-attend="${game.id}">I’m coming</button><button type="button" class="btn btn-secondary btn-sm" data-open-game="${game.id}">Review game</button>`;
     }
 
-    const scheduledLabel = game.recurrence === 'weekly' && game.status === 'upcoming'
-      ? `${new Date(game.scheduled_at).toLocaleDateString([], { weekday: 'long' })}s · ${new Date(game.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-      : `${fmtDateTime(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
+    const decision = playGameDecision(game);
+    if (decision) {
+      banner = `<span class="status-banner confirm-banner game-decision-banner">${uiIcon('clock')}<span>${decision.kind === 'offer' ? 'A spot is held for you' : 'You’ve been asked to host'}<small>Reply by ${esc(fmtDateTime(new Date(decision.deadline).toISOString()))}</small></span></span>`;
+      action = `<button type="button" class="btn btn-primary btn-sm" data-open-game="${game.id}">${esc(decision.action)}</button>`;
+    }
+
+    const scheduledLabel = `${fmtDateTime(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
     const defaultGameTitle = game.is_instant
       ? `${fmtDateTime(game.scheduled_at)}${assembly ? ' · Live' : ''}`
       : scheduledLabel;
@@ -15705,6 +16360,7 @@
         : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
     const courtSummary = `${court.name || 'Game'}${!compact && court.city ? ` · ${court.city}` : ''}`;
     const rosterStatus = gameRosterStatusHtml(game);
+    const queuedCount = Math.max(0, (Number(game.waitlist_count) || 0) - (Number(game.reserved_offer_count) || 0));
     const playerNames = game.players.slice(0, 3).map((player) => player.user_id === state.me?.id ? 'You' : (player.display_name || 'Player').split(' ')[0]);
     const peopleLabel = playerNames.join(', ') + (game.players.length > 3 ? ` +${game.players.length - 3}` : '');
     const joinedState = game.is_joined && game.status === 'upcoming'
@@ -15721,7 +16377,7 @@
         </button>
         <div class="row game-card-footer">
           <div class="game-card-people"><div class="avatar-stack">${avatars}</div><span>${esc(peopleLabel || 'Be the first to join')}</span></div>
-          <div class="game-card-roster">${rosterStatus || (assembly ? esc(rallyCountsText(assembly)) : `${game.players.length}/${game.max_players} players`)}${game.waitlist_count ? `<span class="game-card-waiting">${game.waitlist_count} waiting</span>` : ''}</div>
+          <div class="game-card-roster">${rosterStatus || (assembly ? esc(rallyCountsText(assembly)) : `${game.players.length}/${game.max_players} players`)}${queuedCount ? `<span class="game-card-waiting">${queuedCount} waiting</span>` : ''}</div>
           <div class="game-card-actions">${action}</div>
         </div>
       </article>`;
@@ -15906,7 +16562,7 @@
       if (!resetAction) return;
       const modalLoad = beginRoutedOverlayLoad(null);
       try {
-        const game = await api(`/games/${b.dataset.gameConfirm}/confirm`, { method: 'POST' });
+        const game = await api(`/games/${b.dataset.gameConfirm}/confirm`, { method: 'POST', body: JSON.stringify({ expected_score_version: Number(b.dataset.scoreVersion || 0) }) });
         if (routedOverlayLoadIsCurrent(modalLoad)) showCelebration(game);
         refreshMe();
         refresh();
@@ -15941,11 +16597,11 @@
       if (!resetAction) return;
       try {
         const updated = await api(`/games/${b.dataset.gameDispute}/dispute`, {
-          method: 'POST', body: JSON.stringify({ details: disputeReason }),
+          method: 'POST', body: JSON.stringify({ details: disputeReason, expected_score_version: Number(b.dataset.scoreVersion || 0) }),
         });
         state.playGamesCache = null;
         if (updated.score_dispute_outcome === 'unresolved') {
-          toast('Result closed as unresolved — no rating changed');
+          toast('Score disputed — review the correction options');
           openGameScreen(Number(b.dataset.gameDispute));
         } else {
           openScoreModal(updated, () => {
@@ -15987,7 +16643,216 @@
     return `Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${fmtDateTime(game.scheduled_at)}`;
   }
 
+  function canManageGameInviteLink(game) {
+    return !!(game?.is_creator && game.visibility === 'private'
+      && game.status === 'upcoming' && !game.is_instant
+      && !game.crew_id && !game.club_id && !game.is_direct_challenge);
+  }
+
+  function gameInvitationPreviewHtml(plan) {
+    const count = Math.max(0, Number(plan.joined_count) || 0);
+    const places = Math.max(0, Number(plan.spots_left) || 0);
+    const cost = plan.cost_cents == null ? 'Cost not listed'
+      : Number(plan.cost_cents) === 0 ? 'Free' : `$${(Number(plan.cost_cents) / 100).toFixed(2)} per player`;
+    const format = plan.game_type === 'ranked'
+      ? `Ranked ${Number(plan.max_players) === 2 ? 'singles' : 'doubles'}` : 'Casual session';
+    return `<div class="game-invitation-preview">
+      <span class="auth-preview-kicker">Private invitation · ${esc(format)}</span>
+      <h3>${esc(plan.title || gameActivityLabel(plan))}</h3>
+      <p class="game-invitation-host">Hosted by ${esc(plan.host_name || 'the session host')}</p>
+      <dl class="auth-preview-facts">
+        <div><dt>When</dt><dd>${esc(fmtDateTime(plan.scheduled_at))}<small>Your local time${plan.duration_minutes ? ` · ${Number(plan.duration_minutes)} minutes` : ''}</small></dd></div>
+        <div><dt>Where</dt><dd>${esc(plan.court?.name || 'Court not listed')}<small>${esc([plan.court?.address, plan.court?.city].filter(Boolean).join(', '))}</small></dd></div>
+        <div><dt>Cost</dt><dd>${esc(cost)}</dd></div>
+      </dl>
+      <p class="game-invitation-places">${count} going · ${places ? `${places} ${places === 1 ? 'place' : 'places'} available` : 'Full · ask to join the waitlist'}</p>
+    </div>`;
+  }
+
+  function invitationErrorMessage(error) {
+    return [404, 410].includes(Number(error?.status))
+      ? 'This invitation is no longer available. Ask the host for a current link.'
+      : error?.message || 'The invitation could not load. Check your connection and try again.';
+  }
+
+  async function renderSignedOutGameInvitation(container, route, stillCurrent) {
+    container.classList.add('is-public-detail');
+    container.innerHTML = '<p role="status">Opening your private invitation…</p>';
+    container.setAttribute('aria-busy', 'true');
+    try {
+      const plan = await api(`/games/${route.id}/invite-link/preview`, {
+        method: 'POST', body: JSON.stringify({ token: route.inviteToken }),
+      });
+      if (!stillCurrent() || !container.isConnected) return;
+      container.innerHTML = `${gameInvitationPreviewHtml(plan)}
+        <button type="button" class="btn btn-primary btn-block" data-invitation-signin>Continue to invitation</button>
+        <p class="auth-preview-footnote">Log in or create an account to see the players. Joining is your choice.</p>`;
+      container.querySelector('[data-invitation-signin]').addEventListener('click', showAuthEntryForm);
+    } catch (error) {
+      if (!stillCurrent() || !container.isConnected) return;
+      container.innerHTML = `<p class="form-error" role="alert">${esc(invitationErrorMessage(error))}</p>
+        <button type="button" class="btn btn-secondary btn-block" data-invitation-retry>Try again</button>`;
+      container.querySelector('[data-invitation-retry]').addEventListener('click', () => {
+        if (stillCurrent()) renderSignedOutGameInvitation(container, route, stillCurrent);
+      });
+    } finally {
+      if (stillCurrent()) container.removeAttribute('aria-busy');
+    }
+  }
+
+  async function openGameInvitation(route) {
+    const owner = captureAuthenticatedSessionOwner();
+    const shell = openDetailLoadShell({ route, title: 'Private invitation',
+      copy: 'Loading the session…', label: 'Private invitation' });
+    if (!shell) return;
+    const { modal, box, load } = shell;
+    const isCurrent = () => modal.isConnected && authenticatedSessionOwnerIsCurrent(owner)
+      && routedOverlayLoadIsCurrent(load);
+    try {
+      const plan = await api(`/games/${route.id}/invite-link/preview`, {
+        method: 'POST', body: JSON.stringify({ token: route.inviteToken }),
+      });
+      if (!isCurrent()) return;
+      box.removeAttribute('aria-busy');
+      box.innerHTML = `${modalHead('Private invitation')}${gameInvitationPreviewHtml(plan)}
+        <button type="button" class="btn btn-primary btn-block" data-invitation-open>Open invitation</button>
+        <p class="game-invitation-note">See the players, then choose Join on the session to confirm your place.</p>
+        <p role="alert" class="form-error" data-invitation-error></p>`;
+      setDialogLabel(box, 'Private invitation');
+      const button = modal.querySelector('[data-invitation-open]');
+      button.addEventListener('click', async () => {
+        const finish = beginButtonAction(button, 'Opening…');
+        if (!finish) return;
+        try {
+          await api(`/games/${route.id}/invite-link/redeem`, {
+            method: 'POST', body: JSON.stringify({ token: route.inviteToken }),
+          });
+          if (!isCurrent()) return;
+          transitionModal(modal, () => openGameScreen(route.id));
+        } catch (error) {
+          if (isCurrent()) modal.querySelector('[data-invitation-error]').textContent = invitationErrorMessage(error);
+        } finally { if (modal.isConnected) finish(); }
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      renderDetailLoadError(shell, invitationErrorMessage(error),
+        () => retryDetailLoad(shell, () => openGameInvitation(route)), 'Invitation unavailable');
+    }
+    return modal;
+  }
+
+  function openGameInviteLinkSheet(game) {
+    const owner = captureAuthenticatedSessionOwner();
+    const sheet = openModal(`${modalHead('Private invite link')}
+      <p class="game-invitation-note">Anyone with this link can open this private session after signing in. Joining is a separate choice.</p>
+      <div data-invite-link-content aria-busy="true"><p role="status">Loading invitation…</p></div>
+      <p class="game-invitation-note">Existing invitations and RSVPs stay when you replace or disable the link.</p>
+      <p class="game-invitation-status" role="status" aria-live="polite" data-invite-link-status></p>`,
+    { label: 'Private invite link' });
+    let link = null;
+    let busy = false;
+    let request = 0;
+    const isCurrent = () => sheet.isConnected && authenticatedSessionOwnerIsCurrent(owner);
+    const content = sheet.querySelector('[data-invite-link-content]');
+    const status = sheet.querySelector('[data-invite-link-status]');
+    const render = () => {
+      if (!isCurrent()) return;
+      content.removeAttribute('aria-busy');
+      content.innerHTML = !link ? '<button type="button" class="btn btn-secondary btn-block" data-invite-link-retry>Try again</button>'
+        : link.enabled ? `<div class="form-field"><label for="private-invite-url">${esc(game.title || 'Session')} invitation</label>
+            <input id="private-invite-url" type="url" readonly value="${esc(link.url)}" /></div>
+          <p class="game-invitation-note">Expires ${esc(fmtDateTime(link.expires_at))}. This link is for this date.</p>
+          <div class="game-invitation-actions"><button type="button" class="btn btn-primary" data-invite-link-copy>Copy link</button><button type="button" class="btn btn-secondary" data-invite-link-share>Share</button></div>
+          <div class="game-invitation-actions is-secondary"><button type="button" class="btn-link" data-invite-link-replace>Replace link</button><button type="button" class="btn-link" data-invite-link-disable>Disable link</button></div>`
+        : '<p>Link sharing is off.</p><button type="button" class="btn btn-primary btn-block" data-invite-link-create>Create invite link</button>';
+      content.querySelector('[data-invite-link-retry]')?.addEventListener('click', () => load());
+      content.querySelector('[data-invite-link-create]')?.addEventListener('click', () => change('POST'));
+      for (const [action, method] of [['replace', 'POST'], ['disable', 'DELETE']]) {
+        content.querySelector(`[data-invite-link-${action}]`)?.addEventListener('click', async (event) => {
+          if (busy) return;
+          const version = link.version;
+          const confirmed = await openActionConfirmation({
+            title: action === 'replace' ? 'Replace this invitation link?' : 'Disable this invitation link?',
+            message: 'The old link will stop working. Existing invitations and RSVPs stay.',
+            confirmLabel: action === 'replace' ? 'Replace link' : 'Disable link',
+            cancelLabel: 'Keep link', trigger: event.currentTarget,
+          });
+          if (confirmed && isCurrent()) change(method, version);
+        });
+      }
+      const copy = async () => {
+        if (busy || !link?.enabled) return;
+        try {
+          await navigator.clipboard.writeText(link.url);
+          if (isCurrent()) status.textContent = 'Invitation link copied.';
+        } catch {
+          if (!isCurrent()) return;
+          const input = content.querySelector('#private-invite-url');
+          input?.focus(); input?.select();
+          status.textContent = 'Select and copy the link above.';
+        }
+      };
+      content.querySelector('[data-invite-link-copy]')?.addEventListener('click', copy);
+      content.querySelector('[data-invite-link-share]')?.addEventListener('click', async () => {
+        if (busy || !link?.enabled) return;
+        if (!navigator.share) { await copy(); return; }
+        try {
+          await navigator.share({ title: game.title || 'Private pickleball session',
+            text: `Join me ${fmtDateTime(game.scheduled_at)} at ${game.court?.name || 'the court'}.`, url: link.url });
+          if (isCurrent()) status.textContent = 'Invitation shared.';
+        } catch (error) {
+          if (isCurrent() && error?.name !== 'AbortError') status.textContent = 'Sharing did not open. You can copy the link instead.';
+        }
+      });
+    };
+    const load = async (message = '') => {
+      const seq = ++request;
+      busy = true;
+      content.setAttribute('aria-busy', 'true');
+      content.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+      try {
+        const fresh = await api(`/games/${game.id}/invite-link`);
+        if (!isCurrent() || seq !== request) return;
+        link = fresh;
+        status.textContent = message;
+      } catch (error) {
+        if (!isCurrent() || seq !== request) return;
+        link = null;
+        status.textContent = invitationErrorMessage(error);
+      } finally {
+        if (isCurrent() && seq === request) { busy = false; render(); }
+      }
+    };
+    const change = async (method, version = link?.version) => {
+      if (busy || !isCurrent()) return;
+      busy = true;
+      content.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+      try {
+        const fresh = await api(`/games/${game.id}/invite-link`, {
+          method, body: JSON.stringify({ expected_version: version }),
+        });
+        if (!isCurrent()) return;
+        link = fresh;
+        status.textContent = method === 'DELETE' ? 'Link disabled. Existing RSVPs stay.' : 'Your new invitation link is ready.';
+      } catch (error) {
+        if (!isCurrent()) return;
+        await load(error.code === 'invite_link_changed'
+          ? 'This link changed on another device. The current version is shown.'
+          : error.message || 'The link could not be changed. Review its current status before trying again.');
+        return;
+      } finally {
+        if (isCurrent()) { busy = false; render(); }
+      }
+    };
+    load();
+    return sheet;
+  }
+
   async function shareGame(game, { notify = true } = {}) {
+    if (canManageGameInviteLink(game)) {
+      openGameInviteLinkSheet(game);
+      return 'managed';
+    }
     const url = `${location.origin}/g/${game.id}`; // short link → OG preview in chat apps
     const text = gameShareText(game);
     try {
@@ -16042,13 +16907,16 @@
       </div>
       <div class="roster-boost-launch-actions" role="group" aria-label="Invite players">
         <button type="button" data-roster-boost-channel="friends"><span aria-hidden="true">${uiIcon('users')}</span><b>Friends</b></button>
-        <button type="button" data-roster-boost-channel="court"><span aria-hidden="true">${uiIcon('message')}</span><b>Court chat</b></button>
+        ${game.visibility === 'open' ? `<button type="button" data-roster-boost-channel="court"><span aria-hidden="true">${uiIcon('message')}</span><b>Court chat</b></button>` : ''}
         <button type="button" data-roster-boost-channel="share"><span aria-hidden="true">${uiIcon('send')}</span><b>Share link</b></button>
       </div>
     </section>`;
   }
 
   function openRosterBoostSheet(initialGame, { onGameUpdated, initialChannel = 'friends' } = {}) {
+    if (initialChannel === 'share' && canManageGameInviteLink(initialGame)) {
+      return openGameInviteLinkSheet(initialGame);
+    }
     const accountId = Number(state.me && state.me.id);
     let game = initialGame;
     const playNoun = game.game_type === 'ranked' ? 'match' : 'play session';
@@ -16058,7 +16926,7 @@
     let friendsError = false;
     let busy = false;
     let activeChannel = ['friends', 'court', 'share'].includes(initialChannel)
-      ? initialChannel : 'friends';
+      && (initialChannel !== 'court' || game.visibility === 'open') ? initialChannel : 'friends';
     const selected = new Set();
     const sentInviteIds = new Set();
 
@@ -16070,7 +16938,7 @@
         <p class="roster-boost-trust">Choose one way to reach players. Each action reports its result below.</p>
         <div class="roster-boost-tabs" role="tablist" aria-label="Invite options">
           <button type="button" role="tab" id="rb-tab-friends" aria-controls="rb-friends-channel" data-rb-channel="friends">${uiIcon('users')}<span>Friends</span></button>
-          <button type="button" role="tab" id="rb-tab-court" aria-controls="rb-court-channel" data-rb-channel="court">${uiIcon('message')}<span>Court chat</span></button>
+          ${game.visibility === 'open' ? `<button type="button" role="tab" id="rb-tab-court" aria-controls="rb-court-channel" data-rb-channel="court">${uiIcon('message')}<span>Court chat</span></button>` : ''}
           <button type="button" role="tab" id="rb-tab-share" aria-controls="rb-share-channel" data-rb-channel="share">${uiIcon('send')}<span>Share link</span></button>
         </div>
         <section class="roster-boost-channel" id="rb-friends-channel" role="tabpanel" aria-labelledby="rb-tab-friends">
@@ -16095,6 +16963,8 @@
             <span class="roster-boost-channel-icon" aria-hidden="true">${uiIcon('send')}</span>
             <div><b>Share link</b><span>Text the ${playNoun} link to any group.</span></div>
           </div>
+          <div class="form-field"><label for="rb-share-url">Session invitation link</label><input id="rb-share-url" type="url" readonly value="${esc(`${location.origin}/g/${game.id}`)}" /></div>
+          <button type="button" class="btn btn-primary btn-block" id="rb-copy-link">Copy link</button>
           <button type="button" class="btn btn-secondary btn-block" id="rb-share">Share ${playNoun} link</button>
           <p class="roster-boost-channel-note" id="rb-share-note"></p>
         </section>
@@ -16110,6 +16980,8 @@
     const postButton = sheet.querySelector('#rb-post-court');
     const withdrawButton = sheet.querySelector('#rb-withdraw-court');
     const shareButton = sheet.querySelector('#rb-share');
+    const copyLinkButton = sheet.querySelector('#rb-copy-link');
+    const linkInput = sheet.querySelector('#rb-share-url');
     const shareSection = sheet.querySelector('#rb-share-channel');
     const shareNote = sheet.querySelector('#rb-share-note');
     const courtNote = sheet.querySelector('#rb-court-note');
@@ -16121,6 +16993,10 @@
 
     const selectChannel = (channel, { focus = false } = {}) => {
       if (!channelPanels[channel]) return;
+      if (channel === 'share' && canManageGameInviteLink(game)) {
+        openChildModal(sheet, () => openGameInviteLinkSheet(game));
+        return;
+      }
       activeChannel = channel;
       channelButtons.forEach((button) => {
         const selected = button.dataset.rbChannel === channel;
@@ -16137,6 +17013,18 @@
       statusEl.textContent = message || '';
       statusEl.className = `roster-boost-status${tone ? ` is-${tone}` : ''}`;
     };
+    copyLinkButton.addEventListener('click', async () => {
+      const reset = beginButtonAction(copyLinkButton, 'Copying…');
+      if (!reset) return;
+      try {
+        await navigator.clipboard.writeText(linkInput.value);
+        announce('Session link copied.', 'success');
+      } catch {
+        linkInput.focus();
+        linkInput.select();
+        announce('Select and copy the session link above.');
+      } finally { reset(); }
+    });
     const currentPlayerIds = () => new Set(
       (game.players || []).map((player) => Number(player.user_id)),
     );
@@ -17052,6 +17940,37 @@
     return result || null;
   }
 
+  function openCreatePlaySheet() {
+    const modal = openModal(`
+      ${modalHead('What are you planning?', 'calendar')}
+      <div class="create-play-choices">
+        <button type="button" class="card row nav-row-button" data-create-kind="casual">
+          <span class="nav-row-leading" aria-hidden="true">${uiIcon('users')}</span>
+          <span class="row-main"><b>Casual session</b><small>Pick a time and invite people to play.</small></span>${uiIcon('chevron-right', 'chev')}
+        </button>
+        <button type="button" class="card row nav-row-button" data-create-kind="ranked">
+          <span class="nav-row-leading" aria-hidden="true">${uiIcon('target')}</span>
+          <span class="row-main"><b>Ranked match</b><small>Singles or doubles with a confirmed result.</small></span>${uiIcon('chevron-right', 'chev')}
+        </button>
+        <button type="button" class="card row nav-row-button" data-create-kind="competition">
+          <span class="nav-row-leading" aria-hidden="true">${uiIcon('trophy')}</span>
+          <span class="row-main"><b>Tournament or league</b><small>Organize several matches and standings.</small></span>${uiIcon('chevron-right', 'chev')}
+        </button>
+      </div>
+    `, { label: 'Choose a play activity' });
+    modal.querySelectorAll('[data-create-kind]').forEach((button) => button.addEventListener('click', () => {
+      transitionModal(modal, () => {
+        if (button.dataset.createKind === 'competition') return openCompetitionCreateSheet();
+        const ranked = button.dataset.createKind === 'ranked';
+        return openNewGameModal({
+          gameType: ranked ? 'ranked' : 'casual', maxPlayers: ranked ? 4 : 6,
+          lockGameType: true, sessionMode: !ranked, rankedMatchMode: ranked,
+        });
+      });
+    }));
+    return modal;
+  }
+
   function rallyLauncherHtml() {
     const here = state.presence && state.presence.checked_in;
     const pulse = here ? null : normalizeActivePlayPulse(state.activePlayPulse);
@@ -17062,7 +17981,7 @@
     return `
       <section class="play-action-bar" aria-label="Create or start a game">
         <button type="button" class="btn btn-primary" data-goto="new-game">${uiIcon('plus')} Create game</button>
-        <details class="play-now-options">
+        <details class="play-now-options" data-view-state-key="play-now">
           <summary>${uiIcon('zap')} Play now</summary>
           <div class="play-now-quick-actions">
             <p class="row-sub">${status}</p>
@@ -17094,18 +18013,14 @@
 
   function playScheduleHtml(games, excludedIds = new Set(), competitions = []) {
     const now = Date.now();
-    const end = now + 7 * 24 * 60 * 60 * 1000;
     const upcomingGames = (games || []).filter((game) => {
       const starts = new Date(game.scheduled_at).getTime();
       return game.status === 'upcoming' && !excludedIds.has(Number(game.id)) && Number.isFinite(starts)
-        && starts >= now && starts <= end && !instantRallyClosed(game);
+        && starts >= now && !instantRallyClosed(game);
     }).map((item) => ({ kind: 'game', item, startsAt: item.scheduled_at }));
-    const tournamentEvents = (competitions || []).filter((competition) => {
-      const starts = new Date(competition.starts_at).getTime();
-      return competition.kind === 'tournament' && Number.isFinite(starts)
-        && starts >= now && starts <= end;
-    }).map((item) => ({ kind: 'tournament', item, startsAt: item.starts_at }));
-    const upcoming = [...upcomingGames, ...tournamentEvents]
+    const competitionEvents = (competitions || []).filter((item) => !playCompetitionNeedsAction(item))
+      .map((item) => ({ kind: item.kind, item, startsAt: item.starts_at || item.scheduled_at }));
+    const upcoming = [...upcomingGames, ...competitionEvents]
       .sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
     if (!upcoming.length) return '';
     const groups = [];
@@ -17119,30 +18034,121 @@
       group.events.push(event);
     });
     return `<section class="play-schedule" aria-labelledby="play-schedule-title">
-      <div class="section-heading-row"><div class="section-label" id="play-schedule-title">My schedule · next 7 days</div><button type="button" class="btn-link play-calendar-sync" data-sync-play-calendar>Sync to calendar</button></div>
+      <div class="section-heading-row"><div class="section-label" id="play-schedule-title">Upcoming plans</div><button type="button" class="btn-link play-calendar-sync" data-sync-play-calendar>Subscribe to calendar</button></div>
       ${groups.map((group) => `<div class="play-schedule-day"><b>${esc(group.day)}</b>${group.events.map((event) => {
-        if (event.kind === 'tournament') {
-          const tournament = event.item;
-          const court = tournament.court || {};
-          const role = tournament.is_organizer ? 'Organizer' : tournament.is_entered ? 'Entered' : 'Partner invitation';
-          return `<button type="button" class="play-schedule-row" data-open-tournament="${tournament.id}" aria-label="Open ${esc(tournament.name)} tournament, ${esc(fmtDateTime(tournament.starts_at))}${court.name ? ` at ${esc(court.name)}` : ''}, ${esc(role)}">
-            <span class="play-schedule-time">${esc(fmtTimeShort(tournament.starts_at))}</span>
-            <span class="row-main"><b>${esc(tournament.name)}</b><small>${uiIcon('trophy')} Tournament${court.name ? ` · ${esc(court.name)}` : ''}</small></span>
-            <span class="tag live">${esc(role)}</span>
-          </button>`;
-        }
+        if (event.kind !== 'game') return playCompetitionRowHtml(event.item);
         const game = event.item;
         const court = game.court || {};
-        const rsvp = game.waitlist_position ? `Waitlist #${game.waitlist_position}`
-          : game.my_recurrence_rsvp?.is_skipped ? 'Maybe'
-            : game.is_joined ? 'Going' : 'Invited';
-        return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(rsvp)}">
+        const rsvp = playGameDecision(game)?.label || (game.waitlist_position ? `Waitlist #${game.waitlist_position}`
+          : game.my_recurrence_rsvp?.is_skipped ? 'Skipping this date'
+            : game.attendance_confirmation_due && !game.is_creator ? 'Confirm spot'
+              : game.is_joined ? 'Going' : 'Invited');
+        return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(rsvp)}">
           <span class="play-schedule-time">${esc(fmtTimeShort(game.scheduled_at))}</span>
-          <span class="row-main"><b>${esc(court.name || 'Pickleball')}</b><small>${game.recurrence === 'weekly' ? 'Play session · Weekly' : game.game_type === 'ranked' ? 'Ranked match' : 'Pickup game'}</small></span>
+          <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${game.game_type === 'ranked' ? `Ranked ${Number(game.max_players) === 2 ? 'singles' : 'doubles'}` : 'Pickup session'}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
           <span class="tag ${rsvp === 'Going' ? 'live' : ''}">${esc(rsvp)}</span>
         </button>`;
       }).join('')}</div>`).join('')}
     </section>`;
+  }
+
+  function playCompetitionNeedsAction(competition) {
+    const starts = Date.parse(competition.starts_at || competition.scheduled_at || '');
+    if (competition.kind === 'tournament' && competition.my_waitlist?.status === 'queued') return false;
+    return !Number.isFinite(starts) || starts < Date.now()
+      || ['awaiting_confirmation', 'disputed', 'unresolved'].includes(competition.result_state)
+      || competition.can_respond_schedule
+      || competition.my_waitlist?.status === 'offered'
+      || competition.my_partner_action
+      || competition.partner_status === 'needed'
+      || competition.kind === 'tournament' && !competition.is_entered && !competition.is_organizer;
+  }
+
+  function playCompetitionRowHtml(competition) {
+    const startsAt = competition.starts_at || competition.scheduled_at;
+    const hasTime = Number.isFinite(Date.parse(startsAt || ''));
+    const court = competition.scheduled_court || competition.court || {};
+    const status = competition.awaiting_your_confirmation ? 'Confirm result'
+      : competition.result_state === 'awaiting_confirmation' ? 'Waiting for confirmation'
+        : ['disputed', 'unresolved'].includes(competition.result_state) ? 'Review result'
+          : competition.can_respond_schedule ? 'Review times'
+            : competition.schedule_status === 'waiting_reply' ? 'Waiting for reply'
+              : competition.kind === 'tournament_match'
+                ? competition.play_state === 'playing' ? 'Playing'
+                  : competition.play_state === 'called' ? 'Go to court'
+                    : !hasTime ? 'Time TBA' : Date.parse(startsAt) < Date.now() ? 'Awaiting call' : 'Estimated'
+                : !hasTime ? 'Choose a time' : Date.parse(startsAt) < Date.now() ? 'Ready to play' : 'Scheduled';
+    if (competition.kind === 'tournament') {
+      const tournament = competition;
+      const waiting = tournament.my_waitlist;
+      const role = waiting?.status === 'offered' ? 'Accept offered place'
+        : waiting?.status === 'queued' ? `Waitlist${waiting.position ? ` #${waiting.position}` : ''}`
+          : tournament.my_partner_action ? 'Reply to partner'
+            : tournament.partner_status === 'needed' ? 'Find partner'
+              : tournament.partner_status === 'pending' ? 'Partner pending'
+                : tournament.is_organizer ? 'Organizer' : tournament.is_entered ? 'Entered' : 'Reply to invite';
+      return `<button type="button" class="play-schedule-row" data-open-tournament="${tournament.id}" aria-label="Open ${esc(tournament.name)} tournament, ${esc(hasTime ? fmtDateTime(startsAt) : 'Time to be announced')}${court.name ? ` at ${esc(court.name)}` : ''}, ${esc(role)}">
+        <span class="play-schedule-time">${hasTime ? esc(fmtTimeShort(startsAt)) : '—'}</span>
+        <span class="row-main"><b>${esc(tournament.name)}</b><small>Tournament${court.name ? ` · ${esc(court.name)}` : ''}${waiting?.status === 'offered' && waiting.expires_at ? ` · Reply by ${esc(fmtDateTime(waiting.expires_at))}` : ''}</small></span>
+        <span class="tag">${esc(role)}</span>
+      </button>`;
+    }
+    const isLeague = competition.kind === 'league_match';
+    const opponent = isLeague ? competition.opponent?.display_name || 'Opponent' : competition.opponent_name || 'Opponent to be decided';
+    const name = isLeague ? competition.league_name : competition.name;
+    return `<button type="button" class="play-schedule-row" data-play-competition="${isLeague ? 'league' : 'tournament'}" data-competition-id="${isLeague ? competition.league_id : competition.tournament_id}" data-match-id="${competition.id}" aria-label="${esc(name)}, match against ${esc(opponent)}, ${esc(status)}${hasTime ? `, ${esc(fmtDateTime(startsAt))}` : ''}">
+      <span class="play-schedule-time">${hasTime ? esc(fmtTimeShort(startsAt)) : '—'}</span>
+      <span class="row-main"><b>vs ${esc(opponent)}</b><small>${esc(name)} · ${isLeague ? 'League' : 'Tournament'}${court.name ? ` · ${esc(court.name)}` : ''}${competition.court_number ? ` · Court ${esc(competition.court_number)}` : ''}${playCompetitionNeedsAction(competition) && hasTime ? ` · ${esc(fmtDateTime(startsAt))}` : ''}</small></span>
+      <span class="tag">${esc(status)}</span>
+    </button>`;
+  }
+
+  function playScheduleConflictsHtml(conflicts) {
+    if (!Array.isArray(conflicts) || !conflicts.length) return '';
+    const planHtml = (plan) => {
+      const route = String(plan.action_url || '').match(/^\/#(game|league|tournament)\/(\d+)(?:\/match\/(\d+))?$/);
+      const attrs = route?.[1] === 'game' && !route[3] ? `data-open-game="${route[2]}"`
+        : route && route[1] !== 'game' && route[3] ? `data-play-competition="${route[1]}" data-competition-id="${route[2]}" data-match-id="${route[3]}"` : '';
+      const content = `<b>${esc(plan.title || 'Your plan')}</b><small>${esc(fmtDateTime(plan.starts_at))}</small>`;
+      return attrs ? `<button type="button" class="plan-overlap-link" ${attrs}>${content}${uiIcon('chevron-right')}</button>` : `<div class="plan-overlap-link">${content}</div>`;
+    };
+    const itemHtml = (item) => `<div class="plan-overlap-pair">${(item.plans || []).map(planHtml).join('')}${item.estimated ? '<small class="row-sub">Includes an estimated time</small>' : ''}</div>`;
+    return `<section class="plan-overlaps" aria-label="Overlapping plans"><div class="section-label">${uiIcon('calendar')} ${conflicts.length} time overlap${conflicts.length === 1 ? '' : 's'}</div><p class="row-sub">Both plans are still saved. Open either one to review the time.</p>${conflicts.slice(0, 2).map(itemHtml).join('')}${conflicts.length > 2 ? `<details data-view-state-key="all-plan-overlaps"><summary>Show ${conflicts.length - 2} more overlap${conflicts.length - 2 === 1 ? '' : 's'}</summary>${conflicts.slice(2).map(itemHtml).join('')}</details>` : ''}</section>`;
+  }
+
+  function playFeedPageControlHtml(feed, key, label) {
+    return feed?.has_more && feed.next_cursor
+      ? `<button type="button" class="btn btn-secondary btn-block" data-play-page="${key}">${esc(label)}</button>` : '';
+  }
+
+  function mergePlayFeedPage(feed, page) {
+    const items = new Map((feed.items || []).map((item) => [item.id, item]));
+    (page.items || []).forEach((item) => items.set(item.id, item));
+    return { ...page, items: [...items.values()] };
+  }
+
+  function distinctDiscoveredSeries(games) {
+    const earliest = new Map();
+    games.forEach((game) => {
+      const seriesId = Number(game.recurrence_series_id);
+      if (!(seriesId > 0)) return;
+      const current = earliest.get(seriesId);
+      if (!current || Date.parse(game.scheduled_at) < Date.parse(current.scheduled_at)) earliest.set(seriesId, game);
+    });
+    return games.filter((game) => !(Number(game.recurrence_series_id) > 0)
+      || earliest.get(Number(game.recurrence_series_id)) === game);
+  }
+
+  async function restorePlayFeedWindow(feed, targetCount, baseUrl) {
+    const cursors = new Set();
+    while (feed.items.length < targetCount && feed.has_more && feed.next_cursor) {
+      const cursor = feed.next_cursor;
+      if (cursors.has(cursor)) break;
+      cursors.add(cursor);
+      const page = await api(`${baseUrl}&limit=100&cursor=${encodeURIComponent(cursor)}`);
+      feed = mergePlayFeedPage(feed, page);
+    }
+    return feed;
   }
 
   function playNearbyNowHtml(looking) {
@@ -17177,17 +18183,50 @@
     });
   }
 
+  function rankingViewerHtml(board, rankRowHtml) {
+    const me = state.me;
+    if (!me) return '';
+    const loaded = board.items.find((player) => player.id === me.id);
+    const viewer = board.viewer || (loaded
+      ? { status: 'ranked', rank: loaded.rank || board.items.indexOf(loaded) + 1, player: loaded }
+      : { status: 'not_available' });
+    const heading = '<div class="section-label ranking-you-label">Your place</div>';
+    if (viewer.status === 'ranked' && viewer.player && viewer.rank > 0) {
+      return heading + rankRowHtml(viewer.player, viewer.rank, { highlight: true, name: 'You' });
+    }
+    const copy = {
+      no_ranked_results: 'Complete a ranked match to get a Third Shot match rating.',
+      no_results_this_month: 'No confirmed ranked results this month. Your all-time rating is unchanged.',
+      outside_area: 'Your player location is outside this ranking area.',
+      location_not_set: 'Set your player area to appear in local rankings.',
+      not_available: 'Your place could not be loaded. Refresh the rankings to try again.',
+    }[viewer.status] || 'Your place could not be loaded.';
+    const action = viewer.status === 'no_ranked_results'
+      ? '<button type="button" class="btn btn-primary btn-sm" data-goto="ranked-match">Plan a ranked match</button>'
+      : viewer.status === 'no_results_this_month'
+        ? '<button type="button" class="btn btn-secondary btn-sm" data-rankings-reset="period">View all time</button>'
+        : viewer.status === 'outside_area'
+          ? '<button type="button" class="btn btn-secondary btn-sm" data-rankings-reset="area">View everyone</button>'
+          : viewer.status === 'location_not_set'
+            ? '<button type="button" class="btn btn-secondary btn-sm" data-set-rankings-area>Set area</button>'
+            : '<button type="button" class="btn btn-secondary btn-sm" data-rankings-retry>Try again</button>';
+    return `${heading}<div class="card ranking-viewer-state" data-ranking-status="${esc(viewer.status)}">
+      <div class="row">${avatarHtml(me, 'sm')}<div class="row-main"><b>You</b><div class="row-sub">${esc(copy)}</div></div></div>
+      <div class="ranking-viewer-actions">${action}<button type="button" class="btn-link rating-help-link" data-rating-help aria-label="Third Shot match rating ${me.rating}. How ratings work">${me.rating} · What is this?</button></div>
+    </div>`;
+  }
+
   async function renderPlay({ reuseFresh = false, useCachedData = false } = {}) {
     loadPlayPreferences();
     const seg = state.playSeg;
-    const discoveryKey = `${state.playWhen}:${state.playRadius}:${state.playLevelFilter}`;
+    const discoveryKey = `${state.playWhen}:${state.playRadius}:${state.playLevelFilter}:${JSON.stringify(state.playFilters || {})}`;
     const liveEl = $('#play-content');
     if (document.getElementById(`play-tab-${seg}`)) liveEl.setAttribute('aria-labelledby', `play-tab-${seg}`);
     else {
       liveEl.removeAttribute('aria-labelledby');
       liveEl.setAttribute('aria-label', 'Play');
     }
-    const viewKey = `${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}:${discoveryKey}`;
+    const viewKey = `${state.me?.id || 'signed-out'}:play:${seg}:${areaViewKey()}:${discoveryKey}:${seg === 'scores' ? `${state.boardScope}:${state.boardPeriod}` : ''}`;
     if (reuseFresh && viewIsFresh(liveEl, viewKey)) return;
     const renderSeq = ++state.playRenderSeq;
     const hadUsableContent = beginViewRender(liveEl, viewKey, 5);
@@ -17211,6 +18250,7 @@
       return true;
     };
     const personalLoc = committedAreaLatLng();
+    const hasDiscoveryLocation = !!personalLoc || !!state.playFilters?.courtId;
     const loc = personalLoc || { lat: null, lng: null };
     if (seg === 'brackets') {
       await renderTournaments(el, () => renderPlay());
@@ -17278,13 +18318,9 @@
           </div>`;
         let html = `
           <div class="rankings-heading">
-            <span class="rankings-heading-icon" aria-hidden="true">${uiIcon('trophy')}</span>
-            <span class="row-main">
-              <span class="section-label">Rankings</span>
-              <h2>${scope === 'near' ? 'Local leaderboard' : scope === 'friends' ? 'Friends leaderboard' : 'Global leaderboard'}</h2>
-              <span>${isMonth ? 'Third Shot match-rating movement this month.' : 'Third Shot match ratings from confirmed ranked matches.'}</span>
-            </span>
-            <button type="button" class="rankings-metric" data-rating-help aria-label="How Third Shot match ratings work">${uiIcon('activity')} ${isMonth ? 'Monthly change' : 'Match rating'}</button>
+            <h2>${scope === 'near' ? 'Local rankings' : scope === 'friends' ? 'Friends rankings' : 'Global rankings'}</h2>
+            <button type="button" class="rankings-metric" data-rating-help aria-label="How Third Shot match ratings work">${uiIcon('activity')} Ratings</button>
+            <p class="rankings-description">${isMonth ? 'Change in Third Shot match rating this month.' : 'Third Shot match ratings · Confirmed ranked results'}</p>
           </div>
           <div class="rankings-filters">
             <div class="segmented" id="board-geography" role="group" aria-label="Ranking area">
@@ -17303,6 +18339,7 @@
             <button type="button" class="btn btn-primary" data-set-rankings-area>Set area</button>
           </section>` : ''}`;
 
+        if (!boardFeed.error) html += rankingViewerHtml(board, rankRowHtml);
         if (boardFeed.error) {
           html += rankingsSectionError(
             'Rankings unavailable',
@@ -17312,47 +18349,35 @@
           const top3 = board.items.slice(0, 3);
           // Podium order: 2nd, 1st, 3rd
           const order = [top3[1], top3[0], top3[2]].filter(Boolean);
-          const place = (u) => board.items.indexOf(u) + 1;
+          const place = (u) => u.rank || board.items.indexOf(u) + 1;
           html += '<div class="podium">' + order.map((u) => `
             <button type="button" class="podium-col place-${place(u)}" data-view-user="${u.id}" aria-label="View ${esc(u.display_name)}, rank ${place(u)}, ${boardValueText(u)}${u.tournament_titles ? `, ${u.tournament_titles} tournament title${u.tournament_titles === 1 ? '' : 's'}` : ''}${u.current_streak >= 2 ? `, ${u.current_streak} match win streak` : ''}">
               <span class="podium-medal" aria-hidden="true">${['🥇', '🥈', '🥉'][place(u) - 1]}</span>
               ${avatarHtml(u, '', 'span')}
-              <span class="podium-name">${esc(u.display_name.split(' ')[0])}${u.tournament_titles ? `<span class="ranking-achievement" aria-hidden="true">${uiIcon('trophy')}</span>` : ''}${u.current_streak >= 2 ? `<span class="ranking-achievement" aria-hidden="true">${uiIcon('zap')}</span>` : ''}</span>
+              <span class="podium-name">${esc(u.display_name)}${u.tournament_titles ? `<span class="ranking-achievement" aria-hidden="true">${uiIcon('trophy')}</span>` : ''}${u.current_streak >= 2 ? `<span class="ranking-achievement" aria-hidden="true">${uiIcon('zap')}</span>` : ''}</span>
               <span class="podium-rating"><span class="sr-only">Third Shot match rating${isMonth ? ' change ' : ' '}</span>${boardVal(u)}</span>
               <span class="podium-base" aria-hidden="true"></span>
             </button>`).join('') + '</div>';
 
           const rest = board.items.slice(3, 10);
           if (rest.length) {
-            html += rest.map((u, i) => rankRowHtml(u, i + 4, {
+            html += rest.map((u, i) => rankRowHtml(u, u.rank || i + 4, {
               highlight: !!(state.me && u.id === state.me.id),
             })).join('');
           }
           const me = state.me;
-          const meIndex = me ? board.items.findIndex((u) => u.id === me.id) : -1;
-          if (me && meIndex >= 10) {
-            const boardMe = board.items[meIndex];
-            html += `<div class="section-label ranking-you-label">Your place</div>${rankRowHtml(boardMe, meIndex + 1, { highlight: true, name: 'You' })}`;
-          } else if (me && meIndex === -1) {
-            html += `<div class="card row you-row" style="padding:10px 14px">
-              <div class="rank-num">—</div>
-              ${avatarHtml(me, 'sm')}
-              <div class="row-main">
-                <div class="row-title" style="font-size:14px">You</div>
-                <div class="row-sub">Win a ranked match to enter the leaderboard</div>
-              </div>
-              <button type="button" class="btn btn-primary btn-sm" data-goto="ranked-match">Start a ranked match</button>
-              <button type="button" class="btn-link rating-help-link" data-rating-help aria-label="Third Shot match rating ${me.rating}. How ratings work">${me.rating} · What is this?</button>
-            </div>`;
-          }
           const remaining = board.items.slice(10).filter((u) => !me || u.id !== me.id);
-          if (remaining.length) {
-            html += `<details class="rankings-more"><summary>See ranks 11–${board.items.length}</summary><div>${remaining.map((u) => rankRowHtml(u, board.items.indexOf(u) + 1)).join('')}</div></details>`;
+          if (remaining.length || board.has_more) {
+            html += `<details class="rankings-more" data-view-state-key="rankings-more"><summary>More players</summary>
+              <div data-ranking-rows>${remaining.map((u) => rankRowHtml(u, u.rank || board.items.indexOf(u) + 1)).join('')}</div>
+              <div class="ranking-pagination"><span data-ranking-count>Showing ${board.items.length} of ${board.total ?? board.items.length}</span>
+                <button type="button" class="btn btn-secondary btn-block" data-ranking-more ${board.has_more ? '' : 'hidden'}>Load more players</button>
+                <span role="status" data-ranking-page-status></span></div></details>`;
           }
         } else {
           html += scope === 'near'
-          ? `<div class="empty-state rankings-empty"><span class="empty-state-icon is-ranked" aria-hidden="true">${uiIcon('trophy')}</span><b>Claim the local crown.</b><span class="empty-state-copy">No ranked players are on the board here yet.</span><button type="button" class="btn btn-primary" data-goto="ranked-match">${uiIcon('trophy')} Start a ranked match</button></div>`
-          : `<div class="empty-state rankings-empty"><span class="empty-state-icon is-ranked" aria-hidden="true">${uiIcon('trophy')}</span><b>Be first on the podium.</b><span class="empty-state-copy">No ranked matches have been recorded yet.</span><button type="button" class="btn btn-primary" data-goto="ranked-match">${uiIcon('trophy')} Start a ranked match</button></div>`;
+          ? `<div class="empty-state rankings-empty"><span class="empty-state-icon is-ranked" aria-hidden="true">${uiIcon('trophy')}</span><b>No local rankings${isMonth ? ' this month' : ' yet'}.</b><span class="empty-state-copy">No confirmed ranked results match this area${isMonth ? ' and month' : ''}.</span><button type="button" class="btn btn-primary" data-goto="ranked-match">${uiIcon('trophy')} Plan a ranked match</button></div>`
+          : `<div class="empty-state rankings-empty"><span class="empty-state-icon is-ranked" aria-hidden="true">${uiIcon('trophy')}</span><b>No rankings${isMonth ? ' this month' : ' yet'}.</b><span class="empty-state-copy">No confirmed ranked results match these filters.</span><button type="button" class="btn btn-primary" data-goto="ranked-match">${uiIcon('trophy')} Plan a ranked match</button></div>`;
         }
 
         const resultHeading = `${scope === 'near' ? 'Recent local ranked matches' : scope === 'friends' ? 'Recent ranked matches with friends' : 'Recent ranked matches everywhere'}${isMonth ? ' · This month' : ''}`;
@@ -17391,11 +18416,46 @@
           state.boardScope = btn.dataset.scope;
           renderPlay();
         });
-        el.querySelector('[data-set-rankings-area]')?.addEventListener('click', () => {
+        el.querySelectorAll('[data-set-rankings-area]').forEach((button) => button.addEventListener('click', () => {
           openHomeAreaOnboarding({ replay: true, onComplete: () => {
             state.boardScope = 'near';
             renderPlay();
           } });
+        }));
+        el.querySelectorAll('[data-rankings-reset]').forEach((button) => button.addEventListener('click', () => {
+          if (button.dataset.rankingsReset === 'period') state.boardPeriod = 'all';
+          else state.boardScope = 'all';
+          renderPlay();
+        }));
+        el.querySelector('[data-ranking-more]')?.addEventListener('click', async (event) => {
+          const button = event.currentTarget;
+          const details = button.closest('.rankings-more');
+          if (button.disabled || !board.has_more || !board.next_cursor) return;
+          const status = details.querySelector('[data-ranking-page-status]');
+          button.disabled = true;
+          button.textContent = 'Loading…';
+          status.textContent = '';
+          try {
+            const cursor = board.next_cursor;
+            const page = await api(`${boardUrl}${boardUrl.includes('?') ? '&' : '?'}cursor=${encodeURIComponent(cursor)}`);
+            if (!button.isConnected || renderSeq !== state.playRenderSeq || state.playSeg !== 'scores') return;
+            if (page.has_more && page.next_cursor === cursor) throw new Error('The rankings did not advance. Try again.');
+            const known = new Set(board.items.map((player) => player.id));
+            const newPlayers = (page.items || []).filter((player) => !known.has(player.id) && player.id !== state.me?.id);
+            const rows = document.createElement('div');
+            rows.innerHTML = newPlayers.map((player, index) => rankRowHtml(player, player.rank || board.items.length + index + 1)).join('');
+            bindUserButtons(rows);
+            details.querySelector('[data-ranking-rows]').append(...rows.children);
+            Object.assign(board, mergePlayFeedPage(board, page));
+            details.querySelector('[data-ranking-count]').textContent = `Showing ${board.items.length} of ${board.total ?? board.items.length}`;
+            button.hidden = !board.has_more;
+            status.textContent = newPlayers.length ? `${newPlayers.length} more players loaded.` : 'All players loaded.';
+          } catch (error) {
+            if (button.isConnected) status.textContent = humanError(error);
+          } finally {
+            button.disabled = false;
+            button.textContent = 'Load more players';
+          }
         });
         el.querySelector('#board-period').addEventListener('click', (e) => {
           const btn = e.target.closest('button');
@@ -17446,7 +18506,7 @@
           settled = await Promise.allSettled([
             api('/games?mine=1'),
             api(`/games?friends=1${areaQuery}${levelQuery}`),
-            personalLoc
+            hasDiscoveryLocation
               ? api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=${state.playRadius}${levelQuery}`)
               : Promise.resolve({ items: [] }),
           ]);
@@ -17466,7 +18526,25 @@
           progress: homeResult.status === 'fulfilled' ? homeResult.value.progress || null : null,
           competitions: homeResult.status === 'fulfilled' && Array.isArray(homeResult.value.competitions)
             ? homeResult.value.competitions : [],
+          scheduleConflicts: homeResult.status === 'fulfilled' && Array.isArray(homeResult.value.schedule_conflicts)
+            ? homeResult.value.schedule_conflicts : null,
+          feedUrls: {
+            mine: '/games?mine=1',
+            friends: `/games?friends=1${areaQuery}${levelQuery}`,
+            nearby: `/games?lat=${loc.lat}&lng=${loc.lng}&radius=${state.playRadius}${levelQuery}`,
+          },
         };
+        const previousBundle = state.playGamesCache;
+        if (previousBundle?.discoveryKey === discoveryKey) {
+          await Promise.all(['mine', 'friends', 'nearby'].map(async (key) => {
+            if (!gameBundle.errors[key] && (key !== 'nearby' || hasDiscoveryLocation)) {
+              gameBundle[key] = await restorePlayFeedWindow(
+                gameBundle[key], previousBundle[key]?.items?.length || 0, gameBundle.feedUrls[key],
+              );
+            }
+          }));
+        }
+        if (renderSeq !== state.playRenderSeq || state.playSeg !== seg) return;
         state.playGamesCache = gameBundle;
       }
       // Normalize a pre-r41 in-memory array defensively if a long-lived PWA
@@ -17482,26 +18560,30 @@
         errors: feedErrors = {},
       } = gameBundle;
       const nowMs = Date.now();
+      const toDecide = mine.items.filter((game) => playGameDecision(game, nowMs))
+        .sort((a, b) => playGameDecision(a, nowMs).deadline - playGameDecision(b, nowMs).deadline);
       const toScore = mine.items.filter((g) =>
         g.status === 'upcoming' && (g.can_enter_score || g.can_complete_session)
           && (g.is_instant
             ? (instantRallyScorePending(g) || instantSessionWrapPending(g))
             : new Date(g.scheduled_at).getTime() <= nowMs));
       const toConfirm = mine.items.filter((g) => g.awaiting_your_confirmation);
-      const toReconfirm = mine.items.filter((g) => g.status === 'upcoming' && !g.is_instant
+      const toReconfirm = mine.items.filter((g) => g.status === 'upcoming' && !g.is_instant && g.is_joined && !toDecide.includes(g)
         && g.attendance_confirmation_due && !g.is_creator
         && new Date(g.scheduled_at).getTime() > nowMs);
       const waiting = mine.items.filter((g) =>
         g.status === 'awaiting_confirmation' && !g.awaiting_your_confirmation);
       const upcoming = mine.items.filter((g) =>
-        !toScore.includes(g) && !toConfirm.includes(g) && !toReconfirm.includes(g) && !waiting.includes(g)
+        !toDecide.includes(g) && !toScore.includes(g) && !toConfirm.includes(g) && !toReconfirm.includes(g) && !waiting.includes(g)
           && !instantRallyClosed(g));
       const mineIds = new Set(mine.items.map((g) => g.id));
-      const friendsGames = (friends.items || []).filter((g) =>
-        !mineIds.has(g.id) && !instantRallyClosed(g));
+      const friendsGames = distinctDiscoveredSeries((friends.items || []).filter((g) =>
+        !mineIds.has(g.id) && !instantRallyClosed(g)));
       const friendsIds = new Set(friendsGames.map((g) => g.id));
-      const nearbyOpen = nearby.items.filter((g) =>
-        !mineIds.has(g.id) && !friendsIds.has(g.id) && !instantRallyClosed(g));
+      const friendsSeries = new Set(friendsGames.map((g) => Number(g.recurrence_series_id)).filter((id) => id > 0));
+      const nearbyOpen = distinctDiscoveredSeries(nearby.items.filter((g) =>
+        !mineIds.has(g.id) && !friendsIds.has(g.id)
+        && !friendsSeries.has(Number(g.recurrence_series_id)) && !instantRallyClosed(g)));
       const isWeekly = (game) => game.recurrence === 'weekly'
         && game.game_type !== 'ranked';
       const weeklySessionIds = new Set();
@@ -17514,8 +18596,14 @@
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
 
       let html = rallyLauncherHtml();
-      const planCount = [...toConfirm, ...toReconfirm, ...toScore, ...waiting, ...upcoming].length;
-      const attentionCount = toConfirm.length + toScore.length + toReconfirm.length;
+      const competitionActions = competitions.filter(playCompetitionNeedsAction);
+      const planCount = mine.items.filter((game) => !instantRallyClosed(game)).length + competitions.length;
+      const competitionDecisionCount = competitions.filter((item) => item.awaiting_your_confirmation
+        || item.can_respond_schedule
+        || item.kind === 'league_match' && item.schedule_status === 'needs_time' && item.can_propose_schedule
+        || item.kind === 'tournament' && (item.my_waitlist?.status === 'offered' || item.my_partner_action
+          || item.partner_status === 'needed' || !item.is_entered && !item.is_organizer && !item.my_waitlist)).length;
+      const attentionCount = new Set([...toDecide, ...toConfirm, ...toScore, ...toReconfirm].map((game) => game.id)).size + competitionDecisionCount;
       html += `<div class="segmented play-lanes" role="tablist" aria-label="Games and plans">
         <button type="button" role="tab" id="play-lane-find" data-play-lane="find" aria-controls="play-find-panel" aria-selected="true" class="active">Find games</button>
         <button type="button" role="tab" id="play-lane-plans" data-play-lane="plans" aria-controls="play-plans-panel" aria-selected="false">My plans${planCount ? ` · ${planCount}` : ''}${attentionCount ? ` <span class="plan-attention">${attentionCount} to do</span>` : ''}</button>
@@ -17534,28 +18622,35 @@
         );
       }
 
-      const priorityItems = [...toConfirm, ...toReconfirm, ...toScore, ...waiting, ...upcoming];
+      html += playScheduleConflictsHtml(gameBundle.scheduleConflicts);
+      if (gameBundle.scheduleConflicts === null) html += playFeedNoticeHtml('Time-overlap check unavailable', 'Your saved plans are shown below. Retry to check for overlapping times.');
+
+      const priorityItems = [...new Map([...toDecide, ...toConfirm, ...toReconfirm, ...toScore, ...waiting, ...upcoming].map((game) => [game.id, game])).values()];
       let displayedNextGameId = null;
       if (priorityItems.length) {
         const next = priorityItems[0];
         displayedNextGameId = next.id;
-        const nextLabel = toConfirm.includes(next) ? 'Next up · Confirm the score'
+        const nextLabel = toDecide.includes(next) ? `Needs your reply · ${playGameDecision(next, nowMs).label}`
+          : toConfirm.includes(next) ? 'Next up · Confirm the score'
           : toReconfirm.includes(next) ? 'Next up · Confirm your spot'
           : toScore.includes(next) ? 'Next up · Finish recent play'
             : waiting.includes(next) ? 'Next up · Waiting on opponents'
               : 'Next up';
         html += `<div class="section-label section-label-icon" style="margin-top:6px">${uiIcon(toConfirm.includes(next) ? 'activity' : toScore.includes(next) ? 'check-circle' : 'calendar')} ${nextLabel}</div>`;
         html += gameCardHtml(next);
-        const moreAttention = priorityItems.slice(1).filter((game) => !upcoming.includes(game));
+        const moreAttention = priorityItems.slice(1).filter((game) => !upcoming.includes(game)
+          || new Date(game.scheduled_at).getTime() < nowMs);
         if (moreAttention.length) {
-          html += `<details class="play-game-depth"><summary>${moreAttention.length} more item${moreAttention.length === 1 ? '' : 's'} need attention</summary><div class="play-game-depth-body">${moreAttention.map((game) => gameCardHtml(game, { compact: true })).join('')}</div></details>`;
+          html += `<details class="play-game-depth" data-view-state-key="plan-attention"><summary>${moreAttention.length} more item${moreAttention.length === 1 ? ' needs' : 's need'} attention</summary><div class="play-game-depth-body">${moreAttention.map((game) => gameCardHtml(game, { compact: true })).join('')}</div></details>`;
         }
       }
+      if (competitionActions.length) html += `<section class="play-schedule" aria-labelledby="play-competition-actions"><div class="section-label" id="play-competition-actions">Competition plans &amp; decisions</div>${competitionActions.map(playCompetitionRowHtml).join('')}</section>`;
       html += playScheduleHtml(
         mine.items,
         new Set(displayedNextGameId ? [Number(displayedNextGameId)] : []),
         competitions,
       );
+      html += playFeedPageControlHtml(mine, 'mine', 'Show more plans');
       if (!planCount && !competitions.length && !feedErrors.mine) html += `<div class="empty-state flow-empty"><span class="empty-state-icon" aria-hidden="true">${uiIcon('calendar')}</span><b>Your next game belongs here</b><p>Join a nearby game or plan one with your friends.</p><button type="button" class="btn btn-primary" data-find-play>Find a game</button></div>`;
       html += playerProfileSetupCardHtml();
       html += `<button class="btn btn-secondary btn-block" id="pl-log-game" style="margin-top:14px">${uiIcon('target')} Log a game you already played</button>`;
@@ -17568,23 +18663,24 @@
       ${state.playWhen === 'now' ? '<p class="play-discovery-context">Playing now or starting within an hour.</p>' : ''}`;
 
       const activePlayLevel = normalizedGameLevel(state.playLevelFilter);
-      if (personalLoc) html += `<div class="play-discovery-controls-row" role="group" aria-label="Game search preferences"><div class="play-discovery-controls"><label class="play-radius-filter"><span class="sr-only">Travel radius in miles</span><select id="play-radius-filter" data-select-title="How far will you travel?">${[10, 25, 50, 100].map((radius) => `<option value="${radius}" ${state.playRadius === radius ? 'selected' : ''}>Within ${radius} mi</option>`).join('')}</select></label><label class="play-level-filter"><span class="sr-only">Filter play by self-rating</span><select id="play-level-filter" data-select-title="Filter play by self-rating" data-select-prefix="Level"><option value="" ${activePlayLevel == null ? 'selected' : ''}>Any level</option>${SELF_RATING_CHOICES.map(([value]) => `<option value="${value}" ${value === activePlayLevel ? 'selected' : ''}>${value.toFixed(1)}</option>`).join('')}</select></label></div></div>`;
+      if (hasDiscoveryLocation) html += `<div class="play-discovery-controls-row" role="group" aria-label="Game search preferences"><div class="play-discovery-controls">${state.playFilters?.courtId ? '' : `<label class="play-radius-filter"><span class="sr-only">Travel radius in miles</span><select id="play-radius-filter" data-select-title="How far will you travel?">${[10, 25, 50, 100].map((radius) => `<option value="${radius}" ${state.playRadius === radius ? 'selected' : ''}>Within ${radius} mi</option>`).join('')}</select></label>`}<label class="play-level-filter"><span class="sr-only">Filter play by self-rating</span><select id="play-level-filter" data-select-title="Filter play by self-rating" data-select-prefix="Level"><option value="" ${activePlayLevel == null ? 'selected' : ''}>Any level</option>${SELF_RATING_CHOICES.map(([value,,description]) => `<option value="${value}" ${value === activePlayLevel ? 'selected' : ''}>${value.toFixed(1)} · ${value <= 2.5 ? 'Beginner' : description}</option>`).join('')}</select></label></div></div>`;
+      html += `<button type="button" class="btn btn-secondary play-filter-trigger" data-play-filters>${uiIcon('sliders')}<span>${esc(playDiscoveryFilterLabel() || 'Date, court & open spots')}</span></button>`;
 
-      if (!personalLoc) {
+      if (!hasDiscoveryLocation) {
         html += `<section class="play-area-setup" role="status">
           <span class="play-area-setup-icon" aria-hidden="true">${uiIcon('map-pin')}</span>
           <span class="row-main"><b>Set your area for nearby play</b><small>Choose a city or use your location before Third Shot searches for local courts, games, and players.</small></span>
           <button type="button" class="btn btn-primary" data-set-play-area>Set area</button>
         </section>`;
       }
-      html += playNearbyNowHtml(looking);
+      if (!state.playFilters?.date && !state.playFilters?.courtId) html += playNearbyNowHtml(looking);
       const sortedFriendGames = [...friendsGames]
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
       if (sortedFriendGames.length) {
         html += `<section class="play-friends-sessions" aria-labelledby="play-friends-sessions-title">
           <div class="section-label" id="play-friends-sessions-title">Friends are playing</div>
           ${sortedFriendGames.slice(0, 3).map((game) => gameCardHtml(game, { compact: true })).join('')}
-          ${sortedFriendGames.length > 3 ? `<details class="play-game-depth"><summary>See ${sortedFriendGames.length - 3} more friend session${sortedFriendGames.length === 4 ? '' : 's'}</summary><div class="play-game-depth-body">${sortedFriendGames.slice(3).map((game) => gameCardHtml(game, { compact: true })).join('')}</div></details>` : ''}
+          ${sortedFriendGames.length > 3 ? `<details class="play-game-depth" data-view-state-key="friend-sessions"><summary>See ${sortedFriendGames.length - 3} more friend session${sortedFriendGames.length === 4 ? '' : 's'}</summary><div class="play-game-depth-body">${sortedFriendGames.slice(3).map((game) => gameCardHtml(game, { compact: true })).join('')}</div></details>` : ''}
         </section>`;
       }
       if (feedErrors.friends) {
@@ -17593,6 +18689,7 @@
           'Your schedule and nearby play are still shown. Retry to check what friends are planning.',
         );
       }
+      html += playFeedPageControlHtml(friends, 'friends', 'Show more friends’ sessions');
       // Weekly recurring play is a first-class session rail, rather than being
       // mixed into a capped nearby-games feed. Your own occurrences remain in
       // the agenda above, with their per-date RSVP state.
@@ -17614,33 +18711,33 @@
       const discoveryFeedFailed = !!feedErrors.nearby;
       const discoveryFailureTitle = 'Nearby play did not load';
       const discoveryFailureDetail = 'You can still explore courts, invite friends, or retry these listings.';
-      if (personalLoc) html += '<div class="section-label">Nearby games</div>';
-      if (personalLoc && featuredDiscovery.length) {
+      if (hasDiscoveryLocation) html += `<div class="section-label">${state.playFilters?.courtId ? `Games at ${esc(state.playFilters.courtName)}` : 'Nearby games'}</div>`;
+      if (hasDiscoveryLocation && featuredDiscovery.length) {
         html += featuredDiscovery.map((game) => gameCardHtml(game, { compact: true })).join('');
         if (discoveryFeedFailed) html += playFeedNoticeHtml(discoveryFailureTitle, discoveryFailureDetail);
-      } else if (personalLoc && discoveryFeedFailed) {
+      } else if (hasDiscoveryLocation && discoveryFeedFailed) {
         html += `<div class="empty-state play-discovery-empty play-feed-empty" style="padding:18px">
           <b>${esc(discoveryFailureTitle)}</b><br>${esc(discoveryFailureDetail)}
           <div class="play-empty-actions"><button class="btn btn-primary" data-goto="courts-list">${uiIcon('map-pin')} Explore nearby courts</button><button class="btn btn-secondary" data-invite-share>${uiIcon('mail')} Invite friends</button></div>
           <button type="button" class="btn btn-secondary btn-block" data-play-feed-retry>Retry play listings</button>
         </div>`;
-      } else if (personalLoc) {
+      } else if (hasDiscoveryLocation) {
         const emptyDiscoveryText = sortedFriendGames.length || weeklySessions.length
-          ? 'No other nearby games match these choices yet.'
-          : state.playWhen !== 'any' || activePlayLevel != null
+          ? 'No other games match these choices yet.'
+          : state.playWhen !== 'any' || activePlayLevel != null || playDiscoveryFilterLabel()
             ? 'No games match these choices yet.' : 'No open games nearby yet.';
-        html += `<div class="empty-state play-discovery-empty" style="padding:18px">${emptyDiscoveryText} Try another time, explore a court, or create a game for others to join.<div class="play-empty-actions">${state.playWhen !== 'any' || activePlayLevel != null ? '<button type="button" class="btn btn-primary" data-reset-play-filters>Show any time &amp; level</button>' : ''}<button class="btn btn-secondary" data-goto="courts-list">${uiIcon('map-pin')} Explore nearby courts</button></div></div>`;
+        html += `<div class="empty-state play-discovery-empty" style="padding:18px">${emptyDiscoveryText} Try another time, explore a court, or create a game for others to join.<div class="play-empty-actions">${state.playWhen !== 'any' || activePlayLevel != null || playDiscoveryFilterLabel() ? '<button type="button" class="btn btn-primary" data-reset-play-filters>Clear search filters</button>' : ''}<button class="btn btn-secondary" data-goto="courts-list">${uiIcon('map-pin')} Explore nearby courts</button></div></div>`;
       }
       const moreDiscovery = discovery.slice(3);
-      if (personalLoc && moreDiscovery.length) {
-        html += `<details class="play-game-depth">
-          <summary>See all nearby play · ${moreDiscovery.length} more</summary>
+      if (hasDiscoveryLocation && moreDiscovery.length) {
+        html += `<details class="play-game-depth" data-view-state-key="nearby-sessions">
+          <summary>${state.playFilters?.courtId ? 'See all games here' : 'See all nearby play'} · ${moreDiscovery.length} more</summary>
           <div class="play-game-depth-body">
             ${moreDiscovery.length ? `<div class="section-label">More nearby play</div>${moreDiscovery.map((game) => gameCardHtml(game, { compact: true })).join('')}` : ''}
           </div>
         </details>`;
       }
-      if (personalLoc && weeklySessions.length) html += `<section class="play-regular-sessions" aria-labelledby="play-regular-sessions-title">
+      if (hasDiscoveryLocation && weeklySessions.length) html += `<section class="play-regular-sessions" aria-labelledby="play-regular-sessions-title">
         <div class="section-heading-row">
           <div><div class="section-label" id="play-regular-sessions-title">Regular group sessions</div><p>Weekly player-organized sessions near you with an RSVP list for each date.</p></div>
           <button type="button" class="btn btn-secondary btn-sm" data-host-play-session>${uiIcon('plus')} Host</button>
@@ -17649,6 +18746,7 @@
           ? weeklySessions.map((game) => gameCardHtml(game, { compact: true })).join('')
           : '<div class="empty-state play-regular-sessions-empty">No regular sessions nearby yet. Host the first one at your court.</div>'}
       </section>`;
+      if (hasDiscoveryLocation) html += playFeedPageControlHtml(nearby, 'nearby', state.playFilters?.courtId ? 'Show more games at this court' : 'Show more nearby play');
       html += '</section>';
 
       if (state.playSeg !== seg) return; // a newer segment render owns the panel
@@ -17674,6 +18772,27 @@
       el.querySelectorAll('[data-find-play]').forEach((button) => button.addEventListener('click', () => selectPlayLane('find', { focus: true })));
       selectPlayLane(state.playLane);
       setupTablistKeyboard(el.querySelector('.play-lanes'));
+      el.querySelectorAll('[data-play-page]').forEach((button) => button.addEventListener('click', async () => {
+        const key = button.dataset.playPage;
+        const feed = gameBundle[key];
+        const url = gameBundle.feedUrls?.[key];
+        if (!url || !feed?.has_more || !feed.next_cursor) return;
+        const reset = beginButtonAction(button, 'Loading…');
+        if (!reset) return;
+        state.playPageLoading = true;
+        try {
+          const page = await api(`${url}&cursor=${encodeURIComponent(feed.next_cursor)}`);
+          // An old page request must never enter a newly selected search/account.
+          if (state.playGamesCache !== gameBundle) return;
+          gameBundle[key] = mergePlayFeedPage(feed, page);
+          renderPlay({ useCachedData: true });
+        } catch (error) {
+          reset();
+          toast(error.message || 'Could not load more. Try again.');
+        } finally {
+          state.playPageLoading = false;
+        }
+      }));
       el.querySelector('[data-complete-player-setup]')?.addEventListener('click', async (event) => {
         const button = event.currentTarget;
         const progress = playerProfileSetupProgress();
@@ -17702,10 +18821,12 @@
         renderPlay();
       };
       el.querySelectorAll('[data-play-when]').forEach((button) => button.addEventListener('click', () => {
-        if (state.playWhen !== button.dataset.playWhen) changeDiscovery({ playWhen: button.dataset.playWhen });
+        if (state.playWhen !== button.dataset.playWhen) changeDiscovery({ playWhen: button.dataset.playWhen,
+          playFilters:{...state.playFilters,date:'',startTime:'',endTime:''} });
       }));
+      el.querySelector('[data-play-filters]')?.addEventListener('click', () => openPlayDiscoveryFilters(changeDiscovery));
       el.querySelector('#play-radius-filter')?.addEventListener('change', (event) => changeDiscovery({ playRadius: Number(event.currentTarget.value) }));
-      el.querySelector('[data-reset-play-filters]')?.addEventListener('click', () => changeDiscovery({ playWhen: 'any', playLevelFilter: '' }));
+      el.querySelector('[data-reset-play-filters]')?.addEventListener('click', () => changeDiscovery({ playWhen: 'any', playLevelFilter: '', playFilters:null }));
       el.querySelector('[data-play-again-game]')?.addEventListener('click', (event) => {
         if (playAgainGame) openPostGamePlanner(playAgainGame, null, event.currentTarget);
       });
@@ -17736,6 +18857,11 @@
       }));
       el.querySelectorAll('[data-open-tournament]').forEach((button) => {
         makePressable(button, () => openTournamentScreen(Number(button.dataset.openTournament)));
+      });
+      el.querySelectorAll('[data-play-competition]').forEach((button) => {
+        makePressable(button, () => button.dataset.playCompetition === 'league'
+          ? openLeagueScreen(Number(button.dataset.competitionId), Number(button.dataset.matchId))
+          : openTournamentScreen(Number(button.dataset.competitionId), Number(button.dataset.matchId)));
       });
       bindGameButtons(el, renderPlay);
       if (commit()) maybeCelebrateNewBadge(progress);
@@ -17774,9 +18900,7 @@
     $('#new-game-fab')?.addEventListener('click', () => {
       if (state.playSeg === 'scores') openRankedMatchFlow();
       else if (state.playSeg === 'brackets') openCompetitionCreateSheet();
-      else openNewGameModal({
-        gameType: 'casual', maxPlayers: 6, lockGameType: true, sessionMode: true,
-      });
+      else openCreatePlaySheet();
     });
     syncPlayFab();
     $('#play-activity')?.addEventListener('click', openActivity);
@@ -17814,11 +18938,11 @@
       <p class="row-sub" style="margin:-4px 0 14px">Choose the format that fits your players.</p>
       <button type="button" class="card row nav-row-button" id="create-tournament-choice" aria-label="Create a tournament">
         <span class="nav-row-leading">${uiIcon('trophy')}</span>
-        <span class="row-main"><span class="row-title">Tournament</span><span class="row-sub">Bracket or round robin · singles or doubles</span></span>${uiIcon('chevron-right', 'chev')}
+        <span class="row-main"><span class="row-title">Tournament</span><span class="row-sub">Knockout: winners advance. Round robin: play every entry.</span></span>${uiIcon('chevron-right', 'chev')}
       </button>
       <button type="button" class="card row nav-row-button" id="create-league-choice" aria-label="Create a ladder league">
         <span class="nav-row-leading">${uiIcon('grid')}</span>
-        <span class="row-main"><span class="row-title">Ladder league</span><span class="row-sub">A recurring season with promotion and relegation</span></span>${uiIcon('chevron-right', 'chev')}
+        <span class="row-main"><span class="row-title">League</span><span class="row-sub">Arrange singles matches over several rounds. Move divisions as you play.</span></span>${uiIcon('chevron-right', 'chev')}
       </button>
     `, { label: 'Create a competition' });
     modal.querySelector('#create-tournament-choice').addEventListener('click', () => {
@@ -18642,6 +19766,7 @@
     const requestedInviteIds = restoredDraft ? restoredDraft.inviteUserIds : presetInviteUserIds;
     const invitePeopleIds = new Set(invitePeople.map((person) => person.id));
     const initialInviteIds = new Set(requestedInviteIds.filter((id) => invitePeopleIds.has(id)));
+    const inviteIds = new Set(initialInviteIds);
     if (crewId) {
       const acceptedCrewSize = initialInviteIds.size + 1;
       presetMaxPlayers = acceptedCrewSize <= 2 ? 2 : acceptedCrewSize <= 4 ? 4
@@ -18651,9 +19776,6 @@
       ? restoredDraft.visibility
       : (presetVisibility || (initialInviteIds.size ? 'private' : 'open')));
     if (!crewId && initialVisibility === 'friends' && friends.length === 0) {
-      initialVisibility = 'open';
-    }
-    if (!crewId && initialVisibility === 'private' && invitePeople.length === 0) {
       initialVisibility = 'open';
     }
 
@@ -18749,24 +19871,14 @@
 
     // Keep the first decision light: offer three useful complete date/time
     // choices instead of asking players to scan a day-by-time matrix.
-    const smartTimeSuggestions = [];
-    const smartTimeKeys = new Set();
-    const addSmartTime = (dayIdx, hour) => {
-      if (smartTimeSuggestions.length >= 9 || !days[dayIdx] || !timePresets.includes(hour)) return;
-      const date = setPlannerClock(new Date(days[dayIdx]), hour);
-      const key = `${dayIdx}:${hour}`;
-      if (date.getTime() <= Date.now() + 50 * 60000 || smartTimeKeys.has(key)) return;
-      smartTimeKeys.add(key);
-      smartTimeSuggestions.push({ dayIdx, hour, date });
-    };
-    addSmartTime(selDayIdx, selHour);
-    for (let dayIdx = 0; dayIdx < days.length && smartTimeSuggestions.length < 9; dayIdx++) {
-      [9, 12, 17, 18].forEach((hour) => addSmartTime(dayIdx, hour));
-    }
-    const smartTimeChips = smartTimeSuggestions.map((slot, index) =>
-      `<button type="button" data-smart-time="${slot.date.toISOString()}" aria-pressed="false" class="${index >= 3 ? 'hidden' : ''}" ${index >= 3 ? 'data-extra-time' : ''}><small>${esc(dayLabel(slot.date, slot.dayIdx))}${slot.dayIdx > 1 ? ` · ${slot.date.toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}</small><b>${timeLabel(slot.hour)}</b></button>`).join('');
-    const smartTimeChoicesHtml = `<div class="schedule-suggestions" id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === 'ranked' ? 'match' : 'play session'} times">${smartTimeChips}</div>`;
     const initialExactTime = initialTimeSelection?.date || setPlannerClock(new Date(days[selDayIdx]), selHour);
+    const selectedPlannerPeople = () => [state.me, ...invitePeople.filter((person) => inviteIds.has(person.id))].filter(Boolean);
+    const smartTimeChipsHtml = (selected) => plannerSuggestedTimes(selectedPlannerPeople(), selected).map((date, index) => {
+      const midnight = new Date(date); midnight.setHours(0, 0, 0, 0);
+      const dayIdx = Math.round((midnight.getTime() - days[0].getTime()) / 86400000);
+      return `<button type="button" data-smart-time="${date.toISOString()}" aria-pressed="false" class="${index >= 3 ? 'hidden' : ''}" ${index >= 3 ? 'data-extra-time' : ''}><small>${esc(dayLabel(date, dayIdx))}${dayIdx > 1 ? ` · ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}</small><b>${timeLabel(date.getHours() + date.getMinutes() / 60)}</b></button>`;
+    }).join('');
+    const smartTimeChoicesHtml = `<div class="schedule-suggestions" id="ng-smart-times" role="group" aria-label="Suggested ${defaultType === 'ranked' ? 'match' : 'play session'} times">${smartTimeChipsHtml(initialExactTime)}</div>`;
 
     const inviteAvailabilityKey = (date) => {
       if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return '';
@@ -18781,30 +19893,31 @@
       const day = match[1].slice(0, 1).toUpperCase() + match[1].slice(1);
       return `Usually plays ${day} ${match[2] === 'am' ? 'AM' : match[2] === 'pm' ? 'PM' : 'evening'}`;
     };
-    const inviteChipHtml = (f, selected = false, matchingSlot = '') => {
-      const free = matchingSlot && (f.availability || []).includes(matchingSlot);
+    const inviteChipHtml = (f, selected = false, matchingSlot = '', planned = initialExactTime) => {
+      const away = playerAwayUntil(f, planned?.getTime());
+      const free = !away && matchingSlot && (f.availability || []).includes(matchingSlot);
       return `<button type="button" class="invite-chip planner-invite-person ${selected ? 'active' : ''}" data-fid="${f.id}" aria-pressed="${selected}">
         ${avatarHtml(f, 'sm')}
-        <span class="row-main"><b>${esc(f.display_name)}</b><small>${playerSkillIdentityHtml(f)}${f.is_recent && f.games_together ? ` · ${f.games_together} game${f.games_together === 1 ? '' : 's'} together` : ''}${free ? ` · <span class="planner-availability-match">${esc(inviteAvailabilityText(matchingSlot))}</span>` : ''}</small></span>
+        <span class="row-main"><b>${esc(f.display_name)}</b><small>${playerSkillIdentityHtml(f)}${f.is_recent && f.games_together ? ` · ${f.games_together} game${f.games_together === 1 ? '' : 's'} together` : ''}${away ? ` · Away until ${esc(away.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}` : free ? ` · <span class="planner-availability-match">${esc(inviteAvailabilityText(matchingSlot))}</span>` : ''}</small></span>
         <span class="play-group-check" aria-hidden="true">${uiIcon('check')}</span>
       </button>`;
     };
-    const availabilityFirst = (people, matchingSlot) => people
+    const availabilityFirst = (people, matchingSlot, planned) => people
       .map((person, index) => ({ person, index }))
       .sort((a, b) => {
-        const aFree = matchingSlot && (a.person.availability || []).includes(matchingSlot) ? 1 : 0;
-        const bFree = matchingSlot && (b.person.availability || []).includes(matchingSlot) ? 1 : 0;
+        const aFree = !playerAwayUntil(a.person, planned?.getTime()) && matchingSlot && (a.person.availability || []).includes(matchingSlot) ? 1 : 0;
+        const bFree = !playerAwayUntil(b.person, planned?.getTime()) && matchingSlot && (b.person.availability || []).includes(matchingSlot) ? 1 : 0;
         return bFree - aFree || a.index - b.index;
       })
       .map(({ person }) => person);
-    const plannerInviteGroupsHtml = (people, matchingSlot, selectedIds = initialInviteIds) => {
+    const plannerInviteGroupsHtml = (people, matchingSlot, selectedIds = initialInviteIds, planned = initialExactTime) => {
       const renderGroup = (id, label, members) => {
         if (!members.length) return '';
-        const sorted = availabilityFirst(members, matchingSlot);
+        const sorted = availabilityFirst(members, matchingSlot, planned);
         return `<section class="planner-invite-group" aria-labelledby="${id}">
           <div class="planner-invite-group-head"><span class="section-label" id="${id}">${esc(label)}</span><small>${sorted.length}</small></div>
           <div class="planner-invite-group-list">${sorted.map((person) => inviteChipHtml(
-            person, selectedIds.has(person.id), matchingSlot,
+            person, selectedIds.has(person.id), matchingSlot, planned,
           )).join('')}</div>
         </section>`;
       };
@@ -19007,25 +20120,25 @@
             <button type="button" data-vis="open" aria-pressed="${initialVisibility === 'open'}" class="${initialVisibility === 'open' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('map-pin')}</span><b>Nearby players</b><small>Open at the court</small></button>` : `
             <button type="button" data-vis="open" aria-pressed="${initialVisibility === 'open'}" class="${initialVisibility === 'open' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('map-pin')}</span><b>Anyone nearby</b><small>Open at the court</small></button>
             <button type="button" data-vis="friends" aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}" ${friends.length ? '' : 'disabled aria-disabled="true"'}><span class="vis-choice-icon" aria-hidden="true">${uiIcon('users')}</span><b>My friends</b><small>${friends.length ? 'Friends can join' : 'Add friends first'}</small></button>
-            <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}" ${invitePeople.length ? '' : 'disabled aria-disabled="true"'}><span class="vis-choice-icon" aria-hidden="true">${uiIcon('lock')}</span><b>Invite only</b><small>${invitePeople.length ? 'Only selected players' : 'Find players first'}</small></button>`}
+            <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('lock')}</span><b>Invite only</b><small>Invited players or your private link</small></button>`}
         </div>
         <div class="planner-inline-warning ${!crewId && friends.length === 0 ? '' : 'hidden'}" id="ng-friends-empty" role="status">
           ${plannerFeedErrors.friends
-            ? 'Friends couldn’t load. Reload the setup choices, or choose Anyone nearby.'
-            : 'Add friends first to use My friends. Anyone nearby is selected for now.'}
+            ? 'Friends couldn’t load. You can still create a private session and share its invite link.'
+            : 'No friends added yet. Choose Invite only to share a private link.'}
         </div>
         <details class="flow-disclosure planner-invitations" id="ng-invitations" ${crewId || initialVisibility === 'private' || hasPresetInvites ? 'open' : ''}>
-        <summary>${crewId ? 'Choose group players' : 'Invite specific players'} <span>${crewId || initialVisibility === 'private' ? 'Choose who joins' : 'Optional'}</span></summary>
+        <summary>${crewId ? 'Choose group players' : 'Invite specific players'} <span>${crewId ? 'Choose players' : 'Optional'}</span></summary>
         <div id="ng-friends-wrap" style="margin-top:10px">
           ${invitePeople.length
-            ? `<label for="ng-invite-search">${crewId ? 'Group players' : 'Direct invitations'} <span class="row-sub">(${crewId ? 'choose at least one' : 'optional unless invite only'})</span></label>
+            ? `<label for="ng-invite-search">${crewId ? 'Group players' : 'Direct invitations'} <span class="row-sub">(${crewId ? 'choose at least one' : 'optional'})</span></label>
                <input type="search" id="ng-invite-search" placeholder="${crewId ? 'Search group players…' : 'Search players…'}" autocomplete="off" />
                <div class="planner-invite-toolbar"><span class="row-sub">Players who usually play then appear first.</span><button type="button" class="btn-link" id="ng-select-visible" aria-pressed="false">Select all visible</button></div>
                <div class="invite-chips planner-invite-list" id="ng-invites">${friendChips}</div>`
             : `<div class="empty-state planner-invite-empty"><span>${plannerFeedErrors.friends
               ? 'Friends couldn’t load. Reload setup choices to invite someone.'
-              : 'Add players from Community before using invite only.'}</span><button type="button" class="btn btn-secondary btn-sm" data-goto="chat-friends">Find players</button></div>`}
-          <button type="button" class="btn-link planner-invite-link" id="ng-copy-invite-link">${uiIcon('link')} Invite by link</button>
+              : 'Create this session, then share its private invite link. Your friends can join even if they are new to Third Shot.'}</span><button type="button" class="btn btn-secondary btn-sm" data-goto="chat-friends">Find players</button></div>`}
+          <button type="button" class="btn-link planner-invite-link" id="ng-copy-invite-link">${uiIcon('link')} Create session &amp; get invite link</button>
           <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">${hasPresetInvites ? `${initialInviteIds.size} selected for a direct invitation.` : 'Select people to ping directly after scheduling.'}</p>
         </div>
         </details>
@@ -19428,10 +20541,18 @@
     let refreshPlannerInviteChoices = () => {};
     const exactTimeInput = modal.querySelector('#ng-when');
     const schedulePicker = bindScheduleDateTimePicker(modal, 'ng-when');
+    let suggestedRosterKey = '';
     const syncPlannerTimeChoices = () => {
+      const rosterKey = selectedPlannerPeople().map((person) => `${person.id}:${person.away_until || ''}`).sort().join('|');
+      if (rosterKey !== suggestedRosterKey) {
+        modal.querySelector('#ng-smart-times').innerHTML = smartTimeChipsHtml(chosenPlannerTime());
+        suggestedRosterKey = rosterKey;
+      }
+      const expanded = modal.querySelector('#ng-more-times')?.getAttribute('aria-expanded') === 'true';
       modal.querySelectorAll('#ng-smart-times button').forEach((button) => {
         const active = button.dataset.smartTime === plannerScheduledIso();
         button.disabled = new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000;
+        button.classList.toggle('hidden', button.hasAttribute('data-extra-time') && !expanded);
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
       });
@@ -19479,7 +20600,6 @@
     // The accepted group snapshot supplies the available people. The session
     // keeps its own explicit selection so somebody can sit this week out.
     let visibility = initialVisibility;
-    const inviteIds = new Set(initialInviteIds);
 
     // --- Type and format ---
     const initialCrewSize = crewId ? initialInviteIds.size + 1 : null;
@@ -19685,7 +20805,7 @@
       if (crewId) {
         title.textContent = `${crewName || 'Your play group'} · ${inviteIds.size + 1} selected player${inviteIds.size === 0 ? '' : 's'}`;
         copy.textContent = visibility === 'private'
-          ? `Group only · ${inviteIds.size + 1} selected players, including you.`
+          ? `Group only · ${inviteIds.size + 1} selected player${inviteIds.size === 0 ? '' : 's'}, including you.`
           : visibility === 'friends'
             ? `Selected group players are included; friends can fill the extra spots.`
             : `Selected group players are included; nearby players can fill the extra spots.`;
@@ -19713,7 +20833,7 @@
         ? availabilityLabel
         : (inviteIds.size
             ? `${inviteIds.size} teammate${inviteIds.size === 1 ? '' : 's'} will get a direct invite.`
-            : 'Select at least one available teammate to keep this private.');
+            : 'Share a private invitation link after scheduling.');
     };
     const syncAudienceChoices = () => {
       if (clubId) visibility = 'open';
@@ -19726,10 +20846,7 @@
           : 'Keep it open, share with friends, or invite specific players.';
       modal.querySelectorAll('#ng-vis button').forEach((button) => {
         const active = button.dataset.vis === visibility;
-        const missingAudience = !crewId && (
-          (button.dataset.vis === 'friends' && friends.length === 0)
-          || (button.dataset.vis === 'private' && invitePeople.length === 0)
-        );
+        const missingAudience = !crewId && button.dataset.vis === 'friends' && friends.length === 0;
         const unavailable = (!!clubId && button.dataset.vis !== 'open') || missingAudience;
         button.classList.toggle('active', active);
         button.disabled = unavailable;
@@ -19740,8 +20857,8 @@
         else button.removeAttribute('title');
       });
       friendsWrap.classList.remove('hidden');
-      if (crewId || visibility === 'private') modal.querySelector('#ng-invitations').open = true;
-      friendsEmpty?.classList.toggle('hidden', !!crewId || friends.length > 0);
+      if (crewId) modal.querySelector('#ng-invitations').open = true;
+      friendsEmpty?.classList.toggle('hidden', !!crewId || friends.length > 0 || visibility === 'private');
       syncCapacityChoices();
       updateOptionsSummary();
       updateCrewPresetBanner();
@@ -19794,20 +20911,21 @@
       if (crewId) {
         hint.textContent = inviteIds.size
           ? `${inviteIds.size} group player${inviteIds.size === 1 ? '' : 's'} selected; you are included too.`
-          : 'Select at least one other group player for this session.';
+          : 'Plan the date now. Group members can join after accepting their group invitation.';
         return;
       }
       if (!inviteIds.size) {
         hint.textContent = visibility === 'private'
-          ? 'Select at least one player for an invite-only game.'
+          ? 'Share your private invite link after scheduling. Direct invitations are optional.'
           : 'Optional: select people to ping directly after scheduling.';
         return;
       }
       hint.textContent = visibility === 'private'
-        ? `${inviteIds.size} selected · only invited players can join.`
+        ? `${inviteIds.size} selected · invited players and people with your private link can join.`
         : `${inviteIds.size} selected for a direct invitation · the game is still ${visibility === 'friends' ? 'open to your friends' : 'open to anyone nearby'}.`;
     };
     refreshPlannerInviteChoices = () => {
+      syncPlannerTimeChoices();
       if (!invitesEl) return;
       const planned = chosenPlannerTime();
       const matchingSlot = inviteAvailabilityKey(planned);
@@ -19816,7 +20934,7 @@
         !query || person.display_name.toLocaleLowerCase().includes(query)
       ));
       invitesEl.innerHTML = visibleInvitePeople.length
-        ? plannerInviteGroupsHtml(visibleInvitePeople, matchingSlot, inviteIds)
+        ? plannerInviteGroupsHtml(visibleInvitePeople, matchingSlot, inviteIds, planned)
         : '<div class="planner-invite-no-match" role="status">No players match that search.</div>';
       if (selectVisibleButton) {
         const allSelected = visibleInvitePeople.length > 0
@@ -19860,9 +20978,10 @@
         markPlannerDirty();
       });
     }
-    modal.querySelector('#ng-copy-invite-link')?.addEventListener('click', async () => {
-      try { await shareInviteLink(); }
-      catch { toast('Couldn’t open sharing. Try again.', { tone: 'warning' }); }
+    let shareCreatedPlan = false;
+    modal.querySelector('#ng-copy-invite-link')?.addEventListener('click', () => {
+      shareCreatedPlan = true;
+      modal.querySelector('#ng-form').requestSubmit();
     });
     refreshPlannerInviteChoices();
     updateInviteHint();
@@ -19898,7 +21017,7 @@
       const inviteHint = modal.querySelector('#ng-invite-hint');
       if (inviteHint) inviteHint.textContent = inviteIds.size
         ? `${inviteIds.size} group player${inviteIds.size === 1 ? '' : 's'} still selected; you are included too.`
-        : 'Your selected players changed. Choose at least one other group player.';
+        : 'Your selected players changed. You can plan now and invite group members later.';
 
       const playerCount = inviteIds.size + 1;
       const nextCapacity = playerCount <= 2 ? 2 : playerCount <= 4 ? 4
@@ -20035,8 +21154,7 @@
 
       visibility = ['open', 'friends', 'private'].includes(restoredDraft.visibility)
         ? restoredDraft.visibility : (crewId ? 'private' : 'open');
-      if (!crewId && ((visibility === 'friends' && friends.length === 0)
-          || (visibility === 'private' && invitePeople.length === 0))) {
+      if (!crewId && visibility === 'friends' && friends.length === 0) {
         visibility = 'open';
       }
       modal.querySelectorAll('#ng-vis button').forEach((btn) => {
@@ -20045,7 +21163,7 @@
         btn.setAttribute('aria-pressed', String(active));
       });
       friendsWrap.classList.remove('hidden');
-      friendsEmpty?.classList.toggle('hidden', !!crewId || friends.length > 0);
+      friendsEmpty?.classList.toggle('hidden', !!crewId || friends.length > 0 || visibility === 'private');
       const currentInviteeIds = new Set(invitePeople.map((person) => person.id));
       inviteIds.clear();
       const restoredInviteIds = restoredDraft.inviteUserIds.filter(
@@ -20386,10 +21504,6 @@
         showPlannerSubmitError('Choose a future time.', modal.querySelector('#ng-when-clock'));
         return;
       }
-      if (!exactRetry && visibility === 'private' && inviteIds.size === 0) {
-        showPlannerSubmitError('Pick at least one person to invite.', modal.querySelector('#ng-invites button'));
-        return;
-      }
       const chosenCapacity = Number(modal.querySelector('#ng-max').value);
       const effectiveCapacity = gameType === 'ranked' ? (chosenCapacity <= 2 ? 2 : 4) : chosenCapacity;
       const plannedPlayerCount = inviteIds.size + 1;
@@ -20464,6 +21578,7 @@
         scheduled_at: scheduledAt.toISOString(),
         game_type: gameType,
         visibility,
+        ...(visibility === 'private' && !crewId && !clubId ? { invite_link_enabled: true } : {}),
         recurrence: recurringBox.checked ? 'weekly' : 'none',
         ...(recurringBox.checked ? {
           recurrence_timezone: recurrenceTimezone,
@@ -20539,7 +21654,6 @@
           : 'Play session scheduled — let’s gather the group', {
           tone: 'success', icon: gameType === 'ranked' ? 'trophy' : 'pickleball',
         });
-        maybeOfferPhoneNotifications('Get reminders and join updates for this game?');
         state.playGamesCache = null;
         if (state.tab === 'play') {
           setPlaySegment('games');
@@ -20547,7 +21661,12 @@
         refreshMe();
         // Creation is the start of assembling the game, not the end. Keep the
         // host on the roster where invite/share/court-post actions are visible.
-        openGameScreen(createdGame.id, { replaceModal: modal });
+        const createdScreen = await openGameScreen(createdGame.id, { replaceModal: modal });
+        if (shareCreatedPlan && createdScreen?.isConnected
+            && currentOverlayEntry()?.el === createdScreen
+            && createdScreen.querySelector('#gs-share-header')) {
+          openRosterBoostSheet(createdGame, { initialChannel: 'share' });
+        }
         // If this planner came from a retained court, group, or community,
         // queue that parent to refresh after the new game is dismissed. The
         // newly opened game remains the visible destination and Back never
@@ -20745,17 +21864,17 @@
     const players = Array.isArray(game.players) ? game.players : [];
     const modal = openModal(`
       ${modalHead('Wrap up this session', 'check-circle')}
-      <p class="row-sub" style="margin-bottom:12px">Choose who played. This records one shared session with no score, winner, loss, or rating change.</p>
+      <p class="row-sub" style="margin-bottom:12px">Select the people who played. No score or rating change.</p>
       <fieldset class="session-attendance-picker">
         <legend class="section-label">Who played?</legend>
         ${players.map((player) => `<label class="row session-attendance-row">
-          <input type="checkbox" data-session-attendee="${player.user_id}" checked ${player.user_id === state.me?.id ? 'disabled' : ''} />
+          <input type="checkbox" data-session-attendee="${player.user_id}" ${player.user_id === state.me?.id ? 'checked disabled' : ''} />
           ${avatarHtml(player, 'sm')}
-          <span class="row-main"><b>${esc(player.display_name)}</b><small>${player.user_id === state.me?.id ? 'You' : 'Include in this session'}</small></span>
+          <span class="row-main"><b>${esc(player.display_name)}</b><small>${player.user_id === state.me?.id ? 'You' : 'Select if they played'}</small></span>
         </label>`).join('')}
       </fieldset>
       <p class="form-error hidden" id="session-wrap-error" role="alert" aria-live="assertive" tabindex="-1"></p>
-      <button type="button" class="btn btn-primary btn-block" id="session-wrap-save">Wrap up session</button>
+      <button type="button" class="btn btn-primary btn-block" id="session-wrap-save">Record who played</button>
       <button type="button" class="btn btn-secondary btn-block" id="session-wrap-log">Log an individual game</button>
     `, { label: 'Wrap up this play session' });
     const error = modal.querySelector('#session-wrap-error');
@@ -20808,7 +21927,8 @@
     if (Number(game.max_players) > 4) {
       return openSessionWrapUpModal(game, refresh);
     }
-    const players = game.players;
+    const lockedSides = game.game_type === 'ranked' && (game.status === 'unresolved' || game.score_correction_pending);
+    const players = lockedSides ? game.players.filter((player) => [1, 2].includes(player.team)) : game.players;
     const singles = players.length === 2;
     // Preserve the last submitted sides for corrections/counter-scores. Older
     // unscored games still use the deterministic half-and-half default.
@@ -20849,7 +21969,7 @@
         <button class="modal-close" aria-label="Close">${uiIcon('x')}</button>
       </div>
       <form id="sc-form" novalidate>
-      ${singles ? '' : `<p class="row-sub" style="margin-bottom:8px">Tap a player to switch their team.${players.length >= 4 ? ` <button type="button" id="sc-balance" class="tag score-balance-action">${uiIcon('sliders')} Balance by rating</button>` : ''}</p>`}
+      ${lockedSides ? '<p class="row-sub">Original players and sides · correction only</p>' : singles ? '' : `<p class="row-sub" style="margin-bottom:8px">Tap a player to switch their team.${players.length >= 4 ? ` <button type="button" id="sc-balance" class="tag score-balance-action">${uiIcon('sliders')} Balance by rating</button>` : ''}</p>`}
       <div id="sc-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px"></div>
       <div id="sc-uneven" class="row-sub" style="color:var(--amber-700);font-weight:700;margin-bottom:10px;display:none"></div>
       <div class="score-series-teams" aria-label="Match sides">
@@ -20860,7 +21980,7 @@
         <p id="sc-series-summary" role="status">Enter the final score.</p>
         <button type="button" class="btn btn-secondary btn-sm" id="sc-add-game">${uiIcon('plus')} Add another game</button>
       </div>
-      ${scoreMode === 'counter' ? '<p class="row-sub" style="margin:10px 0 12px;text-align:center">Adjust the reported score to what you remember. The other side will confirm your counter-score.</p>' : game.game_type === 'ranked' ? '<p class="row-sub" style="margin:10px 0 12px;text-align:center">An opponent has 72 hours to review the score before it confirms automatically.</p>' : '<div style="height:12px"></div>'}
+      ${lockedSides ? `<p class="row-sub" style="margin:10px 0 12px">An opponent must agree by ${esc(fmtDateTime(game.ranked_correction_deadline_at))}. This correction will never confirm automatically.</p>` : scoreMode === 'counter' ? '<p class="row-sub" style="margin:10px 0 12px;text-align:center">The other side must agree to your counter-score.</p>' : game.game_type === 'ranked' ? '<p class="row-sub" style="margin:10px 0 12px;text-align:center">An opponent has 72 hours to review the score before it confirms automatically.</p>' : '<div style="height:12px"></div>'}
       <button type="submit" class="btn btn-primary btn-block" id="sc-submit" style="padding:15px">
         ${scoreMode === 'counter' ? 'Send counter-score' : scoreMode === 'correction' ? 'Send corrected score' : game.game_type === 'ranked' ? 'Send for confirmation' : 'Save result'}
       </button>
@@ -20872,10 +21992,10 @@
 
     const renderChips = () => {
       modal.querySelector('#sc-chips').innerHTML = players.map((p) => `
-        <button type="button" class="team-chip team-${teams[p.user_id]}" data-chip="${p.user_id}" ${singles ? 'disabled' : ''}>
+        <button type="button" class="team-chip team-${teams[p.user_id]}" data-chip="${p.user_id}" ${singles || lockedSides ? 'disabled' : ''}>
           ${avatarHtml(p, 'sm')} ${esc(p.display_name)}
         </button>`).join('');
-      if (!singles) {
+      if (!singles && !lockedSides) {
         modal.querySelectorAll('[data-chip]').forEach((chip) => chip.addEventListener('click', () => {
           const uid = Number(chip.dataset.chip);
           teams[uid] = teams[uid] === 1 ? 2 : 1;
@@ -20906,8 +22026,8 @@
     };
     const syncScoreRowsFromInputs = () => {
       scoreRows.forEach((row, index) => {
-        row.score_team1 = modal.querySelector(`[data-score-row="${index}"][data-score-side="1"]`)?.value.trim() ?? '';
-        row.score_team2 = modal.querySelector(`[data-score-row="${index}"][data-score-side="2"]`)?.value.trim() ?? '';
+        row.score_team1 = modal.querySelector(`input[data-score-row="${index}"][data-score-side="1"]`)?.value.trim() ?? '';
+        row.score_team2 = modal.querySelector(`input[data-score-row="${index}"][data-score-side="2"]`)?.value.trim() ?? '';
       });
     };
     const renderSeriesSummary = () => {
@@ -20972,7 +22092,7 @@
       });
       modal.querySelectorAll('[data-series-step]').forEach((button) => {
         button.addEventListener('click', () => {
-          const input = modal.querySelector(`[data-score-row="${button.dataset.scoreRow}"][data-score-side="${button.dataset.scoreSide}"]`);
+          const input = modal.querySelector(`input[data-score-row="${button.dataset.scoreRow}"][data-score-side="${button.dataset.scoreSide}"]`);
           input.value = Math.max(0, Math.min(99, Number(input.value || 0) + Number(button.dataset.seriesStep)));
           input.dispatchEvent(new Event('input', { bubbles: true }));
         });
@@ -21007,7 +22127,7 @@
       teamsDirty = true;
       renderScoreRows();
       renderLabels();
-      modal.querySelector(`[data-score-row="${scoreRows.length - 1}"][data-score-side="1"]`)?.focus();
+      modal.querySelector(`input[data-score-row="${scoreRows.length - 1}"][data-score-side="1"]`)?.focus();
     });
 
     // Fairest split: the half-size subset whose total rating is closest to
@@ -21049,7 +22169,7 @@
         const fresh = await api(`/games/${game.id}`);
         const someoneElseReported = fresh.score_submitted_by && fresh.score_submitted_by !== state.me.id
           && fresh.status === 'awaiting_confirmation' && originalStatus !== 'awaiting_confirmation';
-        if (fresh.status !== originalStatus || someoneElseReported) {
+        if (fresh.status !== originalStatus || Number(fresh.score_version || 0) !== Number(game.score_version || 0) || someoneElseReported) {
           clearInterval(scorePoll);
           if (someoneElseReported) {
             syncScoreRowsFromInputs();
@@ -21084,8 +22204,8 @@
       const scoreGames = [];
       for (let index = 0; index < scoreRows.length; index += 1) {
         const row = scoreRows[index];
-        const score1 = modal.querySelector(`[data-score-row="${index}"][data-score-side="1"]`);
-        const score2 = modal.querySelector(`[data-score-row="${index}"][data-score-side="2"]`);
+        const score1 = modal.querySelector(`input[data-score-row="${index}"][data-score-side="1"]`);
+        const score2 = modal.querySelector(`input[data-score-row="${index}"][data-score-side="2"]`);
         const s1 = Number(row.score_team1);
         const s2 = Number(row.score_team2);
         if (!row.score_team1 || !Number.isInteger(s1) || s1 < 0 || s1 > 99) {
@@ -21118,6 +22238,7 @@
       peers.forEach((control) => { control.disabled = true; });
       const scorePayload = {
         team1: [...team1], team2: [...team2], score_games: scoreGames,
+        expected_score_version: Number(game.score_version || 0),
       };
       const sendScoreRequest = (acceptNonstandard = false) => api(`/games/${game.id}/complete`, {
         method: 'POST',
@@ -21156,7 +22277,7 @@
         if (isConfirmableNonstandardScore(err)) {
           const unusualIndex = Math.max(0, Number(err.data?.game_number || 1) - 1);
           const unusualGame = scoreGames[unusualIndex] || scoreGames[0];
-          const unusualInput = modal.querySelector(`[data-score-row="${unusualIndex}"][data-score-side="2"]`);
+          const unusualInput = modal.querySelector(`input[data-score-row="${unusualIndex}"][data-score-side="2"]`);
           const accepted = await confirmNonstandardScore({
             score1: unusualGame.score_team1,
             score2: unusualGame.score_team2,
@@ -21209,7 +22330,8 @@
   function tournamentMatchScheduleHtml(match, { compact = false } = {}) {
     if (!match.scheduled_at && !match.court_number) return '';
     const parts = [
-      match.scheduled_at ? fmtDateTime(match.scheduled_at) : '',
+      normalizeCompetitionResult(match).terminal ? 'Final' : match.play_state === 'playing' ? 'Playing now' : match.play_state === 'called' ? 'Called to court' : 'Estimated',
+      match.play_state === 'playing' || match.play_state === 'called' ? '' : match.scheduled_at ? fmtDateTime(match.scheduled_at) : '',
       match.court_number ? `Court ${match.court_number}` : '',
     ].filter(Boolean).join(' · ');
     return `<span class="competition-match-schedule${compact ? ' is-compact' : ''}">${uiIcon('calendar')}<span>${esc(parts)}</span></span>`;
@@ -21224,6 +22346,7 @@
 
   function tournamentScheduleActionHtml(tournament, match) {
     if (!tournament.is_organizer || tournament.status !== 'active') return '';
+    if (normalizeCompetitionResult(match).state !== 'unreported' || match.play_state === 'playing') return '';
     return `<button type="button" class="btn btn-secondary btn-sm competition-match-schedule-action" data-edit-tournament-schedule="${Number(match.id)}">${uiIcon('calendar')} Schedule</button>`;
   }
 
@@ -21233,7 +22356,7 @@
 
   function tournamentStatusChip(t) {
     if (t.status === 'registration') {
-      const spots = Math.max(0, Number(t.max_entries) - Number(t.entry_count));
+      const spots = Math.max(0, Number(t.registration_spots_left ?? (Number(t.max_entries) - Number(t.entry_count))));
       if (!spots) return competitionStatusTag('Registration full', 'users', 'is-full');
       if (Date.parse(t.starts_at || '') <= Date.now() && Number(t.ready_entry_count ?? t.entry_count) >= 2) {
         return competitionStatusTag('Waiting for organizer to start', 'clock', 'is-pending');
@@ -21272,7 +22395,7 @@
     let invitation;
     if (item.status === 'registration') {
       const capacity = isTournament
-        ? Math.max(0, Number(item.max_entries) - Number(item.entry_count))
+        ? Math.max(0, Number(item.registration_spots_left ?? (Number(item.max_entries) - Number(item.entry_count))))
         : Math.max(0, Number(item.max_players) - Number(item.member_count));
       invitation = capacity > 0
         ? `${capacity} ${isTournament ? 'entry spot' : 'player spot'}${capacity === 1 ? '' : 's'} open`
@@ -21310,7 +22433,7 @@
           <span class="row-sub competition-nav-format">${T_FORMAT_LABEL[t.format] || t.format} · ${t.event_type === 'doubles' ? 'Doubles' : 'Singles'} · ${esc(T_GAME_FORMAT_LABEL[t.game_format] || 'One game to 11')}${t.ranked ? ' · Ranked' : ''}</span>
           <span class="row-sub">${esc(tournamentDivisionLabel(t))} · ${t.entry_count}/${t.max_entries} ${t.event_type === 'doubles' ? 'teams' : 'players'} · ${Number(t.court_count || 1)} court${Number(t.court_count || 1) === 1 ? '' : 's'}</span>
           ${competitionPendingActionHtml(t)}
-          <span class="competition-nav-tags">${tournamentStatusChip(t)}${t.club_name ? ` <span class="tag competition-context-tag">${uiIcon('building')}<span>${esc(t.club_name)}</span></span>` : ''}${t.my_entry_id ? ` <span class="tag competition-context-tag is-joined">${uiIcon('check-circle')}<span>You're in</span></span>` : ''}${t.is_organizer ? ` <span class="tag competition-context-tag">${uiIcon('shield')}<span>Organizer</span></span>` : ''}</span>
+          <span class="competition-nav-tags">${tournamentStatusChip(t)}${t.club_name ? ` <span class="tag competition-context-tag">${uiIcon('building')}<span>${esc(t.club_name)}</span></span>` : ''}${t.my_entry_id ? ` <span class="tag competition-context-tag is-joined">${uiIcon('check-circle')}<span>${t.my_entry_ready === false ? t.my_entry_partner_status === 'pending' ? 'Partner invited' : 'Partner needed' : "You're in"}</span></span>` : ''}${t.my_waitlist?.status === 'queued' ? ` <span class="tag competition-context-tag">Waitlist #${Number(t.my_waitlist.position)}</span>` : t.my_waitlist?.status === 'offered' ? '<span class="tag warn">Place offered — respond</span>' : ''}${t.is_organizer ? ` <span class="tag competition-context-tag">${uiIcon('shield')}<span>Organizer</span></span>` : ''}</span>
         </span>
         ${uiIcon('chevron-right', 'chev')}
       </button>`;
@@ -21394,25 +22517,84 @@
     activate(initialTarget);
   }
 
+  let competitionBrowseFilters = {type:'all',format:'all',when:'any',rating:''};
+  let competitionBrowseSequence = 0;
+
+  function competitionBrowseQuery(filters) {
+    const query = new URLSearchParams({signup:'1'});
+    if(filters.format !== 'all') query.set('event_type',filters.format);
+    if(filters.rating) query.set('self_rating',filters.rating);
+    if(filters.when !== 'any'){
+      const start=new Date();start.setHours(0,0,0,0);
+      const end=new Date(start);end.setDate(end.getDate()+(filters.when==='week'?7:30));
+      query.set('starts_after',start.toISOString());query.set('starts_before',end.toISOString());
+    }
+    return '&'+query.toString();
+  }
+
+  function competitionBrowseControlsHtml(filters) {
+    const options=(rows,value)=>rows.map(([id,label])=>`<option value="${id}" ${value===id?'selected':''}>${label}</option>`).join('');
+    return `<form class="competition-browse-filters" id="competition-browse-form" aria-label="Find a competition">
+      <div class="form-field"><label for="cb-type">Event</label><select id="cb-type">${options([['all','Tournaments & leagues'],['tournament','Tournaments'],['league','Leagues']],filters.type)}</select></div>
+      <div class="form-field"><label for="cb-format">Players</label><select id="cb-format">${options([['all','Singles & doubles'],['singles','Singles'],['doubles','Doubles']],filters.format)}</select></div>
+      <div class="form-field"><label for="cb-when">Starts</label><select id="cb-when">${options([['any','Any date'],['week','Next 7 days'],['month','Next 30 days']],filters.when)}</select></div>
+      <div class="form-field"><label for="cb-rating">Fits self-rating</label><select id="cb-rating">${options([['','All levels'],['2.5','2.5'],['3','3.0'],['3.5','3.5'],['4','4.0'],['4.5','4.5'],['5','5.0']],filters.rating)}</select></div>
+      <button type="submit" class="btn btn-secondary">Find events</button>
+    </form>`;
+  }
+
+  function competitionHubNextHtml(kind,item) {
+    const match=item.personal_match;if(!match)return '';
+    const label=match.state==='awaiting_confirmation' || match.state==='disputed' ? 'Review result'
+      : kind==='league' && match.schedule_status==='waiting_reply' ? match.can_respond_schedule?'Choose a time':'View proposed times'
+      : match.starts_at ? 'Open match' : 'Find a time';
+    const when=match.timing==='playing'?'Playing now':match.timing==='called'?'Called to court':match.starts_at?`${match.timing==='estimated'?'Estimated · ':''}${fmtDateTime(match.starts_at)}`:'Agree a time';
+    return `<button type="button" class="card competition-hub-next" data-open-${kind}="${item.id}" data-match-id="${match.id}"><span class="section-label">${kind==='league'?'LEAGUE':'TOURNAMENT'} · ROUND ${match.round}</span><strong>vs ${esc(match.opponent)}</strong><span>${esc(when)}${match.court_number?` · Court ${match.court_number}`:''}</span><small>${esc(item.name)}${match.court_name?` · ${esc(match.court_name)}`:''}</small><b>${label} ${uiIcon('arrow-right')}</b></button>`;
+  }
+
+  async function openAllCompetitionMatches() {
+    const box=openModal(`${modalHead('Your active matches')}<div id="all-competition-matches" aria-busy="true">${skeletonHtml(3)}</div>`,{label:'Your active matches'});
+    const content=box.querySelector('#all-competition-matches');
+    let cursor=null, total=0, rows=[];
+    const load=async()=>{
+      try{
+        const page=await api('/competitions/next-matches?limit=30'+(cursor?`&cursor=${encodeURIComponent(cursor)}`:''));
+        if(!box.isConnected)return;
+        const seen=new Set(rows.map(row=>`${row.kind}:${row.item.personal_match.id}`));
+        rows.push(...page.items.filter(row=>!seen.has(`${row.kind}:${row.item.personal_match.id}`)));
+        total=page.total;cursor=page.next_cursor;
+        content.innerHTML=`<p class="row-sub">${total} active match${total===1?'':'es'} · every tournament and league</p>${rows.map(row=>competitionHubNextHtml(row.kind,row.item)).join('')}${!rows.length?'<p>No active matches. Your finished results remain in your competitions.</p>':''}${cursor?'<button class="btn btn-secondary btn-block" id="all-matches-more">Load more matches</button>':''}`;
+        content.setAttribute('aria-busy','false');
+        content.querySelectorAll('[data-match-id]').forEach(button=>button.addEventListener('click',()=>openChildModal(box,()=>button.dataset.openLeague?openLeagueScreen(Number(button.dataset.openLeague),Number(button.dataset.matchId)):openTournamentScreen(Number(button.dataset.openTournament),Number(button.dataset.matchId)))));
+        content.querySelector('#all-matches-more')?.addEventListener('click',event=>{event.currentTarget.disabled=true;load();});
+      }catch(error){content.setAttribute('aria-busy','false');showInlineActionError(content,error.message);content.querySelector('#all-matches-more')?.removeAttribute('disabled');}
+    };
+    await load();return box;
+  }
+
   async function renderTournaments(el, retryFn) {
     const loc = committedAreaLatLng();
+    const sequence=++competitionBrowseSequence;
+    const filters={...competitionBrowseFilters},browseQuery=competitionBrowseQuery(filters);
     try {
-      const [mine, nearbyResult, myLeaguesResult, nearbyLeaguesResult] = await Promise.all([
+      const [mine, nearbyResult, myLeaguesResult, nearbyLeaguesResult, nextResult] = await Promise.all([
         api('/tournaments?mine=1'),
-        loc
-          ? api(`/tournaments?lat=${loc.lat}&lng=${loc.lng}&radius=60`)
+        loc && filters.type !== 'league'
+          ? api(`/tournaments?lat=${loc.lat}&lng=${loc.lng}&radius=60${browseQuery}`)
             .then((data) => ({ data, error: null, areaUnset: false }))
             .catch((error) => ({ data: { items: [] }, error, areaUnset: false }))
-          : Promise.resolve({ data: { items: [] }, error: null, areaUnset: true }),
+          : Promise.resolve({ data: { items: [] }, error: null, areaUnset: !loc }),
         api('/leagues?mine=1')
           .then((data) => ({ data, error: null }))
           .catch((error) => ({ data: { items: [] }, error })),
-        loc
-          ? api(`/leagues?lat=${loc.lat}&lng=${loc.lng}&radius=60`)
+        loc && filters.type !== 'tournament'
+          ? api(`/leagues?lat=${loc.lat}&lng=${loc.lng}&radius=60${browseQuery}`)
             .then((data) => ({ data, error: null, areaUnset: false }))
             .catch((error) => ({ data: { items: [] }, error, areaUnset: false }))
-          : Promise.resolve({ data: { items: [] }, error: null, areaUnset: true }),
+          : Promise.resolve({ data: { items: [] }, error: null, areaUnset: !loc }),
+        api('/competitions/next-matches').then(data=>({data,error:null})).catch(error=>({data:{items:[]},error})),
       ]);
+      if(sequence!==competitionBrowseSequence)return;
       const nearby = nearbyResult.data;
       const myLeagues = myLeaguesResult.data;
       const nearbyLeagues = nearbyLeaguesResult.data;
@@ -21449,7 +22631,11 @@
           <button type="button" class="btn btn-secondary btn-sm" data-competition-retry>Try again</button>
         </div>`;
 
-      let html = `<button type="button" class="btn btn-primary btn-block" id="competition-create" style="margin:2px 0 14px">${uiIcon('plus')} Create competition</button>`;
+      const personal=nextResult.data.items || [];
+      let html = personal.length ? '<div class="section-label">Your next match'+(personal.length>1?'es':'')+'</div>'+personal.map(row=>competitionHubNextHtml(row.kind,row.item)).join('') : '';
+      if(Number(nextResult.data.total)>0)html+=`<button type="button" class="btn btn-secondary btn-block" id="competition-all-matches">All active matches (${Number(nextResult.data.total)})</button>`;
+      if(nextResult.error)html+=sectionError('Your next matches are unavailable','Try again to check your active matches. Your competition lists remain below.');
+
       if (nearbyResult.areaUnset || nearbyLeaguesResult.areaUnset) {
         html += `<section class="play-area-setup" role="status">
           <span class="play-area-setup-icon" aria-hidden="true">${uiIcon('map-pin')}</span>
@@ -21458,11 +22644,13 @@
         </section>`;
       }
       if (live.length || liveLeagues.length) {
-        html += '<div class="section-label">Your competitions</div>';
+        html += personal.length ? '<details class="competition-hub-owned"><summary>Your competitions</summary>' : '<div class="section-label">Your competitions</div>';
         html += hubCardsHtml(live, liveLeagues);
+        if(personal.length)html+='</details>';
       }
+      html += '<div class="section-label">Open signups</div>'+competitionBrowseControlsHtml(filters);
       if (nearbyOnly.length || nearbyLeaguesOnly.length) {
-        html += '<div class="section-label">Near you</div>';
+
         html += hubCardsHtml(nearbyOnly, nearbyLeaguesOnly);
       }
       if (nearbyResult.error) {
@@ -21472,9 +22660,10 @@
         html += sectionError('Nearby leagues unavailable', 'Your competitions are still shown. Check the connection and try this section again.');
       }
       if (past.length || pastLeagues.length) {
-        html += '<div class="section-label">Past competitions</div>';
+        html += '<div class="section-label">Past results</div>';
         html += hubCardsHtml(past, pastLeagues);
       }
+      if(!nearbyOnly.length && !nearbyLeaguesOnly.length && loc && !nearbyResult.error && !nearbyLeaguesResult.error) html+='<p class="competition-browse-empty">No open signups match these filters. Try another date, format or level.</p>';
       if (mine.has_more && mine.next_cursor) {
         html += `<div class="competition-page-control" data-competition-page-wrap="mine-tournaments"><button type="button" class="btn btn-secondary btn-block" data-competition-page="mine-tournaments" data-cursor="${esc(mine.next_cursor)}">Show more of your tournaments</button></div>`;
       }
@@ -21492,8 +22681,8 @@
         html += emptyStateHtml({
           icon: 'trophy',
           title: 'No competitions around yet',
-          body: 'Start a tournament or ladder league and bring players together.',
-          primary: { id: 'competition-create-empty', label: 'Create a competition', icon: 'plus' },
+          body: 'Try a wider area or come back as local events open.',
+
         });
       }
 
@@ -21501,8 +22690,14 @@
         html += sectionError('Your leagues are unavailable', 'Tournament results are still shown. Check the connection and try this section again.');
       }
 
+      html += '<details class="competition-organize-tools"><summary>Organize an event</summary><button type="button" class="btn btn-secondary btn-block" id="competition-create">Create tournament or league</button></details>';
       if (state.playSeg !== 'brackets') return; // user already switched away
       el.innerHTML = html;
+      el.querySelector('#competition-all-matches')?.addEventListener('click',openAllCompetitionMatches);
+      el.querySelector('#competition-browse-form')?.addEventListener('submit',event=>{
+        event.preventDefault();competitionBrowseFilters={type:el.querySelector('#cb-type').value,format:el.querySelector('#cb-format').value,when:el.querySelector('#cb-when').value,rating:el.querySelector('#cb-rating').value};
+        renderTournaments(el,retryFn);
+      });
       el.querySelectorAll('#competition-create, #competition-create-empty')
         .forEach((button) => button.addEventListener('click', openCompetitionCreateSheet));
       el.querySelector('[data-set-competition-area]')?.addEventListener('click', () => {
@@ -21515,21 +22710,21 @@
       }));
       const bindCompetitionCards = (root) => {
         root.querySelectorAll('[data-open-league]').forEach((card) => {
-          makePressable(card, () => openLeagueScreen(Number(card.dataset.openLeague)));
+          makePressable(card, () => openLeagueScreen(Number(card.dataset.openLeague),Number(card.dataset.matchId)||null));
         });
         root.querySelectorAll('[data-open-tournament]').forEach((card) => {
-          makePressable(card, () => openTournamentScreen(Number(card.dataset.openTournament)));
+          makePressable(card, () => openTournamentScreen(Number(card.dataset.openTournament),Number(card.dataset.matchId)||null));
         });
       };
       bindCompetitionCards(el);
       const pageUrls = {
         'mine-tournaments': '/tournaments?mine=1&limit=30',
         'nearby-tournaments': loc
-          ? `/tournaments?lat=${encodeURIComponent(loc.lat)}&lng=${encodeURIComponent(loc.lng)}&radius=60&limit=30`
+          ? `/tournaments?lat=${encodeURIComponent(loc.lat)}&lng=${encodeURIComponent(loc.lng)}&radius=60&limit=30${browseQuery}`
           : '',
         'mine-leagues': '/leagues?mine=1&limit=30',
         'nearby-leagues': loc
-          ? `/leagues?lat=${encodeURIComponent(loc.lat)}&lng=${encodeURIComponent(loc.lng)}&radius=60&limit=30`
+          ? `/leagues?lat=${encodeURIComponent(loc.lat)}&lng=${encodeURIComponent(loc.lng)}&radius=60&limit=30${browseQuery}`
           : '',
       };
       el.querySelectorAll('[data-competition-page]').forEach((button) => {
@@ -21612,7 +22807,7 @@
       return {
         side1: match.player1 || { display_name: 'Player 1' },
         side2: match.player2 || { display_name: 'Player 2' },
-        context: `Singles · ${Number(parent.round_days) === 7 ? 'Week' : 'Round'} ${match.round}`,
+        context: `Singles · Round ${match.round}`,
       };
     }
     const entries = Object.fromEntries((parent.entries || []).map((entry) => [entry.id, entry]));
@@ -21680,9 +22875,9 @@
         const name = opponent.display_name || 'Opponent';
         return `<div class="competition-card-opponent" data-card-opponent-user="${id}">
           ${kind === 'league' ? '' : `<span class="competition-card-opponent-name">${esc(name)}</span>`}
-          ${canPropose ? `<button type="button" class="btn btn-primary btn-sm" data-card-opponent-propose="${id}" data-card-opponent-name="${esc(name)}" data-card-opponent-match="${Number(match.id)}" aria-label="Arrange match with ${esc(name)}">${uiIcon('calendar')} Arrange match</button>` : ''}
+          ${canPropose ? `<button type="button" class="btn btn-primary btn-sm" data-card-opponent-propose="${id}" data-card-opponent-name="${esc(name)}" data-card-opponent-match="${Number(match.id)}" aria-label="Arrange match with ${esc(name)}">${uiIcon('calendar')} ${match.can_respond_schedule ? 'Choose a time' : match.scheduled_at ? 'View plan' : match.schedule_status === 'waiting_reply' ? 'View options' : 'Arrange match'}</button>` : ''}
           <button type="button" class="btn btn-secondary btn-sm" data-card-opponent-profile="${id}" aria-label="View ${esc(name)}'s profile">Profile</button>
-          ${canPropose ? `<button type="button" class="btn btn-secondary btn-sm" data-card-match-score="${Number(match.id)}" aria-label="Add score against ${esc(name)}">Add score</button>` : `<button type="button" class="btn btn-secondary btn-sm" data-card-opponent-message="${id}" aria-label="Message ${esc(name)}">Message</button>`}
+          ${canPropose ? `<details><summary>Already played?</summary><button type="button" class="btn btn-secondary btn-sm" data-card-match-score="${Number(match.id)}" aria-label="Add score against ${esc(name)}">Add score</button></details>` : `<button type="button" class="btn btn-secondary btn-sm" data-card-opponent-message="${id}" aria-label="Message ${esc(name)}">Message</button>`}
         </div>`;
       }).join('')}
     </div>`;
@@ -21709,6 +22904,10 @@
         const match = (parent.matches || []).find(
           (item) => Number(item.id) === Number(target.dataset.cardOpponentMatch),
         );
+        if (kind === 'league' && match) {
+          openChildModal(parentModal, () => openLeagueScheduleSheet(parent, match, () => parentModal.dispatchEvent(new Event('league-schedule-saved'))));
+          return;
+        }
         const name = target.dataset.cardOpponentName || 'there';
         const draft = competitionArrangeDraft(kind, parent, match, name);
         openChildModal(parentModal, () => openThread(
@@ -21744,6 +22943,9 @@
       organizer_correction: 'Organizer corrected the final score',
       organizer_forfeit: 'Organizer recorded a forfeit',
       organizer_void: 'Organizer marked this match as not played',
+      player_unavailable: 'Not played · player unavailable this round',
+      absence_result_claim: 'Played result reported after an absence · explicit agreement or organizer decision required',
+      round_closed_unplayed: 'Round closed without a result · no played loss recorded',
     }[match.resolution_kind];
     if (match.resolution_kind !== 'automatic_timeout' && resolutionCopy) rows.push(esc(resolutionCopy));
     return rows.length ? `<div class="competition-provenance">${rows.map((row) => `<div>${row}</div>`).join('')}</div>` : '';
@@ -21765,7 +22967,9 @@
               reported: 'Score reported', confirmed: 'Score confirmed',
               auto_confirmed: 'Score confirmed automatically', disputed: 'Score challenged',
               resolved: 'Final score set', corrected: 'Final score corrected',
-              voided: 'Marked not played', forfeit: 'Forfeit recorded',
+              late_review_requested: 'Closed-round review requested', late_review_response: 'Player responded to review',
+              late_review_approved: 'Closed-round amendment approved', late_review_rejected: 'Closed-round request declined',
+              voided: 'Marked not played', reopened: 'Available to play again', forfeit: 'Forfeit recorded',
             }[event.action] || 'Result updated');
             return `<li><b>${esc(actionLabel)}</b>${score}${event.actor_name ? ` · ${esc(event.actor_name)}` : ''}${event.created_at ? ` · ${esc(fmtDateTime(event.created_at))}` : ''}${reason}</li>`;
           }).join('')}
@@ -21832,14 +23036,20 @@
     const myEntry = (tournament.entries || []).find((entry) => entry.id === tournament.my_entry_id) || null;
     const startsAt = new Date(tournament.starts_at).getTime();
     const open = Number.isFinite(startsAt)
-      && Date.now() >= startsAt - 24 * 3600e3
+      && Date.now() >= startsAt - 2 * 3600e3
       && (tournament.status === 'registration' || tournament.status === 'active');
-    return { myEntry, canCheckIn: !!(myEntry && open && !myEntry.checked_in) };
+    return { myEntry, canCheckIn: !!(myEntry && open && !myEntry.my_arrived) };
   }
 
   function competitionActionNeeded(kind, parent) {
     const actions = (parent.matches || []).map((match) => {
       const result = normalizeCompetitionResult(match);
+      const lateReview = match.closed_round_review;
+      if (kind === 'league' && lateReview?.status === 'pending' && (parent.is_organizer || (
+          [match.player1?.id, match.player2?.id].includes(state.me?.id) && lateReview.requested_by_id !== state.me?.id
+          && !(lateReview.responses || []).some(response => response.user_id === state.me?.id)))) {
+        return {match, priority: -1, title: 'Review closed-round result', detail: `Round ${match.round} · A late correction needs a decision. The existing record stays in place until approval.`};
+      }
       if (match.can_confirm_result || match.awaiting_your_confirmation) {
         const deadline = competitionReviewDeadlineText(match);
         return { match, priority: 0, title: 'Review reported score', detail: `Confirm it or flag a problem.${deadline ? ` ${deadline}.` : ''}` };
@@ -21856,7 +23066,7 @@
             : 'Nudge the confirmer or finalize the result.',
         };
       }
-      if (match.can_report_result) {
+      if (match.can_report_result && !match.can_report_played_after_absence) {
         const myTournamentMatch = kind === 'tournament' && result.state === 'unreported'
           && [match.entry1_id, match.entry2_id].some((id) => Number(id) > 0 && Number(id) === Number(parent.my_entry_id));
         const roundDeadline = kind === 'league'
@@ -21897,6 +23107,11 @@
     }
 
     if (kind === 'tournament') {
+      const incompleteReview = parent.status === 'registration' && parent.is_organizer
+        ? (parent.entries || []).find(entry=>entry.partner_deadline_expired) : null;
+      if(incompleteReview)actions.push({action:'partner-deadline',priority:-4,title:'Resolve an incomplete team',
+        detail:`${incompleteReview.players?.[0]?.display_name || 'This player'} needs a partner. Extend the deadline or remove the entry before starting.`,
+        label:'Review team',controlId:`td-partner-deadline-${incompleteReview.id}`,targetTab:'td-players',direct:false});
       if (parent.status === 'registration' && parent.my_partner_action?.decision_for_me) {
         const directInvite = parent.my_partner_action.pending_on === 'invitee';
         actions.push({
@@ -21912,7 +23127,7 @@
       const { canCheckIn } = tournamentCheckinState(parent);
       if (canCheckIn) {
         actions.push({
-          action: 'checkin', priority: -2, title: 'Mark your entry here',
+          action: 'checkin', priority: -2, title: 'Mark yourself here',
           detail: 'Let the organizer know you have arrived at the court.',
           label: 'I’m here', controlId: 'td-checkin', targetTab: 'td-players', direct: true,
         });
@@ -21923,20 +23138,20 @@
       if (parent.status === 'registration' && parent.is_organizer && tournamentReady) {
         const scheduledTimeReached = Date.parse(parent.starts_at || '') <= Date.now();
         actions.push({
-          action: 'start', priority: -1, title: 'Start the tournament',
+          action: 'start', priority: -1, title: 'Review the starting field',
           detail: scheduledTimeReached
             ? `${parent.entry_count} ${parent.event_type === 'doubles' ? 'teams are' : 'players are'} ready and the planned start time has arrived. Generate the matches when the court is ready.`
             : `Planned for ${fmtDateTime(parent.starts_at)}. You control when the matches go live.`,
-          label: 'Start tournament', controlId: 'td-start', targetTab: 'td-players', direct: true,
+          label: 'Preview bracket', controlId: 'td-start', targetTab: 'td-players', direct: true,
         });
       } else if (parent.status === 'registration' && !parent.my_entry_id
           && !parent.my_partner_action && !parent.my_pending_partner_offer
-          && Number(parent.entry_count) < Number(parent.max_entries)) {
+          && Number(parent.registration_spots_left ?? (parent.max_entries - parent.entry_count)) > 0) {
         const needsPartner = parent.event_type === 'doubles';
         actions.push({
           action: 'register', priority: 4,
           title: needsPartner ? 'Choose a partner and sign up' : 'Sign up for this tournament',
-          detail: `${Number(parent.max_entries) - Number(parent.entry_count)} spot${Number(parent.max_entries) - Number(parent.entry_count) === 1 ? '' : 's'} left.`,
+          detail: `${Number(parent.registration_spots_left ?? (parent.max_entries - parent.entry_count))} places available.`,
           label: needsPartner ? 'Choose partner' : 'Sign up', controlId: 'td-register',
           focusId: needsPartner ? 'td-partner-search' : null, targetTab: 'td-players', direct: !needsPartner,
         });
@@ -22059,7 +23274,77 @@
     };
   }
 
+  async function leagueScoreRequest(path, payload, trigger) {
+    try { return await api(path,{method:'POST',body:JSON.stringify(payload)}); }
+    catch(error){
+      if(!isConfirmableNonstandardScore(error))throw error;
+      const accepted=await confirmNonstandardScore({score1:payload.score1,score2:payload.score2,ranked:true,trigger});
+      if(!accepted)return null;
+      return api(path,{method:'POST',body:JSON.stringify({...payload,accept_nonstandard_score:true})});
+    }
+  }
+
+  function openLeagueClosedReviewSheet(parent, sourceMatch, hooks = {}) {
+    let match = sourceMatch, liveParent = parent;
+    const modal = openModal('', {route:{kind:'league',id:Number(parent.id),matchId:Number(match.id)},label:'Closed-round result review'});
+    const content = modal.querySelector('.modal');
+    let changed = false;
+    modal._cleanupFns?.push(() => { if (changed) hooks.adoptFresh?.(liveParent,{render:true}); });
+    const render = () => {
+      const review = match.closed_round_review || {}, pending = review.status === 'pending';
+      const participant = [match.player1?.id,match.player2?.id].includes(state.me?.id);
+      const canRespond = pending && participant && review.requested_by_id !== state.me?.id;
+      content.innerHTML = `${modalHead('Closed-round result review')}<p class="row-sub">${esc(parent.name)} · Round ${match.round}</p>
+        <h4>${esc(match.player1?.display_name || 'Player')} vs ${esc(match.player2?.display_name || 'Player')}</h4>
+        <p><b>Current record:</b> ${normalizeCompetitionResult(match).confirmed ? `${match.score1}–${match.score2}` : 'Not played'}</p>
+        <p class="row-sub">A late result needs organizer review. Existing divisions, later matches and appointments stay in place. The review shows changes to this round, season records and any season title.</p>
+        ${review.status ? `<section class="card"><b>${pending ? 'Review requested' : review.status === 'approved' ? 'Amendment approved' : 'Request declined'}</b><p>${review.void ? 'Requested: not played' : `Requested score: ${review.score1}–${review.score2}`} · ${esc(review.requested_by_name || 'Player')}</p><p>${esc(review.reason)}</p>${(review.responses || []).map(response=>`<p><b>${esc(response.name)} · ${response.agree ? 'Agrees' : 'Objects'}</b><br>${esc(response.reason)}</p>`).join('')}${review.review_reason ? `<p>${esc(review.review_reason)}</p>` : ''}</section>` : ''}
+        <form id="lcr-form">
+          ${!pending ? `<div class="form-grid"><div class="form-field"><label for="lcr-score1">${esc(match.player1?.display_name)}</label><input id="lcr-score1" type="number" min="0" max="99" inputmode="numeric" value="${match.score1 ?? ''}"></div><div class="form-field"><label for="lcr-score2">${esc(match.player2?.display_name)}</label><input id="lcr-score2" type="number" min="0" max="99" inputmode="numeric" value="${match.score2 ?? ''}"></div></div><label><input id="lcr-void" type="checkbox"> This match was not played</label>` : ''}
+          ${!pending || canRespond || parent.is_organizer ? '<div class="form-field"><label for="lcr-reason">Reason and evidence</label><textarea id="lcr-reason" required maxlength="500" rows="3"></textarea></div>' : ''}
+          ${!pending ? '<button class="btn btn-primary btn-block" type="button" data-lcr-action="request">Request a result review</button>' : canRespond ? '<button class="btn btn-primary" type="button" data-lcr-action="agree">I agree with this request</button><button class="btn btn-secondary" type="button" data-lcr-action="object">I disagree</button>' : ''}
+          ${pending && parent.is_organizer ? '<button class="btn btn-primary btn-block" type="button" data-lcr-action="approve">Review effects before approving</button><button class="btn btn-secondary btn-block" type="button" data-lcr-action="reject">Decline request</button>' : pending ? '<p class="row-sub">The organizer makes the final decision. Nothing changes automatically.</p>' : ''}
+        </form>${competitionResultHistoryHtml(match)}`;
+      setDialogLabel(content, 'Closed-round result review');
+      if (modal.classList.contains('flow-child-modal')) decorateFlowChildModal(modal);
+      content.querySelectorAll('[data-lcr-action]').forEach(button=>button.addEventListener('click', async()=>{
+        const action=button.dataset.lcrAction, reason=content.querySelector('#lcr-reason')?.value.trim() || '';
+        if(!reason){showInlineActionError(content,'Add a reason and the evidence you checked.');return;}
+        const body={action,reason,expected_result_version:match.result_version};
+        if(action==='request'){
+          body.void=!!content.querySelector('#lcr-void')?.checked;
+          if(!body.void){
+            const score1=content.querySelector('#lcr-score1').value,score2=content.querySelector('#lcr-score2').value;
+            if(score1==='' || score2===''){showInlineActionError(content,'Enter both scores.');return;}
+            body.score1=Number(score1);body.score2=Number(score2);
+          }
+        }
+        if(action==='agree' || action==='object'){body.action='respond';body.agree=action==='agree';}
+        const reset=beginButtonAction(button,'Checking…',content.querySelectorAll('[data-lcr-action]'));if(!reset)return;
+        hooks.setMutating?.(true);
+        try{
+          if(action==='approve' || action==='reject'){
+            const plan=await api(`/leagues/${parent.id}/matches/${match.id}/closed-review`,{method:'POST',body:JSON.stringify({action:'preview',expected_result_version:match.result_version})});
+            const records=plan.season_changes.map(row=>row.before ? `${row.name}: ${row.before.wins}–${row.before.losses} → ${row.after.wins}–${row.after.losses}; ${row.before.points} → ${row.after.points} pts` : `${row.name}: historical result only; membership no longer exists.`).join('\n');
+            const title=`Season title: ${plan.champion_before.name || 'No outright champion'} → ${plan.champion_after.name || 'No outright champion'}`;
+            const approved=await openActionConfirmation({title:action==='approve'?'Approve this amendment?':'Decline this request?',eyebrow:`Round ${match.round}`,message:action==='approve'?records:'The existing result and standings remain unchanged.',detail:action==='approve'?`${title}. ${plan.effect} ${plan.later_match_count} later matches and ${plan.preserved_appointments} agreed appointments stay in place. ${reason}`:reason,confirmLabel:action==='approve'?'Approve & preserve later draw':'Decline request',cancelLabel:'Back to review',tone:'primary'});
+            if(!approved)return;
+            body.preview_fingerprint=plan.preview_fingerprint;body.acknowledge_downstream_effect=true;
+          }
+          const updated=await leagueScoreRequest(`/leagues/${parent.id}/matches/${match.id}/closed-review`,body,button);
+          if(!updated)return;
+          match=updated;
+          const fresh=await hooks.fetchFresh?.();if(fresh){liveParent=fresh;hooks.adoptFresh?.(fresh,{render:false});changed=true;}
+          render();toast('Result review updated');
+        }catch(error){showInlineActionError(content,error.message || 'Could not save this review.');}
+        finally{hooks.setMutating?.(false);reset();}
+      }));
+    };
+    render();return modal;
+  }
+
   function openCompetitionResultSheet(kind, parent, sourceMatch, hooks = {}) {
+    if (kind === 'league' && sourceMatch.can_review_closed_round) return openLeagueClosedReviewSheet(parent, sourceMatch, hooks);
     let liveParent = parent;
     let match = sourceMatch;
     const plural = kind === 'league' ? 'leagues' : 'tournaments';
@@ -22090,7 +23375,11 @@
     );
     const progressionNoteFor = (currentMatch) => {
       const currentResult = normalizeCompetitionResult(currentMatch);
-      return kind === 'league' && currentResult.state === 'unreported'
+      return currentMatch.can_report_played_after_absence
+        ? 'Already played? Report the score for your opponent to confirm. An absence notice does not erase a played result.'
+        : currentMatch.requires_explicit_confirmation
+          ? 'This result needs explicit agreement or an organizer decision. It will not confirm automatically.'
+        : kind === 'league' && currentResult.state === 'unreported'
         ? 'After you play, add the score for your opponent to confirm. Leave it blank if you don’t play.'
         : currentResult.terminal
           ? ''
@@ -22130,7 +23419,7 @@
           <button type="button" class="btn btn-secondary btn-block" data-result-action="forfeit-2">${esc(side2Name)} did not play</button>
         </details>` : '';
     const actionButtons = [
-      match.can_report_result ? '<button type="button" class="btn btn-primary btn-block" data-result-action="score">Report score</button>' : '',
+      match.can_report_result ? `<button type="button" class="btn btn-primary btn-block" data-result-action="score">${match.can_report_played_after_absence ? 'We played — report score' : 'Report score'}</button>` : '',
       match.can_confirm_result ? '<button type="button" class="btn btn-primary btn-block" data-result-action="confirm">Looks right — confirm</button>' : '',
       match.can_dispute_result ? '<button type="button" class="btn btn-secondary btn-block" data-result-action="dispute">That score is not right</button>' : '',
       match.can_resolve_result ? '<button type="button" class="btn btn-primary btn-block" data-result-action="resolve">Set final score</button>' : '',
@@ -22191,6 +23480,22 @@
     });
     modal.querySelectorAll('[data-opponent-propose]').forEach((button) => {
       button.addEventListener('click', () => {
+        if (kind === 'league') {
+          openChildModal(modal, () => openLeagueScheduleSheet(liveParent, match, async () => {
+            const fresh = await hooks.fetchFresh?.().catch(() => null);
+            if (!fresh) return;
+            const freshMatch = (fresh.matches || []).find((item) => Number(item.id) === Number(match.id));
+            if (freshMatch && Number(freshMatch.result_version || 0) !== Number(match.result_version || 0)) {
+              void refreshStaleResult('schedule', fresh);
+            } else {
+              liveParent = fresh;
+              if (freshMatch) match = freshMatch;
+              hooks.adoptFresh?.(fresh, { render: false });
+              staleParentNeedsRender = true;
+            }
+          }));
+          return;
+        }
         const opponentName = button.dataset.opponentName || 'there';
         const draft = competitionArrangeDraft(kind, liveParent, match, opponentName);
         openChildModal(modal, () => openThread(
@@ -22480,10 +23785,11 @@
         setMutationBusy(true, button);
         try {
           const endpointAction = action === 'void' ? 'resolve' : isForfeit ? 'forfeit' : action;
-          const mutationResult = await api(`/${plural}/${liveParent.id}/matches/${match.id}/${endpointAction}`, {
+          const mutationResult = kind === 'league' ? await leagueScoreRequest(`/${plural}/${liveParent.id}/matches/${match.id}/${endpointAction}`,payload,button) : await api(`/${plural}/${liveParent.id}/matches/${match.id}/${endpointAction}`, {
             method: 'POST',
             body: JSON.stringify(payload),
           });
+          if(!mutationResult){finishSubmitting();return;}
           staleParentNeedsRender = false;
           closeModal(modal);
           toast(action === 'confirm' ? 'Score confirmed' : action === 'dispute' ? 'Score review requested' : action === 'void' ? 'Marked as not played' : isForfeit ? 'Forfeit recorded' : action === 'resolve' ? 'Final score saved' : 'Score sent for confirmation');
@@ -22540,13 +23846,130 @@
     </div>`;
   }
 
+  async function openLeagueScheduleSheet(parent, initialMatch, onSaved) {
+    const shell = openDetailLoadShell({ title: 'Arrange your match', copy: 'Loading the latest times…', label: 'League match scheduling' });
+    if (!shell) return;
+    const { modal, box } = shell;
+    let match;
+    let league;
+    const render = () => {
+      const opponent = competitionOpponents('league', league, match)[0];
+      const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      box.innerHTML = `${modalHead('Arrange your match')}
+        <p class="row-title">${esc(match.player1?.display_name)} vs ${esc(match.player2?.display_name)}</p>
+        <p class="row-sub">${esc(league.name)} · Round ${match.round} · Times in ${esc(zone)}</p>
+        ${match.scheduled_at ? `<div class="card" style="padding:14px"><b>Confirmed plan</b><p>${esc(fmtDateTime(match.scheduled_at))}</p><p>${esc(match.scheduled_court?.name)} · ${match.scheduled_duration_minutes} minutes</p>${match.schedule_options?.length ? '<small>This time stays confirmed until a new option is accepted.</small>' : ''}<button type="button" class="btn btn-secondary btn-sm" id="league-match-calendar">Add match to calendar</button></div>` : ''}
+        ${match.schedule_options?.length ? `<div class="section-label">${match.can_respond_schedule ? 'Choose a time' : 'Waiting for your opponent'}</div>${match.schedule_options.map((option) => `<div class="card" style="padding:12px"><b>${esc(fmtDateTime(option.starts_at))}</b><p class="row-sub">${esc(option.court_name)} · ${option.duration_minutes} minutes</p>${match.can_respond_schedule ? `<button type="button" class="btn btn-primary" data-league-accept="${esc(option.id)}">Accept this time</button>` : ''}</div>`).join('')}${match.can_respond_schedule ? '<button type="button" class="btn btn-secondary btn-block" id="league-decline-times">None of these work</button>' : ''}` : ''}
+        ${match.can_propose_schedule ? `<details class="simple-disclosure" ${match.schedule_options?.length || match.scheduled_at ? '' : 'open'}><summary>${match.scheduled_at ? 'Propose a different time' : match.schedule_options?.length ? 'Suggest other times' : 'Suggest times'}</summary>
+          <form id="league-schedule-form" novalidate><p class="field-help">Choose 1–3 options. Times shown in ${esc(zone)}. Your opponent confirms one.</p>
+          ${[0, 1, 2].map((index) => `<fieldset class="profile-editor-section" data-league-option="${index}" ${index ? 'hidden' : ''}><legend>Option ${index + 1}${index ? ' · optional' : ''}</legend><div class="form-field"><label for="league-option-time-${index}">Date and time</label><input type="datetime-local" id="league-option-time-${index}" data-option-time /></div><div class="form-field"><label for="league-option-court-${index}">Court</label><input type="search" id="league-option-court-${index}" data-option-court data-court-id="${Number(match.scheduled_court?.id || league.court.id)}" value="${esc(match.scheduled_court?.name || league.court.name)}" autocomplete="off" /><div data-option-court-results aria-live="polite"></div></div><div class="form-field"><label for="league-option-duration-${index}">Minutes</label><input type="number" id="league-option-duration-${index}" data-option-duration min="15" max="240" step="15" value="60" /></div></fieldset>`).join('')}
+          <button type="button" class="btn btn-secondary btn-sm" id="league-add-option">Add another time</button>
+          <button type="submit" class="btn btn-primary btn-block" id="league-propose-times">Send time options</button></form></details>` : ''}
+        <p id="league-schedule-error" class="form-error hidden" role="alert"></p>
+        <button type="button" class="btn btn-secondary btn-block hidden" id="league-schedule-reload">Reload current plan</button>
+        ${match.can_cancel_schedule && (match.scheduled_at || !match.can_respond_schedule) ? `<button type="button" class="btn btn-secondary btn-block" id="league-cancel-time">${match.scheduled_at ? 'Cancel planned time' : 'Withdraw time options'}</button>` : ''}
+        ${opponent ? '<button type="button" class="btn btn-secondary btn-block" id="league-schedule-chat">Message opponent</button>' : ''}`;
+      box.removeAttribute('aria-busy');
+      setDialogLabel(box, 'Arrange league match');
+      const showError = (message) => {
+        box.querySelector('#league-schedule-error').textContent = message;
+        box.querySelector('#league-schedule-error').classList.remove('hidden');
+      };
+      const save = async (path, payload, button) => {
+        const controls = [...box.querySelectorAll('button, input')];
+        const reset = beginButtonAction(button, 'Saving…', controls);
+        if (!reset) return;
+        try {
+          match = await api(`/leagues/${league.id}/matches/${match.id}/schedule/${path}`, { method: 'POST', body: JSON.stringify({ ...payload, expected_schedule_version: match.schedule_version }) });
+          closeModal(modal);
+          toast(path === 'respond' && payload.action === 'accept' ? 'Match scheduled' : path === 'proposals' ? 'Time options sent' : 'Schedule updated');
+          onSaved?.(match);
+        } catch (error) {
+          reset();
+          const copy = { stale_schedule: 'This plan changed while you were viewing it. Reload before choosing again.', schedule_conflict: 'One of you already has a plan at that time. Choose another option.', schedule_after_round_deadline: 'The match must finish before this round ends.', schedule_option_expired: 'That time has passed or the round changed. Choose a new time.', league_schedule_closed: 'This round or match is no longer open for scheduling.' };
+          showError(copy[error.code] || copy[error.message] || error.message);
+          if (Number(error.status) === 409) box.querySelector('#league-schedule-reload').classList.remove('hidden');
+        }
+      };
+      box.querySelector('#league-schedule-reload').addEventListener('click', () => load());
+      box.querySelector('#league-match-calendar')?.addEventListener('click', () => downloadLeagueIcs({ ...league, matches: [match] }, { matchOnly: match.id }));
+      box.querySelector('#league-add-option')?.addEventListener('click', (event) => {
+        const next = box.querySelector('[data-league-option][hidden]');
+        if (!next) return;
+        next.hidden = false;
+        next.querySelector('[data-option-time]').focus();
+        event.currentTarget.hidden = !box.querySelector('[data-league-option][hidden]');
+      });
+      box.querySelectorAll('[data-league-accept]').forEach((button) => button.addEventListener('click', () => save('respond', { action: 'accept', option_id: button.dataset.leagueAccept }, button)));
+      box.querySelector('#league-decline-times')?.addEventListener('click', (event) => save('respond', { action: 'decline' }, event.currentTarget));
+      box.querySelector('#league-cancel-time')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        if (!await openActionConfirmation({ title: match.scheduled_at ? 'Cancel this planned time?' : 'Withdraw these time options?', message: 'Your opponent will be notified. The match stays in this round and needs a new time.', confirmLabel: match.scheduled_at ? 'Cancel time' : 'Withdraw options', cancelLabel: match.scheduled_at ? 'Keep plan' : 'Keep options', trigger: button })) return;
+        save('cancel', {}, button);
+      });
+      box.querySelector('#league-schedule-chat')?.addEventListener('click', () => openChildModal(modal, () => openThread(opponent.id)));
+      box.querySelectorAll('[data-league-option]').forEach((row) => {
+        const input = row.querySelector('[data-option-court]');
+        const results = row.querySelector('[data-option-court-results]');
+        let searchVersion = 0;
+        let timer;
+        input.addEventListener('input', () => {
+          const version = ++searchVersion;
+          input.dataset.courtId = '';
+          clearTimeout(timer);
+          results.replaceChildren();
+          if (input.value.trim().length < 2) return;
+          timer = setTimeout(async () => {
+            try {
+              const data = await api(`/courts?q=${encodeURIComponent(input.value.trim())}&limit=5`);
+              if (version !== searchVersion || !input.isConnected) return;
+              results.innerHTML = (data.items || []).map((court) => `<button type="button" class="btn btn-secondary btn-block" data-pick-court="${court.id}" data-court-name="${esc(court.name)}">${esc(court.name)} · ${esc(court.city)}</button>`).join('') || '<p class="field-help">No courts found. Try another name or city.</p>';
+              results.querySelectorAll('[data-pick-court]').forEach((button) => button.addEventListener('click', () => { input.dataset.courtId = button.dataset.pickCourt; input.value = button.dataset.courtName; results.replaceChildren(); input.focus(); }));
+            } catch { if (version === searchVersion && input.isConnected) results.innerHTML = '<p role="alert">Could not search courts. Edit the name to try again.</p>'; }
+          }, 250);
+        });
+        modal._cleanupFns?.push(() => clearTimeout(timer));
+      });
+      const form = box.querySelector('#league-schedule-form');
+      if (form) {
+        bindModalDiscardConfirmation(modal, { isDirty: () => [...form.querySelectorAll('[data-option-time]')].some((field) => field.value), title: 'Discard these time options?', message: 'Your options have not been sent yet.' });
+        form.addEventListener('submit', (event) => {
+          event.preventDefault();
+          const options = [];
+          for (const row of form.querySelectorAll('[data-league-option]')) {
+            const time = row.querySelector('[data-option-time]').value;
+            if (!time) continue;
+            const date = new Date(time);
+            const courtId = Number(row.querySelector('[data-option-court]').dataset.courtId);
+            const duration = Number(row.querySelector('[data-option-duration]').value);
+            if (!Number.isFinite(date.getTime()) || date <= new Date() || !courtId || !Number.isInteger(duration) || duration < 15 || duration > 240) { showError('Choose a future time, a court from the results, and 15–240 minutes for every option.'); return; }
+            options.push({ starts_at: date.toISOString(), court_id: courtId, duration_minutes: duration });
+          }
+          if (!options.length) { showError('Add at least one time option.'); return; }
+          save('proposals', { options }, form.querySelector('#league-propose-times'));
+        });
+      }
+    };
+    const load = async () => {
+      try {
+        league = await api(`/leagues/${parent.id}?match_id=${initialMatch.id}`);
+        match = (league.matches || []).find((item) => Number(item.id) === Number(initialMatch.id));
+        if (!modal.isConnected) return;
+        if (!match) throw new Error('This match is no longer available.');
+        render();
+      } catch (error) { if (modal.isConnected) renderDetailLoadError(shell, error.message, load, 'Match could not load'); }
+    };
+    await load();
+    return modal;
+  }
+
   function leagueMatchCardHtml(match, { mine = false, parent = null } = {}) {
     const result = normalizeCompetitionResult(match);
     const score = match.score1 != null && match.score2 != null ? `${match.score1}–${match.score2}` : '';
     const player1Won = result.confirmed && match.winner_id === match.player1?.id;
     const player2Won = result.confirmed && match.winner_id === match.player2?.id;
     const opponent = mine && parent ? competitionOpponents('league', parent, match)[0] : null;
-    const roundName = Number(parent?.round_days) === 7 ? 'Week' : 'Round';
+    const roundName = 'Round';
     const currentRound = Number(match.round) === Number(parent?.current_round);
     return `
       <div class="card competition-match-card league-opponent-card${mine ? ' is-mine' : ''}" data-result-match="${match.id}" data-match-key="${match.id}">
@@ -22566,10 +23989,121 @@
         </div>
         <div class="competition-match-result">
           ${score ? `<b>${score}</b>` : ''}
-          ${competitionResultStatusHtml(match, { compact: true })}
+          ${result.state === 'unreported' ? `<span class="competition-result-status">${match.schedule_status === 'waiting_reply' ? match.can_respond_schedule ? 'Choose a time' : 'Waiting for reply' : match.scheduled_at ? 'Scheduled' : 'Needs a time'}</span>${match.scheduled_at ? `<small>${esc(fmtDateTime(match.scheduled_at))}<br>${esc(match.scheduled_court?.name || '')}</small>` : ''}` : competitionResultStatusHtml(match, { compact: true })}
         </div>
         ${parent ? competitionCardOpponentActionsHtml('league', parent, match) : ''}
+        ${match.can_report_played_after_absence ? `<button type="button" class="btn btn-secondary" data-card-match-score="${match.id}">We played — report score</button>` : ''}
       </div>`;
+  }
+
+  function leaguePersonalMatchHtml(lg) {
+    if (lg.status !== 'active' || !lg.joined) return '';
+    const mine = (lg.matches || []).filter((match) => Number(match.round) === Number(lg.current_round)
+      && [Number(match.player1?.id), Number(match.player2?.id)].includes(Number(state.me?.id))
+      && !normalizeCompetitionResult(match).terminal);
+    mine.sort((a, b) => Number(!!b.can_confirm_result) - Number(!!a.can_confirm_result)
+      || Number(!!b.scheduled_at) - Number(!!a.scheduled_at)
+      || (a.scheduled_at || '').localeCompare(b.scheduled_at || '') || a.id - b.id);
+    const match = mine[0];
+    const opponent = match && (Number(match.player1?.id) === Number(state.me?.id) ? match.player2 : match.player1);
+    const waiting = match?.schedule_status === 'waiting_reply';
+    const scheduleLabel = waiting ? match.can_respond_schedule ? 'Choose a time' : 'View proposed times' : match?.scheduled_at ? 'View match' : 'Find a time';
+    const scheduleCopy = waiting ? match.can_respond_schedule ? 'Your opponent proposed times — choose one' : 'Waiting for your opponent to choose a time' : 'Agree a time with your opponent';
+    const away = Number(lg.my_unavailable_round) === Number(lg.current_round);
+    const label = lg.my_withdrawn_at ? 'You left this season' : away ? 'Unavailable this round' : opponent ? `vs ${opponent.display_name}` : 'Your round is complete';
+    return `<section class="league-personal-match" aria-label="Your league match"><span class="section-label">ROUND ${Number(lg.current_round)}${lg.total_rounds ? ` OF ${Number(lg.total_rounds)}` : ''} · DIVISION ${Number(lg.my_box || 1)}</span><h4>${esc(label)}</h4>
+      ${match && !away ? `<p>${match.scheduled_at ? `${esc(fmtDateTime(match.scheduled_at))} · ${esc(match.scheduled_court?.name || lg.court?.name || '')}` : normalizeCompetitionResult(match).state === 'unreported' ? scheduleCopy : 'Score waiting for a decision'}</p>` : ''}
+      ${lg.round_deadline_at && !lg.my_withdrawn_at ? `<small>Play by ${esc(fmtDateTime(lg.round_deadline_at))}${mine.length ? ` · ${mine.length} remaining` : ''}</small>` : ''}
+      <div class="league-primary-actions">${match && !away ? `<button type="button" class="btn btn-primary" data-personal-lmatch="${match.id}">${normalizeCompetitionResult(match).state === 'unreported' ? scheduleLabel : 'Review score'}</button>${normalizeCompetitionResult(match).state === 'unreported' ? `<details><summary>Already played?</summary><button type="button" class="btn btn-secondary" data-personal-lscore="${match.id}">Enter score</button></details>` : ''}` : ''}
+      ${away && !lg.my_withdrawn_at ? '<button type="button" class="btn btn-secondary" data-league-availability="available">I’m available again</button>' : ''}</div>
+      ${lg.my_withdraw_after_round && !lg.my_withdrawn_at ? '<small>Leaving after this round · current matches stay open</small>' : ''}</section>`;
+  }
+
+  function leagueStandingsHtml(lg, scope, selectedRound) {
+    const round = Number(selectedRound) || Number(lg.current_round);
+    const closed = (lg.round_history || []).filter((item) => Number(item.round) === round && (item.closed_at || item.action === 'result_amended')).at(-1);
+    const tables = scope === 'season'
+      ? [{ box: null, players: (lg.members || []).map((m) => ({ ...m, user_id: m.user?.id })).sort((a, b) => b.points-a.points || b.wins-a.wins || a.user_id-b.user_id) }]
+      : closed?.round_standings || lg.round_standings || [];
+    const moves = scope === 'round' && round === Number(lg.current_round) && lg.status === 'active' ? lg.movement_preview || [] : [];
+    return `<div class="league-standing-switch" role="group" aria-label="Standings period"><button type="button" class="btn btn-secondary" data-league-standing="round" aria-pressed="${scope === 'round'}">${round === Number(lg.current_round) ? 'This round' : `Round ${round}`}</button><button type="button" class="btn btn-secondary" data-league-standing="season" aria-pressed="${scope === 'season'}">Season record</button></div>
+      <p class="row-sub">${scope === 'season' ? 'All confirmed results this season. Movement uses each round’s results.' : `Round ${round}${closed?.action === 'result_amended' ? ' · amended after review; original draw preserved' : closed ? ' · closed' : ' · provisional'}. Win 3 pts · played loss 1 pt.`}</p>
+      ${tables.map((table) => `<div class="section-label">${scope === 'season' ? 'Season totals' : `Division ${table.box}`}</div>${table.players.map((member, index) => {
+        const move = moves.find((m) => Number(m.user_id) === Number(member.user_id));
+        const movement = move?.reason === 'division_combined' ? 'Division combines after withdrawals' : move ? `Currently in ${move.to_box < move.from_box ? 'promotion' : 'relegation'} place` : '';
+        return `<button type="button" class="card row nav-row-button competition-member-row" data-view-user="${member.user.id}"><span class="league-standing-place">${scope === 'season' ? '·' : `${member.tied ? '=' : ''}${member.place || index + 1}`}</span>${avatarHtml(member.user, 'sm', 'span')}<span class="row-main"><span class="row-title">${esc(member.user.display_name)}${Number(member.user.id) === Number(state.me?.id) ? ' · You' : ''}</span><span class="row-sub">${member.wins}–${member.losses} ${scope === 'season' ? 'this season' : 'this round'}${scope === 'round' ? ` · ${member.point_difference > 0 ? '+' : ''}${member.point_difference} diff` : ''}${member.unavailable ? ' · Unavailable' : ''}${member.withdrawn_at ? ' · Withdrawn' : member.withdrawing ? ' · Leaving after round' : ''}${movement ? ` · ${movement}` : ''}</span></span><b>${member.points} pts</b></button>`;
+      }).join('')}`).join('')}
+      <details class="competition-standings-legend"><summary>Points, ties and movement</summary><p>${esc(lg.standing_rule || '')}</p>${scope === 'round' ? (closed?.movement_notes || lg.movement_notes || []).map((note) => `<p>${esc(note)}</p>`).join('') : ''}<p>The final round’s clear first-place player in Division 1 wins the season. A tied or unplayed first place has no outright champion.</p></details>`;
+  }
+
+  async function openLeagueRoundCloseSheet(lg, finish, onSaved) {
+    let plan;
+    try { plan = await api(`/leagues/${lg.id}/round/preview${finish ? '?finish=1' : ''}`); }
+    catch (error) { toast(error.message); return null; }
+    const modal = openModal(`${modalHead(plan.ends_season ? 'Review season finish' : `Review round ${plan.round}`)}
+      <div class="league-close-counts"><span><b>${plan.unplayed_count}</b> No result recorded</span><span><b>${plan.not_played_count}</b> Marked not played</span><span><b>${plan.unresolved_count}</b> Results to review</span></div>
+      <p class="row-sub">Unplayed matches close with no points or played losses.</p>
+      ${plan.movements.map((move) => `<div class="card row"><strong>${esc(move.name)}</strong><span>Division ${move.from_box} → ${move.to_box}</span></div>`).join('')}
+      ${plan.movement_notes.map((note) => `<p class="row-sub">${esc(note)}</p>`).join('')}
+      ${plan.withdrawals.map((person) => `<p>${esc(person.name)} leaves after this round.</p>`).join('')}
+      <div class="card"><strong>${plan.ends_season ? 'The season ends here' : `Round ${plan.next_round} opens next`}</strong><p>${plan.ends_season ? plan.champion_name ? `${esc(plan.champion_name)} · season champion` : 'No outright champion: first place is tied or unplayed.' : `Next deadline: ${esc(fmtDateTime(plan.next_deadline_at))}`}</p></div>
+      <details><summary>How movement is decided</summary><p>${esc(plan.standing_rule)}</p></details>
+      <button type="button" class="btn btn-primary btn-block" id="lrc-confirm" ${plan.unresolved_count ? 'disabled' : ''}>${plan.ends_season ? 'Finish season & notify players' : 'Close round & notify players'}</button>
+      ${plan.unresolved_count ? '<p role="status">Resolve the outstanding scores before closing.</p>' : ''}`, { label: 'Review league round' });
+    modal.querySelector('#lrc-confirm').addEventListener('click', async (event) => {
+      const reset = beginButtonAction(event.currentTarget, 'Closing…'); if (!reset) return;
+      try {
+        const fresh = await api(`/leagues/${lg.id}/round/close`, { method: 'POST', body: JSON.stringify({ preview_fingerprint: plan.preview_fingerprint, finish }) });
+        closeModal(modal); onSaved?.(fresh); toast(fresh.status === 'completed' ? 'Season finished' : 'Round closed');
+      } catch (error) { reset(); showInlineActionError(modal, error.message); }
+    });
+    return modal;
+  }
+
+  async function openLeagueAvailabilitySheet(lg, action, onSaved) {
+    let plan;
+    try { plan = await api(`/leagues/${lg.id}/availability`, { method: 'POST', body: JSON.stringify({ action, preview: true }) }); }
+    catch (error) { toast(error.message); return null; }
+    const title = { unavailable: 'Unavailable this round?', available: 'Ready to play again?', withdraw: 'Leave after this round?', stay: 'Stay in this season?' }[action];
+    const copy = { unavailable: 'Mark these matches not played and notify opponents. Agreed times will be cancelled. If you already played, you can still report the result for review.', available: 'Your unplayed matches reopen. Agree new times with your opponents; old appointments stay cancelled.', withdraw: `Keep your round ${plan.round} matches. When the round closes, you leave the season and receive no new opponents.`, stay: 'Your withdrawal is cancelled. You will receive opponents in the next round.' }[action];
+    const modal = openModal(`${modalHead(title)}<p>${esc(copy)}</p>
+      ${plan.affected_matches.map((match) => `<div class="card"><strong>vs ${esc(match.opponent)}</strong><p>${match.scheduled_at ? `${esc(fmtDateTime(match.scheduled_at))} · ${esc(match.court || '')}` : 'No agreed time'}</p></div>`).join('')}
+      ${plan.pending_result_count ? `<p>${plan.pending_result_count} reported result${plan.pending_result_count === 1 ? '' : 's'} still need a decision. Those scores stay open.</p>` : ''}
+      <button type="button" class="btn btn-primary btn-block" id="lav-confirm">${{ unavailable: 'Mark unavailable & notify opponents', available: 'Reopen my matches', withdraw: 'Leave after this round', stay: 'Stay in the season' }[action]}</button>`, { label: title });
+    modal.querySelector('#lav-confirm').addEventListener('click', async (event) => {
+      const reset = beginButtonAction(event.currentTarget, 'Saving…'); if (!reset) return;
+      try {
+        const fresh = await api(`/leagues/${lg.id}/availability`, { method: 'POST', body: JSON.stringify({ action, preview_fingerprint: plan.preview_fingerprint }) });
+        closeModal(modal); onSaved?.(fresh); toast('Availability updated');
+      } catch (error) { reset(); showInlineActionError(modal, error.message); }
+    });
+    return modal;
+  }
+
+  function openLeagueExtensionSheet(lg, onSaved) {
+    const when = new Date(lg.round_deadline_at); when.setDate(when.getDate() + 7);
+    const pad = (n) => String(n).padStart(2, '0');
+    const value = `${when.getFullYear()}-${pad(when.getMonth()+1)}-${pad(when.getDate())}T${pad(when.getHours())}:${pad(when.getMinutes())}`;
+    const modal = openModal(`${modalHead('Extend round deadline')}<form id="lre-form"><p>Current deadline: ${esc(fmtDateTime(lg.round_deadline_at))}</p>
+      <div class="form-field"><label for="lre-when">New deadline</label><input type="datetime-local" id="lre-when" value="${value}" required /></div>
+      <div class="form-field"><label for="lre-reason">Reason</label><input id="lre-reason" maxlength="300" placeholder="e.g. Rain this week" required /></div>
+      <p class="row-sub">Agreed match times stay in place. Players can arrange makeup matches before the new deadline.</p>
+      <button type="submit" class="btn btn-primary btn-block" id="lre-review">Review extension</button></form>`, {label:'Extend league round'});
+    modal.querySelector('#lre-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const deadline = new Date(modal.querySelector('#lre-when').value), reason = modal.querySelector('#lre-reason').value.trim();
+      if (!Number.isFinite(deadline.getTime()) || !reason) { showInlineActionError(modal, 'Choose a deadline and add the reason.'); return; }
+      const reset = beginButtonAction(modal.querySelector('#lre-review'), 'Reviewing…'); if (!reset) return;
+      const payload = { deadline_at: deadline.toISOString(), reason };
+      try {
+        const plan = await api(`/leagues/${lg.id}/round/extend`, {method:'POST',body:JSON.stringify({...payload,preview:true})});
+        const confirmed = await openActionConfirmation({eyebrow:`Round ${plan.round}`,title:'Extend this round?',message:`${fmtDateTime(plan.previous_deadline_at)} → ${fmtDateTime(plan.deadline_at)}`,detail:`${plan.notification_count} player${plan.notification_count === 1 ? '' : 's'} notified. ${plan.retained_appointments} agreed appointment${plan.retained_appointments === 1 ? ' stays' : 's stay'} in place. ${plan.reason}`,confirmLabel:'Extend & notify players',cancelLabel:'Keep current deadline',tone:'primary',icon:'calendar'});
+        if (!confirmed) { reset(); return; }
+        const fresh = await api(`/leagues/${lg.id}/round/extend`, {method:'POST',body:JSON.stringify({...payload,preview_fingerprint:plan.preview_fingerprint})});
+        closeModal(modal); onSaved?.(fresh); toast('Round deadline extended');
+      } catch (error) { reset(); showInlineActionError(modal,error.message); }
+    });
+    return modal;
   }
 
   async function openLeagueScreen(leagueId, requestedMatchId = null) {
@@ -22618,6 +24152,7 @@
       requestedLeagueMatch?.round || lg.current_round || 'all',
     );
     let leagueMineOnly = !!lg.joined;
+    let leagueStandingScope = 'round';
     const refreshGuard = createCompetitionRefreshGuard();
     const setCompetitionMutation = (busy) => {
       if (busy) refreshGuard.invalidate();
@@ -22656,7 +24191,11 @@
       } catch { return null; }
       finally { refreshGuard.finish(refreshTicket); }
     };
-    const openMatch = (match) => openChildModal(box, () => openCompetitionResultSheet('league', lg, match, {
+    box.addEventListener('league-schedule-saved', () => refresh({ force: true }));
+    const openMatch = (match, { score = false } = {}) => !score && normalizeCompetitionResult(match).state === 'unreported'
+      && (match.can_propose_schedule || match.can_cancel_schedule)
+      ? openChildModal(box, () => openLeagueScheduleSheet(lg, match, () => refresh({ force: true })))
+      : openChildModal(box, () => openCompetitionResultSheet('league', lg, match, {
       setMutating: setCompetitionMutation,
       fetchFresh: () => api(detailPath),
       adoptFresh: (fresh, { render: shouldRender = true } = {}) => {
@@ -22671,26 +24210,10 @@
       lg = data;
       const snapshot = preserve ? captureCompetitionViewState(box) : null;
       const statusChip = leagueStatusChip(lg);
-      const rankMember = (a, b) => (b.points - a.points) || (b.wins - a.wins) || ((b.user?.rating || 0) - (a.user?.rating || 0));
       const leagueNav = [['lg-overview', 'Overview']];
       if (lg.status === 'active' || lg.status === 'completed') leagueNav.push(['lg-matches', lg.joined ? 'Your matches' : 'Matches'], ['lg-standings', 'Standings']);
       else if (lg.status === 'registration') leagueNav.push(['lg-standings', 'Players']);
       const currentRoundMatches = (lg.matches || []).filter((match) => match.round === lg.current_round);
-      const finishPreviewBoxes = {};
-      (lg.members || []).forEach((member) => {
-        if (member.box) (finishPreviewBoxes[member.box] = finishPreviewBoxes[member.box] || []).push(member);
-      });
-      const finishBoxNumbers = Object.keys(finishPreviewBoxes).map(Number).sort((a, b) => a - b);
-      const finishMovementPreview = [];
-      finishBoxNumbers.forEach((boxNumber, index) => {
-        const standing = finishPreviewBoxes[boxNumber].slice().sort(rankMember);
-        if (index > 0 && standing[0]?.user) finishMovementPreview.push(`${standing[0].user.display_name} would move up`);
-        if (index < finishBoxNumbers.length - 1 && standing.at(-1)?.user) finishMovementPreview.push(`${standing.at(-1).user.display_name} would move down`);
-      });
-      const finishUnplayedCount = currentRoundMatches.filter((match) => (
-        normalizeCompetitionResult(match).state === 'unreported'
-      )).length;
-      const finishLeader = finishPreviewBoxes[finishBoxNumbers[0]]?.slice().sort(rankMember)[0]?.user?.display_name || 'the current league leader';
       const leagueMatchesById = new Map();
       [...(lg.match_history || []), ...(lg.matches || [])].forEach((match) => {
         leagueMatchesById.set(Number(match.id), match);
@@ -22703,26 +24226,28 @@
         selectedLeagueRound = String(lg.current_round || availableRounds.at(-1) || 'all');
       }
       const nextActionHtml = competitionActionNeededHtml('league', {
-        ...lg, matches: currentRoundMatches.filter((match) => normalizeCompetitionResult(match).state !== 'unreported'),
+        ...lg, matches: allLeagueMatches.filter((match) => match.closed_round_review?.status === 'pending' || (Number(match.round) === Number(lg.current_round) && normalizeCompetitionResult(match).state !== 'unreported')),
       });
       const myRoundMatches = currentRoundMatches.filter((match) => Number(match.player1?.id) === Number(state.me?.id) || Number(match.player2?.id) === Number(state.me?.id));
       const myRemainingMatches = myRoundMatches.filter((match) => !normalizeCompetitionResult(match).terminal).length;
-      const leagueRoundWord = Number(lg.round_days) === 7 ? 'Week' : 'Round';
+      const leagueRoundWord = 'Round';
       let body = `
         ${modalHead(lg.name)}
         <div class="competition-identity"><span class="competition-format-label">Singles league</span><span>${lg.member_count} players${lg.court ? ` · ${esc(lg.court.name)}` : ''}</span></div>
-        ${lg.status === 'active' ? `<div class="league-round-summary"><div><span>${leagueRoundWord} ${lg.current_round}</span><strong>${lg.joined ? `${myRemainingMatches} match${myRemainingMatches === 1 ? '' : 'es'} to finish` : 'This round is in progress'}</strong></div>${lg.round_deadline_at ? `<div class="competition-round-deadline">${competitionDeadlineHtml(lg.round_deadline_at, { absolutePrefix: 'Play by', expiredLabel: 'Round deadline reached', showRelative: false })}</div>` : ''}</div>` : ''}
+        ${leaguePersonalMatchHtml(lg)}
+        ${lg.status === 'active' && !lg.joined ? `<div class="league-round-summary"><div><span>${leagueRoundWord} ${lg.current_round}</span><strong>${lg.joined ? `${myRemainingMatches} match${myRemainingMatches === 1 ? '' : 'es'} to finish` : 'This round is in progress'}</strong></div>${lg.round_deadline_at ? `<div class="competition-round-deadline">${competitionDeadlineHtml(lg.round_deadline_at, { absolutePrefix: 'Play by', expiredLabel: 'Round deadline reached', showRelative: false })}</div>` : ''}</div>` : ''}
         ${nextActionHtml}
-        <details class="competition-how-it-works"><summary>How this league works</summary><p>You play each assigned opponent before the round ends. Players start at a similar level; results determine who moves up or down for the next round.</p></details>
         ${competitionDetailTabsHtml(leagueNav)}
         <div id="lg-overview" class="competition-overview-status" tabindex="-1">${statusChip}${lg.club_name ? ` <span class="tag competition-context-tag">${uiIcon('building')}<span>${esc(lg.club_name)}</span></span>` : ''}</div>
+        <details class="competition-how-it-works"><summary>How this league works</summary><p>Play each assigned opponent before the round ends. Confirmed results decide movement into the next division.</p></details>
         ${lg.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(lg.description)}</div>` : ''}
-        <details class="competition-settings-summary"><summary>League details</summary><span>${lg.member_count}/${lg.max_players} players · ${lg.round_days} days to play each round</span>${lg.status === 'registration' ? `<span>Planned start: ${esc(fmtDateTime(lg.starts_at))}</span>` : ''}</details>
+        <details class="competition-settings-summary"><summary>League details</summary><span>${lg.member_count}/${lg.max_players} players · ${lg.round_days} days per round · ${lg.total_rounds ? `${lg.total_rounds} rounds this season` : 'Season end not set'}</span>${lg.season_end_estimate_at ? `<span>Estimated season end: ${esc(fmtDateTime(lg.season_end_estimate_at))} · closing a round can change this date</span>` : ''}${lg.status === 'registration' ? `<span>Planned start: ${esc(fmtDateTime(lg.starts_at))}</span>` : ''}</details>
         ${lg.status !== 'cancelled' ? `<div class="competition-share-actions">
           <button type="button" class="btn btn-secondary" id="lg-share">${uiIcon('send')} Share league</button>
           ${lg.status !== 'completed' ? `<button type="button" class="btn btn-secondary" id="lg-ics">${uiIcon('calendar')} Add season dates</button>` : ''}
         </div>` : ''}
         ${lg.is_organizer && !['completed', 'cancelled'].includes(lg.status) ? `<button type="button" class="btn btn-secondary btn-block competition-secondary-action" id="lg-edit">${uiIcon('edit')} Edit league settings</button>` : ''}
+        ${lg.status === 'active' && lg.joined && !lg.my_withdrawn_at ? `<details class="league-availability-tools"><summary>My availability</summary><button type="button" class="btn btn-secondary" data-league-availability="${Number(lg.my_unavailable_round) === Number(lg.current_round) ? 'available' : 'unavailable'}">${Number(lg.my_unavailable_round) === Number(lg.current_round) ? 'I’m available again' : 'Unavailable this round'}</button><button type="button" class="btn btn-secondary" data-league-availability="${lg.my_withdraw_after_round ? 'stay' : 'withdraw'}">${lg.my_withdraw_after_round ? 'Cancel my withdrawal' : 'Leave after this round'}</button></details>` : ''}
         ${lg.joined ? `<button type="button" class="btn btn-secondary btn-block competition-chat-action" id="lg-chat">${uiIcon('message')} Open league chat${lg.chat_unread ? ` <span class="tag live competition-unread-tag">${lg.chat_unread > 9 ? '9+' : lg.chat_unread} new</span>` : ''}</button>` : ''}`;
 
       if (lg.status === 'completed' && lg.champion_name) {
@@ -22808,37 +24333,14 @@
             <details class="competition-organizer-tools">
               <summary>${uiIcon('settings')} Organizer tools</summary>
               <p class="row-sub">Season-level actions do not create another round.</p>
+              <button type="button" class="btn btn-secondary btn-block" id="lg-extend">${uiIcon('calendar')} Extend round deadline</button>
               <button type="button" class="btn btn-secondary btn-block" id="lg-complete" ${disabled}>${uiIcon('trophy')} Finish season</button>
               <button type="button" class="btn btn-danger btn-block competition-danger-action" id="lg-cancel">${uiIcon('trash')} Cancel league</button>
             </details>`;
         }
 
-        const boxes = {};
-        lg.members.forEach((member) => { if (member.box) (boxes[member.box] = boxes[member.box] || []).push(member); });
-        const standingBoxNumbers = Object.keys(boxes).map(Number).sort((a, b) => a - b);
         body += '<div id="lg-standings" tabindex="-1"></div>';
-        body += `<details class="competition-standings-legend"><summary>How points and movement work</summary><p>A win earns 3 points and a played loss earns 1; an unplayed match earns 0. At the end of a round, each division winner moves up and the last player moves down where there is another division.</p><p>Ties break by wins, then match rating.</p></details>`;
-        standingBoxNumbers.forEach((boxNumber, boxIndex) => {
-          const standing = boxes[boxNumber].sort(rankMember);
-          body += `<div class="section-label">${standingBoxNumbers.length > 1 ? `Division ${boxNumber}${Number(boxNumber) === 1 ? ' · highest level' : ''}` : 'League standings'}</div>`;
-          body += standing.map((member, index) => {
-            const movement = lg.status === 'active' && index === 0 && boxIndex > 0
-              ? 'Moves up when the round closes'
-              : lg.status === 'active' && index === standing.length - 1 && boxIndex < standingBoxNumbers.length - 1
-                ? 'Moves down when the round closes' : '';
-            return `
-            <button type="button" class="card row nav-row-button competition-member-row" data-view-user="${member.user.id}" aria-label="View ${esc(member.user.display_name)}'s profile, ${member.points} point${member.points === 1 ? '' : 's'}${movement ? `, ${movement.toLowerCase()}` : ''}">
-              <span style="font-size:14px;width:20px;text-align:center;font-weight:700">${index + 1}</span>
-              ${avatarHtml(member.user, 'sm', 'span')}
-              <span class="row-main">
-                <span class="row-title">${esc(member.user.display_name)}${member.user.id === myId ? ` <span class="tag competition-context-tag competition-inline-tag is-joined">${uiIcon('check-circle')}<span>You</span></span>` : ''}</span>
-                <span class="row-sub">${member.wins}–${member.losses} this season${movement ? ` · ${movement}` : ''}</span>
-              </span>
-              <b style="font-size:14px">${member.points} pt${member.points === 1 ? '' : 's'}</b>
-              ${uiIcon('chevron-right', 'chev')}
-            </button>`;
-          }).join('');
-        });
+        body += leagueStandingsHtml(lg, leagueStandingScope, selectedLeagueRound);
       }
 
       content.innerHTML = body;
@@ -22848,6 +24350,16 @@
         content, snapshot?.activeCompetitionTab || (requestedMatchId || lg.status === 'active' ? 'lg-matches' : lg.status === 'completed' ? 'lg-standings' : null),
       );
       bindUserButtons(box);
+      content.querySelectorAll('[data-personal-lmatch], [data-personal-lscore]').forEach((button) => button.addEventListener('click', () => {
+        const match = allLeagueMatches.find((item) => Number(item.id) === Number(button.dataset.personalLmatch || button.dataset.personalLscore));
+        if (match) openMatch(match, { score: !!button.dataset.personalLscore });
+      }));
+      content.querySelectorAll('[data-league-standing]').forEach((button) => button.addEventListener('click', () => {
+        leagueStandingScope = button.dataset.leagueStanding; render(lg, { preserve: true });
+      }));
+      content.querySelectorAll('[data-league-availability]').forEach((button) => button.addEventListener('click', () => openChildModal(box,
+        () => openLeagueAvailabilitySheet(lg, button.dataset.leagueAvailability, (fresh) => refresh({ force: true, data: fresh })))));
+
       content.querySelector('#lg-chat')?.addEventListener('click', () => openChildModal(box, () => openLeagueChat(lg)));
       content.querySelector('#lg-share')?.addEventListener('click', () => shareCompetition('league', lg));
       content.querySelector('#lg-ics')?.addEventListener('click', () => downloadLeagueIcs(lg));
@@ -22965,28 +24477,12 @@
         tone: 'primary',
         icon: 'grid',
       }));
-      content.querySelector('#lg-advance')?.addEventListener('click', act('advance', {
-        eyebrow: 'League progression',
-        title: `Close round ${lg.current_round}?`,
-        message: 'The highest finishers move up and the lowest finishers move down for their next opponents.',
-        detail: 'Standings for this round are locked before the next matchups are created.',
-        confirmLabel: `Close round ${lg.current_round}`,
-        cancelLabel: 'Keep round open',
-        tone: 'primary',
-        icon: 'activity',
-      }));
-      content.querySelector('#lg-complete')?.addEventListener('click', act('complete', {
-        eyebrow: 'Finish league',
-        title: 'Finish the season?',
-        message: `Final standings lock with ${finishLeader} as the current leader.${finishUnplayedCount ? ` ${finishUnplayedCount} unplayed match${finishUnplayedCount === 1 ? '' : 'es'} will count for 0 points.` : ' Every current-round match has a result.'}`,
-        detail: finishMovementPreview.length
-          ? `If you close the round instead: ${finishMovementPreview.join('; ')}. Finish only when you do not want those moves or another round.`
-          : 'Finish only when you do not want another round. This cannot be resumed.',
-        confirmLabel: 'Finish season',
-        cancelLabel: 'Keep season open',
-        tone: 'primary',
-        icon: 'trophy',
-      }));
+      content.querySelector('#lg-advance')?.addEventListener('click', () => openChildModal(box,
+        () => openLeagueRoundCloseSheet(lg, false, (fresh) => { selectedLeagueRound = String(fresh.current_round); return refresh({ force: true, data: fresh }); })));
+      content.querySelector('#lg-complete')?.addEventListener('click', () => openChildModal(box,
+        () => openLeagueRoundCloseSheet(lg, true, (fresh) => { selectedLeagueRound = String(fresh.current_round); return refresh({ force: true, data: fresh }); })));
+      content.querySelector('#lg-extend')?.addEventListener('click', () => openChildModal(box,
+        () => openLeagueExtensionSheet(lg, (fresh) => refresh({force:true,data:fresh}))));
       content.querySelector('#lg-cancel')?.addEventListener('click', act('cancel', {
         eyebrow: 'Cancel for everyone',
         title: 'Cancel this league?',
@@ -23011,7 +24507,7 @@
           event.preventDefault();
           event.stopPropagation();
           const match = allLeagueMatches.find((item) => Number(item.id) === Number(button.dataset.cardMatchScore));
-          if (match) openMatch(match);
+          if (match) openMatch(match, { score: true });
         });
       });
       if (snapshot) restoreCompetitionViewState(box, snapshot);
@@ -23082,6 +24578,8 @@
             </div>
           </div>
           <div class="form-field">
+            <label for="le-total-rounds">Rounds in this season</label><input id="le-total-rounds" type="number" min="1" max="52" value="${lg.total_rounds || 6}" required />
+          </div><div class="form-field">
             <label for="le-round-days">Days per round</label>
             <select id="le-round-days" data-select-title="Days per round">${[3, 5, 7, 10, 14, 21, 28].map((value) => `<option value="${value}" ${Number(lg.round_days) === value ? 'selected' : ''}>${value} days</option>`).join('')}</select>
           </div>` : '<p class="field-help">Match assignments, player limits, and round timing are fixed once the league starts.</p>'}
@@ -23128,6 +24626,7 @@
           box_size: Number(modal.querySelector('#le-box').value),
           max_players: Number(modal.querySelector('#le-max').value),
           round_days: Number(modal.querySelector('#le-round-days').value),
+          total_rounds: Number(modal.querySelector('#le-total-rounds').value),
         });
       }
       const finishSubmitting = formUX.startSubmitting('Saving league settings…');
@@ -23299,9 +24798,10 @@
           <select id="lc-round-days" data-select-title="Days per round"><option>3</option><option>5</option><option selected>7</option><option>10</option><option>14</option><option>21</option><option>28</option></select>
         </div>
       </div>
+      <div class="form-field"><label for="lc-total-rounds">Rounds in this season</label><input type="number" id="lc-total-rounds" min="1" max="52" value="6" required /></div>
       ${myClubs.length ? `
       <div class="form-field">
-        <label id="lc-club-label">Host with a public community?</label>
+        <label id="lc-club-label">Host with a public group?</label>
         <div class="quick-times" id="lc-club" role="group" aria-labelledby="lc-club-label" aria-describedby="lc-club-hint">
           <button type="button" data-club-id="" class="active" aria-pressed="true">Just me</button>
           ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}" aria-pressed="false">${uiIcon('building')}<span>${esc(cl.name)}</span></button>`).join('')}
@@ -23366,6 +24866,7 @@
           box_size: Number(modal.querySelector('#lc-box').value),
           max_players: Number(modal.querySelector('#lc-max').value),
           round_days: Number(modal.querySelector('#lc-round-days').value),
+          total_rounds: Number(modal.querySelector('#lc-total-rounds').value),
           description: modal.querySelector('#lc-desc').value.trim(),
           club_id: lcClubId,
         }) });
@@ -23524,7 +25025,7 @@
       </div>
       ${myClubs.length ? `
       <div class="form-field">
-        <label id="tc-club-label">Host with a public community?</label>
+        <label id="tc-club-label">Host with a public group?</label>
         <div class="quick-times" id="tc-club" role="group" aria-labelledby="tc-club-label" aria-describedby="tc-club-hint">
           <button type="button" data-club-id="" class="active" aria-pressed="true">Just me</button>
           ${myClubs.map((cl) => `<button type="button" data-club-id="${cl.id}" aria-pressed="false">${uiIcon('building')}<span>${esc(cl.name)}</span></button>`).join('')}
@@ -23533,6 +25034,7 @@
       </div>` : ''}
       <div class="form-field">
         <label class="sr-only" for="tc-desc">Tournament details</label>
+        ${tournamentEntryTermsHtml('tc')}
         <input type="text" id="tc-desc" maxlength="200" placeholder="Details (optional) — parking, warm-up, prizes" />
       </div>
       <button type="submit" class="btn btn-primary btn-block" id="tc-submit" style="padding:15px">Create tournament</button>
@@ -23751,6 +25253,7 @@
           body: JSON.stringify({
             name,
             court_id: courtId,
+            ...tournamentEntryTermsPayload(modal, 'tc'),
             starts_at: startsAt.toISOString(),
             format: modal.querySelector('#tc-format button.active').dataset.val,
             event_type: modal.querySelector('#tc-event button.active').dataset.val,
@@ -23966,6 +25469,7 @@
         const fresh = await api(`/tournaments/${tournament.id}/matches/${match.id}/schedule`, {
           method: 'PATCH',
           body: JSON.stringify({
+            expected_schedule_version: tournament.schedule_version || 0,
             scheduled_at: when.toISOString(),
             court_number: Number(modal.querySelector('#tms-court').value),
           }),
@@ -23979,6 +25483,100 @@
       }
     });
     return modal;
+  }
+
+  function tournamentEntryTermsHtml(prefix, tournament = {}) {
+    return `<div class="form-grid"><div class="form-field"><label for="${prefix}-fee">Entry fee per player ($)</label><input id="${prefix}-fee" type="number" min="0" max="10000" step="0.01" placeholder="Not specified" value="${tournament.entry_fee_cents == null ? '' : (tournament.entry_fee_cents / 100).toFixed(2)}" /></div><div class="form-field"><label for="${prefix}-rest">Rest between rounds (minutes)</label><input id="${prefix}-rest" type="number" min="0" max="60" step="1" value="${Number(tournament.rest_minutes ?? 5)}" /></div></div>
+      <div class="form-field"><label for="${prefix}-payment">How to pay the organizer</label><input id="${prefix}-payment" maxlength="80" placeholder="e.g. Pay at check-in" value="${esc(tournament.payment_method || '')}" /></div>
+      <div class="form-field"><label for="${prefix}-withdrawal">Withdrawal and refund terms</label><input id="${prefix}-withdrawal" maxlength="300" placeholder="e.g. Refunds until 24 hours before start" value="${esc(tournament.withdrawal_policy || '')}" /></div>`;
+  }
+
+  function tournamentEntryTermsPayload(modal, prefix) {
+    const raw = modal.querySelector(`#${prefix}-fee`).value;
+    const amount = raw === '' ? null : Number(raw);
+    const rest = Number(modal.querySelector(`#${prefix}-rest`).value);
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0 || amount > 10000)) throw new Error('Enter a fee from $0 to $10,000.');
+    if (!Number.isInteger(rest) || rest < 0 || rest > 60) throw new Error('Choose 0 to 60 minutes of rest.');
+    return {entry_fee_cents: amount === null ? null : Math.round(amount * 100), rest_minutes: rest,
+      payment_method: modal.querySelector(`#${prefix}-payment`).value.trim(), withdrawal_policy: modal.querySelector(`#${prefix}-withdrawal`).value.trim()};
+  }
+
+  function tournamentWaitlistHtml(tournament) {
+    if (tournament.status !== 'registration' || tournament.my_entry_id || tournament.my_partner_action || tournament.my_pending_partner_offer) return '';
+    const mine = tournament.my_waitlist, offered = mine?.status === 'offered';
+    if (offered) {
+      const fee = tournament.entry_fee_cents == null ? 'Fee not provided' : tournament.entry_fee_cents === 0 ? 'Free entry' : `$${(tournament.entry_fee_cents / 100).toFixed(2)} entry`;
+      return `<section class="tournament-personal-match" aria-label="Held tournament place"><span class="section-label">PLACE OFFERED</span><h4>A place is held for you</h4><p>Accept by ${esc(fmtDateTime(mine.expires_at))}</p><p>${esc(fee)}${tournament.payment_method ? ` · ${esc(tournament.payment_method)}` : ''}</p>${tournament.withdrawal_policy ? `<small>${esc(tournament.withdrawal_policy)}</small>` : ''}<div class="tournament-operation-actions"><button type="button" class="btn btn-primary" id="td-waitlist-accept">${tournament.event_type === 'doubles' ? 'Choose partner & accept' : 'Accept place & sign up'}</button><button type="button" class="btn btn-secondary" id="td-waitlist-leave">Pass</button></div>${tournament.event_type === 'doubles' ? '<small>Your partner must accept separately.</small>' : ''}</section>`;
+    }
+    if (mine?.status === 'queued') return `<section class="tournament-personal-match" aria-label="Tournament waitlist"><strong>You’re #${Number(mine.position)} on the waitlist</strong><p>We’ll offer you a place if one opens. Accept the offer to enter.</p><button type="button" class="btn btn-secondary" id="td-waitlist-leave">Leave waitlist</button></section>`;
+    const full = Number(tournament.registration_spots_left ?? (tournament.max_entries - tournament.entry_count)) <= 0;
+    return full ? `<section class="tournament-personal-match" aria-label="Tournament full"><strong>${mine?.status === 'expired' ? 'Your offer expired' : 'Signups are full'}</strong>${mine?.status === 'expired' ? '<p>You were not entered. Rejoin at the back of the queue.</p>' : ''}<p>${Number(tournament.waitlist_count || 0)} waiting${tournament.held_offer_count ? ` · ${Number(tournament.held_offer_count)} places offered` : ''}</p><button type="button" class="btn btn-primary" id="td-waitlist-join">${mine?.status === 'expired' ? 'Rejoin waitlist' : 'Join waitlist'}</button></section>` : mine?.status === 'expired' ? '<section class="tournament-personal-match" aria-label="Expired tournament offer"><strong>Your offer expired</strong><p>You were not entered. A place is available now—use the signup below to join.</p></section>' : '';
+  }
+
+  function tournamentPersonalMatchHtml(tournament) {
+    const entryId = Number(tournament.my_entry_id);
+    const match = (tournament.matches || []).filter((item) => [Number(item.entry1_id), Number(item.entry2_id)].includes(entryId)
+      && entryId && !normalizeCompetitionResult(item).terminal).sort((a, b) => Number(a.round) - Number(b.round) || Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at))[0];
+    if (!match) return '';
+    const opponentId = Number(match.entry1_id) === entryId ? match.entry2_id : match.entry1_id;
+    const opponent = (tournament.entries || []).find((entry) => Number(entry.id) === Number(opponentId));
+    const arrival = tournamentCheckinState(tournament);
+    return `<section class="tournament-personal-match" aria-label="Your next match"><span class="section-label">YOUR NEXT MATCH · ${esc(window.TournamentBracket.matchLabel(tournament, match))}</span><h4>vs ${esc(opponent?.name || 'Winner of the previous round')}</h4>${tournamentMatchScheduleHtml(match)}<div class="tournament-operation-actions"><button class="btn btn-primary" data-personal-tmatch="${match.id}">${['awaiting_confirmation','disputed'].includes(normalizeCompetitionResult(match).state) ? 'Review score' : 'Open match'}</button><button class="btn btn-secondary" data-personal-round="${match.round}">View this round</button>${arrival.canCheckIn ? '<button class="btn btn-secondary" data-personal-arrival>I’m here</button>' : arrival.myEntry?.my_arrived ? '<span>You’re marked here</span>' : ''}</div></section>`;
+  }
+
+  function tournamentPartnerStatusHtml(tournament) {
+    const offer=tournament.my_pending_partner_offer;
+    if(tournament.status==='registration' && offer && !offer.deadline_expired)return `<section class="tournament-personal-match" aria-label="Your doubles partner offer"><span class="section-label">PARTNER OFFER SENT</span><h4>Waiting for ${esc(offer.owner?.display_name || 'your partner')}</h4><p>You join the team only after they accept.${offer.response_deadline_at?` Response due ${esc(fmtDateTime(offer.response_deadline_at))}.`:''}</p><button type="button" class="btn btn-secondary" id="td-view-partner-status">View team</button></section>`;
+    const entry=(tournament.entries || []).find(item=>item.id===tournament.my_entry_id);
+    if(tournament.status!=='registration' || tournament.event_type!=='doubles' || !entry || entry.partner_ready || tournament.my_partner_action?.decision_for_me)return '';
+    const label=entry.partner_deadline_expired?'Partner deadline passed':entry.partner_invite_pending?'Your partner has not accepted':'Choose a partner to complete your team';
+    return `<section class="tournament-personal-match" aria-label="Your doubles team"><span class="section-label">TEAM INCOMPLETE</span><h4>${label}</h4><p>${entry.partner_deadline_expired?'Ask the organizer to extend your deadline.':entry.partner_response_deadline_at?`Complete your team by ${esc(fmtDateTime(entry.partner_response_deadline_at))}`:'No deadline was recorded. Check with the organizer.'}</p><button type="button" class="btn btn-secondary" id="td-view-partner-status">View your team</button></section>`;
+  }
+
+  function tournamentPartnerUpdateHtml(tournament) {
+    const update=tournament.my_partner_updates?.[0];
+    if(!update || tournament.my_entry_id || tournament.my_partner_action?.decision_for_me || tournament.my_pending_partner_offer && !tournament.my_pending_partner_offer.deadline_expired)return '';
+    const title={expired:'Your partner invitation expired',declined:'The partner request was declined',removed:'That team entry was removed',cancelled:'The partner request was cancelled'}[update.status] || 'Partner request updated';
+    const detail={organizer_review:'You are not on this team. The organizer must extend the team deadline before you can try again.',offer_partner:'You are not on this team. The team’s deadline is open again—you can send a new partner offer.',view_signup:'You are not on this team. Check current teams, places and waitlist options.',registration_closed:'You are not on this team. Registration has closed.'}[update.next_step];
+    return `<section class="tournament-personal-match" aria-label="Your partner request"><span class="section-label">PARTNER REQUEST</span><h4>${title}</h4><p>${detail}</p>${update.next_step==='offer_partner'?`<button type="button" class="btn btn-primary" data-partner-offer="${update.entry_id}">Send a new partner offer</button>`:update.next_step==='view_signup'?'<button type="button" class="btn btn-secondary" id="td-view-partner-update">View teams & signup</button>':''}</section>`;
+  }
+
+  function tournamentOperationsHtml(tournament) {
+    if (!tournament.is_organizer || tournament.status !== 'active') return '';
+    const remaining = (tournament.matches || []).filter((match) => !normalizeCompetitionResult(match).terminal);
+    const names = (match) => [match.entry1_id, match.entry2_id].map((id) => (tournament.entries || []).find((entry) => entry.id === id)?.name || 'Awaiting player').join(' vs ');
+    return `<section class="tournament-court-board" aria-label="Courts now and next"><div class="tournament-board-heading"><h4>Courts · now &amp; next</h4><button class="btn btn-secondary btn-sm" id="td-delay">Delay remaining</button></div><div class="tournament-court-grid">${Array.from({length:Number(tournament.court_count || 1)}, (_, i) => {
+      const matches = remaining.filter((match) => Number(match.court_number) === i + 1).sort((a,b) => ({playing:0,called:1}[a.play_state] ?? 2) - ({playing:0,called:1}[b.play_state] ?? 2) || Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at)).slice(0,2);
+      return `<div class="tournament-court-lane"><b>Court ${i + 1}</b>${matches.map((match) => `<article><small>${esc(window.TournamentBracket.matchLabel(tournament,match))}</small><strong>${esc(names(match))}</strong>${tournamentMatchScheduleHtml(match,{compact:true})}<div class="tournament-operation-actions">${normalizeCompetitionResult(match).state === 'unreported' && match.entry1_id && match.entry2_id && match.play_state !== 'playing' ? `<button class="btn btn-primary btn-sm" data-tournament-play-state="${match.play_state === 'called' ? 'playing' : 'called'}" data-match-id="${match.id}">${match.play_state === 'called' ? 'Start play' : 'Call to court'}</button>${match.play_state === 'called' ? `<button class="btn btn-secondary btn-sm" data-tournament-play-state="estimated" data-match-id="${match.id}">Undo call</button>` : ''}` : ''}${tournamentScheduleActionHtml(tournament,match)}</div></article>`).join('') || '<small>No remaining matches</small>'}</div>`;
+    }).join('')}</div></section>`;
+  }
+
+  async function openTournamentPreviewSheet(tournament, onStarted) {
+    let preview;
+    try { preview = await api(`/tournaments/${tournament.id}/preview`); }
+    catch (error) { toast(error.message, {tone:'error'}); return; }
+    const modal = openModal(`${modalHead('Review tournament before starting')}<p class="row-sub">${preview.entry_count} entries · ${preview.court_count} courts · estimated finish ${esc(fmtDateTime(preview.estimated_end_at))}</p><p class="row-sub">Seeds follow match ratings. No players are notified until you start.</p>${preview.preview_warnings.map((warning) => `<p class="form-error">${esc(warning)}</p>`).join('')}${(preview.preview_notes || []).map((note) => `<p class="row-sub">${esc(note)}</p>`).join('')}<div class="tournament-preview">${window.TournamentBracket.render(preview,{formatDateTime:fmtDateTime})}</div><p class="form-error hidden" id="tp-error" role="alert"></p><button class="btn btn-primary btn-block" id="tp-start" ${preview.can_start ? '' : 'disabled'}>Start &amp; notify ${preview.entry_count} ${preview.event_type === 'doubles' ? 'teams' : 'players'}</button><button class="btn btn-secondary btn-block" id="tp-back">Back to setup</button>`,{label:'Tournament preview',page:true});
+    const cleanup = window.TournamentBracket.bind(modal); modal._cleanupFns?.push(cleanup);
+    modal.querySelector('#tp-back').addEventListener('click',()=>closeModal(modal));
+    modal.querySelector('#tp-start').addEventListener('click',async(event)=>{
+      const reset=beginButtonAction(event.currentTarget,'Starting…'); if(!reset)return;
+      try {const fresh=await api(`/tournaments/${tournament.id}/start`,{method:'POST',body:JSON.stringify({preview_fingerprint:preview.preview_fingerprint})});closeModal(modal);onStarted(fresh);toast('Bracket is live');}
+      catch(error){reset();const field=modal.querySelector('#tp-error');field.textContent=error.message;field.classList.remove('hidden');}
+    });
+    return modal;
+  }
+
+  function openTournamentDelaySheet(tournament, onSaved) {
+    const modal=openModal(`${modalHead('Delay remaining matches')}<form id="tdl-form"><div class="form-field"><label for="tdl-minutes">Delay in minutes</label><input id="tdl-minutes" type="number" min="1" max="240" step="1" value="15" required /></div><p class="row-sub">Matches already playing keep their current start. Called matches return to estimated until you call them again.</p><p class="form-error hidden" id="tdl-error" role="alert"></p><button class="btn btn-primary btn-block" id="tdl-review">Review delay</button></form>`,{label:'Delay tournament matches'});
+    modal.querySelector('#tdl-form').addEventListener('submit',async(event)=>{
+      event.preventDefault();const button=modal.querySelector('#tdl-review');const reset=beginButtonAction(button,'Checking…');if(!reset)return;
+      const payload={minutes:Number(modal.querySelector('#tdl-minutes').value),expected_schedule_version:tournament.schedule_version || 0};
+      try {const preview=await api(`/tournaments/${tournament.id}/schedule/delay`,{method:'POST',body:JSON.stringify({...payload,preview:true})});
+        reset();if(!await openActionConfirmation({title:`Delay ${preview.match_count} matches by ${payload.minutes} minutes?`,message:`${preview.notification_count} players will receive the updated schedule.`,confirmLabel:'Apply delay',cancelLabel:'Keep current times',trigger:button}))return;
+        const finish=beginButtonAction(button,'Saving…');if(!finish)return;
+        try{const fresh=await api(`/tournaments/${tournament.id}/schedule/delay`,{method:'POST',body:JSON.stringify(payload)});closeModal(modal);onSaved(fresh);toast(`${preview.match_count} matches delayed`);}catch(error){finish();throw error;}
+      }catch(error){reset();const field=modal.querySelector('#tdl-error');field.textContent=error.message;field.classList.remove('hidden');}
+    });return modal;
   }
 
   async function openTournamentScreen(tournamentId, requestedMatchId = null) {
@@ -24063,7 +25661,13 @@
       } catch { return null; }
       finally { refreshGuard.finish(refreshTicket); }
     };
-    const openMatch = (match) => openChildModal(box, () => openCompetitionResultSheet('tournament', t, match, {
+    const openMatch = (match) => {
+      selectedTournamentRound = String(match.round);
+      tournamentMineOnly = false;
+      render(t, { preserve: true });
+      content.querySelector('[data-competition-tab="td-matches"]')?.click();
+      content.querySelector(`[data-result-match="${Number(match.id)}"]`)?.scrollIntoView({ block: 'center' });
+      return openChildModal(box, () => openCompetitionResultSheet('tournament', t, match, {
       setMutating: setCompetitionMutation,
       adoptFresh: (fresh, { render: shouldRender = true } = {}) => {
         refreshGuard.invalidate();
@@ -24072,6 +25676,7 @@
       },
       refresh,
     }));
+    };
 
     const render = (data, { preserve = false } = {}) => {
       refreshGuard.invalidate();
@@ -24100,23 +25705,25 @@
       if (selectedTournamentRound !== 'all' && !tournamentRounds.includes(Number(selectedTournamentRound))) {
         selectedTournamentRound = 'all';
       }
-      const nextActionHtml = competitionActionNeededHtml('tournament', t);
+      const needsResultReview = (t.matches || []).some((match) => ['awaiting_confirmation','disputed'].includes(normalizeCompetitionResult(match).state));
+      const nextActionHtml = tournamentPartnerUpdateHtml(t) + tournamentWaitlistHtml(t) + tournamentPartnerStatusHtml(t) + (tournamentPersonalMatchHtml(t) || (t.is_organizer && t.status === 'active' && !needsResultReview ? '' : competitionActionNeededHtml('tournament', t)));
       const tournamentStartsMs = Date.parse(t.starts_at || '');
-      const arrivalOpensMs = tournamentStartsMs - 24 * 3600e3;
+      const arrivalOpensMs = tournamentStartsMs - 2 * 3600e3;
       const arrivalWindowOpen = Number.isFinite(tournamentStartsMs)
         && Date.now() >= arrivalOpensMs && ['registration', 'active'].includes(t.status);
-      const hereCount = (t.entries || []).filter((entry) => entry.checked_in).length;
-      const arrivalUnit = isDoubles ? 'team' : 'player';
+      const hereCount = (t.entries || []).reduce((sum, entry) => sum + Number(entry.arrived_count || 0), 0);
+      const expectedArrivals = (t.entries || []).reduce((sum, entry) => sum + (entry.players || []).length, 0);
+      const arrivalUnit = 'player';
       const arrivalCountdownCopy = !Number.isFinite(tournamentStartsMs) || !['registration', 'active'].includes(t.status)
         ? '' : Date.now() < arrivalOpensMs
           ? `Arrival status opens in ${fmtDuration(Math.max(1, Math.ceil((arrivalOpensMs - Date.now()) / 60000)))}`
           : Date.now() < tournamentStartsMs
-            ? `${hereCount} of ${t.entry_count} ${arrivalUnit}${Number(t.entry_count) === 1 ? '' : 's'} here · starts in ${fmtDuration(Math.max(1, Math.ceil((tournamentStartsMs - Date.now()) / 60000)))}`
-            : `${hereCount} of ${t.entry_count} ${arrivalUnit}${Number(t.entry_count) === 1 ? '' : 's'} here · planned start time reached`;
+            ? `${hereCount} of ${expectedArrivals} players here · starts in ${fmtDuration(Math.max(1, Math.ceil((tournamentStartsMs - Date.now()) / 60000)))}`
+            : `${hereCount} of ${expectedArrivals} players here`;
 
       let body = `
         ${modalHead(t.name)}
-        <div class="competition-identity"><span class="competition-format-label">${isDoubles ? 'Doubles' : 'Singles'} tournament</span><span>${t.entry_count} ${isDoubles ? 'teams' : 'players'} · ${esc(T_GAME_FORMAT_LABEL[t.game_format] || 'One game to 11')}</span></div>
+        <div class="competition-identity"><span class="competition-format-label">${isDoubles ? 'Doubles' : 'Singles'} tournament</span><span>${t.entry_count} ${unitLabel}${Number(t.entry_count) === 1 ? '' : 's'} · ${esc(T_GAME_FORMAT_LABEL[t.game_format] || 'One game to 11')}</span></div>
         ${t.court ? `<div class="competition-location">${esc(t.court.name)}${t.court.city ? `, ${esc(t.court.city)}` : ''}</div>` : ''}
         ${nextActionHtml}
         ${competitionDetailTabsHtml(tournamentNav)}
@@ -24125,11 +25732,12 @@
         ${t.status === 'registration' ? `<p class="row-sub competition-manual-start-copy">${t.is_organizer ? 'This is your start target. Review the field and start the tournament when everyone is ready.' : 'The organizer starts the tournament manually when the field is ready.'}</p>` : ''}
         ${t.description ? `<div class="row-sub" style="margin-bottom:12px">${esc(t.description)}</div>` : ''}
         <details class="competition-how-it-works"><summary>Format and tournament details</summary><p>${t.format === 'round_robin' ? 'Each player or team faces every other entry. The standings decide the winner.' : `Winners advance to the next round. The final decides the champion${Number(t.total_rounds) > 1 ? '; the other semifinalists play for third place' : ''}.`}</p><p>${esc(tournamentDivisionLabel(t))} · ${Number(t.court_count || 1)} court${Number(t.court_count || 1) === 1 ? '' : 's'} · ${Number(t.match_minutes || 30)} minutes planned per match</p>${t.status === 'registration' ? `<p>Planned start: ${esc(fmtDateTime(t.starts_at))}</p>` : ''}</details>
-        ${t.status !== 'cancelled' ? `<div class="competition-share-actions">
+        ${t.status === 'registration' ? `<section class="tournament-entry-facts" aria-label="Before you sign up"><b>${esc(fmtDateTime(t.starts_at))} → about ${esc(fmtTimeShort(t.estimated_end_at))}</b><span>${esc(tournamentDivisionLabel(t))} · ${t.entry_count}/${t.max_entries} ${unitLabel}s</span><span>${t.entry_fee_cents == null ? 'Entry fee: ask organizer' : t.entry_fee_cents === 0 ? 'Free entry' : `$${(t.entry_fee_cents / 100).toFixed(2)} per player${t.payment_method ? ` · ${esc(t.payment_method)}` : ' · ask organizer how to pay'}`}</span><small>${isDoubles ? 'Both partners must accept before the team can play. ' : ''}Leave through this page before the organizer starts.${t.withdrawal_policy ? ` ${esc(t.withdrawal_policy)}` : ' Contact the organizer about refunds or leaving after start.'}</small></section>` : ''}
+        ${t.status !== 'cancelled' ? `<details class="tournament-extras"><summary>Share, calendar &amp; chat</summary><div class="competition-share-actions">
           <button type="button" class="btn btn-secondary" id="td-share">${uiIcon('send')} Share tournament</button>
           ${t.status !== 'completed' ? `<button type="button" class="btn btn-secondary" id="td-ics">${uiIcon('calendar')} Add to calendar</button>` : ''}
         </div>` : ''}
-        ${hasTournamentChat ? `<button type="button" class="btn btn-secondary btn-block competition-chat-action" id="td-chat">${uiIcon('message')} Open tournament chat${t.chat_unread ? ` <span class="tag live competition-unread-tag">${t.chat_unread > 9 ? '9+' : t.chat_unread} new</span>` : ''}</button>` : ''}`;
+        ${hasTournamentChat ? `<button type="button" class="btn btn-secondary btn-block competition-chat-action" id="td-chat">${uiIcon('message')} Open tournament chat${t.chat_unread ? ` <span class="tag live competition-unread-tag">${t.chat_unread > 9 ? '9+' : t.chat_unread} new</span>` : ''}</button>` : ''}${t.status !== 'cancelled' ? '</details>' : ''}`;
 
       if (t.status === 'completed' && t.champion) {
         body += `
@@ -24141,22 +25749,27 @@
       }
 
       const { myEntry, canCheckIn } = tournamentCheckinState(t);
-      const hereTag = (en) => (en.checked_in
-        ? `<span class="tag competition-entry-checkin">${uiIcon('check-circle')} Here</span>`
+      const hereTag = (en) => (en.arrived_count
+        ? `<span class="tag competition-entry-checkin">${uiIcon('check-circle')} ${en.arrived_count} of ${en.arrival_expected_count} here</span>`
         : t.is_organizer && arrivalWindowOpen
           ? `<span class="tag competition-entry-checkin is-waiting">${uiIcon('clock')} Not here yet</span>` : '');
       const entryNameHtml = (en, { showSeed = false } = {}) => `
         <div class="competition-entry-name-row"${en.checked_in ? ` aria-label="${esc(en.name)}, marked here"` : ''}>
           <div class="row-title competition-entry-name" style="font-size:14px">${showSeed && en.seed ? `<span class="bm-seed" style="margin-right:4px">${en.seed}</span>` : ''}${(en.players || []).map((player) => `<button type="button" class="competition-entry-person-name" data-view-user="${Number(player.id)}">${esc(player.display_name)}</button>`).join('<span aria-hidden="true"> &amp; </span>')}${en.needs_partner ? ' · needs a partner' : en.partner_invite_pending ? ' · partner invited' : ''}</div>
-          ${hereTag(en)}
+          ${hereTag(en)}${t.is_organizer && arrivalWindowOpen ? `<div class="tournament-arrival-controls">${(en.arrivals || []).map((person) => `<button class="btn btn-secondary btn-sm" data-mark-tournament-arrival="${person.user_id}" data-arrived="${!person.arrived_at}">${esc(person.display_name)} · ${person.arrived_at ? 'Undo arrival' : 'Mark here'}</button>`).join('')}</div>` : ''}
         </div>`;
       const entryAvatarsHtml = (en) => `<span class="competition-entry-avatars" aria-label="${(en.players || []).length === 2 ? 'Team players' : 'Player'}">
         ${(en.players || []).map((player) => `<button type="button" class="competition-entry-avatar" data-view-user="${Number(player.id)}" aria-label="View ${esc(player.display_name)}'s profile">${avatarHtml(player, 'sm', 'span')}</button>`).join('')}
       </span>`;
       const checkinButton = canCheckIn
-        ? `<button type="button" class="btn btn-primary btn-block competition-detail-action" id="td-checkin">${uiIcon('check-circle')} I’m here at the court</button>` : '';
+        ? `<button type="button" class="btn btn-primary btn-block competition-detail-action" id="td-checkin">${uiIcon('check-circle')} I’m here at the court</button>` : myEntry?.my_arrived && arrivalWindowOpen
+          ? '<button type="button" class="btn btn-secondary btn-block" id="td-undo-arrival">Undo my arrival</button>' : '';
 
       if (t.status === 'registration') {
+        const entrySummary = isDoubles
+          ? `${Number(t.ready_entry_count || 0)} complete team${Number(t.ready_entry_count || 0) === 1 ? '' : 's'}${t.pending_partner_count ? ` · ${t.pending_partner_count} pending` : ''}${t.partner_pool_count ? ` · ${t.partner_pool_count} looking` : ''}`
+          : `${t.entry_count}/${t.max_entries}`;
+        body += `<div class="section-label" id="td-players" tabindex="-1">${isDoubles ? 'Teams' : 'Players'} (${entrySummary})</div>`;
         const partnerAction = t.my_partner_action;
         const pendingOffer = t.my_pending_partner_offer;
         if (partnerAction?.decision_for_me) {
@@ -24164,46 +25777,42 @@
           const person = directInvite ? partnerAction.owner : partnerAction.candidate;
           body += `<section class="competition-partner-action" aria-labelledby="td-partner-action-title">
             <span class="competition-partner-action-icon" aria-hidden="true">${uiIcon('users')}</span>
-            <div class="row-main"><b id="td-partner-action-title">${esc(person?.display_name || 'A player')} ${directInvite ? 'invited you to partner' : 'offered to be your partner'}</b><span>${directInvite ? 'You are not entered until you accept.' : 'Accept to complete your team, or stay in the partner pool.'}</span></div>
+            <div class="row-main"><b id="td-partner-action-title">${esc(person?.display_name || 'A player')} ${directInvite ? 'invited you to partner' : 'offered to be your partner'}</b><span>${directInvite ? 'You are not entered until you accept.' : 'Accept to complete your team, or stay in the partner pool.'}</span>${partnerAction.response_deadline_at ? `<span>Respond by ${esc(fmtDateTime(partnerAction.response_deadline_at))}</span>` : '<span>No response deadline was recorded. Ask the organizer.</span>'}</div>
             <div class="competition-partner-action-buttons"><button type="button" class="btn btn-primary" id="td-partner-accept">Accept</button><button type="button" class="btn btn-secondary" id="td-partner-decline">Decline</button></div>
           </section>`;
-        } else if (pendingOffer) {
-          body += `<section class="competition-partner-action is-waiting" role="status">
-            <span class="competition-partner-action-icon" aria-hidden="true">${uiIcon('clock')}</span>
-            <div class="row-main"><b>Partner offer sent to ${esc(pendingOffer.owner?.display_name || 'this player')}</b><span>They need to accept before you join this tournament.</span></div>
-          </section>`;
+        } else if (partnerAction?.deadline_expired || pendingOffer?.deadline_expired) {
+          body += '<section class="competition-partner-action" role="status"><div class="row-main"><b>Partner invitation expired</b><span>You were not added as a partner. The organizer needs to review this team.</span></div></section>';
         }
-        const entrySummary = isDoubles
-          ? `${Number(t.ready_entry_count || 0)} complete team${Number(t.ready_entry_count || 0) === 1 ? '' : 's'}${t.pending_partner_count ? ` · ${t.pending_partner_count} pending` : ''}${t.partner_pool_count ? ` · ${t.partner_pool_count} looking` : ''}`
-          : `${t.entry_count}/${t.max_entries}`;
-        body += `<div class="section-label" id="td-players" tabindex="-1">${isDoubles ? 'Teams' : 'Players'} (${entrySummary})</div>`;
         body += t.entries.length ? t.entries.map((en) => `
           <div class="card row competition-partner-entry ${en.needs_partner ? 'is-looking' : en.partner_invite_pending ? 'is-pending' : 'is-ready'}" style="padding:10px 14px">
             ${entryAvatarsHtml(en)}
             <div class="row-main">
               ${entryNameHtml(en)}
               <div class="row-sub">${(en.players || []).map((player) => playerSkillIdentityHtml(player)).join(' · ')}${en.partner_invite_pending && en.pending_partner && (t.is_organizer || en.players[0]?.id === state.me?.id) ? ` · waiting on ${esc(en.pending_partner.display_name)}` : ''}</div>
+              ${!en.partner_ready && Object.prototype.hasOwnProperty.call(en,'partner_response_deadline_at') ? `<div class="row-sub">${en.partner_deadline_expired ? 'Deadline passed · organizer review needed' : en.partner_response_deadline_at ? `Complete team by ${esc(fmtDateTime(en.partner_response_deadline_at))}` : 'Partner deadline not recorded'}</div>` : ''}
             </div>
             ${en.needs_partner ? `<span class="tag competition-partner-pool-tag">Needs a partner</span>` : en.partner_invite_pending ? '<span class="tag warn">Approval pending</span>' : isDoubles ? '<span class="tag live">Team ready</span>' : ''}
-            ${isDoubles && en.needs_partner && !t.my_entry_id && !partnerAction && !pendingOffer && en.players[0]?.id !== state.me?.id ? `<button type="button" class="btn btn-primary btn-sm" data-partner-offer="${en.id}">Offer to partner</button>` : ''}
+            ${isDoubles && en.needs_partner && en.partner_offer_available !== false && !t.my_entry_id && !partnerAction && !pendingOffer && en.players[0]?.id !== state.me?.id ? `<button type="button" class="btn btn-primary btn-sm" data-partner-offer="${en.id}">Offer to partner</button>` : ''}
+            ${t.is_organizer && isDoubles && !en.partner_ready ? `<button type="button" class="btn btn-secondary btn-sm" id="td-partner-deadline-${en.id}" data-partner-deadline="${en.id}">${en.partner_response_deadline_at ? 'Extend deadline' : 'Set deadline'}</button>` : ''}
             ${t.is_organizer ? `<button type="button" class="btn btn-secondary btn-sm" data-remove-entry="${en.id}" aria-label="Remove ${esc(en.name)} from tournament">${uiIcon('trash')} Remove</button>` : ''}
           </div>`).join('')
           : `<div class="empty-state" style="padding:16px">No ${unitLabel}s yet — be the first to sign up!</div>`;
         body += checkinButton;
 
-        if (!t.my_entry_id && !partnerAction && !pendingOffer && t.entry_count < t.max_entries) {
+        if (!t.my_entry_id && !partnerAction && !pendingOffer && (Number(t.registration_spots_left ?? (t.max_entries - t.entry_count)) > 0 || (isDoubles && t.my_waitlist?.status === 'offered'))) {
           body += isDoubles
             ? `<form class="competition-entry-form" id="td-register-form" novalidate>
-                ${tournamentPartnerPickerHtml('td-partner', { submitId: 'td-register', submitLabel: 'Invite partner' })}
+                ${tournamentPartnerPickerHtml('td-partner', { submitId: 'td-register', submitLabel: t.my_waitlist?.status === 'offered' ? 'Accept place & invite partner' : 'Invite partner' })}
                 <div class="competition-partner-alternatives">
-                  <button type="button" class="btn btn-secondary btn-block" id="td-need-partner">${uiIcon('users')} I need a partner</button>
+                  <button type="button" class="btn btn-secondary btn-block" id="td-need-partner">${uiIcon('users')} ${t.my_waitlist?.status === 'offered' ? 'Accept place & find a partner' : 'I need a partner'}</button>
                   <button type="button" class="btn-link btn-block" data-share-player-invite>Invite a friend to Third Shot</button>
                 </div>
               </form>`
-            : `<form class="competition-entry-form is-compact" id="td-register-form" novalidate><button type="submit" class="btn btn-primary btn-block" id="td-register">${uiIcon('trophy')} Sign up</button></form>`;
+            : `<form class="competition-entry-form is-compact" id="td-register-form" novalidate><button type="submit" class="btn btn-primary btn-block" id="td-register">${uiIcon('trophy')} ${t.my_waitlist?.status === 'offered' ? 'Accept place & sign up' : 'Sign up'}</button></form>`;
         } else if (t.my_entry_id) {
           // The owner can replace a teammate only through another consented invite.
-          if (isDoubles && myEntry && myEntry.players[0] && myEntry.players[0].id === state.me.id) {
+          if (isDoubles && myEntry?.partner_deadline_expired) body += '<p class="competition-partner-current" role="status">Your team is incomplete. Ask the organizer to extend the deadline, or leave the tournament.</p>';
+          if (isDoubles && myEntry && !myEntry.partner_deadline_expired && myEntry.players[0] && myEntry.players[0].id === state.me.id) {
             const partnerState = myEntry.partner_ready
               ? `Current partner: ${myEntry.players[1]?.display_name || 'unknown'}`
               : myEntry.partner_invite_pending
@@ -24224,12 +25833,13 @@
             && (!isDoubles || Number(t.ready_entry_count) === Number(t.entry_count));
           body += `
             <div class="section-label" style="margin-top:16px">Organizer</div>
-            <button type="button" class="btn btn-primary btn-block competition-detail-action" id="td-start" ${readyToStart ? '' : 'disabled'}>${uiIcon('trophy')} Start tournament${readyToStart ? '' : Number(t.ready_entry_count || 0) < 2 ? ' (need 2 complete teams)' : ' (partners still pending)'}</button>
+            <button type="button" class="btn btn-primary btn-block competition-detail-action" id="td-start">${uiIcon('trophy')} Preview bracket &amp; start</button>
             <button type="button" class="btn btn-secondary btn-block competition-secondary-action" id="td-edit">${uiIcon('edit')} Edit details</button>
             <button type="button" class="btn btn-danger btn-block competition-danger-action" id="td-cancel">${uiIcon('trash')} Cancel tournament</button>`;
         }
       } else if (t.status !== 'cancelled') {
         body += '<div id="td-matches" tabindex="-1"></div>';
+        body += tournamentOperationsHtml(t);
         body += competitionRoundControlsHtml(
           'td', tournamentRounds, selectedTournamentRound, tournamentMineOnly,
           { hasMine: !!t.my_entry_id, allLabel: t.format === 'single_elim' ? 'Full bracket' : 'All rounds',
@@ -24273,7 +25883,7 @@
 
       // --- actions ---
       const mutationControls = () => [...content.querySelectorAll(
-        '#td-checkin, #td-register, #td-swap, #td-need-partner, #td-list-partner-pool, #td-partner-accept, #td-partner-decline, #td-withdraw, [data-partner-offer], [data-remove-entry], #td-start, #td-cancel',
+        '#td-checkin, #td-register, #td-swap, #td-need-partner, #td-list-partner-pool, #td-partner-accept, #td-partner-decline, #td-withdraw, [data-partner-offer], [data-remove-entry], #td-start, #td-cancel, #td-waitlist-join, #td-waitlist-leave, #td-waitlist-accept',
       )];
       const runTournamentAction = async ({
         button, pendingLabel, request, confirmation = null, errorUX = null,
@@ -24294,7 +25904,8 @@
         } catch (error) {
           setCompetitionMutation(false);
           resetAction();
-          if (errorUX) errorUX.showError(error.message);
+          if (['offer_expired','registration_closed','tournament_full','partner_deadline_expired','partner_review_changed'].includes(error.code || error.data?.error)) await refresh({force:true});
+          if (errorUX && errorUX.form?.isConnected !== false) errorUX.showError(error.message);
           else showInlineActionError(content, error.message);
           return null;
         }
@@ -24317,6 +25928,15 @@
         return result;
       };
       content.querySelector('#td-chat')?.addEventListener('click', () => openChildModal(box, () => openTournamentChat(t)));
+      content.querySelector('#td-waitlist-join')?.addEventListener('click', (event) => runTournamentAction({button:event.currentTarget,pendingLabel:'Joining waitlist…',request:()=>api(`/tournaments/${t.id}/waitlist`,{method:'POST'}),successMessage:'You’re on the waitlist'}));
+      content.querySelector('#td-waitlist-leave')?.addEventListener('click', (event) => runTournamentAction({button:event.currentTarget,pendingLabel:'Leaving…',request:()=>api(`/tournaments/${t.id}/waitlist`,{method:'DELETE'}),successMessage:'Waitlist request closed'}));
+      content.querySelector('#td-waitlist-accept')?.addEventListener('click', (event) => {
+        if (isDoubles) {
+          content.querySelector('[data-competition-tab="td-players"]')?.click();
+          content.querySelector('#td-partner-search')?.focus();
+          content.querySelector('#td-register-form')?.scrollIntoView({block:'center'});
+        } else runTournamentAction({button:event.currentTarget,pendingLabel:'Accepting…',request:()=>api(`/tournaments/${t.id}/waitlist/respond`,{method:'POST',body:JSON.stringify({accept:true})}),successMessage:'Your place is confirmed'});
+      });
       content.querySelector('#td-ics')?.addEventListener('click', () => downloadTournamentIcs(t));
       content.querySelector('#td-round-filter')?.addEventListener('change', (event) => {
         selectedTournamentRound = event.currentTarget.value;
@@ -24329,6 +25949,22 @@
       content.querySelector('#td-edit')?.addEventListener('click', () => (
         openChildModal(box, () => openEditTournamentSheet(t, render))
       ));
+      content.querySelectorAll('[data-personal-tmatch]').forEach((button)=>button.addEventListener('click',()=>{
+        const match=(t.matches || []).find((item)=>Number(item.id)===Number(button.dataset.personalTmatch)); if(match)openMatch(match);
+      }));
+      content.querySelector('[data-personal-arrival]')?.addEventListener('click',()=>content.querySelector('#td-checkin')?.click());
+      content.querySelectorAll('[data-personal-round]').forEach((button)=>button.addEventListener('click',()=>{
+        selectedTournamentRound=button.dataset.personalRound;tournamentMineOnly=false;render(t,{preserve:true});
+        content.querySelector('[data-competition-tab="td-matches"]')?.click();
+        content.querySelector('#td-matches')?.scrollIntoView({block:'start',behavior:'smooth'});
+      }));
+      content.querySelector('#td-delay')?.addEventListener('click',()=>openChildModal(box,()=>openTournamentDelaySheet(t,render)));
+      content.querySelectorAll('[data-tournament-play-state]').forEach((button)=>button.addEventListener('click',()=>runTournamentAction({
+        button,pendingLabel:'Updating…',request:()=>api(`/tournaments/${t.id}/matches/${button.dataset.matchId}/play-state`,{method:'POST',body:JSON.stringify({play_state:button.dataset.tournamentPlayState,expected_schedule_version:t.schedule_version || 0})}),successMessage:button.dataset.tournamentPlayState==='called'?'Players called to court':'Match status updated',
+      })));
+      content.querySelectorAll('[data-mark-tournament-arrival], #td-undo-arrival').forEach((button)=>button.addEventListener('click',()=>runTournamentAction({
+        button,pendingLabel:'Saving…',request:()=>api(`/tournaments/${t.id}/checkin`,{method:'POST',body:JSON.stringify({user_id:Number(button.dataset.markTournamentArrival || state.me.id),arrived:button.dataset.arrived==='true'})}),successMessage:'Arrival updated',
+      })));
       content.querySelector('#td-checkin')?.addEventListener('click', (event) => {
         const myEntryId = t.my_entry_id;
         runTournamentAction({
@@ -24338,7 +25974,7 @@
           fallback: (current) => ({
             ...current,
             entries: (current.entries || []).map((entry) => (
-              Number(entry.id) === Number(myEntryId) ? { ...entry, checked_in: true } : entry
+              Number(entry.id) === Number(myEntryId) ? { ...entry, my_arrived: true } : entry
             )),
           }),
           successMessage: 'Marked here for the organizer',
@@ -24351,7 +25987,7 @@
         ? bindTournamentPartnerPicker(content, 'td-partner', t) : null;
       registerForm?.addEventListener('submit', (event) => {
         event.preventDefault();
-        const payload = {};
+        const payload = t.my_waitlist?.status === 'offered' ? {accept_waitlist_offer:true} : {};
         if (isDoubles) {
           const pid = Number(registerPartnerInput?.dataset.selectedUserId || 0);
           if (!pid) { registerUX.showError('Search for the player you want to invite.', registerPartnerInput); return; }
@@ -24386,7 +26022,7 @@
           button: event.currentTarget,
           pendingLabel: 'Joining partner pool…',
           request: () => api(`/tournaments/${t.id}/register`, {
-            method: 'POST', body: JSON.stringify({ needs_partner: true }),
+            method: 'POST', body: JSON.stringify({ needs_partner: true, accept_waitlist_offer: t.my_waitlist?.status === 'offered' }),
           }),
           errorUX: registerUX,
           successMessage: 'You’re listed as needing a partner',
@@ -24406,6 +26042,17 @@
       content.querySelectorAll('[data-share-player-invite]').forEach((button) => {
         button.addEventListener('click', () => shareInviteLink());
       });
+      content.querySelector('#td-view-partner-status')?.addEventListener('click',()=>content.querySelector('[data-competition-tab="td-players"]')?.click());
+      content.querySelector('#td-view-partner-update')?.addEventListener('click',()=>content.querySelector('[data-competition-tab="td-players"]')?.click());
+      content.querySelectorAll('[data-partner-deadline]').forEach(button=>button.addEventListener('click',async()=>{
+        try{
+          const path=`/tournaments/${t.id}/entries/${button.dataset.partnerDeadline}/partner-deadline`;
+          const plan=await api(path,{method:'POST',body:JSON.stringify({preview:true})});
+          const accepted=await openActionConfirmation({title:'Extend this team’s deadline?',eyebrow:plan.entry_name,message:`Complete team by ${fmtDateTime(plan.deadline_at)}`,detail:plan.effect,confirmLabel:'Extend deadline',cancelLabel:'Keep current deadline',trigger:button});
+          if(!accepted)return;
+          runTournamentAction({button,pendingLabel:'Extending…',request:()=>api(path,{method:'POST',body:JSON.stringify({preview_fingerprint:plan.preview_fingerprint,deadline_at:plan.deadline_at})}),successMessage:'Partner deadline extended'});
+        }catch(error){showInlineActionError(content,error.message);}
+      }));
       content.querySelectorAll('[data-partner-offer]').forEach((button) => {
         button.addEventListener('click', () => runTournamentAction({
           button,
@@ -24473,24 +26120,7 @@
           successMessage: 'Entry removed',
         });
       }));
-      content.querySelector('#td-start')?.addEventListener('click', (event) => {
-        runTournamentAction({
-          button: event.currentTarget,
-          pendingLabel: 'Building bracket…',
-          request: () => api(`/tournaments/${t.id}/start`, { method: 'POST' }),
-          confirmation: {
-            eyebrow: 'Build the bracket',
-            title: `Start with ${t.entry_count} entr${Number(t.entry_count) === 1 ? 'y' : 'ies'}?`,
-            message: 'Registration closes and the tournament bracket is generated immediately.',
-            detail: 'Review the player field now; bracket play begins as soon as this is confirmed.',
-            confirmLabel: 'Start tournament',
-            cancelLabel: 'Keep signups open',
-            tone: 'primary',
-            icon: 'trophy',
-          },
-          successMessage: 'Bracket is live',
-        });
-      });
+      content.querySelector('#td-start')?.addEventListener('click', () => openChildModal(box,()=>openTournamentPreviewSheet(t,render)));
       content.querySelector('#td-cancel')?.addEventListener('click', (event) => {
         runTournamentAction({
           button: event.currentTarget,
@@ -24556,14 +26186,14 @@
       const label = content.querySelector('[data-tournament-arrival-countdown] span');
       if (!label) return;
       const startsMs = Date.parse(t.starts_at || '');
-      const opensMs = startsMs - 24 * 3600e3;
-      const here = (t.entries || []).filter((entry) => entry.checked_in).length;
-      const unit = t.event_type === 'doubles' ? 'team' : 'player';
+      const opensMs = startsMs - 2 * 3600e3;
+      const here = (t.entries || []).reduce((sum, entry) => sum + Number(entry.arrived_count || 0), 0);
+      const total = (t.entries || []).reduce((sum, entry) => sum + (entry.players || []).length, 0);
       label.textContent = Date.now() < opensMs
         ? `Arrival status opens in ${fmtDuration(Math.max(1, Math.ceil((opensMs - Date.now()) / 60000)))}`
         : Date.now() < startsMs
-          ? `${here} of ${t.entry_count} ${unit}${Number(t.entry_count) === 1 ? '' : 's'} here · starts in ${fmtDuration(Math.max(1, Math.ceil((startsMs - Date.now()) / 60000)))}`
-          : `${here} of ${t.entry_count} ${unit}${Number(t.entry_count) === 1 ? '' : 's'} here · planned start time reached`;
+          ? `${here} of ${total} players here · starts in ${fmtDuration(Math.max(1, Math.ceil((startsMs - Date.now()) / 60000)))}`
+          : `${here} of ${total} players here`;
     };
     const arrivalCountdownTimer = setInterval(syncTournamentArrivalCountdown, 30000);
     box._cleanupFns?.push(() => clearInterval(arrivalCountdownTimer));
@@ -24611,6 +26241,7 @@
           <div class="form-field"><label for="te-courts">Courts available</label><input type="number" id="te-courts" min="1" max="24" step="1" value="${Number(t.court_count || 1)}" /></div>
           <div class="form-field"><label for="te-match-minutes">Minutes per match</label><input type="number" id="te-match-minutes" min="15" max="120" step="5" value="${Number(t.match_minutes || 30)}" /></div>
         </div>
+        ${tournamentEntryTermsHtml('te', t)}
         <label class="choice-card"><input type="checkbox" id="te-ranked" ${t.ranked ? 'checked' : ''} /><span><b>Ranked tournament</b><small>Confirmed matches change Third Shot match ratings.</small></span></label>
         ` : inRegistration ? '<p class="row-sub">Court, event, division, match scoring, and ranked status locked when the first entry signed up.</p>' : ''}
         <div class="form-field">
@@ -24659,6 +26290,8 @@
       };
       if (inRegistration) payload.max_entries = Number(modal.querySelector('#te-max').value);
       if (canEditStructure) {
+        try { Object.assign(payload, tournamentEntryTermsPayload(modal, 'te')); }
+        catch (error) { formUX.showError(error.message); return; }
         const courtId = Number(modal.querySelector('#te-court-id').value);
         const courtCount = Number(modal.querySelector('#te-courts').value);
         const matchMinutes = Number(modal.querySelector('#te-match-minutes').value);
@@ -24816,9 +26449,15 @@
     const suggestion = window.CrewPlanner?.bestSlot([state.me, invitee], {
       hostId: state.me?.id, minLeadMinutes: 50,
     });
+    const court = player.last_played_court || player.checked_in_court
+      || (player.home_court_id ? { id: player.home_court_id, name: player.home_court_name } : null)
+      || (state.me?.home_court_id ? { id: state.me.home_court_id, name: state.me.home_court_name } : null);
     return {
       visibility: 'private', invitees: [invitee], inviteUserIds: [invitee.id],
-      ...(suggestion?.coverage === 2 ? { scheduledAt: suggestion.scheduledAt } : {}),
+      requireAllInvitees: true,
+      sourceLabel: player.last_played_court ? `Played together at ${player.last_played_court.name}` : `Play with ${invitee.display_name}`,
+      ...(court ? { court } : {}),
+      ...(suggestion?.coverage === 2 ? { scheduledAt: suggestion.scheduledAt, availabilityLabel: 'Suggested from your shared usual times' } : {}),
     };
   }
 
@@ -24869,6 +26508,56 @@
     });
   }
 
+  function openChatMessageSearch(channelKey, onReply) {
+    const modal = openModal(`${modalHead('Search this conversation')}
+      <form class="chat-message-search-form"><label class="sr-only" for="message-search-text">Search message text</label><input id="message-search-text" type="search" placeholder="Find a message…" maxlength="80" autocomplete="off" /><button class="btn btn-secondary" type="submit">Search</button></form>
+      <div class="chat-message-search-results" aria-live="polite"><p class="row-sub">Search the messages you can access in this conversation.</p></div>
+      <button type="button" class="btn btn-secondary btn-block" data-search-more hidden>Older matches</button>`, { label: 'Search message text in this conversation' });
+    const input = modal.querySelector('#message-search-text');
+    const results = modal.querySelector('.chat-message-search-results');
+    const more = modal.querySelector('[data-search-more]');
+    let request = 0, timer = null, cursor = null, matches = new Map();
+    const load = async (append = false) => {
+      const query = input.value.trim();
+      const generation = ++request;
+      if (!append) { cursor = null; matches = new Map(); more.hidden = true; }
+      if (query.length < 2) {
+        results.innerHTML = '<p class="row-sub">Type at least two characters to find a message.</p>'; return;
+      }
+      more.disabled = true;
+      if (!append) results.innerHTML = '<p class="row-sub" role="status">Searching messages…</p>';
+      try {
+        const page = await api(`/messages/search?channel=${encodeURIComponent(channelKey)}&q=${encodeURIComponent(query)}${append && cursor ? `&before_id=${cursor}` : ''}`);
+        if (generation !== request || !modal.isConnected || input.value.trim() !== query) return;
+        page.items.forEach((message) => matches.set(Number(message.id), message));
+        const html = page.items.map((message) => `<article class="card chat-message-search-result">
+          <div class="chat-message-search-meta"><b>${esc(message.sender_name || 'Player')}</b><small>${esc(fmtDateTime(message.created_at))}</small></div>
+          <p>${esc(message.body || (message.has_image ? 'Photo' : 'Message'))}</p>
+          <button type="button" class="btn btn-secondary btn-sm" data-search-reply="${Number(message.id)}" aria-label="Reply to ${esc(message.sender_name || 'player')}’s message">Reply</button></article>`).join('');
+        if (append) results.insertAdjacentHTML('beforeend', html);
+        else results.innerHTML = html || '<p class="row-sub">No messages match this search.</p>';
+        cursor = Number(page.next_before_id) || null;
+        more.hidden = !page.has_more || !cursor; more.disabled = false;
+      } catch (error) {
+        if (generation !== request || !modal.isConnected) return;
+        more.disabled = false;
+        if (!append) renderError(results, error.message, () => load(false));
+        else toast(error.message);
+      }
+    };
+    modal.querySelector('form').addEventListener('submit', (event) => { event.preventDefault(); clearTimeout(timer); load(); });
+    input.addEventListener('input', () => { ++request; clearTimeout(timer); timer = setTimeout(() => load(), 250); });
+    more.addEventListener('click', () => load(true));
+    results.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-search-reply]');
+      const message = matches.get(Number(button?.dataset.searchReply));
+      if (!message) return;
+      closeModal(modal); onReply(message);
+    });
+    modal._cleanupFns?.push(() => { ++request; clearTimeout(timer); });
+    return modal;
+  }
+
   function chatMessageActionHtml(message, mine) {
     const id = Number(message && message.id);
     if (!Number.isSafeInteger(id) || id <= 0) return '';
@@ -24876,6 +26565,7 @@
     const heart = `<button type="button" class="chat-message-action" data-message-action="heart" data-message-id="${id}" aria-label="React to ${mine ? 'your message' : sender} with a heart">${uiIcon('heart')}</button>`;
     const remove = `<button type="button" class="chat-message-action is-delete" data-message-action="delete" data-message-id="${id}" aria-label="Delete your message">${uiIcon('trash')}</button>`;
     const report = `<button type="button" class="chat-message-action" data-message-action="report" data-message-id="${id}" aria-label="Report message from ${sender}">${uiIcon('alert-triangle')}</button>`;
+    const reply = `<button type="button" class="chat-message-action" data-message-action="reply" data-message-id="${id}" aria-label="Reply to ${mine ? 'your message' : sender}">${uiIcon('message')}</button>`;
     // Direct-message hearts deliberately remain a recipient reaction: the
     // sender sees the same ❤️ badge but cannot toggle the other person's
     // response. Room reactions are per-user, so an author can heart their own
@@ -24883,7 +26573,7 @@
     const actions = mine
       ? (message.recipient_id == null ? `${heart}${remove}` : remove)
       : `${heart}${report}`;
-    return `<span class="chat-message-actions" role="group" aria-label="Message actions">${actions}</span>`;
+    return `<span class="chat-message-actions" role="group" aria-label="Message actions">${reply}${actions}</span>`;
   }
 
   function openContentReport({ contentType, contentId, label = 'content' }) {
@@ -24894,7 +26584,7 @@
     const modal = openModal(`
       ${modalHead(`Report ${label}`, 'alert-triangle')}
       <form id="content-report-form" novalidate>
-        <p class="row-sub profile-report-intro">Reports are private. A trained operator reviews the saved content and your context.</p>
+        <p class="row-sub profile-report-intro">Reports are private. Third Shot reviews the saved content and your context.</p>
         <div class="form-field"><label for="content-report-reason">What is wrong?</label><select id="content-report-reason" data-select-title="Report reason"><option value="" selected disabled>Choose a reason</option><option value="Harassment or hate">Harassment or hate</option><option value="Threats or unsafe conduct">Threats or unsafe conduct</option><option value="Spam or misleading content">Spam or misleading content</option><option value="Privacy violation">Privacy violation</option><option value="Other safety concern">Other safety concern</option></select></div>
         <div class="form-field"><label for="content-report-details">Details <span class="row-sub">(optional)</span></label><textarea id="content-report-details" maxlength="2000" rows="4" placeholder="Add context that will help the reviewer understand what happened."></textarea></div>
         <button type="submit" class="btn btn-danger btn-block" id="content-report-submit">Send private report</button>
@@ -24937,7 +26627,7 @@
       const firstName = String(user.display_name || 'this player').split(' ')[0];
       const sheet = openModal(`
         ${modalHead(`Report ${firstName}`, 'alert-triangle')}
-        <p class="row-sub profile-report-intro">What’s going on? Reports are private and go to the Third Shot safety team.</p>
+        <p class="row-sub profile-report-intro">What’s going on? Your report is private and goes to Third Shot for review.</p>
         <form id="profile-report-form" novalidate>
           <fieldset class="profile-report-choices">
             <legend class="sr-only">Reason for reporting ${esc(user.display_name || 'this player')}</legend>
@@ -25214,7 +26904,7 @@
       kind: 'dm', id: chat.user.id, title: chat.user.display_name,
       iconHtml: avatarHtml(chat.user, '', 'span'), lastMessage: chat.last_message,
       unread: chat.unread || 0, emptyText: 'Send a message',
-      messageRequest: chat.message_request === true,
+      nonFriend: chat.is_friend === false,
     }));
     (clubs.items || []).forEach((club) => items.push({
       kind: 'club', id: club.id, title: club.name,
@@ -25272,20 +26962,20 @@
         if (a.eventAt && b.eventAt) return new Date(a.eventAt) - new Date(b.eventAt);
         return a.eventAt ? -1 : b.eventAt ? 1 : a.title.localeCompare(b.title);
       });
-    const kindLabel = { dm: 'Direct', club: 'Community', crew: 'Private group', court: 'Court', game: 'Game', tournament: 'Tournament', league: 'League' };
+    const kindLabel = { dm: 'Direct', club: 'Public group', crew: 'Private group', court: 'Court', game: 'Game', tournament: 'Tournament', league: 'League' };
     const rowHtml = (item, extraClass = '') => {
       const attention = item.unread
         ? `, ${item.unread} unread message${item.unread === 1 ? '' : 's'}` : '';
       const groupInfo = groupPage && ['crew', 'club'].includes(item.kind);
       const preview = groupInfo ? item.emptyText : inboxMessagePreviewText(item);
       const accessibleLabel = groupInfo
-        ? `Open ${item.title}, ${item.kind === 'crew' ? 'private play group' : 'public community'}, ${preview}${attention}, group info`
+        ? `Open ${item.title}, ${item.kind === 'crew' ? 'private play group' : 'public group'}, ${preview}${attention}, group info`
         : `${item.title}, ${kindLabel[item.kind]} chat${attention}, ${preview}${item.lastMessage ? `, ${fmtInboxTimestamp(item.lastMessage.created_at)}` : ''}`;
       return `
       <button type="button" class="card row inbox-row ${extraClass}" data-inbox-kind="${item.kind}" data-inbox-destination="${groupInfo ? 'info' : 'chat'}" data-inbox-id="${item.id}" data-inbox-title="${esc(item.title)}" data-unread="${item.unread}" aria-label="${esc(accessibleLabel)}">
         ${item.iconHtml}
         <span class="row-main">
-          <span class="row-title" style="display:block">${esc(item.title)}${groupInfo ? '' : `<span class="inbox-kind">${item.messageRequest ? 'Message request' : kindLabel[item.kind]}</span>`}</span>
+          <span class="row-title" style="display:block">${esc(item.title)}${groupInfo ? '' : `<span class="inbox-kind">${kindLabel[item.kind]}</span>`}</span>
           <span class="row-sub" style="display:block">${esc(preview)}</span>
         </span>
         ${item.unread ? `<span class="badge" style="position:static">${item.unread > 99 ? '99+' : item.unread}</span>`
@@ -25343,7 +27033,7 @@
           return a.lastMessage ? -1 : b.lastMessage ? 1 : a.title.localeCompare(b.title);
         });
       const discoveryHtml = `<div class="community-discovery-hero">
-        <span class="row-main"><b>Find or create a group</b><small>Join a public community group, or create a private group for people you play with.</small></span>
+        <span class="row-main"><b>Find or create a group</b><small>Join a public group, or create a private group for people you play with.</small></span>
         <div class="community-group-actions">
           <button class="btn btn-primary" id="club-find">${uiIcon('search')} Find public groups</button>
           <button class="btn btn-secondary" id="group-new">${uiIcon('plus')} Create a group</button>
@@ -25354,7 +27044,7 @@
         html += crewItems.map((item) => rowHtml(item)).join('');
       }
       if (clubItems.length) {
-        html += '<div class="section-label">Your community groups</div>';
+        html += '<div class="section-label">Your public groups</div>';
         html += clubItems.map((item) => rowHtml(item)).join('');
       }
       html += discoveryHtml;
@@ -25389,7 +27079,72 @@
     return html;
   }
 
-  function bindCommunityConversationRows(el) {
+  function openConversationSearchSheet() {
+    const modal = openModal(`${modalHead('Find a conversation')}
+      <div class="form-field"><label for="conversation-search">Player, group, court or game</label><input type="search" id="conversation-search" maxlength="80" placeholder="Search conversations…" autocomplete="off" /></div>
+      <div id="conversation-search-status" role="status" aria-live="polite"></div>
+      <div id="conversation-search-results"><p class="row-sub">Type at least two characters.</p></div>
+      <button type="button" class="btn btn-secondary btn-block hidden" id="conversation-search-more">Show more results</button>`, { label: 'Find a conversation' });
+    const input = modal.querySelector('#conversation-search');
+    const results = modal.querySelector('#conversation-search-results');
+    const status = modal.querySelector('#conversation-search-status');
+    const more = modal.querySelector('#conversation-search-more');
+    let requestVersion = 0;
+    let timer;
+    let cursor = null;
+    let items = [];
+    const runSearch = async (query, append = false) => {
+      const version = ++requestVersion;
+      if (query.length < 2) {
+        items = []; cursor = null; status.textContent = '';
+        results.innerHTML = '<p class="row-sub">Type at least two characters.</p>';
+        more.classList.add('hidden');
+        return;
+      }
+      status.textContent = 'Searching…';
+      more.disabled = true;
+      if (!append) { items = []; cursor = null; results.replaceChildren(); more.classList.add('hidden'); }
+      try {
+        const data = await api(`/inbox/search?q=${encodeURIComponent(query)}${append && cursor != null ? `&offset=${cursor}` : ''}`);
+        if (version !== requestVersion || !modal.isConnected || input.value.trim() !== query) return;
+        items = [...new Map([...items, ...(data.items || [])].map((item) => [`${item.kind}:${item.id}`, item])).values()];
+        cursor = data.next_offset;
+        const kinds = { dm: 'Direct message', court: 'Court chat', game: 'Game chat', tournament: 'Tournament chat', league: 'League chat', crew: 'Private group', club: 'Public group' };
+        const partial = Object.keys(data.errors || {}).length > 0;
+        results.innerHTML = items.length ? items.map((item) => `<button type="button" class="card row inbox-row" data-inbox-kind="${esc(item.kind)}" data-inbox-id="${Number(item.id)}" data-inbox-title="${esc(item.title)}" aria-label="Open ${esc(item.title)}, ${esc(kinds[item.kind] || 'conversation')}">
+          <span class="inbox-room-icon">${uiIcon(item.kind === 'dm' ? 'user' : item.kind === 'court' ? 'map-pin' : 'message')}</span>
+          <span class="row-main"><span class="row-title">${esc(item.title)}</span><span class="row-sub">${esc(kinds[item.kind] || 'Conversation')}${item.event_at ? ` · ${esc(fmtDateTime(item.event_at))}` : ''}${item.context && item.context !== item.title ? ` · ${esc(item.context)}` : ''}</span></span>${uiIcon('chevron-right', 'chev')}</button>`).join('')
+          : `<p class="empty-state">${partial ? 'No results from the conversations that loaded.' : `No conversations found for “${esc(query)}”.`}</p>`;
+        bindCommunityConversationRows(results, { parentModal: modal });
+        status.innerHTML = partial ? 'Some conversations could not load. <button type="button" class="btn btn-link" data-search-retry>Retry</button>'
+          : `${Number(data.total ?? items.length)} conversation${Number(data.total ?? items.length) === 1 ? '' : 's'} found`;
+        more.classList.toggle('hidden', !data.has_more);
+      } catch (error) {
+        if (version !== requestVersion || !modal.isConnected) return;
+        status.innerHTML = `${esc(error.message || 'Search could not load.')} <button type="button" class="btn btn-link" data-search-retry>Retry</button>`;
+      } finally {
+        if (version === requestVersion) {
+          more.disabled = false;
+          status.querySelector('[data-search-retry]')?.addEventListener('click', () => runSearch(input.value.trim()));
+        }
+      }
+    };
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      requestVersion += 1;
+      const query = input.value.trim();
+      if (query.length < 2) { runSearch(query); return; }
+      status.textContent = 'Searching…';
+      results.replaceChildren();
+      more.classList.add('hidden');
+      timer = setTimeout(() => runSearch(query), 250);
+    });
+    more.addEventListener('click', () => runSearch(input.value.trim(), true));
+    modal._cleanupFns?.push(() => { clearTimeout(timer); requestVersion += 1; });
+    return modal;
+  }
+
+  function bindCommunityConversationRows(el, { parentModal = null } = {}) {
     el.querySelectorAll('[data-inbox-kind]').forEach((row) => row.addEventListener('click', async () => {
       if (row.disabled) return;
       row.disabled = true;
@@ -25397,6 +27152,7 @@
       const id = Number(row.dataset.inboxId);
       let roomModal = null;
       try {
+        const openRoom = async () => {
         if (kind === 'dm') roomModal = await openThread(id);
         else if (kind === 'court') roomModal = await openCourtChat({ id, name: row.dataset.inboxTitle });
         else if (kind === 'club') roomModal = await openClubScreen(id, {
@@ -25409,6 +27165,10 @@
         else if (kind === 'game') roomModal = await openGameChat({ id });
         else if (kind === 'tournament') roomModal = await openTournamentChat({ id });
         else if (kind === 'league') roomModal = await openLeagueChat({ id, name: row.dataset.inboxTitle });
+          return roomModal;
+        };
+        if (parentModal) await openChildModal(parentModal, openRoom);
+        else await openRoom();
       } catch (error) {
         if (!error?.isCancelled && !error?.isStaleSession) errorToast(error);
       } finally {
@@ -25440,7 +27200,7 @@
       </button>
       <button type="button" class="choice-card" data-group-kind="public">
         ${uiIcon('building')}
-        <span><b>Public court community</b><small>Discoverable by local players, with optional join approval.</small></span>
+        <span><b>Public group</b><small>Discoverable by local players, with optional join approval.</small></span>
         ${uiIcon('chevron-right', 'chev')}
       </button>
     `, { label: 'Choose a group type' });
@@ -25559,15 +27319,14 @@
   }
 
   function recentPlayerActionHtml(player) {
-    if (player.is_friend) {
-      return `<button type="button" class="btn btn-primary btn-sm" data-recent-invite="${player.id}" aria-label="Invite ${esc(player.display_name)} to play again">${uiIcon('calendar')} Play again</button>`;
-    }
+    const invite = player.can_invite === false ? '' : `<button type="button" class="btn btn-primary btn-sm" data-recent-invite="${player.id}" aria-label="Invite ${esc(player.display_name)} to play again">${uiIcon('calendar')} Invite to play</button>`;
+    if (player.is_friend) return invite;
     if (player.friendship_status === 'pending') {
-      return player.outgoing
+      return invite + (player.outgoing
         ? '<span class="tag recent-player-pending" role="status">Request sent</span>'
-        : `<button type="button" class="btn btn-primary btn-sm" data-recent-accept="${player.friendship_id}" aria-label="Accept friend request from ${esc(player.display_name)}">${uiIcon('check-circle')} Accept</button>`;
+        : `<button type="button" class="btn btn-secondary btn-sm" data-recent-accept="${player.friendship_id}" aria-label="Accept friend request from ${esc(player.display_name)}">Accept friend</button>`);
     }
-    return `<button type="button" class="btn btn-primary btn-sm" data-recent-add="${player.id}" aria-label="Add ${esc(player.display_name)} as a friend">${uiIcon('plus')} Add friend</button>`;
+    return invite + `<button type="button" class="btn btn-secondary btn-sm" data-recent-add="${player.id}" aria-label="Add ${esc(player.display_name)} as a friend">${uiIcon('plus')} Add friend</button>`;
   }
 
   async function renderRecentPlayers(el) {
@@ -25581,8 +27340,8 @@
     const players = data.items || [];
     el.innerHTML = players.length ? `
       <div class="recent-players-intro">
-        <h2>Good games. Familiar faces.</h2>
-        <p>Keep in touch with people from your recent games and sessions.</p>
+        <h2>Play together again</h2>
+        <p>Invite someone from a past game.</p>
       </div>
       <div class="recent-players-list">${players.map((player) => {
         const played = new Date(player.last_played_at);
@@ -25596,6 +27355,7 @@
             <span class="row-main">
               <span class="row-title">${esc(player.display_name)}</span>
               <span class="row-sub">${together}${lastPlayed ? ` · ${esc(lastPlayed)}` : ''}</span>
+              ${player.last_played_court?.name ? `<span class="row-sub">${esc(player.last_played_court.name)}</span>` : ''}
               ${sharedTimes
                 ? `<span class="row-sub community-inline-status">${uiIcon('clock', 'community-inline-icon')} Shared usual times: ${esc(sharedTimes)}</span>` : ''}
             </span>
@@ -25688,15 +27448,16 @@
         syncCommunityUnreadLanes(rooms, clubs, competitions, crews);
         renderBadges();
         const failedLabels = Object.keys(inbox.errors || {}).map((key) => ({
-          direct: 'Direct messages', courts: 'Court chats', clubs: 'Community groups',
+          direct: 'Direct messages', courts: 'Court chats', clubs: 'Public groups',
           competitions: 'Game chats', crews: 'Private groups',
         }[key] || key));
-        el.innerHTML = communityPartialLoadHtml(failedLabels)
+        el.innerHTML = '<button type="button" class="btn btn-secondary btn-block" id="inbox-search">' + uiIcon('search') + ' Search conversations</button>' + communityPartialLoadHtml(failedLabels)
           + universalInboxHtml(data, rooms, clubs, competitions, crews, {
             filter: seg === 'groups' ? 'groups' : (state.chatConversationFilter === 'groups' ? 'all' : state.chatConversationFilter),
             groupPage: seg === 'groups',
           });
         bindCommunityPartialRetry(el);
+        el.querySelector('#inbox-search')?.addEventListener('click', openConversationSearchSheet);
         bindCommunityConversationRows(el);
         bindCrewInvitationActions(el);
         el.querySelectorAll('[data-chat-filter]').forEach((button) => button.addEventListener('click', () => {
@@ -25774,7 +27535,9 @@
     return `${profile} · Nearby from their profile${distanceText}`;
   }
 
-  async function renderNearbyPlayers(el) {
+  async function renderNearbyPlayers(el, { page = 1, previous = [] } = {}) {
+    const requestVersion = (el._nearbyRequest || 0) + 1;
+    el._nearbyRequest = requestVersion;
     const loc = committedAreaLatLng();
     if (!loc) {
       el.innerHTML = `<section class="play-area-setup community-area-setup" role="status">
@@ -25788,22 +27551,25 @@
       return;
     }
     const skill = state.nearbySkill || '';
+    const radius = [5, 10, 25, 50].includes(Number(state.nearbyRadius)) ? Number(state.nearbyRadius) : 25;
     let data;
     let looking;
     try {
       [data, looking] = await Promise.all([
-        api(`/players/nearby?lat=${loc.lat}&lng=${loc.lng}&radius=50${skill ? `&level=${encodeURIComponent(skill)}` : ''}`),
-        api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=50`).catch(() => null),
+        api(`/players/nearby?lat=${loc.lat}&lng=${loc.lng}&radius=${radius}&page=${page}${skill ? `&level=${encodeURIComponent(skill)}` : ''}`),
+        api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=${radius}`).catch(() => null),
       ]);
     } catch (e) {
+      if (requestVersion !== el._nearbyRequest) return;
       renderError(el, e.message, () => renderNearbyPlayers(el));
       return;
     }
-
-    const skills = [['', 'All'], ['3.0', '3.0'], ['3.5', '3.5'], ['4.0', '4.0+']];
+    if (requestVersion !== el._nearbyRequest) return;
+    const skills = [['', 'All levels'], ['beginner', 'Beginner · under 3.0'], ['3.0', '3.0'], ['3.5', '3.5'], ['4.0', '4.0+']];
     const matchesLevel = (person) => {
       if (!skill) return true;
       const rating = Number(person?.skill_rating ?? person?.self_rating);
+      if (skill === 'beginner') return person?.skill_rating == null && person?.self_rating == null ? person?.skill_level === 'beginner' : Number.isFinite(rating) && rating < 3;
       if (!Number.isFinite(rating)) return false;
       if (skill === '3.0') return rating >= 3 && rating < 3.5;
       if (skill === '3.5') return rating >= 3.5 && rating < 4;
@@ -25812,7 +27578,7 @@
     const rallies = normalizeLookingRallies(looking);
     const pulses = normalizeLookingPulses(looking).filter((pulse) => matchesLevel(pulse.user));
     const pulsesById = new Map(pulses.map((pulse) => [pulse.id, pulse]));
-    const players = [...(Array.isArray(data.items) ? data.items : [])].sort((a, b) => {
+    const players = [...new Map([...previous, ...(Array.isArray(data.items) ? data.items : [])].map((player) => [player.id, player])).values()].sort((a, b) => {
       const rank = (player) => {
         const playerRally = playerRallySummary(player);
         if (playerRally && playerRally.gameId) return 4;
@@ -25825,6 +27591,7 @@
         || String(a.display_name || '').localeCompare(String(b.display_name || ''));
     });
     let html = `
+      <div class="form-field nearby-distance-filter"><label for="nearby-radius">Distance from your area</label><select id="nearby-radius">${[5, 10, 25, 50].map((miles) => `<option value="${miles}" ${miles === radius ? 'selected' : ''}>Within ${miles} miles</option>`).join('')}</select></div>
       <div class="nearby-level-filters" role="group" aria-label="Filter nearby players by level">
         ${skills.map(([value, label]) => `<button type="button" data-nearby-level="${value}" class="${value === skill ? 'active' : ''}" aria-pressed="${value === skill}">${label}</button>`).join('')}
       </div>`;
@@ -25905,7 +27672,7 @@
               ${action}
             </div>`;
         }).join('')
-      : pulses.length || rallies.length ? ''
+      : pulses.length || rallies.length || skill ? ''
         : `<div class="empty-state community-nearby-empty">
             <span class="empty-state-icon" aria-hidden="true">${uiIcon('map-pin')}</span>
             <b>No nearby players yet.</b>
@@ -25915,8 +27682,8 @@
 
     const matchingSkillCount = players.length + pulses.length;
     html += `<div class="empty-state community-nearby-filter-empty" id="nearby-filter-empty" ${!skill || matchingSkillCount ? 'hidden' : ''}>
-      <b>No ${esc((skills.find(([value]) => value === skill) || ['', 'nearby'])[1].toLowerCase())} players in this area yet.</b>
-      <span class="empty-state-copy">Choose another level or check back after more players join.</span>
+      <b>No ${esc(skill === 'beginner' ? 'beginner' : (skills.find(([value]) => value === skill) || ['', 'nearby'])[1].toLowerCase())} players within ${radius} miles.</b>
+      <span class="empty-state-copy">Choose another level or widen the distance.</span>
     </div>`;
 
     html += `<details class="nearby-privacy">
@@ -25924,7 +27691,18 @@
       <p>Court check-ins show where you are now. Free this hour shares only where you intend to play and expires automatically.</p>
     </details>`;
 
+    if (data.has_more) html += `<button type="button" class="btn btn-secondary btn-block" id="nearby-load-more">Show more players</button>`;
+
     el.innerHTML = html;
+    el.querySelector('#nearby-radius')?.addEventListener('change', (event) => {
+      state.nearbyRadius = Number(event.target.value);
+      renderNearbyPlayers(el);
+    });
+    el.querySelector('#nearby-load-more')?.addEventListener('click', (event) => {
+      event.currentTarget.disabled = true;
+      event.currentTarget.textContent = 'Loading…';
+      renderNearbyPlayers(el, { page: page + 1, previous: players });
+    });
     el.querySelectorAll('[data-nearby-level]').forEach((button) => button.addEventListener('click', () => {
       const selected = button.dataset.nearbyLevel || '';
       if (selected === state.nearbySkill) return;
@@ -26148,6 +27926,7 @@
                   <span class="row-sub">${f.checked_in_court
                   ? `${uiIcon('map-pin', 'community-inline-icon')} At ${esc(f.checked_in_court.name)}${f.checked_in_court.looking_for_game ? ' · <b style="color:var(--green-accent)">wants to play!</b>' : ''}`
                   : playerSkillIdentityHtml(f)}</span>
+                  ${playerAwayLabel(f) ? `<span class="row-sub">${esc(playerAwayLabel(f))}</span>` : ''}
                 </span>
               </button>
               <div class="friend-row-actions">
@@ -26447,7 +28226,7 @@
             ${avatarHtml(data.user, 'sm', 'span')}
             <span class="row-main">
               <span class="row-title">${esc(data.user.display_name)}</span>
-              <span class="row-sub">${data.message_request ? 'Message request · ' : ''}${data.user.active_now ? '<span class="community-presence-status"><span class="community-presence-dot" aria-hidden="true"></span>Active now</span> · ' : ''}${playerSkillIdentityHtml(data.user)}</span>
+              <span class="row-sub">${data.is_friend === false ? 'Not in your friends · ' : ''}${data.user.active_now ? '<span class="community-presence-status"><span class="community-presence-dot" aria-hidden="true"></span>Active now</span> · ' : ''}${playerSkillIdentityHtml(data.user)}</span>
             </span>
           </button>
           <details class="thread-more-actions">
@@ -26460,6 +28239,8 @@
             </div>
           </details>
         </div>
+        <button type="button" class="btn btn-secondary thread-plan-game" id="thread-plan-game">${uiIcon('calendar')} Plan a game</button>
+        <div id="thread-shared-plan" class="thread-shared-plan"></div>
         <div class="thread-msgs" id="thread-msgs" role="log" aria-live="off" aria-relevant="additions" aria-label="Conversation with ${esc(data.user.display_name)}"></div>
         <form class="thread-input" id="thread-form">
           <button type="button" id="thread-photo" class="thread-photo-button" aria-label="Send a photo">${uiIcon('camera')}</button>
@@ -26473,6 +28254,22 @@
     const msgsEl = modal.querySelector('#thread-msgs');
     const input = modal.querySelector('#thread-text');
     bindDisclosureMenus(modal);
+    let sharedPlanKey = '';
+    const renderSharedPlan = (plan) => {
+      const panel = modal.querySelector('#thread-shared-plan');
+      if (!panel) return;
+      const nextKey = JSON.stringify(plan || null);
+      if (nextKey === sharedPlanKey) return;
+      sharedPlanKey = nextKey;
+      panel.innerHTML = plan ? `<button type="button" class="card row nav-row-button" data-thread-shared-plan="${Number(plan.id)}"><span class="nav-row-leading">${uiIcon('calendar')}</span><span class="row-main"><span class="row-title">${esc(plan.title || 'Play session')}</span><span class="row-sub">${esc(fmtDateTime(plan.scheduled_at))} · ${esc(plan.court?.name || '')}</span><span class="row-sub">You: ${esc(plan.viewer_status)} · ${esc(data.user.display_name.split(' ')[0])}: ${esc(plan.partner_status)}</span></span>${uiIcon('chevron-right', 'chev')}</button>` : '';
+      panel.querySelector('[data-thread-shared-plan]')?.addEventListener('click', () => openChildModal(modal, () => openGameScreen(Number(plan.id))));
+    };
+    renderSharedPlan(data.shared_plan);
+    modal.querySelector('#thread-plan-game')?.addEventListener('click', () => {
+      openChildModal(modal, () => openNewGameModal({ ...playerInvitePlannerOptions(data.user), onCreated: (game) => {
+        renderSharedPlan({ ...game, viewer_status: 'going', partner_status: 'invited' });
+      } }));
+    });
     modal.querySelector('#thread-profile')?.addEventListener('click', () => {
       openChildModal(modal, () => openUserProfile(userId));
     });
@@ -26610,6 +28407,7 @@
     stopThreadPolling();
     const threadPoller = startAdaptiveChatPoll(modal, msgsEl, async () => {
       const fresh = await api(`/chat/${userId}?since_id=${lastId}`);
+      renderSharedPlan(fresh.shared_plan);
       if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
       applyRoomHearts(msgsEl, fresh.heart_counts);
       markSeen(fresh.partner_read_up_to);
@@ -27406,8 +29204,8 @@
     const spotsLeft = Number.isFinite(suppliedSpots)
       ? Math.max(0, suppliedSpots) : Math.max(0, capacity - playerCount);
     const ranked = game.game_type === 'ranked';
-    const title = community && game.title ? game.title : copy.title;
-    const detail = community && game.title ? `${copy.title} · ${copy.detail}` : copy.detail;
+    const title = copy.title;
+    const detail = game.title ? `${gameActivityLabel(game)} · ${copy.detail}` : copy.detail;
     const action = ranked ? copy.action.replace('View session', 'View match') : copy.action;
     return `<span class="nav-row-leading">${uiIcon(ranked ? 'trophy' : 'calendar')}</span>
       <span class="row-main"><span class="row-title">${esc(title)}</span>
@@ -27420,7 +29218,7 @@
   function groupUpcomingGamesHtml(games, { community = false } = {}) {
     const rows = games.map((game) => `<button type="button" class="card row nav-row-button crew-session-row" ${community ? 'data-open-game' : 'data-open-crew-game'}="${Number(game.id)}">${groupSessionContentHtml(game, { community })}</button>`);
     if (!rows.length) return '';
-    return `<div class="section-label">${community ? 'Upcoming community play' : 'Upcoming play'}</div><div class="crew-upcoming-games">${rows[0]}</div>${rows.length > 1 ? `<details class="flow-disclosure crew-later-sessions"><summary>More upcoming sessions <span>${rows.length - 1}</span></summary><div class="crew-upcoming-games">${rows.slice(1).join('')}</div></details>` : ''}`;
+    return `<div class="section-label">${community ? 'Upcoming group play' : 'Upcoming play'}</div><div class="crew-upcoming-games">${rows[0]}</div>${rows.length > 1 ? `<details class="flow-disclosure crew-later-sessions"><summary>More upcoming sessions <span>${rows.length - 1}</span></summary><div class="crew-upcoming-games">${rows.slice(1).join('')}</div></details>` : ''}`;
   }
 
   async function openCrewScreen(crewId, { showInvitations = false } = {}) {
@@ -27476,7 +29274,7 @@
     const owner = crewIsOwner(crew);
     const pendingInvites = owner && Array.isArray(crew.pending_invites) ? crew.pending_invites : [];
     const plannerOptions = crewPlannerOptions(crew);
-    const canPlan = plannerOptions.inviteUserIds.length > 0;
+    const canPlan = crew.joined === true;
     const reviewInvitations = pendingInvites.length > 0 && playGroupInviteCapacity(crew) === 0;
     const notificationLabel = crew.my_notification_level === 'off' ? 'Muted'
       : crew.my_notification_level === 'mentions' ? 'Mentions only' : 'All messages';
@@ -27513,7 +29311,7 @@
         ${canPlan ? `<button type="button" class="btn ${upcomingGames.length ? 'btn-secondary' : 'btn-primary'}" id="crew-plan">${uiIcon('calendar')} ${upcomingGames.length ? 'Plan another' : 'Plan with this group'}</button>` : ''}
         <button type="button" class="btn ${upcomingGames.length || !canPlan ? 'btn-primary' : 'btn-secondary'}" id="crew-chat">${uiIcon('message')} Group chat</button>
       </div>
-      ${!canPlan ? `<p class="crew-pending-note" id="crew-plan-waiting">${crew.pending_count ? 'Once a player accepts your invitation, you can plan your first session together.' : 'Add a player to start planning sessions together.'}</p>` : ''}
+      ${crew.pending_count ? '<p class="crew-pending-note" id="crew-plan-waiting">Invited players join the group first, then choose whether to join a session.</p>' : ''}
       <details class="flow-disclosure" id="crew-players" ${!canPlan || showInvitations ? 'open' : ''}>
         <summary>Players <span>${crew.member_count}${crew.pending_count ? ` · ${crew.pending_count} invited` : ''}</span></summary>
         ${owner ? `<button type="button" class="btn ${canPlan ? 'btn-secondary' : 'btn-primary'} btn-block crew-add-players" id="crew-add-players">${uiIcon(reviewInvitations ? 'users' : 'plus')} ${reviewInvitations ? 'Review invitations' : 'Add players'}</button>` : ''}
@@ -27602,10 +29400,6 @@
     });
     const openGroupPlanner = () => {
       const options = crewPlannerOptions(crew);
-      if (!options.inviteUserIds.length) {
-        toast('At least one player needs to join before this group can plan a session');
-        return;
-      }
       options.onCreated = () => {
         if (modal.isConnected) transitionModal(modal, () => openCrewScreen(crew.id));
       };
@@ -27736,12 +29530,30 @@
     });
   }
 
+  function bindChoiceRadioKeys(container, selector) {
+    const choices = [...container.querySelectorAll(selector)].filter((choice) => !choice.disabled);
+    if (!choices.length) return;
+    const selectTabStop = (choice) => choices.forEach((item) => { item.tabIndex = item === choice ? 0 : -1; });
+    selectTabStop(choices.find((choice) => choice.getAttribute('aria-checked') === 'true') || choices[0]);
+    choices.forEach((choice, index) => {
+      choice.addEventListener('click', () => selectTabStop(choice));
+      choice.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1
+          : (index + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1) + choices.length) % choices.length;
+        choices[next].click();
+        choices[next].focus();
+      });
+    });
+  }
+
   function openCrewNotificationSheet(crew, onSaved = null) {
     let selected = ['all', 'mentions', 'off'].includes(crew.my_notification_level)
       ? crew.my_notification_level : 'all';
     const modal = openModal(`
       ${modalHead('Play group notifications')}
-      <p class="play-group-intro">Choose alerts for this private play group. Messages stay available whenever you open the chat.</p>
+      <p class="play-group-intro">Choose alerts for this private group. Save to apply. Messages stay available in chat.</p>
       <div class="community-notification-options" role="radiogroup" aria-label="Play group notification level">
         ${[
     ['all', 'All messages', 'Notify me when anyone posts.'],
@@ -27763,6 +29575,9 @@
       selected = button.dataset.crewNotification;
       sync();
     }));
+    bindChoiceRadioKeys(modal, '[data-crew-notification]');
+    const initialLevel = selected;
+    const discardGuard = bindModalDiscardConfirmation(modal, { isDirty: () => selected !== initialLevel });
     modal.querySelector('#crew-notification-save').addEventListener('click', async (event) => {
       clearInlineActionError(modal);
       const reset = beginButtonAction(event.currentTarget, 'Saving…');
@@ -27772,6 +29587,7 @@
           method: 'PATCH', body: JSON.stringify({ level: selected }),
         });
         crew.my_notification_level = selected;
+        discardGuard.authorizeClose();
         dismissModal(modal);
         toast(selected === 'off' ? 'Play group muted' : 'Play group notifications updated');
         await onSaved?.();
@@ -27873,12 +29689,12 @@
           : game.is_invited ? 'You’re invited' : 'Open to you';
       return {
         gameId: Number(game.id), eyebrow: 'Next session',
-        title: fmtDateTime(game.scheduled_at),
-        detail: game.court?.name || 'View court details',
+        title: game.title || gameActivityLabel(game),
+        detail: `${fmtDateTime(game.scheduled_at)} · ${game.court?.name || 'View court details'}`,
         action: `${attendance} · ${game.is_joined || Number(game.waitlist_position) > 0 ? 'View session' : 'View & RSVP'}`,
       };
     }
-    if (Number(crew?.member_count) < 2 || !crew?.joined) return null;
+    if (!crew?.joined) return null;
     return {
       gameId: null, eyebrow: '', title: 'Plan with this group',
       detail: 'Choose a court and time together.', action: '',
@@ -27966,11 +29782,11 @@
         const freshCrew = await api(`/crews/${crew.id}`);
         if (!modal.isConnected || currentOverlayEntry()?.el !== modal) return;
         const options = crewPlannerOptions(freshCrew);
-        if (!options.inviteUserIds.length) {
+        if (!freshCrew.joined) {
           crew = { ...crew, ...freshCrew };
           syncCrewChatPlan(planButton, crew, freshCrew.upcoming_games?.[0]);
           syncWelcome();
-          toast('At least one other player needs to join before you can plan together.');
+          toast('Join this group before planning a session.');
           return;
         }
         options.onCreated = (game) => {
@@ -28098,9 +29914,9 @@
     const route = { kind: 'club', id: clubId };
     const shell = openDetailLoadShell({
       route,
-      title: 'Opening community',
-      copy: 'Loading members, upcoming play, and community details…',
-      label: 'Loading community details',
+      title: 'Opening public group',
+      copy: 'Loading members, upcoming play, and group details…',
+      label: 'Loading public group details',
     });
     if (!shell) return;
     const routeLoad = shell.load;
@@ -28111,9 +29927,9 @@
       if ([404, 410].includes(Number(e.status))) clearDeadDeepLink(`#club/${clubId}`);
       renderDetailLoadError(
         shell,
-        e.message || 'This community could not load.',
+        e.message || 'This group could not load.',
         () => retryDetailLoad(shell, () => openClubScreen(clubId, { destination })),
-        'Community details could not load',
+        'Group details could not load',
       );
       return shell.modal;
     }
@@ -28128,9 +29944,9 @@
   async function openClubChat(club) {
     const shell = openChatLoadShell({
       route: { kind: 'club', id: club.id },
-      title: 'Opening community chat',
+      title: 'Opening public group chat',
       copy: `Loading the latest conversation in ${club.name}…`,
-      label: `Loading ${club.name} community chat`,
+      label: `Loading ${club.name} public group chat`,
     });
     if (!shell) return;
     const { modal, box, load: routeLoad } = shell;
@@ -28139,13 +29955,14 @@
       if (!routedOverlayLoadIsCurrent(routeLoad) || !modal.isConnected) return;
       renderDetailLoadError(
         shell,
-        e.message || 'Community chat could not load.',
+        e.message || 'Group chat could not load.',
         () => retryDetailLoad(shell, () => openClubChat(club)),
         `${club.name} chat could not load`,
       );
       return modal;
     }
     if (!routedOverlayLoadIsCurrent(routeLoad) || !modal.isConnected) return;
+    club = { ...club, ...data.club };
     refreshMe(); // keep the global Community badge exact outside Inbox
 
     hydrateChatLoadShell(shell, `
@@ -28153,26 +29970,47 @@
         <div class="thread-head">
           <button type="button" class="modal-close" aria-label="Back">${uiIcon('arrow-left')}</button>
           <span class="thread-community-icon" aria-hidden="true">${uiIcon('users')}</span>
-          <button type="button" class="row-main club-thread-head-target" id="club-head" aria-label="Open ${esc(club.name)} community group info">
+          <button type="button" class="row-main club-thread-head-target" id="club-head" aria-label="Open ${esc(club.name)} public group info">
             <span class="row-title">${esc(club.name)}</span>
-            <span class="row-sub">Community group · ${club.member_count} member${club.member_count === 1 ? '' : 's'} · View info</span>
+            <span class="row-sub">Public group · ${club.member_count} member${club.member_count === 1 ? '' : 's'} · View info</span>
           </button>
         </div>
+        <button type="button" class="crew-chat-plan" id="club-chat-plan" hidden>${uiIcon('calendar')}<span class="row-main"><span class="crew-chat-plan-eyebrow" data-crew-plan-eyebrow></span><b data-crew-plan-title></b><span class="row-sub" data-crew-plan-detail></span><span class="crew-chat-plan-action" data-crew-plan-action></span></span>${uiIcon('chevron-right')}</button>
         ${club.announcement ? `
         <div class="card row community-announcement" style="margin:8px 12px 0">
           <span class="community-announcement-icon" aria-hidden="true">${uiIcon('bell')}</span>
           <div class="row-sub" style="flex:1;color:var(--ink)">${esc(club.announcement)}</div>
         </div>` : ''}
-        <div class="thread-msgs" id="clb-msgs" role="log" aria-live="off" aria-relevant="additions" aria-label="${esc(club.name)} community conversation"></div>
+        <div class="thread-msgs" id="clb-msgs" role="log" aria-live="off" aria-relevant="additions" aria-label="${esc(club.name)} public group conversation"></div>
         <form class="thread-input" id="clb-form">
-          <textarea id="clb-text" aria-label="Message the community" placeholder="Message the community…" autocomplete="off" maxlength="2000" rows="1"></textarea>
+          <textarea id="clb-text" aria-label="Message the group" placeholder="Message the group…" autocomplete="off" maxlength="2000" rows="1"></textarea>
           <button type="submit" aria-label="Send">${uiIcon('send')}</button>
         </form>
       </div>
-    `, `${club.name} community chat`);
+    `, `${club.name} public group chat`);
 
     const msgsEl = modal.querySelector('#clb-msgs');
     const input = modal.querySelector('#clb-text');
+    const planButton = modal.querySelector('#club-chat-plan');
+    syncCrewChatPlan(planButton, club, data.next_game);
+    planButton.addEventListener('click', async () => {
+      const gameId = Number(planButton.dataset.gameId);
+      if (gameId) { openChildModal(modal, () => openGameScreen(gameId)); return; }
+      const reset = beginButtonAction(planButton, 'Opening…');
+      if (!reset) return;
+      try {
+        const fresh = await api(`/clubs/${club.id}`);
+        if (!modal.isConnected || currentOverlayEntry()?.el !== modal) return;
+        if (!fresh.joined) { toast('Join this group before planning a session.'); return; }
+        openChildModal(modal, () => openNewGameModal({
+          gameType: 'casual', lockGameType: true, sessionMode: true,
+          clubId: fresh.id, communityName: fresh.name, visibility: 'open', maxPlayers: 6,
+          court: fresh.home_court_id ? { id: fresh.home_court_id, name: fresh.home_court_name } : undefined,
+          onCreated: (game) => { if (modal.isConnected) syncCrewChatPlan(planButton, fresh, game); },
+        }));
+      } catch (error) { if (modal.isConnected) toast(error.message); }
+      finally { reset(); }
+    });
       const chatUX = bindChatContinuity(modal, msgsEl, input, `club:${club.id}`);
     let lastId = 0;
     const renderMsgs = (items, append, { forceBottom = false, newMessages = false, prepend = false } = {}) => {
@@ -28198,7 +30036,7 @@
       if (prepend) { msgsEl.querySelector('.empty-state')?.remove(); msgsEl.insertAdjacentHTML('afterbegin', html); }
       else if (append && !msgsEl.querySelector('.empty-state')) msgsEl.insertAdjacentHTML('beforeend', html);
       else if (append) msgsEl.innerHTML = html;
-      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet — bring the community together.</div>';
+      else msgsEl.innerHTML = html || '<div class="empty-state" style="padding:20px">No messages yet. Say hello to the group.</div>';
       normalizeChatDaySeparators(msgsEl);
       chatUX.restoreScroll(snapshot, { forceBottom, newMessageCount: newMessages ? items.length : 0, preserveAnchor: prepend });
       hydrateChatImages(msgsEl, chatUX);
@@ -28214,6 +30052,7 @@
 
     startAdaptiveChatPoll(modal, msgsEl, async () => {
       const fresh = await api(`/clubs/${club.id}/chat?since_id=${lastId}`);
+      syncCrewChatPlan(planButton, { ...club, ...fresh.club }, fresh.next_game);
       if (fresh.items.length) renderMsgs(fresh.items, true, { newMessages: true });
       applyRoomHearts(msgsEl, fresh.heart_counts);
       return fresh.items.length > 0;
@@ -28263,7 +30102,7 @@
             <span class="row-sub">${playerSkillIdentityHtml(m)}</span>
           </span>
         </button>
-        ${isManager && m.id !== state.me.id && m.role !== 'owner' && !(club.my_role === 'admin' && m.role === 'admin') ? `<button type="button" class="btn btn-secondary btn-sm community-member-manage" data-manage-member="${m.id}" aria-label="Manage ${esc(m.display_name)} in this community">Manage</button>` : ''}
+        ${isManager && m.id !== state.me.id && m.role !== 'owner' && !(club.my_role === 'admin' && m.role === 'admin') ? `<button type="button" class="btn btn-secondary btn-sm community-member-manage" data-manage-member="${m.id}" aria-label="Manage ${esc(m.display_name)} in this group">Manage</button>` : ''}
       </div>`).join('') : '';
 
     const announcementMeta = club.announcement_posted_at
@@ -28287,11 +30126,11 @@
     if (!routedOverlayLoadIsCurrent(routeLoad)) return;
     const modal = openModal(`
       ${modalHead(club.name)}
-      <div class="community-group-eyebrow">Public community · ${club.member_count} member${club.member_count === 1 ? '' : 's'}</div>
+      <div class="community-group-eyebrow">Public group · ${club.member_count} member${club.member_count === 1 ? '' : 's'}</div>
       ${club.description ? `<div class="row-sub community-description">${esc(club.description)}</div>` : ''}
       ${announcementHtml}
       ${club.home_court_id ? `
-        <button type="button" class="card row nav-row-button" id="club-court" aria-label="Open ${esc(club.home_court_name || 'community home court')}">
+        <button type="button" class="card row nav-row-button" id="club-court" aria-label="Open ${esc(club.home_court_name || 'group home court')}">
           <span class="nav-row-leading">${uiIcon('map-pin')}</span>
           <span class="row-main">
             <span class="row-title">${esc(club.home_court_name)}</span>
@@ -28299,19 +30138,19 @@
           </span>
           ${uiIcon('chevron-right', 'chev')}
         </button>` : ''}
-      <section class="community-upcoming-section" aria-label="Upcoming community play" ${upcomingGames.length ? '' : 'hidden'}>${groupUpcomingGamesHtml(upcomingGames, { community: true })}</section>
+      <section class="community-upcoming-section" aria-label="Upcoming group play" ${upcomingGames.length ? '' : 'hidden'}>${groupUpcomingGamesHtml(upcomingGames, { community: true })}</section>
       <div class="community-group-actions community-session-actions">
         ${club.joined ? `
           <button class="btn btn-primary" id="club-plan">${uiIcon('calendar')} Plan a session</button>
-          <button class="btn btn-secondary" id="club-chat-btn">${uiIcon('message')} Community chat</button>` : `
-          <button class="btn btn-primary" id="club-join-btn" ${joinPending ? 'disabled' : ''}>${uiIcon(joinPending ? 'clock' : 'users')} ${joinPending ? 'Request pending' : (club.join_policy === 'request' ? 'Request to join' : 'Join community')}</button>
+          <button class="btn btn-secondary" id="club-chat-btn">${uiIcon('message')} Group chat</button>` : `
+          <button class="btn btn-primary" id="club-join-btn" ${joinPending ? 'disabled' : ''}>${uiIcon(joinPending ? 'clock' : 'users')} ${joinPending ? 'Request pending' : (club.join_policy === 'request' ? 'Request to join' : 'Join group')}</button>
           <button class="btn btn-secondary" id="club-share">${uiIcon('send')} Share</button>`}
       </div>
       ${!club.joined && joinPending ? '<button class="btn btn-secondary btn-block community-primary-action" id="club-cancel-request">Cancel join request</button>' : ''}
       ${isManager && Number(club.pending_join_requests) > 0 ? `<button class="btn btn-secondary btn-block community-primary-action" id="club-join-requests">${uiIcon('users')} Review ${Number(club.pending_join_requests)} join request${Number(club.pending_join_requests) === 1 ? '' : 's'}</button>` : ''}
       <p class="form-error inline-action-error" data-inline-action-error role="alert" tabindex="-1" hidden></p>
       ${(club.leagues || []).length ? `
-        <div class="section-label section-label-icon">${uiIcon('grid')} Community leagues</div>
+        <div class="section-label section-label-icon">${uiIcon('grid')} Group leagues</div>
         ${club.leagues.map((lg) => `
           <button type="button" class="card row nav-row-button" data-open-club-league="${lg.id}" aria-label="Open ${esc(lg.name)} league">
             <span class="nav-row-leading">${uiIcon('grid')}</span>
@@ -28322,7 +30161,7 @@
             ${uiIcon('chevron-right', 'chev')}
           </button>`).join('')}` : ''}
       ${(club.tournaments || []).length ? `
-        <div class="section-label section-label-icon">${uiIcon('trophy')} Community tournaments</div>
+        <div class="section-label section-label-icon">${uiIcon('trophy')} Group tournaments</div>
         ${club.tournaments.map((t) => `
           <button type="button" class="card row nav-row-button" data-open-club-tournament="${t.id}" aria-label="Open ${esc(t.name)} tournament">
             <span class="nav-row-leading">${uiIcon('trophy')}</span>
@@ -28336,26 +30175,26 @@
         <summary>Members <span>${club.member_count}</span></summary>
         <div class="community-group-actions community-session-actions">
           <button class="btn btn-secondary" id="club-invite">${uiIcon('ticket')} ${CTA_LABELS.invitePlayers}</button>
-          <button class="btn btn-secondary" id="club-share">${uiIcon('send')} Share community</button>
+          <button class="btn btn-secondary" id="club-share">${uiIcon('send')} Share group</button>
         </div>` : ''}
       ${rosterVisible ? `
         ${membersHtml || '<div class="empty-state community-roster-empty">No member profiles are available.</div>'}` : `
         <div class="card row community-roster-private" role="note">
           <span class="nav-row-leading">${uiIcon('lock')}</span>
-          <span class="row-main"><span class="row-title">Member list is private</span><span class="row-sub">Join this community to see its members. Until then, only the total of ${club.member_count} is shown.</span></span>
+          <span class="row-main"><span class="row-title">Member list is private</span><span class="row-sub">Join this group to see its members. Until then, only the total of ${club.member_count} is shown.</span></span>
         </div>`}
       ${club.joined ? '</details>' : ''}
       ${club.joined ? `<details class="flow-disclosure community-settings" id="club-settings">
-        <summary>Community settings <span>${isManager ? 'Preferences &amp; management' : 'Notifications &amp; membership'}</span></summary>
+        <summary>Group settings <span>${isManager ? 'Preferences &amp; management' : 'Notifications &amp; membership'}</span></summary>
         <div class="community-settings-actions">
           <button class="btn btn-secondary btn-block" id="club-notifications">${uiIcon('bell')} Notifications · ${notificationLabel}</button>
           ${isManager ? `<button class="btn btn-secondary btn-block" id="club-announcement">${uiIcon('bell')} ${club.announcement ? 'Update announcement' : 'Post announcement'}</button><button class="btn btn-secondary btn-block" id="club-bans">${uiIcon('shield')} Blocked players</button>` : ''}
       ${isOwner ? `
         <div class="community-manage-actions">
-          <button class="btn btn-secondary" id="club-edit">${uiIcon('edit')} Edit community</button>
-          <button class="btn btn-secondary danger-text" id="club-delete">${uiIcon('trash')} Close community</button>
+          <button class="btn btn-secondary" id="club-edit">${uiIcon('edit')} Edit group</button>
+          <button class="btn btn-secondary danger-text" id="club-delete">${uiIcon('trash')} Close group</button>
         </div>`
-        : (club.joined ? '<button class="btn btn-secondary btn-block community-leave" id="club-leave">Leave community</button>' : '')}
+        : (club.joined ? '<button class="btn btn-secondary btn-block community-leave" id="club-leave">Leave group</button>' : '')}
         </div>
       </details>` : ''}
     `, { route: { kind: 'club', id: club.id } });
@@ -28407,7 +30246,7 @@
     });
     modal.querySelector('#club-plan')?.addEventListener('click', () => {
       const court = club.home_court_id ? {
-        id: club.home_court_id, name: club.home_court_name || 'Community home court',
+        id: club.home_court_id, name: club.home_court_name || 'Group home court',
       } : null;
       openChildModal(modal, () => openNewGameModal({
         court,
@@ -28432,7 +30271,7 @@
         const fresh = await api(`/clubs/${club.id}`);
         toast(result.join_request_status === 'pending'
           ? 'Join request sent to the organizers'
-          : 'Welcome to the community');
+          : 'Welcome to the group');
         transitionModal(modal, () => openClubInfo(fresh));
         renderChat();
       } catch (e) {
@@ -28472,26 +30311,26 @@
       const url = `${location.origin}/cl/${club.id}`; // short link → OG preview in chat apps
       try {
         if (navigator.share) {
-          await navigator.share({ title: 'Third Shot', text: `Join our pickleball community: ${club.name}`, url });
+          await navigator.share({ title: 'Third Shot', text: `Join our pickleball group: ${club.name}`, url });
         } else {
           await navigator.clipboard.writeText(url);
-          toast('Community link copied');
+          toast('Group link copied');
         }
       } catch (error) {
         if (error?.name !== 'AbortError') {
-          showInlineActionError(modal, 'Could not share this community. Copy the link from your browser and try again.');
+          showInlineActionError(modal, 'Could not share this group. Copy the link from your browser and try again.');
         }
       }
     });
     modal.querySelector('#club-leave')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
       if (!await openActionConfirmation({
-        eyebrow: 'Leave community',
+        eyebrow: 'Leave group',
         title: `Leave ${club.name}?`,
-        message: 'You will lose access to this community’s chat, announcements, and member plans.',
-        detail: 'Your play history is unchanged, and you can rejoin later if the community is open.',
-        confirmLabel: 'Leave community',
-        cancelLabel: 'Stay in community',
+        message: 'You will lose access to this group’s chat, announcements, and member plans.',
+        detail: 'Your play history is unchanged, and you can rejoin later if the group is open.',
+        confirmLabel: 'Leave group',
+        cancelLabel: 'Stay in group',
         icon: 'users',
         trigger: button,
       })) return;
@@ -28500,7 +30339,7 @@
       if (!resetAction) return;
       try {
         await api(`/clubs/${club.id}/leave`, { method: 'POST' });
-        toast('You left the community group');
+        toast('You left the public group');
         closeModal(modal);
         renderChat();
       } catch (e) {
@@ -28513,10 +30352,10 @@
       if (!await openActionConfirmation({
         eyebrow: 'Close for everyone',
         title: `Close ${club.name}?`,
-        message: 'The community will disappear from discovery and members will lose access.',
+        message: 'The group will disappear from discovery and members will lose access.',
         detail: 'The conversation and history are retained, and you can undo immediately after closing.',
-        confirmLabel: 'Close community',
-        cancelLabel: 'Keep community',
+        confirmLabel: 'Close group',
+        cancelLabel: 'Keep group',
         icon: 'trash',
         trigger: button,
       })) return;
@@ -28525,14 +30364,14 @@
       if (!resetAction) return;
       try {
         const result = await api(`/clubs/${club.id}`, { method: 'DELETE' });
-        toast('Community closed', {
+        toast('Group closed', {
           tone: 'success', duration: 7000,
           action: result.recoverable ? {
             label: 'Undo',
             onClick: async () => {
               try {
                 await api(`/clubs/${club.id}/restore`, { method: 'POST' });
-                toast('Community restored');
+                toast('Group restored');
                 renderChat();
               } catch (error) { toast(error.message, { tone: 'warning' }); }
             },
@@ -28604,7 +30443,7 @@
       if (!await openActionConfirmation({
         eyebrow: 'Pinned announcement',
         title: 'Remove this announcement?',
-        message: 'It will no longer appear in the community info or chat.',
+        message: 'It will no longer appear in the group info or chat.',
         detail: 'Members are not notified when an announcement is removed.',
         confirmLabel: 'Remove announcement',
         cancelLabel: 'Keep announcement',
@@ -28669,8 +30508,8 @@
         const decision = button.dataset.requestDecision;
         const playerName = button.closest('[data-request-row]')?.querySelector('.row-title')?.textContent || 'this player';
         if (decision === 'decline' && !await openActionConfirmation({
-          eyebrow: 'Community request', title: `Decline ${playerName}?`,
-          message: 'They will not be added to this community.',
+          eyebrow: 'Group request', title: `Decline ${playerName}?`,
+          message: 'They will not be added to this group.',
           detail: 'They may request to join again later unless an organizer blocks them.',
           confirmLabel: 'Decline request', cancelLabel: 'Keep pending',
           icon: 'users', trigger: button,
@@ -28682,7 +30521,7 @@
             method: 'POST', body: JSON.stringify({ decision }),
           });
           data.items = data.items.filter((row) => Number(row.id) !== Number(button.dataset.requestId));
-          toast(decision === 'approve' ? `${playerName} joined the community` : 'Join request declined');
+          toast(decision === 'approve' ? `${playerName} joined the group` : 'Join request declined');
           if (data.items.length) renderRows();
           else {
             dismissModal(modal);
@@ -28721,7 +30560,7 @@
       box.removeAttribute('aria-busy');
       box.innerHTML = `
         ${modalHead('Blocked players')}
-        <p class="play-group-intro">Blocked players cannot join, request access, or receive an invitation to this community.</p>
+        <p class="play-group-intro">Blocked players cannot join, request access, or receive an invitation to this group.</p>
         ${items.length ? items.map((row) => `
           <div class="card row community-member-row" data-club-ban-row="${row.user.id}">
             ${avatarHtml(row.user, 'sm')}
@@ -28734,8 +30573,8 @@
         const row = button.closest('[data-club-ban-row]');
         const name = row?.querySelector('.row-title')?.textContent || 'this player';
         if (!await openActionConfirmation({
-          eyebrow: 'Community access', title: `Unblock ${name}?`,
-          message: 'They will be able to request access or join again, depending on this community’s join setting.',
+          eyebrow: 'Group access', title: `Unblock ${name}?`,
+          message: 'They will be able to request access or join again, depending on this group’s join setting.',
           detail: 'Unblocking does not automatically add them or send an invitation.',
           confirmLabel: 'Unblock player', cancelLabel: 'Keep blocked',
           icon: 'shield', trigger: button,
@@ -28760,13 +30599,13 @@
     let selected = ['all', 'mentions', 'off'].includes(club.my_notification_level)
       ? club.my_notification_level : 'all';
     const modal = openModal(`
-      ${modalHead('Community notifications')}
-      <p class="play-group-intro">Choose alerts for this community. Messages always remain available when you open the chat.</p>
-      <div class="community-notification-options" role="radiogroup" aria-label="Community notification level">
+      ${modalHead('Public group notifications')}
+      <p class="play-group-intro">Choose alerts for this public group. Save to apply. Messages stay available in chat.</p>
+      <div class="community-notification-options" role="radiogroup" aria-label="Public group notification level">
         ${[
     ['all', 'All messages', 'Notify me when anyone posts.'],
     ['mentions', 'Mentions only', 'Notify me only when someone writes @ followed by my name.'],
-    ['off', 'Off', 'Keep this community quiet.'],
+    ['off', 'Off', 'Keep this public group quiet.'],
   ].map(([value, label, help]) => `<button type="button" class="choice-card ${selected === value ? 'selected' : ''}" role="radio" aria-checked="${selected === value}" data-club-notification="${value}"><span><b>${label}</b><small>${help}</small></span>${uiIcon(selected === value ? 'check-circle' : 'circle')}</button>`).join('')}
       </div>
       <p class="form-error inline-action-error" data-inline-action-error role="alert" tabindex="-1" hidden></p>
@@ -28783,6 +30622,9 @@
       selected = button.dataset.clubNotification;
       sync();
     }));
+    bindChoiceRadioKeys(modal, '[data-club-notification]');
+    const initialLevel = selected;
+    const discardGuard = bindModalDiscardConfirmation(modal, { isDirty: () => selected !== initialLevel });
     modal.querySelector('#club-notification-save').addEventListener('click', async (event) => {
       clearInlineActionError(modal);
       const reset = beginButtonAction(event.currentTarget, 'Saving…');
@@ -28791,8 +30633,10 @@
         await api(`/clubs/${club.id}/notification-settings`, {
           method: 'PATCH', body: JSON.stringify({ level: selected }),
         });
+        club.my_notification_level = selected;
+        discardGuard.authorizeClose();
         dismissModal(modal);
-        toast('Community notifications updated');
+        toast('Public group notifications updated');
         await onSaved?.();
       } catch (error) { reset(); showInlineActionError(modal, error.message); }
     });
@@ -28808,7 +30652,7 @@
         <span class="row-main"><span class="row-title">${esc(member.display_name)}</span><span class="row-sub">${member.role === 'admin' ? 'Organizer' : 'Member'} · ${playerSkillIdentityHtml(member)}</span></span>
       </div>
       ${isOwner ? `<button type="button" class="btn btn-secondary btn-block" id="club-member-role">${uiIcon('users')} ${member.role === 'admin' ? 'Remove organizer role' : 'Make organizer'}</button>` : ''}
-      <button type="button" class="btn btn-secondary btn-block community-secondary-action" id="club-member-remove">Remove from community</button>
+      <button type="button" class="btn btn-secondary btn-block community-secondary-action" id="club-member-remove">Remove from group</button>
       <div class="form-field community-ban-reason">
         <label for="club-ban-reason">Reason for blocking (optional)</label>
         <textarea id="club-ban-reason" rows="2" maxlength="300" placeholder="Visible to organizers only"></textarea>
@@ -28840,9 +30684,9 @@
         title: `${ban ? 'Block' : 'Remove'} ${member.display_name}?`,
         message: ban
           ? 'They will lose access and will not be able to request or join again.'
-          : 'They will lose access to this community and its shared conversation.',
+          : 'They will lose access to this group and its shared conversation.',
         detail: ban
-          ? 'An organizer can reverse the block from Community settings.'
+          ? 'An organizer can reverse the block from Group settings.'
           : 'Their player account and game history remain unchanged. They can rejoin later.',
         confirmLabel: ban ? 'Remove and block' : 'Remove player',
         cancelLabel: 'Keep player', icon: 'users', trigger: button,
@@ -28960,7 +30804,7 @@
     modal._cleanupFns.push(() => clearTimeout(searchTimer));
     modal.querySelector('#club-invite-share').addEventListener('click', async () => {
       const url = `${location.origin}/cl/${club.id}`;
-      const text = `Join our pickleball community: ${club.name}`;
+      const text = `Join our pickleball group: ${club.name}`;
       try {
         if (navigator.share) await navigator.share({ title: 'Third Shot', text, url });
         else {
@@ -29160,15 +31004,15 @@
 
   function openCreateClubSheet() {
     const modal = openModal(`
-      ${modalHead('Start a community group')}
+      ${modalHead('Start a public group')}
       <form id="cb-form" novalidate>
-      <p class="row-sub community-description">A community group is public and discoverable: local players can join, talk, and plan play around a shared home court.</p>
+      <p class="row-sub community-description">A public group is discoverable. Local players can join, chat, and plan sessions together.</p>
       <div class="form-field">
-        <label for="cb-name">Community name</label>
+        <label for="cb-name">Group name</label>
         <input type="text" id="cb-name" maxlength="80" placeholder="e.g. Sunrise Dinkers" />
       </div>
       <div class="form-field">
-        <label for="cb-desc">What brings this community together? (optional)</label>
+        <label for="cb-desc">What brings this group together? (optional)</label>
         <textarea id="cb-desc" maxlength="500" rows="3" placeholder="e.g. Early birds, all levels welcome"></textarea>
       </div>
       <fieldset class="form-field community-join-policy">
@@ -29182,7 +31026,7 @@
         <input type="hidden" id="cb-court-id" value="" />
         <div id="cb-court-results" class="community-court-results"></div>
       </div>
-      <button type="submit" class="btn btn-primary btn-block community-create-submit" id="cb-submit">Start community group</button>
+      <button type="submit" class="btn btn-primary btn-block community-create-submit" id="cb-submit">Start public group</button>
       </form>
     `);
     modal.querySelectorAll('[name="cb-join-policy"]').forEach((radio) => radio.addEventListener('change', () => {
@@ -29195,11 +31039,11 @@
       formUX.clearError();
       const name = modal.querySelector('#cb-name').value.trim();
       if (name.length < 3) {
-        formUX.showError('Give your community a name (3+ characters).', modal.querySelector('#cb-name'));
+        formUX.showError('Give your group a name (3+ characters).', modal.querySelector('#cb-name'));
         return;
       }
       const courtId = Number(modal.querySelector('#cb-court-id').value) || null;
-      const finishSubmitting = formUX.startSubmitting('Starting community…');
+      const finishSubmitting = formUX.startSubmitting('Starting group…');
       if (!finishSubmitting) return;
       try {
         const club = await api('/clubs', { method: 'POST', body: JSON.stringify({
@@ -29209,7 +31053,7 @@
           home_court_id: courtId,
         }) });
         formUX.clearDraft({ disable: true });
-        toast('Community group started');
+        toast('Public group started');
         transitionModal(modal, () => openClubScreen(club.id));
         renderChat();
       } catch (err) {
@@ -29221,10 +31065,10 @@
 
   function openEditClubSheet(club, onSaved = null) {
     const modal = openModal(`
-      ${modalHead('Edit community group')}
+      ${modalHead('Edit public group')}
       <form id="ce-form" novalidate>
       <div class="form-field">
-        <label for="ce-name">Community name</label>
+        <label for="ce-name">Group name</label>
         <input type="text" id="ce-name" maxlength="80" value="${esc(club.name)}" />
       </div>
       <div class="form-field">
@@ -29255,7 +31099,7 @@
       formUX.clearError();
       const name = modal.querySelector('#ce-name').value.trim();
       if (name.length < 3) {
-        formUX.showError('Community name needs 3+ characters.', modal.querySelector('#ce-name'));
+        formUX.showError('Group name needs 3+ characters.', modal.querySelector('#ce-name'));
         return;
       }
       const searchVal = modal.querySelector('#ce-court-search').value.trim();
@@ -29270,7 +31114,7 @@
       try {
         await api(`/clubs/${club.id}`, { method: 'PATCH', body: JSON.stringify(body) });
         formUX.clearDraft({ disable: true });
-        toast('Community group updated');
+        toast('Public group updated');
         if (onSaved) {
           onSaved();
           closeModal(modal);
@@ -29287,9 +31131,9 @@
 
   async function openFindClubsSheet({ courtId = null, courtName = '' } = {}) {
     const modal = openModal(`
-      ${modalHead(courtId ? `Communities at ${courtName || 'this court'}` : 'Find community groups')}
+      ${modalHead(courtId ? `Public groups at ${courtName || 'this court'}` : 'Find public groups')}
       <div class="form-field" style="margin-top:4px">
-          <label class="sr-only" for="fc-search">Search community groups</label>
+          <label class="sr-only" for="fc-search">Search public groups</label>
           <input type="search" id="fc-search" placeholder="Search by name or description…" autocomplete="off" aria-controls="fc-results" />
       </div>
       <div id="fc-results" aria-live="polite" aria-busy="true">${skeletonHtml(3)}</div>
@@ -29299,7 +31143,7 @@
     let clubSearchSeq = 0;
     const renderResults = (items) => {
       resultsEl.innerHTML = items.length ? items.map((cl) => `
-        <button type="button" class="card row nav-row-button community-search-result" data-open-club="${cl.id}" aria-label="Open ${esc(cl.name)} community${cl.joined ? ', member' : ''}">
+        <button type="button" class="card row nav-row-button community-search-result" data-open-club="${cl.id}" aria-label="Open ${esc(cl.name)} public group${cl.joined ? ', member' : ''}">
           <span class="nav-row-leading">${uiIcon('users')}</span>
           <span class="row-main">
             <span class="row-title">${esc(cl.name)}</span>
@@ -29307,7 +31151,7 @@
           </span>
           ${cl.joined ? `<span class="tag" style="margin:0">${uiIcon('check-circle')} Member</span>` : uiIcon('chevron-right', 'chev')}
         </button>`).join('')
-        : `<div class="empty-state actionable-empty-state"><span class="empty-state-icon" aria-hidden="true">${uiIcon('building')}</span><b>No community groups found</b><span class="empty-state-copy">Start one for players around your court.</span><div class="empty-state-actions"><button type="button" class="btn btn-primary" data-create-community>${uiIcon('plus')} Create a community</button></div></div>`;
+        : `<div class="empty-state actionable-empty-state"><span class="empty-state-icon" aria-hidden="true">${uiIcon('building')}</span><b>No public groups found</b><span class="empty-state-copy">Start one for players around your court.</span><div class="empty-state-actions"><button type="button" class="btn btn-primary" data-create-community>${uiIcon('plus')} Create a public group</button></div></div>`;
       resultsEl.querySelectorAll('[data-open-club]').forEach((row) => row.addEventListener('click', () => {
         openChildModal(modal, () => openClubScreen(Number(row.dataset.openClub)));
       }));
@@ -29349,10 +31193,17 @@
     return modal;
   }
 
+  function courtPhotoCategories() {
+    return [['court','Courts'],['entrance','Entrance'],['parking','Parking'],['nets','Nets'],['accessibility','Accessibility'],['other','Other']];
+  }
+
   function galleryPhotoMetaHtml(photo) {
-    const date = resultDayLabel(photo.created_at);
-    return `${photo.caption ? `<strong>${esc(photo.caption)}</strong>` : '<strong>Court photo</strong>'}
-      <span>by ${esc(photo.user_name)}${date ? ` · ${esc(date)}` : ''}</span>`;
+    const uploaded = resultDayLabel(photo.created_at);
+    const taken = photo.captured_on ? new Intl.DateTimeFormat(undefined, {month:'short',day:'numeric',year:'numeric'}).format(new Date(`${photo.captured_on}T12:00:00`)) : '';
+    const category = courtPhotoCategories().find(([key]) => key === photo.category)?.[1];
+    return `${photo.caption ? `<strong>${esc(photo.caption)}</strong>` : `<strong>${esc(category || 'Court photo')}</strong>`}
+      <span>${category && photo.caption ? `${esc(category)} · ` : ''}${taken ? `Taken ${esc(taken)}` : 'Date taken not provided'}</span>
+      <span>by ${esc(photo.user_name)}${uploaded ? ` · Uploaded ${esc(uploaded)}` : ''}</span>`;
   }
 
   async function toggleCourtPhotoLike(court, photo, button) {
@@ -29484,13 +31335,16 @@
     if (!routedOverlayLoadIsCurrent(modalLoad) || !modal.isConnected) return;
     box.removeAttribute('aria-busy');
     const photos = data.items || [];
+    let category = 'all';
     const renderGallery = () => {
       if (!modal.isConnected) return;
+      const visible = photos.map((photo,index) => ({photo,index})).filter(({photo}) => category === 'all' || (photo.category || 'unclassified') === category);
       box.innerHTML = `
         ${modalHead(court.name, 'camera')}
-        <p class="gallery-count" aria-live="polite">${photos.length} photo${photos.length === 1 ? '' : 's'} · Select one to view full screen</p>
-        ${photos.length ? `<div class="gallery-scroll">
-          ${photos.map((photo, index) => `
+        <p class="gallery-count" aria-live="polite">${visible.length} photo${visible.length === 1 ? '' : 's'} · Select one to view full screen</p>
+        ${photos.length ? `<label class="form-field" for="gallery-category">Show photos<select id="gallery-category"><option value="all">All photos</option>${[...courtPhotoCategories(),['unclassified','Unclassified']].filter(([key]) => photos.some(photo => (photo.category || 'unclassified') === key)).map(([key,label]) => `<option value="${key}" ${category === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}
+        ${visible.length ? `<div class="gallery-scroll">
+          ${visible.map(({photo,index}) => `
             <figure class="gallery-item" data-gallery-photo-id="${photo.id}">
               <button type="button" class="gallery-open" data-open-photo-index="${index}" aria-label="Open photo ${index + 1} of ${photos.length}">
                 <span class="gallery-photo-fallback" aria-hidden="true">${uiIcon('camera')}<span>Photo unavailable</span></span>
@@ -29509,6 +31363,7 @@
         <button class="btn btn-secondary btn-block" id="gal-add" style="margin-top:12px">${uiIcon('camera')} Add your photo</button>
       `;
       setDialogLabel(box, `${court.name} photos`);
+      box.querySelector('#gallery-category')?.addEventListener('change', event => { category = event.target.value; renderGallery(); box.querySelector('#gallery-category')?.focus(); });
       box.querySelector('#gal-add').addEventListener('click', (event) => {
         if (!uploadFn) return;
         const reopenGallery = () => transitionModal(
@@ -29710,6 +31565,9 @@
       } else {
         friendAction = `${user.can_message ? `<button class="btn btn-primary" id="up-msg">${uiIcon('message')} Message</button>` : ''}<button class="btn ${user.can_message ? 'btn-secondary' : 'btn-primary'}" id="up-add">${uiIcon('plus')} Add friend</button>`;
       }
+      if (!user.is_blocked) {
+        friendAction = `<button type="button" class="btn btn-primary" id="up-invite">${uiIcon('calendar')} Invite to play</button>${friendAction.replaceAll('btn-primary', 'btn-secondary')}`;
+      }
       profileMoreAction = `<div class="profile-more-actions">
         <button type="button" class="btn btn-secondary" id="up-more" aria-haspopup="menu" aria-expanded="false" aria-controls="up-more-menu" aria-label="More actions for ${esc(user.display_name)}">${uiIcon('sliders')} More</button>
         <div class="profile-more-menu" id="up-more-menu" role="menu" aria-label="Actions for ${esc(user.display_name)}" hidden>
@@ -29755,10 +31613,10 @@
     const availHtml = availLines.length ? `
       <div class="card" style="padding:10px 14px;margin:12px 0 0">
         <div class="row-sub profile-availability-title">${uiIcon('clock')} Usually plays${
-          userId !== state.me.id && availabilityOverlap(state.me.availability, user.availability)
+          userId !== state.me.id && !playerAwayUntil(user) && !playerAwayUntil(state.me) && availabilityOverlap(state.me.availability, user.availability)
             ? ` <span class="tag" style="margin:0 0 0 6px">${uiIcon('users')} Your times too</span>` : ''}</div>
         ${availLines.map((l) => `<div class="row-sub">${l}</div>`).join('')}
-        ${userId !== state.me.id && sharedAvailabilityText(state.me.availability, user.availability)
+        ${userId !== state.me.id && !playerAwayUntil(user) && !playerAwayUntil(state.me) && sharedAvailabilityText(state.me.availability, user.availability)
           ? `<div class="row-sub community-inline-status" style="margin-top:6px">${uiIcon('users', 'community-inline-icon')} You both play: ${esc(sharedAvailabilityText(state.me.availability, user.availability))}</div>
              <button class="btn btn-secondary btn-sm btn-block" id="up-schedule-shared" style="margin-top:8px">${uiIcon('pickleball')} Schedule at a shared time</button>` : ''}
       </div>` : '';
@@ -29780,8 +31638,15 @@
         <div class="profile-sub">${user.active_now ? '<span class="community-presence-status"><span class="community-presence-dot" aria-hidden="true"></span>Active now</span> · ' : ''}${playerSkillIdentityHtml(user)}${user.home_court_name ? ` · ${uiIcon('home', 'community-inline-icon')} ${esc(user.home_court_name)}` : ''}</div>
         ${user.invited_by_you ? `<p class="profile-sub profile-referral-note">${uiIcon('users', 'community-inline-icon')} Joined from your invitation</p>` : ''}
         ${user.bio ? `<p class="profile-sub" style="margin-top:8px">${esc(user.bio)}</p>` : ''}
+        ${playerAwayLabel(user) ? `<p class="profile-sub">${esc(playerAwayLabel(user))} · Usual times stay saved</p>` : ''}
         ${(user.mutual_friends || []).length ? `<p class="profile-sub profile-mutuals" style="margin-top:8px">${uiIcon('users', 'community-inline-icon')} ${mutualFriendsText(user.mutual_friends)}</p>` : ''}
       </div>
+      <div class="action-row player-primary-actions">${friendAction}${profileMoreAction}</div>
+      <p class="form-error inline-action-error" data-inline-action-error role="alert" tabindex="-1" hidden></p>
+      ${availHtml}
+      ${upcoming.length ? `<div class="section-label">Upcoming play</div>${upcoming.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
+      ${courts.length ? `<div class="section-label">Courts</div>${courts.map(courtRow).join('')}` : ''}
+      <details class="simple-disclosure player-play-history"><summary>Play history</summary>
       <div class="stat-grid">
         ${publicHeadlineStats}
       </div>
@@ -29793,12 +31658,8 @@
         </div>` : ''}
       ${tournamentTitlesHtml(user.tournament_titles, user.league_titles)}
       ${h2hHtml}
-      ${availHtml}
-      <div class="action-row">${friendAction}${profileMoreAction}</div>
-      <p class="form-error inline-action-error" data-inline-action-error role="alert" tabindex="-1" hidden></p>
-      ${upcoming.length ? `<div class="section-label">Upcoming play</div>${upcoming.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
-      ${courts.length ? `<div class="section-label">Courts</div>${courts.map(courtRow).join('')}` : ''}
       ${games.length ? `<div class="section-label">Recent play</div>${games.map((g) => gameCardHtml(g, { compact: true })).join('')}` : ''}
+      </details>
     `;
     setDialogLabel(box, `${user.display_name} profile`);
 
@@ -29975,6 +31836,9 @@
     modal.querySelector('#up-msg')?.addEventListener('click', () => {
       openChildModal(modal, () => openThread(userId));
     });
+    modal.querySelector('#up-invite')?.addEventListener('click', () => {
+      openChildModal(modal, () => openNewGameModal(playerInvitePlannerOptions(user)));
+    });
     modal.querySelector('#up-challenge')?.addEventListener('click', () => {
       // Ranked singles, right now. Default to a court that makes sense:
       // where you're checked in, else your primary court, else theirs.
@@ -30045,7 +31909,7 @@
     const openCalendarSubscription = () => {
       const sheet = openModal(`
         ${modalHead('Play calendar', 'calendar')}
-        <p class="row-sub calendar-fallback-copy">Subscribe once and future sessions, matches, updates, and cancellations stay in sync.</p>
+        <p class="row-sub calendar-fallback-copy">Subscribe to sessions and matches. Your calendar provider controls refresh timing; check Third Shot for urgent changes or cancellations.</p>
         <div class="calendar-subscription-actions">
           <a class="btn btn-primary btn-block" id="calendar-google-subscribe" target="_blank" rel="noopener">${uiIcon('external')} Add to Google Calendar</a>
           <a class="btn btn-secondary btn-block" id="calendar-device-subscribe">${uiIcon('calendar')} Open in Apple or Outlook</a>
@@ -30206,6 +32070,28 @@
     return window.VenueWorkspace.task(options, uiIcon);
   }
 
+  function openBusinessConflictReview(parent, conflicts) {
+    return new Promise((resolve) => {
+      const display = (value) => value == null || value === '' ? 'Not set' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+      const sheet = openChildModal(parent, () => openModal(`${modalHead('Review overlapping edits')}<p class="business-form-note">Another manager changed the same information. Choose what to keep. All other saved changes and your other edits will stay.</p><form data-venue-conflicts>${conflicts.map((conflict, index) => `<fieldset class="venue-form-section"><legend>${esc(conflict.label)}</legend><label class="business-authorized-check"><input type="radio" name="venue-conflict-${index}" value="theirs" required /><span><b>Latest saved</b><br />${esc(display(conflict.theirs))}</span></label><label class="business-authorized-check"><input type="radio" name="venue-conflict-${index}" value="mine" required /><span><b>My edit</b><br />${esc(display(conflict.mine))}</span></label></fieldset>`).join('')}<button type="submit" class="btn btn-primary btn-block" data-venue-conflicts-save>Save chosen changes</button><button type="button" class="btn btn-secondary btn-block" data-venue-conflicts-back>Back to my edits</button></form>`, {label: 'Review overlapping venue edits'}));
+      let completed = false;
+      const finish = choices => { if (completed) return; completed = true; resolve(choices); };
+      sheet._cleanupFns?.push(() => finish(null));
+      const formUX = bindModalFormUX(sheet, '[data-venue-conflicts-save]');
+      sheet.querySelector('[data-venue-conflicts]').addEventListener('submit', event => {
+        event.preventDefault();
+        const choices = {};
+        for (let index = 0; index < conflicts.length; index += 1) {
+          const selected = sheet.querySelector(`input[name="venue-conflict-${index}"]:checked`);
+          if (!selected) { formUX.showError('Choose which value to keep for each change.', sheet.querySelector(`input[name="venue-conflict-${index}"]`)); return; }
+          choices[conflicts[index].key] = selected.value;
+        }
+        finish(choices); closeModal(sheet);
+      });
+      sheet.querySelector('[data-venue-conflicts-back]').addEventListener('click', () => { finish(null); closeModal(sheet); });
+    });
+  }
+
   function openBusinessBookingSetup(rawBusiness, onSaved) {
     let business = normalizeBusinessProfile(rawBusiness);
     const initialLinks = { booking_url: business.booking_url || '', membership_url: business.membership_url || '' };
@@ -30229,12 +32115,12 @@
       bindModalDiscardConfirmation(modal, { isDirty: formUX.isDirty, onDiscard: () => formUX.clearDraft({ disable: true }), title: 'Discard unsaved booking links?', message: 'Your booking links have not been saved.' });
       modal.querySelector('#venue-booking-form').addEventListener('submit', async (event) => {
         event.preventDefault(); formUX.clearError();
-        const booking = optionalBusinessUrl(modal, '#venue-booking-url', 'booking', formUX);
-        const membership = optionalBusinessUrl(modal, '#venue-membership-url', 'membership', formUX);
+        const booking = optionalBusinessUrl(modal, '#venue-booking-url', 'booking', formUX, initialLinks.booking_url);
+        const membership = optionalBusinessUrl(modal, '#venue-membership-url', 'membership', formUX, initialLinks.membership_url);
         if (booking === null || membership === null) return;
         const finish = formUX.startSubmitting('Saving…'); if (!finish) return;
         try {
-          const updated = await api(`/businesses/${business.id}`, { method: 'PATCH', body: JSON.stringify(window.VenueWorkspace.changedDetails(initialLinks, { booking_url: booking, membership_url: membership })) });
+          const updated = await window.VenueWorkspace.saveEdits({...business, ...initialLinks}, {changes: window.VenueWorkspace.changedDetails(initialLinks, { booking_url: booking, membership_url: membership }), request: api, resolveConflicts: conflicts => openBusinessConflictReview(modal, conflicts)});
           formUX.clearDraft({ disable: true }); closeModal(modal); adoptSaved(updated); toast('Booking links saved');
         } catch (error) { finish(); formUX.showError(error.message); }
       });
@@ -30259,11 +32145,11 @@
       ${context.businesses.length > 1 ? `<button type="button" class="business-hub-back" id="business-hub-locations">${uiIcon('arrow-left')} Your venues</button>` : ''}
       <header class="venue-owner-heading"><span class="venue-owner-mark" aria-hidden="true">${uiIcon('building')}</span><div class="row-main"><p class="simple-eyebrow">YOUR VENUE</p><h2>${esc(business.name || businessCourtName(business))}</h2><p>${esc(businessCourtName(business))}</p></div><div class="venue-owner-header-actions"><button type="button" class="btn btn-secondary" id="business-player-preview">${uiIcon('eye')} Preview</button><button type="button" class="venue-settings-button" id="venue-open-settings" aria-label="Venue settings and team">${uiIcon('settings')}</button></div></header>
       <section class="venue-owner-status ${isPublic ? 'is-live' : ''}" aria-label="Publishing status"><span>${uiIcon(isPublic ? 'check-circle' : 'eye')}</span><div class="row-main"><b>${esc(workspace.title)}</b><p>${esc(workspace.copy)}</p></div>
-        ${workspace.tool === 'publish' ? '<button type="button" class="btn btn-primary" id="business-publish-toggle">Publish venue</button>' : !isPublic ? `<button type="button" class="btn btn-secondary" data-business-tool="${workspace.tool}">${esc(workspace.action)}</button>` : ''}
+        ${workspace.tool === 'publish' ? `<button type="button" class="btn btn-primary" id="business-publish-toggle">${business.has_unpublished_changes ? 'Publish changes' : 'Publish venue'}</button>` : !isPublic ? `<button type="button" class="btn btn-secondary" data-business-tool="${workspace.tool}">${esc(workspace.action)}</button>` : ''}
         ${status === 'rejected' && canOwn ? '<button type="button" class="btn-link" id="business-resubmit-claim">Update and resubmit claim</button>' : ''}
       </section>
       ${context.savedMessage ? `<p class="venue-save-success" role="status">${uiIcon('check-circle')} ${esc(context.savedMessage)}</p>` : ''}
-      ${window.VenueWorkspace.render(business, { icon: uiIcon, day: businessDayLabel, time: businessTimeLabel, workspace, canEdit: canEditContent, panel: context.venuePanel })}
+      ${window.VenueWorkspace.render(business, { icon: uiIcon, day: businessDayLabel, time: businessTimeLabel, workspace, canEdit: canEditContent, panel: context.venuePanel, agendaView: context.agendaView || 'week' })}
       <details class="simple-disclosure venue-management"><summary>Venue settings &amp; team</summary>
         <p class="simple-note">${esc(managerRole.replace(/^./, (c) => c.toUpperCase()))} access</p>
         ${venueTaskHtml({tool:'team',icon:'users',title:'Team access',copy:'Add staff and manage their permissions'})}
@@ -30285,21 +32171,36 @@
     };
     const openToolChild = (openNext) => openChildModal(modal, openNext);
     const savedBusiness = (updated) => {
-      context.savedMessage = updated.content_review_status === 'pending'
-        ? 'Saved. Your listing is private while the changed details or links are reviewed.'
-        : updated.is_public === true ? 'Saved. Your player listing is up to date.' : 'Saved to your venue. Your listing is still private.';
+      context.agendaRequestId = (context.agendaRequestId || 0) + 1;
+      context.savedMessage = window.VenueWorkspace.savedStatus(updated);
       updateBusiness(updated);
+      if (context.agendaOffset) loadAgenda(context.agendaOffset, updated, 0);
     };
+    const loadAgenda = async (offset = 0, source = business, priorOffset = context.agendaOffset || 0) => {
+      const requestId = context.agendaRequestId = (context.agendaRequestId || 0) + 1;
+      const start = new Date(`${source.schedule_range?.from || new Date().toISOString().slice(0,10)}T12:00:00`);
+      start.setDate(start.getDate() + offset - priorOffset);
+      const dateKey = value => `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`;
+      const from = dateKey(start); const end = new Date(start); end.setDate(end.getDate() + 6);
+      try {
+        const data = await api(`/businesses/${business.id}/agenda?draft=1&from=${from}&to=${dateKey(end)}`);
+        if (!body.isConnected || context.agendaRequestId !== requestId) return;
+        context.agendaOffset = offset; context.agendaView = 'week';
+        updateBusiness({...source, schedule_occurrences: data.items, schedule_range: {from:data.from,to:data.to}});
+      } catch (error) { toast(error.message); }
+    };
+    body.querySelectorAll('[data-venue-agenda-shift]').forEach(button => button.addEventListener('click', () => loadAgenda((context.agendaOffset || 0) + Number(button.dataset.venueAgendaShift))));
+    body.querySelector('[data-venue-agenda-today]')?.addEventListener('click', () => loadAgenda(0));
+    body.querySelectorAll('[data-venue-agenda-view]').forEach(button => button.addEventListener('click', () => { context.agendaView = button.dataset.venueAgendaView; updateBusiness(business); }));
     const saveItem = async (kind, updated, original) => {
-      const fresh = normalizeBusinessProfile(await api(`/businesses/${business.id}`));
-      const items = window.VenueWorkspace.mergeItem(fresh[kind], updated, original);
-      const result = await api(`/businesses/${business.id}/${kind}`, { method: 'PUT', body: JSON.stringify({ items }) });
+      const items = window.VenueWorkspace.mergeItem(business[kind], updated, original);
+      const result = await window.VenueWorkspace.saveEdits(business, {kind, items, request: api, resolveConflicts: conflicts => openBusinessConflictReview(modal, conflicts)});
       savedBusiness(result);
     };
     const editItem = (kind, item = null) => {
       if (!canEditContent) return;
       const openForm = kind === 'schedule' ? openBusinessScheduleItemForm : openBusinessOfferingForm;
-      const child = openToolChild(() => openForm(item || {}, item ? 0 : -1, (updated) => saveItem(kind, updated, item), { persist: true }));
+      const child = openToolChild(() => openForm(item || {}, item ? 0 : -1, (updated) => saveItem(kind, updated, item), { persist: true, venueTimezone: business.timezone, services: business.offerings }));
       if (child?.querySelector) {
         child.querySelector('.modal-head')?.insertAdjacentHTML('afterend', `<p class="venue-editor-context">${esc(business.name)} · ${kind === 'schedule' ? 'Sessions & events' : 'Lessons & services'}</p>`);
       }
@@ -30308,12 +32209,27 @@
     body.querySelectorAll('[data-venue-edit]').forEach((button) => button.addEventListener('click', () => {
       const kind = button.dataset.venueEdit;
       const item = business[kind].find((row) => Number(row.id) === Number(button.dataset.itemId));
-      if (item) editItem(kind, item);
+      const occurrence = button.dataset.occurrenceOn && business.schedule_occurrences?.find(row => Number(row.schedule_item_id) === Number(button.dataset.itemId) && row.occurrence_on === button.dataset.occurrenceOn);
+      if (item && occurrence) openToolChild(() => openBusinessOccurrenceEditor(business, item, occurrence, savedBusiness));
+      else if (item) editItem(kind, item);
+    }));
+    body.querySelectorAll('[data-venue-duplicate]').forEach(button => button.addEventListener('click', () => {
+      const occurrence = business.schedule_occurrences?.find(row => Number(row.schedule_item_id) === Number(button.dataset.venueDuplicate) && row.occurrence_on === button.dataset.occurrenceOn);
+      if (!occurrence) return;
+      const copy = {...occurrence}; delete copy.id; delete copy.schedule_item_id; delete copy.occurrence_on;
+      openToolChild(() => openBusinessScheduleItemForm(copy, -1, value => saveItem('schedule', value, null), {persist:true, venueTimezone:business.timezone, services:business.offerings}));
     }));
     body.querySelectorAll('[data-venue-remove]').forEach((button) => button.addEventListener('click', async () => {
       if (!canEditContent) return;
       const kind = button.dataset.venueRemove;
       const item = business[kind].find((row) => Number(row.id) === Number(button.dataset.itemId));
+      const occurrence = button.dataset.occurrenceOn && business.schedule_occurrences?.find(row => Number(row.schedule_item_id) === Number(button.dataset.itemId) && row.occurrence_on === button.dataset.occurrenceOn);
+      if (occurrence) {
+        if (!await openActionConfirmation({title: `Cancel ${occurrence.title} on ${occurrence.occurrence_on}?`, message:'Other dates stay scheduled.', confirmLabel:'Cancel this date', cancelLabel:'Keep session', tone:'danger', trigger:button})) return;
+        const finish = beginButtonAction(button, 'Cancelling…'); if (!finish) return;
+        try { savedBusiness(await window.VenueWorkspace.saveOccurrence(business, occurrence, {status:'cancelled'}, {request:api, resolveConflicts:conflicts => openBusinessConflictReview(modal, conflicts)})); } catch (error) { finish(); toast(error.message); }
+        return;
+      }
       if (!item || !await openActionConfirmation({ title: `Remove ${item.title || item.name}?`, message: 'This item will be removed from your venue. You can add it again later.', confirmLabel: 'Remove item', cancelLabel: 'Keep item', icon: 'trash', tone: 'danger', trigger: button })) return;
       const reset = beginButtonAction(button, 'Removing…'); if (!reset) return;
       try { await saveItem(kind, null, item); } catch (error) { reset(); toast(error.message); }
@@ -30359,7 +32275,7 @@
     body.querySelectorAll('[data-business-setup]').forEach((button) => button.addEventListener('click', () => openTool(button.dataset.businessSetup)));
     body.querySelector('#business-publish-toggle').addEventListener('click', async (event) => {
       const button = event.currentTarget;
-      if (publicationEnabled && !await openActionConfirmation({
+      if (publicationEnabled && workspace.tool !== 'publish' && !await openActionConfirmation({
         eyebrow: 'Player visibility',
         title: 'Unpublish this business profile?',
         message: 'Players will stop seeing the venue profile, offerings, schedule, and booking actions until it is published again.',
@@ -30373,7 +32289,7 @@
       button.disabled = true;
       try {
         const updated = await api(`/businesses/${business.id}`, {
-            method: 'PATCH', body: JSON.stringify({ published: !publicationEnabled }),
+            method: 'PATCH', headers: window.VenueWorkspace.contentHeaders(business), body: JSON.stringify({ published: workspace.tool === 'publish' || !publicationEnabled }),
         });
         toast(updated.published
           ? 'Business profile published'
@@ -30417,10 +32333,12 @@
   function openBusinessPlayerPreview(business) {
     const modal = openModal(`
       ${modalHead('Player listing preview')}
+      <button type="button" class="btn btn-secondary btn-block" data-preview-court-context>${uiIcon('map-pin')} Preview in full court page</button>
       <div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>Preview only</b><br />Only business managers can see this draft preview. Public court pages show verified, published profiles.</p></div>
-      ${courtBusinessHtml({ ...business, is_owner: false, is_manager: false, preview_only: true })}
+      ${courtBusinessHtml({ ...business, logo_url: business.logo_preview_url || business.logo_url, is_owner: false, is_manager: false, preview_only: true })}
     `, { label: 'Business player listing preview' });
     bindBusinessLogoFallback(modal);
+    modal.querySelector('[data-preview-court-context]').addEventListener('click', () => openChildModal(modal, () => openCourtDetail(business.court_id, {venuePreview: business, focusBusiness: true})));
     modal.querySelector('[data-open-business-schedule]')?.addEventListener('click', () => {
       const services = modal.querySelector('.business-services-disclosure');
       const schedule = modal.querySelector('.business-schedule-disclosure');
@@ -30519,6 +32437,35 @@
     return modal;
   }
 
+  function openPendingVenueLocationEditor(business, onSaved) {
+    const baseline = business.proposed_location || {};
+    const modal = openModal(`${modalHead('Correct venue location')}<form id="venue-location-form" novalidate>${window.VenueWorkspace.locationFields(baseline)}<button type="submit" class="btn btn-primary btn-block" id="venue-location-save">Save location for review</button><p class="simple-note">This location stays private until an operator approves it.</p></form>`, {label:'Correct pending venue location'});
+    const formUX = bindModalFormUX(modal, '#venue-location-save', {draftKey:`venue-location-${business.id}`});
+    const readLocation = window.VenueWorkspace.bindLocation(modal, {request:api, showError:formUX.showError, icon:uiIcon});
+    bindModalDiscardConfirmation(modal, {isDirty:formUX.isDirty, onDiscard:()=>formUX.clearDraft({disable:true})});
+    modal.querySelector('#venue-location-form').addEventListener('submit', async event => {
+      event.preventDefault(); formUX.clearError(); const edits = readLocation(); if (!edits) return;
+      const finish = formUX.startSubmitting('Saving location…'); if (!finish) return;
+      try {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const latest = await api(`/businesses/${business.id}`);
+          if (!latest.location_pending_review) throw new Error('The location has been approved. Your edits are still here; use the court’s correction form for further changes.');
+          let merged = window.VenueWorkspace.reconcileProfile(baseline, edits, latest.proposed_location);
+          if (merged.conflicts.length) {
+            const choices = await openBusinessConflictReview(modal, merged.conflicts);
+            if (!choices) throw new Error('Your edits are still here. Nothing was saved.');
+            merged = window.VenueWorkspace.reconcileProfile(baseline, edits, latest.proposed_location, choices);
+          }
+          try {
+            const saved = await api(`/businesses/${business.id}/location`, {method:'PATCH', headers:window.VenueWorkspace.contentHeaders(latest), body:JSON.stringify({...latest.proposed_location, ...merged.value})});
+            formUX.clearDraft({disable:true}); closeModal(modal); onSaved?.(saved); toast('Location saved for review'); return;
+          } catch (error) { if (error.status !== 412 || attempt === 2) throw error; }
+        }
+      } catch (error) { finish(); formUX.showError(error.data?.message || error.message); }
+    });
+    return modal;
+  }
+
   function openBusinessVerificationCenter(business, onSaved, { evidenceId = null, token = '' } = {}) {
     const modal = openModal(`${modalHead('Verify your venue')}<div class="business-feature-body" aria-live="polite">${skeletonHtml(2)}</div>`, { label: 'Business verification center' });
     const body = modal.querySelector('.business-feature-body');
@@ -30532,7 +32479,8 @@
       let verification;
       try { verification = await api(`/businesses/${business.id}/verification`); }
       catch (error) {
-        body.innerHTML = `${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.status) ? '<button class="btn btn-secondary btn-block" data-retry>Try again</button>' : ''}`;
+        body.innerHTML = `
+${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.status) ? '<button class="btn btn-secondary btn-block" data-retry>Try again</button>' : ''}`;
         body.querySelector('[data-retry]')?.addEventListener('click', load); return;
       }
       const claims = Array.isArray(verification.claims) ? verification.claims : [];
@@ -30544,11 +32492,18 @@
       const status = String(verification.claim_status || claim?.status || business.claim_status || 'pending').toLowerCase();
       const feedback = claim?.feedback || business.review_feedback || '';
       const canSubmit = claim && claim.status === 'pending';
+      const submittedOn = claim?.created_at ? fmtDateTime(claim.created_at) : '';
+      const nextStep = status === 'verified' ? (business.content_review_status === 'pending' ? 'Your role is approved. Listing changes are awaiting content review; publish them after approval.' : business.is_public ? 'Your listing is live. Update it in your venue workspace.' : 'Preview your listing, then publish it from your venue workspace.') : status === 'rejected' ? 'Read the feedback, correct the details, then resubmit your claim.' : challenge ? 'Enter the code sent to your work email below.' : evidence.some(item => ['submitted', 'verified', 'accepted'].includes(item.status)) ? 'Your information is with the review team. You can keep preparing your venue while it is reviewed.' : 'Send a work email code or add an official reference below.';
       body.innerHTML = `
+        <ol class="venue-verification-progress" aria-label="Venue publication progress"><li><span>1 · Management role</span><b>${status === 'verified' ? 'Approved' : status === 'rejected' ? 'Needs your update' : 'Under review'}</b></li><li><span>2 · Listing content</span><b>${status !== 'verified' ? 'Prepare your details' : business.content_review_status === 'pending' ? 'Under review' : business.content_review_status === 'rejected' ? 'Needs your update' : 'Ready to publish'}</b></li><li><span>3 · Player listing</span><b>${business.is_public ? business.has_unpublished_changes ? 'Approved version live' : 'Live' : 'Private'}</b></li></ol>
         <div class="business-trust-summary ${status === 'verified' ? 'is-ready' : status === 'rejected' ? 'is-error' : 'is-pending'}">
           <span aria-hidden="true">${uiIcon(businessStateIconName(status))}</span><div><b>${status === 'verified' ? 'Your management role is verified' : status === 'rejected' ? 'More information is needed' : 'Your claim is being reviewed'}</b>
-          <p>${status === 'verified' ? 'You can now publish and manage your venue listing.' : 'Confirm your work email or provide an official reference. Our team will review your role before the venue goes live.'}</p></div>
+          <p>${esc(nextStep)}</p></div>
         </div>
+        ${submittedOn ? `<p class="simple-note">Submitted ${esc(submittedOn)} · ${esc(status === 'verified' ? 'Role approved' : status === 'rejected' ? 'Action needed' : 'Review pending')}</p>` : ''}
+        ${business.location_pending_review ? `<div class="card"><b>Private location · awaiting review</b><p>${esc([business.proposed_location?.address, business.proposed_location?.city, business.proposed_location?.state].filter(Boolean).join(', '))}</p><button type="button" class="btn btn-secondary" id="venue-location-correct">Correct location</button></div>` : ''}
+        ${status === 'rejected' ? '<button type="button" class="btn btn-primary btn-block" id="venue-claim-resubmit">Update and resubmit claim</button>' : ''}
+        <p class="simple-note"><a href="mailto:support@third-shot.app">Contact venue support</a></p>
         ${feedback ? `<div class="card business-review-feedback"><span class="section-label">Reviewer feedback</span><p>${esc(feedback)}</p></div>` : ''}
         ${evidence.length ? `<details class="simple-disclosure"><summary>Submitted information · ${evidence.length}</summary><div class="business-evidence-list">${evidence.map((item) => `<div class="card business-evidence-row"><span aria-hidden="true">${uiIcon(businessStateIconName(item.status))}</span><div class="row-main"><b>${esc(typeLabels[item.type] || item.type || 'Evidence')}</b><small>${esc(item.value || '')}</small><small>${esc(String(item.status || 'submitted').replace(/_/g, ' '))}${item.challenge_expires_at ? ` · expires ${esc(fmtDateTime(item.challenge_expires_at))}` : ''}</small>${item.review_note ? `<p>${esc(item.review_note)}</p>` : ''}</div></div>`).join('')}</div></details>` : ''}
         ${challenge ? `<form id="business-email-challenge-form" class="card business-email-challenge" novalidate><span class="section-label">Email challenge</span><b>Check ${esc(challenge.value)}</b><p>Enter the six-digit code from the Third Shot email. This confirms mailbox access; an operator still reviews listing control.</p>${challenge.challenge_locked ? '<div class="business-connection-error" role="alert">This code is locked after too many attempts. Send a new code.</div>' : ''}<div class="form-field"><label for="business-email-challenge-token">Six-digit email code</label><input type="text" id="business-email-challenge-token" inputmode="numeric" maxlength="6" autocomplete="one-time-code" value="${Number(challenge.id) === Number(evidenceId) ? esc(token) : ''}" ${challenge.challenge_locked ? 'disabled' : ''} /></div><button type="submit" class="btn btn-primary btn-block" id="business-email-challenge-submit" ${challenge.challenge_locked ? 'disabled' : ''}>Verify email code</button><button type="button" class="btn-link btn-block" data-resend-email-challenge>Send a new code</button>${Number.isFinite(Number(challenge.challenge_attempts_remaining)) ? `<small>${Number(challenge.challenge_attempts_remaining)} attempt${Number(challenge.challenge_attempts_remaining) === 1 ? '' : 's'} remaining</small>` : ''}</form>` : ''}
@@ -30559,6 +32514,8 @@
           <button type="submit" class="btn btn-primary btn-block" id="business-evidence-send">Send verification code</button>
           <p class="business-form-note">Never send passwords, API keys, payment information, government IDs, or sensitive personal documents.</p>
         </form>` : '<p class="business-form-note">Evidence can be added while a claim is pending. Resubmit the claim first if the reviewer requested changes.</p>'}`;
+      body.querySelector('#venue-location-correct')?.addEventListener('click', () => openChildModal(modal, () => openPendingVenueLocationEditor(business, updated => { Object.assign(business, updated); onSaved?.(updated); load(); })));
+      body.querySelector('#venue-claim-resubmit')?.addEventListener('click', () => openChildModal(modal, () => openBusinessClaimSheet({court:{id:business.court_id,name:business.court_name || business.name}, onSaved:updated => { if (updated) Object.assign(business, updated); onSaved?.(updated); load(); }})));
       const challengeForm = body.querySelector('#business-email-challenge-form');
       if (challengeForm) {
         const challengeUX = bindModalFormUX(modal, '#business-email-challenge-submit');
@@ -30599,7 +32556,7 @@
   function openBusinessTeamManager(business) {
     const modal = openModal(`${modalHead('Team access')}<div class="business-feature-body" aria-live="polite">${skeletonHtml(2)}</div>`, { label: 'Manage business team' });
     const body = modal.querySelector('.business-feature-body');
-    const load = async () => {
+    const load = async (notice = '') => {
       body.innerHTML = skeletonHtml(2);
       let data;
       try { data = await api(`/businesses/${business.id}/team`); }
@@ -30608,16 +32565,19 @@
       const invitations = Array.isArray(data.invitations) ? data.invitations : [];
       const actorRole = String(data.role || business.manager_role || '').toLowerCase();
       const canManage = ['owner', 'admin'].includes(actorRole);
+      const locationNames = (data.locations || []).map(location => location.name).filter(Boolean);
+      const scopeLabel = locationNames.join(', ') || business.name || 'this organization';
       body.innerHTML = `
-        <div class="business-feature-intro"><b>Give each person only the access they need.</b><p>Owners control transfers. Admins manage staff and connections. Editors update content and feeds. Viewers have read-only access.</p></div>
+        ${notice ? `<p class="venue-save-success" role="status">${esc(notice)}</p>` : ''}
+        <div class="business-feature-intro"><b>Team access covers every location below.</b><p>Invitations and role changes apply across this organization. Owners control transfers. Admins manage staff and connections. Editors update content and feeds. Viewers have read-only access.</p></div>
         ${data.organization ? `<div class="card business-organization-summary"><span aria-hidden="true">${uiIcon('building')}</span><div class="row-main"><b>${esc(data.organization.name || business.name)}</b><small>${(data.locations || []).length} connected location${(data.locations || []).length === 1 ? '' : 's'}</small></div></div>` : ''}
         <div class="business-team-list">${members.length ? members.map((member) => `
-          <div class="card business-team-row"><span class="business-manager-icon" aria-hidden="true">${uiIcon('user')}</span><span class="row-main"><b>${esc(member.display_name || member.email || 'Team member')}</b><small>${esc(member.email || '')}</small></span>
+          <div class="card business-team-row"><span class="business-manager-icon" aria-hidden="true">${uiIcon('user')}</span><span class="row-main"><b>${esc(member.display_name || member.email || 'Team member')}</b><small>${esc(member.email || '')}</small><small>${esc(window.VenueWorkspace.teamCapabilities(member.role))}</small></span>
           ${member.role === 'owner' ? `<span class="business-status is-verified">${uiIcon('check-circle')}<span>Owner</span></span>` : `<select data-team-role="${member.id}" data-current-role="${esc(member.role)}" data-select-title="Role for ${esc(member.display_name || member.email || 'team member')}" data-select-prefix="Access" aria-label="Role for ${esc(member.display_name || member.email || 'team member')}" ${!canManage || (actorRole !== 'owner' && member.role === 'admin') ? 'disabled' : ''}><option value="admin" ${member.role === 'admin' ? 'selected' : ''}>Admin</option><option value="editor" ${member.role === 'editor' ? 'selected' : ''}>Editor</option><option value="viewer" ${member.role === 'viewer' ? 'selected' : ''}>Viewer</option></select>`}
           ${canManage && member.role !== 'owner' && (actorRole === 'owner' || member.role !== 'admin') ? `<button type="button" class="business-team-remove" data-team-remove="${member.id}" aria-label="Remove ${esc(member.display_name || member.email || 'team member')}">Remove</button>` : ''}</div>`).join('') : `<div class="business-manager-empty"><span aria-hidden="true">${uiIcon('users')}</span><b>No accepted teammates yet</b><p>Invite an admin, editor, or viewer without sharing your password.</p></div>`}</div>
-        ${invitations.length ? `<div class="section-label">Pending invitations</div><div class="business-team-list">${invitations.map((invitation) => `<div class="card business-team-row"><span class="business-manager-icon" aria-hidden="true">${uiIcon('mail')}</span><span class="row-main"><b>${esc(invitation.email)}</b><small>${esc(invitation.role)} · expires ${esc(fmtDateTime(invitation.expires_at))}</small></span><button type="button" class="business-team-remove" data-invitation-revoke="${invitation.id}" aria-label="Revoke invitation for ${esc(invitation.email)}">Revoke</button></div>`).join('')}</div>` : ''}
+        ${invitations.length ? `<div class="section-label">Invitations</div><div class="business-team-list">${invitations.map((invitation) => `<div class="card business-team-row"><span class="business-manager-icon" aria-hidden="true">${uiIcon('mail')}</span><span class="row-main"><b>${esc(invitation.email)}</b><small>${esc(invitation.role)} · ${invitation.status === 'expired' ? 'Expired' : 'Pending · expires'} ${esc(fmtDateTime(invitation.expires_at))}</small><small>${esc(window.VenueWorkspace.teamCapabilities(invitation.role))}</small></span><button type="button" class="btn btn-secondary btn-sm" data-invitation-resend="${invitation.id}" ${invitation.role === 'admin' && actorRole !== 'owner' ? 'disabled' : ''}>Send new invite</button><button type="button" class="business-team-remove" data-invitation-revoke="${invitation.id}" aria-label="Revoke invitation for ${esc(invitation.email)}">Revoke</button></div>`).join('')}</div>` : ''}
         ${(data.locations || []).length ? `<div class="section-label">Organization locations</div><div class="business-location-list">${data.locations.map((location) => `<div class="card business-team-row"><span class="business-manager-icon" aria-hidden="true">${uiIcon('map-pin')}</span><span class="row-main"><b>${esc(location.name)}</b><small>${esc(String(location.governance_status || 'active'))}</small></span></div>`).join('')}</div>` : ''}
-        ${canManage ? `<form id="business-team-invite" class="card business-team-invite" novalidate><div class="form-field"><label for="business-team-email">Work email</label><input type="email" id="business-team-email" maxlength="255" autocomplete="email" /></div><div class="form-field"><label for="business-team-role">Role</label><select id="business-team-role" data-select-title="Team role">${actorRole === 'owner' ? '<option value="admin">Admin</option>' : ''}<option value="editor">Editor</option><option value="viewer">Viewer</option></select></div><button type="submit" class="btn btn-primary btn-block" id="business-team-send">Send secure invitation</button></form>` : '<p class="business-form-note">Only an owner or admin can change team access.</p>'}`;
+        ${canManage ? `<form id="business-team-invite" class="card business-team-invite" novalidate><div class="form-field"><label for="business-team-email">Work email</label><input type="email" id="business-team-email" maxlength="255" autocomplete="email" /></div><div class="form-field"><label for="business-team-role">Role</label><select id="business-team-role" data-select-title="Team role">${actorRole === 'owner' ? '<option value="admin">Admin</option>' : ''}<option value="editor">Editor</option><option value="viewer">Viewer</option></select><small class="field-help" id="business-team-role-help"></small></div><p class="simple-note">Invitation covers ${esc(scopeLabel)}. This is organization-wide access.</p><button type="submit" class="btn btn-primary btn-block" id="business-team-send">Send secure invitation</button></form>` : '<p class="business-form-note">Only an owner or admin can change team access.</p>'}`;
       body.querySelectorAll('[data-team-role]').forEach((select) => select.addEventListener('change', async () => {
         const previousRole = select.dataset.currentRole;
         const nextRole = select.value;
@@ -30625,7 +32585,7 @@
         if (!await openActionConfirmation({
           eyebrow: 'Team access',
           title: `Change ${memberName} to ${nextRole}?`,
-          message: 'Their business permissions change as soon as this is saved.',
+          message: `This changes access at ${scopeLabel} as soon as it is saved.`,
           detail: nextRole === 'admin'
             ? 'Admins can publish, manage staff, and configure connections.'
             : nextRole === 'editor'
@@ -30645,13 +32605,16 @@
         catch (error) { select.value = previousRole; syncAppSelect(select); select.disabled = false; toast(error.message); }
       }));
       body.querySelectorAll('[data-team-remove]').forEach((button) => button.addEventListener('click', () => openBusinessConfirmAction({
-        title: 'Remove team access?', message: 'This person will immediately lose access to this business. Their account and past audit entries remain.', confirmLabel: 'Remove access',
+        title: 'Remove team access?', message: `This person loses team access at ${scopeLabel}. Their account and past audit entries remain.`, confirmLabel: 'Remove access',
         onConfirm: async (sheet) => { await api(`/businesses/${business.id}/team/${button.dataset.teamRemove}`, { method: 'DELETE' }); closeModal(sheet); toast('Team access removed'); await load(); },
       })));
+      body.querySelectorAll('[data-invitation-resend]').forEach(button => button.addEventListener('click', () => { const invitation = invitations.find(item => String(item.id) === button.dataset.invitationResend); if (!invitation) return; openBusinessConfirmAction({title:'Send a new invitation?', message:`Send a new ${invitation.role} invitation to ${invitation.email}. Any earlier pending link stops working. The new link lasts seven days.`, confirmLabel:'Send new invite', onConfirm:async sheet => { await api(`/businesses/${business.id}/team/invitations`, {method:'POST',body:JSON.stringify({email:invitation.email,role:invitation.role})}); closeModal(sheet); await load('New invitation sent. Earlier pending links were replaced.'); }}); }));
       body.querySelectorAll('[data-invitation-revoke]').forEach((button) => button.addEventListener('click', () => openBusinessConfirmAction({
         title: 'Revoke this invitation?', message: 'The unused invitation link stops working immediately.', confirmLabel: 'Revoke invitation',
         onConfirm: async (sheet) => { await api(`/businesses/${business.id}/team/invitations/${button.dataset.invitationRevoke}`, { method: 'DELETE' }); closeModal(sheet); toast('Invitation revoked'); await load(); },
       })));
+      const roleChoice = body.querySelector('#business-team-role');
+      if (roleChoice) { const describeRole = () => { body.querySelector('#business-team-role-help').textContent = window.VenueWorkspace.teamCapabilities(roleChoice.value); }; roleChoice.addEventListener('change', describeRole); describeRole(); }
       const form = body.querySelector('#business-team-invite');
       if (form) {
         const formUX = bindModalFormUX(modal, '#business-team-send');
@@ -30843,7 +32806,7 @@
   }
 
   function openBusinessConnections(business, onSaved) {
-    const modal = openModal(`${modalHead('Connections')}<div class="business-feature-body" aria-live="polite">${skeletonHtml(2)}</div>`, { label: 'Business data connections' });
+    const modal = openModal(`${modalHead('Booking & schedule tools')}<div class="business-feature-body" aria-live="polite">${skeletonHtml(2)}</div>`, { label: 'Business data connections' });
     const body = modal.querySelector('.business-feature-body');
     const role = String(business.manager_role || (business.is_owner ? 'owner' : '')).toLowerCase();
     const canConfigure = ['owner', 'admin'].includes(role);
@@ -30859,13 +32822,15 @@
           usingCommittedFallback = true;
         } else {
           body.innerHTML = `${businessUnavailableHtml('Live connections', error)}<button class="btn btn-secondary btn-block" data-request>Request integration help</button>${![404, 501].includes(error.status) ? '<button class="btn btn-secondary btn-block" data-retry>Try again</button>' : ''}`;
-          body.querySelector('[data-request]').addEventListener('click', () => openChildModal(modal, () => openBusinessIntegrationRequest(business)));
+          body.querySelector('[data-tools-booking]').addEventListener('click', () => openChildModal(modal, () => openBusinessBookingSetup(business, onSaved)));
+      body.querySelector('[data-tools-schedule]')?.addEventListener('click', () => openChildModal(modal, () => openBusinessScheduleEditor(business, onSaved, {startImport:true})));
+      body.querySelector('[data-request]').addEventListener('click', () => openChildModal(modal, () => openBusinessIntegrationRequest(business)));
           body.querySelector('[data-retry]')?.addEventListener('click', () => load());
           return;
         }
       }
       const connections = Array.isArray(data.items) ? data.items : [];
-      body.innerHTML = `<div class="business-feature-intro"><b>Links and live connections are different.</b><p>A booking URL sends players to a provider. Only a connected adapter with a successful sync imports dated schedules or availability.</p></div>
+      body.innerHTML = `<div class="business-feature-intro"><b>How should players book and find your sessions?</b><p>Booking happens on your provider’s site. Add dates here or import them from a supported source.</p></div><div class="venue-connection-tasks"><button type="button" class="btn btn-secondary" data-tools-booking>Add booking link</button>${canSync ? '<button type="button" class="btn btn-secondary" data-tools-schedule>Import schedule spreadsheet</button>' : ''}<button type="button" class="btn btn-secondary" data-request>Get setup help</button></div>
         ${usingCommittedFallback ? '<p class="competition-sync-note" role="status">Saved. Live connection details will refresh when the connection returns.</p>' : ''}
         <div class="business-connections-list">${connections.length ? connections.map((item) => {
           const status = String(item.status || 'draft').toLowerCase();
@@ -30878,12 +32843,14 @@
           const label = disconnected ? 'Disconnected' : problem ? 'Attention' : connected ? 'Live' : needsCheck ? 'Needs link check' : held ? 'Held from public' : 'Draft';
           const statusIcon = problem ? 'alert-triangle' : connected ? 'check-circle' : disconnected ? 'x' : 'refresh';
           const lastSync = item.last_sync_succeeded_at;
-          return `<article class="card business-connection-row ${problem ? 'is-error' : connected ? 'is-ready' : disconnected ? 'is-neutral' : 'is-pending'}"><div class="business-connection-head"><span aria-hidden="true">${uiIcon(statusIcon)}</span><div class="row-main"><b>${esc(item.display_name || item.provider_key || 'Data connection')}</b><small>${esc(item.provider_key || 'provider')} · health ${esc(health.replace(/_/g, ' '))}</small></div><span class="business-status ${problem ? 'is-rejected' : connected ? 'is-verified' : 'is-pending'}">${uiIcon(businessStateIconName(health))}<span>${esc(label)}</span></span></div>
-            <p>${esc((item.capabilities || []).join(' · ') || 'No synced capabilities reported')}</p>${lastSync ? `<small>Last successful sync ${esc(fmtDateTime(lastSync))}</small>` : '<small>No successful sync yet</small>'}${needsCheck ? '<div class="business-form-note">Run Check links to validate configured destinations before imported data is public.</div>' : ''}${held ? '<div class="business-form-note">The feed is healthy, but business verification, content approval, or publication is still holding imported data from players.</div>' : ''}${item.last_error_message ? `<div class="business-connection-error" role="alert">${esc(item.last_error_message)}</div>` : ''}
-            ${disconnected ? `<p class="business-form-note">Disconnected connections keep their audit history and do not publish imported data.</p>${canConfigure && item.provider_key === 'link_catalog' ? `<div class="business-connection-actions"><button type="button" class="btn btn-primary btn-sm" data-connection-reconnect="${item.id}">Reconnect feed</button></div>` : ''}` : `<div class="business-connection-actions">${canSync ? `<button type="button" class="btn btn-secondary btn-sm" data-connection-check="${item.id}">Check links</button>${item.provider_key === 'link_catalog' ? `<button type="button" class="btn btn-primary btn-sm" data-connection-catalog="${item.id}">Sync JSON</button>` : ''}` : ''}${canConfigure ? `<button type="button" class="btn btn-secondary btn-sm" data-connection-disconnect="${item.id}">Disconnect</button>` : ''}</div>`}</article>`;
+          return `<article class="card business-connection-row ${problem ? 'is-error' : connected ? 'is-ready' : disconnected ? 'is-neutral' : 'is-pending'}"><div class="business-connection-head"><span aria-hidden="true">${uiIcon(statusIcon)}</span><div class="row-main"><b>${esc(item.display_name || item.provider_key || 'Data connection')}</b><small>${connected ? 'Players can see this imported schedule' : disconnected ? 'Imported sessions are hidden' : needsCheck ? 'Check the links before players can use this schedule' : held ? 'Complete venue review and publish to show these sessions' : problem ? 'Updates need attention; check the source and links' : 'Add schedule data, then check its links'}</small></div><span class="business-status ${problem ? 'is-rejected' : connected ? 'is-verified' : 'is-pending'}">${uiIcon(businessStateIconName(health))}<span>${esc(label)}</span></span></div>
+            <details class="simple-disclosure"><summary>Advanced connection details</summary><p>${esc(item.provider_key)} · ${esc(health)} · ${esc((item.capabilities || []).join(' · '))}</p></details>${lastSync ? `<small>Last successful sync ${esc(fmtDateTime(lastSync))}</small>` : '<small>No successful sync yet</small>'}${needsCheck ? '<div class="business-form-note">Run Check links to validate configured destinations before imported data is public.</div>' : ''}${held ? '<div class="business-form-note">The feed is healthy, but business verification, content approval, or publication is still holding imported data from players.</div>' : ''}${item.last_error_message ? `<div class="business-connection-error" role="alert">${esc(item.last_error_message)}</div>` : ''}
+            ${disconnected ? `<p class="business-form-note">Disconnected connections keep their audit history and do not publish imported data.</p>${canConfigure && item.provider_key === 'link_catalog' ? `<div class="business-connection-actions"><button type="button" class="btn btn-primary btn-sm" data-connection-reconnect="${item.id}">Reconnect schedule source</button></div>` : ''}` : `<div class="business-connection-actions">${canSync ? `<button type="button" class="btn btn-secondary btn-sm" data-connection-check="${item.id}">Check links</button>${item.provider_key === 'link_catalog' ? `<button type="button" class="btn btn-primary btn-sm" data-connection-catalog="${item.id}">Update imported schedule</button>` : ''}` : ''}${canConfigure ? `<button type="button" class="btn btn-secondary btn-sm" data-connection-disconnect="${item.id}">Disconnect</button>` : ''}</div>`}</article>`;
         }).join('') : `<div class="business-manager-empty"><span aria-hidden="true">${uiIcon('link')}</span><b>No live data connections</b><p>Secure outbound links may still work, but Third Shot is not importing schedules, capacity, bookings, or memberships.</p></div>`}</div>
-        ${canConfigure ? '<button type="button" class="btn btn-primary btn-block" data-add-connection>Add structured feed</button>' : '<p class="business-form-note">Only an owner or admin can create or disconnect feeds. Editors can sync an existing catalog; viewers have read-only access.</p>'}
-        <button type="button" class="btn btn-secondary btn-block" data-request>Request integration help</button>`;
+        ${canConfigure ? '<button type="button" class="btn btn-primary btn-block" data-add-connection>Set up advanced schedule import</button>' : '<p class="business-form-note">Only an owner or admin can create or disconnect feeds. Editors can sync an existing catalog; viewers have read-only access.</p>'}
+`;
+      body.querySelector('[data-tools-booking]').addEventListener('click', () => openChildModal(modal, () => openBusinessBookingSetup(business, onSaved)));
+      body.querySelector('[data-tools-schedule]')?.addEventListener('click', () => openChildModal(modal, () => openBusinessScheduleEditor(business, onSaved, {startImport:true})));
       body.querySelector('[data-request]').addEventListener('click', () => openChildModal(modal, () => openBusinessIntegrationRequest(business)));
       body.querySelector('[data-add-connection]')?.addEventListener('click', () => openChildModal(modal, () => openBusinessAddConnection(business, connections, async (connection) => {
         const nextConnections = [...connections, connection];
@@ -30954,14 +32921,15 @@
   function openBusinessAnalytics(business) {
     const modal = openModal(`${modalHead('Business analytics')}<div class="business-feature-body" aria-live="polite"><div class="form-field"><label for="business-analytics-range">Time range</label><select id="business-analytics-range" data-select-title="Analytics range"><option value="7d">Last 7 days</option><option value="30d" selected>Last 30 days</option><option value="90d">Last 90 days</option></select></div><div data-analytics-results>${skeletonHtml(2)}</div></div>`, { label: 'Business analytics' });
     const results = modal.querySelector('[data-analytics-results]');
+    let requestGeneration = 0;
     const load = async () => {
+      const generation = ++requestGeneration;
       results.innerHTML = skeletonHtml(2);
       try {
         const data = await api(`/businesses/${business.id}/analytics?range=${encodeURIComponent(modal.querySelector('#business-analytics-range').value)}`);
-        const summary = data.summary || data;
-        const metrics = [['Profile views', summary.profile_views], ['Booking clicks', summary.booking_clicks], ['Lesson clicks', summary.lesson_clicks], ['Schedule opens', summary.schedule_opens], ['Calls & emails', summary.contact_clicks], ['Website visits', summary.website_clicks], ['Reported conversions', summary.conversions], ['Conversion rate', summary.conversion_rate == null ? null : `${Math.round(Number(summary.conversion_rate) * 100)}%`]];
-        results.innerHTML = `<div class="business-analytics-grid">${metrics.map(([label, value]) => `<div class="card"><b>${typeof value === 'string' ? esc(value) : Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '—'}</b><span>${esc(label)}</span></div>`).join('')}</div><p class="business-form-note">Clicks show actions started in Third Shot. Reported conversions appear only when a connected feed sends them; Third Shot does not infer completed bookings.</p>${data.since ? `<p class="business-data-freshness">Range begins ${esc(fmtDateTime(data.since))}</p>` : ''}`;
-      } catch (error) { results.innerHTML = `${businessUnavailableHtml('Analytics', error)}${![404, 501].includes(error.status) ? '<button class="btn btn-secondary btn-block" data-retry>Try again</button>' : ''}`; results.querySelector('[data-retry]')?.addEventListener('click', load); }
+        if (generation !== requestGeneration || !results.isConnected) return;
+        results.innerHTML = window.VenueWorkspace.analyticsHtml(data, fmtDateTime);
+      } catch (error) { if (generation !== requestGeneration || !results.isConnected) return; results.innerHTML = `${businessUnavailableHtml('Analytics', error)}${![404, 501].includes(error.status) ? '<button class="btn btn-secondary btn-block" data-retry>Try again</button>' : ''}`; results.querySelector('[data-retry]')?.addEventListener('click', load); }
     };
     modal.querySelector('#business-analytics-range').addEventListener('change', load); load(); return modal;
   }
@@ -30975,28 +32943,44 @@
       try {
         const data = await api(`/businesses/${business.id}/revisions`); const items = Array.isArray(data.items) ? data.items : [];
         const currentId = safePositiveId(data.current_revision_id) || safePositiveId(items[0]?.id);
-        body.innerHTML = `<div class="business-feature-intro"><b>Saved edits create an audit entry.</b><p>Restoring creates a new revision and never erases history. Sensitive changes to a verified listing may hide it until an operator approves the new content.</p></div>${items.length ? `<div class="business-revision-list">${items.map((item) => {
+        body.innerHTML = `<div class="business-feature-intro"><b>Saved edits create an audit entry.</b><p>Review exactly what changed. Restoring saves a new draft and keeps history. Your approved player listing stays live while sensitive edits are reviewed.</p></div>${items.length ? `<div class="business-revision-list">${items.map((item) => {
           const current = Number(item.id) === Number(currentId);
           const review = String(item.review_status || 'approved').toLowerCase();
-          return `<div class="card business-revision-row"><span aria-hidden="true">${uiIcon(current ? 'check-circle' : 'refresh')}</span><div class="row-main"><b>${esc(item.change_summary || item.summary || (item.fields || []).join(', ') || 'Business profile updated')}</b><small>${esc(item.actor_name || 'Business manager')} · ${esc(fmtDateTime(item.created_at))}</small><small>${item.sensitive ? 'Sensitive change · ' : ''}${esc(review.replace(/_/g, ' '))}</small>${item.review_note ? `<p class="business-revision-note">${esc(item.review_note)}</p>` : ''}</div>${current ? `<span class="business-status is-verified">${uiIcon('check-circle')}<span>Current</span></span>` : canRestore ? `<button type="button" class="btn btn-secondary btn-sm" data-revision-restore="${item.id}">${uiIcon('refresh')} Restore</button>` : `<span class="business-status">${uiIcon('eye')}<span>Read only</span></span>`}</div>`;
+          return `<div class="card business-revision-row"><span aria-hidden="true">${uiIcon(current ? 'check-circle' : 'refresh')}</span><div class="row-main"><b>${esc(item.change_summary || item.summary || (item.fields || []).join(', ') || 'Business profile updated')}</b><small>${esc(item.actor_name || 'Business manager')} · ${esc(fmtDateTime(item.created_at))}</small><small>${item.sensitive ? 'Sensitive change · ' : ''}${esc(review.replace(/_/g, ' '))}</small>${item.review_note ? `<p class="business-revision-note">${esc(item.review_note)}</p>` : ''}<details><summary>View changes</summary>${businessRevisionDiffHtml(item)}</details></div>${current ? `<span class="business-status is-verified">${uiIcon('check-circle')}<span>Current</span></span>` : canRestore ? `<button type="button" class="btn btn-secondary btn-sm" data-revision-restore="${item.id}">${uiIcon('refresh')} Restore</button>` : `<span class="business-status">${uiIcon('eye')}<span>Read only</span></span>`}</div>`;
         }).join('')}</div>` : `<div class="business-manager-empty"><span aria-hidden="true">${uiIcon('clock')}</span><b>No saved revisions yet</b><p>Future profile changes will appear here when revision tracking is enabled.</p></div>`}`;
-        body.querySelectorAll('[data-revision-restore]').forEach((button) => button.addEventListener('click', () => openBusinessConfirmAction({ title: 'Restore this version?', message: 'This creates a new revision. Sensitive restored content may require operator review before the listing can be republished.', confirmLabel: 'Restore version', tone: 'primary', onConfirm: async (sheet) => { const result = await api(`/businesses/${business.id}/revisions/${button.dataset.revisionRestore}/restore`, { method: 'POST' }); closeModal(sheet); closeModal(modal); toast('Business version restored'); onSaved?.(result.business || result); } })));
+        body.querySelectorAll('[data-revision-restore]').forEach((button) => button.addEventListener('click', () => {
+          const revision = items.find((item) => Number(item.id) === Number(button.dataset.revisionRestore));
+          const sheet = openChildModal(modal, () => openModal(`${modalHead('Preview restored version')}<p class="business-form-note">These changes will be saved as a new draft. Your approved listing stays live while sensitive edits are reviewed.</p>${businessRevisionDiffHtml({ before_snapshot: data.current_snapshot, after_snapshot: revision?.after_snapshot || revision?.snapshot })}<button class="btn btn-primary btn-block" data-confirm-restore>Restore this draft</button>`, { label: 'Preview restored venue version' }));
+          const formUX = bindModalFormUX(sheet, '[data-confirm-restore]');
+          sheet.querySelector('[data-confirm-restore]').addEventListener('click', async () => {
+            const finish = formUX.startSubmitting('Restoring…'); if (!finish) return;
+            try {
+              const result = await api(`/businesses/${business.id}/revisions/${revision.id}/restore`, { method: 'POST', headers: window.VenueWorkspace.contentHeaders(data) });
+              closeModal(sheet); closeModal(modal); toast(window.VenueWorkspace.savedStatus(result.business)); onSaved?.(result.business);
+            } catch (error) { finish(); formUX.showError(error.message); }
+          });
+        }));
       } catch (error) { body.innerHTML = `${businessUnavailableHtml('Change history', error)}${![404, 501].includes(error.status) ? '<button class="btn btn-secondary btn-block" data-retry>Try again</button>' : ''}`; body.querySelector('[data-retry]')?.addEventListener('click', load); }
     }; load(); return modal;
   }
 
   function openBusinessSecurity(business) {
-    const modal = openModal(`${modalHead('Business security')}<div class="business-feature-body" aria-live="polite"></div>`, { label: 'Business security' });
+    return openAccountSecurity({ businessContext: true });
+  }
+
+  function openAccountSecurity({ businessContext = false } = {}) {
+    const title = businessContext ? 'Business security' : 'Account security';
+    const modal = openModal(`${modalHead(title)}<div class="business-feature-body" aria-live="polite"></div>`, { label: title });
     const body = modal.querySelector('.business-feature-body');
     const render = () => {
       const mfa = state.me?.mfa && typeof state.me.mfa === 'object' ? state.me.mfa : {};
       const enabled = mfa.enabled === true;
       body.innerHTML = `
-        <div class="business-feature-intro"><b>Security follows your Third Shot account.</b><p>These controls protect every business location your account can manage; they do not change another teammate’s account.</p></div>
-        <div class="business-trust-summary ${enabled ? 'is-ready' : 'is-pending'}"><span aria-hidden="true">${uiIcon(enabled ? 'check-circle' : 'shield')}</span><div><b>${enabled ? 'Multi-factor authentication is on' : 'Protect business controls with MFA'}</b><p>${enabled ? `A second factor is required when you sign in.${Number(mfa.recovery_codes_remaining) >= 0 ? ` ${Number(mfa.recovery_codes_remaining)} recovery code${Number(mfa.recovery_codes_remaining) === 1 ? '' : 's'} remain.` : ''}` : 'MFA is strongly recommended for anyone who can publish, manage staff, or request integrations.'}</p></div></div>
+        <div class="business-feature-intro"><b>Security follows your Third Shot account.</b><p>${businessContext ? 'These controls protect every business location your account can manage; they do not change another teammate’s account.' : 'Use an authenticator app to add a second sign-in step.'}</p></div>
+        <div class="business-trust-summary ${enabled ? 'is-ready' : 'is-pending'}"><span aria-hidden="true">${uiIcon(enabled ? 'check-circle' : 'shield')}</span><div><b>${enabled ? 'Multi-factor authentication is on' : 'Add an authenticator'}</b><p>${enabled ? `A second factor is required when you sign in.${Number(mfa.recovery_codes_remaining) >= 0 ? ` ${Number(mfa.recovery_codes_remaining)} recovery code${Number(mfa.recovery_codes_remaining) === 1 ? '' : 's'} remain.` : ''}` : 'You’ll use your password and a six-digit code. Save the recovery codes in case you lose access to your authenticator.'}</p></div></div>
         <div class="business-security-actions">${enabled ? '<button type="button" class="btn btn-secondary btn-block" data-mfa-disable>Disable MFA</button>' : '<button type="button" class="btn btn-primary btn-block" data-mfa-start>Set up MFA</button>'}</div>
         <div class="section-label">Active sessions</div>
-        <div class="business-feature-state is-neutral"><span aria-hidden="true">${uiIcon('lock')}</span><div><b>Session inventory is not available yet</b><p>Third Shot cannot currently list or revoke individual devices. Changing your password signs out every other token and keeps this device signed in.</p><button type="button" class="btn btn-secondary btn-sm" data-open-account-security>Change password</button></div></div>`;
+        <div class="business-feature-state is-neutral"><span aria-hidden="true">${uiIcon('lock')}</span><div><b>Sign out other sessions</b><p>Account settings can sign out all other sessions while keeping this device signed in. Individual devices are not listed.</p><button type="button" class="btn btn-secondary btn-sm" data-open-account-security>Open account settings</button></div></div>`;
       body.querySelector('[data-mfa-start]')?.addEventListener('click', async (event) => {
         const sheet = openChildModal(modal, () => openModal(`${modalHead('Set up MFA')}<p class="row-sub business-editor-intro">Confirm your password before Third Shot creates a one-time authenticator setup key.</p><div class="form-field"><label for="business-mfa-password">Current account password</label><input type="password" id="business-mfa-password" autocomplete="current-password" /></div><button type="button" class="btn btn-primary btn-block" id="business-mfa-setup">Create setup key</button>`, { label: 'Set up account multi-factor authentication' }));
         const formUX = bindModalFormUX(sheet, '#business-mfa-setup');
@@ -31120,22 +33104,67 @@
     return window.VenueWorkspace.revisionDiff(item);
   }
 
-  function openBusinessOperatorHub() {
-    if (!currentUserIsBusinessOperator()) { toast('Operator access is required'); return null; }
-    const modal = openModal(`${modalHead('Business operator queue')}<div class="business-feature-body" aria-live="polite">${skeletonHtml(3)}</div>`, { page: true, label: 'Business operator queue' });
+  function openCourtCorrectionQueue() {
+    const modal = openModal(`${modalHead('Court closure reviews')}<div class="form-field"><label for="court-review-status">Show</label><select id="court-review-status"><option value="pending">Needs review</option><option value="reviewed">Reviewed decisions</option></select></div><div class="business-feature-body" aria-live="polite"></div>`, {page:true});
+    const body = modal.querySelector('.business-feature-body');
+    let generation = 0;
+    const load = async () => {
+      const request = ++generation; body.innerHTML = skeletonHtml(2);
+      try {
+        const data = await api(`/operator/courts/corrections?status=${modal.querySelector('#court-review-status').value}`);
+        if (request !== generation || !modal.isConnected) return;
+        body.innerHTML = `<p class="simple-note">Review evidence before changing court access. Reports never close a court automatically.</p>${data.items.length ? data.items.map(item => `<article class="card row"><span class="row-main"><b>${esc(item.court_name)}</b><small>${item.proposed_closed ? 'Closure' : 'Reopening'} · ${esc(fmtDateTime(item.submitted_at))}</small><small>${item.status === 'pending' ? `${item.impact.upcoming_sessions} upcoming sessions · ${item.impact.players} players` : `${esc(item.status)} · ${esc(fmtDateTime(item.reviewed_at))}`}</small></span><button class="btn btn-secondary" type="button" data-court-review="${item.id}">${item.status === 'pending' ? 'Review' : 'Inspect decision'}</button></article>`).join('') : '<p>No court status reports need review.</p>'}`;
+        body.querySelectorAll('[data-court-review]').forEach(button => button.addEventListener('click', () => openChildModal(modal, () => openCourtCorrectionReview(Number(button.dataset.courtReview), load))));
+      } catch (error) { if (request !== generation || !modal.isConnected) return; body.innerHTML = `<p role="alert">${esc(error.message)}</p><button class="btn btn-secondary" data-retry>Try again</button>`; body.querySelector('[data-retry]').addEventListener('click', load); }
+    };
+    modal.querySelector('#court-review-status').addEventListener('change', load);
+    load(); return modal;
+  }
+
+  function openCourtCorrectionReview(id, onSaved) {
+    const modal = openModal(`${modalHead('Review court status')}<div class="business-feature-body">${skeletonHtml(2)}</div>`);
     const body = modal.querySelector('.business-feature-body');
     const load = async () => {
+      try {
+        const item = await api(`/operator/courts/corrections/${id}`); if (!modal.isConnected) return;
+        body.innerHTML = `<h3>${esc(item.court_name)}</h3><p class="simple-note">Current: ${item.current_closed ? 'Closed to new play' : 'Open to new play'} → Proposed: ${item.proposed_closed ? 'Closed' : 'Reopened'}</p><div class="card"><b>Submitted evidence</b><p>${esc(item.evidence || 'No written evidence. Investigate before approving.')}</p></div><div class="card"><b>What changes</b><p>${esc(item.impact.effect)}</p><p>${item.impact.upcoming_sessions} upcoming sessions · ${item.impact.players} players</p>${item.impact.sessions.map(game => `<p>${esc(game.title)} · ${esc(fmtDateTime(game.scheduled_at))}</p>`).join('')}</div><details><summary>Previous decisions (${item.history.length})</summary>${item.history.map(row => `<p><b>${esc(row.status)} · ${esc(fmtDateTime(row.reviewed_at))}</b><br>${esc(row.review_note)}</p>`).join('') || '<p>No reviewed decisions yet.</p>'}</details>${item.status !== 'pending' ? '<p>This report has already been reviewed.</p>' : `<form id="court-review-form"><div class="form-field"><label for="court-review-decision">Decision</label><select id="court-review-decision"><option value="">Choose after reviewing</option><option value="approve">Approve ${item.proposed_closed ? 'closure' : 'reopening'}</option><option value="reject">Keep current court status</option></select></div><div class="form-field"><label for="court-review-note">Reason and evidence checked</label><textarea id="court-review-note" minlength="12" maxlength="500" required rows="3"></textarea></div><div class="form-field"><label for="court-review-mfa">Current authenticator code</label><input id="court-review-mfa" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required maxlength="6" /></div><p class="form-error hidden" role="alert"></p><button class="btn btn-primary btn-block" type="submit">Save reviewed decision</button></form>`}`;
+        body.querySelector('form')?.addEventListener('submit', async event => {
+          event.preventDefault(); const form = event.currentTarget; const error = form.querySelector('[role="alert"]');
+          const decision = form.querySelector('select').value; const note = form.querySelector('textarea').value.trim();
+          if (!decision || note.length < 12) { error.textContent = 'Choose a decision and explain the evidence checked.'; error.classList.remove('hidden'); return; }
+          const reset = beginButtonAction(form.querySelector('[type="submit"]'), 'Saving decision…'); if (!reset) return;
+          try { await api(`/operator/courts/corrections/${id}/review`, {method:'POST',body:JSON.stringify({decision,review_note:note,mfa_code:form.querySelector('input').value,expected_closed:item.current_closed})}); closeModal(modal); onSaved?.(); toast('Court status decision saved.'); }
+          catch (failure) { reset(); error.textContent = failure.message; error.classList.remove('hidden'); }
+        });
+      } catch (error) { if (!modal.isConnected) return; body.innerHTML = `<p role="alert">${esc(error.message)}</p><button class="btn btn-secondary" data-retry>Try again</button>`; body.querySelector('[data-retry]').addEventListener('click', load); }
+    };
+    load(); return modal;
+  }
+
+  function openBusinessOperatorHub() {
+    if (!currentUserIsBusinessOperator()) { toast('Operator access is required'); return null; }
+    const modal = openModal(`${modalHead('Business operator queue')}<form id="venue-operator-filters" class="venue-operator-filters"><div class="form-field"><label for="venue-queue-search">Find venue or claimant</label><input type="search" id="venue-queue-search" maxlength="120" placeholder="Venue name or claimant email" /></div><div class="form-grid"><div class="form-field"><label for="venue-queue-type">Review type</label><select id="venue-queue-type"><option value="all">All types</option><option value="claims">Claims</option><option value="revisions">Sensitive content</option><option value="integration_requests">Setup requests</option><option value="reports">Player reports</option><option value="actions_requiring_second_admin">Second-admin approvals</option><option value="connection_alerts">Connection alerts</option><option value="profile_link_alerts">Link alerts</option></select></div><div class="form-field"><label for="venue-queue-assignment">Assigned to</label><select id="venue-queue-assignment"><option value="any">Anyone</option><option value="mine">Me</option><option value="unassigned">Unassigned</option></select></div><div class="form-field"><label for="venue-queue-sort">Order</label><select id="venue-queue-sort"><option value="due">Due first</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div></div><label class="business-authorized-check"><input type="checkbox" id="venue-queue-overdue" /><span>Overdue only</span></label><div class="venue-connection-tasks"><button type="submit" class="btn btn-primary">Apply filters</button><button type="button" class="btn btn-secondary" id="venue-queue-reset">Reset filters</button></div></form><div class="business-feature-body" aria-live="polite">${skeletonHtml(3)}</div>`, { page: true, label: 'Business operator queue' });
+    modal.querySelector('#venue-operator-filters').insertAdjacentHTML('beforebegin', '<button type="button" class="btn btn-secondary btn-block" data-open-court-reviews>Court closure & reopening reviews</button>');
+    modal.querySelector('[data-open-court-reviews]').addEventListener('click', () => openChildModal(modal, openCourtCorrectionQueue));
+    const body = modal.querySelector('.business-feature-body');
+    let requestGeneration = 0;
+    const load = async () => {
+      const generation = ++requestGeneration;
       body.innerHTML = skeletonHtml(3);
       try {
-        const data = await api('/operator/business/queue');
+        const query = new URLSearchParams({q:modal.querySelector('#venue-queue-search').value.trim(),assignment:modal.querySelector('#venue-queue-assignment').value,sort:modal.querySelector('#venue-queue-sort').value,overdue:modal.querySelector('#venue-queue-overdue').checked ? '1' : '0'});
+        const data = await api(`/operator/business/queue?${query}`);
+        if (generation !== requestGeneration || !body.isConnected) return;
         const mfaReady = state.me?.mfa?.enabled === true;
         const queueData = data;
-        const groups = [
+        const allGroups = [
           ['claims', 'Claims'], ['revisions', 'Sensitive content'],
           ['integration_requests', 'Integration requests'], ['reports', 'Player & profile-link reports'],
           ['actions_requiring_second_admin', 'Second-admin approvals'], ['connection_alerts', 'Connection health'],
           ['profile_link_alerts', 'Profile link health'],
         ];
+        const selectedType = modal.querySelector('#venue-queue-type').value;
+        const groups = allGroups.filter(([key]) => selectedType === 'all' ? (data[key] || []).length : key === selectedType);
         const assignableKinds = new Set(['claims', 'integration_requests', 'reports']);
         const itemSummary = (kind, item) => {
           if (kind === 'claims') return `${item.claimant_email || 'Claimant'} · ${(item.evidence || []).length} evidence item${(item.evidence || []).length === 1 ? '' : 's'}`;
@@ -31145,7 +33174,7 @@
           if (kind === 'actions_requiring_second_admin') return `${String(item.action_type || 'action').replace(/_/g, ' ')} · proposed by ${item.proposed_by || `user ${item.proposed_by_id || 'unknown'}`}`;
           return item.last_error_message || item.error_message || item.status || item.health_status || 'Connection needs review';
         };
-        body.innerHTML = `<div class="business-operator-warning"><b>Privileged workspace</b><p>Operator actions are server-authorized and audited. Verification confirms listing control, not the truth of every service or link. Player reports and automated link-health alerts remain separate so each follows its correct review flow.</p></div>${mfaReady ? '' : `<div class="business-feature-state is-error"><span aria-hidden="true">${uiIcon('lock')}</span><div><b>Set up MFA before changing queue state</b><p>You can inspect the queue and run link checks, but assignment and review decisions require a fresh six-digit code.</p><button type="button" class="btn btn-primary btn-sm" data-operator-setup-mfa>Set up MFA</button></div></div>`}${groups.map(([key, label]) => { const items = Array.isArray(queueData[key]) ? queueData[key] : []; return `<section class="business-operator-section"><div class="section-label">${esc(label)} · ${items.length}</div>${items.length ? items.map((item, index) => { const deadline = item.due_at || item.response_due_at || item.expires_at; const assignment = item.assigned_operator_identifier || (item.assigned_operator_id ? `Operator ${item.assigned_operator_id}` : 'Unassigned'); const sla = String(item.sla_state || (item.overdue ? 'overdue' : '')).replace(/_/g, ' '); return `<article class="card business-operator-row"><div class="row-main"><b>${esc(item.business_name || item.court_name || item.display_name || item.provider || item.action_type || 'Business request')}</b><small>${esc(itemSummary(key, item))}</small>${assignableKinds.has(key) ? `<small>${esc(assignment)}${sla ? ` · SLA ${esc(sla)}` : ''}</small>` : ''}${deadline ? `<small class="${item.overdue ? 'business-operator-overdue' : ''}">${item.overdue ? 'Overdue · ' : ''}${item.expires_at ? 'Expires' : 'Due'} ${esc(fmtDateTime(deadline))}</small>` : item.created_at ? `<small>Submitted ${esc(fmtDateTime(item.created_at))}</small>` : ''}</div><div class="business-operator-actions">${assignableKinds.has(key) && !item.assigned_operator_id ? `<button type="button" class="btn btn-secondary btn-sm" data-operator-assign-kind="${key}" data-operator-assign-index="${index}" ${mfaReady ? '' : 'disabled'}>Assign to me</button>` : ''}<button type="button" class="btn btn-secondary btn-sm" data-operator-kind="${key}" data-operator-index="${index}" ${!mfaReady && !['connection_alerts', 'profile_link_alerts'].includes(key) ? 'disabled' : ''}>${key === 'actions_requiring_second_admin' ? 'Inspect' : 'Review'}</button></div></article>`; }).join('') : `<div class="business-operator-empty">No ${esc(label.toLowerCase())} need attention.</div>`}</section>`; }).join('')}`;
+        body.innerHTML = `<div class="business-operator-warning"><b>Privileged workspace</b><p>Operator actions are server-authorized and audited. Verification confirms listing control, not the truth of every service or link. Player reports and automated link-health alerts remain separate so each follows its correct review flow.</p></div>${mfaReady ? '' : `<div class="business-feature-state is-error"><span aria-hidden="true">${uiIcon('lock')}</span><div><b>Set up MFA before changing queue state</b><p>You can inspect the queue and run link checks, but assignment and review decisions require a fresh six-digit code.</p><button type="button" class="btn btn-primary btn-sm" data-operator-setup-mfa>Set up MFA</button></div></div>`}${!groups.length ? '<div class="business-operator-empty">No review items match these filters.</div>' : ''}<p class="simple-note">Up to 200 results per review type. Narrow the search for older items.</p>${groups.map(([key, label]) => { const items = Array.isArray(queueData[key]) ? queueData[key] : []; return `<section class="business-operator-section"><div class="section-label">${esc(label)} · ${items.length}</div>${items.length ? items.map((item, index) => { const deadline = item.due_at || item.response_due_at || item.expires_at; const assignment = item.assigned_operator_identifier || (item.assigned_operator_id ? `Operator ${item.assigned_operator_id}` : 'Unassigned'); const sla = String(item.sla_state || (item.overdue ? 'overdue' : '')).replace(/_/g, ' '); return `<article class="card business-operator-row"><div class="row-main"><b>${esc(item.business_name || item.court_name || item.display_name || item.provider || item.action_type || 'Business request')}</b><small>${esc(itemSummary(key, item))}</small>${assignableKinds.has(key) ? `<small>${esc(assignment)}${sla ? ` · SLA ${esc(sla)}` : ''}</small>` : ''}${deadline ? `<small class="${item.overdue ? 'business-operator-overdue' : ''}">${item.overdue ? 'Overdue · ' : ''}${item.expires_at ? 'Expires' : 'Due'} ${esc(fmtDateTime(deadline))}</small>` : item.created_at ? `<small>Submitted ${esc(fmtDateTime(item.created_at))}</small>` : ''}</div><div class="business-operator-actions">${assignableKinds.has(key) && !item.assigned_operator_id ? `<button type="button" class="btn btn-secondary btn-sm" data-operator-assign-kind="${key}" data-operator-assign-index="${index}" ${mfaReady ? '' : 'disabled'}>Assign to me</button>` : ''}<button type="button" class="btn btn-secondary btn-sm" data-operator-kind="${key}" data-operator-index="${index}" ${!mfaReady && !['connection_alerts', 'profile_link_alerts'].includes(key) ? 'disabled' : ''}>${key === 'actions_requiring_second_admin' ? 'Inspect' : 'Review'}</button></div></article>`; }).join('') : `<div class="business-operator-empty">No ${esc(label.toLowerCase())} need attention.</div>`}</section>`; }).join('')}`;
         body.querySelector('[data-operator-setup-mfa]')?.addEventListener('click', () => {
           openChildModal(modal, () => openBusinessSecurity({}));
         });
@@ -31159,8 +33188,12 @@
           const item = items[Number(button.dataset.operatorIndex)];
           if (item) openChildModal(modal, () => openBusinessOperatorReview(button.dataset.operatorKind, item, load));
         }));
-      } catch (error) { body.innerHTML = `${businessUnavailableHtml('Operator queue', error)}<button class="btn btn-secondary btn-block" data-retry>Try again</button>`; body.querySelector('[data-retry]').addEventListener('click', load); }
-    }; load(); return modal;
+      } catch (error) { if (generation !== requestGeneration || !body.isConnected) return; body.innerHTML = `${businessUnavailableHtml('Operator queue', error)}<button class="btn btn-secondary btn-block" data-retry>Try again</button>`; body.querySelector('[data-retry]').addEventListener('click', load); }
+    };
+    modal.querySelector('#venue-operator-filters').addEventListener('submit', event => { event.preventDefault(); load(); });
+    modal.querySelectorAll('#venue-operator-filters select, #venue-queue-overdue').forEach(input => input.addEventListener('change', load));
+    modal.querySelector('#venue-queue-reset').addEventListener('click', () => { modal.querySelector('#venue-operator-filters').reset(); modal.querySelectorAll('#venue-operator-filters select').forEach(syncAppSelect); load(); });
+    load(); return modal;
   }
 
   function openBusinessOperatorAssignment(kind, item, onDone) {
@@ -31254,8 +33287,10 @@
       const evidence = Array.isArray(item.evidence) ? item.evidence : [];
       claimEvidence = evidence;
       const history = Array.isArray(item.review_history) ? item.review_history : [];
+      const proposed = item.business_profile?.proposed_location;
       const approvedEvidence = evidence.some((entry) => ['verified', 'accepted'].includes(String(entry.status || '').toLowerCase()));
       fields = `<div class="business-operator-detail"><b>${esc(item.business_name || item.court_name || 'Venue claim')}</b><p>${esc(item.claimant_name || item.claimant_email || 'Claimant')} · role ${esc(item.role || 'not provided')}</p><small>Claimant user ${esc(item.claimant_user_id || 'unknown')} · current owner ${esc(item.current_owner_user_id || 'none')}</small>${item.ownership_transfer ? '<div class="business-connection-error">Approval transfers control and requires a different administrator to confirm it.</div>' : ''}</div>
+        ${proposed ? `<div class="card"><b>New venue location · private</b><p>${esc([proposed.name, proposed.address, proposed.city, proposed.state].join(', '))}</p><p>${esc(proposed.num_courts)} ${proposed.indoor ? 'indoor' : 'outdoor'} courts</p><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${proposed.latitude},${proposed.longitude}`)}" target="_blank" rel="noopener">Check proposed map location ${uiIcon('link')}</a><label class="business-authorized-check"><input type="checkbox" id="operator-location-reviewed" /><span>I checked this venue’s name, address and map location. Approval adds the court to public discovery.</span></label></div>` : ''}
         <div class="section-label">Submitted evidence</div>
         ${evidence.length ? evidence.map((entry) => `<div class="card business-evidence-row"><span aria-hidden="true">${uiIcon(businessStateIconName(entry.status))}</span><div class="row-main"><b>${esc(String(entry.type || 'evidence').replace(/_/g, ' '))}</b><small>${esc(entry.value || '')} · ${esc(entry.status || 'submitted')}</small><small>${entry.domain_match === true ? 'Matches approved official domain' : entry.domain_match === false ? 'Does not match approved official domain' : 'Domain match not applicable'}</small>${entry.note ? `<p>Claimant note: ${esc(entry.note)}</p>` : ''}${entry.review_note ? `<p>Immutable reviewer note: ${esc(entry.review_note)}</p>` : ''}</div>${entry.status === 'submitted' ? `<button type="button" class="btn btn-secondary btn-sm" data-operator-evidence-index="${evidence.indexOf(entry)}">Review</button>` : ''}</div>`).join('') : '<div class="business-operator-empty">No evidence submitted.</div>'}
         ${history.length ? `<details class="business-operator-history"><summary>Immutable review history · ${history.length}</summary>${history.map((entry) => `<p><b>${esc(entry.decision || 'review')}</b> · ${esc(entry.verification_method || 'method not recorded')} · ${esc(entry.review_note || '')}${entry.reviewer_identifier ? ` · ${esc(entry.reviewer_identifier)}` : ''}</p>`).join('')}</details>` : '<div class="business-operator-empty">No earlier claim decisions.</div>'}
@@ -31300,6 +33335,7 @@
             decision: modal.querySelector('#operator-business-decision').value,
             verification_method: modal.querySelector('#operator-verification-method').value,
             review_note: note, claimant_feedback: feedback, mfa_code: mfa.value.trim(),
+            location_reviewed: modal.querySelector('#operator-location-reviewed')?.checked === true,
           }) });
         } else if (kind === 'integration_requests') {
           result = await api(`/operator/business/integration-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status: modal.querySelector('#operator-business-decision').value, status_message: note, mfa_code: mfa.value.trim() }) });
@@ -31456,10 +33492,11 @@
           <input type="search" id="bh-court-search" placeholder="Search by venue name or city" autocomplete="off" value="${esc(court?.name || '')}" ${court ? 'readonly' : ''} />
           <input type="hidden" id="bh-court-id" value="${court?.id || ''}" />
           <div id="bh-court-results" class="business-court-results"></div>
-          ${!court && onMissing ? `<div class="business-missing-venue"><span>Can’t find your venue?</span><button type="button" class="btn-link" id="business-add-missing-venue">Add it on the Courts map</button></div>` : ''}
+          ${!court ? `<div class="business-missing-venue"><span>Can’t find your venue?</span><button type="button" class="btn-link" id="business-add-missing-venue">Add a missing venue</button></div>` : ''}
         </div>
         <button type="button" class="btn btn-primary btn-block" id="claim-next">Continue</button>
         </section>
+        <section id="claim-step-location" hidden><button type="button" class="simple-back" id="claim-location-back">${uiIcon('arrow-left')} Search existing venues</button><div class="simple-page-intro"><h3>Add your missing venue</h3><p>This location stays private while we review it. Submit your venue and management role together.</p></div>${window.VenueWorkspace.locationFields()}<button type="button" class="btn btn-primary btn-block" id="claim-location-next">Continue to your role</button></section>
         <section id="claim-step-role" aria-labelledby="claim-role-title" hidden>
         <button type="button" class="simple-back" id="claim-back">${uiIcon('arrow-left')} ${court ? 'Review venue' : 'Change venue'}</button>
         <div class="simple-page-intro"><h3 id="claim-role-title">Confirm you manage this venue</h3><p id="claim-selected-name">${esc(court?.name || '')}</p></div>
@@ -31483,19 +33520,19 @@
       </form>
     `, { label: 'Manage a venue' });
     if (!court) clubCourtPicker(modal, 'bh');
-    modal.querySelector('#business-add-missing-venue')?.addEventListener('click', () => {
-      transitionModal(modal, onMissing);
-    });
     const formUX = bindModalFormUX(modal, '#business-claim-submit', { draftKey: 'business-claim' });
+    let missingLocation = false;
+    const readLocation = window.VenueWorkspace.bindLocation(modal, {request: api, showError: formUX.showError, icon:uiIcon});
     let claimStep = court ? 'role' : 'venue';
     const showClaimStep = (step, focus = false) => {
       claimStep = step;
       modal.querySelector('#claim-step-venue').hidden = step !== 'venue';
+      modal.querySelector('#claim-step-location').hidden = step !== 'location';
       modal.querySelector('#claim-step-role').hidden = step !== 'role';
-      modal.querySelector('#claim-selected-name').textContent = modal.querySelector('#bh-court-search').value;
+      modal.querySelector('#claim-selected-name').textContent = missingLocation ? modal.querySelector('#venue-location-name').value : modal.querySelector('#bh-court-search').value;
       ['venue', 'role'].forEach((name) => modal.querySelector(`#claim-trail-${name}`).setAttribute('aria-current', name === step ? 'step' : 'false'));
       if (focus) {
-        const target = modal.querySelector(step === 'venue' ? '#bh-court-search' : '#business-claim-role');
+        const target = modal.querySelector(step === 'location' ? '#venue-location-name' : step === 'venue' ? '#bh-court-search' : '#business-claim-role');
         (target._appSelectButton || target).focus();
       }
     };
@@ -31506,16 +33543,23 @@
       if (!Number.isSafeInteger(selected) || selected <= 0) { formUX.showError('Select your venue from the search results.', search); return false; }
       showClaimStep('role', true); return true;
     };
+    modal.querySelector('#business-add-missing-venue')?.addEventListener('click', () => { missingLocation = true; showClaimStep('location', true); });
+    modal.querySelector('#claim-location-back').addEventListener('click', () => { missingLocation = false; showClaimStep('venue', true); });
+    const continueLocation = () => { formUX.clearError(); if (readLocation()) showClaimStep('role', true); };
+    modal.querySelector('#claim-location-next').addEventListener('click', continueLocation);
     modal.querySelector('#claim-next').addEventListener('click', continueClaim);
-    modal.querySelector('#claim-back').addEventListener('click', () => showClaimStep('venue', true));
+    modal.querySelector('#claim-back').addEventListener('click', () => showClaimStep(missingLocation ? 'location' : 'venue', true));
     showClaimStep(claimStep);
     modal.querySelector('#business-claim-form').addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (claimStep === 'location') { continueLocation(); return; }
       if (claimStep === 'venue') { continueClaim(); return; }
       formUX.clearError();
       const searchInput = modal.querySelector('#bh-court-search');
       const courtId = Number(searchInput.dataset.selectedCourtId || modal.querySelector('#bh-court-id').value);
-      if (!Number.isSafeInteger(courtId) || courtId <= 0) {
+      const location = missingLocation ? readLocation() : null;
+      if (missingLocation && !location) { showClaimStep('location'); return; }
+      if (!missingLocation && (!Number.isSafeInteger(courtId) || courtId <= 0)) {
         showClaimStep('venue');
         formUX.showError('Choose your club or court from the search results.', modal.querySelector('#bh-court-search'));
         return;
@@ -31539,10 +33583,10 @@
       const finish = formUX.startSubmitting('Submitting for review…');
       if (!finish) return;
       try {
-        const result = await api('/businesses/claims', {
+        const result = await api(missingLocation ? '/businesses/claims/new-location' : '/businesses/claims', {
           method: 'POST',
           body: JSON.stringify({
-            court_id: courtId,
+            ...(missingLocation ? {location} : {court_id: courtId}),
             role: modal.querySelector('#business-claim-role').value,
             authorized_attestation: true,
             verification_contact_email: contactInput.value.trim(),
@@ -31556,13 +33600,19 @@
         onSaved?.(result.business, result.claim);
       } catch (error) {
         finish();
-        formUX.showError(error.message);
+        if (error.code === 'venue_location_already_listed') {
+          showClaimStep('location');
+          const results = modal.querySelector('#venue-location-results');
+          results.innerHTML = `<p>${esc(error.data?.message || 'This location is already listed.')}</p>${(error.data?.items || []).map(item => `<button type="button" class="court-search-row" data-existing-venue="${item.id}"><span class="row-main"><b>${esc(item.name)}</b><small>${esc([item.address, item.city, item.state].filter(Boolean).join(', '))}</small></span><span>Use this venue</span></button>`).join('')}`;
+          results.querySelectorAll('[data-existing-venue]').forEach(button => button.addEventListener('click', () => { const item = error.data.items.find(item => String(item.id) === button.dataset.existingVenue); missingLocation = false; searchInput.dataset.selectedCourtId = item.id; searchInput.value = item.name; modal.querySelector('#bh-court-id').value = item.id; showClaimStep('role', true); }));
+        }
+        formUX.showError(error.data?.message || error.message);
       }
     });
     return modal;
   }
 
-  function optionalBusinessUrl(modal, selector, label, formUX) {
+  function optionalBusinessUrl(modal, selector, label, formUX, original = undefined) {
     const input = modal.querySelector(selector);
     const raw = input.value.trim();
     if (!raw) return '';
@@ -31573,7 +33623,38 @@
       formUX.showError(`Enter a valid ${label} link that starts with https://`, input);
       return null;
     }
-    return href;
+    return original !== undefined && raw === String(original || '').trim() ? original || '' : href;
+  }
+
+  function openBusinessHoursEditor(business, onSaved) {
+    const modal=openModal(`${modalHead('Opening hours')}${window.VenueWorkspace.hoursForm(business)}`, {label:'Venue opening hours'});
+    const formUX=bindModalFormUX(modal,'#venue-hours-save');
+    window.VenueWorkspace.bindHoursForm(modal);
+    bindModalDiscardConfirmation(modal,{isDirty:formUX.isDirty});
+    modal.querySelector('#venue-hours-form').addEventListener('submit',async event=>{
+      event.preventDefault();formUX.clearError();let changes;
+      try {changes=window.VenueWorkspace.readHoursForm(modal);} catch(error){formUX.showError(error.message);return;}
+      const finish=formUX.startSubmitting('Saving hours…');if(!finish)return;
+      try {const saved=await window.VenueWorkspace.saveEdits(business,{changes,request:api,resolveConflicts:conflicts=>openBusinessConflictReview(modal,conflicts)});closeModal(modal);onSaved?.(saved);toast(window.VenueWorkspace.savedStatus(saved));}
+      catch(error){finish();formUX.showError(error.message);}
+    });
+    return modal;
+  }
+
+  function openBusinessVisitEditor(business, onSaved) {
+    const modal = openModal(`${modalHead('Access, parking & arrival')}<form id="venue-visit-form" novalidate>${window.VenueWorkspace.visitingForm(business.visitor_info, 'venue-visit', {owner:true})}<button type="submit" class="btn btn-primary btn-block" id="venue-visit-save">Save visiting details for review</button></form>`, {label:'Venue visiting details'});
+    const formUX = bindModalFormUX(modal, '#venue-visit-save');
+    bindModalDiscardConfirmation(modal, {isDirty:formUX.isDirty});
+    modal.querySelector('#venue-visit-form').addEventListener('submit', async event => {
+      event.preventDefault(); formUX.clearError();
+      const changes = {visitor_info:window.VenueWorkspace.readVisitingForm(modal)};
+      const finish = formUX.startSubmitting('Saving visiting details…'); if (!finish) return;
+      try {
+        const saved = await window.VenueWorkspace.saveEdits(business, {changes,request:api,resolveConflicts:conflicts=>openBusinessConflictReview(modal,conflicts)});
+        closeModal(modal); onSaved?.(saved); toast(window.VenueWorkspace.savedStatus(saved));
+      } catch(error) {finish();formUX.showError(error.message);}
+    });
+    return modal;
   }
 
   function openBusinessDetailsEditor(rawBusiness, onSaved, { focusField = null } = {}) {
@@ -31586,17 +33667,24 @@
     const syncPreview = window.VenueWorkspace.bindDetailsEditor(modal, business, { formUX, icon: uiIcon, baseline: initialDetails, verified: businessVerificationState(business) === 'verified', publicNow: businessWorkspaceState(business).publicNow });
     bindModalDiscardConfirmation(modal, { isDirty: formUX.isDirty, onDiscard: () => formUX.clearDraft({ disable: true }), title: 'Discard unsaved venue details?', message: 'Your text edits have not been saved. Logo uploads or removals already completed are kept.' });
     if (focusField) requestAnimationFrame(() => { const input = modal.querySelector(focusField); syncPreview.reveal(input); input?.scrollIntoView({ block: 'center' }); input?.focus({ preventScroll: true }); });
-    const adoptLogoState = (updated) => { initialDetails.logo_url = updated.logo_url || ''; Object.assign(business, normalizeBusinessProfile(updated)); syncPreview(); onSaved?.(business); };
+    const adoptLogoState = (updated) => { initialDetails.logo_url = updated.logo_url || ''; Object.assign(business, normalizeBusinessProfile(updated)); modal.querySelector('#business-logo-saved').textContent = 'Logo saved. ' + window.VenueWorkspace.savedStatus(updated); modal.querySelector('#business-logo-history').hidden = false; syncPreview(); onSaved?.(business); };
+    modal.querySelector('#business-logo-history').addEventListener('click', () => openChildModal(modal, () => openBusinessRevisionHistory(business, updated => { adoptLogoState(updated); modal.querySelector('#business-logo-url').value = updated.logo_url || ''; syncPreview(); })));
+    modal.querySelector('#business-edit-hours')?.addEventListener('click', () => openChildModal(modal, () => openBusinessHoursEditor(business, updated => { Object.assign(business, normalizeBusinessProfile(updated)); for (const key of ['structured_hours','hours_dawn_to_dusk','effective_hours','timezone','hours']) initialDetails[key]=updated[key]; modal.querySelector('#business-hours').value=updated.hours || ''; modal.querySelector('#business-timezone').value=updated.timezone || '';onSaved?.(updated);syncPreview(); })));
+    modal.querySelector('#business-edit-visiting')?.addEventListener('click', () => openChildModal(modal, () => openBusinessVisitEditor(business, updated => { Object.assign(business, normalizeBusinessProfile(updated)); for (const key of ['visitor_info','effective_visiting']) initialDetails[key] = updated[key]; onSaved?.(updated); syncPreview(); })));
+    let pendingLogoFile = null;
+    modal.querySelector('#business-logo-retry').addEventListener('click', () => { if (pendingLogoFile) uploadLogo(pendingLogoFile); });
     const logoFileInput = modal.querySelector('#business-logo-file');
     const logoFileButton = modal.querySelector('#business-logo-file-button');
     const logoFilePicker = modal.querySelector('#business-logo-file-picker');
     const logoRemoveButton = modal.querySelector('#business-logo-remove');
     const detailsSaveButton = modal.querySelector('#business-details-save');
     logoFileButton.addEventListener('click', () => logoFileInput.click());
-    logoFileInput.addEventListener('change', async (event) => {
-      const fileInput = event.currentTarget;
-      const file = fileInput.files?.[0];
+    logoFileInput.addEventListener('change', event => uploadLogo(event.currentTarget.files?.[0]));
+    const uploadLogo = async (file) => {
+      const fileInput = logoFileInput;
       if (!file) return;
+      pendingLogoFile = file;
+      modal.querySelector('#business-logo-retry').hidden = true;
       formUX.clearError();
       const meta = businessFileDescription(file, 'Image');
       const fileType = String(file.type || '').toLowerCase();
@@ -31627,15 +33715,16 @@
       let uploadError = '';
       try {
         const image = await imageFileToDataUrl(file, 768);
-        const result = await api(`/businesses/${business.id}/logo`, { method: 'POST', body: JSON.stringify({ data: image }) });
+        const result = await window.VenueWorkspace.saveLogo(business, {data: image, request: api, resolveConflicts: conflicts => openBusinessConflictReview(modal, conflicts)});
+        pendingLogoFile = null;
+        if (result.business) adoptLogoState(result.business);
         const url = result.logo_url || '';
         if (url) modal.querySelector('#business-logo-url').value = url;
         setBusinessFilePickerState(logoFilePicker, { state: 'success', name: file.name, meta: `${meta} · uploaded securely`, badge: 'Uploaded' });
         logoFileButton.querySelector('#business-logo-file-action').textContent = 'Replace uploaded logo';
         logoRemoveButton.hidden = false;
-        syncPreview(); toast('Logo saved. Your listing may need review.');
-        try { adoptLogoState(await api(`/businesses/${business.id}`)); }
-        catch { adoptLogoState({ ...business, logo_url: url, has_logo_upload: true, is_public: false, published: false, content_review_status: 'pending' }); }
+        syncPreview(); toast(window.VenueWorkspace.savedStatus(result.business || business));
+        if (!result.business) adoptLogoState(await api(`/businesses/${business.id}`));
       } catch (error) {
         uploadError = error.status === 404
           ? 'Managed logo uploads are not enabled yet. Use a secure image link for now.'
@@ -31644,7 +33733,8 @@
             : error.message === 'bad_image'
               ? 'That image could not be opened. Choose another PNG, JPEG, or WebP.'
               : error.message || 'Logo upload failed. Try again.';
-        setBusinessFilePickerState(logoFilePicker, { state: 'error', name: file.name, meta, badge: 'Try another' });
+        setBusinessFilePickerState(logoFilePicker, { state: 'error', name: file.name, meta, badge: 'Not saved' });
+        modal.querySelector('#business-logo-retry').hidden = false;
       } finally {
         fileInput.disabled = false;
         logoFileButton.disabled = false;
@@ -31652,10 +33742,10 @@
         fileInput.value = '';
       }
       if (uploadError) formUX.showError(uploadError, logoFileButton);
-    });
+    };
     logoRemoveButton.addEventListener('click', () => openBusinessConfirmAction({
-      title: 'Remove uploaded logo?', message: 'The player listing will return to its venue icon. A verified listing may need content review before republishing.', confirmLabel: 'Remove logo',
-      onConfirm: async (sheet) => { await api(`/businesses/${business.id}/logo`, { method: 'DELETE' }); modal.querySelector('#business-logo-url').value = ''; logoRemoveButton.hidden = true; setBusinessFilePickerState(logoFilePicker, { state: 'idle', name: 'Uploaded logo removed', meta: 'Choose an image to add a new logo', badge: 'Optional', icon: 'camera' }); logoFileButton.querySelector('#business-logo-file-action').textContent = 'Choose logo image'; closeModal(sheet); toast('Uploaded logo removed'); try { adoptLogoState(await api(`/businesses/${business.id}`)); } catch { adoptLogoState({ ...business, logo_url: '', has_logo_upload: false, is_public: false, published: false, content_review_status: 'pending' }); } },
+      title: 'Remove uploaded logo?', message: 'Logo removal saves a draft for review. The approved logo stays live until you publish the new version.', confirmLabel: 'Remove logo',
+      onConfirm: async (sheet) => { const removed = await window.VenueWorkspace.saveLogo(business, {request: api, resolveConflicts: conflicts => openBusinessConflictReview(sheet, conflicts)}); adoptLogoState(removed.business); modal.querySelector('#business-logo-url').value = ''; logoRemoveButton.hidden = true; syncPreview(); setBusinessFilePickerState(logoFilePicker, { state: 'idle', name: 'Uploaded logo removed', meta: 'Choose an image to add a new logo', badge: 'Optional', icon: 'camera' }); logoFileButton.querySelector('#business-logo-file-action').textContent = 'Choose logo image'; closeModal(sheet); toast(window.VenueWorkspace.savedStatus(removed.business)); },
     }));
     modal.querySelector('#business-details-form').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -31673,25 +33763,25 @@
       const rawLogoUrl = modal.querySelector('#business-logo-url').value.trim();
       const managedLogo = /^\/api\/businesses\/\d+\/logo$/.test(rawLogoUrl);
       const urls = {
-        website_url: optionalBusinessUrl(modal, '#business-website-url', 'website', formUX),
-        ...(managedLogo ? {} : { logo_url: optionalBusinessUrl(modal, '#business-logo-url', 'logo image', formUX) }),
+        website_url: optionalBusinessUrl(modal, '#business-website-url', 'website', formUX, initialDetails.website_url),
+        ...(managedLogo ? {} : { logo_url: optionalBusinessUrl(modal, '#business-logo-url', 'logo image', formUX, initialDetails.logo_url) }),
       };
       if (Object.values(urls).some((value) => value === null)) return;
       const finish = formUX.startSubmitting('Saving details…');
       if (!finish) return;
       try {
-        const updated = await api(`/businesses/${business.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(window.VenueWorkspace.changedDetails(initialDetails, {
+        const updated = await window.VenueWorkspace.saveEdits(initialDetails, {
+          changes: window.VenueWorkspace.changedDetails(initialDetails, {
             name,
             description: modal.querySelector('#business-description').value.trim(),
             announcement: modal.querySelector('#business-announcement').value.trim(),
             phone: modal.querySelector('#business-phone').value.trim(),
             email: emailInput.value.trim(),
             hours: modal.querySelector('#business-hours').value.trim(),
+            timezone: modal.querySelector('#business-timezone').value,
             amenities: modal.querySelector('#business-amenities').value.split(',').map((item) => item.trim()).filter(Boolean),
             ...urls,
-          })),
+          }), request: api, resolveConflicts: conflicts => openBusinessConflictReview(modal, conflicts),
         });
         formUX.clearDraft({ disable: true });
         closeModal(modal);
@@ -31827,13 +33917,14 @@
     const category = Object.prototype.hasOwnProperty.call(BUSINESS_OFFERING_CATEGORIES, item.category)
       ? item.category : 'lesson';
     const modal = openModal(`
-      ${modalHead(index >= 0 ? 'Edit lesson or service' : 'Add lesson or service')}
+      ${modalHead(index >= 0 ? 'Edit service' : 'Add service')}
       <form id="business-offering-form" class="venue-item-form" novalidate>
-        <fieldset class="venue-form-section"><legend>Lesson or service</legend>
+        ${index < 0 ? `<div class="venue-service-templates"><span class="section-label">Start with a service</span><div class="filter-chips">${[['lesson','Private lesson'],['clinic','Group clinic'],['court_rental','Court rental'],['membership','Membership']].map(([type,label])=>`<button type="button" class="filter-chip" data-service-template="${type}" data-template-name="${label}">${label}</button>`).join('')}</div><p class="simple-note">Services stay on your venue page. Add a session in Schedule for a specific date and time.</p></div>` : ''}
+        <fieldset class="venue-form-section"><legend>Service</legend>
         <div class="form-field"><label for="business-offering-name">Name</label><input type="text" id="business-offering-name" maxlength="120" value="${esc(item.name || item.title || '')}" placeholder="e.g. Beginner private lesson" /></div>
         <div class="form-field">
           <label for="business-offering-category">Type</label>
-          <select id="business-offering-category" data-select-title="Offering type" data-select-prefix="Type">
+          <select id="business-offering-category" data-select-title="Service type" data-select-prefix="Type">
             ${Object.entries(BUSINESS_OFFERING_CATEGORIES).map(([value, [icon, label]]) => `<option value="${value}" data-icon-name="${icon}" ${category === value ? 'selected' : ''}>${label}</option>`).join('')}
           </select>
         </div>
@@ -31844,25 +33935,26 @@
           <div class="form-field"><label for="business-offering-duration">Minutes</label><input type="number" id="business-offering-duration" min="5" max="1440" step="1" inputmode="numeric" value="${item.duration_minutes || ''}" placeholder="60" /><small class="field-help">Optional · 5 minutes or longer</small></div>
         </div>
         <div class="form-field"><label for="business-offering-booking">Direct booking link</label><input type="url" id="business-offering-booking" value="${esc(item.booking_url || '')}" placeholder="https://…" inputmode="url" /><small class="field-help">Players continue to this link to finish booking.</small></div>
-        <label class="business-authorized-check"><input type="checkbox" id="business-offering-active" ${item.active === false ? '' : 'checked'} /> <span>Show this offering to players</span></label>
-        </fieldset><footer class="venue-item-savebar"><button type="submit" class="btn btn-primary btn-block" id="business-offering-done">${persist ? 'Save lesson or service' : 'Update list'}</button><p class="simple-note">${persist ? 'Saves to your venue. Changed booking links need review before your listing is public.' : 'Next, choose Save offerings to save the updated list.'}</p></footer>
+        <label class="business-authorized-check"><input type="checkbox" id="business-offering-active" ${item.active === false ? '' : 'checked'} /> <span>Show this service to players</span></label>
+        </fieldset><footer class="venue-item-savebar"><button type="submit" class="btn btn-primary btn-block" id="business-offering-done">${persist ? 'Save service' : 'Update list'}</button><p class="simple-note">${persist ? 'Saves to your venue. Changed booking links need review before your listing is public.' : 'Next, choose Save services to save the updated list.'}</p></footer>
       </form>
     `, { label: index >= 0 ? 'Edit business offering' : 'Add business offering' });
     const formUX = bindModalFormUX(modal, '#business-offering-done');
     bindModalDiscardConfirmation(modal, {
       isDirty: formUX.isDirty,
-      title: 'Discard this offering draft?',
-      message: 'The offering fields you changed have not been added to the list yet.',
+      title: 'Discard this service draft?',
+      message: 'The service fields you changed have not been added to the list yet.',
     });
+    modal.querySelectorAll('[data-service-template]').forEach(button => button.addEventListener('click', () => { const name = modal.querySelector('#business-offering-name'); const type = modal.querySelector('#business-offering-category'); if (!name.value.trim()) name.value = button.dataset.templateName; type.value = button.dataset.serviceTemplate; [name,type].forEach(input => input.dispatchEvent(new Event('change', {bubbles:true}))); name.focus(); }));
     modal.querySelector('#business-offering-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       formUX.clearError();
       const name = modal.querySelector('#business-offering-name').value.trim();
       if (name.length < 2) {
-        formUX.showError('Give this offering a clear name.', modal.querySelector('#business-offering-name'));
+        formUX.showError('Give this service a clear name.', modal.querySelector('#business-offering-name'));
         return;
       }
-      const bookingUrl = optionalBusinessUrl(modal, '#business-offering-booking', 'booking', formUX);
+      const bookingUrl = optionalBusinessUrl(modal, '#business-offering-booking', 'booking', formUX, item.booking_url);
       if (bookingUrl === null) return;
       const durationInput = modal.querySelector('#business-offering-duration');
       const durationText = durationInput.value.trim();
@@ -31898,7 +33990,7 @@
     const initialOfferings = JSON.stringify(offerings);
     const modal = openModal(`
       ${modalHead('Offerings')}
-      ${businessWorkspaceState(business).publicNow ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved changes update your listing. Changed booking links make the listing private until reviewed.</p></div>` : ''}
+      ${businessWorkspaceState(business).publicNow ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Edits save to your venue. Changed booking links are reviewed before publication; your approved listing stays live.</p></div>` : ''}
       <p class="row-sub business-editor-intro">Show players exactly what they can book or join. Each item can use its own direct link.</p>
       <div id="business-offerings-list"></div>
       <button type="button" class="btn btn-secondary btn-block" id="business-offering-add">${uiIcon('plus')} Add offering</button>
@@ -31937,11 +34029,7 @@
       const finish = formUX.startSubmitting('Saving offerings…');
       if (!finish) return;
       try {
-        const fresh = normalizeBusinessProfile(await api(`/businesses/${business.id}`));
-        window.VenueWorkspace.assertCollectionUnchanged(fresh.offerings, business.offerings);
-        const updated = await api(`/businesses/${business.id}/offerings`, {
-          method: 'PUT', body: JSON.stringify({ items: offerings }),
-        });
+        const updated = await window.VenueWorkspace.saveEdits(business, {kind: 'offerings', items: offerings, request: api, resolveConflicts: conflicts => openBusinessConflictReview(modal, conflicts)});
         closeModal(modal);
         toast('Offerings updated');
         onSaved?.(updated);
@@ -31964,11 +34052,39 @@
     other: ['map-pin', 'Other'],
   };
 
-  function openBusinessScheduleItemForm(item = {}, index = -1, onSave, { persist = false } = {}) {
+  function openBusinessOccurrenceEditor(business, pattern, occurrence, onSaved) {
+    let modal;
+    const save = async values => {
+      const scope = modal.querySelector('[data-occurrence-scope]').value;
+      const fields = [...window.VenueWorkspace.occurrenceEditableFields, ...(scope === 'following_dates' ? ['day_of_week'] : [])];
+      const changes = Object.fromEntries(fields.filter(key => JSON.stringify(values[key] ?? null) !== JSON.stringify(occurrence[key] ?? null)).map(key => [key, values[key]]));
+      if (!Object.keys(changes).length) return;
+      const result = await window.VenueWorkspace.saveOccurrence(business, occurrence, changes, {scope, request:api, resolveConflicts:conflicts => openBusinessConflictReview(modal, conflicts)});
+      onSaved?.(result); toast(window.VenueWorkspace.savedStatus(result));
+    };
+    modal = openBusinessScheduleItemForm({...occurrence, id: pattern.id}, 0, save, {persist:true, venueTimezone:business.timezone, services:business.offerings});
+    modal.querySelector('#business-schedule-item-form').insertAdjacentHTML('afterbegin', `<div class="form-field"><label for="venue-occurrence-scope">Apply changes to</label><select id="venue-occurrence-scope" data-occurrence-scope><option value="this_date">Only ${esc(occurrence.occurrence_on)}</option>${pattern.recurrence !== 'dated' ? `<option value="following_dates">This and future dates</option>` : ''}</select><small>Other individually edited dates keep their exceptions.</small></div>`);
+    const patternInput = modal.querySelector('#business-schedule-recurrence');
+    patternInput.closest('.form-field').hidden = true;
+    const applyScope = () => {
+      const following = modal.querySelector('[data-occurrence-scope]').value === 'following_dates';
+      patternInput.value = following ? pattern.recurrence : 'dated';
+      modal.querySelector('#business-schedule-event-date').value = occurrence.occurrence_on;
+      modal.querySelector('#business-schedule-start-date').value = pattern.start_date || '';
+      modal.querySelector('#business-schedule-end-date').value = pattern.end_date || '';
+      patternInput.dispatchEvent(new Event('change', {bubbles:true}));
+      ['event-date', 'start-date', 'end-date'].forEach(key => { modal.querySelector(`#business-schedule-${key}`).disabled = true; });
+    };
+    modal.querySelector('[data-occurrence-scope]').addEventListener('change', applyScope);
+    applyScope(); enhanceAppSelects(modal);
+    return modal;
+  }
+
+  function openBusinessScheduleItemForm(item = {}, index = -1, onSave, { persist = false, venueTimezone = '', services = [] } = {}) {
     const kind = Object.prototype.hasOwnProperty.call(BUSINESS_SCHEDULE_KINDS, item.kind) ? item.kind : 'open_play';
     const dayValue = businessDayLabel(item.day_of_week ?? item.day ?? 'monday').toLowerCase();
     const recurrence = item.recurrence || (item.event_date ? 'dated' : 'weekly');
-    const defaultTimezone = item.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles';
+    const defaultTimezone = item.timezone || venueTimezone;
     const modal = openModal(`
       ${modalHead(index >= 0 ? 'Edit session' : 'Add session')}
       <form id="business-schedule-item-form" class="venue-item-form" novalidate>
@@ -31980,6 +34096,7 @@
             ${Object.entries(BUSINESS_SCHEDULE_KINDS).map(([value, [icon, label]]) => `<option value="${value}" data-icon-name="${icon}" ${kind === value ? 'selected' : ''}>${label}</option>`).join('')}
           </select>
         </div>
+        <div class="form-field"><label for="business-schedule-service">Service or program</label><select id="business-schedule-service"><option value="">Standalone session</option>${services.filter(service => service.active !== false || Number(service.id) === Number(item.offering_id)).map(service => `<option value="${service.id}" ${Number(service.id) === Number(item.offering_id) ? 'selected' : ''}>${esc(service.name)}${service.active === false ? ' (not listed)' : ''}</option>`).join('')}${item.offering_id && !services.some(service => Number(service.id) === Number(item.offering_id)) ? `<option selected value="${item.offering_id}">Previously linked service</option>` : ''}</select><small class="field-help">Players can find this date from the service’s listing.</small></div>
         </fieldset><fieldset class="venue-form-section"><legend>When it happens</legend>
         <div class="form-field"><label for="business-schedule-recurrence">Schedule pattern</label><select id="business-schedule-recurrence" data-select-title="Schedule pattern"><option value="weekly" ${recurrence === 'weekly' ? 'selected' : ''}>Repeats weekly</option><option value="dated" ${recurrence === 'dated' ? 'selected' : ''}>Specific date</option><option value="date_range" ${recurrence === 'date_range' ? 'selected' : ''}>Weekly within a date range</option></select></div>
         <div class="form-field">
@@ -32003,14 +34120,15 @@
         </fieldset><details class="simple-disclosure"><summary>Audience, capacity &amp; location <span>Optional</span></summary>
         <div class="form-field"><label for="business-schedule-skill">Skill or audience</label><input type="text" id="business-schedule-skill" maxlength="40" value="${esc(item.skill_level || '')}" placeholder="All levels, 3.5+, beginners…" /></div>
         <div class="form-grid"><div class="form-field"><label for="business-schedule-instructor">Instructor or host</label><input type="text" id="business-schedule-instructor" maxlength="120" value="${esc(item.instructor || '')}" /></div><div class="form-field"><label for="business-schedule-capacity">Capacity</label><input type="number" id="business-schedule-capacity" min="1" max="10000" inputmode="numeric" value="${item.capacity ?? ''}" placeholder="24" /></div></div>
-        <div class="form-field"><label for="business-schedule-spots">Spots remaining (optional)</label><input type="number" id="business-schedule-spots" min="0" max="10000" inputmode="numeric" value="${item.spots_remaining ?? ''}" placeholder="8" /><small class="field-help">Use 0 when full. Third Shot labels a scheduled item sold out when no spots remain.</small></div>
+        <label class="business-authorized-check"><input type="checkbox" id="business-schedule-availability-checked" data-no-draft /><span>I checked the remaining places just now.</span></label>
+        <div class="form-field"><label for="business-schedule-spots">Spots remaining (optional)</label><input type="number" id="business-schedule-spots" min="0" max="10000" inputmode="numeric" value="${item.spots_remaining ?? ''}" placeholder="8" /><small class="field-help">Manually maintained. After two days, players see Check availability. Changing the title does not refresh this count.</small></div>
         <div class="form-field"><label for="business-schedule-location">Court or meeting point</label><input type="text" id="business-schedule-location" maxlength="160" value="${esc(item.location_note || '')}" placeholder="Courts 1–4, front desk, upstairs studio…" /></div>
         </details><fieldset class="venue-form-section"><legend>Registration &amp; visibility</legend>
-        <div class="form-field"><label for="business-schedule-timezone">Venue timezone</label><input type="text" id="business-schedule-timezone" maxlength="80" value="${esc(defaultTimezone)}" placeholder="America/Los_Angeles" /><small class="field-help">Times are shown in the venue’s local timezone.</small></div>
+        <div class="form-field"><label for="business-schedule-timezone">Venue timezone</label><select id="business-schedule-timezone" data-select-title="Venue time zone">${window.VenueWorkspace.timezoneOptions(defaultTimezone)}</select><small class="field-help">Times are shown in the venue’s local timezone.</small></div>
         <div class="form-field"><label for="business-schedule-booking">Registration link (optional)</label><input type="url" id="business-schedule-booking" value="${esc(item.booking_url || '')}" placeholder="https://…" inputmode="url" /></div>
         <div class="form-field"><label for="business-schedule-status">Program status</label><select id="business-schedule-status" data-select-title="Program status"><option value="scheduled" ${!['sold_out', 'cancelled', 'completed'].includes(item.status) ? 'selected' : ''}>Scheduled</option><option value="sold_out" ${item.status === 'sold_out' ? 'selected' : ''}>Sold out</option><option value="cancelled" ${item.status === 'cancelled' ? 'selected' : ''}>Cancelled — keep visible</option><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>Completed</option></select></div>
         <label class="business-authorized-check"><input type="checkbox" id="business-schedule-active" ${item.active === false ? '' : 'checked'} /> <span>Show this on the public schedule</span></label>
-        </fieldset><footer class="venue-item-savebar"><button type="submit" class="btn btn-primary btn-block" id="business-schedule-item-done">${persist ? 'Save session' : 'Update list'}</button><p class="simple-note">${persist ? 'Saves to your venue. Changed registration links need review before your listing is public.' : 'Next, choose Save schedule to save the updated list.'}</p></footer>
+        </fieldset><footer class="venue-item-savebar"><button type="submit" class="btn btn-primary btn-block" id="business-schedule-item-done">${persist ? 'Save session' : 'Update list'}</button><p class="simple-note">${persist ? 'Saves to your venue. Changed links are reviewed while your approved listing stays live.' : 'Next, choose Save schedule to save the updated list.'}</p></footer>
       </form>
     `, { label: index >= 0 ? 'Edit business schedule item' : 'Add business schedule item' });
     const formUX = bindModalFormUX(modal, '#business-schedule-item-done');
@@ -32046,7 +34164,7 @@
         formUX.showError('The end time needs to be after the start time.', modal.querySelector('#business-schedule-end'));
         return;
       }
-      const bookingUrl = optionalBusinessUrl(modal, '#business-schedule-booking', 'registration', formUX);
+      const bookingUrl = optionalBusinessUrl(modal, '#business-schedule-booking', 'registration', formUX, item.booking_url);
       if (bookingUrl === null) return;
       const recurrenceValue = modal.querySelector('#business-schedule-recurrence').value;
       const eventDate = modal.querySelector('#business-schedule-event-date').value;
@@ -32069,6 +34187,7 @@
         ...item,
         title,
         kind: modal.querySelector('#business-schedule-kind').value,
+        offering_id: safePositiveId(modal.querySelector('#business-schedule-service').value),
         day_of_week: modal.querySelector('#business-schedule-day').value,
         start_time: startTime,
         end_time: endTime,
@@ -32080,6 +34199,7 @@
         instructor: modal.querySelector('#business-schedule-instructor').value.trim(),
         capacity: capacityText ? capacity : null,
         spots_remaining: spotsText ? spotsRemaining : null,
+        ...(modal.querySelector('#business-schedule-availability-checked').checked ? {availability_checked:true} : {}),
         location_note: modal.querySelector('#business-schedule-location').value.trim(),
         timezone: modal.querySelector('#business-schedule-timezone').value.trim(),
         status: modal.querySelector('#business-schedule-status').value,
@@ -32099,7 +34219,7 @@
   }
 
   function businessScheduleCsvTemplate(business) {
-    const timezone = business?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles';
+    const timezone = business?.timezone || business?.schedule?.[0]?.timezone || '';
     return [
       'Title,Type,Day,Start,End,Timezone,Audience,Capacity,Spots remaining,Location,Host,Registration link,Status,Visible,Pattern,Date,Start date,End date',
       `Beginner open play,Open play,Monday,6:00 PM,8:00 PM,${timezone},Beginners,24,8,Courts 1-4,,,Scheduled,Yes,Weekly,,,`,
@@ -32237,7 +34357,7 @@
         const result = await api(`/businesses/${business.id}/schedule/import-preview`, {
           method: 'POST', body: JSON.stringify({
             csv,
-            timezone: business.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles',
+            timezone: business.timezone || business.schedule?.[0]?.timezone || '',
           }),
         });
         onImport?.(result.items || [], mode, result);
@@ -32250,7 +34370,7 @@
     return modal;
   }
 
-  function openBusinessScheduleEditor(rawBusiness, onSaved) {
+  function openBusinessScheduleEditor(rawBusiness, onSaved, {startImport = false} = {}) {
     const business = normalizeBusinessProfile(rawBusiness);
     let schedule = business.schedule.map((item) => ({ ...item }));
     const scheduleDayOrder = [...BUSINESS_DAY_LABELS.map((day) => day.toLowerCase()), 'weekdays', 'weekends', 'daily'];
@@ -32262,7 +34382,7 @@
     });
     const modal = openModal(`
       ${modalHead('Weekly schedule')}
-      ${businessWorkspaceState(business).publicNow ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Saved changes update your listing. Changed registration links make the listing private until reviewed.</p></div>` : ''}
+      ${businessWorkspaceState(business).publicNow ? `<div class="business-preview-note"><span aria-hidden="true">${uiIcon('eye')}</span><p><b>This listing is live.</b><br />Edits save to your venue. Changed registration links are reviewed before publication; your approved listing stays live.</p></div>` : ''}
       <p class="row-sub business-editor-intro">Add weekly sessions or one-time events. Review your changes here, then choose Save schedule.</p>
       <div id="business-schedule-import-status" class="business-form-note" role="status" aria-live="polite"></div>
       <div id="business-schedule-list"></div>
@@ -32288,7 +34408,7 @@
       }).join('') : `<div class="business-manager-empty"><span aria-hidden="true">${uiIcon('calendar')}</span><b>No weekly schedule yet</b><p>Add the recurring times players need before they visit.</p></div>`;
       list.querySelectorAll('[data-schedule-edit]').forEach((button) => button.addEventListener('click', () => {
         const index = Number(button.dataset.scheduleEdit);
-        openChildModal(modal, () => openBusinessScheduleItemForm(schedule[index], index, (updated, target) => { schedule[target] = updated; render(); }));
+        openChildModal(modal, () => openBusinessScheduleItemForm(schedule[index], index, (updated, target) => { schedule[target] = updated; render(); }, {venueTimezone:business.timezone,services:business.offerings}));
       }));
       list.querySelectorAll('[data-schedule-remove]').forEach((button) => button.addEventListener('click', () => {
         schedule.splice(Number(button.dataset.scheduleRemove), 1);
@@ -32314,7 +34434,7 @@
     });
     modal.querySelector('#business-schedule-add').addEventListener('click', () => {
       if (schedule.length >= 100) { toast('A schedule can contain up to 100 items'); return; }
-      openChildModal(modal, () => openBusinessScheduleItemForm({}, -1, (updated) => { schedule.push(updated); render(); }));
+      openChildModal(modal, () => openBusinessScheduleItemForm({}, -1, (updated) => { schedule.push(updated); render(); }, {venueTimezone: business.timezone, services: business.offerings}));
     });
     const formUX = bindModalFormUX(modal, '#business-schedule-save');
     bindModalDiscardConfirmation(modal, {
@@ -32326,11 +34446,7 @@
       const finish = formUX.startSubmitting('Saving schedule…');
       if (!finish) return;
       try {
-        const fresh = normalizeBusinessProfile(await api(`/businesses/${business.id}`));
-        window.VenueWorkspace.assertCollectionUnchanged(fresh.schedule, business.schedule);
-        const updated = await api(`/businesses/${business.id}/schedule`, {
-          method: 'PUT', body: JSON.stringify({ items: schedule }),
-        });
+        const updated = await window.VenueWorkspace.saveEdits(business, {kind: 'schedule', items: schedule, request: api, resolveConflicts: conflicts => openBusinessConflictReview(modal, conflicts)});
         closeModal(modal);
         toast('Schedule updated');
         onSaved?.(updated);
@@ -32339,6 +34455,7 @@
         formUX.showError(error.message);
       }
     });
+    if (startImport) requestAnimationFrame(() => modal.querySelector('#business-schedule-import').click());
     return modal;
   }
 
@@ -32371,7 +34488,7 @@
       ${modalHead('Notifications')}
       <div class="settings-leaf-intro">
         <span aria-hidden="true">${uiIcon('bell')}</span>
-        <p>Choose the optional updates you want. Score confirmations, invites, and challenges always come through.</p>
+        <p>Choose your optional updates. Score confirmations, invites, and challenges remain in Activity. Phone delivery depends on the device setting below.</p>
       </div>
       ${iosNeedsInstall ? `<div class="settings-notification-guidance" role="note">
         <span aria-hidden="true">${uiIcon('plus')}</span>
@@ -32626,8 +34743,8 @@
       <div class="card row settings-presence-privacy">
         <span class="nav-row-leading" aria-hidden="true">${uiIcon(checkedIn ? 'eye' : 'shield')}</span>
         <span class="row-main">
-          <span class="row-title">Court presence · ${checkedIn ? 'Visible now' : 'Not visible'}</span>
-          <span class="row-sub">${checkedIn
+          <span class="row-title" id="privacy-presence-title">Court presence · ${checkedIn ? nearbyVisibility === 'hidden' ? 'Hidden' : nearbyVisibility === 'friends' || !state.presence?.looking_for_game ? 'Friends only' : 'Visible nearby' : 'Not checked in'}</span>
+          <span class="row-sub" id="privacy-presence-audience" aria-live="polite">${checkedIn
             ? `${esc(currentPresenceAudience)}${presenceExpiry ? ` This check-in expires about ${esc(presenceExpiry)}.` : ''} Your precise coordinates are never shown.`
             : 'You are not checked in, so other players cannot see a current court presence. Location permission alone never publishes one.'}</span>
         </span>
@@ -32651,6 +34768,22 @@
       modal.querySelectorAll('input[name="nearby-visibility"]').forEach((radio) => {
         radio.checked = radio.value === visibility;
       });
+      const activePresence = state.presence?.checked_in === true;
+      const title = !activePresence ? 'Not checked in' : visibility === 'hidden'
+        ? 'Hidden' : visibility === 'friends' || !state.presence?.looking_for_game
+          ? 'Friends only' : 'Visible nearby';
+      const audience = !activePresence
+        ? 'You are not checked in, so other players cannot see a current court presence. Location permission alone never publishes one.'
+        : visibility === 'hidden'
+          ? 'Your check-in identity is hidden from nearby-player and court-presence lists.'
+          : visibility === 'friends'
+            ? 'Only accepted friends can see your identity in nearby-player and court-presence lists.'
+            : state.presence?.looking_for_game
+              ? 'Signed-in players nearby can see that you’re looking to play at this court.'
+              : 'Accepted friends can see your identity at this court; other players only see the anonymous activity count.';
+      modal.querySelector('#privacy-presence-title').textContent = `Court presence · ${title}`;
+      const expiry = activePresence && state.presence?.expires_at ? fmtTimeShort(state.presence.expires_at) : '';
+      modal.querySelector('#privacy-presence-audience').textContent = `${audience}${activePresence ? `${expiry ? ` This check-in expires about ${expiry}.` : ''} Your precise coordinates are never shown.` : ''}`;
     };
     modal.querySelector('#privacy-home-area').addEventListener('click', () => {
       openChildModal(modal, () => openHomeAreaSheet({ onSet: () => {
@@ -32687,6 +34820,7 @@
           method: 'PATCH', body: JSON.stringify({ nearby_visibility: radio.value }),
         });
         applyMe(updated);
+        syncPrivacyControls();
         nearbyStatus.textContent = 'Nearby visibility saved.';
         toast('Nearby visibility saved', { tone: 'success', icon: 'shield' });
         renderProfile();
@@ -32765,7 +34899,7 @@
       </div>
       <button type="button" class="card row nav-row-button" id="settings-calendar" aria-label="Subscribe to your play calendar">
         <span class="nav-row-leading" aria-hidden="true">${uiIcon('calendar')}</span>
-        <span class="row-main"><span class="row-title">Subscribe to your play</span><span class="row-sub">A private calendar link stays synced as plans change</span></span>
+        <span class="row-main"><span class="row-title">Subscribe to your play</span><span class="row-sub">Updates arrive when your calendar provider refreshes</span></span>
         ${uiIcon('chevron-right', 'chev')}
       </button>
     `, { label: 'Play calendar settings' });
@@ -32904,6 +35038,55 @@
     requestAnimationFrame(() => finish?.focus({ preventScroll: true }));
   }
 
+  function openPlayerDataDownload() {
+    const accountId = Number(state.me?.id);
+    let downloadUrl = null;
+    const modal = openModal(`${modalHead('Download player data')}
+      <p class="row-sub">Your profile, saved courts, dated sessions, league and tournament results, group memberships, and messages and photos you sent.</p>
+      <p class="field-help">Prepare a JSON file, then save it to this device. Other players’ messages, sign-in secrets and organization records are excluded.</p>
+      <form id="player-export-form" novalidate><div class="form-field"><label for="player-export-password">Current password</label><input id="player-export-password" type="password" autocomplete="current-password" /></div>
+      ${state.me?.mfa?.enabled ? '<div class="form-field"><label for="player-export-mfa">Authenticator code</label><input id="player-export-mfa" type="text" autocomplete="one-time-code" inputmode="numeric" maxlength="6" /></div>' : ''}
+      <button type="submit" class="btn btn-primary btn-block" id="player-export-download">Prepare JSON file</button></form>
+      <div id="player-export-ready" hidden aria-live="polite"></div>
+    `, { label: 'Download your player data' });
+    const formUX = bindModalFormUX(modal, '#player-export-download');
+    modal.querySelector('#player-export-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const password = modal.querySelector('#player-export-password');
+      const code = modal.querySelector('#player-export-mfa');
+      if (!password.value) { formUX.showError('Enter your current password.', password); return; }
+      if (code && !/^\d{6}$/.test(code.value.trim())) { formUX.showError('Enter your current six-digit code.', code); return; }
+      const finish = formUX.startSubmitting('Preparing download…');
+      if (!finish) return;
+      try {
+        const data = await api('/me/export', { method: 'POST', body: JSON.stringify({ current_password: password.value, mfa_code: code?.value.trim() || '' }) });
+        if (!modal.isConnected || Number(state.me?.id) !== accountId) return;
+        if (!data || data.format !== 'third-shot-player-data-v1' || Number(data.profile?.id) !== accountId
+            || !Array.isArray(data.sent_messages) || !Array.isArray(data.sessions)
+            || !Array.isArray(data.league_matches) || !Array.isArray(data.tournament_matches)) {
+          throw new Error('The complete file could not be prepared. Try again.');
+        }
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        downloadUrl = URL.createObjectURL(blob);
+        const filename = `third-shot-player-data-${new Date().toISOString().slice(0, 10)}.json`;
+        password.value = ''; if (code) code.value = '';
+        finish();
+        modal.querySelector('#player-export-form').hidden = true;
+        const ready = modal.querySelector('#player-export-ready');
+        ready.hidden = false;
+        ready.innerHTML = `<p class="row-title">Your file is ready</p><p class="field-help">${esc(filename)} · ${Math.max(1, Math.ceil(blob.size / 1024))} KB</p><a class="btn btn-primary btn-block" href="${downloadUrl}" download="${filename}" id="player-export-save">Save JSON file</a><p class="field-help">Contains personal information. Keep the saved file private.</p><button type="button" class="btn btn-secondary btn-block" id="player-export-done">Done</button>`;
+        ready.querySelector('#player-export-done').addEventListener('click', () => closeModal(modal));
+        ready.querySelector('#player-export-save').focus({ preventScroll: true });
+      } catch (error) {
+        finish();
+        formUX.showError(error.code === 'invalid_credentials' ? 'That is not your current password.' : error.message,
+          error.code === 'invalid_mfa_code' ? code : password);
+      }
+    });
+    modal._cleanupFns?.push(() => { if (downloadUrl) URL.revokeObjectURL(downloadUrl); });
+    return modal;
+  }
+
   function openAccountSettings() {
     const installHtml = !window.matchMedia('(display-mode: standalone)').matches
       ? (state.installPrompt
@@ -32917,7 +35100,7 @@
               <span class="row-main"><span class="row-title">Install Third Shot</span><span class="row-sub">Use your browser’s Add to Home Screen command</span></span>
             </div>`) : '';
     const emailVerified = state.me?.email_verified === true;
-    const mfaEnabled = state.me?.mfa?.enabled === true;
+    let mfaEnabled = state.me?.mfa?.enabled === true;
     const modal = openModal(`
       ${modalHead('Account')}
       <div class="settings-leaf-intro">
@@ -32930,6 +35113,7 @@
         <span class="row-main"><span class="row-title">${esc(state.me?.email || 'Account email')}</span><span class="row-sub" id="account-email-verification-state">${emailVerified ? 'Verified email' : 'Email not verified'}</span></span>
         ${emailVerified ? `<span class="account-verified-badge">${uiIcon('check-circle')} Verified</span>` : '<button type="button" class="btn btn-secondary account-verify-email" id="account-verify-email">Send verification</button>'}
       </div>
+      <button type="button" class="card row nav-row-button" id="account-mfa"><span class="nav-row-leading" aria-hidden="true">${uiIcon('shield')}</span><span class="row-main"><span class="row-title">Authenticator &amp; recovery codes</span><span class="row-sub">${mfaEnabled ? 'Second sign-in step is on' : 'Add a second sign-in step'}</span></span>${uiIcon('chevron-right', 'chev')}</button>
       <details class="settings-account-section">
         <summary>
           <span class="settings-account-summary-icon" aria-hidden="true">${uiIcon('edit')}</span>
@@ -32960,8 +35144,8 @@
           </div>
           <div class="form-field">
             <label for="account-new-password">New password</label>
-            <input type="password" id="account-new-password" placeholder="Enter new password" autocomplete="new-password" minlength="6" aria-describedby="account-password-help" />
-            <small class="field-help" id="account-password-help">Use at least 6 characters.</small>
+            <input type="password" id="account-new-password" placeholder="Enter new password" autocomplete="new-password" minlength="8" aria-describedby="account-password-help" />
+            <small class="field-help" id="account-password-help">Use at least 8 characters.</small>
           </div>
           <p class="account-action-status hidden" id="account-password-status" role="status" aria-live="polite">Password updated.</p>
           <button type="submit" class="btn btn-secondary btn-block account-form-action" id="account-password-save">Update password</button>
@@ -32987,6 +35171,7 @@
         </form>
       </details>
       <button type="button" class="btn btn-secondary btn-block account-logout" id="account-logout">${uiIcon('external')} <span>Log out</span></button>
+      <button type="button" class="card row nav-row-button" id="account-export"><span class="nav-row-leading" aria-hidden="true">${uiIcon('external')}</span><span class="row-main"><span class="row-title">Download player data</span><span class="row-sub">Your profile, records and sent messages</span></span>${uiIcon('chevron-right', 'chev')}</button>
       <div class="section-label account-danger-label">Danger zone</div>
       <details class="settings-account-section is-danger">
         <summary>
@@ -33012,6 +35197,18 @@
       title: 'Discard account changes?',
       message: 'The account security fields you entered will be cleared.',
     });
+    modal.querySelector('#account-mfa').addEventListener('click', () => openChildModal(modal, openAccountSecurity));
+    modal.querySelector('#account-export').addEventListener('click', () => openChildModal(modal, openPlayerDataDownload));
+    modal._onResume = () => {
+      mfaEnabled = state.me?.mfa?.enabled === true;
+      modal.querySelector('#account-mfa .row-sub').textContent = mfaEnabled ? 'Second sign-in step is on' : 'Add a second sign-in step';
+      const code = modal.querySelector('#account-sessions-mfa');
+      if (!mfaEnabled) code?.closest('.form-field')?.remove();
+      else if (!code) {
+        modal.querySelector('#account-sessions-status').insertAdjacentHTML('beforebegin', '<div class="form-field"><label for="account-sessions-mfa">Authenticator code</label><input type="text" id="account-sessions-mfa" placeholder="6-digit code" autocomplete="one-time-code" inputmode="numeric" /></div>');
+        modal.querySelector('#account-sessions-mfa').addEventListener('input', () => modal.querySelector('#account-sessions-status').classList.add('hidden'));
+      }
+    };
     modal.querySelector('#account-install')?.addEventListener('click', async () => {
       const prompt = state.installPrompt;
       if (!prompt) return;
@@ -33088,8 +35285,8 @@
         passwordUX.showError('Enter your current password.', currentField);
         return;
       }
-      if (next.length < 6) {
-        passwordUX.showError('Use at least 6 characters for the new password.', nextField);
+      if (next.length < 8) {
+        passwordUX.showError('Use at least 8 characters for the new password.', nextField);
         return;
       }
       const resetSubmitting = passwordUX.startSubmitting('Updating password…');
@@ -33360,6 +35557,48 @@
     return modal;
   }
 
+  function openHelpSafety() {
+    const topics = [
+      ['Join a game', 'Open a session to check its date, court, level, cost and players. Join confirms your place; a waitlist is not a confirmed place. Use the session chat for meeting details.'],
+      ['Session or ranked match?', 'A session is a group meeting to play. A ranked match has named teams and a score that affects your Third Shot match rating after confirmation. Your self-rating is separate.'],
+      ['Change or cancel a plan', 'Open the plan from My plans or Me. Leave if you cannot attend. Hosts can manage the roster, change details or cancel from the session. Check the current details before traveling.'],
+      ['What does check-in reveal?', 'Checking in shares court presence according to Privacy & safety. Hidden removes your identity from nearby discovery; Friends only limits it to accepted friends. Your exact coordinates are never displayed.'],
+      ['Missing an alert?', 'Activity keeps your updates in the app. Phone alerts require a supported browser, device permission and enabled delivery. On iPhone, add Third Shot to your Home Screen first. Calendar subscriptions refresh on your calendar provider’s schedule.'],
+      ['An incorrect score', 'Open the match and review the teams and score. Dispute an incorrect report, or an automatic result within 7 days. The match then stays unrated while the original players have 7 days and up to 2 proposals to agree a corrected score. Corrections never confirm automatically. Result history keeps the reports and decisions. If the window or proposals have ended, contact support with the match link.'],
+      ['Report or block someone', 'Open the player or content menu to report a concern. Reports are reviewed by Third Shot and updates appear in Activity. Blocked players can be managed in Privacy & safety.'],
+    ];
+    const modal = openModal(`
+      ${modalHead('Help & safety')}
+      ${topics.map(([title, copy]) => `<details class="simple-disclosure"><summary>${esc(title)}</summary><p class="row-sub">${esc(copy)}</p></details>`).join('')}
+      <div class="section-label">Get help</div>
+      <a class="btn btn-primary btn-block" href="mailto:support@third-shot.app">Email support</a>
+      <p class="field-help">Include the game or court link and what happened. Never send your password.</p>
+      <button type="button" class="btn btn-secondary btn-block" id="help-privacy">Privacy & safety settings</button>
+      <button type="button" class="btn btn-secondary btn-block" id="help-notifications">Notification settings</button>
+    `, { label: 'Help and safety' });
+    modal.querySelector('#help-privacy').addEventListener('click', () => openChildModal(modal, openPrivacySafetySettings));
+    modal.querySelector('#help-notifications').addEventListener('click', () => openChildModal(modal, openNotificationSettings));
+    return modal;
+  }
+
+  function openProfileEditorHub() {
+    const previewHtml = () => `${avatarHtml(state.me)}<span class="row-main"><b>${esc(state.me?.display_name || '')}</b><span class="row-sub">${playerSkillIdentityHtml(state.me, { includeDupr: false })}${state.me?.home_court_name ? ` · ${esc(state.me.home_court_name)}` : ''}</span></span>`;
+    const sections = [
+      ['about', 'user', 'About you', 'Name and bio'],
+      ['level', 'activity', 'Playing level', 'Self-rating and optional DUPR details'],
+      ['photo', 'camera', 'Photo', 'Photo and initials color'],
+      ['availability', 'clock', 'Usually plays', 'Your usual days and times'],
+      ['court', 'map-pin', 'Primary court', 'Your go-to court'],
+    ];
+    const modal = openModal(`${modalHead('Edit profile')}
+      <div class="card row" data-profile-preview aria-label="Your current player card">${previewHtml()}</div>
+      ${sections.map(([section, icon, title, copy]) => `<button type="button" class="card row nav-row-button" data-profile-edit-section="${section}"><span class="nav-row-leading">${uiIcon(icon)}</span><span class="row-main"><span class="row-title">${title}</span><span class="row-sub">${copy}</span></span>${uiIcon('chevron-right', 'chev')}</button>`).join('')}
+    `, { label: 'Edit profile sections' });
+    modal.querySelectorAll('[data-profile-edit-section]').forEach((button) => button.addEventListener('click', () => openChildModal(modal, () => openEditProfile({ section: button.dataset.profileEditSection }))));
+    modal._onResume = () => { modal.querySelector('[data-profile-preview]').innerHTML = previewHtml(); };
+    return modal;
+  }
+
   function openSettingsHub() {
     const businessDestinations = [
       ['business', 'building', 'Business tools', 'Claim a venue, add booking links, and publish programs'],
@@ -33379,11 +35618,12 @@
         ['privacy', 'shield', 'Privacy & safety', 'Location choices and blocked players'],
         ['appearance', 'sun', 'Appearance', 'Auto, light, or dark theme'],
         ['calendar', 'calendar', 'Play calendar', 'Sync sessions and matches'],
+        ['help', 'message', 'Help & safety', 'Joining, privacy, scores and support'],
       ]],
       ['For pickleball businesses', businessDestinations],
       ...(operatorDestinations.length ? [['Third Shot operations', operatorDestinations]] : []),
       ['Account access', [
-        ['account', 'lock', 'Account', 'Password, install, sign out, or delete'],
+        ['account', 'lock', 'Account', 'Sign-in security, your data, and account access'],
       ]],
     ];
     const modal = openModal(`
@@ -33403,7 +35643,7 @@
       </div>
     `, { label: 'Settings' });
     const handlers = {
-      'edit-profile': openEditProfile,
+      'edit-profile': openProfileEditorHub,
       'replay-setup': () => runNewPlayerOnboarding({ replay: true }),
       business: openBusinessHub,
       'business-operator': openBusinessOperatorHub,
@@ -33413,6 +35653,7 @@
       appearance: openAppearanceSettings,
       calendar: openCalendarSettings,
       account: openAccountSettings,
+      help: openHelpSafety,
     };
     modal.querySelectorAll('[data-settings-destination]').forEach((button) => {
       button.addEventListener('click', () => openChildModal(
@@ -33464,9 +35705,8 @@
       <div class="stat-card"><div class="stat-value">${winPct}%</div><div class="stat-label">Ranked win rate</div></div>
       <div class="stat-card"><div class="stat-value">${me.current_streak >= 2 ? uiIcon('trophy', 'profile-stat-icon') : ''}${me.current_streak}</div><div class="stat-label">Current ranked win streak · best ${me.best_streak}</div></div>` : `
       <section class="profile-ranked-starter" aria-labelledby="profile-ranked-starter-title">
-        <span class="profile-ranked-starter-icon" aria-hidden="true">${uiIcon('trophy')}</span>
-        <span class="row-main"><b id="profile-ranked-starter-title">Your ranked story starts with one match</b><small>Find a ranked opponent when you’re ready. Casual play still builds your full play history below.</small></span>
-        <button type="button" class="btn btn-primary btn-sm" id="pf-first-ranked">Find a ranked opponent</button>
+        <span class="profile-ranked-starter-icon" aria-hidden="true">${uiIcon('pickleball')}</span>
+        <span class="row-main"><b id="profile-ranked-starter-title">Your play history</b><small>Completed sessions and matches appear here after you play.</small></span>
       </section>`;
 
     el.innerHTML = `
@@ -33480,7 +35720,7 @@
       </div>
       <button type="button" class="profile-availability-summary" id="profile-availability-edit" aria-label="Edit when you usually play">
         <span aria-hidden="true">${uiIcon('clock')}</span>
-        <span class="row-main"><b>Usually plays</b><small>${availabilityLines.length ? availabilityLines.join(' · ') : 'Add your usual days and times'}</small></span>
+        <span class="row-main"><b>Usually plays</b>${playerAwayLabel(me) ? `<small>${esc(playerAwayLabel(me))}</small>` : ''}<small>${availabilityLines.length ? availabilityLines.join(' · ') : 'Add your usual days and times'}</small></span>
         ${uiIcon('chevron-right', 'chev')}
       </button>
       <div class="profile-load-error hidden" id="pf-dashboard-error" role="alert">
@@ -33491,6 +35731,7 @@
       <div id="pf-upcoming" aria-busy="true" style="min-height:108px">
         <div class="section-label">Up next</div>${skeletonHtml(1)}
       </div>
+      <div id="pf-upcoming-more"></div>
       <div id="pf-courts" aria-busy="true" style="min-height:108px">
         <div class="section-label">Saved courts</div>${skeletonHtml(1)}
       </div>
@@ -33512,8 +35753,6 @@
         <div id="pf-play-stats" aria-busy="true" style="min-height:146px">
           <div class="section-label">Your play stats</div>${skeletonHtml(1)}
         </div>
-        <div id="pf-upcoming-more">
-        </div>
         <div id="pf-history-more">
         </div>
       </details>
@@ -33525,8 +35764,8 @@
 
     `;
 
-    el.querySelector('#profile-avatar-edit')?.addEventListener('click', openEditProfile);
-    el.querySelector('#profile-availability-edit')?.addEventListener('click', openEditProfile);
+    el.querySelector('#profile-avatar-edit')?.addEventListener('click', () => openEditProfile({ section: 'photo' }));
+    el.querySelector('#profile-availability-edit')?.addEventListener('click', () => openEditProfile({ section: 'availability' }));
     el.querySelector('#pf-first-ranked')?.addEventListener('click', openRankedMatchFlow);
     // One dashboard response keeps Profile to a single mobile round trip while
     // preserving the endpoint-parity section shapes consumed below.
@@ -33659,12 +35898,16 @@
         upcomingEl.innerHTML = `<div class="section-label">${nextLabel}</div>${gameCardHtml(nextGame)}`;
         const remaining = ordered.slice(1);
         upcomingMoreEl.innerHTML = remaining.length
-          ? `<div class="section-label">More upcoming play</div>${remaining.map((game) => gameCardHtml(game, { compact: true })).join('')}`
+          ? `<details class="simple-disclosure"><summary>See all ${ordered.length} plans</summary>${remaining.map((game) => gameCardHtml(game, { compact: true })).join('')}</details>`
           : '';
         bindGameButtons(upcomingEl, renderProfile);
         bindGameButtons(upcomingMoreEl, renderProfile);
       } else {
-        upcomingEl.innerHTML = '<div class="section-label">Up next</div><div class="empty-state" style="padding:14px">Nothing planned yet.<br><button type="button" class="btn btn-primary btn-sm" id="pf-plan-game" style="margin-top:9px">Plan a play session</button></div>';
+        upcomingEl.innerHTML = '<div class="section-label">Up next</div><div class="empty-state" style="padding:14px">Nothing planned yet.<br><button type="button" class="btn btn-primary btn-sm" id="pf-find-game" style="margin-top:9px">Find a game</button> <button type="button" class="btn btn-secondary btn-sm" id="pf-plan-game" style="margin-top:9px">Plan a session</button></div>';
+        upcomingEl.querySelector('#pf-find-game').addEventListener('click', () => {
+          setPlaySegment('nearby', { render: false });
+          switchTab('play');
+        });
         upcomingEl.querySelector('#pf-plan-game').addEventListener('click', () => openNewGameModal({
           gameType: 'casual',
           maxPlayers: 6,
@@ -33692,30 +35935,10 @@
         if (headline) {
           headline.removeAttribute('aria-busy');
           const progressCopy = Number(stats.games_total || 0)
-            ? `${stats.games_total} casual play${stats.games_total === 1 ? '' : 's'} completed · ${stats.week_streak || 0} week${stats.week_streak === 1 ? '' : 's'} in a row`
-            : 'Casual play still builds your full play history below.';
-          headline.querySelector('.profile-ranked-starter small').textContent = `Find a ranked opponent when you’re ready. ${progressCopy}`;
+            ? `${stats.games_total} completed play${stats.games_total === 1 ? '' : 's'} · ${stats.week_streak || 0} week${stats.week_streak === 1 ? '' : 's'} in a row`
+            : 'Completed sessions and matches appear here after you play.';
+          headline.querySelector('.profile-ranked-starter small').textContent = progressCopy;
         }
-      }
-      const newPlayerProgress = el.querySelector('#pf-new-player-progress');
-      if (newPlayerProgress && Number(stats.games_total || 0) === 0
-          && (stats.badge_progress || []).length) {
-        newPlayerProgress.innerHTML = `
-          <section class="profile-next-milestones" aria-labelledby="profile-first-milestones-title">
-            <b id="profile-first-milestones-title">Your first milestones</b>
-            <div class="profile-milestone-list">
-              ${(stats.badge_progress || []).map((badge) => {
-                const current = Math.max(0, Number(badge.current) || 0);
-                const target = Math.max(1, Number(badge.target) || 1);
-                const value = Math.min(current, target);
-                const progress = Math.round((value / target) * 100);
-                return `<div class="profile-milestone">
-                  <span class="profile-milestone-label"><span aria-hidden="true">${badge.emoji || '🏓'}</span><b>${esc(badge.label)}</b><small>${value} of ${target}</small></span>
-                  <span class="profile-milestone-track" role="progressbar" aria-label="${esc(badge.label)} progress" aria-valuemin="0" aria-valuemax="${target}" aria-valuenow="${value}"><span style="width:${progress}%"></span></span>
-                </div>`;
-              }).join('')}
-            </div>
-          </section>`;
       }
       if (stats.games_total > 0) {
         statsEl.innerHTML = `
@@ -33820,7 +36043,7 @@
       );
     }
 
-    // Saved courts (primary court first), tappable into court detail.
+    // Saved courts lead with their next real dated opportunity; expand the rest on demand.
     try {
       const favs = favoritesResult.status === 'fulfilled' ? favoritesResult.value : null;
       if (!favs) throw favoritesResult.reason;
@@ -33832,14 +36055,14 @@
       }
       (favs.items || []).forEach((c) => { if (!seen.has(c.id)) { rows.push({ ...c, is_home: false }); seen.add(c.id); } });
       const savedCourtRowHtml = (c) => `
-        <button type="button" class="card row nav-row-button" data-pfcourt="${c.id}" aria-label="Open ${esc(c.name)} court">
+        <article class="card profile-saved-court"><button type="button" class="row nav-row-button" data-pfcourt="${c.id}" aria-label="Open ${esc(c.name)} court">
           <span class="nav-row-leading">${uiIcon(c.is_home ? 'home' : 'star')}</span>
           <span class="row-main">
             <span class="row-title">${esc(c.name)}</span>
             <span class="row-sub">${esc(c.city || '')}${c.is_home ? ' · Primary court' : ''}${c.rating_avg ? ` · Rated ${c.rating_avg}` : ''}</span>
           </span>
           ${uiIcon('chevron-right', 'chev')}
-        </button>`;
+        </button><div class="court-next-opportunity" data-saved-next="${c.id}"></div></article>`;
       const featuredCourts = rows.slice(0, 3);
       const moreCourts = rows.slice(3);
       courtsEl.innerHTML = '<div class="section-label">Saved courts</div>' + (rows.length
@@ -33851,6 +36074,10 @@
         : `<div class="empty-state" style="padding:16px">No saved courts yet — use Save on a court to keep it here.<br><button class="btn btn-secondary btn-sm" data-goto="courts-list" style="margin-top:10px">${uiIcon('map')} Browse courts</button></div>`);
       courtsEl.querySelectorAll('[data-pfcourt]').forEach((row) =>
         makePressable(row, () => openCourtDetail(Number(row.dataset.pfcourt))));
+      featuredCourts.forEach(court => loadCourtNextOpportunity(courtsEl.querySelector(`[data-saved-next="${court.id}"]`),court));
+      courtsEl.querySelector('.profile-saved-courts-more')?.addEventListener('toggle',event=>{
+        if(event.currentTarget.open) moreCourts.forEach(court=>loadCourtNextOpportunity(courtsEl.querySelector(`[data-saved-next="${court.id}"]`),court));
+      });
     } catch {
       if (!dashboardFailed) showProfileSectionUnavailable(
         courtsEl, 'Saved courts', 'Saved courts are unavailable right now.',
@@ -33861,9 +36088,8 @@
       const history = historyResult.status === 'fulfilled' ? historyResult.value : null;
       if (!history) throw historyResult.reason;
       if (history.items.length) {
-        historyEl.innerHTML = `<div class="section-label">Recent play</div>${history.items.slice(0, 3).map(resultRowHtml).join('')}`;
-        bindGameButtons(historyEl, renderProfile);
-        const historyItems = [...history.items];
+        historyEl.replaceChildren();
+        let historyItems = [...history.items];
         let historyNextCursor = history.next_cursor || null;
         let historyHasMore = history.has_more === true && !!historyNextCursor;
         const filters = [
@@ -33874,35 +36100,60 @@
           ['casual', 'Casual', (g) => g.game_type === 'casual'],
         ];
         let active = 'all';
+        let historyRequest = 0;
+        let historyLoading = false;
+        let historyError = '';
+        const loadHistoryFilter = async (filter) => {
+          active = filter;
+          const request = ++historyRequest;
+          historyLoading = true;
+          historyError = '';
+          render({ restoreFilterFocus: true });
+          try {
+            const page = await api(`/games/history?limit=30&filter=${encodeURIComponent(filter)}`);
+            if (request !== historyRequest || !renderIsCurrent()) return;
+            historyItems = [...(page.items || [])];
+            historyNextCursor = page.next_cursor || null;
+            historyHasMore = page.has_more === true && !!historyNextCursor;
+          } catch (error) {
+            if (request !== historyRequest || !renderIsCurrent()) return;
+            historyError = error.message || 'Could not load this history.';
+          }
+          if (request !== historyRequest || !renderIsCurrent()) return;
+          historyLoading = false;
+          render({ restoreFilterFocus: true });
+        };
         const render = ({ restoreFilterFocus = false } = {}) => {
-          const test = filters.find(([k]) => k === active)[2];
-          const rows = historyItems.filter(test);
+          const rows = historyItems;
           historyMoreEl.innerHTML = `
             <div class="section-label">Play history</div>
             <div class="quick-times" role="group" aria-label="Filter play history" style="margin:0 0 10px">
             ${filters.map(([k, label]) => `<button type="button" data-hf="${k}" class="${k === active ? 'active' : ''}" aria-pressed="${k === active}">${label}</button>`).join('')}
             </div>
-            ${rows.length ? rows.map(resultRowHtml).join('')
+            ${historyLoading ? '<p role="status">Loading play history…</p>' : historyError
+              ? `<div role="alert">${esc(historyError)} <button type="button" class="btn-link" id="profile-history-retry">Try again</button></div>`
+              : rows.length ? rows.map(resultRowHtml).join('')
               : emptyStateHtml({
                   icon: 'sliders', title: 'No play matches this filter',
                   body: 'Show the full history and choose another result.',
                   primary: { id: 'profile-history-clear-filter', label: 'Show all play', icon: 'refresh' },
                 })}
-            ${historyHasMore ? '<button type="button" class="btn btn-secondary btn-block" id="profile-history-load-more">Load more play</button>' : ''}`;
+            ${historyHasMore && !historyLoading && !historyError ? '<button type="button" class="btn btn-secondary btn-block" id="profile-history-load-more">Load more play</button>' : ''}`;
           historyMoreEl.querySelectorAll('[data-hf]').forEach((b) => b.addEventListener('click', () => {
-            active = b.dataset.hf;
-            render({ restoreFilterFocus: true });
+            loadHistoryFilter(b.dataset.hf);
           }));
+          historyMoreEl.querySelector('#profile-history-retry')?.addEventListener('click', () => loadHistoryFilter(active));
           historyMoreEl.querySelector('#profile-history-clear-filter')?.addEventListener('click', () => {
-            active = 'all';
-            render({ restoreFilterFocus: true });
+            loadHistoryFilter('all');
           });
           historyMoreEl.querySelector('#profile-history-load-more')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
             const resetAction = beginButtonAction(button, 'Loading…');
             if (!resetAction || !historyNextCursor) return;
+            const request = ++historyRequest;
             try {
-              const nextPage = await api(`/games/history?limit=30&cursor=${encodeURIComponent(historyNextCursor)}`);
+              const nextPage = await api(`/games/history?limit=30&filter=${encodeURIComponent(active)}&cursor=${encodeURIComponent(historyNextCursor)}`);
+              if (request !== historyRequest || !renderIsCurrent()) return;
               const knownIds = new Set(historyItems.map((game) => game.id));
               (nextPage.items || []).forEach((game) => {
                 if (!knownIds.has(game.id)) historyItems.push(game);
@@ -33916,6 +36167,7 @@
                 target?.focus({ preventScroll: true });
               });
             } catch (error) {
+              if (request !== historyRequest || !renderIsCurrent()) return;
               resetAction();
               showInlineActionError(historyMoreEl, error.message);
             }
@@ -33948,13 +36200,22 @@
     });
   }
 
-  function openEditProfile() {
+  function profileChangesForSection(body, section) {
+    const allowed = {
+      about: ['display_name', 'bio'],
+      level: ['skill_rating', 'dupr_rating', 'dupr_id'],
+      photo: ['avatar_color', 'avatar_data', 'avatar_url'],
+      availability: ['availability', 'away_until'], court: ['home_court_id'],
+    }[section];
+    return Object.fromEntries(Object.entries(body).filter(([key]) => !allowed || allowed.includes(key)));
+  }
+
+  function openEditProfile({ section = 'all' } = {}) {
     const me = state.me;
-    const legacySelfRating = {
-      beginner: 2.5, intermediate: 3.5, advanced: 4.0, pro: 5.0,
-    }[me.skill_level] || 3.0;
+    const focusSection = ['about', 'level', 'photo', 'availability', 'court'].includes(section) ? section : 'all';
+    const editorTitle = { about: 'About you', level: 'Playing level', photo: 'Profile photo', availability: 'Usually plays', court: 'Primary court', all: 'Edit profile' }[focusSection];
     const initialSelfRating = SELF_RATING_CHOICES.some(([value]) => value === Number(me.skill_rating))
-      ? Number(me.skill_rating) : legacySelfRating;
+      ? Number(me.skill_rating) : null;
     const colors = [
       ['#2f9e44', 'Green'], ['#1971c2', 'Blue'], ['#e8590c', 'Orange'], ['#9c36b5', 'Purple'],
       ['#0c8599', 'Teal'], ['#e03131', 'Red'], ['#f08c00', 'Amber'], ['#5f3dc4', 'Indigo'],
@@ -33965,13 +36226,13 @@
       fri: 'Friday', sat: 'Saturday', sun: 'Sunday',
     };
     const modal = openModal(`
-      ${modalHead('Edit profile')}
+      ${modalHead(editorTitle)}
       <form id="ep-form" class="profile-editor-form" novalidate>
       <div class="settings-leaf-intro profile-editor-intro">
         <span aria-hidden="true">${uiIcon('user')}</span>
         <p>Keep your player card recognizable so the right people can find and invite you.</p>
       </div>
-      <section class="profile-editor-section" aria-labelledby="ep-about-title">
+      <section class="profile-editor-section" data-profile-section="about" aria-labelledby="ep-about-title">
         <div class="profile-editor-section-heading" id="ep-about-title">
           <span aria-hidden="true">${uiIcon('user')}</span><span><b>About you</b><small>Shown on your player profile</small></span>
         </div>
@@ -33981,6 +36242,8 @@
           <textarea id="ep-bio" rows="3" maxlength="300" aria-describedby="ep-bio-help">${esc(me.bio || '')}</textarea>
           <small class="field-help" id="ep-bio-help">A short intro, play style, or what kind of games you enjoy.</small>
         </div>
+      </section>
+      <section class="profile-editor-section" data-profile-section="level" aria-labelledby="ep-self-rating-label">
         <div class="form-field">
           <label id="ep-self-rating-label">Pickleball self-rating</label>
           <div class="profile-skill-rating-options" id="ep-self-rating" role="radiogroup" aria-labelledby="ep-self-rating-label" aria-describedby="ep-self-rating-help">
@@ -33988,21 +36251,26 @@
           </div>
           <small class="field-help" id="ep-self-rating-help">Your own 2.0–5.5 estimate, used to find well-matched players and sessions.</small>
         </div>
+        <details class="simple-disclosure">
+          <summary>Optional DUPR details &amp; rating guide</summary>
         <div class="form-field">
           <label for="ep-dupr">DUPR rating <span class="field-optional">Optional</span></label>
           <input type="number" id="ep-dupr" min="2" max="8" step="0.001" inputmode="decimal" value="${me.dupr_rating == null ? '' : esc(Number(me.dupr_rating).toFixed(3))}" placeholder="3.750" aria-describedby="ep-dupr-help" />
-          <small class="field-help" id="ep-dupr-help">Enter your published DUPR; Third Shot never infers or changes it.</small>
+          <small class="field-help" id="ep-dupr-help">Added by you, not verified by Third Shot. Enter the rating shown on your DUPR profile.</small>
         </div>
         <div class="form-field">
           <label for="ep-dupr-id">DUPR ID <span class="field-optional">Optional</span></label>
           <input type="text" id="ep-dupr-id" maxlength="80" value="${esc(me.dupr_id || '')}" placeholder="Your DUPR player ID" aria-describedby="ep-dupr-id-help" />
-          <small class="field-help" id="ep-dupr-id-help">Shown with your published DUPR rating so players can recognize the right profile.</small>
+          <small class="field-help" id="ep-dupr-id-help">Your player-entered DUPR ID. Third Shot has not verified this profile.</small>
         </div>
         <div class="profile-rating-guide" role="note" aria-label="How player ratings differ">
           <p><b>Self-rating</b><span>You choose this estimate and can update it as you improve.</span></p>
-          <p><b>DUPR</b><span>An optional published rating from your DUPR profile; Third Shot does not calculate it.</span></p>
+          <p><b>DUPR</b><span>Optional and player-entered. Third Shot does not verify or calculate this rating.</span></p>
           <p><b>Third Shot match rating</b><span>Your in-app rating changes only from confirmed ranked match results and is not editable here.</span></p>
         </div>
+        </details>
+      </section>
+      <section class="profile-editor-section" data-profile-section="photo" aria-labelledby="ep-avatar-label">
         <div class="form-field">
           <label id="ep-avatar-label">Profile photo <span class="field-optional">Optional</span></label>
           <div class="profile-photo-field" aria-labelledby="ep-avatar-label" aria-describedby="ep-avatar-help ep-avatar-status">
@@ -34028,9 +36296,14 @@
           </div>
         </div>
       </section>
-      <section class="profile-editor-section" aria-labelledby="ep-availability-label">
+      <section class="profile-editor-section" data-profile-section="availability" aria-labelledby="ep-availability-label">
         <div class="profile-editor-section-heading" id="ep-availability-label">
-          <span aria-hidden="true">${uiIcon('clock')}</span><span><b>Usually plays</b><small id="ep-availability-hint">Choose the times that make you a useful match</small></span>
+          <span aria-hidden="true">${uiIcon('clock')}</span><span><b>Usually plays</b><small id="ep-availability-hint">Your usual times. Joining a session confirms a specific date.</small></span>
+        </div>
+        <div class="form-field"><label for="ep-away-until">Away until <span class="field-optional">Optional</span></label>
+          <input type="date" id="ep-away-until" value="${playerAwayUntil(me) ? scheduleDateTimeValue(playerAwayUntil(me)).slice(0, 10) : ''}" min="${scheduleDateTimeValue(new Date(Date.now() + 86400000)).slice(0, 10)}" max="${scheduleDateTimeValue(new Date(Date.now() + 90 * 86400000)).slice(0, 10)}" aria-describedby="ep-away-help" />
+          <small class="field-help" id="ep-away-help">Your local return date. Pause nearby suggestions; keep your usual times and existing plans.</small>
+          <button type="button" class="btn-link" id="ep-away-clear">I'm available again</button>
         </div>
         <div class="profile-availability-editor" role="group" aria-labelledby="ep-availability-label" aria-describedby="ep-availability-hint">
         ${AVAIL_PARTS.map(([part, , partLabel]) => `
@@ -34043,7 +36316,7 @@
           </div>`).join('')}
         </div>
       </section>
-      <section class="profile-editor-section" aria-labelledby="ep-home-court-title">
+      <section class="profile-editor-section" data-profile-section="court" aria-labelledby="ep-home-court-title">
         <div class="profile-editor-section-heading" id="ep-home-court-title">
           <span aria-hidden="true">${uiIcon('map-pin')}</span><span><b>Primary court</b><small>Your go-to venue for challenges and court shortcuts; Home area controls nearby results</small></span>
         </div>
@@ -34055,11 +36328,21 @@
           <small class="field-help" id="ep-court-help">Choose a result, or clear the search to remove your primary court.</small>
         </div>
       </section>
-      <button type="submit" class="btn btn-primary btn-block profile-editor-save" id="ep-save">Save profile changes</button>
+      <button type="submit" class="btn btn-primary btn-block profile-editor-save" id="ep-save">${focusSection === 'all' ? 'Save profile changes' : 'Save changes'}</button>
       </form>
-    `, { label: 'Edit profile' });
+    `, { label: editorTitle });
+    modal.querySelectorAll('[data-profile-section]').forEach((element) => {
+      element.hidden = focusSection !== 'all' && element.dataset.profileSection !== focusSection;
+      if (element.hidden) element.querySelectorAll('input, button, textarea').forEach((control) => { control.disabled = true; });
+    });
+    if (focusSection !== 'all') modal.querySelector('.profile-editor-intro')?.remove();
+    modal.querySelector('#ep-away-clear').addEventListener('click', () => {
+      const field = modal.querySelector('#ep-away-until');
+      field.value = '';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
 
-    const formUX = bindModalFormUX(modal, '#ep-save', { draftKey: 'edit-profile' });
+    const formUX = bindModalFormUX(modal, '#ep-save', { draftKey: `edit-profile-${focusSection}` });
     let selfRating = initialSelfRating;
     modal.querySelectorAll('[data-self-rating]').forEach((choice) => {
       choice.addEventListener('click', () => {
@@ -34068,9 +36351,11 @@
           const active = button === choice;
           button.classList.toggle('active', active);
           button.setAttribute('aria-checked', String(active));
+          button.tabIndex = active ? 0 : -1;
         });
       });
     });
+    bindChoiceRadioKeys(modal, '[data-self-rating]');
     modal.querySelectorAll('[data-av]').forEach((chip) =>
       chip.addEventListener('click', () => {
         const active = chip.classList.toggle('active');
@@ -34240,29 +36525,39 @@
     modal.querySelector('#ep-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       formUX.clearError();
-      if (!nameInput.value.trim()) {
+      if (['all', 'about'].includes(focusSection) && !nameInput.value.trim()) {
         formUX.showError('Please enter a display name.', nameInput);
         return;
       }
-      if (avatarUrlInput.value.trim() && avatarUrlInput.validity.typeMismatch) {
+      if (['all', 'photo'].includes(focusSection) && avatarUrlInput.value.trim() && avatarUrlInput.validity.typeMismatch) {
         formUX.showError('Enter a complete photo link, including https://.', avatarUrlInput);
         return;
       }
       const duprField = modal.querySelector('#ep-dupr');
       const dupr = duprField.value.trim();
-      if (dupr && (!duprField.validity.valid || Number(dupr) < 2 || Number(dupr) > 8)) {
+      if (['all', 'level'].includes(focusSection) && dupr && (!duprField.validity.valid || Number(dupr) < 2 || Number(dupr) > 8)) {
         formUX.showError('Enter a DUPR rating from 2.000 through 8.000.', duprField);
         return;
       }
       const duprIdField = modal.querySelector('#ep-dupr-id');
       const duprId = duprIdField.value.trim();
-      if (duprId && !/^[A-Za-z0-9_-]+$/.test(duprId)) {
+      if (['all', 'level'].includes(focusSection) && duprId && !/^[A-Za-z0-9_-]+$/.test(duprId)) {
         formUX.showError('Use only letters, numbers, hyphens, or underscores in the DUPR ID.', duprIdField);
         return;
       }
       const courtId = courtIdInput.value;
+      const awayField = modal.querySelector('#ep-away-until');
+      let awayUntil = null;
+      if (['all', 'availability'].includes(focusSection) && awayField.value) {
+        const date = new Date(`${awayField.value}T00:00:00`);
+        if (!awayField.validity.valid || !Number.isFinite(date.getTime()) || date <= new Date()) {
+          formUX.showError('Choose a return date within the next 90 days, or clear it.', awayField);
+          return;
+        }
+        awayUntil = date.toISOString();
+      }
       const courtName = courtSearch.value.trim();
-      if (courtName && !courtId) {
+      if (['all', 'court'].includes(focusSection) && courtName && !courtId) {
         formUX.showError('Choose a primary court from the search results.', courtSearch);
         return;
       }
@@ -34277,14 +36572,16 @@
           dupr_id: duprId,
           avatar_color: color,
           availability: [...modal.querySelectorAll('[data-av].active')].map((c) => c.dataset.av),
+          away_until: awayUntil,
         };
         if (pendingAvatarData) body.avatar_data = pendingAvatarData;
         else if (avatarRemoved) body.avatar_data = null;
         else if (avatarUrlTouched) body.avatar_url = avatarUrlInput.value.trim();
         body.home_court_id = courtId ? Number(courtId) : null;
-        const data = await api('/me', { method: 'PATCH', body: JSON.stringify(body) });
+        const data = await api('/me', { method: 'PATCH', body: JSON.stringify(profileChangesForSection(body, focusSection)) });
         formUX.clearDraft({ disable: true });
         applyMe(data);
+        if (playerAwayUntil(state.me)) document.querySelectorAll('.usual-nudge').forEach((nudge) => nudge.remove());
         closeModal(modal);
         toast('Profile updated');
         renderProfile();
@@ -34294,7 +36591,7 @@
         formUX.showError(err.message, target);
       }
     });
-
+    return modal;
   }
 
   function gameIsChallenge(game) {
@@ -34325,6 +36622,7 @@
       ? `<select id="eg-capacity" data-select-title="Game capacity">${rankedCapacities.map((value) => `<option value="${value}" ${value === Number(game.max_players) ? 'selected' : ''}>${value === 2 ? 'Singles' : 'Doubles'} · ${value}</option>`).join('')}</select>`
       : `<input type="number" id="eg-capacity" min="${minimumCapacity}" max="${CASUAL_GAME_MAX_PLAYERS}" step="1" inputmode="numeric" value="${Number(game.max_players)}" aria-describedby="eg-capacity-help" /><small class="field-help" id="eg-capacity-help">Group games support up to ${CASUAL_GAME_MAX_PLAYERS} players.</small>`;
     const canRepeat = game.game_type === 'casual';
+    const datedSeries = gameHasDatedSeries(game);
     const recurrenceDayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
     const recurrenceDayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const initialRecurrenceDays = Array.isArray(game.recurrence_weekdays)
@@ -34337,8 +36635,9 @@
     const [initialLevelMin, initialLevelMax] = gameLevelRange(game);
     const sheet = openModal(`
       ${modalHead(`Edit ${playNoun}`, 'edit')}
-      <p class="row-sub" style="margin-bottom:12px">The player list stays together. Players get one update that names exactly what changed.</p>
+      <p class="row-sub" style="margin-bottom:12px">${datedSeries ? 'Choose the dates to update, then make your changes.' : 'Players keep their spot and receive the updated details.'}</p>
       <form id="eg-form" novalidate>
+        ${recurrenceScopeChoicesHtml(game, 'eg')}
         <div class="form-field"><label for="eg-title">Title <span class="row-sub">(optional)</span></label><input type="text" id="eg-title" maxlength="120" value="${esc(game.title || '')}" placeholder="e.g. Saturday morning round robin" /></div>
         <div class="form-field"><label for="eg-description">Description <span class="row-sub">(optional)</span></label><textarea id="eg-description" maxlength="1000" rows="3" placeholder="Share the format, rotation, or what to bring.">${esc(game.description || '')}</textarea></div>
         <div class="form-field">
@@ -34422,11 +36721,19 @@
     sheet.querySelector('#eg-when').addEventListener('input', updateEditEndPreview);
     updateEditEndPreview();
     const editRecurrenceSelect = sheet.querySelector('#eg-recurrence');
+    const editScope = () => sheet.querySelector('input[name="eg-scope"]:checked')?.value || 'this_date';
     const syncEditRecurrence = () => {
+      const dateOnly = datedSeries && editScope() === 'this_date';
+      editRecurrenceSelect.disabled = !canRepeat || dateOnly;
+      syncAppSelect(editRecurrenceSelect);
       sheet.querySelector('#eg-recurrence-settings').classList.toggle(
-        'hidden', editRecurrenceSelect.value !== 'weekly',
+        'hidden', dateOnly || editRecurrenceSelect.value !== 'weekly',
       );
+      sheet.querySelector('#eg-save').textContent = datedSeries
+        ? dateOnly ? 'Save this date' : 'Save this and future dates' : 'Save changes';
     };
+    sheet.querySelectorAll('input[name="eg-scope"]').forEach((input) => input.addEventListener('change', syncEditRecurrence));
+    syncEditRecurrence();
     editRecurrenceSelect.addEventListener('change', syncEditRecurrence);
     sheet.querySelector('#eg-recurrence-weekdays').addEventListener('click', (event) => {
       const button = event.target.closest('[data-recurrence-day]');
@@ -34535,7 +36842,8 @@
         formUX.showError('Choose a date and time that has not already passed.', sheet.querySelector('#eg-when-clock'));
         return;
       }
-      const recurrence = canRepeat ? editRecurrenceSelect.value : game.recurrence;
+      const dateOnly = datedSeries && editScope() === 'this_date';
+      const recurrence = canRepeat && !dateOnly ? editRecurrenceSelect.value : game.recurrence;
       const recurrenceEndInput = sheet.querySelector('#eg-recurrence-end');
       const recurrenceEnd = recurrenceEndInput.value || null;
       const localStartDate = calendarDateInTimeZone(when, editRecurrenceTimezone);
@@ -34611,7 +36919,7 @@
         notes,
         recurrence,
       };
-      if (recurrence === 'weekly') Object.assign(next, {
+      if (recurrence === 'weekly' && !dateOnly) Object.assign(next, {
         recurrence_timezone: editRecurrenceTimezone,
         recurrence_weekdays: [...editRecurrenceDays],
         recurrence_ends_on: recurrenceEnd,
@@ -34650,6 +36958,7 @@
         toast('No game details changed');
         return;
       }
+      if (datedSeries) payload.edit_scope = editScope();
       const resetSubmitting = formUX.startSubmitting('Saving changes…');
       if (!resetSubmitting) return;
       try {
@@ -34670,8 +36979,52 @@
     return sheet;
   }
 
+  function gameConsentHtml(game) {
+    const handoff = game.host_handoff;
+    const record = game.attendance_record;
+    const attendanceKnown = (record?.people || []).some((person) => person.attended === true || person.attended === false);
+    return `${handoff ? `<section class="game-consent-card" aria-label="Host handoff">
+      <b>${handoff.can_respond ? `${esc(handoff.requested_by_name)} asked you to host` : `Waiting for ${esc(handoff.target_name)}`}</b>
+      <p>${handoff.scope === 'following_dates' ? 'This and future dates' : 'This date only'} · Reply by ${esc(fmtDateTime(handoff.expires_at))}</p>
+      <small>The current host stays responsible until this is accepted.${handoff.leave_on_accept ? ' They will leave after acceptance.' : ''}</small>
+      <div class="game-consent-actions">${handoff.can_respond ? '<button class="btn btn-primary" data-host-reply="accept">Accept hosting</button><button class="btn btn-secondary" data-host-reply="decline">Decline</button>' : '<button class="btn btn-secondary" data-host-reply="decline">Withdraw request</button>'}</div>
+    </section>` : ''}${record ? `<details class="game-attendance-history"><summary>Attendance record · ${record.signed_up_count} signed up${game.status === 'completed' && attendanceKnown ? ` · ${record.played_count} played` : ''}</summary>
+      ${(record.people || []).map((person) => `<div class="game-attendance-person"><span><b>${esc(person.display_name)}</b><small>${person.attended === true ? 'Played' : person.attended === false ? 'Did not play' : person.rsvp_status === 'cancelled' ? 'Session cancelled' : person.rsvp_status === 'left' ? 'Left before play' : person.rsvp_status === 'skipped' ? 'Skipped this date' : 'Attendance not recorded'}</small></span>
+      ${game.completion_kind === 'session' && (game.is_creator || Number(person.user_id) === Number(state.me?.id)) ? `<button class="btn btn-secondary btn-sm" data-attendance-correct="${person.user_id}" data-attended="${person.attended !== true}">${person.attended ? 'Mark did not play' : 'Mark played'}</button>` : ''}</div>`).join('')}
+      <small>RSVPs and corrections stay in the session history.${game.completion_kind === 'session' ? ' No match score or rating changes.' : ''}</small>
+    </details>` : ''}`;
+  }
+
+  function openHostHandoffModal(game, onUpdated) {
+    const candidates = (game.players || []).filter((person) => Number(person.user_id) !== Number(game.creator_id));
+    const modal = openModal(`${modalHead('Ask someone to host', 'users')}
+      <p class="row-sub">You stay the host until they accept.</p>
+      ${recurrenceScopeChoicesHtml(game, 'hh', 'Transfer')}
+      <fieldset class="host-transfer-options"><legend>Choose a player</legend>${candidates.map((person, i) => `<label class="host-transfer-option"><input type="radio" name="hh-person" value="${person.user_id}" ${i === 0 ? 'checked' : ''} />${avatarHtml(person, 'sm', 'span')}<span>${esc(person.display_name)}</span></label>`).join('')}</fieldset>
+      ${!candidates.length ? '<p class="row-sub">Another player needs to join before you can request a handoff.</p>' : ''}
+      <label class="session-attendance-row"><input type="checkbox" id="hh-leave" />Leave these dates after they accept</label>
+      <p id="hh-error" class="form-error hidden" role="alert"></p>
+      <button class="btn btn-primary btn-block" id="hh-send" ${candidates.length ? '' : 'disabled'}>Request handoff</button>`, {label:'Request a host handoff'});
+    modal.querySelector('#hh-send').addEventListener('click', async (event) => {
+      const reset = beginButtonAction(event.currentTarget, 'Sending…');
+      if (!reset) return;
+      try {
+        const fresh = await api(`/games/${game.id}/host-handoff`, {method:'POST', body:JSON.stringify({
+          target_user_id:Number(modal.querySelector('[name="hh-person"]:checked')?.value),
+          edit_scope:modal.querySelector('[name="hh-scope"]:checked')?.value || 'this_date',
+          leave_on_accept:modal.querySelector('#hh-leave').checked,
+        })});
+        closeModal(modal); onUpdated?.(fresh); toast('Request sent. You remain the host until they accept.');
+      } catch (error) {
+        reset(); const target=modal.querySelector('#hh-error'); target.textContent=error.message; target.classList.remove('hidden');
+      }
+    });
+    return modal;
+  }
+
   function gameFingerprint(game) {
     return JSON.stringify([
+      game.score_version, game.score_correction_pending, game.ranked_correction_expired,
       game.status, game.is_instant, game.is_challenge, game.assembly_active,
       game.assembly_expires_at,
       game.max_players, game.can_enter_score, game.can_complete_session, game.completion_kind,
@@ -34682,6 +37035,7 @@
       game.recurrence_local_time, game.recurrence_weekdays,
       game.recurrence_ends_on, game.recurrence_occurrence_on,
       game.my_recurrence_rsvp,
+      game.waitlist_offer, game.host_handoff, game.attendance_record,
       game.court && [game.court.id, game.court.name, game.court.city],
       game.ready_count, game.roster_count,
       game.on_the_way_count, game.committed_count, game.physical_spots_left, game.spots_left,
@@ -34792,6 +37146,33 @@
     return `${clock} ${zoneLabel}`;
   }
 
+  function scoreCorrectionStatusHtml(game) {
+    const attempts = Number(game.score_correction_attempts || 0);
+    const remaining = Math.max(0, 2 - attempts);
+    const explanation = game.can_propose_score_correction
+      ? `Keep the original teams. An opponent must agree by ${fmtDateTime(game.ranked_correction_deadline_at)}.`
+      : game.ranked_correction_expired ? 'The 7-day correction window has ended.'
+        : attempts >= 2 ? 'The two correction proposals have been used.'
+          : 'A corrected score is unavailable for this match. Use Result help for the next step.';
+    return `<section class="score-correction-status"><b>${game.can_propose_score_correction ? 'Agree a corrected result' : 'This match remains unrated'}</b><p>${esc(explanation)}</p>${game.can_propose_score_correction ? `<button type="button" class="btn btn-primary btn-block" id="gs-correct-result">Propose corrected score</button><small>${remaining} proposal${remaining === 1 ? '' : 's'} left · no automatic confirmation</small>` : '<button type="button" class="btn btn-secondary btn-block" id="gs-result-help">Result help</button>'}</section>`;
+  }
+
+  function scoreHistoryHtml(game) {
+    const history = Array.isArray(game.score_history) ? game.score_history : [];
+    if (!history.length) return '';
+    const labels = { reported: 'Score reported', confirmed: 'Result confirmed',
+      disputed: 'Score disputed', late_disputed: 'Automatic result disputed',
+      rating_removed: 'Rating change removed', withdrawn: 'Score withdrawn',
+      correction_proposed: 'Correction proposed', correction_confirmed: 'Correction agreed',
+      correction_expired: 'Correction expired', legacy_snapshot: 'Earlier result' };
+    return `<details class="score-history simple-disclosure"><summary>Result history</summary>${history.map((item) => {
+      const scores = (item.score_games || []).map((row) => `${row.score_team1}–${row.score_team2}`).join(', ')
+        || (item.score_team1 == null ? '' : `${item.score_team1}–${item.score_team2}`);
+      const sides = [1, 2].map((team) => (item.sides || []).filter((player) => player.team === team).map((player) => player.name).join(' & ')).filter(Boolean).join(' vs ');
+      return `<div class="score-history-entry"><b>${esc(labels[item.kind] || 'Result updated')}${scores ? ` · ${esc(scores)}` : ''}</b><small>${esc(item.confirmation_kind === 'timeout' && item.kind === 'confirmed' ? 'Confirmed automatically' : item.actor_name || 'System')} · ${esc(fmtDateTime(item.at))}</small>${sides ? `<small>${esc(sides)}</small>` : ''}${item.reason ? `<p>${esc(item.reason)}</p>` : ''}</div>`;
+    }).join('')}</details>`;
+  }
+
   function gameScreenHtml(game, { joinedNow = false } = {}) {
     const court = game.court || {};
     const isRankedMatch = game.game_type === 'ranked';
@@ -34846,22 +37227,24 @@
         const gameScores = Array.isArray(game.score_games) && game.score_games.length > 1
           ? ` · ${game.score_games.map((row) => `${row.score_team1}–${row.score_team2}`).join(', ')}` : '';
         subline = `${fmtDateTime(game.completed_at)}${gameScores}${game.confirmed_automatically ? ' · Confirmed automatically' : ''}`;
+        if (isRankedMatch && game.score_submitted_by_name) subline += `<br>Reported by ${esc(game.score_submitted_by_name)}${!game.confirmed_automatically && game.score_confirmed_by_name ? ` · Confirmed by ${esc(game.score_confirmed_by_name)}` : ''}`;
       }
     } else if (game.status === 'unresolved') {
       statusIcon = uiIcon('alert-triangle'); headline = 'Score unresolved';
       subline = game.score_confirmation_kind === 'late_disputed'
         ? 'An automatically confirmed result was disputed; its rating change was removed.'
-        : 'No rating change was applied after two disagreements.';
+        : 'No agreed result. This match is not counted in ratings.';
     } else if (game.status === 'cancelled') {
       statusIcon = uiIcon('x'); headline = 'Cancelled'; subline = `This ${playNoun} was called off.`;
     } else if (game.status === 'expired') {
-      statusIcon = uiIcon('clock'); headline = 'Expired'; subline = `No score was entered, so this ${playNoun} closed itself.`;
+      statusIcon = uiIcon('clock'); headline = 'Session ended';
+      subline = game.game_type === 'ranked' ? 'No result has been recorded.' : 'Attendance has not been recorded.';
     } else if (game.status === 'awaiting_confirmation') {
       statusIcon = uiIcon(game.awaiting_your_confirmation ? 'activity' : 'clock');
-      headline = `Reported: ${gameScoreText(game)}`;
+      headline = `${game.score_correction_pending ? 'Proposed correction' : 'Reported'}: ${gameScoreText(game)}`;
       subline = game.awaiting_your_confirmation
-        ? `${esc(game.score_submitted_by_name || 'Opponent')} reported — confirm or dispute`
-        : 'Waiting for opponents to confirm';
+        ? `${esc(game.score_submitted_by_name || 'Opponent')} ${game.score_correction_pending ? 'proposed this correction — agree or reject' : 'reported — confirm or dispute'}`
+        : `Reported by ${esc(game.score_submitted_by_name || 'a player')} · waiting for an opponent`;
     } else if (assembly) {
       statusIcon = assembly.icon;
       headline = assembly.title;
@@ -34874,7 +37257,7 @@
       statusIcon = uiIcon('clock');
       headline = 'Game didn’t fill up';
       subline = 'This pickup game didn’t fill up.';
-    } else if (game.my_invite_status === 'pending' && !game.is_joined) {
+    } else if (game.my_invite_status === 'pending' && !game.is_joined && !game.my_recurrence_rsvp?.is_skipped) {
       statusIcon = uiIcon('send');
       subline = `${esc((game.invited_by || {}).display_name || 'The host')} invited you`;
     } else if (isChallenge && !game.is_joined && game.spots_left > 0) {
@@ -34923,12 +37306,12 @@
     }
     const waitlistPeople = Array.isArray(game.waitlist_people) ? game.waitlist_people : [];
     const waitlistHtml = game.waitlist_count ? `<section class="game-waitlist" aria-labelledby="game-waitlist-title">
-      <div class="game-waitlist-head"><div><b id="game-waitlist-title">Waitlist (${game.waitlist_count})</b><span>${game.waitlist_position ? `You’re #${game.waitlist_position}. ` : ''}${game.auto_fill_waitlist ? 'Open spots fill in waitlist order.' : 'The host reviews promotions.'}</span></div>
-        ${game.is_creator ? `<label class="game-waitlist-toggle"><input type="checkbox" id="gs-waitlist-auto" ${game.auto_fill_waitlist ? 'checked' : ''} /><span>Auto-fill</span></label>` : ''}
+      <div class="game-waitlist-head"><div><b id="game-waitlist-title">Waitlist (${game.waitlist_count})</b><span>${game.waitlist_offer ? 'Your spot is ready. Accept below to join.' : `${game.waitlist_position ? `You’re #${game.waitlist_position}. ` : ''}${game.auto_fill_waitlist ? 'Spots are offered in order. Players must accept.' : 'The host chooses when to offer a spot.'}`}</span></div>
+        ${game.is_creator ? `<label class="game-waitlist-toggle"><input type="checkbox" id="gs-waitlist-auto" ${game.auto_fill_waitlist ? 'checked' : ''} /><span>Auto-offer</span></label>` : ''}
       </div>
       ${game.is_creator ? `<div class="game-waitlist-people">${waitlistPeople.map((person) => `<div class="game-waitlist-person">
-        <button type="button" class="player-profile-link" data-view-user="${person.user_id}">${avatarHtml(person, 'sm', 'span')}<span class="row-main"><span class="row-title">${esc(person.display_name)}</span><span class="row-sub">#${person.position} waiting</span></span></button>
-        <button type="button" class="btn btn-secondary btn-sm" data-promote-waitlist="${person.user_id}" ${game.spots_left > 0 ? '' : 'disabled'}>Promote</button>
+        <button type="button" class="player-profile-link" data-view-user="${person.user_id}">${avatarHtml(person, 'sm', 'span')}<span class="row-main"><span class="row-title">${esc(person.display_name)}</span><span class="row-sub">${person.offer_status === 'offered' ? `Offered until ${esc(fmtTimeShort(person.offer_expires_at))}` : `#${person.position} waiting`}</span></span></button>
+        <button type="button" class="btn btn-secondary btn-sm" data-promote-waitlist="${person.user_id}" ${game.spots_left > 0 && person.offer_status !== 'offered' ? '' : 'disabled'}>${person.offer_status === 'offered' ? 'Offered' : 'Offer spot'}</button>
       </div>`).join('')}</div>` : ''}
     </section>` : '';
     const arrivals = rally ? (Array.isArray(game.arrivals) ? game.arrivals : [])
@@ -34984,12 +37367,12 @@
         }
       } else if (!game.is_joined && game.spots_left > 0) {
         const skipped = game.recurrence === 'weekly' && game.my_recurrence_rsvp?.is_skipped;
-        const inviteCopy = game.my_invite_status === 'pending' && game.invited_by
+        const inviteCopy = !skipped && game.my_invite_status === 'pending' && game.invited_by
           ? `<div class="game-invite-context"><b>${esc(game.invited_by.display_name)} invited you</b><span>Accept to join the roster, or let the host know you can’t make it.</span></div>` : '';
         actions = `${inviteCopy}${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
-        } else if (game.my_invite_status === 'pending') {
+        } else if (!skipped && game.my_invite_status === 'pending') {
           actions += '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
         }
       } else if (!game.is_joined) {
@@ -35043,11 +37426,11 @@
         if (game.recurrence === 'weekly') {
           const standing = game.is_creator || game.my_recurrence_rsvp?.standing_rsvp === true;
           moreActions.push(`<section class="recurrence-rsvp-card" aria-label="Recurring RSVP preference">
-            <div><b>${standing ? 'Standing RSVP is on' : 'Confirm each date'}</b><span>${standing ? 'You’ll be added automatically to future dates.' : 'Your series invite stays saved; RSVP when each date is posted.'}</span></div>
+            <div><b>${standing ? 'Standing RSVP is on' : 'Confirm each date'}</b><span>${standing ? 'We’ll reserve a spot on future dates when one is available.' : 'Choose the dates you want to join.'}</span></div>
             ${game.is_creator ? '<small>Hosts stay RSVP’d. Edit the series to change its days or end date.</small>' : `<button type="button" class="btn btn-secondary btn-block" id="gs-standing-rsvp" aria-pressed="${standing}">${standing ? 'Confirm each date instead' : 'Turn on standing RSVP'}</button><button type="button" class="btn btn-secondary btn-block" id="gs-skip-occurrence">Skip only this date</button>`}
           </section>`);
         }
-        moreActions.push(game.recurrence === 'weekly'
+        if (!(game.is_creator && gameHasDatedSeries(game))) moreActions.push(game.recurrence === 'weekly'
           ? '<button class="btn btn-secondary btn-block" id="gs-leave-series">Leave weekly series</button>'
           : `<button class="btn btn-secondary btn-block" id="gs-leave">Leave ${playNoun}</button>`);
         if (game.is_creator) {
@@ -35055,6 +37438,7 @@
             <summary>${uiIcon('shield')} Manage ${playNoun}<small>You’re hosting</small></summary>
             <div class="game-host-toolbar-actions">
               ${game.is_instant ? '' : `<button type="button" class="btn btn-secondary" id="gs-edit">${uiIcon('edit')} Edit game</button>`}
+              ${!game.host_handoff ? '<button type="button" class="btn btn-secondary" id="gs-handoff">Ask someone to host</button>' : ''}
               ${!game.is_instant && startsAhead && game.recurrence !== 'weekly' ? `<button type="button" class="btn btn-secondary" id="gs-reschedule">${uiIcon('clock')} Reschedule</button>` : ''}
               <button type="button" class="btn btn-danger" id="gs-cancel">Cancel ${playNoun}</button>
             </div>
@@ -35072,8 +37456,8 @@
       const deadlineCopy = scoreAutoConfirmCopy(game);
       if (game.awaiting_your_confirmation) actions = `
         <p class="score-deadline" role="status">${esc(deadlineCopy)}</p>
-        <button class="btn btn-primary btn-block" id="gs-confirm" style="padding:16px">${uiIcon('check-circle')} Confirm ${gameScoreText(game)}</button>
-        <button class="btn btn-danger btn-block" id="gs-dispute" style="margin-top:10px">${uiIcon('x')} That score is wrong</button>`;
+        <button class="btn btn-primary btn-block" id="gs-confirm" style="padding:16px">${uiIcon('check-circle')} ${game.score_correction_pending ? 'Agree to' : 'Confirm'} ${gameScoreText(game)}</button>
+        <button class="btn btn-danger btn-block" id="gs-dispute" style="margin-top:10px">${uiIcon('x')} ${game.score_correction_pending ? 'Reject correction' : 'That score is wrong'}</button>`;
       else if (game.can_fix_score) actions = `
         <p class="score-deadline" role="status">${esc(deadlineCopy)}</p>
         <button class="btn btn-secondary btn-block" id="gs-fix-score">${uiIcon('edit')} Fix the score</button>`;
@@ -35096,7 +37480,9 @@
             <div><b>${uiIcon('clock')} Confirmed automatically</b><span>No opponent responded during the 72-hour review window.</span></div>
             ${game.can_late_dispute
               ? `<button type="button" class="btn btn-secondary btn-block" id="gs-late-dispute">That score is wrong</button><small>Available through ${esc(fmtDateTime(game.late_dispute_deadline_at))}.</small>`
-              : '<small>The 7-day late-dispute window has closed.</small>'}
+              : game.late_dispute_deadline_at && new Date(game.late_dispute_deadline_at).getTime() > Date.now()
+                ? `<small>An opposing player can dispute through ${esc(fmtDateTime(game.late_dispute_deadline_at))}.</small>`
+                : '<small>The 7-day late-dispute window has closed.</small>'}
           </section>`
         : '';
       const casualScoreFix = game.game_type === 'casual' && game.can_fix_score
@@ -35112,7 +37498,11 @@
           <small id="gs-save-group-hint"></small>
         </div>
         <details class="game-result-extras simple-disclosure"><summary>Players &amp; highlights</summary>${mvpBanner}${voteChips}<div id="gs-crew-connect" aria-live="polite"><div class="postgame-connection-loading">Loading players…</div></div></details>`;
-    } else if (['cancelled', 'expired', 'unresolved'].includes(game.status) || closedRally) {
+    } else if (game.status === 'expired' && game.is_joined && game.can_complete_session) {
+      actions = `<section class="game-completion-choices"><p class="row-sub">This date has ended. Record who actually played.</p><button class="btn btn-primary btn-block" id="gs-wrap-session">${uiIcon('check-circle')} Record attendance</button>${game.can_enter_score ? '<button class="btn btn-secondary btn-block" id="gs-score">Add a score</button>' : ''}</section>`;
+    } else if (game.status === 'unresolved' && game.is_joined) {
+      actions = scoreCorrectionStatusHtml(game);
+    } else if (['cancelled', 'expired'].includes(game.status) || closedRally) {
       actions = whatNowHtml;
     }
 
@@ -35132,9 +37522,13 @@
     const notes = game.notes && !(game.is_instant && game.notes === '⚡ Instant rally') ? game.notes : '';
     const planningFacts = [costLabel, courtScaleLabel, recurrencePattern,
       recurrenceEndLabel ? `Through ${recurrenceEndLabel}` : ''].filter(Boolean);
-    const planningDetails = game.description || notes || planningFacts.length
-      ? `<details class="game-detail-plan simple-disclosure"><summary>${game.description || notes ? 'Host note &amp; details' : 'Session details'}</summary>
-        ${game.description ? `<p>${esc(game.description)}</p>` : ''}
+    if (game.waitlist_offer && game.status === 'upcoming' && !game.is_joined) {
+      actions = `<section class="game-consent-card"><b>A spot is held for you</b><p>Accept by ${esc(fmtTimeShort(game.waitlist_offer.expires_at))} to join this date.</p><div class="game-consent-actions"><button class="btn btn-primary" data-waitlist-reply="accept">Accept spot</button><button class="btn btn-secondary" data-waitlist-reply="pass">Pass</button></div></section>`;
+    }
+    const descriptionNote = courtEntryDescriptionParts(game).note;
+    const planningDetails = descriptionNote || notes || planningFacts.length
+      ? `<details class="game-detail-plan simple-disclosure"><summary>${descriptionNote || notes ? 'Host note &amp; details' : 'Session details'}</summary>
+        ${descriptionNote ? `<p>${esc(descriptionNote)}</p>` : ''}
         ${notes ? `<p>${esc(notes)}</p>` : ''}
         ${planningFacts.length ? `<div class="game-detail-plan-facts">${planningFacts.map((fact) => `<span>${esc(fact)}</span>`).join('')}</div>` : ''}
       </details>` : '';
@@ -35165,14 +37559,17 @@
     </button>` : '';
 
     const resultState = hasScore
-      ? game.status === 'awaiting_confirmation' ? 'Awaiting confirmation'
+      ? game.status === 'awaiting_confirmation' ? game.score_correction_pending ? 'Correction needs agreement' : 'Awaiting confirmation'
         : isRankedMatch ? 'Confirmed result' : 'Final score'
       : '';
     const joinedState = game.is_joined && game.status === 'upcoming' && !closedRally
       ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${uiIcon('check-circle')} ${game.is_creator ? 'You’re hosting' : 'You’re in'}</span>${joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>' : ''}</div>` : '';
-    const when = game.status === 'upcoming' && !game.is_instant
+    const when = !game.is_instant && game.scheduled_at
       ? `<div class="session-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
     const openSpots = Math.max(0, Number(game.spots_left) || 0);
+    const heldSpots = Math.max(0, Number(game.reserved_offer_count) || 0);
+    const rosterAvailability = openSpots ? `${openSpots} spot${openSpots === 1 ? '' : 's'} left`
+      : heldSpots ? `${heldSpots} spot${heldSpots === 1 ? '' : 's'} awaiting acceptance` : 'Full';
     return `
       <div class="modal-head game-detail-header">
         <div class="session-heading-copy">
@@ -35189,6 +37586,7 @@
       </div>
       ${hasScore ? playersHtml : ''}
       ${when}
+      ${gameHasDatedSeries(game) ? '<section class="series-date-card" id="gs-series-dates" aria-label="Session dates" aria-busy="true"><span class="row-sub">Loading session dates…</span></section>' : ''}
       <div class="session-place-wrap">
         <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
           <span class="nav-row-leading">${uiIcon('map-pin')}</span>
@@ -35199,13 +37597,15 @@
         ${game.status === 'upcoming' && courtDirectionsUrl(court)
           ? `<a class="btn btn-secondary btn-block gs-directions" href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name || 'the court')} (opens Maps)">${uiIcon('external')}<span>Directions</span></a>` : ''}
       </div>
+      ${courtEntryNoticeHtml(game)}
       ${!hasScore ? `<section class="session-roster" aria-label="Players">
-        <div class="session-roster-head"><h4>${assembly ? 'At the court' : 'Players'} <span>${readyCount}</span></h4><span>${game.status === 'upcoming' && !closedRally ? openSpots ? `${openSpots} spot${openSpots === 1 ? '' : 's'} left` : 'Full' : ''}</span></div>
+        <div class="session-roster-head"><h4>${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Going' : 'Signed up'} <span>${readyCount}</span></h4><span>${game.status === 'upcoming' && !closedRally ? rosterAvailability : ''}</span></div>
         ${playersHtml}
       </section>` : ''}
-      ${waitlistHtml}${arrivalsHtml}
+      ${waitlistHtml}${arrivalsHtml}${gameConsentHtml(game)}
       ${ratingChanges}
       <div class="session-main-actions">${actions}</div>
+      ${scoreHistoryHtml(game)}
       <div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
         ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
         <button type="button" class="btn btn-secondary" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
@@ -35305,6 +37705,56 @@
     };
 
     function bind() {
+      box.querySelector('#gs-handoff')?.addEventListener('click', () => {
+        openChildModal(modal, () => openHostHandoffModal(game, (fresh) => render(fresh)));
+      });
+      box.querySelectorAll('[data-waitlist-reply], [data-host-reply], [data-attendance-correct]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const reset = beginButtonAction(button, 'Saving…');
+          if (!reset) return;
+          let endpoint, payload, method='POST';
+          if (button.dataset.waitlistReply) {
+            endpoint=`/games/${gameId}/waitlist/respond`; payload={accept:button.dataset.waitlistReply === 'accept'};
+          } else if (button.dataset.hostReply) {
+            endpoint=`/games/${gameId}/host-handoff/${game.host_handoff.id}/respond`; payload={accept:button.dataset.hostReply === 'accept'};
+          } else {
+            endpoint=`/games/${gameId}/attendance/${button.dataset.attendanceCorrect}`;
+            method='PATCH'; payload={attended:button.dataset.attended === 'true'};
+          }
+          try {
+            const fresh=await api(endpoint,{method,body:JSON.stringify(payload)});
+            state.playGamesCache=null; render(fresh); refreshMe();
+            if (state.tab === 'play') renderPlay();
+            toast(button.dataset.attendanceCorrect ? 'Attendance corrected. RSVP history is preserved.' : 'Response saved');
+          } catch (error) { reset(); showInlineActionError(box,error.message); }
+        });
+      });
+      const datesHost = box.querySelector('#gs-series-dates');
+      if (datesHost) {
+        const hydrateDates = async () => {
+          datesHost.setAttribute('aria-busy', 'true');
+          try {
+            const data = await api(`/games/${game.id}/occurrences`);
+            if (!datesHost.isConnected || datesHost !== box.querySelector('#gs-series-dates')) return;
+            datesHost.innerHTML = gameOccurrencesHtml(game, data.occurrences);
+            datesHost.removeAttribute('aria-busy');
+            const openDate = (id) => {
+              const destination = safePositiveId(id);
+              if (destination && destination !== Number(game.id)) openGameScreen(destination, { replaceModal: modal });
+            };
+            datesHost.querySelector('#gs-occurrence-select')?.addEventListener('change', (event) => openDate(event.currentTarget.value));
+            datesHost.querySelectorAll('[data-series-date]').forEach((link) => link.addEventListener('click', (event) => {
+              event.preventDefault(); openDate(link.dataset.seriesDate);
+            }));
+          } catch {
+            if (!datesHost.isConnected) return;
+            datesHost.removeAttribute('aria-busy');
+            datesHost.innerHTML = '<p class="row-sub">Other dates couldn’t load.</p><button type="button" class="btn btn-secondary btn-sm" data-retry-dates>Retry dates</button>';
+            datesHost.querySelector('[data-retry-dates]').addEventListener('click', hydrateDates);
+          }
+        };
+        hydrateDates();
+      }
       const court = game.court || {};
       const playNoun = game.game_type === 'ranked' ? 'match' : 'play session';
       const isChallenge = gameIsChallenge(game);
@@ -35629,7 +38079,7 @@
           });
           state.playGamesCache = null;
           render(fresh);
-          toast(input.checked ? 'Waitlist auto-fill is on' : 'Waitlist promotions are manual');
+          toast(input.checked ? 'Spots will be offered in order' : 'The host will choose when to offer spots');
           if (state.tab === 'play') renderPlay();
         } catch (error) {
           input.checked = !input.checked;
@@ -35640,7 +38090,7 @@
       box.querySelectorAll('[data-promote-waitlist]').forEach((button) => {
         button.addEventListener('click', async () => {
           const resetAction = beginButtonAction(
-            button, 'Promoting…', [...box.querySelectorAll('[data-promote-waitlist]')],
+            button, 'Offering…', [...box.querySelectorAll('[data-promote-waitlist]')],
           );
           if (!resetAction) return;
           try {
@@ -35649,7 +38099,7 @@
             });
             state.playGamesCache = null;
             render(fresh);
-            toast('Player promoted to the roster', { tone: 'success', icon: 'check-circle' });
+            toast('Spot offered. The player must accept to join.', { tone: 'success', icon: 'check-circle' });
             if (state.tab === 'play') renderPlay();
           } catch (error) {
             resetAction();
@@ -35682,6 +38132,7 @@
       });
       box.querySelector('#gs-join')?.addEventListener('click', async (event) => {
         const button = event.currentTarget;
+        const accountId = Number(state.me?.id);
         if (game.is_instant) {
           await openReadyRally(rallySummaryFromValue(game), button);
           return;
@@ -35693,11 +38144,13 @@
         button.textContent = 'Joining…';
         try {
           const fresh = await api(`/games/${gameId}/join`, { method: 'POST' });
+          if (Number(state.me?.id) !== accountId || !modal.isConnected || modal._destroyed) return;
           rememberFresh(fresh);
           state.playGamesCache = null;
           render(fresh, { joinedNow: true });
           box.querySelector('#gs-joined-state')?.focus({ preventScroll: true });
           announceViewStatus('You’re in. Your name is on the player list.');
+          maybeOfferPlayerDetailsAfterJoin(fresh, box.querySelector('#gs-joined-state'));
           refreshMe();
           if (state.tab === 'play') renderPlay();
         } catch (e) {
@@ -35746,29 +38199,10 @@
           showInlineActionError(box, error.message);
         }
       });
-      box.querySelector('#gs-complete-no-score')?.addEventListener('click', async (event) => {
-        const button = event.currentTarget;
-        const resetAction = beginButtonAction(
-          button, 'Recording play…', [...box.querySelectorAll('#gs-complete-no-score, #gs-score')],
-        );
-        if (!resetAction) return;
-        try {
-          const updated = await api(`/games/${gameId}/complete-session`, {
-            method: 'POST', body: JSON.stringify({}),
-          });
-          state.playGamesCache = null;
-          toast('Pickup game recorded — no score or rating change', {
-            tone: 'success', icon: 'check-circle',
-          });
-          refreshMe();
-          render(updated);
-          if (state.tab === 'play') renderPlay();
-        } catch (error) {
-          resetAction();
-          toast(error.message, { tone: 'warning' });
-        }
+      box.querySelector('#gs-complete-no-score')?.addEventListener('click', () => {
+        openChildModal(modal, () => openSessionWrapUpModal(game, (updated) => render(updated)));
       });
-      box.querySelector('#gs-score, #gs-wrap-session')?.addEventListener('click', async (event) => {
+      box.querySelectorAll('#gs-score, #gs-wrap-session').forEach((button) => button.addEventListener('click', async (event) => {
         const scoreButton = event.currentTarget;
         const resetAction = beginButtonAction(
           scoreButton,
@@ -35792,7 +38226,7 @@
           resetAction();
           toast(error.message);
         }
-      });
+      }));
       box.querySelector('#gs-confirm')?.addEventListener('click', async (event) => {
         const resetAction = beginButtonAction(
           event.currentTarget,
@@ -35801,7 +38235,7 @@
         );
         if (!resetAction) return;
         try {
-          const updated = await api(`/games/${gameId}/confirm`, { method: 'POST' });
+          const updated = await api(`/games/${gameId}/confirm`, { method: 'POST', body: JSON.stringify({ expected_score_version: Number(game.score_version || 0) }) });
           pendingScoreConflicts.delete(Number(gameId));
           state.playGamesCache = null;
           transitionModal(modal, () => showCelebration(updated));
@@ -35814,19 +38248,22 @@
         }
       });
       box.querySelector('#gs-dispute')?.addEventListener('click', async (event) => {
+        const disputeButton = event.currentTarget;
         const disputeReason = await requestScoreDisputeReason({
-          trigger: event.currentTarget,
+          trigger: disputeButton,
+          correction: game.score_correction_pending === true,
+          finalCorrection: game.score_correction_pending === true && Number(game.score_correction_attempts || 0) >= 2,
         });
         if (!disputeReason) return;
         const resetAction = beginButtonAction(
-          event.currentTarget,
+          disputeButton,
           'Opening score…',
           [...box.querySelectorAll('#gs-confirm, #gs-dispute')],
         );
         if (!resetAction) return;
         try {
           const updated = await api(`/games/${gameId}/dispute`, {
-            method: 'POST', body: JSON.stringify({ details: disputeReason }),
+            method: 'POST', body: JSON.stringify({ details: disputeReason, expected_score_version: Number(game.score_version || 0) }),
           });
           pendingScoreConflicts.delete(Number(gameId));
           state.playGamesCache = null;
@@ -35834,7 +38271,7 @@
           if (state.tab === 'play') renderPlay();
           if (updated.score_dispute_outcome === 'unresolved') {
             render(updated);
-            toast('Result closed as unresolved — no rating changed');
+            toast(updated.can_propose_score_correction ? 'Score disputed — propose a correction when you’re ready' : 'Correction rejected — this match remains unrated');
             return;
           }
           const opened = openChildModal(modal, () => openScoreModal(updated, (fresh) => {
@@ -35850,15 +38287,16 @@
         }
       });
       box.querySelector('#gs-late-dispute')?.addEventListener('click', async (event) => {
+        const disputeButton = event.currentTarget;
         const disputeReason = await requestScoreDisputeReason({
-          trigger: event.currentTarget, late: true,
+          trigger: disputeButton, late: true,
         });
         if (!disputeReason) return;
-        const resetAction = beginButtonAction(event.currentTarget, 'Disputing…');
+        const resetAction = beginButtonAction(disputeButton, 'Disputing…');
         if (!resetAction) return;
         try {
           const updated = await api(`/games/${gameId}/dispute`, {
-            method: 'POST', body: JSON.stringify({ details: disputeReason }),
+            method: 'POST', body: JSON.stringify({ details: disputeReason, expected_score_version: Number(game.score_version || 0) }),
           });
           pendingScoreConflicts.delete(Number(gameId));
           state.playGamesCache = null;
@@ -35895,12 +38333,21 @@
         });
         if (!opened) resetAction();
       });
+      box.querySelector('#gs-correct-result')?.addEventListener('click', () => {
+        const prior = [...(game.score_history || [])].reverse().find((row) => row.score_team1 != null);
+        openChildModal(modal, () => openScoreModal(game, (updated) => {
+          if (modal.isConnected) render(updated);
+        }, { mode: 'correction', prefill: prior || {} }));
+      });
+      box.querySelector('#gs-result-help')?.addEventListener('click', () => {
+        openChildModal(modal, openHelpSafety);
+      });
       box.querySelector('#gs-fix-score')?.addEventListener('click', async (event) => {
         const resetAction = beginButtonAction(event.currentTarget, 'Opening score…');
         if (!resetAction) return;
         try {
           const updated = await api(`/games/${gameId}/dispute`, {
-            method: 'POST', body: JSON.stringify({ reason: 'correction' }),
+            method: 'POST', body: JSON.stringify({ reason: 'correction', expected_score_version: Number(game.score_version || 0) }),
           });
           pendingScoreConflicts.delete(Number(gameId));
           state.playGamesCache = null;
@@ -35964,6 +38411,9 @@
           if (skipOnly) {
             render(fresh);
             toast('This date skipped');
+          } else if (fresh.host_handoff) {
+            render(fresh);
+            toast('Request sent. You remain the host until they accept.');
           } else if (fresh.left_series) {
             closeModal(modal);
             toast('Left the recurring series');
@@ -36120,6 +38570,7 @@
         }
       } catch { /* offline */ }
     }, LIVE_DETAIL_POLL_INTERVAL_MS);
+    return modal;
   }
 
   function safeNotificationOverlayRoute(actionUrl) {
@@ -36129,6 +38580,21 @@
       if (url.origin !== location.origin) return null;
       return normalizeOverlayRoute(url.hash);
     } catch { return null; }
+  }
+
+  async function loadActivityWindow(filter, targetCount, isCurrent = () => true) {
+    let page = await api(`/notifications?limit=20&filter=${encodeURIComponent(filter)}`);
+    const items = new Map((page.items || []).map((item) => [item.id, item]));
+    const seenCursors = new Set();
+    while (isCurrent() && items.size < targetCount && page.has_more && page.next_cursor
+        && !seenCursors.has(String(page.next_cursor))) {
+      const cursor = String(page.next_cursor);
+      seenCursors.add(cursor);
+      page = await api(`/notifications?limit=20&filter=${encodeURIComponent(filter)}&before_id=${encodeURIComponent(cursor)}`);
+      (page.items || []).forEach((item) => items.set(item.id, item));
+    }
+    return { ...page, items: [...items.values()],
+      has_more: page.has_more === true && !!page.next_cursor && !seenCursors.has(String(page.next_cursor)) };
   }
 
   async function openActivity() {
@@ -36143,7 +38609,7 @@
     let activityPushCapability;
     try {
       [data, activityPushCapability] = await Promise.all([
-        api('/notifications?limit=20'),
+        api('/notifications?limit=20&filter=action'),
         pushCapabilityState(),
       ]);
     } catch (e) {
@@ -36164,7 +38630,7 @@
     const notificationIconFor = (kind) => {
       if (['friend_request', 'friend_accept', 'club_join', 'crew_invite', 'crew_update'].includes(kind)) return 'users';
       if (['direct_message', 'game_message', 'tournament_message', 'club_message', 'crew_message', 'league_message'].includes(kind)) return 'message';
-      if (['game_invite', 'game_invite_direct', 'tournament_invite', 'club_invite'].includes(kind)) return 'ticket';
+      if (['game_invite', 'game_invite_direct', 'game_waitlist_offer', 'game_host_handoff', 'tournament_invite', 'club_invite'].includes(kind)) return 'ticket';
       if (['ranked_result', 'badge_earned', 'tournament_result', 'tournament_start'].includes(kind)) return 'trophy';
       if (['challenge', 'challenge_declined', 'tournament_match', 'tournament_score', 'league_match'].includes(kind)) return 'target';
       if (['score_submitted', 'score_confirmed', 'score_disputed', 'session_completed', 'weekly_recap', 'game_logged'].includes(kind)) return 'activity';
@@ -36189,13 +38655,18 @@
       if (notification.kind === 'friend_request') return 'Review request';
       if (notification.kind === 'tournament_invite') return 'Review partner request';
       if (['game_invite', 'game_invite_direct', 'club_invite', 'crew_invite'].includes(notification.kind)) return 'Open invitation';
+      if (notification.kind === 'game_waitlist_offer') return notification.needs_action ? 'Review spot offer' : 'View session';
+      if (notification.kind === 'game_host_handoff') return notification.needs_action ? 'Review host request' : 'View session';
       if (notification.kind === 'challenge') return 'Review challenge';
       if (['score_submitted', 'score_disputed', 'tournament_score'].includes(notification.kind)) return 'Review score';
       if (['score_confirmed', 'ranked_result', 'tournament_result'].includes(notification.kind)) return 'View result';
       return 'Open details';
     };
     const activityCategoryFor = (notification) => {
+      if (notification.category) return notification.category;
       const kind = String(notification.kind || '');
+      if (kind.startsWith('business_')) return 'business';
+      if (['moderation_', 'report_', 'account_'].some((prefix) => kind.startsWith(prefix))) return 'safety';
       if (kind.startsWith('friend_') || kind.startsWith('player_')
           || ['direct_message', 'challenge', 'challenge_declined'].includes(kind)) return 'people';
       if (kind.startsWith('club_') || kind.startsWith('crew_')
@@ -36203,6 +38674,7 @@
       return 'games';
     };
     const inlineActionsFor = (notification) => {
+      if (notification.needs_action === false) return '';
       const action = (name, label, primary = false) => `<button type="button" class="btn ${primary ? 'btn-primary' : 'btn-secondary'} btn-sm" data-activity-action="${name}" data-activity-action-id="${notification.id}">${esc(label)}</button>`;
       if (notification.kind === 'friend_request' && notification.related_user_id) {
         return `${action('friend-accept', 'Accept', true)}${action('friend-decline', 'Decline')}`;
@@ -36213,22 +38685,27 @@
       if (notification.kind === 'club_invite' && notification.related_club_id) {
         return `${action('club-accept', 'Join Community', true)}${action('club-decline', 'Decline')}`;
       }
-      if (notification.kind === 'tournament_invite' && notification.related_tournament_id && !notification.read) {
+      if (notification.kind === 'tournament_invite' && notification.related_tournament_id) {
         return `${action('tournament-accept', 'Accept', true)}${action('tournament-decline', 'Decline')}`;
       }
       if (['game_invite', 'game_invite_direct'].includes(notification.kind) && notification.related_game_id) {
         return `${action('game-accept', 'Join game', true)}${action('game-decline', 'Can’t make it')}`;
       }
       if (notification.kind === 'score_submitted' && notification.related_game_id) {
-        return `${action('score-confirm', 'Confirm score', true)}${action('score-dispute', 'Score is wrong')}`;
+        return action('score-confirm', 'Review score', true);
       }
       return '';
     };
     let items = [...(data.items || [])];
-    let activityFilter = 'all';
+    let activityFilter = 'action';
     let hasMore = data.has_more === true;
     let nextCursor = data.next_cursor || null;
     let loadingMore = false;
+    let filterLoading = false;
+    let refreshing = false;
+    const ownerId = state.me?.id;
+    let filterError = '';
+    let activityRequest = 0;
     const pendingClears = new Map();
     state.unreadNotifications = Math.max(0, Number(data.unread) || 0);
     renderBadges();
@@ -36248,27 +38725,82 @@
       state.unreadNotifications = Math.max(0, Number(state.unreadNotifications || 0) - changed);
       renderBadges();
     };
+    const matchesActivityFilter = (notification) => activityFilter === 'all'
+      || (activityFilter === 'unread' ? !notification.read
+        : activityFilter === 'action' ? notification.needs_action === true
+          : activityCategoryFor(notification) === activityFilter);
+    const focusActivityFilter = () => {
+      const target = modal.querySelector(`[data-activity-filter="${activityFilter}"]`)
+        || modal.querySelector('#activity-category');
+      target?.focus({ preventScroll: true });
+    };
+    const loadActivityFilter = async (filter, { preserveWindow = false } = {}) => {
+      const targetCount = preserveWindow ? Math.max(20, items.length) : 20;
+      activityFilter = filter;
+      const request = ++activityRequest;
+      const isCurrent = () => request === activityRequest && modal.isConnected && state.me?.id === ownerId;
+      filterLoading = !preserveWindow;
+      refreshing = preserveWindow;
+      loadingMore = false;
+      filterError = '';
+      if (!preserveWindow) { items = []; hasMore = false; nextCursor = null; }
+      renderActivity();
+      try {
+        const page = await loadActivityWindow(filter, targetCount, isCurrent);
+        if (!isCurrent()) return;
+        items = (page.items || []).filter((notification) => !pendingClears.has(notification.id));
+        nextCursor = page.next_cursor || null;
+        hasMore = page.has_more === true && !!nextCursor;
+        const pendingUnread = [...pendingClears.values()].filter((entry) => !entry.notification.read).length;
+        state.unreadNotifications = Math.max(0, (Number(page.unread) || 0) - pendingUnread);
+        renderBadges();
+      } catch (error) {
+        if (!isCurrent()) return;
+        filterError = error.message || 'Activity could not load.';
+      }
+      if (!isCurrent()) return;
+      filterLoading = false;
+      refreshing = false;
+      renderActivity();
+      if (!preserveWindow && currentOverlayEntry()?.el === modal) {
+        focusActivityFilter();
+      }
+    };
+    modal._onResume = () => loadActivityFilter(activityFilter, { preserveWindow: true });
     const renderActivity = () => {
-      if (!modal.isConnected) return;
-      const visibleItems = activityFilter === 'all'
-        ? items
-        : activityFilter === 'unread'
-          ? items.filter((notification) => !notification.read)
-          : items.filter((notification) => activityCategoryFor(notification) === activityFilter);
-      const filters = [
-        ['all', 'All'], ['unread', 'Unread'], ['games', 'Games'], ['people', 'People'], ['groups', 'Groups'],
+      if (!modal.isConnected || state.me?.id !== ownerId) return;
+      if (refreshing) {
+        list.setAttribute('aria-busy', 'true');
+        [...list.querySelectorAll('button'), ...toolbar.querySelectorAll('.activity-toolbar-actions button')]
+          .forEach((button) => button.setAttribute('aria-disabled', 'true'));
+        pagination.innerHTML = '<span>Updating activity…</span>';
+        return;
+      }
+      const foreground = currentOverlayEntry()?.el === modal;
+      const interaction = foreground ? captureFeedInteraction(box) : null;
+      const scrollTop = box.scrollTop;
+      const visibleItems = items.filter(matchesActivityFilter);
+      const categories = [
+        ['all', 'All updates'], ['unread', 'Unread'], ['games', 'Games'], ['people', 'People'],
+        ['groups', 'Groups'], ['business', 'Venues'], ['safety', 'Safety & account'], ['updates', 'Other updates'],
       ];
       toolbar.innerHTML = `
         <div class="segmented activity-filters" role="radiogroup" aria-label="Filter activity">
-          ${filters.map(([value, label]) => `<button type="button" role="radio" data-activity-filter="${value}" class="${activityFilter === value ? 'active' : ''}" aria-checked="${activityFilter === value}" tabindex="${activityFilter === value ? '0' : '-1'}">${label}</button>`).join('')}
+          ${[['action', 'Needs your action'], ['all', 'All updates']].map(([value, label]) => {
+            const selected = value === 'action' ? activityFilter === 'action' : activityFilter !== 'action';
+            return `<button type="button" role="radio" data-activity-filter="${value}" class="${selected ? 'active' : ''}" aria-checked="${selected}" tabindex="${selected ? '0' : '-1'}">${label}</button>`;
+          }).join('')}
         </div>
-        ${items.length ? `<div class="activity-toolbar-actions">
+        ${activityFilter !== 'action' ? `<div class="activity-category-field"><label for="activity-category">Show</label><select id="activity-category">${categories.map(([value, label]) => `<option value="${value}" ${activityFilter === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div>` : ''}
+        ${items.length ? `<details class="activity-toolbar-actions" data-view-state-key="activity-tools"><summary>Manage updates</summary><div>
           ${visibleItems.some((notification) => !notification.read) ? `<button type="button" class="btn btn-secondary btn-sm" data-activity-read-visible>${uiIcon('check-circle')} Mark visible read</button>` : ''}
           <button type="button" class="btn btn-secondary btn-sm" data-activity-clear-all>${uiIcon('trash')} Clear activity</button>
-        </div>` : ''}`;
-      if (!visibleItems.length) {
-        list.innerHTML = items.length
-          ? `<div class="empty-state compact"><span class="activity-empty-icon">${uiIcon('bell')}</span><b>No ${activityFilter} activity yet</b><span>Choose another filter to see the rest of your updates.</span></div>`
+        </div></details>` : ''}`;
+      if (filterLoading) list.innerHTML = '<p role="status">Loading activity…</p>';
+      else if (filterError) list.innerHTML = `<div role="alert">${esc(filterError)} <button type="button" class="btn-link" data-activity-filter-retry>Try again</button></div>`;
+      else if (!visibleItems.length) {
+        list.innerHTML = activityFilter !== 'all'
+          ? `<div class="empty-state compact"><span class="activity-empty-icon">${uiIcon('bell')}</span><b>${activityFilter === 'action' ? 'No pending decisions' : 'No matching activity'}</b><button type="button" class="btn btn-secondary" data-activity-filter="all">View all updates</button></div>`
           : `<div class="empty-state"><span class="activity-empty-icon">${uiIcon('bell')}</span><b>You're all caught up</b><span>New invitations, requests, and scores will appear here.</span><button type="button" class="btn btn-primary" data-activity-find-play>${uiIcon('users')} Find people to play</button></div>`;
       } else {
         let lastLabel = null;
@@ -36295,9 +38827,20 @@
           return `${day}<article class="card activity-item" data-activity-id="${notification.id}" data-unread="${!notification.read}">${main}${inlineActions ? `<div class="activity-inline-actions" aria-label="Actions for ${esc(title)}">${inlineActions}</div>` : ''}<div class="activity-item-actions">${notification.read ? '' : `<button type="button" class="btn-link" data-activity-read="${notification.id}">Mark read</button>`}<button type="button" class="btn-link activity-clear-one" data-activity-clear="${notification.id}" aria-label="Clear ${esc(title)}">Clear</button></div></article>`;
         }).join('');
       }
-      if (loadingMore) pagination.innerHTML = `<button type="button" class="btn btn-secondary btn-block" disabled aria-busy="true">Loading older activity…</button>`;
+      list.setAttribute('aria-busy', String(refreshing || filterLoading));
+      toolbar.querySelectorAll('.activity-toolbar-actions button').forEach((button) => { button.disabled = refreshing; });
+      if (refreshing) pagination.innerHTML = '<span>Updating activity…</span>';
+      else if (filterLoading || filterError) pagination.innerHTML = '';
+      else if (loadingMore) pagination.innerHTML = `<button type="button" class="btn btn-secondary btn-block" disabled aria-busy="true">Loading older activity…</button>`;
       else if (hasMore && nextCursor) pagination.innerHTML = '<button type="button" class="btn btn-secondary btn-block" data-activity-more>Load older activity</button>';
       else pagination.innerHTML = items.length ? '<span class="activity-pagination-end">You’ve reached the end.</span>' : '';
+      if (foreground && !refreshing) {
+        restoreFeedInteraction(box, interaction);
+        if (interaction?.focus && !box.contains(document.activeElement)) {
+          focusActivityFilter();
+        }
+      }
+      box.scrollTop = scrollTop;
     };
     const markReadLocally = (ids) => {
       const wanted = new Set(ids.map(Number));
@@ -36332,7 +38875,7 @@
         if (!pending) return;
         clearTimeout(pending.timer);
         pendingClears.delete(notification.id);
-        items.splice(Math.min(pending.index, items.length), 0, notification);
+        if (matchesActivityFilter(notification)) items.splice(Math.min(pending.index, items.length), 0, notification);
         if (!notification.read) {
           state.unreadNotifications = Number(state.unreadNotifications || 0) + 1;
           renderBadges();
@@ -36344,7 +38887,7 @@
         try {
           await api(`/notifications/${notification.id}`, { method: 'DELETE' });
         } catch (error) {
-          items.splice(Math.min(index, items.length), 0, notification);
+          if (matchesActivityFilter(notification)) items.splice(Math.min(index, items.length), 0, notification);
           if (!notification.read) {
             state.unreadNotifications = Number(state.unreadNotifications || 0) + 1;
             renderBadges();
@@ -36371,6 +38914,8 @@
       });
       if (!approved) return;
       trigger.disabled = true;
+      activityRequest += 1;
+      loadingMore = false;
       const pendingRows = [...pendingClears.values()].map((entry) => entry.notification);
       const previousItems = [...items, ...pendingRows].sort((a, b) => Number(b.id) - Number(a.id));
       const previousUnread = Number(state.unreadNotifications || 0)
@@ -36409,9 +38954,9 @@
       }
     });
     modal.addEventListener('keydown', (event) => {
-      const current = event.target.closest('[data-activity-filter]');
+      const current = event.target.closest('[role="radio"][data-activity-filter]');
       if (!current || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-      const buttons = [...modal.querySelectorAll('[data-activity-filter]')];
+      const buttons = [...modal.querySelectorAll('[role="radio"][data-activity-filter]')];
       if (!buttons.length) return;
       event.preventDefault();
       const index = buttons.indexOf(current);
@@ -36420,13 +38965,17 @@
       buttons[next].focus();
       buttons[next].click();
     });
+    modal.addEventListener('change', (event) => {
+      if (event.target.id === 'activity-category') loadActivityFilter(event.target.value);
+    });
     modal.addEventListener('click', async (event) => {
       const filterButton = event.target.closest('[data-activity-filter]');
       if (filterButton) {
-        activityFilter = filterButton.dataset.activityFilter;
-        renderActivity();
+        loadActivityFilter(filterButton.dataset.activityFilter);
         return;
       }
+      if (refreshing) { event.preventDefault(); return; }
+      if (event.target.closest('[data-activity-filter-retry]')) { loadActivityFilter(activityFilter, { preserveWindow: true }); return; }
       const inlineAction = event.target.closest('[data-activity-action]');
       if (inlineAction) {
         const notification = items.find((item) => item.id === Number(inlineAction.dataset.activityActionId));
@@ -36477,15 +39026,15 @@
             await api(`/games/${notification.related_game_id}/join`, { method: 'POST' });
           } else if (action === 'game-decline') {
             await api(`/games/${notification.related_game_id}/invites/decline`, { method: 'POST' });
-          } else if (action === 'score-confirm') {
-            await api(`/games/${notification.related_game_id}/confirm`, { method: 'POST' });
-          } else if (action === 'score-dispute') {
-            await api(`/games/${notification.related_game_id}/dispute`, {
-              method: 'POST', body: JSON.stringify({ reason: 'different_score' }),
-            });
+          } else if (action === 'score-confirm' || action === 'score-dispute') {
+            finish();
+            openChildModal(modal, () => openGameScreen(notification.related_game_id));
+            return;
           }
           const wasUnread = !notification.read;
+          if (wasUnread) api(`/notifications/${notification.id}/read`, { method: 'POST' }).catch(() => {});
           notification.read = true;
+          notification.needs_action = false;
           if (wasUnread) syncUnread(1);
           renderActivity();
           toast({
@@ -36515,10 +39064,12 @@
         loadingMore = true;
         renderActivity();
         const requestedCursor = nextCursor;
+        const request = ++activityRequest;
         try {
-          const page = await api(`/notifications?limit=20&before_id=${encodeURIComponent(requestedCursor)}`);
+          const page = await api(`/notifications?limit=20&filter=${encodeURIComponent(activityFilter)}&before_id=${encodeURIComponent(requestedCursor)}`);
+          if (request !== activityRequest || !modal.isConnected) return;
           const known = new Set(items.map((notification) => Number(notification.id)));
-          const additions = (page.items || []).filter((notification) => !known.has(Number(notification.id)));
+          const additions = (page.items || []).filter((notification) => !known.has(Number(notification.id)) && !pendingClears.has(notification.id));
           items.push(...additions);
           nextCursor = page.next_cursor || null;
           hasMore = page.has_more === true && nextCursor && nextCursor !== requestedCursor;
@@ -36527,6 +39078,7 @@
           state.unreadNotifications = Math.max(0, (Number(page.unread) || 0) - pendingUnread);
           renderBadges();
         } catch (error) {
+          if (request !== activityRequest || !modal.isConnected) return;
           pagination.innerHTML = `<span class="activity-pagination-error">${esc(error.message || 'Older activity could not load.')} <button type="button" class="btn-link" data-activity-more>Try again</button></span>`;
           loadingMore = false;
           return;
@@ -36537,8 +39089,7 @@
       }
       const readVisible = event.target.closest('[data-activity-read-visible]');
       if (readVisible) {
-        const ids = items.filter((notification) => !notification.read
-          && (activityFilter === 'all' || activityCategoryFor(notification) === activityFilter))
+        const ids = items.filter((notification) => !notification.read && matchesActivityFilter(notification))
           .map((notification) => notification.id);
         if (!ids.length) return;
         readVisible.disabled = true;
@@ -36603,7 +39154,7 @@
     const el = $('#presence-banner');
     if (state.presence && state.presence.checked_in) {
       el.innerHTML = `<button type="button" class="presence-main" id="banner-court" aria-label="Open ${esc(state.presence.court_name)}">
-          ${uiIcon('map-pin')}<span><span class="presence-label">You're at</span><b>${esc(state.presence.court_name)}</b></span>${uiIcon('chevron-right')}
+          ${uiIcon('map-pin')}<span><span class="presence-label">${esc(courtPresenceSourceText(state.presence))}</span><b>${esc(state.presence.court_name)}</b></span>${uiIcon('chevron-right')}
         </button>
         <button type="button" id="banner-checkout">Check out</button>`;
       el.classList.remove('hidden');
@@ -37158,6 +39709,29 @@
     return { items, complete, total: items.length, isComplete: complete === items.length };
   }
 
+  function maybeOfferPlayerDetailsAfterJoin(game, trigger = null) {
+    const accountId = Number(state.me?.id);
+    if (!accountId || !Array.isArray(game?.players)
+        || !game.players.some((player) => Number(player.user?.id ?? player.user_id ?? player.id) === accountId)) return false;
+    const progress = playerProfileSetupProgress();
+    const missing = ['photo', 'level'].find((key) => !progress.items.find((item) => item.key === key)?.complete
+      && localStorage.getItem(`pp_join_detail_prompt:${accountId}:${key}`) !== '1');
+    if (!missing) return false;
+    localStorage.setItem(`pp_join_detail_prompt:${accountId}:${missing}`, '1');
+    toast(missing === 'photo' ? 'Help your group recognize you at the court.' : 'Add your level so this group knows how you play.', {
+      duration: 10000,
+      action: {
+        label: missing === 'photo' ? 'Add photo' : 'Add self-rating',
+        onClick: () => {
+          if (Number(state.me?.id) !== accountId) return;
+          const modal = openEditProfile({ section: missing });
+          if (modal && trigger?.isConnected) modal._returnFocus = trigger;
+        },
+      },
+    });
+    return true;
+  }
+
   function playerProfileSetupCardHtml() {
     if (!state.me) return '';
     const progress = playerProfileSetupProgress();
@@ -37420,6 +39994,7 @@
           });
         });
       });
+      bindChoiceRadioKeys(modal, '[data-onboarding-rating]');
       modal.querySelector('#onboarding-level-skip').addEventListener('click', moveOn);
       modal.querySelector('#onboarding-level-form').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -37454,6 +40029,22 @@
     // profile data was saved. The server-owned completion flag stays accurate.
     if (!replay && localStorage.getItem(pauseKey) === '1') return null;
     if (replay) localStorage.removeItem(pauseKey);
+    // The first visit asks only where to browse. Profile details remain
+    // optional and can be completed from the relevant play action or Me.
+    if (!replay && !profileOnly) {
+      const beginBrowsing = () => {
+        if (Number(state.me?.id) !== accountId) return;
+        localStorage.setItem(pauseKey, '1');
+        pendingNewPlayerOnboardingAccountId = null;
+        switchTab('play', { preserveOverlayIntent: true });
+        resumePlayerInviteIntentAfterAuth();
+      };
+      if (state.me.home_lat != null || state.me.home_court_id) {
+        beginBrowsing();
+        return null;
+      }
+      return openHomeAreaOnboarding({ onComplete: beginBrowsing });
+    }
     const pauseSetup = () => {
       if (Number(state.me?.id) !== accountId) return;
       localStorage.setItem(pauseKey, '1');
@@ -37501,9 +40092,8 @@
     state.playLiveRefreshTimer = setInterval(() => {
       if (document.hidden || state.connectionState === 'offline'
           || state.tab !== 'play' || state.playSeg !== 'games'
-          || state.playLiveRefreshInFlight) return;
+          || state.playLiveRefreshInFlight || state.playPageLoading) return;
       state.playLiveRefreshInFlight = true;
-      state.playGamesCache = null;
       Promise.resolve(renderPlay()).finally(() => {
         state.playLiveRefreshInFlight = false;
       });
@@ -37579,6 +40169,7 @@
   // "It's your usual time to play" — shown once per session when the current
   // local time matches one of the player's availability slots.
   async function maybeShowUsualTimeNudge() {
+    if (playerAwayUntil(state.me)) return;
     if (sessionStorage.getItem('pp_usual_nudge')) return;
     const slots = (state.me && state.me.availability) || [];
     const slot = slotForNow();
@@ -37592,6 +40183,7 @@
       const data = await api(`/games?lat=${loc.lat}&lng=${loc.lng}&radius=60`);
       openGames = data.items.filter((g) => !g.is_joined && g.spots_left > 0).length;
     } catch { return; }
+    if (playerAwayUntil(state.me)) return;
     const el = document.createElement('div');
     el.className = 'usual-nudge';
     el.innerHTML = `
@@ -37793,7 +40385,7 @@
       const age = snapshotAgeLabel(state.snapshotSavedAt);
       statusCopy.textContent = degraded
         ? `Having trouble reaching Third Shot${age ? ` — showing details saved ${age}` : ''}`
-        : `You're offline${age ? ` — showing details saved ${age}` : ''}. Actions wait until you reconnect.`;
+        : `You're offline${age ? ` — showing details saved ${age}` : ''}. Reconnect, then retry unsent actions.`;
     }
     if (next === 'online') clearConnectionProbe();
     else scheduleConnectionProbe();
@@ -37930,7 +40522,10 @@
       return true;
     }
     if (route.kind === 'court') openCourtDetail(route.id);
-    else if (route.kind === 'game') openGameScreen(route.id);
+    else if (route.kind === 'game') {
+      if (route.inviteToken) openGameInvitation(route);
+      else openGameScreen(route.id);
+    }
     else if (route.kind === 'tournament') openTournamentScreen(route.id, route.matchId || null);
     else if (route.kind === 'club') openClubScreen(route.id);
     else if (route.kind === 'crew') openCrewScreen(route.id);
@@ -38012,9 +40607,7 @@
       }
     }
     const prepareRoute = (kind, id, matchId = null) => {
-      const adopting = adoptOverlayEntry && adoptOverlayEntry.route.kind === kind
-        && adoptOverlayEntry.route.id === id
-        && (adoptOverlayEntry.route.matchId || null) === (matchId || null);
+      const adopting = adoptOverlayEntry && sameOverlayRoute(adoptOverlayEntry.route, { kind, id, matchId });
       if (!adopting) {
         try { history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl()); } catch { /* ignore */ }
       }
@@ -38035,6 +40628,15 @@
       return true;
     }
     const courtMatch = location.hash.match(/^#court\/(\d+)$/);
+    const privateInvitation = normalizeOverlayRoute(location.hash);
+    if (privateInvitation?.inviteToken) {
+      const adopting = adoptOverlayEntry && sameOverlayRoute(adoptOverlayEntry.route, privateInvitation);
+      if (!adopting) {
+        try { history.replaceState(overlayHistoryState(null, 0, null), '', baseAppUrl()); } catch { /* openModal restores the route */ }
+      }
+      openGameInvitation(privateInvitation);
+      return true;
+    }
     if (courtMatch) { const id = Number(courtMatch[1]); prepareRoute('court', id); openCourtDetail(id); return true; }
     const gameMatch = location.hash.match(/^#game\/(\d+)$/);
     if (gameMatch) { const id = Number(gameMatch[1]); prepareRoute('game', id); openGameScreen(id); return true; }
@@ -38098,10 +40700,7 @@
     if (!location.hash) return;
     const requested = normalizeOverlayRoute(location.hash);
     const current = currentOverlayEntry()?.route;
-    if (requested && current
-        && requested.kind === current.kind
-        && requested.id === current.id
-        && (requested.matchId || null) === (current.matchId || null)) return;
+    if (requested && current && sameOverlayRoute(requested, current)) return;
     if (requested) navigateOverlayRoute(requested);
     else openDeepLink();
   });
@@ -38238,6 +40837,7 @@
     const row = button.closest('[data-message-row]') || button.parentElement;
     const bubble = row?.querySelector(`.bubble[data-message-id="${id}"]`);
     if (!id || !bubble) return;
+    if (button.dataset.messageAction === 'reply') return; // The scoped composer owns replies.
     if (button.dataset.messageAction === 'report') {
       openContentReport({ contentType: 'message', contentId: id, label: 'message' });
       return;

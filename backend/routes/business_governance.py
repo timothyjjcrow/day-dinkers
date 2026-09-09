@@ -37,12 +37,15 @@ from backend.models import (
     utcnow,
 )
 from backend.routes.auth import login_required, optional_current_user
+from backend.services.business_visibility import business_is_public
 from backend.security import rate_limit
 from backend.services.business_governance import (
     ADMIN_ROLES,
     MANAGE_ROLES,
     business_access_role,
     business_snapshot,
+    content_precondition_error,
+    content_version,
     create_staff_invitation,
     ensure_organization,
     expire_pending_invitations,
@@ -490,13 +493,17 @@ def business_team(business_id):
     organization = ensure_organization(business, g.current_user.id)
     expire_pending_invitations(organization)
     db.session.commit()
+    invitation_rows = BusinessStaffInvitation.query.filter_by(organization_id=organization.id).order_by(BusinessStaffInvitation.created_at.desc(), BusinessStaffInvitation.id.desc()).execution_options(populate_existing=True).all()
+    latest_invitations = {}
+    for item in invitation_rows:
+        latest_invitations.setdefault(item.email, item)
     return jsonify({
         'organization': organization.to_dict(),
         'role': role,
         'members': [item.to_dict() for item in organization.members],
         'invitations': [
-            item.to_dict() for item in organization.invitations
-            if item.status == 'pending'
+            item.to_dict() for item in latest_invitations.values()
+            if item.status in {'pending', 'expired'}
         ] if role in ADMIN_ROLES else [],
         'locations': [
             {
@@ -762,6 +769,13 @@ def attach_business_location(business_id):
     return jsonify({'organization': organization.to_dict()}), 201
 
 
+def _safe_manager_snapshot(business):
+    snapshot = business_snapshot(business)
+    profile = snapshot['profile']
+    profile['has_logo_upload'] = bool(profile.pop('logo_data', ''))
+    return snapshot
+
+
 @business_governance_bp.get('/businesses/<int:business_id>/revisions')
 @login_required
 def list_business_revisions(business_id):
@@ -779,6 +793,8 @@ def list_business_revisions(business_id):
             item.to_dict(include_snapshot=include_snapshot) for item in revisions
         ],
         'content_review_status': business.content_review_status,
+        'content_version': content_version(business),
+        'current_snapshot': _safe_manager_snapshot(business) if role in MANAGE_ROLES else None,
     })
 
 
@@ -797,6 +813,9 @@ def restore_business_revision(business_id, revision_id):
     ).first()
     if revision is None:
         return jsonify({'error': 'revision_not_found'}), 404
+    precondition = content_precondition_error(business)
+    if precondition:
+        return precondition
     before = business_snapshot(business)
     try:
         restore_snapshot(business, revision.snapshot_dict())
@@ -818,6 +837,7 @@ def restore_business_revision(business_id, revision_id):
         'is_owner': role == 'owner',
         'is_manager': True,
         'manager_role': role,
+        'is_public': business_is_public(business),
     })
     return jsonify({
         'restored': True,
@@ -872,15 +892,15 @@ def business_logo(business_id):
     if request.method == 'GET':
         viewer = optional_current_user()
         manager = bool(viewer and business_access_role(business, viewer.id))
-        if not manager and not (
-            business.published and business.verified
-            and business.governance_status == 'active'
-            and business.content_review_status == 'approved'
-        ):
+        if not manager and not business_is_public(business):
             return jsonify({'error': 'logo_not_found'}), 404
-        if not business.logo_data:
+        draft_preview = manager and request.args.get('draft') == '1'
+        logo_data = business.logo_data if draft_preview or not business.reviewed_public_snapshot else (
+            business.reviewed_snapshot_dict().get('profile', {}).get('logo_data', '')
+        )
+        if not logo_data:
             return jsonify({'error': 'logo_not_found'}), 404
-        prefix, encoded = business.logo_data.split(',', 1)
+        prefix, encoded = logo_data.split(',', 1)
         mime_type = prefix[5:].split(';', 1)[0]
         try:
             raw = base64.b64decode(encoded, validate=True)
@@ -889,7 +909,7 @@ def business_logo(business_id):
         response = Response(raw, mimetype=mime_type)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Cache-Control'] = (
-            'private, no-store' if manager and not business.published
+            'private, no-store' if manager
             else 'public, max-age=300, must-revalidate'
         )
         response.set_etag(hashlib.sha256(raw).hexdigest())
@@ -902,6 +922,9 @@ def business_logo(business_id):
     role, error = _role_error(business, MANAGE_ROLES)
     if error:
         return error
+    precondition = content_precondition_error(business)
+    if precondition:
+        return precondition
     before = business_snapshot(business)
     if request.method == 'DELETE':
         business.logo_data = ''
@@ -926,6 +949,7 @@ def business_logo(business_id):
     db.session.commit()
     return jsonify({
         'uploaded': bool(business.logo_data),
+        'business': {**business.to_dict(include_inactive=True), 'is_public': business_is_public(business), 'is_manager': True, 'manager_role': role, 'is_owner': role == 'owner'},
         'logo_url': business.logo_url,
         'revision': revision.to_dict() if revision else None,
     })
@@ -1287,6 +1311,8 @@ def operator_review_claim(claim_id):
             raise GovernancePayloadError('invalid_decision')
         if method not in _EVIDENCE_TYPES:
             raise GovernancePayloadError('invalid_verification_method')
+        if decision == 'approve' and claim.court.pending_submission and payload.get('location_reviewed') is not True:
+            raise GovernancePayloadError('venue_location_review_required')
         if decision == 'approve' and not any(
             item.status in {'verified', 'accepted'} for item in claim.evidence
         ):
@@ -1538,7 +1564,6 @@ def operator_review_revision(revision_id):
         'pending' if remaining_pending else 'approved'
     )
     business.content_reviewed_at = None if remaining_pending else utcnow()
-    business.published = False
     record_governance_event(
         business,
         f'sensitive_change_{"approved" if decision == "approve" else "rejected"}',
@@ -1695,9 +1720,38 @@ def operator_business_queue():
     operator_error = _operator_error()
     if operator_error:
         return operator_error
-    claims = BusinessClaim.query.filter_by(status='pending').order_by(
+    query_text = str(request.args.get('q') or '').strip().casefold()
+    assignment = str(request.args.get('assignment') or 'any')
+    overdue_only = str(request.args.get('overdue') or '') == '1'
+    order = str(request.args.get('sort') or 'due')
+    if len(query_text) > 120 or assignment not in {'any', 'mine', 'unassigned'} or order not in {'due', 'newest', 'oldest'}:
+        return jsonify({'error':'invalid_queue_filters'}), 400
+
+    def filtered(query, model):
+        if query_text:
+            terms = []
+            if hasattr(model, 'business_id'):
+                terms.append(model.business_id.in_(db.session.query(BusinessProfile.id).filter(func.lower(BusinessProfile.name).contains(query_text, autoescape=True))))
+            for field in ('email', 'provider', 'details', 'action_type', 'display_name', 'review_note', 'change_summary'):
+                if hasattr(model, field):
+                    terms.append(func.lower(getattr(model, field)).contains(query_text, autoescape=True))
+            if model == BusinessClaim:
+                terms.append(BusinessClaim.user_id.in_(db.session.query(User.id).filter(db.or_(func.lower(User.display_name).contains(query_text, autoescape=True), func.lower(User.email).contains(query_text, autoescape=True)))))
+            query = query.filter(db.or_(*terms)) if terms else query.filter(False)
+        assigned = getattr(model, 'assigned_operator_id', None)
+        if assignment != 'any':
+            query = query.filter(assigned == g.current_user.id if assignment == 'mine' else assigned.is_(None)) if assigned is not None else query.filter(False)
+        due = getattr(model, 'due_at', None)
+        if due is None:
+            due = getattr(model, 'expires_at', None)
+        if overdue_only:
+            query = query.filter(due < utcnow()) if due is not None else query.filter(False)
+        if order in {'newest', 'oldest'} and hasattr(model, 'created_at'):
+            query = query.order_by(None).order_by(model.created_at.desc() if order == 'newest' else model.created_at.asc(), model.id.asc())
+        return query
+    claims = filtered(BusinessClaim.query.filter_by(status='pending').order_by(
         BusinessClaim.due_at.asc(), BusinessClaim.id.asc(),
-    ).limit(200).all()
+    ), BusinessClaim).limit(200).all()
     # Only the latest pending snapshot can be acted on. Approval of that
     # snapshot covers its exact antecedents, and rejection restores its direct
     # predecessor, so showing older rows creates guaranteed 409s for operators.
@@ -1713,7 +1767,7 @@ def operator_business_queue():
     ).filter(
         BusinessProfileRevision.review_status == 'pending',
     ).subquery()
-    revisions = BusinessProfileRevision.query.join(
+    revisions = filtered(BusinessProfileRevision.query.join(
         ranked_revisions,
         ranked_revisions.c.revision_id == BusinessProfileRevision.id,
     ).filter(
@@ -1721,16 +1775,16 @@ def operator_business_queue():
     ).order_by(
         BusinessProfileRevision.created_at.asc(),
         BusinessProfileRevision.id.asc(),
-    ).limit(200).all()
-    integration_requests = BusinessIntegrationRequest.query.filter(
+    ), BusinessProfileRevision).limit(200).all()
+    integration_requests = filtered(BusinessIntegrationRequest.query.filter(
         BusinessIntegrationRequest.status.in_(['submitted', 'contacted']),
-    ).order_by(BusinessIntegrationRequest.due_at.asc()).limit(200).all()
-    reports = BusinessProfileReport.query.filter(
+    ).order_by(BusinessIntegrationRequest.due_at.asc()), BusinessIntegrationRequest).limit(200).all()
+    reports = filtered(BusinessProfileReport.query.filter(
         BusinessProfileReport.status.in_(['submitted', 'reviewing']),
-    ).order_by(BusinessProfileReport.due_at.asc()).limit(200).all()
-    actions = BusinessOperatorAction.query.filter_by(status='proposed').order_by(
+    ).order_by(BusinessProfileReport.due_at.asc()), BusinessProfileReport).limit(200).all()
+    actions = filtered(BusinessOperatorAction.query.filter_by(status='proposed').order_by(
         BusinessOperatorAction.expires_at.asc(),
-    ).limit(200).all()
+    ), BusinessOperatorAction).limit(200).all()
 
     connection_alerts = []
     try:
@@ -1741,12 +1795,12 @@ def operator_business_queue():
         from backend.integrations import provider_registry
         from backend.integrations.errors import IntegrationError
         from backend.integrations.safety import stable_digest
-        bad_connections = BusinessProviderConnection.query.filter(db.or_(
+        bad_connections = filtered(BusinessProviderConnection.query.filter(db.or_(
             BusinessProviderConnection.status.in_(['degraded', 'error']),
             BusinessProviderConnection.health_status.in_(
                 ['degraded', 'unreachable', 'unsafe'],
             ),
-        )).order_by(BusinessProviderConnection.updated_at.asc()).limit(200).all()
+        )).order_by(BusinessProviderConnection.updated_at.asc()), BusinessProviderConnection).limit(200).all()
         for connection in bad_connections:
             item = connection.to_owner_dict()
             item['alert_type'] = 'connection'
@@ -1759,12 +1813,12 @@ def operator_business_queue():
             BusinessLinkHealthCheck.link_kind,
             BusinessLinkHealthCheck.url_hash,
         ).subquery()
-        failed_links = BusinessLinkHealthCheck.query.join(
+        failed_links = filtered(BusinessLinkHealthCheck.query.join(
             latest_link_checks,
             latest_link_checks.c.id == BusinessLinkHealthCheck.id,
         ).filter(
             BusinessLinkHealthCheck.status.in_(['broken', 'unreachable', 'unsafe']),
-        ).order_by(BusinessLinkHealthCheck.checked_at.desc()).limit(200).all()
+        ).order_by(BusinessLinkHealthCheck.checked_at.desc()), BusinessLinkHealthCheck).limit(200).all()
 
         def current_link_check(check):
             if check.connection_id:
@@ -1822,6 +1876,8 @@ def operator_business_queue():
             'after_snapshot': safe_snapshot(revision.snapshot_dict()),
         }
     return jsonify({
+        'filters': {'q':query_text, 'assignment':assignment, 'overdue':overdue_only, 'sort':order},
+        'limit_per_queue':200,
         'claims': [_claim_operator_payload(item) for item in claims],
         'revisions': [operator_revision_payload(item) for item in revisions],
         'integration_requests': [

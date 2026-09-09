@@ -24,6 +24,20 @@ from scripts.migrate_production_schema import (
 )
 
 
+@pytest.mark.parametrize('predicate,valid', [
+    ("((status)::text = 'pending'::text)", True),
+    ("status = 'accepted'::text", False),
+    ("status != 'pending'::text", False),
+])
+def test_pending_host_uniqueness_verifies_postgres_text_casts(predicate, valid):
+    inspector = FakeInspector()
+    index = inspector.partial_indexes['game_host_handoff']['uq_game_host_handoff_pending']
+    index['dialect_options']['postgresql_where'] = predicate
+    gaps = _schema_gaps(inspector)
+    matching = [gap for gap in gaps if 'uq_game_host_handoff_pending' in gap]
+    assert (matching == []) is valid
+
+
 class FakeInspector:
     def __init__(self):
         self.columns = {
@@ -71,6 +85,7 @@ class FakeInspector:
                     'referred_table': shape[1],
                     'referred_columns': list(shape[2]),
                     'referred_schema': 'picklepals',
+                    'options': {'ondelete': 'SET NULL'} if name in {'court_edit_suggestion_reviewed_by_id_fkey', 'business_schedule_item_offering_id_fkey', 'message_reply_to_id_fkey'} else {},
                 }
                 for name, shape in constraints.items()
             }
@@ -287,7 +302,7 @@ def test_additive_reference_repair_detects_exact_shape_and_name_collisions():
         ADDITIVE_REFERENCE_FOREIGN_KEYS
     )
 
-    requirement = ADDITIVE_REFERENCE_FOREIGN_KEYS[0]
+    requirement = next(item for item in ADDITIVE_REFERENCE_FOREIGN_KEYS if item[0] == 'game')
     table, local_column, referred_table, referred_column, name = requirement
     inspector.foreign_keys[table] = [{
         'name': 'legacy_equivalent_name',

@@ -93,7 +93,9 @@ def test_checkin_roster_score_and_cancel_surfaces_share_the_same_icon_language()
     assert "${uiIcon('users')}" in checkin
     assert "${uiIcon('shield')}" in checkin
     assert "${uiIcon('check-circle')} Check in" in checkin
-    assert "${uiIcon('eye')}" in checkin
+    assert "${uiIcon('clock')}" in checkin
+    assert "${esc(courtPresenceAudience(true))}" in checkin
+    assert "${esc(courtPresenceAudience(false))}" in checkin
     assert "📍" not in checkin
     assert "👍" not in checkin
     assert "👀" not in checkin
@@ -143,7 +145,9 @@ def test_ranked_empty_planner_group_and_mvp_choices_have_semantic_icons_and_stat
     planner = section("async function openNewGameModal", "async function renderTournaments")
     detail = section("function gameScreenHtml", "async function openGameScreen")
 
-    assert APP.count("${uiIcon('trophy')} Start a ranked match") == 2
+    launcher = section("function rallyLauncherHtml", "function playProgressCardHtml")
+    assert launcher.count('data-goto="ranked-match"') == 1
+    assert "<span aria-hidden=\"true\">${uiIcon('trophy')}</span><b>Start a ranked match</b>" in launcher
     assert "⚔️ Start a ranked match" not in APP
     assert planner.count("${uiIcon('users')} Starts with") >= 2
     assert "👥 Starts with" not in planner

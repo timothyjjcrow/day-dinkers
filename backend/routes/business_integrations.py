@@ -627,10 +627,31 @@ def create_booking_click(business_id):
                 occurrence, connection,
             ).get('booking_available'):
                 raise IntegrationError('occurrence_not_found')
+        manual_id, manual_on, label = None, None, occurrence.title if occurrence else ''
+        if payload.get('schedule_item_id') not in (None, ''):
+            if occurrence is not None or connection is not None:
+                raise IntegrationError('invalid_booking_event')
+            from backend.models import BusinessScheduleItem
+            from backend.services.business_governance import business_snapshot
+            from backend.services.business_visibility import hide_unsafe_public_links
+            from backend.services.business_schedule import dated_occurrences, local_today
+            manual_on = date.fromisoformat(str(payload.get('schedule_occurrence_on') or ''))
+            today = local_today(business.venue_timezone())
+            if not today - timedelta(days=1) <= manual_on <= today + timedelta(days=93):
+                raise IntegrationError('occurrence_not_found')
+            snapshot = business.reviewed_snapshot_dict() or business_snapshot(business)
+            rows = hide_unsafe_public_links(business, {'schedule':snapshot.get('schedule', [])})['schedule']
+            eligible = next((item for item in dated_occurrences(rows, manual_on, manual_on) if item['schedule_item_id'] == int(payload['schedule_item_id'])), None)
+            if not eligible or eligible.get('status') in {'cancelled', 'completed'} or not eligible.get('booking_url'):
+                raise IntegrationError('occurrence_not_found')
+            label = eligible.get('title') or ''
+            stored = db.session.get(BusinessScheduleItem, int(payload['schedule_item_id']))
+            manual_id = stored.id if stored and stored.business_id == business.id else None
         item, duplicate = record_booking_click(
             business_id=business.id,
             connection_id=connection.id if connection else None,
             occurrence_id=occurrence.id if occurrence else None,
+            schedule_item_id=manual_id, schedule_occurrence_on=manual_on, subject_label=label,
             client_event_id=client_event_id,
             action=action,
         )
@@ -651,13 +672,15 @@ def business_integration_analytics(business_id):
     days = {'7d': 7, '30d': 30, '90d': 90}.get(raw_range)
     if days is None:
         return jsonify({'error': 'invalid_analytics_range'}), 400
-    since = utcnow() - timedelta(days=days)
+    until = utcnow()
+    since = until - timedelta(days=days)
     rows = db.session.query(
         BusinessBookingEvent.event_type,
         func.count(BusinessBookingEvent.id),
     ).filter(
         BusinessBookingEvent.business_id == business.id,
         BusinessBookingEvent.occurred_at >= since,
+        BusinessBookingEvent.occurred_at < until,
     ).group_by(BusinessBookingEvent.event_type).all()
     by_type = {kind: int(count) for kind, count in rows}
     action_rows = db.session.query(
@@ -666,6 +689,7 @@ def business_integration_analytics(business_id):
         BusinessBookingEvent.business_id == business.id,
         BusinessBookingEvent.event_type == 'click',
         BusinessBookingEvent.occurred_at >= since,
+        BusinessBookingEvent.occurred_at < until,
     ).group_by(BusinessBookingEvent.action).all()
     actions = {action: count for action, count in action_rows}
     profile_views = actions.get('profile_view', 0)
@@ -676,7 +700,14 @@ def business_integration_analytics(business_id):
     schedule_opens = actions.get('schedule', 0)
     contact_clicks = actions.get('contact', 0)
     website_clicks = actions.get('website', 0)
-    conversions = by_type.get('conversion', 0)
+    conversion_reporting = any(
+        'conversions' in connection.capabilities_list()
+        and connection.last_sync_succeeded_at is not None
+        and connection.status != 'disconnected'
+        for connection in BusinessProviderConnection.query.filter_by(business_id=business.id).all()
+    )
+    # A real reported event remains evidence even after a feed disconnects.
+    conversions = by_type.get('conversion', 0) if conversion_reporting or by_type.get('conversion') else None
     value_rows = db.session.query(
         BusinessBookingEvent.currency,
         func.sum(BusinessBookingEvent.value_minor),
@@ -684,13 +715,16 @@ def business_integration_analytics(business_id):
         BusinessBookingEvent.business_id == business.id,
         BusinessBookingEvent.event_type == 'conversion',
         BusinessBookingEvent.occurred_at >= since,
+        BusinessBookingEvent.occurred_at < until,
         BusinessBookingEvent.currency != '',
         BusinessBookingEvent.value_minor.is_not(None),
     ).group_by(BusinessBookingEvent.currency).all()
     conversion_value_by_currency = {
         currency: int(value) for currency, value in value_rows
     }
+    from backend.services.business_analytics import activity_comparison
     return jsonify({
+        **activity_comparison(business.id, since, until),
         'range': raw_range,
         'since': since.isoformat() + 'Z',
         'profile_views': profile_views,
@@ -700,7 +734,9 @@ def business_integration_analytics(business_id):
         'contact_clicks': contact_clicks,
         'website_clicks': website_clicks,
         'conversions': conversions,
-        'conversion_rate': round(conversions / booking_clicks, 4) if booking_clicks else None,
+        'conversion_rate': None,
+        'conversion_rate_note': 'Provider reports are not linked to individual Third Shot clicks.',
+        'conversion_reporting_available': conversion_reporting,
         'conversion_value_by_currency': conversion_value_by_currency,
         'privacy': 'Aggregates contain no player identity or raw destination URLs.',
     })

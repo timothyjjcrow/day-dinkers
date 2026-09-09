@@ -18,7 +18,8 @@ def test_planner_keeps_partial_setup_failures_distinct_from_empty_results():
     assert "plannerFeedErrors[key]" in planner
     assert "plannerFeedErrors.friends" in planner
     assert "Friends couldn’t load." in planner
-    assert 'Add players from Community before using invite only.' in planner
+    assert 'Friends couldn’t load. You can still create a private session and share its invite link.' in planner
+    assert 'Create this session, then share its private invite link.' in planner
 
 
 def test_planner_exposes_a_recoverable_setup_notice_without_blocking_creation():

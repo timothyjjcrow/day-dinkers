@@ -11,6 +11,8 @@ def test_rendered_community_roles_keep_primary_actions_and_private_management_se
     source = APP[helpers_start:APP.index('  async function openCrewScreen(', helpers_start)]
     copy_start = APP.index('  function crewChatPlanCopy(')
     source += APP[copy_start:APP.index('  function syncCrewChatPlan(', copy_start)]
+    label_start = APP.index('  function gameActivityLabel(')
+    source += APP[label_start:APP.index('  function gameResultScoreboardHtml(', label_start)]
     source += APP[start:APP.index('  async function openClubInviteSheet(', start)]
     subprocess.run(['node', '-e', '''
       const assert=require('node:assert/strict');

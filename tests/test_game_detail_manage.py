@@ -105,10 +105,13 @@ def test_waitlist_identity_is_host_only_and_manual_promotion_is_explicit(client)
         headers=auth(host),
     )
     assert promoted.status_code == 200, promoted.get_json()
-    assert promoted.get_json()['promoted_user_id'] == waiting['user']['id']
-    assert waiting['user']['id'] in {
+    assert promoted.get_json()['offered_user_id'] == waiting['user']['id']
+    assert waiting['user']['id'] not in {
         row['user_id'] for row in promoted.get_json()['players']
     }
+    accepted = client.post(f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=auth(waiting))
+    assert accepted.status_code == 200
+    assert accepted.get_json()['is_joined'] is True
 
 
 def test_personal_invite_has_context_and_decline_notifies_host(client):
@@ -175,7 +178,7 @@ def test_score_correction_counter_deadline_and_second_dispute_are_durable(client
     assert opposing_view['can_fix_score'] is False
 
     correction = client.post(
-        f"/api/games/{game['id']}/dispute", json={'reason': 'correction'},
+        f"/api/games/{game['id']}/dispute", json={'reason': 'correction', 'expected_score_version': body['score_version']},
         headers=auth(host),
     )
     assert correction.status_code == 200, correction.get_json()
@@ -188,6 +191,7 @@ def test_score_correction_counter_deadline_and_second_dispute_are_durable(client
     }
     assert client.post(f"/api/games/{game['id']}/complete", json={
         **teams, 'score_team1': 11, 'score_team2': 8,
+        'expected_score_version': correction.get_json()['score_version'],
     }, headers=auth(host)).status_code == 200
 
     missing_reason = client.post(
@@ -197,18 +201,20 @@ def test_score_correction_counter_deadline_and_second_dispute_are_durable(client
     assert missing_reason.get_json()['error'] == 'dispute_reason_required'
     first_dispute = client.post(
         f"/api/games/{game['id']}/dispute",
-        json={'details': 'The final score was 11–8.'}, headers=auth(opponent),
+        json={'details': 'The final score was 11–8.', 'expected_score_version': db.session.get(Game, game['id']).score_version}, headers=auth(opponent),
     )
     assert first_dispute.status_code == 200, first_dispute.get_json()
-    assert first_dispute.get_json()['score_dispute_outcome'] == 'counter_score'
+    assert first_dispute.get_json()['score_dispute_outcome'] == 'unresolved'
+    assert first_dispute.get_json()['can_propose_score_correction'] is True
     assert first_dispute.get_json()['score_dispute_count'] == 1
     counter = client.post(f"/api/games/{game['id']}/complete", json={
         **teams, 'score_team1': 8, 'score_team2': 11,
+        'expected_score_version': first_dispute.get_json()['score_version'],
     }, headers=auth(opponent))
     assert counter.status_code == 200, counter.get_json()
     unresolved = client.post(
         f"/api/games/{game['id']}/dispute",
-        json={'details': 'We remember the opposite result.'}, headers=auth(host),
+        json={'details': 'We remember the opposite result.', 'expected_score_version': counter.get_json()['score_version']}, headers=auth(host),
     )
     assert unresolved.status_code == 200, unresolved.get_json()
     assert unresolved.get_json()['status'] == 'unresolved'
@@ -283,7 +289,7 @@ def test_score_reminder_timeout_provenance_and_late_dispute_rollback(client):
 
     disputed = client.post(
         f"/api/games/{game['id']}/dispute",
-        json={'details': 'The recorded score is not what we played.'},
+        json={'details': 'The recorded score is not what we played.', 'expected_score_version': detail['score_version']},
         headers=auth(opponent),
     )
     assert disputed.status_code == 200, disputed.get_json()
@@ -322,6 +328,7 @@ def test_casual_score_has_bounded_correction_window_and_notifies_peers(client):
 
     corrected = client.post(f"/api/games/{game['id']}/complete", json={
         **teams, 'score_team1': 11, 'score_team2': 9,
+        'expected_score_version': saved.get_json()['score_version'],
     }, headers=auth(host))
     assert corrected.status_code == 200, corrected.get_json()
     assert corrected.get_json()['score_correction_outcome'] == 'corrected'
@@ -336,6 +343,7 @@ def test_casual_score_has_bounded_correction_window_and_notifies_peers(client):
     db.session.commit()
     expired = client.post(f"/api/games/{game['id']}/complete", json={
         **teams, 'score_team1': 11, 'score_team2': 10,
+        'expected_score_version': corrected.get_json()['score_version'],
     }, headers=auth(host))
     assert expired.status_code == 400
     assert expired.get_json()['error'] == 'game_not_open'
@@ -354,11 +362,13 @@ def test_host_can_choose_successor_and_leave_response_explains_outcome(client):
     left = client.post(f"/api/games/{game['id']}/leave", json={
         'transfer_to_user_id': chosen['user']['id'],
     }, headers=auth(host))
-    assert left.status_code == 200, left.get_json()
-    assert left.get_json()['leave_outcome'] == 'host_transferred'
-    assert left.get_json()['new_host_id'] == chosen['user']['id']
-    assert left.get_json()['new_host_name'] == 'Chosen Host'
-    assert left.get_json()['creator_id'] == chosen['user']['id']
+    assert left.status_code == 202, left.get_json()
+    assert left.get_json()['creator_id'] == host['user']['id']
+    handoff_id = left.get_json()['host_handoff']['id']
+    accepted = client.post(f"/api/games/{game['id']}/host-handoff/{handoff_id}/respond",
+                           json={'accept': True}, headers=auth(chosen))
+    assert accepted.status_code == 200
+    assert accepted.get_json()['creator_id'] == chosen['user']['id']
 
 
 def test_game_chat_preview_and_unread_count_ignore_your_own_messages(client):

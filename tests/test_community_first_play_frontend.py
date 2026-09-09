@@ -238,12 +238,12 @@ def test_group_planner_is_casual_supports_twelve_and_has_three_audiences():
 def test_clubs_are_presented_as_public_community_groups_with_planning():
     inbox = section("function universalInboxHtml", "function bindCommunityConversationRows")
     assert "Private groups" in inbox
-    assert "Your community groups" in inbox
+    assert "Your public groups" in inbox
     assert 'id="group-new"' in inbox
     assert "Find public groups" in inbox
     create = section("function openCreateClubSheet", "function openEditClubSheet")
-    assert "Start a community group" in create
-    assert "public and discoverable" in create
+    assert "Start a public group" in create
+    assert "A public group is discoverable." in create
     assert "A club is your crew" not in create
     club = section("function openClubInfo", "async function openClubInviteSheet")
     assert "Plan a session" in club

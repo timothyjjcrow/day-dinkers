@@ -34,7 +34,8 @@ def test_password_and_submit_controls_are_explicit_and_browser_bubbles_are_avoid
     assert "submitButton.setAttribute('aria-busy', 'true')" in auth
     assert "form.setAttribute('aria-busy', 'true')" in auth
     assert "'Creating account…'" in auth and "'Logging in…'" in auth
-    assert "showAuthError('Password must be at least 6 characters.', passwordInput)" in auth
+    assert "passwordInput.minLength = registering ? 8 : 1;" in auth
+    assert "authMode === 'register' ? 'Password must be at least 8 characters.' : 'Enter your password.'" in auth
 
 
 def test_signed_out_shared_routes_keep_destination_and_explain_what_opens_next():
@@ -44,7 +45,7 @@ def test_signed_out_shared_routes_keep_destination_and_explain_what_opens_next()
         "A court was shared with you",
         "A play session was shared with you",
         "A tournament was shared with you",
-        "A Community was shared with you",
+        "A public group was shared with you",
         "A private play group was shared with you",
         "A league was shared with you",
         "A conversation was shared with you",
@@ -127,9 +128,9 @@ def test_account_reads_are_event_driven_and_me_is_side_effect_free():
 
 def test_first_paint_has_a_static_shell_and_non_parser_blocking_app_files():
     assert 'id="boot-screen" class="screen boot-screen"' in INDEX
-    assert '<link rel="preload" href="/release-assets/r76/app-v15.min.js" as="script" />' in INDEX
-    assert '<script defer src="/release-assets/r76/crew-planner-v15.min.js"></script>' in INDEX
-    assert '<script defer src="/release-assets/r76/app-v15.min.js"></script>' in INDEX
+    assert '<link rel="preload" href="/release-assets/r77/app-v15.min.js" as="script" />' in INDEX
+    assert '<script defer src="/release-assets/r77/crew-planner-v15.min.js"></script>' in INDEX
+    assert '<script defer src="/release-assets/r77/app-v15.min.js"></script>' in INDEX
     assert "if (!localStorage.getItem('pp_token'))" in INDEX
     assert "auth?.classList.remove('hidden')" in INDEX
     assert "window.__thirdShotShowBootFailure = showRecovery" in INDEX

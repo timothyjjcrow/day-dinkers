@@ -12,6 +12,7 @@ def section(start, end):
 def run(script):
     source = section('  function groupSessionContentHtml(', '  async function openCrewScreen(')
     source += section('  function crewChatPlanCopy(', '  function syncCrewChatPlan(')
+    source += section('  function gameActivityLabel(', '  function gameResultScoreboardHtml(')
     subprocess.run(['node', '-e', '''
       const assert=require('node:assert/strict');
       const esc=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');

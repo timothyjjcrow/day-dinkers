@@ -33,7 +33,7 @@ def test_community_separates_messages_groups_and_players():
     assert "Active play chats" not in inbox
     assert "inbox-row-pinned" not in inbox
     assert "Private groups" in inbox
-    assert "Your community groups" in inbox
+    assert "Your public groups" in inbox
     assert "community-lane-empty" in inbox
     assert "item.kind !== 'game'" in inbox
     assert "activeStatuses.has(item.status) && item.lastMessage" in inbox
@@ -143,11 +143,11 @@ def test_discovery_cards_and_saved_courts_are_keyboard_pressable():
     assert "makePressable(row, () => openCourtDetail(Number(row.dataset.pfcourt)))" in APP
 
 
-def test_rankings_keep_the_viewers_position_below_the_visible_top_ten():
+def test_rankings_show_the_independent_viewer_position_before_the_board():
     rankings = section("if (seg === 'scores')", "// --- Games:")
-    assert "const meIndex = me ? board.items.findIndex" in rankings
-    assert "if (me && meIndex >= 10)" in rankings
-    assert "rankRowHtml(boardMe, meIndex + 1, { highlight: true, name: 'You' })" in rankings
+    assert rankings.index('rankingViewerHtml(board, rankRowHtml)') < rankings.index('const top3')
+    assert 'data-ranking-more' in rankings
+    assert 'Win a ranked match to enter' not in rankings
     assert 'class="rankings-more"' in rankings
 
 
@@ -339,7 +339,8 @@ def test_pinned_competition_action_covers_global_eligible_ctas():
     assert "kind === 'tournament'" in actions
     assert "const { canCheckIn } = tournamentCheckinState(parent);" in actions
     assert "!parent.my_entry_id" in actions
-    assert "Number(parent.entry_count) < Number(parent.max_entries)" in actions
+    assert "parent.registration_spots_left" in actions
+    assert "Number(parent.registration_spots_left ?? (parent.max_entries - parent.entry_count)) > 0" in actions
     assert "action: 'checkin'" in actions
     assert "action: 'register'" in actions
     assert "direct: !needsPartner" in actions
@@ -369,7 +370,8 @@ def test_league_matches_and_standings_have_strict_panel_boundaries():
     assert "competition-organizer-actions" in matches_panel_source
     assert "leagueMatchCardHtml" not in standings_panel_source
     assert "competition-organizer-actions" not in standings_panel_source
-    assert "boxes[boxNumber].sort(rankMember)" in standings_panel_source
+    assert "leagueStandingsHtml(lg, leagueStandingScope, selectedLeagueRound)" in standings_panel_source
+    assert "leagueStandingScope" not in matches_panel_source
 
 
 def test_crew_planner_keeps_the_group_and_offers_clear_session_visibility():

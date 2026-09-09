@@ -26,18 +26,15 @@ def test_profile_refresh_retains_content_scroll_and_retries_in_place():
     assert "el.scrollTop = previousScrollTop;" in profile
 
 
-def test_new_player_milestones_are_visible_and_have_semantic_progress():
+def test_new_player_history_is_neutral_without_unearned_ranked_milestones():
     profile = section("async function renderProfile", "function openEditProfile")
 
-    assert 'id="pf-new-player-progress" aria-live="polite"' in profile
-    assert "Number(stats.games_total || 0) === 0" in profile
-    assert "stats.badge_progress || []" in profile
-    assert "Your first milestones" in profile
-    assert 'role="progressbar"' in profile
-    assert 'aria-valuemax="${target}"' in profile
-    assert 'aria-valuenow="${value}"' in profile
-    assert ".profile-milestone-track" in CSS
-    assert 'style="width:${progress}%"' in profile
+    assert 'Your play history' in profile
+    assert 'Completed sessions and matches appear here after you play.' in profile
+    assert 'Your ranked story starts with one match' not in profile
+    assert 'Your first milestones' not in profile
+    assert 'summary>Your progress &amp; history' in profile
+    assert 'resultRowHtml' in profile
 
 
 def test_notification_settings_expose_honest_device_push_state():
@@ -73,7 +70,7 @@ def test_theme_picker_is_a_keyboard_operable_radiogroup():
 def test_activity_has_cursor_pagination_filters_and_inline_decisions():
     activity = section("async function openActivity", "function renderPresenceBanner")
 
-    assert "api('/notifications?limit=20')" in activity
+    assert "api('/notifications?limit=20&filter=action')" in activity
     assert "before_id=${encodeURIComponent(requestedCursor)}" in activity
     assert "page.next_cursor || null" in activity
     assert "nextCursor !== requestedCursor" in activity

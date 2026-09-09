@@ -408,6 +408,9 @@ class BusinessBookingEvent(TimestampMixin, db.Model):
         db.ForeignKey('business_schedule_occurrence.id', name='business_booking_event_occurrence_id_fkey'),
         index=True,
     )
+    schedule_item_id = db.Column(db.Integer, db.ForeignKey('business_schedule_item.id', ondelete='SET NULL', name='business_booking_event_schedule_item_id_fkey'), nullable=True)
+    schedule_occurrence_on = db.Column(db.Date, nullable=True)
+    subject_label = db.Column(db.String(120), nullable=False, default='', server_default='')
     event_type = db.Column(db.String(20), nullable=False, index=True)
     event_key = db.Column(db.String(64), nullable=False)
     external_event_id = db.Column(db.String(160), nullable=False, default='')

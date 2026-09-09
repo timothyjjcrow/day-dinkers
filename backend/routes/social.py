@@ -3,7 +3,7 @@ import json
 import math
 
 from flask import Blueprint, g, jsonify, request
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, case, cast, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, selectinload
 
@@ -12,14 +12,28 @@ from backend.models import (
     BlockedUser,
     CheckIn,
     Court,
+    Club,
+    ClubMember,
+    Crew,
+    CrewInvite,
     FavoriteCourt,
     Friendship,
     Game,
     GameArrivalIntent,
     GamePlayer,
+    GameInvite,
+    GameWaitlist,
+    GameHostHandoff,
+    League,
+    LeagueMatch,
+    LeagueMember,
     Notification,
     PlayAvailabilityPulse,
     SKILL_LEVELS,
+    Tournament,
+    TournamentEntry,
+    TournamentMatch,
+    TournamentWaitlist,
     User,
     blocked_pair_ids,
     can_direct_message,
@@ -99,6 +113,7 @@ def _nearby_player_payload(user, *, viewer_is_friend=False):
         'current_streak': user.current_streak,
         'home_court_name': user.home_court.name if user.home_court else None,
         'availability': user.availability_list(),
+        'away_until': iso(user.away_until),
         'active_now': bool(
             user.nearby_visibility == 'everyone' or viewer_is_friend
         ) and bool(
@@ -194,7 +209,7 @@ def players_nearby():
     text = str(request.args.get('q') or '').strip()
     skill = str(request.args.get('skill') or '').strip().lower()
     level = str(request.args.get('level') or '').strip()
-    if level not in ('', '3.0', '3.5', '4.0'):
+    if level not in ('', 'beginner', '3.0', '3.5', '4.0'):
         return jsonify({'error': 'invalid_level'}), 400
     page = _positive_page_arg('page', 1)
     limit = _positive_page_arg(
@@ -211,7 +226,8 @@ def players_nearby():
     my_friends = friend_ids(g.current_user.id)
     query = (
         User.query.outerjoin(home, User.home_court_id == home.id)
-        .filter(User.id != g.current_user.id, User.deleted_at.is_(None))
+        .filter(User.id != g.current_user.id, User.deleted_at.is_(None),
+                or_(User.away_until.is_(None), User.away_until <= utcnow()))
         .filter(or_(
             and_(User.last_lat.between(lat_lo, lat_hi), User.last_lng.between(lng_lo, lng_hi)),
             and_(User.home_lat.between(lat_lo, lat_hi), User.home_lng.between(lng_lo, lng_hi)),
@@ -224,7 +240,10 @@ def players_nearby():
         query = query.filter(User.display_name.ilike(f'%{text}%'))
     if skill in SKILL_LEVELS:
         query = query.filter(User.skill_level == skill)
-    if level == '3.0':
+    if level == 'beginner':
+        query = query.filter(or_(User.skill_rating < 3.0,
+            and_(User.skill_rating.is_(None), User.skill_level == 'beginner')))
+    elif level == '3.0':
         query = query.filter(User.skill_rating >= 3.0, User.skill_rating < 3.5)
     elif level == '3.5':
         query = query.filter(User.skill_rating >= 3.5, User.skill_rating < 4.0)
@@ -1270,7 +1289,7 @@ def recent_coplayers():
             GamePlayer.user_id == g.current_user.id,
             Game.status == 'completed',
         )
-        .options(selectinload(Game.players))
+        .options(selectinload(Game.players), selectinload(Game.court))
         .order_by(Game.completed_at.desc(), Game.id.desc())
         .limit(60)
         .all()
@@ -1299,6 +1318,7 @@ def recent_coplayers():
                 stats[user_id] = {
                     'games_together': 0,
                     'last_played_at': game.completed_at,
+                    'last_played_court': game.court.to_summary_dict() if game.court else None,
                 }
             stats[user_id]['games_together'] += 1
     users = {
@@ -1330,6 +1350,8 @@ def recent_coplayers():
         item.update({
             'games_together': stats[user_id]['games_together'],
             'last_played_at': iso(stats[user_id]['last_played_at']),
+            'last_played_court': stats[user_id]['last_played_court'],
+            'can_invite': True,
             'is_friend': user_id in friends,
             'friendship_status': friendship.status if friendship else None,
             'friendship_id': friendship.id if friendship else None,
@@ -1600,6 +1622,158 @@ def remove_friend(friendship_id):
     return jsonify({'deleted': True})
 
 
+def _notification_category_expression():
+    kind = Notification.kind
+    return case(
+        (kind.startswith('business_'), 'business'),
+        (or_(kind.startswith('moderation_'), kind.startswith('report_'),
+             kind.startswith('account_'), kind.startswith('safety_'), kind.startswith('feedback_'),
+             kind == 'content_removed'), 'safety'),
+        (or_(kind.startswith('friend_'), kind.startswith('player_'),
+             kind.in_(['direct_message', 'challenge', 'challenge_declined'])), 'people'),
+        (or_(kind.startswith('club_'), kind.startswith('crew_')), 'groups'),
+        (or_(kind.startswith('game_'), kind.startswith('score_'), kind.startswith('session_'),
+             kind.startswith('tournament_'), kind.startswith('league_'), kind.startswith('rally_'),
+             kind.in_(['ranked_result', 'badge_earned', 'court_game', 'nearby_games',
+                       'weekly_recap', 'streak_nag', 'arrival_cancelled'])), 'games'),
+        else_='updates',
+    )
+
+
+def _notification_needs_action_expression(user_id):
+    """Read status is not consent. Resolve decisions from current entity state."""
+    def exists(model, *criteria):
+        return db.session.query(model.id).filter(*criteria).exists()
+
+    friendship = exists(Friendship, Friendship.requester_id == Notification.related_user_id,
+                        Friendship.addressee_id == user_id, Friendship.status == 'pending')
+    crew = exists(CrewInvite, CrewInvite.crew_id == Notification.related_crew_id,
+                  CrewInvite.invitee_id == user_id, CrewInvite.status == 'pending')
+    active_crew = exists(Crew, Crew.id == Notification.related_crew_id, Crew.archived_at.is_(None))
+    club = exists(Club, Club.id == Notification.related_club_id, Club.archived_at.is_(None))
+    club_member = exists(ClubMember, ClubMember.club_id == Notification.related_club_id,
+                         ClubMember.user_id == user_id)
+    game_invite = exists(GameInvite, GameInvite.game_id == Notification.related_game_id,
+                         GameInvite.user_id == user_id)
+    game_player = exists(GamePlayer, GamePlayer.game_id == Notification.related_game_id,
+                         GamePlayer.user_id == user_id)
+    future_game = exists(Game, Game.id == Notification.related_game_id,
+                         Game.status == 'upcoming', Game.scheduled_at > utcnow())
+    hidden_ids = blocked_pair_ids(user_id)
+    visible_creator = db.session.query(Friendship.id).filter(
+        Friendship.status == 'accepted',
+        or_(and_(Friendship.requester_id == user_id, Friendship.addressee_id == Game.creator_id),
+            and_(Friendship.addressee_id == user_id, Friendship.requester_id == Game.creator_id)),
+    ).correlate(Game).exists()
+    offer_scope = or_(Game.visibility == 'open',
+        and_(Game.visibility == 'friends', visible_creator), Game.creator_id == user_id,
+        Game.invites.any(GameInvite.user_id == user_id))
+    consent_visible = ~Game.players.any(GamePlayer.user_id.in_(hidden_ids))
+    if hidden_ids:
+        consent_visible = and_(consent_visible, ~Game.creator_id.in_(hidden_ids))
+    offered_spot = db.session.query(GameWaitlist.id).join(Game).filter(
+        Game.id == Notification.related_game_id, Game.status == 'upcoming', Game.scheduled_at > utcnow(),
+        GameWaitlist.user_id == user_id, GameWaitlist.offer_status == 'offered',
+        GameWaitlist.offer_expires_at > utcnow(),
+        Notification.created_at >= GameWaitlist.offered_at,
+        ~Game.players.any(GamePlayer.user_id == user_id), offer_scope, consent_visible,
+    ).exists()
+    host_request = db.session.query(GameHostHandoff.id).join(Game, Game.id == GameHostHandoff.game_id).filter(
+        Game.id == Notification.related_game_id, Game.status == 'upcoming',
+        GameHostHandoff.target_user_id == user_id, GameHostHandoff.status == 'pending',
+        GameHostHandoff.expires_at > utcnow(), GameHostHandoff.requested_by_id == Game.creator_id,
+        Notification.unread_dedupe_key == 'game-handoff:' + cast(GameHostHandoff.id, String),
+        Game.players.any(GamePlayer.user_id == user_id), consent_visible,
+    ).exists()
+    submitter = aliased(GamePlayer)
+    confirmer = aliased(GamePlayer)
+    score = db.session.query(Game.id).join(
+        submitter, and_(submitter.game_id == Game.id, submitter.user_id == Game.score_submitted_by_id),
+    ).join(confirmer, and_(confirmer.game_id == Game.id, confirmer.user_id == user_id)).filter(
+        Game.id == Notification.related_game_id, Game.status == 'awaiting_confirmation',
+        or_(Game.score_correction_pending.is_(False), Game.completed_at >= utcnow() - timedelta(days=7)),
+        confirmer.user_id != submitter.user_id, confirmer.team.in_([1, 2]),
+        or_(submitter.team.is_(None), submitter.team == 0, confirmer.team != submitter.team),
+    ).exists()
+    partner = exists(TournamentEntry,
+        TournamentEntry.tournament_id == Notification.related_tournament_id,
+        TournamentEntry.partner_status == 'pending',
+        or_(and_(TournamentEntry.partner_pending_on == 'invitee', TournamentEntry.partner_invitee_id == user_id),
+            and_(TournamentEntry.partner_pending_on == 'owner', TournamentEntry.player1_id == user_id)))
+    registering = exists(Tournament, Tournament.id == Notification.related_tournament_id,
+                          Tournament.status == 'registration')
+    existing_entry = exists(TournamentEntry,
+        TournamentEntry.tournament_id == Notification.related_tournament_id,
+        or_(TournamentEntry.player1_id == user_id, TournamentEntry.player2_id == user_id,
+            and_(TournamentEntry.partner_status == 'pending', TournamentEntry.partner_invitee_id == user_id)))
+    tournament_offer = db.session.query(TournamentWaitlist.id).join(Tournament).filter(
+        Tournament.id == Notification.related_tournament_id, Tournament.status == 'registration',
+        TournamentWaitlist.user_id == user_id, TournamentWaitlist.status == 'offered',
+        TournamentWaitlist.expires_at > utcnow(), Notification.created_at >= TournamentWaitlist.offered_at,
+        ~existing_entry,
+    ).exists()
+    league_player = or_(LeagueMatch.player1_id == user_id, LeagueMatch.player2_id == user_id)
+    league_active = (League.status == 'active', LeagueMatch.round == League.current_round,
+        LeagueMatch.league_id == Notification.related_league_id,
+        Notification.action_url == '/#league/' + cast(League.id, String) + '/match/' + cast(LeagueMatch.id, String))
+    league_result = db.session.query(LeagueMatch.id).join(League).filter(
+        *league_active,
+        or_(and_(LeagueMatch.result_state == 'awaiting_confirmation', league_player,
+                 LeagueMatch.reported_by_id.in_([LeagueMatch.player1_id, LeagueMatch.player2_id]),
+                 LeagueMatch.reported_by_id != user_id),
+            and_(LeagueMatch.result_state == 'disputed', league_player),
+            and_(LeagueMatch.result_state.in_(['awaiting_confirmation', 'disputed']), League.organizer_id == user_id)),
+    ).exists()
+    first_member = aliased(LeagueMember)
+    second_member = aliased(LeagueMember)
+    schedule_block = db.session.query(BlockedUser.id).filter(or_(
+        and_(BlockedUser.blocker_id == LeagueMatch.player1_id, BlockedUser.blocked_id == LeagueMatch.player2_id),
+        and_(BlockedUser.blocker_id == LeagueMatch.player2_id, BlockedUser.blocked_id == LeagueMatch.player1_id),
+    )).correlate(LeagueMatch).exists()
+    league_schedule = db.session.query(LeagueMatch.id).join(League).join(
+        first_member, and_(first_member.league_id == League.id, first_member.user_id == LeagueMatch.player1_id),
+    ).join(second_member, and_(second_member.league_id == League.id, second_member.user_id == LeagueMatch.player2_id)).filter(
+        *league_active, league_player, LeagueMatch.result_state == 'unreported',
+        LeagueMatch.schedule_proposals != '[]', LeagueMatch.schedule_proposed_by_id != user_id,
+        LeagueMatch.schedule_proposed_by_id == Notification.related_user_id, ~schedule_block,
+        Notification.unread_dedupe_key == 'league-schedule:' + cast(LeagueMatch.id, String) + ':' + cast(LeagueMatch.schedule_version, String),
+    ).exists()
+    viewer_entry = aliased(TournamentEntry)
+    opposing_reviewer = db.session.query(viewer_entry.id).filter(
+        viewer_entry.id.in_([TournamentMatch.entry1_id, TournamentMatch.entry2_id]),
+        or_(viewer_entry.player1_id == user_id, viewer_entry.player2_id == user_id),
+        viewer_entry.player1_id != TournamentMatch.reported_by_id,
+        or_(viewer_entry.player2_id.is_(None), viewer_entry.player2_id != TournamentMatch.reported_by_id),
+    ).correlate(TournamentMatch).exists()
+    tournament_participant = db.session.query(viewer_entry.id).filter(
+        viewer_entry.id.in_([TournamentMatch.entry1_id, TournamentMatch.entry2_id]),
+        or_(viewer_entry.player1_id == user_id, viewer_entry.player2_id == user_id),
+    ).correlate(TournamentMatch).exists()
+    tournament_result = db.session.query(TournamentMatch.id).join(Tournament).filter(
+        Tournament.status == 'active', TournamentMatch.tournament_id == Notification.related_tournament_id,
+        Notification.action_url == '/#tournament/' + cast(Tournament.id, String) + '/match/' + cast(TournamentMatch.id, String),
+        or_(and_(TournamentMatch.result_state == 'awaiting_confirmation', TournamentMatch.reported_by_id != user_id, opposing_reviewer),
+            and_(TournamentMatch.result_state == 'disputed', tournament_participant,
+                 TournamentMatch.entry1_id.is_not(None), TournamentMatch.entry2_id.is_not(None)),
+            and_(TournamentMatch.result_state.in_(['awaiting_confirmation', 'disputed']), Tournament.organizer_id == user_id)),
+    ).exists()
+    return or_(
+        and_(Notification.kind == 'friend_request', friendship),
+        and_(Notification.kind == 'crew_invite', crew, active_crew),
+        and_(Notification.kind == 'club_invite', club, ~club_member),
+        and_(Notification.kind.in_(['game_invite', 'game_invite_direct', 'challenge']),
+             game_invite, ~game_player, future_game),
+        and_(Notification.kind == 'game_waitlist_offer', offered_spot),
+        and_(Notification.kind == 'game_host_handoff', host_request),
+        and_(Notification.kind == 'score_submitted', score),
+        and_(Notification.kind == 'tournament_invite', partner, registering),
+        and_(Notification.kind == 'tournament_waitlist_offer', tournament_offer),
+        and_(Notification.kind == 'league_schedule', league_schedule),
+        and_(Notification.kind == 'league_match', league_result),
+        and_(Notification.kind.in_(['tournament_score', 'tournament_match']), tournament_result),
+    )
+
+
 @social_bp.get('/notifications')
 @login_required
 def list_notifications():
@@ -1616,23 +1790,35 @@ def list_notifications():
         ))
 
     unread = visible.filter(Notification.read.is_(False)).count()
+    category = _notification_category_expression()
+    needs_action = _notification_needs_action_expression(g.current_user.id)
+    activity_filter = request.args.get('filter', 'all')
+    if activity_filter not in {'all', 'unread', 'action', 'games', 'people', 'groups', 'business', 'safety', 'updates'}:
+        return jsonify({'error': 'invalid_notification_filter'}), 400
     page_query = visible
+    if activity_filter == 'unread':
+        page_query = page_query.filter(Notification.read.is_(False))
+    elif activity_filter == 'action':
+        page_query = page_query.filter(needs_action)
+    elif activity_filter != 'all':
+        page_query = page_query.filter(category == activity_filter)
     if before_id is not None:
         page_query = page_query.filter(Notification.id < before_id)
     page_rows = (
-        page_query.order_by(Notification.id.desc())
+        page_query.add_columns(category, needs_action).order_by(Notification.id.desc())
         .limit(limit + 1)
         .all()
     )
     has_more = len(page_rows) > limit
     rows = page_rows[:limit]
     return jsonify({
-        'items': [n.to_dict() for n in rows],
+        'items': [{**n.to_dict(), 'category': group, 'needs_action': bool(action)} for n, group, action in rows],
         # Account-wide unread count, not merely unread rows on this page.
         'unread': unread,
         'limit': limit,
         'has_more': has_more,
-        'next_cursor': rows[-1].id if has_more and rows else None,
+        'next_cursor': rows[-1][0].id if has_more and rows else None,
+        'filter': activity_filter,
     })
 
 

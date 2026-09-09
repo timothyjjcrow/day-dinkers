@@ -87,10 +87,11 @@ def _url_scope_path(value):
 
 def _approved_business_action_urls(business):
     """Links in the approved profile are the human-reviewed trust boundary."""
+    public = business.to_public_dict()
     return tuple(filter(None, (
-        safe_external_url(getattr(business, 'website_url', '')),
-        safe_external_url(getattr(business, 'booking_url', '')),
-        safe_external_url(getattr(business, 'membership_url', '')),
+        safe_external_url(public.get('website_url', '')),
+        safe_external_url(public.get('booking_url', '')),
+        safe_external_url(public.get('membership_url', '')),
     )))
 
 
@@ -769,11 +770,12 @@ def recheck_connection_links(connection, *, actor_kind='owner', actor_id='',
 def recheck_business_profile_links(business, *, actor_kind='operator', actor_id='',
                                    transport=None, resolver=None, probe_timeout=5):
     """Probe primary listing links without persisting or logging their values."""
-    candidates = (
-        ('website', business.website_url),
-        ('booking', business.booking_url),
-        ('membership', business.membership_url),
-    )
+    reviewed = business.reviewed_snapshot_dict().get('profile', {})
+    candidates = list(dict.fromkeys(
+        (kind, url) for kind, field in (
+            ('website', 'website_url'), ('booking', 'booking_url'), ('membership', 'membership_url')
+        ) for url in (getattr(business, field), reviewed.get(field, '')) if url
+    ))
     now = utcnow()
     results = []
     for kind, url in candidates:
@@ -832,7 +834,7 @@ def mark_connection_health_failure(connection, error_code='link_health_check_fai
 
 
 def record_booking_click(*, business_id, connection_id=None, occurrence_id=None,
-                         client_event_id, action='booking', occurred_at=None):
+                         client_event_id, action='booking', occurred_at=None, schedule_item_id=None, schedule_occurrence_on=None, subject_label=''):
     key = stable_digest(f'click:{business_id}:{client_event_id}')
     existing = BusinessBookingEvent.query.filter_by(event_key=key).first()
     if existing:
@@ -841,6 +843,8 @@ def record_booking_click(*, business_id, connection_id=None, occurrence_id=None,
         business_id=business_id,
         connection_id=connection_id,
         occurrence_id=occurrence_id,
+        schedule_item_id=schedule_item_id, schedule_occurrence_on=schedule_occurrence_on,
+        subject_label=str(subject_label or '')[:120],
         event_type='click',
         event_key=key,
         external_event_id='',

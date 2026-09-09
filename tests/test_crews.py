@@ -830,12 +830,13 @@ def test_crew_session_accepts_selected_members_capacity_and_weekly_recurrence(cl
         ).status_code == 404
 
     one_time = client.patch(
-        f"/api/games/{body['id']}", json={'recurrence': 'none'},
+        f"/api/games/{body['id']}", json={'recurrence': 'none', 'edit_scope': 'following_dates'},
         headers=auth_headers(owner),
     )
     assert one_time.status_code == 200, one_time.get_json()
     repeated = client.patch(f"/api/games/{body['id']}", json={
         'recurrence': 'weekly',
+        'edit_scope': 'following_dates',
         'recurrence_timezone': 'UTC',
         'recurrence_weekdays': [weekday],
     }, headers=auth_headers(owner))

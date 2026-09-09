@@ -99,6 +99,8 @@ DOM_HARNESS = r"""
   const openCourtDetail = (id, options) => { details.push({id, options}); return {id}; };
   const rememberCourtSearch = query => remembered.push(query);
   const openCourtPlayMenu = () => {};
+  const nextOpportunities = [];
+  const loadCourtNextOpportunity = (slot, court) => nextOpportunities.push({slot: slot.name, court: court.id});
   const moveCourtMapWithoutRefresh = fn => fn();
 """
 
@@ -108,6 +110,7 @@ def map_functions():
         section("function syncCourtSheetLabel", "function setupCourtDockLayout")
         + section("function clearCourtSelection", "function courtDirectionsUrl")
         + section("function courtDiscoveryReturnFocus", "function openCourtPlayMenu")
+        + section("function courtPresenceSummaryText", "async function freshCourtPresenceLocation")
         + section("function selectCourtOnMap", "function autoCheckInStorageKey")
     )
 
@@ -141,7 +144,7 @@ def test_mobile_selection_shows_the_selected_court_without_hiding_or_locking_the
         hasSelection: nodes['#court-list'].classList.contains('has-selection'),
         mapInert: nodes['#map'].inert};
       console.log(JSON.stringify({first, repeated, fromList, savedScroll,
-        opened: details.map(item => item.id), selectedMarkers, restoredFocus, cleared,
+        opened: details.map(item => item.id), selectedMarkers, restoredFocus, cleared, nextOpportunities,
         areaUnchanged: areaBefore === JSON.stringify([state.areaLoc, state.areaLabel,
           state.playGamesCache, state.chatFriendsCache])}));
     """)
@@ -160,6 +163,10 @@ def test_mobile_selection_shows_the_selected_court_without_hiding_or_locking_the
         assert snapshot["details"] == 0
     assert result["savedScroll"] == 432
     assert result["opened"] == [22]
+    assert result["nextOpportunities"] == [
+        {"slot": "[data-preview-next]", "court": court_id}
+        for court_id in [11, 11, 22, 22]
+    ]
     assert result["restoredFocus"] == "[data-preview-detail]"
     assert result["cleared"] == {
         "selected": None, "hidden": True, "hasSelection": False, "mapInert": False,

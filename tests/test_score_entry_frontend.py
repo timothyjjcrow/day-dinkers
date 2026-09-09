@@ -75,8 +75,8 @@ def test_larger_sessions_use_attendee_wrap_up_instead_of_a_forged_score():
     detail = section('function gameScreenHtml', 'async function openGameScreen')
     screen = section('async function openGameScreen', 'function safeNotificationOverlayRoute')
 
-    assert 'Choose who played.' in wrap
-    assert 'no score, winner, loss, or rating change' in wrap
+    assert 'Select the people who played.' in wrap
+    assert 'No score or rating change.' in wrap
     assert "JSON.stringify({ attendee_user_ids: attendeeIds })" in wrap
     assert "api(`/games/${game.id}/complete-session`" in wrap
     assert 'attendeeIds.length < 2' in wrap
@@ -84,7 +84,7 @@ def test_larger_sessions_use_attendee_wrap_up_instead_of_a_forged_score():
     assert 'return openSessionWrapUpModal(game, refresh);' in scorer
     assert 'id="gs-wrap-session"' in detail
     assert 'id="gs-score"' in detail
-    assert "querySelector('#gs-score, #gs-wrap-session')" in screen
+    assert "querySelectorAll('#gs-score, #gs-wrap-session')" in screen
 
 
 def test_completed_sessions_never_render_null_scores_or_match_outcomes():

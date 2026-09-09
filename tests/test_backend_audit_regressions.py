@@ -353,7 +353,7 @@ def test_challenge_validation_has_no_side_effects_and_retries_converge(client, a
     )
     assert submitted.status_code == 200, submitted.get_json()
     assert client.post(
-        f"/api/games/{fresh.get_json()['id']}/confirm",
+        f"/api/games/{fresh.get_json()['id']}/confirm", json={'expected_score_version': db.session.get(Game, fresh.get_json()['id']).score_version},
         headers=headers(target),
     ).status_code == 200
     after_completed = client.post(
@@ -442,6 +442,7 @@ def test_compact_business_booking_requires_actionable_schedule_inventory(
         db.session.flush()
         schedule = BusinessScheduleItem(
             business_id=profile.id, title='Full open play', kind='open_play',
+            day_of_week='daily', start_time='09:00', end_time='11:00', timezone='UTC',
             booking_url='https://book.example/full', status='sold_out',
             capacity=16, spots_remaining=0,
         )

@@ -17,8 +17,8 @@ BUNDLED_COURTS_FILE = os.path.join(PROJECT_ROOT, 'data', 'courts.json.gz')
 # Immutable frontend URLs are part of the executable shell contract. Keep the
 # prior release readable while an already-open service-worker client reloads
 # onto the current release.
-FRONTEND_RELEASE = 'r76'
-FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', FRONTEND_RELEASE})
+FRONTEND_RELEASE = 'r77'
+FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', 'r76', FRONTEND_RELEASE})
 FRONTEND_RELEASE_FILES = frozenset({
     'app-v15.min.js',
     'app-v15.min.js.map',
@@ -233,6 +233,9 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE message ADD COLUMN conversation_id INTEGER'
                 )
+            if 'reply_to_id' not in columns:
+                statements.append('ALTER TABLE message ADD COLUMN reply_to_id INTEGER'
+                    + ('' if is_postgres else ' CONSTRAINT message_reply_to_id_fkey REFERENCES message(id) ON DELETE SET NULL'))
             if 'image_data' not in columns:
                 statements.append('ALTER TABLE message ADD COLUMN image_data TEXT')
             if 'hearted' not in columns:
@@ -255,6 +258,7 @@ def _upgrade_schema(app):
                 'CREATE INDEX IF NOT EXISTS ix_message_conversation_id '
                 'ON message (conversation_id)'
             )
+            statements.append('CREATE INDEX IF NOT EXISTS ix_message_reply_to_id ON message (reply_to_id)')
 
         if 'user' in tables:
             user_cols = {c['name'] for c in inspector.get_columns('user')}
@@ -289,6 +293,7 @@ def _upgrade_schema(app):
                 ('mfa_enabled_at', 'ALTER TABLE "user" ADD COLUMN mfa_enabled_at TIMESTAMP'),
                 ('mfa_recovery_codes', "ALTER TABLE \"user\" ADD COLUMN mfa_recovery_codes TEXT NOT NULL DEFAULT '[]'"),
                 ('onboarding_completed_at', 'ALTER TABLE "user" ADD COLUMN onboarding_completed_at TIMESTAMP'),
+                ('away_until', 'ALTER TABLE "user" ADD COLUMN away_until TIMESTAMP'),
                 ('invited_by_user_id', 'ALTER TABLE "user" ADD COLUMN invited_by_user_id INTEGER'),
                 ('suspended_at', 'ALTER TABLE "user" ADD COLUMN suspended_at TIMESTAMP'),
                 ('suspension_reason', "ALTER TABLE \"user\" ADD COLUMN suspension_reason VARCHAR(500) NOT NULL DEFAULT ''"),
@@ -336,11 +341,33 @@ def _upgrade_schema(app):
                 'CREATE INDEX IF NOT EXISTS ix_user_report_content_id ON user_report (content_id)',
             ))
 
+        if 'check_in' in tables:
+            checkin_cols = {c['name'] for c in inspector.get_columns('check_in')}
+            if 'location_verified_at' not in checkin_cols:
+                statements.append('ALTER TABLE check_in ADD COLUMN location_verified_at '
+                                  + ('TIMESTAMP' if is_postgres else 'DATETIME'))
+
+        if 'court_edit_suggestion' in tables:
+            suggestion_cols = {c['name'] for c in inspector.get_columns('court_edit_suggestion')}
+            for column, ddl in (
+                ('reviewed_by_id', 'INTEGER REFERENCES "user"(id) ON DELETE SET NULL'),
+                ('reviewed_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+                ('review_note', "VARCHAR(500) NOT NULL DEFAULT ''"),
+            ):
+                if column not in suggestion_cols:
+                    statements.append(f'ALTER TABLE court_edit_suggestion ADD COLUMN {column} {ddl}')
+
         if 'game' in tables:
             if 'user' in tables:
-                from backend.models import GameRecurrenceRsvp, GameScoreLine
+                from backend.models import (
+                    GameRecurrenceRsvp, GameScoreLine, GameWaitlist,
+                    GameHostHandoff, GameSessionAttendance,
+                )
                 GameRecurrenceRsvp.__table__.create(db.engine, checkfirst=True)
                 GameScoreLine.__table__.create(db.engine, checkfirst=True)
+                GameWaitlist.__table__.create(db.engine, checkfirst=True)
+                GameHostHandoff.__table__.create(db.engine, checkfirst=True)
+                GameSessionAttendance.__table__.create(db.engine, checkfirst=True)
             game_cols = {c['name'] for c in inspector.get_columns('game')}
             if is_postgres:
                 status_col = next(
@@ -372,6 +399,34 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE game ADD COLUMN recurrence_ends_on DATE'
                 )
+            for column, ddl in (
+                ('invite_link_version', 'INTEGER NOT NULL DEFAULT 0'),
+                ('invite_link_expires_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+                ('score_version', 'INTEGER NOT NULL DEFAULT 0'),
+                ('score_history', "TEXT NOT NULL DEFAULT '[]'"),
+                ('score_correction_pending', 'BOOLEAN NOT NULL DEFAULT ' + ('FALSE' if is_postgres else '0')),
+                ('recurrence_series_id', 'INTEGER REFERENCES game(id)'),
+                ('recurrence_occurrence_on', 'DATE'),
+                ('recurrence_template', 'TEXT'),
+                ('recurrence_stopped_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+            ):
+                if column not in game_cols:
+                    statements.append(f'ALTER TABLE game ADD COLUMN {column} {ddl}')
+            statements.extend((
+                'CREATE INDEX IF NOT EXISTS ix_game_recurrence_series_id '
+                'ON game (recurrence_series_id)',
+                'CREATE UNIQUE INDEX IF NOT EXISTS uq_game_series_occurrence '
+                'ON game (recurrence_series_id, recurrence_occurrence_on)',
+            ))
+            if inspector.has_table('game_recurrence_rsvp'):
+                recurrence_rsvp_cols = {
+                    column['name'] for column in inspector.get_columns('game_recurrence_rsvp')
+                }
+                if 'skipped_occurrences' not in recurrence_rsvp_cols:
+                    statements.append(
+                        "ALTER TABLE game_recurrence_rsvp ADD COLUMN skipped_occurrences "
+                        "TEXT NOT NULL DEFAULT '[]'"
+                    )
             if 'club_id' not in game_cols:
                 statements.append('ALTER TABLE game ADD COLUMN club_id INTEGER')
             if 'crew_id' not in game_cols:
@@ -494,8 +549,24 @@ def _upgrade_schema(app):
                 'CREATE INDEX IF NOT EXISTS ix_game_is_instant ON game (is_instant)'
             )
 
+        if 'game_waitlist' in tables:
+            waitlist_cols = {c['name'] for c in inspector.get_columns('game_waitlist')}
+            datetime_type = 'TIMESTAMP' if is_postgres else 'DATETIME'
+            for column, ddl in (
+                ('offered_at', datetime_type),
+                ('offer_expires_at', datetime_type),
+                ('offer_status', "VARCHAR(16) NOT NULL DEFAULT 'queued'"),
+            ):
+                if column not in waitlist_cols:
+                    statements.append(f'ALTER TABLE game_waitlist ADD COLUMN {column} {ddl}')
+
         if 'court' in tables:
             court_cols = {c['name'] for c in inspector.get_columns('court')}
+            if 'pending_submission' not in court_cols:
+                statements.append(
+                    'ALTER TABLE court ADD COLUMN pending_submission BOOLEAN NOT NULL DEFAULT '
+                    + ('FALSE' if is_postgres else '0')
+                )
             if 'photo_data' not in court_cols:
                 statements.append('ALTER TABLE court ADD COLUMN photo_data TEXT')
             if 'hours' not in court_cols:
@@ -506,6 +577,8 @@ def _upgrade_schema(app):
                 statements.append(
                     "ALTER TABLE court ADD COLUMN structured_hours TEXT NOT NULL DEFAULT '{}'"
                 )
+            if 'visitor_info' not in court_cols:
+                statements.append("ALTER TABLE court ADD COLUMN visitor_info TEXT NOT NULL DEFAULT '{}'")
             if 'open_play_schedule_rows' not in court_cols:
                 statements.append(
                     "ALTER TABLE court ADD COLUMN open_play_schedule_rows TEXT NOT NULL DEFAULT '[]'"
@@ -531,6 +604,9 @@ def _upgrade_schema(app):
 
         if 'court_photo' in tables:
             cp_cols = {c['name'] for c in inspector.get_columns('court_photo')}
+            for column, ddl in (('category', "VARCHAR(16) NOT NULL DEFAULT ''"), ('captured_on', 'DATE')):
+                if column not in cp_cols:
+                    statements.append(f'ALTER TABLE court_photo ADD COLUMN {column} {ddl}')
             if 'caption' not in cp_cols:
                 statements.append(
                     "ALTER TABLE court_photo ADD COLUMN caption VARCHAR(140) NOT NULL DEFAULT ''"
@@ -558,6 +634,12 @@ def _upgrade_schema(app):
                 ('game_format', "VARCHAR(32) NOT NULL DEFAULT 'single_11'"),
                 ('court_count', 'INTEGER NOT NULL DEFAULT 1'),
                 ('match_minutes', 'INTEGER NOT NULL DEFAULT 30'),
+                ('schedule_version', 'INTEGER NOT NULL DEFAULT 0'),
+                ('schedule_history', "TEXT NOT NULL DEFAULT '[]'"),
+                ('rest_minutes', 'INTEGER NOT NULL DEFAULT 5'),
+                ('entry_fee_cents', 'INTEGER'),
+                ('payment_method', "VARCHAR(80) NOT NULL DEFAULT ''"),
+                ('withdrawal_policy', "VARCHAR(300) NOT NULL DEFAULT ''"),
             )
             for column, ddl in tournament_columns:
                 if column not in t_cols:
@@ -572,6 +654,15 @@ def _upgrade_schema(app):
                     'ALTER TABLE tournament_entry ADD COLUMN checked_in_at '
                     + ('TIMESTAMP' if is_postgres else 'DATETIME')
                 )
+            for column, ddl in (
+                ('player1_arrived_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+                ('player2_arrived_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+                ('arrival_history', "TEXT NOT NULL DEFAULT '[]'"),
+                ('partner_response_deadline_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+                ('partner_history', "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if column not in te_cols:
+                    statements.append(f'ALTER TABLE tournament_entry ADD COLUMN {column} {ddl}')
             if 'partner_invitee_id' not in te_cols:
                 statements.append(
                     'ALTER TABLE tournament_entry ADD COLUMN partner_invitee_id INTEGER'
@@ -591,6 +682,9 @@ def _upgrade_schema(app):
             tm_cols = {c['name'] for c in inspector.get_columns('tournament_match')}
             datetime_type = 'TIMESTAMP' if is_postgres else 'DATETIME'
             tournament_match_columns = (
+                ('play_state', "VARCHAR(16) NOT NULL DEFAULT 'estimated'"),
+                ('called_at', datetime_type),
+                ('started_at', datetime_type),
                 ('result_state', "VARCHAR(32) NOT NULL DEFAULT 'unreported'"),
                 ('result_version', 'INTEGER NOT NULL DEFAULT 0'),
                 ('reported_by_id', 'INTEGER'),
@@ -703,6 +797,11 @@ def _upgrade_schema(app):
                 ),
                 ('content_reviewed_at', datetime_type),
                 ('logo_data', "TEXT NOT NULL DEFAULT ''"),
+                ('reviewed_public_snapshot', "TEXT NOT NULL DEFAULT ''"),
+                ('timezone', "VARCHAR(64) NOT NULL DEFAULT ''"),
+                ('structured_hours', "TEXT NOT NULL DEFAULT '{}'"),
+                ('visitor_info', "TEXT NOT NULL DEFAULT '{}'"),
+                ('hours_dawn_to_dusk', f'BOOLEAN NOT NULL DEFAULT {boolean_false}'),
             ):
                 if column not in profile_cols:
                     statements.append(
@@ -750,6 +849,9 @@ def _upgrade_schema(app):
             for column, ddl in (
                 ('timezone', "VARCHAR(64) NOT NULL DEFAULT 'UTC'"),
                 ('recurrence', "VARCHAR(24) NOT NULL DEFAULT 'weekly'"),
+                ('occurrence_overrides', "TEXT NOT NULL DEFAULT '{}'"),
+                ('offering_id', 'INTEGER REFERENCES business_offering(id) ON DELETE SET NULL'),
+                ('availability_updated_at', datetime_type),
                 ('start_date', 'DATE'),
                 ('end_date', 'DATE'),
                 ('event_date', 'DATE'),
@@ -771,7 +873,19 @@ def _upgrade_schema(app):
                 'ON business_schedule_item (event_date)',
                 'CREATE INDEX IF NOT EXISTS ix_business_schedule_item_status '
                 'ON business_schedule_item (status)',
+                'CREATE INDEX IF NOT EXISTS ix_business_schedule_item_offering_id '
+                'ON business_schedule_item (offering_id)',
             ))
+
+        if 'business_booking_event' in tables:
+            booking_cols = {c['name'] for c in inspector.get_columns('business_booking_event')}
+            for column, ddl in (
+                ('schedule_item_id', 'INTEGER REFERENCES business_schedule_item(id) ON DELETE SET NULL'),
+                ('schedule_occurrence_on', 'DATE'),
+                ('subject_label', "VARCHAR(120) NOT NULL DEFAULT ''"),
+            ):
+                if column not in booking_cols:
+                    statements.append(f'ALTER TABLE business_booking_event ADD COLUMN {column} {ddl}')
 
         if 'business_verification_evidence' in tables:
             evidence_cols = {
@@ -896,6 +1010,14 @@ def _upgrade_schema(app):
                     'ALTER TABLE league ADD COLUMN round_started_at '
                     + ('TIMESTAMP' if is_postgres else 'DATETIME')
                 )
+            for column, ddl in (
+                ('total_rounds', 'INTEGER'),
+                ('round_version', 'INTEGER NOT NULL DEFAULT 0'),
+                ('round_history', "TEXT NOT NULL DEFAULT '[]'"),
+                ('round_deadline_override_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+            ):
+                if column not in league_cols:
+                    statements.append(f'ALTER TABLE league ADD COLUMN {column} {ddl}')
             if 'champion_user_id' not in league_cols:
                 statements.append('ALTER TABLE league ADD COLUMN champion_user_id INTEGER')
             if 'club_id' not in league_cols:
@@ -908,6 +1030,14 @@ def _upgrade_schema(app):
 
         if 'league_member' in tables:
             lm_cols = {c['name'] for c in inspector.get_columns('league_member')}
+            for column, ddl in (
+                ('unavailable_round', 'INTEGER'),
+                ('withdraw_after_round', 'INTEGER'),
+                ('withdrawn_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+                ('availability_history', "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if column not in lm_cols:
+                    statements.append(f'ALTER TABLE league_member ADD COLUMN {column} {ddl}')
             if 'reminded_round' not in lm_cols:
                 statements.append(
                     'ALTER TABLE league_member ADD COLUMN reminded_round INTEGER NOT NULL DEFAULT 0'
@@ -919,6 +1049,15 @@ def _upgrade_schema(app):
             }
             datetime_type = 'TIMESTAMP' if is_postgres else 'DATETIME'
             league_match_columns = (
+                ('scheduled_at', datetime_type),
+                ('scheduled_court_id', 'INTEGER REFERENCES court(id)'),
+                ('scheduled_duration_minutes', 'INTEGER NOT NULL DEFAULT 60'),
+                ('schedule_version', 'INTEGER NOT NULL DEFAULT 0'),
+                ('schedule_proposals', "TEXT NOT NULL DEFAULT '[]'"),
+                ('schedule_proposed_by_id', 'INTEGER REFERENCES "user"(id)'),
+                ('schedule_day_reminded_at', datetime_type),
+                ('schedule_hour_reminded_at', datetime_type),
+                ('closed_round_review', "TEXT NOT NULL DEFAULT '{}'"),
                 ('result_state', "VARCHAR(32) NOT NULL DEFAULT 'unreported'"),
                 ('result_version', 'INTEGER NOT NULL DEFAULT 0'),
                 # Reuse the existing reporter column when present.
@@ -951,6 +1090,8 @@ def _upgrade_schema(app):
                 "WHERE winner_id IS NOT NULL AND result_state = 'unreported'",
                 'CREATE INDEX IF NOT EXISTS ix_league_match_result_state '
                 'ON league_match (result_state)',
+                'CREATE INDEX IF NOT EXISTS ix_league_match_scheduled_at '
+                'ON league_match (scheduled_at)',
                 'CREATE INDEX IF NOT EXISTS '
                 'ix_league_match_result_state_reported_at '
                 'ON league_match (result_state, reported_at)',
@@ -1013,6 +1154,11 @@ def _upgrade_schema(app):
 
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}
+            if 'recurrence_rsvp_automatic' not in gp_cols:
+                statements.append(
+                    'ALTER TABLE game_player ADD COLUMN recurrence_rsvp_automatic '
+                    'BOOLEAN NOT NULL DEFAULT FALSE'
+                )
             if 'reminded_at' not in gp_cols:
                 statements.append(
                     'ALTER TABLE game_player ADD COLUMN reminded_at '
@@ -1036,6 +1182,9 @@ def _upgrade_schema(app):
                     conn.execute(text(statement))
         if {'user', 'game'} <= set(tables):
             _ensure_game_score_reference_foreign_keys(app)
+        if {'user', 'tournament'} <= set(tables):
+            from backend.models import TournamentWaitlist
+            TournamentWaitlist.__table__.create(db.engine, checkfirst=True)
         # Business integrations are wholly additive.  Production/serverless
         # deliberately runs with AUTO_CREATE_DB disabled, so the trusted
         # operator migration must be able to install these new tables without
@@ -1354,6 +1503,30 @@ GAME_SCORE_REFERENCE_FOREIGN_KEYS = (
 
 ADDITIVE_REFERENCE_FOREIGN_KEYS = (
     (
+        'message', 'reply_to_id', 'message', 'id',
+        'message_reply_to_id_fkey',
+    ),
+    (
+        'business_schedule_item', 'offering_id', 'business_offering', 'id',
+        'business_schedule_item_offering_id_fkey',
+    ),
+    (
+        'court_edit_suggestion', 'reviewed_by_id', 'user', 'id',
+        'court_edit_suggestion_reviewed_by_id_fkey',
+    ),
+    (
+        'game', 'recurrence_series_id', 'game', 'id',
+        'game_recurrence_series_id_fkey',
+    ),
+    (
+        'league_match', 'scheduled_court_id', 'court', 'id',
+        'league_match_scheduled_court_id_fkey',
+    ),
+    (
+        'league_match', 'schedule_proposed_by_id', 'user', 'id',
+        'league_match_schedule_proposed_by_id_fkey',
+    ),
+    (
         'user', 'invited_by_user_id', 'user', 'id',
         'user_invited_by_user_id_fkey',
     ),
@@ -1400,8 +1573,15 @@ ADDITIVE_REFERENCE_FOREIGN_KEYS = (
 )
 
 
+ADDITIVE_REFERENCE_ON_DELETE = {
+    'message_reply_to_id_fkey': 'SET NULL',
+    'court_edit_suggestion_reviewed_by_id_fkey': 'SET NULL',
+    'business_schedule_item_offering_id_fkey': 'SET NULL',
+}
+
+
 def _foreign_key_matches(foreign_key, local_column, referred_table='crew',
-                         referred_column='id', referred_schema=None):
+                         referred_column='id', referred_schema=None, ondelete=None):
     """Return whether an inspected FK has the exact single-column shape."""
     return (
         tuple(foreign_key.get('constrained_columns') or ()) == (local_column,)
@@ -1413,6 +1593,8 @@ def _foreign_key_matches(foreign_key, local_column, referred_table='crew',
             or referred_schema is None
             or foreign_key.get('referred_schema') == referred_schema
         )
+        and (ondelete is None or str((foreign_key.get('options') or {}).get('ondelete')
+                                    or 'NO ACTION').upper() == ondelete)
     )
 
 
@@ -1471,6 +1653,7 @@ def _missing_additive_reference_foreign_keys(inspector):
                 referred_table=referred_table,
                 referred_column=referred_column,
                 referred_schema=expected_schema,
+                ondelete=ADDITIVE_REFERENCE_ON_DELETE.get(constraint_name),
             )
             for foreign_key in foreign_keys
         ):
@@ -1500,6 +1683,8 @@ def _add_reference_foreign_key(connection, requirement):
         f'FOREIGN KEY ({preparer.quote(local_column)}) '
         f'REFERENCES {preparer.quote(referred_table)} '
         f'({preparer.quote(referred_column)})'
+        + (f' ON DELETE {ADDITIVE_REFERENCE_ON_DELETE[constraint_name]}'
+           if constraint_name in ADDITIVE_REFERENCE_ON_DELETE else '')
     ))
 
 
@@ -2407,8 +2592,10 @@ def create_app(config_name=None):
         game = db.session.get(Game, game_id)
         if not game:
             return 'not found', 404
-        if game.visibility == 'private' or (
+        if game.visibility != 'open' or (
             game.is_instant and game.status != 'completed'
+        ) or (
+            game.court and (game.court.closed or game.court.pending_submission)
         ):
             # Don't leak invite-only details or a live rally's exact physical
             # location to anonymous link crawlers / enumerable share URLs.
@@ -2439,7 +2626,7 @@ def create_app(config_name=None):
     def share_court(court_id):
         from backend.models import Court
         court = db.session.get(Court, court_id)
-        if not court:
+        if not court or court.closed or court.pending_submission:
             return 'not found', 404
         bits = [f'{court.num_courts} court{"" if court.num_courts == 1 else "s"}']
         if court.city:
@@ -2509,7 +2696,7 @@ def create_app(config_name=None):
 
     @app.get('/api/share-preview')
     def share_preview():
-        """Return a deliberately small, anonymous-safe preview for hash links.
+        """Return useful anonymous-safe detail for public hash links.
 
         Fragment identifiers never reach the server, so the signed-out shell
         asks for this public summary after it has parsed the hash. Private game
@@ -2525,11 +2712,37 @@ def create_app(config_name=None):
         title = ''
         subtitle = ''
         cache_publicly = True
+        public_details = None
+
+        def public_game_details(game):
+            from backend.models import iso, utcnow
+            now = utcnow()
+            occupied = len(game.players) + sum(
+                row.offer_status == 'offered' and row.offer_expires_at is not None
+                and row.offer_expires_at > now for row in game.waitlist
+            )
+            return {
+                'id': game.id, 'title': game.title or 'Pickleball session',
+                'game_type': game.game_type, 'status': game.status,
+                'scheduled_at': iso(game.scheduled_at),
+                'duration_minutes': game.duration_minutes,
+                'preferred_level': game.preferred_level,
+                'level_min': game.level_min, 'level_max': game.level_max,
+                'max_players': game.max_players, 'player_count': len(game.players),
+                'spots_left': max(0, game.max_players - occupied),
+                'cost_cents': game.cost_cents,
+                'description': game.description or game.notes or '',
+                'court': {'id': game.court.id, 'name': game.court.name,
+                          'city': game.court.city, 'address': game.court.address,
+                          'latitude': game.court.latitude, 'longitude': game.court.longitude}
+                if game.court else None,
+            }
 
         if kind == 'court':
-            from backend.models import Court
+            from backend.models import Court, Game, utcnow
+            from backend.services.court_hours import public_hours_for
             court = db.session.get(Court, entity_id)
-            if not court or court.closed:
+            if not court or court.closed or court.pending_submission:
                 return jsonify({'error': 'share target not found'}), 404
             title = court.name
             facts = []
@@ -2539,12 +2752,27 @@ def create_app(config_name=None):
             if court.fee_type:
                 facts.append(court.fee_type.replace('_', ' ').title())
             subtitle = ' · '.join(facts)
+            public_details = {
+                'court': {key: getattr(court, key) for key in (
+                    'id', 'name', 'address', 'city', 'state', 'latitude', 'longitude',
+                    'num_courts', 'indoor', 'lighted', 'nets_provided', 'has_water',
+                    'has_restrooms', 'surface_type', 'fees', 'fee_type', 'photo_url',
+                )},
+                'hours': public_hours_for([court])[court.id],
+                'sessions': [public_game_details(game) for game in Game.query.filter(
+                    Game.court_id == court.id, Game.visibility == 'open',
+                    Game.is_instant.is_(False), Game.status == 'upcoming',
+                    Game.scheduled_at >= utcnow(),
+                ).order_by(Game.scheduled_at.asc(), Game.id.asc()).limit(4).all()],
+            }
         elif kind == 'game':
             from backend.models import Game
             game = db.session.get(Game, entity_id)
             if not game:
                 return jsonify({'error': 'share target not found'}), 404
-            if game.visibility == 'private' or (game.is_instant and game.status != 'completed'):
+            if game.visibility != 'open' or (game.is_instant and game.status != 'completed') or (
+                game.court and (game.court.closed or game.court.pending_submission)
+            ):
                 title = 'A private play session was shared with you'
                 subtitle = 'Details stay private until you log in.'
                 cache_publicly = False
@@ -2557,6 +2785,7 @@ def create_app(config_name=None):
                     'cancelled': 'Cancelled play session',
                 }.get(game.status, 'Pickup game')
                 subtitle = ' · '.join(part for part in (state_label, court_name, when) if part)
+                public_details = public_game_details(game)
         elif kind == 'tournament':
             from backend.models import Tournament
             tournament = db.session.get(Tournament, entity_id)
@@ -2604,7 +2833,10 @@ def create_app(config_name=None):
         else:
             return jsonify({'error': 'unsupported share target'}), 400
 
-        response = jsonify({'title': title, 'subtitle': subtitle})
+        payload = {'title': title, 'subtitle': subtitle}
+        if public_details is not None:
+            payload.update(kind=kind, public=True, details=public_details)
+        response = jsonify(payload)
         response.headers['Cache-Control'] = (
             'public, max-age=60' if cache_publicly else 'private, no-store'
         )

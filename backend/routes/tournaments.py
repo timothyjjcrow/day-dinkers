@@ -2,6 +2,7 @@
 from datetime import timedelta
 import json
 import math
+import hashlib
 
 from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +18,7 @@ from backend.models import (
     Tournament,
     TournamentEntry,
     TournamentMatch,
+    TournamentWaitlist,
     User,
     award_new_badges,
     iso,
@@ -34,6 +36,8 @@ from backend.routes.games import (
     _parse_scheduled_at,
 )
 from backend.security import rate_limit
+from backend.services.competition_browse import filter_competition_query
+from backend.services.player_schedule import schedule_review_needed, schedule_batch_review_needed
 
 tournaments_bp = Blueprint('tournaments', __name__)
 
@@ -109,7 +113,7 @@ def _schedule_tournament_matches(tournament):
                 minutes=(index // courts) * duration,
             )
         waves = max(1, math.ceil(len(matches) / courts))
-        round_start += timedelta(minutes=waves * duration)
+        round_start += timedelta(minutes=waves * duration + (tournament.rest_minutes or 0))
 
 
 def _tournament_schedule_estimate(tournament):
@@ -135,7 +139,7 @@ def _tournament_schedule_estimate(tournament):
         rounds = entries - 1 if entries % 2 == 0 else entries
         matches_per_round = entries // 2
         waves = max(1, math.ceil(matches_per_round / courts))
-        duration = rounds * waves * match_minutes
+        duration = rounds * waves * match_minutes + max(0, rounds - 1) * (tournament.rest_minutes or 0)
     else:
         bracket_size = 2
         while bracket_size < entries:
@@ -150,6 +154,7 @@ def _tournament_schedule_estimate(tournament):
             max(1, math.ceil(match_count / courts)) * match_minutes
             for match_count in round_matches
         )
+        duration += max(0, len(round_matches) - 1) * (tournament.rest_minutes or 0)
     end_at = tournament.starts_at + timedelta(minutes=duration) \
         if tournament.starts_at else None
     return duration, end_at
@@ -160,6 +165,161 @@ def _add_tournament_schedule_estimate(data, tournament):
     data['estimated_duration_minutes'] = duration
     data['estimated_end_at'] = iso(end_at)
     return data
+
+
+def _registration_settings(payload, tournament=None):
+    values = {}
+    for name, default, ceiling in [('rest_minutes', 5, 60), ('entry_fee_cents', None, 1000000)]:
+        if name not in payload and tournament is not None:
+            continue
+        raw = payload.get(name, default)
+        if name == 'entry_fee_cents' and raw is None:
+            values[name] = None
+            continue
+        if isinstance(raw, bool) or not isinstance(raw, int) or not 0 <= raw <= ceiling:
+            return None, 'invalid_' + name
+        values[name] = raw
+    for name, limit in [('payment_method', 80), ('withdrawal_policy', 300)]:
+        if name in payload or tournament is None:
+            values[name] = str(payload.get(name) or '').strip()[:limit]
+    return values, None
+
+
+def _preview_bracket(tournament):
+    """Pure, deterministic plan: preview never creates matches or notifications."""
+    entries = sorted(tournament.entries, key=lambda entry: (-entry.avg_rating(), entry.id))
+    rows = []
+    if tournament.format == 'round_robin':
+        for number, pairs in enumerate(_round_robin_rounds([entry.id for entry in entries]), 1):
+            rows.extend({'round': number, 'position': position, 'entry1_id': a, 'entry2_id': b}
+                        for position, (a, b) in enumerate(pairs))
+    else:
+        size = 2
+        while size < len(entries):
+            size *= 2
+        by_seed = {i + 1: entry.id for i, entry in enumerate(entries)}
+        slots = [by_seed.get(seed) for seed in _seed_slot_order(size)]
+        for number in range(1, size.bit_length()):
+            for position in range(size // 2 ** number):
+                rows.append({'round': number, 'position': position,
+                             'entry1_id': slots[position * 2] if number == 1 else None,
+                             'entry2_id': slots[position * 2 + 1] if number == 1 else None})
+        if len(entries) >= 4:
+            rows.append({'round': size.bit_length() - 1, 'position': 1, 'entry1_id': None, 'entry2_id': None})
+        for row in rows:
+            if row['round'] == 1 and bool(row['entry1_id']) != bool(row['entry2_id']):
+                row['result_state'] = 'bye'
+                row['winner_entry_id'] = row['entry1_id'] or row['entry2_id']
+                successor = next((other for other in rows if other['round'] == 2
+                                  and other['position'] == row['position'] // 2), None)
+                if successor:
+                    successor['entry1_id' if row['position'] % 2 == 0 else 'entry2_id'] = row['winner_entry_id']
+    start = tournament.starts_at
+    for number in sorted({row['round'] for row in rows}):
+        group = [row for row in rows if row['round'] == number]
+        for index, row in enumerate(group):
+            row.update(id=rows.index(row) + 1, scheduled_at=iso(start + timedelta(minutes=(index // tournament.court_count) * tournament.match_minutes)),
+                       court_number=index % tournament.court_count + 1, play_state='estimated')
+        start += timedelta(minutes=max(1, math.ceil(len(group) / tournament.court_count)) * tournament.match_minutes + (tournament.rest_minutes or 0))
+    data = tournament.to_dict(g.current_user.id, detail=True)
+    data.update(matches=rows, total_rounds=max((row['round'] for row in rows), default=0), preview=True)
+    data['entries'] = [{**entry.to_dict(g.current_user.id, tournament.organizer_id), 'seed': i + 1} for i, entry in enumerate(entries)]
+    data['preview_warnings'] = [f'{entry.display_name()} needs an accepted partner' for entry in entries if not entry.partner_ready(tournament.event_type)]
+    data['preview_warnings'] += [f'{entry.display_name()} no longer matches the division' for entry in entries
+                                 if any(_division_registration_error(tournament, player) for player in entry.players())]
+    if len(entries) < MIN_ENTRIES:
+        data['preview_warnings'].append('At least two complete entries are required')
+    data['can_start'] = not data['preview_warnings']
+    data['preview_notes'] = [f"Starting closes {data['waitlist_count']} waitlist request(s) and {data['held_offer_count']} held offer(s). These players will not be entered."] if data['waitlist_count'] or data['held_offer_count'] else []
+    fingerprint = {'settings': [tournament.starts_at.isoformat(), tournament.court_id, tournament.court_count,
+                                tournament.match_minutes, tournament.rest_minutes, tournament.format, tournament.event_type,
+                                tournament.game_format, tournament.division_min_rating, tournament.division_max_rating],
+                   'entries': [(entry.id, entry.player1_id, entry.player2_id, entry.partner_status, entry.avg_rating()) for entry in entries],
+                   'waitlist': [(row.id, row.status, iso(row.expires_at)) for row in tournament.waitlist if row.status in ('queued', 'offered')]}
+    data['preview_fingerprint'] = hashlib.sha256(json.dumps(fingerprint, sort_keys=True).encode()).hexdigest()
+    _add_tournament_schedule_estimate(data, tournament)
+    if rows:
+        end_at = max(_parse_scheduled_at(row['scheduled_at']) for row in rows) + timedelta(minutes=tournament.match_minutes)
+        data['estimated_end_at'] = iso(end_at)
+        data['estimated_duration_minutes'] = math.ceil((end_at - tournament.starts_at).total_seconds() / 60)
+    return data
+
+
+def _schedule_feeders(tournament, match):
+    if tournament.format == 'round_robin' or match.round <= 1:
+        return []
+    bronze = match.round == tournament.total_rounds() and match.position == 1
+    start = 0 if bronze else match.position * 2
+    return [other for other in tournament.matches if other.round == match.round - 1 and other.position in (start, start + 1)]
+
+
+def _schedule_conflicts(tournament, proposed):
+    """Validate the whole proposed schedule, including both directions of edits."""
+    conflicts = []
+    duration = timedelta(minutes=tournament.match_minutes or 30)
+    rest = timedelta(minutes=tournament.rest_minutes or 0)
+    matches = [match for match in tournament.matches if match.effective_result_state() not in ('bye', 'void')]
+    def slot(match):
+        return proposed.get(match.id, (match.scheduled_at, match.court_number))
+    for match in matches:
+        start, court = slot(match)
+        if not start:
+            continue
+        if match.id in proposed and start < tournament.starts_at:
+            conflicts.append({'kind': 'before_event', 'match_id': match.id, 'message': 'A match cannot start before the tournament.'})
+        for feeder in _schedule_feeders(tournament, match):
+            feeder_start, _ = slot(feeder)
+            if feeder_start and feeder.effective_result_state() != 'bye' and start < feeder_start + duration + rest and (match.id in proposed or feeder.id in proposed):
+                conflicts.append({'kind': 'feeder_order', 'match_id': match.id, 'other_match_id': feeder.id,
+                                  'message': f'Match {match.id} needs time for its previous round and {tournament.rest_minutes or 0} minutes of rest.'})
+        for other in matches:
+            if other.id <= match.id or not ({match.id, other.id} & proposed.keys()):
+                continue
+            other_start, other_court = slot(other)
+            if not other_start:
+                continue
+            overlap = start < other_start + duration and other_start < start + duration
+            if overlap and court and court == other_court:
+                conflicts.append({'kind': 'court_overlap', 'match_id': match.id, 'other_match_id': other.id,
+                                  'message': f'Court {court} has two matches at the same time.'})
+            shared = _match_participant_ids(tournament, match) & _match_participant_ids(tournament, other)
+            if shared and start < other_start + duration + rest and other_start < start + duration + rest:
+                conflicts.append({'kind': 'player_overlap', 'match_id': match.id, 'other_match_id': other.id,
+                                  'message': 'A player has another match or too little rest between matches.'})
+    return conflicts
+
+
+def _record_schedule_change(tournament, action, match_ids, **details):
+    history = json.loads(tournament.schedule_history or '[]')
+    history.append({'action': action, 'actor_id': g.current_user.id, 'at': iso(utcnow()), 'match_ids': match_ids, **details})
+    tournament.schedule_history = json.dumps(history)
+    tournament.schedule_version = (tournament.schedule_version or 0) + 1
+
+
+def _schedule_version_error(tournament, payload):
+    if 'expected_schedule_version' in payload and (isinstance(payload['expected_schedule_version'], bool) or not isinstance(payload['expected_schedule_version'], int)):
+        return jsonify({'error': 'invalid_schedule_version'}), 400
+    if 'expected_schedule_version' in payload and payload['expected_schedule_version'] != (tournament.schedule_version or 0):
+        return jsonify({'error': 'schedule_changed', 'message': 'The schedule changed. Review the latest times before saving.'}), 409
+    return None
+
+
+def _locked_organizer_tournament(tournament_id):
+    initial = db.session.get(Tournament, tournament_id)
+    if not initial:
+        return None, (jsonify({'error': 'tournament_not_found'}), 404)
+    if initial.organizer_id != g.current_user.id:
+        return None, (jsonify({'error': 'not_organizer'}), 403)
+    participants = initial.participant_ids()
+    User.query.filter(User.id.in_(participants)).order_by(User.id).with_for_update().all()
+    tournament = Tournament.query.filter_by(id=tournament_id).with_for_update().execution_options(populate_existing=True).first()
+    if not tournament:
+        return None, (jsonify({'error': 'tournament_not_found'}), 404)
+    if tournament.organizer_id != g.current_user.id:
+        return None, (jsonify({'error': 'not_organizer'}), 403)
+    if tournament.participant_ids() != participants:
+        return None, (jsonify({'error': 'schedule_changed', 'message': 'The tournament field changed. Review it again.'}), 409)
+    return tournament, None
 
 
 def _notify_entry(entry, kind, title, body='', related_user_id=None,
@@ -562,6 +722,9 @@ def _tournament_action_summary(tournament, user_id):
     )
     partner_action = tournament.partner_action_for(user_id) \
         if tournament.status == 'registration' else None
+    partner_review_count = sum(not entry.partner_ready(tournament.event_type)
+        and bool(entry.partner_response_deadline_at and entry.partner_response_deadline_at <= utcnow())
+        for entry in tournament.entries) if tournament.status == 'registration' and tournament.organizer_id == user_id else 0
     start_action_pending = bool(
         tournament.status == 'registration'
         and tournament.organizer_id == user_id
@@ -579,19 +742,63 @@ def _tournament_action_summary(tournament, user_id):
         ) if ordered_unresolved else None,
         'pending_action_count': (
             len(action_matches) + (1 if partner_action else 0)
-            + int(start_action_pending)
+            + int(start_action_pending) + partner_review_count
         ),
         'action_match_id': ordered_actions[0].id if ordered_actions else None,
         'partner_action_pending': bool(partner_action),
+        'partner_review_count': partner_review_count,
         'start_action_pending': start_action_pending,
     }
 
 
-def _summary_payload(tournament, user_id):
+def _summary_payload(tournament, user_id, *, personal_match_id=None):
     data = tournament.to_dict(user_id)
     data.update(_tournament_action_summary(tournament, user_id))
+    entry = tournament.entry_for(user_id)
+    mine = [match for match in tournament.matches if entry and entry.id in (match.entry1_id, match.entry2_id)
+        and match.effective_result_state() not in ('confirmed', 'void', 'bye', 'forfeit')]
+    mine.sort(key=lambda match: (match.round, match.scheduled_at or tournament.starts_at, match.id))
+    if personal_match_id is not None:
+        mine = [match for match in mine if match.id == personal_match_id]
+    data['personal_match'] = None
+    if mine and tournament.status == 'active':
+        match = mine[0]
+        opponent_id = match.entry2_id if match.entry1_id == entry.id else match.entry1_id
+        opponent = next((item for item in tournament.entries if item.id == opponent_id), None)
+        data['personal_match'] = {'id': match.id, 'round': match.round,
+            'opponent': opponent.display_name() if opponent else 'Winner of the previous round',
+            'starts_at': iso(match.started_at if match.play_state == 'playing' else match.scheduled_at),
+            'timing': match.play_state, 'court_number': match.court_number,
+            'state': match.effective_result_state(), 'court_name': tournament.court.name if tournament.court else ''}
     data['result_auto_confirm_hours'] = _tournament_result_window_hours()
     return _add_tournament_schedule_estimate(data, tournament)
+
+
+def _partner_updates_for(tournament, user_id):
+    """Project only this recipient's ended requests, never another invitation."""
+    if not user_id:
+        return []
+    updates = []
+    archives = [row for row in json.loads(tournament.schedule_history or '[]')
+        if row.get('action') == 'entry_removed']
+    sources = [(entry.id, json.loads(entry.partner_history or '[]'), entry, False) for entry in tournament.entries]
+    sources += [(row.get('entry_id'), row.get('partner_history', []), None, True) for row in archives]
+    for entry_id, history, entry, removed in sources:
+        mine = [event for event in history if event.get('candidate_id') == user_id]
+        expired_current = bool(entry and entry.partner_invitee_id == user_id and entry.partner_response_deadline_at and entry.partner_response_deadline_at <= utcnow())
+        if not mine or entry and user_id in (entry.player1_id, entry.player2_id, entry.partner_invitee_id) and not expired_current:
+            continue
+        latest = mine[-1]
+        status = 'removed' if removed else 'expired' if expired_current else {'deadline_expired': 'expired', 'declined': 'declined'}.get(latest.get('action'), 'cancelled')
+        can_offer = bool(entry and tournament.status == 'registration' and entry.partner_status == 'needed'
+            and (not entry.partner_response_deadline_at or entry.partner_response_deadline_at > utcnow())
+            and _partner_candidate_available(tournament, user_id)
+            and not is_blocked_between(entry.player1_id, user_id)
+            and not _division_registration_error(tournament, db.session.get(User, user_id)))
+        next_step = 'offer_partner' if can_offer else 'organizer_review' if entry and entry.partner_response_deadline_at and entry.partner_response_deadline_at <= utcnow() and tournament.status == 'registration' else 'view_signup' if tournament.status == 'registration' else 'registration_closed'
+        updates.append({'entry_id': entry_id, 'status': status, 'at': latest.get('at'),
+            'next_step': next_step})
+    return sorted(updates, key=lambda row: row['at'] or '', reverse=True)
 
 
 def _detail_payload(tournament, user_id):
@@ -599,6 +806,8 @@ def _detail_payload(tournament, user_id):
     data.update(_tournament_action_summary(tournament, user_id))
     data['result_auto_confirm_hours'] = _tournament_result_window_hours()
     _add_tournament_schedule_estimate(data, tournament)
+    data['schedule_history'] = json.loads(tournament.schedule_history or '[]') if user_id == tournament.organizer_id else []
+    data['my_partner_updates'] = _partner_updates_for(tournament, user_id)
     matches = {match.id: match for match in tournament.matches}
     for item in data.get('matches', []):
         match = matches.get(item.get('id'))
@@ -608,6 +817,11 @@ def _detail_payload(tournament, user_id):
         eligible = active and match.effective_result_state() == 'awaiting_confirmation' \
             and _eligible_result_confirmer(tournament, match, user_id)
         organizer = bool(user_id and user_id == tournament.organizer_id)
+        operational = active and organizer and match.effective_result_state() == 'unreported'
+        ready = bool(match.entry1_id and match.entry2_id and _feeders_settled(tournament, match))
+        item['can_call_to_court'] = bool(operational and ready and match.play_state != 'playing')
+        item['can_start_play'] = bool(operational and ready and match.play_state == 'called')
+        item['can_edit_schedule'] = bool(operational and match.play_state != 'playing')
         item['awaiting_your_confirmation'] = bool(eligible)
         item['can_confirm_result'] = bool(eligible)
         item['can_dispute_result'] = bool(eligible)
@@ -656,6 +870,41 @@ def _detail_payload(tournament, user_id):
     return data
 
 
+@tournaments_bp.get('/competitions/next-matches')
+@login_required
+def next_competition_matches():
+    """Personal active matches are independent of catalog/history pagination."""
+    from backend.models import League, LeagueMember
+    from backend.routes.leagues import _league_payload
+    limit, offset, error = _page_args(default=3, maximum=100)
+    if error:
+        return jsonify({'error': error}), 400
+    user_id = g.current_user.id
+    tournaments = Tournament.query.filter(Tournament.status == 'active', Tournament.id.in_(
+        db.session.query(TournamentEntry.tournament_id).filter(db.or_(
+            TournamentEntry.player1_id == user_id, TournamentEntry.player2_id == user_id)))).all()
+    leagues = League.query.filter(League.status == 'active', League.id.in_(
+        db.session.query(LeagueMember.league_id).filter(LeagueMember.user_id == user_id,
+            LeagueMember.withdrawn_at.is_(None)))).all()
+    rows = []
+    for item in tournaments:
+        entry = item.entry_for(user_id)
+        for match in item.matches:
+            if entry and entry.id in (match.entry1_id, match.entry2_id) and match.effective_result_state() not in ('confirmed', 'void', 'bye', 'forfeit'):
+                rows.append({'kind': 'tournament', 'item': _summary_payload(item, user_id, personal_match_id=match.id)})
+    for item in leagues:
+        for match in item.matches:
+            if match.round == item.current_round and user_id in (match.player1_id, match.player2_id) and match.effective_result_state() not in ('confirmed', 'void'):
+                rows.append({'kind': 'league', 'item': _league_payload(item, user_id, personal_match_id=match.id)})
+    rows = [row for row in rows if row['item']['personal_match']]
+    def priority(row):
+        match = row['item']['personal_match']
+        action = 0 if match['timing'] == 'playing' else 1 if match['timing'] == 'called' else 2 if match['state'] in ('awaiting_confirmation', 'disputed') else 3
+        return action, match['starts_at'] or '9999', row['kind'], row['item']['id'], match['id']
+    rows.sort(key=priority)
+    return jsonify(_page_payload(rows[offset:offset + limit], limit=limit, offset=offset, total=len(rows), already_sliced=True))
+
+
 @tournaments_bp.get('/tournaments')
 @login_required
 def list_tournaments():
@@ -677,6 +926,9 @@ def list_tournaments():
             .filter(db.or_(
                 Tournament.organizer_id == user_id,
                 Tournament.id.in_(entered),
+                Tournament.id.in_(db.session.query(TournamentWaitlist.tournament_id).filter(
+                    TournamentWaitlist.user_id == user_id,
+                    TournamentWaitlist.status.in_(['queued', 'offered', 'expired']))),
             ))
             .filter(Tournament.status != 'cancelled')
             .order_by(Tournament.starts_at.desc(), Tournament.id.desc())
@@ -708,6 +960,9 @@ def list_tournaments():
         )
         .order_by(Tournament.starts_at.asc(), Tournament.id.asc())
     )
+    query, filter_error = filter_competition_query(query, Tournament, request.args)
+    if filter_error:
+        return jsonify({'error': filter_error}), 400
     batch_size = max(25, min(100, limit * 2))
     raw_offset = 0
     visible_before_page = 0
@@ -776,6 +1031,9 @@ def create_tournament():
     division, division_error = _division_settings(payload)
     if division_error:
         return jsonify({'error': division_error}), 400
+    registration, registration_error = _registration_settings(payload)
+    if registration_error:
+        return jsonify({'error': registration_error}), 400
 
     try:
         court_count = int(payload.get('court_count') or 1)
@@ -819,6 +1077,7 @@ def create_tournament():
         match_minutes=match_minutes,
         max_entries=max_entries,
         ranked=bool(payload.get('ranked')),
+        **registration,
         **division,
     )
     db.session.add(tournament)
@@ -878,7 +1137,7 @@ def create_tournament():
 def edit_tournament(tournament_id):
     """Organizer tweaks: rename, description, reschedule, resize. Resizing is
     registration-only; the rest works until the tournament finishes."""
-    tournament = db.session.get(Tournament, tournament_id)
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.organizer_id != g.current_user.id:
@@ -891,13 +1150,19 @@ def edit_tournament(tournament_id):
     structural_fields = {
         'court_id', 'format', 'event_type', 'ranked', 'game_format',
         'division_name', 'division_min_rating', 'division_max_rating',
-        'court_count', 'match_minutes',
+        'court_count', 'match_minutes', 'rest_minutes',
+        'entry_fee_cents', 'payment_method', 'withdrawal_policy',
     }
     if structural_fields & payload.keys():
         if tournament.status != 'registration':
             return jsonify({'error': 'registration_closed'}), 409
         if tournament.entries:
             return jsonify({'error': 'entries_lock_tournament_format'}), 409
+        registration, registration_error = _registration_settings(payload, tournament)
+        if registration_error:
+            return jsonify({'error': registration_error}), 400
+        for field, value in registration.items():
+            setattr(tournament, field, value)
 
         if 'court_id' in payload:
             try:
@@ -971,7 +1236,7 @@ def edit_tournament(tournament_id):
         except (TypeError, ValueError):
             return jsonify({'error': 'invalid_max_entries'}), 400
         max_entries = min(max(max_entries, MIN_ENTRIES), MAX_ENTRIES_CAP)
-        if max_entries < len(tournament.entries):
+        if max_entries < len(tournament.entries) + sum(row.status == 'offered' and row.expires_at and row.expires_at > utcnow() for row in tournament.waitlist):
             return jsonify({'error': 'below_entry_count'}), 400
         tournament.max_entries = max_entries
 
@@ -983,6 +1248,8 @@ def edit_tournament(tournament_id):
         if starts_at < utcnow() - timedelta(minutes=15):
             return jsonify({'error': 'scheduled_in_past'}), 400
         rescheduled = starts_at != tournament.starts_at
+        if rescheduled and tournament.status == 'active':
+            return jsonify({'error': 'use_match_schedule', 'message': 'Use Delay remaining matches or edit a match time after the tournament starts.'}), 409
         tournament.starts_at = starts_at
         if rescheduled:
             # Re-arm both reminders for the new time.
@@ -998,6 +1265,7 @@ def edit_tournament(tournament_id):
                 related_user_id=g.current_user.id,
                 related_tournament_id=tournament.id,
             )
+    _maintain_tournament_waitlist(tournament)
     db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
@@ -1020,27 +1288,28 @@ def tournament_detail(tournament_id):
 @rate_limit(60, 3600)
 @login_required
 def edit_tournament_match_schedule(tournament_id, match_id):
-    tournament = db.session.get(Tournament, tournament_id)
-    if not tournament:
-        return jsonify({'error': 'tournament_not_found'}), 404
-    if tournament.organizer_id != g.current_user.id:
-        return jsonify({'error': 'not_organizer'}), 403
+    tournament, error = _locked_organizer_tournament(tournament_id)
+    if error:
+        return error
     if tournament.status != 'active':
         return jsonify({'error': 'not_active'}), 409
     match = next((item for item in tournament.matches if item.id == match_id), None)
     if not match:
         return jsonify({'error': 'match_not_found'}), 404
+    if match.effective_result_state() != 'unreported' or match.play_state == 'playing':
+        return jsonify({'error': 'match_already_started', 'message': 'Only unplayed matches can be rescheduled.'}), 409
 
     payload = request.get_json(silent=True) or {}
+    version_error = _schedule_version_error(tournament, payload)
+    if version_error:
+        return version_error
     if not {'scheduled_at', 'court_number'} & payload.keys():
         return jsonify({'error': 'schedule_required'}), 400
-    changed = False
+    scheduled_at, court_number = match.scheduled_at, match.court_number
     if 'scheduled_at' in payload:
         scheduled_at = _parse_scheduled_at(payload.get('scheduled_at'))
         if not scheduled_at:
             return jsonify({'error': 'invalid_scheduled_at'}), 400
-        changed = changed or scheduled_at != match.scheduled_at
-        match.scheduled_at = scheduled_at
     if 'court_number' in payload:
         try:
             court_number = int(payload.get('court_number'))
@@ -1048,10 +1317,23 @@ def edit_tournament_match_schedule(tournament_id, match_id):
             return jsonify({'error': 'invalid_match_court_number'}), 400
         if not 1 <= court_number <= max(1, int(tournament.court_count or 1)):
             return jsonify({'error': 'invalid_match_court_number'}), 400
-        changed = changed or court_number != match.court_number
-        match.court_number = court_number
+    conflicts = _schedule_conflicts(tournament, {match.id: (scheduled_at, court_number)})
+    if conflicts:
+        return jsonify({'error': 'schedule_conflict', 'message': conflicts[0]['message'], 'conflicts': conflicts}), 409
+    external = schedule_review_needed(_match_participant_ids(tournament, match), scheduled_at, tournament.match_minutes,
+        payload, scope=f'tournament-reschedule:{tournament.id}:{match.id}:{tournament.schedule_version}',
+        viewer_id=g.current_user.id, exclude_tournament_id=tournament.id)
+    if external:
+        return jsonify(external), 409
+    changed = scheduled_at != match.scheduled_at or court_number != match.court_number
+    before = {'scheduled_at': iso(match.scheduled_at), 'court_number': match.court_number}
+    match.scheduled_at, match.court_number = scheduled_at, court_number
 
     if changed:
+        match.play_state = 'estimated'
+        match.called_at = None
+        _record_schedule_change(tournament, 'rescheduled', [match.id], before=before,
+                                after={'scheduled_at': iso(scheduled_at), 'court_number': court_number})
         when = iso(match.scheduled_at) or 'time to be announced'
         for user_id in _match_participant_ids(tournament, match):
             if user_id == g.current_user.id:
@@ -1067,6 +1349,320 @@ def edit_tournament_match_schedule(tournament_id, match_id):
             )
     db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
+@tournaments_bp.get('/tournaments/<int:tournament_id>/preview')
+@login_required
+def preview_tournament(tournament_id):
+    tournament, error = _locked_organizer_tournament(tournament_id)
+    if error:
+        return error
+    if tournament.status != 'registration':
+        return jsonify({'error': 'already_started'}), 409
+    return jsonify(_preview_bracket(tournament))
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/matches/<int:match_id>/play-state')
+@rate_limit(100, 3600)
+@login_required
+def update_tournament_play_state(tournament_id, match_id):
+    tournament, error = _locked_organizer_tournament(tournament_id)
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    version_error = _schedule_version_error(tournament, payload)
+    if version_error:
+        return version_error
+    match = next((item for item in tournament.matches if item.id == match_id), None)
+    desired = payload.get('play_state')
+    if desired not in ('estimated', 'called', 'playing'):
+        return jsonify({'error': 'invalid_play_state'}), 400
+    if tournament.status != 'active' or not match or match.effective_result_state() != 'unreported':
+        return jsonify({'error': 'match_not_playable'}), 409
+    if match.play_state == desired:
+        return jsonify(_detail_payload(tournament, g.current_user.id))
+    if desired in ('called', 'playing'):
+        if not match.entry1_id or not match.entry2_id or not _feeders_settled(tournament, match):
+            return jsonify({'error': 'players_not_decided', 'message': 'Finish the previous round before calling this match.'}), 409
+        if desired == 'playing' and match.play_state != 'called':
+            return jsonify({'error': 'call_match_first', 'message': 'Call the players to court before marking the match playing.'}), 409
+        occupied = [other for other in tournament.matches if other.id != match.id
+                    and other.effective_result_state() == 'unreported' and other.play_state in ('called', 'playing')
+                    and (other.court_number == match.court_number or _match_participant_ids(tournament, match) & _match_participant_ids(tournament, other))]
+        if occupied:
+            return jsonify({'error': 'court_or_player_busy', 'message': 'This court or a player is already called or playing another match.'}), 409
+    if match.play_state == 'playing' and desired != 'playing':
+        return jsonify({'error': 'match_already_started', 'message': 'A playing match must finish through its result.'}), 409
+    now = utcnow()
+    if desired in ('called', 'playing'):
+        # Minute precision keeps the reviewed "play now" snapshot stable while
+        # the organizer confirms; called_at/started_at retain the actual time.
+        external = schedule_review_needed(_match_participant_ids(tournament, match), now.replace(second=0, microsecond=0), tournament.match_minutes,
+            payload, scope=f'tournament-play:{tournament.id}:{match.id}:{tournament.schedule_version}',
+            viewer_id=g.current_user.id, exclude_tournament_id=tournament.id)
+        if external:
+            return jsonify(external), 409
+    match.play_state = desired
+    match.called_at = now if desired == 'called' else match.called_at if desired == 'playing' else None
+    match.started_at = now if desired == 'playing' else None
+    _record_schedule_change(tournament, desired, [match.id])
+    if desired == 'called':
+        for uid in _match_participant_ids(tournament, match):
+            notify(uid, 'tournament_update', f'{tournament.name}: your match is called',
+                   f'Go to court {match.court_number}.', related_tournament_id=tournament.id,
+                   action_url=_match_action_url(tournament, match))
+    db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/schedule/delay')
+@rate_limit(30, 3600)
+@login_required
+def delay_tournament_schedule(tournament_id):
+    tournament, error = _locked_organizer_tournament(tournament_id)
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    minutes = payload.get('minutes')
+    if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 240:
+        return jsonify({'error': 'invalid_delay', 'message': 'Choose a delay from 1 to 240 minutes.'}), 400
+    if 'expected_schedule_version' not in payload:
+        return jsonify({'error': 'schedule_version_required'}), 400
+    version_error = _schedule_version_error(tournament, payload)
+    if version_error:
+        return version_error
+    if tournament.status != 'active':
+        return jsonify({'error': 'not_active'}), 409
+    matches = [match for match in tournament.matches if match.effective_result_state() == 'unreported'
+               and match.play_state != 'playing' and match.scheduled_at]
+    proposed = {match.id: (match.scheduled_at + timedelta(minutes=minutes), match.court_number) for match in matches}
+    conflicts = _schedule_conflicts(tournament, proposed)
+    if conflicts:
+        return jsonify({'error': 'schedule_conflict', 'message': conflicts[0]['message'], 'conflicts': conflicts}), 409
+    recipients = tournament.participant_ids() - {g.current_user.id}
+    if payload.get('preview') is True:
+        return jsonify({'match_count': len(matches), 'notification_count': len(recipients),
+                        'schedule_version': tournament.schedule_version or 0,
+                        'matches': [{'id': match.id, 'before': iso(match.scheduled_at), 'after': iso(proposed[match.id][0])} for match in matches]})
+    external = schedule_batch_review_needed([
+        {'user_ids': _match_participant_ids(tournament, match), 'start': proposed[match.id][0],
+         'duration_minutes': tournament.match_minutes, 'exclusions': {'exclude_tournament_id': tournament.id}}
+        for match in matches], payload, scope=f'tournament-delay:{tournament.id}:{tournament.schedule_version}', viewer_id=g.current_user.id)
+    if external:
+        return jsonify(external), 409
+    if not matches:
+        return jsonify({'error': 'no_remaining_matches'}), 409
+    for match in matches:
+        match.scheduled_at = proposed[match.id][0]
+        match.play_state, match.called_at = 'estimated', None
+    _record_schedule_change(tournament, 'delayed', list(proposed), minutes=minutes, notified_count=len(recipients))
+    for uid in recipients:
+        notify(uid, 'tournament_update', f'{tournament.name}: remaining matches delayed {minutes} minutes',
+               'Check the updated estimated times. Matches already playing continue.', related_tournament_id=tournament.id)
+    db.session.commit()
+    data = _detail_payload(tournament, g.current_user.id)
+    data['schedule_change_summary'] = {'match_count': len(matches), 'notification_count': len(recipients), 'minutes': minutes}
+    return jsonify(data)
+
+
+def _waitlist_event(row, status, reason):
+    row.status = status
+    history = json.loads(row.history or '[]')
+    history.append({'status': status, 'at': iso(utcnow()), 'reason': reason,
+                    'expires_at': iso(row.expires_at) if status == 'offered' else None})
+    row.history = json.dumps(history)
+
+
+def _registration_response_deadline(tournament, now=None):
+    now = now or utcnow()
+    lead = tournament.starts_at - now
+    window = timedelta(hours=24) if lead > timedelta(hours=48) else timedelta(hours=4) if lead > timedelta(hours=6) else timedelta(minutes=30)
+    return min(now + window, tournament.starts_at) if lead > timedelta(0) else now + window
+
+
+def _partner_event(entry, action, actor_id=None, **extra):
+    history = json.loads(entry.partner_history or '[]')
+    history.append({'action': action, 'at': iso(utcnow()), 'actor_id': actor_id,
+        'candidate_id': entry.partner_invitee_id, 'status': entry.partner_status,
+        'deadline_at': iso(entry.partner_response_deadline_at), **extra})
+    entry.partner_history = json.dumps(history)
+
+
+def _maintain_partner_deadlines(tournament, now):
+    changed = False
+    if tournament.status != 'registration':
+        return changed
+    for entry in tournament.entries:
+        if entry.partner_ready(tournament.event_type) or not entry.partner_response_deadline_at or entry.partner_response_deadline_at > now:
+            continue
+        history = json.loads(entry.partner_history or '[]')
+        if history and history[-1].get('action') == 'deadline_expired':
+            continue
+        candidate_id = entry.partner_invitee_id
+        _partner_event(entry, 'deadline_expired')
+        recipients = {entry.player1_id, tournament.organizer_id}
+        if candidate_id:
+            recipients.add(candidate_id)
+            _mark_partner_notifications_resolved(tournament, candidate_id)
+        _mark_partner_notifications_resolved(tournament, entry.player1_id)
+        entry.partner_invitee_id = None
+        entry.partner_invitee = None
+        entry.partner_status = 'needed'
+        entry.partner_pending_on = ''
+        for user_id in recipients:
+            notify(user_id, 'tournament_invite', f'{tournament.name}: partner deadline passed',
+                'The team is incomplete. The organizer must extend the deadline or remove the entry. No partner was entered.',
+                related_tournament_id=tournament.id, action_url=f'/#tournament/{tournament.id}')
+        changed = True
+    return changed
+
+
+def _archive_partner_entry(tournament, entry, action):
+    _partner_event(entry, action, g.current_user.id)
+    history = json.loads(tournament.schedule_history or '[]')
+    history.append({'action': 'entry_removed', 'entry_id': entry.id, 'at': iso(utcnow()),
+        'player_ids': [person.id for person in entry.players()],
+        'partner_history': json.loads(entry.partner_history or '[]')})
+    tournament.schedule_history = json.dumps(history)
+
+
+def _maintain_tournament_waitlist(tournament, now=None):
+    """Called with the tournament locked; holds reserve capacity without joining."""
+    now = now or utcnow()
+    changed = _maintain_partner_deadlines(tournament, now)
+    for row in tournament.waitlist:
+        if row.status not in ('queued', 'offered'):
+            continue
+        reason = None
+        if tournament.status != 'registration':
+            reason = 'Tournament registration closed'
+        elif tournament.entry_for(row.user_id):
+            _waitlist_event(row, 'accepted', 'Registered through an accepted entry')
+            changed = True
+            continue
+        elif row.status == 'offered' and (not row.expires_at or row.expires_at <= now):
+            _waitlist_event(row, 'expired', 'The place was not accepted before the offer expired')
+            notify(row.user_id, 'tournament_waitlist_offer', f'Your place offer for {tournament.name} expired',
+                'You were not entered. Join the waitlist again if you still want to play.', related_tournament_id=tournament.id,
+                action_url=f'/#tournament/{tournament.id}')
+            changed = True
+            continue
+        if reason:
+            _waitlist_event(row, 'closed', reason)
+            notify(row.user_id, 'tournament_waitlist_offer', f'{tournament.name}: signups closed',
+                'Your waitlist request is closed. You were not entered.', related_tournament_id=tournament.id,
+                action_url=f'/#tournament/{tournament.id}')
+            changed = True
+    if tournament.status != 'registration':
+        return changed
+    offers = [row for row in tournament.waitlist if row.status == 'offered' and row.expires_at and row.expires_at > now]
+    places = max(0, tournament.max_entries - len(tournament.entries) - len(offers))
+    queued = sorted((row for row in tournament.waitlist if row.status == 'queued'), key=lambda row: (row.updated_at or row.created_at, row.id))
+    for row in queued:
+        if not places:
+            break
+        if (not row.user or row.user.deleted_at or is_blocked_between(row.user_id, tournament.organizer_id)
+                or _division_registration_error(tournament, row.user) or _partner_entry_for_invitee(tournament, row.user_id)):
+            _waitlist_event(row, 'closed', 'Registration eligibility or partner status changed')
+            notify(row.user_id, 'tournament_waitlist_offer', f'{tournament.name}: review your signup status',
+                'Your waitlist request closed because eligibility or a partner invitation changed.', related_tournament_id=tournament.id,
+                action_url=f'/#tournament/{tournament.id}')
+            changed = True
+            continue
+        row.offered_at = now
+        row.expires_at = _registration_response_deadline(tournament, now)
+        _waitlist_event(row, 'offered', 'A place is held for explicit acceptance')
+        notify(row.user_id, 'tournament_waitlist_offer', f'A place opened in {tournament.name}',
+            f'Accept by {iso(row.expires_at)} to sign up. You are not entered until you accept. Doubles partners must also consent.',
+            related_tournament_id=tournament.id, action_url=f'/#tournament/{tournament.id}')
+        places -= 1
+        changed = True
+    return changed
+
+
+def maintain_tournament_waitlists(now=None):
+    now = now or utcnow()
+    changed = 0
+    last_id = 0
+    while True:
+        ids = db.session.query(Tournament.id).filter(Tournament.id > last_id, db.or_(
+            Tournament.id.in_(db.session.query(TournamentWaitlist.tournament_id).filter(TournamentWaitlist.status.in_(['queued', 'offered']))),
+            db.and_(Tournament.status == 'registration', Tournament.id.in_(db.session.query(TournamentEntry.tournament_id).filter(
+                TournamentEntry.partner_status.in_(['pending', 'needed']), TournamentEntry.partner_response_deadline_at <= now))),
+        )).order_by(Tournament.id).limit(200).all()
+        if not ids:
+            break
+        for (tournament_id,) in ids:
+            tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
+            if tournament and _maintain_tournament_waitlist(tournament, now=now):
+                changed += 1
+            db.session.commit()
+        last_id = ids[-1][0]
+    return {'updated_tournaments': changed}
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/waitlist')
+@rate_limit(30, 3600)
+@login_required
+def join_tournament_waitlist(tournament_id):
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    if tournament.status != 'registration':
+        return jsonify({'error': 'registration_closed'}), 409
+    if tournament.entry_for(g.current_user.id) or _partner_entry_for_invitee(tournament, g.current_user.id):
+        return jsonify({'error': 'already_registered_or_invited'}), 409
+    if is_blocked_between(g.current_user.id, tournament.organizer_id):
+        return jsonify({'error': 'cannot_join'}), 403
+    division_error = _division_registration_error(tournament, g.current_user)
+    if division_error:
+        return jsonify({'error': division_error}), 409
+    _maintain_tournament_waitlist(tournament)
+    row = next((r for r in tournament.waitlist if r.user_id == g.current_user.id), None)
+    if row and row.status in ('queued', 'offered'):
+        db.session.commit()
+        return jsonify(_detail_payload(tournament, g.current_user.id))
+    if tournament.to_dict(g.current_user.id)['registration_spots_left'] > 0:
+        return jsonify({'error': 'registration_available', 'message': 'A place is available. Sign up directly.'}), 409
+    if row is None:
+        row = TournamentWaitlist(tournament=tournament, user=g.current_user)
+        db.session.add(row)
+    row.offered_at = row.expires_at = None
+    row.updated_at = utcnow()
+    _waitlist_event(row, 'queued', 'Player asked to join the waitlist')
+    db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id)), 201
+
+
+@tournaments_bp.delete('/tournaments/<int:tournament_id>/waitlist')
+@rate_limit(30, 3600)
+@login_required
+def leave_tournament_waitlist(tournament_id):
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    row = next((r for r in tournament.waitlist if r.user_id == g.current_user.id), None)
+    if row and row.status in ('queued', 'offered'):
+        _waitlist_event(row, 'left', 'Player passed on the place or left the waitlist')
+    _maintain_tournament_waitlist(tournament)
+    db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/waitlist/respond')
+@rate_limit(30, 3600)
+@login_required
+def respond_tournament_waitlist(tournament_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get('accept'), bool):
+        return jsonify({'error': 'invalid_response'}), 400
+    if payload['accept']:
+        return _register_tournament_entry(tournament_id, accept_offer=True)
+    return leave_tournament_waitlist(tournament_id)
 
 
 def _partner_entry_for_invitee(tournament, user_id):
@@ -1113,6 +1709,7 @@ def _notify_partner_invitation(tournament, entry, candidate, pending_on):
         actor = owner
         title = f'{owner.display_name} invited you to partner for {tournament.name}'
         body = 'Accept or decline before registration closes. You are not entered until you accept.'
+    body += f' Respond by {iso(entry.partner_response_deadline_at)}.' if entry.partner_response_deadline_at else ''
     notify(
         recipient.id,
         'tournament_invite',
@@ -1128,14 +1725,32 @@ def _notify_partner_invitation(tournament, entry, candidate, pending_on):
 @rate_limit(30, 3600)
 @login_required
 def register_entry(tournament_id):
-    tournament = db.session.get(Tournament, tournament_id)
+    return _register_tournament_entry(tournament_id)
+
+
+def _register_tournament_entry(tournament_id, accept_offer=False):
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.status != 'registration':
         return jsonify({'error': 'registration_closed'}), 409
-    if len(tournament.entries) >= tournament.max_entries:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    _maintain_tournament_waitlist(tournament)
+    row = next((r for r in tournament.waitlist if r.user_id == g.current_user.id), None)
+    accept_offer = accept_offer or payload.get('accept_waitlist_offer') is True
+    if accept_offer and row and row.status == 'accepted' and tournament.entry_for(g.current_user.id):
+        db.session.commit()
+        return jsonify(_detail_payload(tournament, g.current_user.id))
+    held = row and row.status == 'offered' and row.expires_at and row.expires_at > utcnow()
+    if accept_offer and not held:
+        db.session.commit()
+        return jsonify({'error': 'offer_expired', 'message': 'This place offer is no longer available. Review the latest signup status.'}), 409
+    if held and not accept_offer:
+        return jsonify({'error': 'offer_acceptance_required', 'message': 'Accept your held place to finish signing up.'}), 409
+    if not held and tournament.to_dict(g.current_user.id)['registration_spots_left'] <= 0:
         return jsonify({'error': 'tournament_full'}), 409
-
     user = g.current_user
     division_error = _division_registration_error(tournament, user)
     if division_error:
@@ -1147,7 +1762,6 @@ def register_entry(tournament_id):
 
     partner = None
     needs_partner = False
-    payload = request.get_json(silent=True) or {}
     if tournament.event_type == 'doubles':
         needs_partner = payload.get('needs_partner') is True
         try:
@@ -1180,11 +1794,16 @@ def register_entry(tournament_id):
             else 'pending' if partner else 'needed'
         ),
         partner_pending_on='invitee' if partner else '',
+        partner_response_deadline_at=_registration_response_deadline(tournament) if tournament.event_type == 'doubles' else None,
     )
     db.session.add(entry)
+    if held:
+        _waitlist_event(row, 'accepted', 'Player explicitly accepted and registered; any partner still needs separate consent')
     db.session.flush()
     entry.player1 = user
     entry.partner_invitee = partner
+    if tournament.event_type == 'doubles':
+        _partner_event(entry, 'invited' if partner else 'partner_needed', user.id)
     entry_name = user.display_name
     if partner:
         _notify_partner_invitation(tournament, entry, partner, 'invitee')
@@ -1210,7 +1829,7 @@ def register_entry(tournament_id):
 @login_required
 def swap_partner(tournament_id):
     """The entry owner proposes a partner or returns to the partner pool."""
-    tournament = db.session.get(Tournament, tournament_id)
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.status != 'registration':
@@ -1222,6 +1841,10 @@ def swap_partner(tournament_id):
         return jsonify({'error': 'not_registered'}), 404
     if entry.player1_id != g.current_user.id:
         return jsonify({'error': 'not_entry_owner'}), 403
+    _maintain_partner_deadlines(tournament, utcnow())
+    if entry.partner_response_deadline_at and entry.partner_response_deadline_at <= utcnow() and not entry.partner_ready('doubles'):
+        db.session.commit()
+        return jsonify({'error': 'partner_deadline_expired', 'message': 'The organizer must extend the partner deadline before you can invite again.'}), 409
 
     payload = request.get_json(silent=True) or {}
     needs_partner = payload.get('needs_partner') is True
@@ -1254,6 +1877,8 @@ def swap_partner(tournament_id):
     ):
         return jsonify({'error': 'partner_already_registered'}), 409
 
+    if entry.partner_ready('doubles'):
+        entry.partner_response_deadline_at = _registration_response_deadline(tournament)
     old_partner_id = entry.player2_id
     old_invitee_id = entry.partner_invitee_id
     old_pending_on = entry.partner_pending_on
@@ -1285,10 +1910,13 @@ def swap_partner(tournament_id):
         )
     entry.player2_id = None
     entry.player2 = None
+    entry.player2_arrived_at = None
     entry.partner_invitee_id = partner.id if partner else None
     entry.partner_invitee = partner
     entry.partner_status = 'pending' if partner else 'needed'
     entry.partner_pending_on = 'invitee' if partner else ''
+    entry.partner_response_deadline_at = entry.partner_response_deadline_at or _registration_response_deadline(tournament)
+    _partner_event(entry, 'invited' if partner else 'partner_needed', g.current_user.id)
     if partner:
         _notify_partner_invitation(tournament, entry, partner, 'invitee')
     db.session.commit()
@@ -1300,7 +1928,7 @@ def swap_partner(tournament_id):
 @login_required
 def offer_tournament_partner(tournament_id, entry_id):
     """Offer to fill a visible partner-pool slot; the owner must consent."""
-    tournament = db.session.get(Tournament, tournament_id)
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.status != 'registration':
@@ -1317,6 +1945,10 @@ def offer_tournament_partner(tournament_id, entry_id):
     entry = next((item for item in tournament.entries if item.id == entry_id), None)
     if not entry:
         return jsonify({'error': 'entry_not_found'}), 404
+    _maintain_partner_deadlines(tournament, utcnow())
+    if entry.partner_response_deadline_at and entry.partner_response_deadline_at <= utcnow():
+        db.session.commit()
+        return jsonify({'error': 'partner_deadline_expired', 'message': 'The organizer must extend this team’s partner deadline.'}), 409
     if entry.partner_status != 'needed' or entry.player2_id:
         return jsonify({'error': 'partner_spot_unavailable'}), 409
     if entry.player1_id == g.current_user.id:
@@ -1332,7 +1964,52 @@ def offer_tournament_partner(tournament_id, entry_id):
     entry.partner_invitee = g.current_user
     entry.partner_status = 'pending'
     entry.partner_pending_on = 'owner'
+    entry.partner_response_deadline_at = entry.partner_response_deadline_at or _registration_response_deadline(tournament)
+    _partner_event(entry, 'offered', g.current_user.id)
     _notify_partner_invitation(tournament, entry, g.current_user, 'owner')
+    db.session.commit()
+    return jsonify(_detail_payload(tournament, g.current_user.id))
+
+
+@tournaments_bp.post('/tournaments/<int:tournament_id>/entries/<int:entry_id>/partner-deadline')
+@rate_limit(30, 3600)
+@login_required
+def extend_tournament_partner_deadline(tournament_id, entry_id):
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
+    if not tournament:
+        return jsonify({'error': 'tournament_not_found'}), 404
+    if tournament.organizer_id != g.current_user.id:
+        return jsonify({'error': 'not_organizer'}), 403
+    if tournament.status != 'registration':
+        return jsonify({'error': 'registration_closed'}), 409
+    entry = next((item for item in tournament.entries if item.id == entry_id), None)
+    if not entry or entry.partner_ready(tournament.event_type):
+        return jsonify({'error': 'incomplete_entry_required'}), 409
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    deadline = _registration_response_deadline(tournament)
+    now = utcnow()
+    _maintain_partner_deadlines(tournament, now)
+    fingerprint = hashlib.sha256(json.dumps({'id': entry.id, 'history': entry.partner_history,
+        'deadline': iso(entry.partner_response_deadline_at), 'starts_at': iso(tournament.starts_at)}, sort_keys=True).encode()).hexdigest()
+    if payload.get('preview') is True:
+        db.session.commit()
+        return jsonify({'preview_fingerprint': fingerprint, 'deadline_at': iso(deadline),
+            'entry_name': entry.display_name(), 'effect': 'Keep this entry. The owner can invite a partner again; that partner must accept. No expired invitation is restored.'})
+    if payload.get('preview_fingerprint') != fingerprint:
+        db.session.commit()
+        return jsonify({'error': 'partner_review_changed', 'message': 'Review the current team before extending its deadline.'}), 409
+    proposed = _parse_scheduled_at(payload.get('deadline_at')) if payload.get('deadline_at') else None
+    if not proposed or proposed <= now or proposed > deadline + timedelta(seconds=5):
+        return jsonify({'error': 'invalid_deadline', 'message': 'Review a fresh partner deadline.'}), 400
+    deadline = proposed
+    entry.partner_response_deadline_at = deadline
+    _partner_event(entry, 'deadline_extended', g.current_user.id)
+    for user_id in {entry.player1_id, entry.partner_invitee_id} - {None}:
+        notify(user_id, 'tournament_invite', f'{tournament.name}: partner deadline extended',
+            f'Complete your team by {iso(deadline)}. Partners must accept separately.',
+            related_tournament_id=tournament.id, action_url=f'/#tournament/{tournament.id}')
     db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
@@ -1342,7 +2019,7 @@ def offer_tournament_partner(tournament_id, entry_id):
 @login_required
 def respond_tournament_partner(tournament_id):
     """Accept or decline the partner invitation/offer awaiting this user."""
-    tournament = db.session.get(Tournament, tournament_id)
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.status != 'registration':
@@ -1353,6 +2030,10 @@ def respond_tournament_partner(tournament_id):
     entry = tournament.partner_action_for(g.current_user.id)
     if not entry:
         return jsonify({'error': 'partner_action_not_pending'}), 409
+    if entry.partner_response_deadline_at and entry.partner_response_deadline_at <= utcnow():
+        _maintain_partner_deadlines(tournament, utcnow())
+        db.session.commit()
+        return jsonify({'error': 'partner_deadline_expired', 'message': 'This partner invitation expired. The organizer must review the incomplete team.'}), 409
     candidate = entry.partner_invitee
     owner = entry.player1
     if not candidate or not owner:
@@ -1373,8 +2054,10 @@ def respond_tournament_partner(tournament_id):
             return jsonify({'error': 'partner_already_registered'}), 409
         if is_blocked_between(owner.id, candidate.id):
             return jsonify({'error': 'blocked'}), 403
+        _partner_event(entry, 'accepted', g.current_user.id)
         entry.player2_id = candidate.id
         entry.player2 = candidate
+        entry.player2_arrived_at = None
         entry.partner_invitee_id = None
         entry.partner_invitee = None
         entry.partner_status = 'accepted'
@@ -1399,6 +2082,7 @@ def respond_tournament_partner(tournament_id):
             )
     else:
         other = owner if g.current_user.id == candidate.id else candidate
+        _partner_event(entry, 'declined', g.current_user.id)
         entry.partner_invitee_id = None
         entry.partner_invitee = None
         entry.partner_status = 'needed'
@@ -1411,6 +2095,7 @@ def respond_tournament_partner(tournament_id):
             related_tournament_id=tournament.id,
             action_url=f'/#tournament/{tournament.id}',
         )
+    _maintain_tournament_waitlist(tournament)
     db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
@@ -1419,7 +2104,7 @@ def respond_tournament_partner(tournament_id):
 @rate_limit(30, 3600)
 @login_required
 def withdraw_entry(tournament_id):
-    tournament = db.session.get(Tournament, tournament_id)
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.status != 'registration':
@@ -1457,7 +2142,9 @@ def withdraw_entry(tournament_id):
             )
     # Remove via the collection so delete-orphan fires AND the serialized
     # entries list below is already up to date.
+    _archive_partner_entry(tournament, entry, 'withdrawn')
     tournament.entries.remove(entry)
+    _maintain_tournament_waitlist(tournament)
     db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
@@ -1467,7 +2154,7 @@ def withdraw_entry(tournament_id):
 @login_required
 def remove_entry(tournament_id, entry_id):
     """Organizer removes an entry during registration."""
-    tournament = db.session.get(Tournament, tournament_id)
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.organizer_id != g.current_user.id:
@@ -1491,7 +2178,9 @@ def remove_entry(tournament_id, entry_id):
             related_tournament_id=tournament.id,
             action_url=f'/#tournament/{tournament.id}',
         )
+    _archive_partner_entry(tournament, entry, 'removed_by_organizer')
     tournament.entries.remove(entry)
+    _maintain_tournament_waitlist(tournament)
     db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
@@ -1748,13 +2437,18 @@ def _complete_tournament(tournament, champion_entry_id, source_match=None):
 @rate_limit(20, 3600)
 @login_required
 def start_tournament(tournament_id):
-    tournament = db.session.get(Tournament, tournament_id)
-    if not tournament:
-        return jsonify({'error': 'tournament_not_found'}), 404
-    if tournament.organizer_id != g.current_user.id:
-        return jsonify({'error': 'not_organizer'}), 403
+    tournament, error = _locked_organizer_tournament(tournament_id)
+    if error:
+        return error
     if tournament.status != 'registration':
         return jsonify({'error': 'already_started'}), 409
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    if any(row.status in ('queued', 'offered') for row in tournament.waitlist) and not payload.get('preview_fingerprint'):
+        return jsonify({'error': 'preview_required', 'message': 'Review the bracket and closing waitlist before starting.'}), 409
+    if payload.get('preview_fingerprint') and payload['preview_fingerprint'] != _preview_bracket(tournament)['preview_fingerprint']:
+        return jsonify({'error': 'preview_changed', 'message': 'The field or settings changed. Review the updated preview before starting.'}), 409
     entries = list(tournament.entries)
     if len(entries) < MIN_ENTRIES:
         return jsonify({'error': 'not_enough_entries'}), 400
@@ -1777,8 +2471,19 @@ def start_tournament(tournament_id):
             'count': len(outside_division),
         }), 409
 
+    preview = _preview_bracket(tournament)
+    entries_by_id = {entry.id: entry for entry in entries}
+    external = schedule_batch_review_needed([
+        {'user_ids': [player.id for entry_id in (row['entry1_id'], row['entry2_id']) if entry_id
+                      for player in entries_by_id[entry_id].players()],
+         'start': _parse_scheduled_at(row['scheduled_at']), 'duration_minutes': tournament.match_minutes,
+         'exclusions': {'exclude_tournament_id': tournament.id}}
+        for row in preview['matches'] if row.get('result_state') != 'bye'], payload,
+        scope=f'tournament-start:{tournament.id}:{preview["preview_fingerprint"]}', viewer_id=g.current_user.id)
+    if external:
+        return jsonify(external), 409
     # Seed by rating (doubles: pair average), best first.
-    entries.sort(key=lambda e: -e.avg_rating())
+    entries.sort(key=lambda e: (-e.avg_rating(), e.id))
     for i, entry in enumerate(entries):
         entry.seed = i + 1
 
@@ -1821,6 +2526,7 @@ def start_tournament(tournament_id):
     db.session.flush()
     _schedule_tournament_matches(tournament)
     tournament.status = 'active'
+    _maintain_tournament_waitlist(tournament)
     for entry in entries:
         _notify_entry(
             entry, 'tournament_start',
@@ -2433,27 +3139,42 @@ def send_tournament_reminders():
         db.session.commit()
 
 
-CHECKIN_OPENS_HOURS_BEFORE = 24
+CHECKIN_OPENS_HOURS_BEFORE = 2
 
 
 @tournaments_bp.post('/tournaments/<int:tournament_id>/checkin')
 @rate_limit(60, 3600)
 @login_required
 def tournament_checkin(tournament_id):
-    """Day-of arrival confirmation — either partner can check the entry in,
-    from 24h before the start until the tournament wraps."""
-    tournament = db.session.get(Tournament, tournament_id)
+    """An individual reports arrival; organizers may explicitly mark a player."""
+    tournament = Tournament.query.filter_by(id=tournament_id).with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.status not in ('registration', 'active'):
         return jsonify({'error': 'tournament_not_open'}), 409
-    entry = tournament.entry_for(g.current_user.id)
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    user_id = payload.get('user_id', g.current_user.id)
+    if isinstance(user_id, bool) or not isinstance(user_id, int):
+        return jsonify({'error': 'invalid_user_id'}), 400
+    if user_id != g.current_user.id and tournament.organizer_id != g.current_user.id:
+        return jsonify({'error': 'cannot_mark_other_player'}), 403
+    entry = tournament.entry_for(user_id)
     if not entry:
         return jsonify({'error': 'not_registered'}), 404
     if utcnow() < tournament.starts_at - timedelta(hours=CHECKIN_OPENS_HOURS_BEFORE):
         return jsonify({'error': 'checkin_not_open'}), 409
-    if entry.checked_in_at is None:
-        entry.checked_in_at = utcnow()
+    arrived = payload.get('arrived', True)
+    if not isinstance(arrived, bool):
+        return jsonify({'error': 'invalid_arrival'}), 400
+    field = 'player1_arrived_at' if user_id == entry.player1_id else 'player2_arrived_at'
+    if bool(getattr(entry, field)) != arrived:
+        now = utcnow()
+        setattr(entry, field, now if arrived else None)
+        history = json.loads(entry.arrival_history or '[]')
+        history.append({'user_id': user_id, 'arrived': arrived, 'actor_id': g.current_user.id, 'at': iso(now)})
+        entry.arrival_history = json.dumps(history)
         db.session.commit()
     return jsonify(_detail_payload(tournament, g.current_user.id))
 
@@ -2462,7 +3183,7 @@ def tournament_checkin(tournament_id):
 @rate_limit(20, 3600)
 @login_required
 def cancel_tournament(tournament_id):
-    tournament = db.session.get(Tournament, tournament_id)
+    tournament = Tournament.query.filter_by(id=tournament_id).populate_existing().with_for_update().first()
     if not tournament:
         return jsonify({'error': 'tournament_not_found'}), 404
     if tournament.organizer_id != g.current_user.id:
@@ -2478,5 +3199,6 @@ def cancel_tournament(tournament_id):
             related_user_id=g.current_user.id,
             related_tournament_id=tournament.id,
         )
+    _maintain_tournament_waitlist(tournament)
     db.session.commit()
     return jsonify(_summary_payload(tournament, g.current_user.id))

@@ -56,6 +56,6 @@ def test_friends_results_need_no_location_and_rankings_explain_the_fallback():
 
 def test_competitions_do_not_claim_an_empty_local_area_when_discovery_was_skipped():
     competitions = section("async function renderTournaments", "// ---------- Shared competition results")
-    assert "areaUnset: true" in competitions
+    assert "areaUnset: !loc" in competitions
     assert "Set your area for nearby competitions" in competitions
     assert "!nearbyResult.areaUnset" in competitions

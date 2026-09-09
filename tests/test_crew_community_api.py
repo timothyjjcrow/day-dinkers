@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from tests.schedule_test_support import post_with_schedule_review
 import pytest
 
 from backend.app import create_app, db
@@ -344,7 +345,7 @@ def test_casual_crew_sessions_support_group_friends_and_open_without_identity_le
     private_payload = scheduled_payload(
         court_id, crew, 'private', max_players=12, suffix='private',
     )
-    private = client.post(
+    private = post_with_schedule_review(client,
         '/api/games', json=private_payload, headers=headers(owner),
     )
     assert private.status_code == 201, private.get_json()
@@ -354,7 +355,7 @@ def test_casual_crew_sessions_support_group_friends_and_open_without_identity_le
     # Crew request as private. A delayed device retry must recover that same
     # immutable row instead of duplicating or changing its audience.
     legacy_retry_payload = {**private_payload, 'visibility': 'open'}
-    legacy_retry = client.post(
+    legacy_retry = post_with_schedule_review(client,
         '/api/games', json=legacy_retry_payload, headers=headers(owner),
     )
     assert legacy_retry.status_code == 200, legacy_retry.get_json()
@@ -366,7 +367,7 @@ def test_casual_crew_sessions_support_group_friends_and_open_without_identity_le
     assert client.delete(
         f'/api/friends/{ben_friendship}', headers=headers(owner),
     ).status_code == 200
-    friends_game = client.post('/api/games', json=scheduled_payload(
+    friends_game = post_with_schedule_review(client, '/api/games', json=scheduled_payload(
         court_id, crew, 'friends', max_players=8, suffix='friends',
     ), headers=headers(owner))
     assert friends_game.status_code == 201, friends_game.get_json()
@@ -386,7 +387,7 @@ def test_casual_crew_sessions_support_group_friends_and_open_without_identity_le
         f"/api/games/{friends_body['id']}", headers=headers(outsider),
     ).status_code == 404
 
-    open_game = client.post('/api/games', json=scheduled_payload(
+    open_game = post_with_schedule_review(client, '/api/games', json=scheduled_payload(
         court_id, crew, 'open', max_players=12, suffix='open',
     ), headers=headers(owner))
     assert open_game.status_code == 201, open_game.get_json()
@@ -411,7 +412,7 @@ def test_casual_crew_sessions_support_group_friends_and_open_without_identity_le
     assert public_view.get_json()['crew_name'] is None
     assert public_view.get_json()['crew_roster_version'] is None
 
-    call = client.post(
+    call = post_with_schedule_review(client,
         f"/api/games/{open_body['id']}/open-call",
         json={'client_attempt_id': 'open-crew-community-call'},
         headers=headers(owner),

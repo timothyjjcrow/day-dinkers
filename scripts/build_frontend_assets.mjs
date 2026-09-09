@@ -7,7 +7,7 @@ import path from 'node:path';
 import { build } from 'esbuild';
 import { minify } from 'terser';
 
-const release = 'r76';
+const release = 'r77';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(projectRoot, 'public');
 const outputDir = path.join(publicDir, 'assets', release);
@@ -33,7 +33,7 @@ for (const [sourceName, outputName] of entries) {
   const source = await readFile(sourcePath);
   if (sourceName.endsWith('.js')) {
     // Terser's cross-statement compression keeps the monolithic application
-    // under the release's 250 KiB Brotli budget.  Use a stable relative source
+    // under the release's 300 KiB Brotli budget.  Use a stable relative source
     // name so source maps remain deterministic across machines/workspaces.
     const mappedSourceName = path.relative(outputDir, sourcePath)
       .split(path.sep).join('/');
@@ -80,7 +80,7 @@ for (const [sourceName, outputName] of entries) {
     params: {
       [constants.BROTLI_PARAM_QUALITY]: 11,
       // A 512 KiB input block improves compression of the application while
-      // keeping the immutable transfer within its existing 250 KiB budget.
+      // keeping the immutable transfer within its 300 KiB budget.
       [constants.BROTLI_PARAM_LGBLOCK]: 19,
       [constants.BROTLI_PARAM_MODE]: sourceName.endsWith('.css')
         ? constants.BROTLI_MODE_TEXT : constants.BROTLI_MODE_TEXT,

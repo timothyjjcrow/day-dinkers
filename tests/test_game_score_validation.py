@@ -215,6 +215,7 @@ def test_multi_game_match_is_persisted_and_server_derives_match_winner(client):
 
     confirmed = client.post(
         f"/api/games/{game['id']}/confirm", headers=headers(ben),
+        json={'expected_score_version': body['score_version']},
     )
     assert confirmed.status_code == 200, confirmed.get_json()
     assert confirmed.get_json()['you_won'] is False
@@ -353,7 +354,7 @@ def test_only_unique_disjoint_1v1_or_2v2_teams_are_accepted(client):
     assert all(player.team is None for player in row.players)
 
 
-def test_corrected_lineup_clears_players_omitted_from_the_new_score(client):
+def test_ranked_correction_preserves_the_original_lineup(client):
     players = [
         register(client, f'correction-{index}', name)
         for index, name in enumerate(('Ana', 'Ben', 'Cam', 'Dee'))
@@ -375,11 +376,11 @@ def test_corrected_lineup_clears_players_omitted_from_the_new_score(client):
 
     corrected = client.post(
         f"/api/games/{game['id']}/complete",
-        json=score_payload([a_id], [c_id], 15, 8),
+        json=score_payload([a_id], [c_id], 15, 8, expected_score_version=first.get_json()['score_version']),
         headers=headers(ana),
     )
-    assert corrected.status_code == 200, corrected.get_json()
-    assert corrected.get_json()['status'] == 'awaiting_confirmation'
+    assert corrected.status_code == 409, corrected.get_json()
+    assert corrected.get_json()['error'] == 'score_review_pending'
 
     assignments = {
         player.user_id: player.team
@@ -387,9 +388,9 @@ def test_corrected_lineup_clears_players_omitted_from_the_new_score(client):
     }
     assert assignments == {
         a_id: 1,
-        b_id: None,
+        b_id: 1,
         c_id: 2,
-        d_id: None,
+        d_id: 2,
     }
 
 

@@ -25,7 +25,7 @@ def finish(client, host, opponent, *, won=True, timeout=False, ranked=True):
         db.session.commit()
         auto_confirm_stale_scores()
     elif ranked:
-        response = client.post(f"/api/games/{game['id']}/confirm", headers=auth(opponent))
+        response = client.post(f"/api/games/{game['id']}/confirm", json={'expected_score_version': response.get_json()['score_version']}, headers=auth(opponent))
         assert response.status_code == 200, response.get_json()
     db.session.expire_all()
     return db.session.get(Game, game['id'])
@@ -34,6 +34,7 @@ def finish(client, host, opponent, *, won=True, timeout=False, ranked=True):
 def dispute(client, game, opponent):
     response = client.post(f'/api/games/{game.id}/dispute', json={
         'details': 'The automatically confirmed score is incorrect.',
+        'expected_score_version': game.score_version,
     }, headers=auth(opponent))
     assert response.status_code == 200, response.get_json()
     assert response.get_json()['score_dispute_outcome'] == 'late_dispute'

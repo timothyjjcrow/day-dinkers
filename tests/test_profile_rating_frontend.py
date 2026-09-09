@@ -8,7 +8,7 @@ STYLES = (ROOT / 'public' / 'styles-v15.css').read_text()
 
 
 def test_profile_editor_supports_self_rating_and_optional_dupr():
-    start = APP.index('function openEditProfile()')
+    start = APP.index('function openEditProfile(')
     editor = APP[start:APP.index('function gameIsChallenge', start)]
     assert 'id="ep-self-rating" role="radiogroup"' in editor
     assert "[2.5, '2.5', 'Learning consistency']" in APP
@@ -67,4 +67,6 @@ def test_match_rating_is_opt_in_and_confined_to_rankings_or_completed_results():
     rankings_end = APP.index("const activePlayLevel", rankings_start)
     rankings = APP[rankings_start:rankings_end]
     assert 'Third Shot match rating ${u.rating}' in rankings
-    assert '${me.rating} · What is this?' in rankings
+    viewer = APP[APP.index('function rankingViewerHtml('):APP.index('async function renderPlay(')]
+    assert '${me.rating} · What is this?' in viewer
+    assert 'rankingViewerHtml(board, rankRowHtml)' in rankings
