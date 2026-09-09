@@ -171,17 +171,13 @@ def test_analytics_distinguishes_unavailable_conversion_reporting_from_zero(clie
 
 
 def test_public_logo_never_uses_draft_bytes_even_for_owner(app, client, live):
-    from io import BytesIO
     import base64
-    from PIL import Image
 
-    def png(color):
-        output = BytesIO()
-        Image.new('RGB', (2, 2), color).save(output, format='PNG')
-        return output.getvalue()
-
+    # Two complete 2×2 PNG fixtures: the test needs distinct valid bytes,
+    # not an optional image-generation dependency on the CI runner.
+    before = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNkYPjPwMDAxAAGAAsfAQMU4wsAAAAAAElFTkSuQmCC')
+    after = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP8zwACTGCSAQANHQEDgslx/wAAAABJRU5ErkJggg==')
     owner, bid = live
-    before, after = png('blue'), png('red')
     with app.app_context():
         business = db.session.get(BusinessProfile, bid)
         business.logo_data = 'data:image/png;base64,' + base64.b64encode(before).decode()
