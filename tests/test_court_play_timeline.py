@@ -151,6 +151,7 @@ def test_entry_notice_is_visible_before_join_and_keeps_other_host_notes_separate
     from pathlib import Path
     source=Path('public/app-v15.js').read_text()
     helpers=source[source.index('  const COURT_OPEN_PLAY_PLAN_SOURCE'):source.index('  function openCourtWindowPlan')]
+    helpers+=source[source.index('  function sessionPlayStyleLabel'):source.index('  function sessionVisitFactsHtml')]
     renderer=source[source.index('  function publicSessionFacts'):source.index('  function renderSignedOutShareContext')]
     subprocess.run(['node','-e',r'''
       const assert=require('node:assert/strict');
