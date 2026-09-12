@@ -14,9 +14,9 @@ Canonical status and evidence: [requirements.json](requirements.json). Implement
 | PL-08 | 3. Create game / planner | P2 — practical essentials are buried with optional prose. Judgment. | pending |
 | PL-09 | 3. Create game / planner | P2 — numeric level selection is clearer for experienced players than new ones. Judgment. | pending |
 | PL-10 | 4. Invitations and joining | P1 — Invite by link does not invite into the draft being created. Confirmed. | in_progress |
-| PL-11 | 4. Invitations and joining | P1 — a new user cannot straightforwardly create a private game for existing offline friends. Confirmed limitation. | implemented |
-| PL-12 | 4. Invitations and joining | P2 — joined state should summarize the commitment. Judgment. | implemented |
-| PL-13 | 5. Session detail, roster and payment/access expectations | P1 — cost and reservation status can be below the join decision. Confirmed layout; priority is a design judgment. | implemented |
+| PL-11 | 4. Invitations and joining | P1 — a new user cannot straightforwardly create a private game for existing offline friends. Confirmed limitation. | verified |
+| PL-12 | 4. Invitations and joining | P2 — joined state should summarize the commitment. Judgment. | verified |
+| PL-13 | 5. Session detail, roster and payment/access expectations | P1 — cost and reservation status can be below the join decision. Confirmed layout; priority is a design judgment. | verified |
 | PL-14 | 5. Session detail, roster and payment/access expectations | P2 — clearer roster state distinctions. Judgment. | pending |
 | PL-15 | 6. Waitlist, arrival and host changes | P1 — waitlist promotion can falsely imply a confirmed commitment. Confirmed. | implemented |
 | PL-16 | 6. Waitlist, arrival and host changes | P2 — host handoff lacks the new host’s consent. Confirmed behavior, design improvement. | implemented |
@@ -70,8 +70,8 @@ Canonical status and evidence: [requirements.json](requirements.json). Implement
 | ID-27 | 11. Activity / notifications | global settings say invitations/challenges/score confirmations **“always come through”**, even when device delivery is off or server push unavailable. | implemented |
 | ID-28 | 11. Activity / notifications | Activity filters also filter only the loaded 20-item page; “No groups activity yet” can appear despite older matching items. | implemented |
 | ID-29 | 11. Activity / notifications | add quiet hours and digest cadence only after channel delivery is reliable. | pending |
-| ID-30 | 12. Calendar and installation | “updates and cancellations stay in sync” can suggest immediate changes. | implemented |
-| ID-31 | 12. Calendar and installation | offer installation and calendar subscription after a person joins a plan, with a concrete benefit. | implemented |
+| ID-30 | 12. Calendar and installation | “updates and cancellations stay in sync” can suggest immediate changes. | verified |
+| ID-31 | 12. Calendar and installation | offer installation and calendar subscription after a person joins a plan, with a concrete benefit. | verified |
 | ID-32 | 13. Privacy, safety and help | when checked in, the heading always says **“Court presence · Visible now”**, even if nearby visibility is Hidden. | implemented |
 | ID-33 | 13. Privacy, safety and help | Settings has no Help entry; contact details are buried in auth policy dialogs and feedback is on Me. | in_progress |
 | ID-34 | 13. Privacy, safety and help | reporting copy promises a trained operator/safety team. | implemented |

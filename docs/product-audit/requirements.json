@@ -136,12 +136,13 @@
       "finding": "P1 — a new user cannot straightforwardly create a private game for existing offline friends. Confirmed limitation.",
       "source": "docs/product-audit/play-competition.md",
       "requirement": "**P1 — a new user cannot straightforwardly create a private game for existing offline friends. Confirmed limitation.** Invite only is disabled without existing invite candidates, and submission requires at least one selected existing player ([public/app-v15.js:19008](</Users/timothycrowley/pickleball local /public/app-v15.js:19008>), `:20389`). This demands building an in-app social graph before arranging a simple private game. Add revocable, unlisted session invitation links, with host approval or explicit link access rules; preserve the currently strong private-roster safeguards. Account creation should complete the selected RSVP, not force the user back through Community.",
-      "status": "implemented",
+      "status": "verified",
       "implementation": [
         "Revocable unlisted per-session links, host-only rotation, explicit link access in creation, and preview distinct from redemption are present in r77."
       ],
       "verification": [
-        "tests/test_private_session_links.py; tests/test_private_session_links_frontend.py. Browser guest-account RSVP and rotation journey remains to verify."
+        "tests/test_private_session_links.py; tests/test_private_session_links_frontend.py. Browser guest-account RSVP and rotation journey remains to verify.",
+        "September 12: complete relevant fixture browser flow, focused behavioral checks and live r78/green Linux CI. See docs/product-audit/session-return-evidence.md and release-r78.md. Physical installation/phone delivery are separate ID-36 boundaries."
       ]
     },
     {
@@ -150,11 +151,13 @@
       "finding": "P2 — joined state should summarize the commitment. Judgment.",
       "source": "docs/product-audit/play-competition.md",
       "requirement": "**P2 — joined state should summarize the commitment. Judgment.** The existing “You’re in” and Undo are good (`:35170`). Immediately show **Date/time, court/meeting point, free/cost, who is hosting** and useful **Add to calendar** / directions actions. Add no automatic permission prompt before this success state. Public preview and authentication-gate observations are in the main audit, rather than repeated here.",
-      "status": "implemented",
+      "status": "verified",
       "implementation": [
-        "September 12 follow-up: confirmed dated session exposes calendar and optional Home Screen actions; one-time copy and refresh-based subscription are distinct. See docs/product-audit/session-return-evidence.md. Release verification pending."
+        "September 12 follow-up: confirmed dated session exposes calendar and optional Home Screen actions; one-time copy and refresh-based subscription are distinct. See docs/product-audit/session-return-evidence.md. Released in r78; see release-r78.md."
       ],
-      "verification": []
+      "verification": [
+        "September 12: complete relevant fixture browser flow, focused behavioral checks and live r78/green Linux CI. See docs/product-audit/session-return-evidence.md and release-r78.md. Physical installation/phone delivery are separate ID-36 boundaries."
+      ]
     },
     {
       "id": "PL-13",
@@ -162,11 +165,13 @@
       "finding": "P1 — cost and reservation status can be below the join decision. Confirmed layout; priority is a design judgment.",
       "source": "docs/product-audit/play-competition.md",
       "requirement": "**P1 — cost and reservation status can be below the join decision. Confirmed layout; priority is a design judgment.** Cost and court-count facts render inside a closed details disclosure at the very end, after roster, join/actions, chat and info strips (`:35126`, `:35214`). Show cost/free status and booking/access status next to date and venue, before Join. Any “reserved” fact must say **Host says courts are reserved** unless verified by a booking integration. Setting a count is not a reservation.",
-      "status": "implemented",
+      "status": "verified",
       "implementation": [
-        "September 12: cost and court access now precede the roster and Join; numeric court counts are explicitly attributed to the host. Missing cost/booking stays unknown. See session-return-evidence.md. Release verification pending."
+        "September 12: cost and court access now precede the roster and Join; numeric court counts are explicitly attributed to the host. Missing cost/booking stays unknown. See session-return-evidence.md. Released in r78; see release-r78.md."
       ],
-      "verification": []
+      "verification": [
+        "September 12: complete relevant fixture browser flow, focused behavioral checks and live r78/green Linux CI. See docs/product-audit/session-return-evidence.md and release-r78.md. Physical installation/phone delivery are separate ID-36 boundaries."
+      ]
     },
     {
       "id": "PL-14",
@@ -916,11 +921,13 @@
       "finding": "“updates and cancellations stay in sync” can suggest immediate changes.",
       "source": "docs/product-audit/identity-social.md",
       "requirement": "**P1 copy:** “updates and cancellations stay in sync” can suggest immediate changes. State that subscribed calendars refresh on their own schedule; use the app's current game status for an urgent change. Keep one-time “Add this game” visibly different from ongoing “Subscribe to my plans.”",
-      "status": "implemented",
+      "status": "verified",
       "implementation": [
-        "September 12 follow-up: confirmed dated session exposes calendar and optional Home Screen actions; one-time copy and refresh-based subscription are distinct. See docs/product-audit/session-return-evidence.md. Release verification pending."
+        "September 12 follow-up: confirmed dated session exposes calendar and optional Home Screen actions; one-time copy and refresh-based subscription are distinct. See docs/product-audit/session-return-evidence.md. Released in r78; see release-r78.md."
       ],
-      "verification": []
+      "verification": [
+        "September 12: complete relevant fixture browser flow, focused behavioral checks and live r78/green Linux CI. See docs/product-audit/session-return-evidence.md and release-r78.md. Physical installation/phone delivery are separate ID-36 boundaries."
+      ]
     },
     {
       "id": "ID-31",
@@ -928,11 +935,13 @@
       "finding": "offer installation and calendar subscription after a person joins a plan, with a concrete benefit.",
       "source": "docs/product-audit/identity-social.md",
       "requirement": "**P2 design:** offer installation and calendar subscription after a person joins a plan, with a concrete benefit. Account security settings are an odd primary place for installation. Keep Settings as a reliable fallback rather than making setup a prerequisite.",
-      "status": "implemented",
+      "status": "verified",
       "implementation": [
-        "September 12 follow-up: confirmed dated session exposes calendar and optional Home Screen actions; one-time copy and refresh-based subscription are distinct. See docs/product-audit/session-return-evidence.md. Release verification pending."
+        "September 12 follow-up: confirmed dated session exposes calendar and optional Home Screen actions; one-time copy and refresh-based subscription are distinct. See docs/product-audit/session-return-evidence.md. Released in r78; see release-r78.md."
       ],
-      "verification": []
+      "verification": [
+        "September 12: complete relevant fixture browser flow, focused behavioral checks and live r78/green Linux CI. See docs/product-audit/session-return-evidence.md and release-r78.md. Physical installation/phone delivery are separate ID-36 boundaries."
+      ]
     },
     {
       "id": "ID-32",

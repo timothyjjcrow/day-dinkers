@@ -1,6 +1,12 @@
-# Release checkpoint — September 9, 2026
+# Release checkpoint — September 12, 2026
 
 The user explicitly resumed work and requested all current changes be pushed and deployed. Production deployment is now authorized. The earlier whole-app implementation goal remains incomplete; this release does not claim that every one of the 104 original requirement groups has passed every acceptance gate.
+
+## September 12 continuation
+
+r78 is live from code commit 5032ab9 after a fully green Linux run (1,723 passed, one PostgreSQL-only skip). Cost/access facts now precede Join; confirmed dated sessions expose calendar and optional Home Screen access; session Help is contextual. Private guest signup → explicit acceptance → host revocation was verified locally, including retention of the accepted roster place. Production health, asset hashes and mobile public entry passed. See release-r78.md and session-return-evidence.md.
+
+The next planner wave is in progress locally: distinct play style and court access, main-flow practical details and clearer skill labels. It is not included in r78 and requires its own migration and verification. See remaining-implementation-review.md for the remaining work.
 
 ## Current release
 

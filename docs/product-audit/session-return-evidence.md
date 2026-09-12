@@ -25,3 +25,10 @@ Session Help uses the existing Help & safety sheet and expands joining, changing
 ## Reconciliation
 
 The audit ledger was reconciled against r77 source, tests and existing journey evidence. Implementation and verification remain separate: 87 findings have implementation recorded; five are in progress and twelve pending. This does not certify 87 complete user flows. Conditional delivery/device checks and unverified journeys remain explicit in each requirement.
+
+
+## Private invitation completion and release
+
+After the original check, the fixture host with zero friends created Private Saturday practice, set $12.50 and one host-reported reserved court, chose Invite only, and copied that newly created session’s link. A fresh browser saw the exact invitation, created a new account, explicitly opened it and accepted the place. Cost and the host claim were visible before acceptance; return actions appeared afterward. The host disabled the link. A second fresh browser received an unavailable-invitation message with no private roster; the accepted player retained their place after reload. No invitation token is retained in this document. Screenshot: `private-invitation-before-join-390.png` in the local evidence directory.
+
+Release r78 is live. Linux CI passed all 1,723 cases with one PostgreSQL-only skip. See release-r78.md for deployment, hash, health and browser smoke receipts. The earlier reconciliation counts above record that point in time; requirements.json is authoritative for current status.
