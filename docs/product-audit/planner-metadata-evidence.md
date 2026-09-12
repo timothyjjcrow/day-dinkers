@@ -1,6 +1,6 @@
 # Session planning metadata — September 12, 2026
 
-Scope: PL-07, PL-08 and PL-09. Release r79 is prepared; production rollout and the full regression gate must be recorded separately before these findings become verified.
+Scope: PL-07, PL-08 and PL-09. Release r79 is live. Its full regression, migration and production receipt is in release-r79.md. The exercised browser path is casual session planning; remaining full-app and physical-device verification stays separate.
 
 ## Changes
 
@@ -28,6 +28,6 @@ Synthetic local fixture on port 8062, Alex Discovery account, no production writ
 - API tests cover invalid enums, ranked/style compatibility, contradictory access/count rejection, no partial creation, exact keyed retries, title-only preservation, following-date propagation without changing earlier dates, public/private preview privacy and calendar subscription output.
 - 42 planning/invitation tests passed on an isolated UTF-8 PostgreSQL database. An initial disposable database inherited SQL_ASCII from the local cluster and failed connection initialization; recreating this test target with explicit UTF-8 resolved the fixture issue.
 - The additive production migration ran twice against a clone of the prior synthetic PostgreSQL schema. Both new fields are nullable; the legacy game remains NULL for both. All five core tables retained their one legacy record.
-- A fresh private production custom-format backup was created and its archive directory verified. Pre-upgrade counts: 19 accounts, 18,510 courts, 95 games, 126 roster records and 11 messages. Neither new column existed yet. This record does not itself mean production migration or rollout completed.
+- A fresh private production custom-format backup was created and its archive directory verified. Pre-upgrade counts: 19 accounts, 18,510 courts, 95 games, 126 roster records and 11 messages. Neither new column existed yet. The production migration, independent schema check and rollout subsequently completed with unchanged counts; see release-r79.md.
 
 Cost/access edits notify participants through the existing update path; explicit price-change reconfirmation is still part of the remaining commitment/roster review (PL-14). Completing these planner improvements does not close the whole-app audit.

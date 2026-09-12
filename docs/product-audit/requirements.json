@@ -101,7 +101,7 @@
         "r79: separate casual capacity/play style, visible practical planning fields with explicit host-reported access, and descriptive self-rating choices; see docs/product-audit/planner-metadata-evidence.md."
       ],
       "verification": [
-        "Focused browser, executed JavaScript/API and 42 PostgreSQL checks recorded in planner-metadata-evidence.md. Full release and production migration gates pending."
+        "r79 live: 1,740 tests passed in Linux CI, 42 planning/invitation tests passed on PostgreSQL, migrated production after backup with unchanged core counts. Casual planning/edit/recovery browser evidence and boundaries: docs/product-audit/planner-metadata-evidence.md; receipt: docs/product-audit/release-r79.md. Retained as implemented pending the wider acceptance review."
       ]
     },
     {
@@ -115,7 +115,7 @@
         "r79: separate casual capacity/play style, visible practical planning fields with explicit host-reported access, and descriptive self-rating choices; see docs/product-audit/planner-metadata-evidence.md."
       ],
       "verification": [
-        "Focused browser, executed JavaScript/API and 42 PostgreSQL checks recorded in planner-metadata-evidence.md. Full release and production migration gates pending."
+        "r79 live: 1,740 tests passed in Linux CI, 42 planning/invitation tests passed on PostgreSQL, migrated production after backup with unchanged core counts. Casual planning/edit/recovery browser evidence and boundaries: docs/product-audit/planner-metadata-evidence.md; receipt: docs/product-audit/release-r79.md. Retained as implemented pending the wider acceptance review."
       ]
     },
     {
@@ -129,7 +129,7 @@
         "r79: separate casual capacity/play style, visible practical planning fields with explicit host-reported access, and descriptive self-rating choices; see docs/product-audit/planner-metadata-evidence.md."
       ],
       "verification": [
-        "Focused browser, executed JavaScript/API and 42 PostgreSQL checks recorded in planner-metadata-evidence.md. Full release and production migration gates pending."
+        "r79 live: 1,740 tests passed in Linux CI, 42 planning/invitation tests passed on PostgreSQL, migrated production after backup with unchanged core counts. Casual planning/edit/recovery browser evidence and boundaries: docs/product-audit/planner-metadata-evidence.md; receipt: docs/product-audit/release-r79.md. Retained as implemented pending the wider acceptance review."
       ]
     },
     {
