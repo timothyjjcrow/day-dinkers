@@ -943,7 +943,7 @@ def test_settings_leaf_rows_share_product_navigation_and_preserve_parent_context
     assert 'class="card row nav-row-button" id="settings-calendar"' in calendar
     assert "uiIcon('calendar')" in calendar
     assert 'class="card row nav-row-button" id="account-install"' in account
-    assert 'class="card row settings-inline-row"' in account
+    assert "openChildModal(modal, openInstallApp)" in account
     assert "uiIcon('external')" in account
     assert "uiIcon('chevron-right', 'chev')" in hub
 

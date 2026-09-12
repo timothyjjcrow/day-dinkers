@@ -75,8 +75,12 @@ def test_cards_and_detail_surface_the_saved_plan_without_hiding_time():
     assert '${esc(descriptionNote)}' in detail
     assert '${courtEntryNoticeHtml(game)}' in detail
     assert 'game.ends_at' in detail
-    assert 'game.cost_cents' in detail
-    assert 'game.court_count' in detail
+    assert '${sessionVisitFactsHtml(game)}' in detail
+    assert detail.index('${sessionVisitFactsHtml(game)}') < detail.index('${waitlistHtml}${arrivalsHtml}${gameConsentHtml(game)}')
+    visit_facts = section('function sessionVisitFactsHtml', 'function sessionReturnToolsHtml')
+    assert 'game.cost_cents' in visit_facts
+    assert 'game.court_count' in visit_facts
+    assert 'Host says' in visit_facts
     assert "game.court_number || ''" in detail
 
     assert '.game-money-input' in STYLES

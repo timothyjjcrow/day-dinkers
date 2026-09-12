@@ -8,7 +8,7 @@ The audit integration gaps are implemented: holiday/venue access continuity, dur
 
 Production schema upgrade completed and verified after a secure pre-upgrade backup. The same migration passed twice on an isolated PostgreSQL database containing the prior release schema and synthetic legacy records; profile, court, recurring session, roster and message data survived. New defaults and reply deletion semantics were checked. Twenty-nine scheduling/recurrence/agenda tests passed on PostgreSQL.
 
-Release r77 is live, pushed to main, and passed live smoke checks. The full local suite passed 1,719 tests; all four real PostgreSQL concurrency cases passed. A fixture-only missing-Pillow issue in Linux CI was corrected without changing production files; its full CI rerun is still in progress. Refer to release-r77.md for the receipt and verification boundaries.
+Release r77 is live, pushed to main, and passed live smoke checks. The full local suite passed 1,719 tests; all four real PostgreSQL concurrency cases passed. A fixture-only missing-Pillow issue in Linux CI was corrected without changing production files; its full CI rerun passed (verified September 12, 2026). Refer to release-r77.md for the receipt and verification boundaries.
 
 ## Verification records
 

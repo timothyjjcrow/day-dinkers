@@ -48,6 +48,9 @@ def test_rally_and_game_cards_use_the_shared_product_icon_sprite():
 
 def test_game_detail_status_and_primary_actions_use_product_icons():
     detail = section("function gameScreenHtml", "async function openGameScreen")
+    return_tools = section('function sessionReturnToolsHtml', 'function openInstallApp')
+    assert "${uiIcon('calendar')} Add to calendar" in return_tools
+    assert '${closedRally ? \'\' : sessionReturnToolsHtml(game)}' in detail
     assert "let statusIcon = uiIcon('pickleball');" in detail
     assert 'data-status="${esc(game.status)}"' in detail
     assert 'class="game-detail-status-icon" aria-hidden="true">${statusIcon}' in detail
@@ -59,7 +62,6 @@ def test_game_detail_status_and_primary_actions_use_product_icons():
     for action in (
         "${uiIcon('clock')} Join waitlist",
         "${uiIcon('clock')} Reschedule",
-        "${uiIcon('calendar')} Add to calendar",
         "${uiIcon('calendar')} Play again",
         "${uiIcon('message')} Message the group",
     ):

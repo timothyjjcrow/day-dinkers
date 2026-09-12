@@ -7053,7 +7053,7 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .session-joined-state { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--green-200); border-radius: var(--radius-md); background: var(--green-50); color: var(--green-800); font-size: 14px; font-weight: 800; }
 .session-joined-state > span { display: flex; align-items: center; gap: 7px; }
 .session-joined-state .ui-icon { width: 19px; height: 19px; }
-.session-joined-state button { min-height: 32px; padding: 2px 9px; border-radius: var(--radius-xs); background: var(--card); color: var(--green-800); font: inherit; font-size: 12px; }
+.session-joined-state button { min-height: 44px; min-width: 44px; padding: 2px 9px; border-radius: var(--radius-xs); background: var(--card); color: var(--green-800); font: inherit; font-size: 12px; }
 .session-when { display: flex; align-items: flex-start; gap: 9px; margin: 14px 0 10px; font-size: 17px; line-height: 1.4; }
 .session-when .ui-icon { width: 19px; height: 19px; flex: 0 0 19px; margin-top: 3px; color: var(--green-700); }
 .session-place-wrap { display: flex; align-items: stretch; gap: 8px; margin-bottom: 18px; }
@@ -7395,3 +7395,10 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 #player-export-ready:not([hidden]) { display: grid; gap: 12px; }
 #player-export-ready p { margin: 0; overflow-wrap: anywhere; }
 #player-export-save { display: flex; align-items: center; justify-content: center; min-height: 44px; text-decoration: none; }
+
+/* Actions that stay visible after confirming a dated place. */
+.session-return-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.session-return-tools .btn { padding: 10px 12px; flex: 1 1 150px; min-width: 0; min-height: 44px; white-space: normal; }
+
+.session-visit-facts { display: grid; gap: 4px; margin: 0 0 14px; font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
+.session-visit-facts b { color: var(--ink); }

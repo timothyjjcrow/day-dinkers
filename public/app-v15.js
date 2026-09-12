@@ -11380,10 +11380,16 @@
     });
     const modal = openModal(`
       ${modalHead('Add to calendar', 'calendar')}
-      <p class="row-sub calendar-choice-copy">Add this game once, or subscribe to your plans. Subscribed calendars refresh on their provider’s schedule.</p>
+      <p class="row-sub calendar-choice-copy">Save this date once, or keep all your plans in sync.</p>
+      <div class="section-label">Just this date</div>
+      <p class="field-help">A one-time copy. Later changes will not update it.</p>
       <div class="calendar-choice-list">
         <a class="btn btn-primary btn-block" href="https://calendar.google.com/calendar/render?${esc(googleParams.toString())}" target="_blank" rel="noopener">${uiIcon('external')} Google Calendar</a>
         <button type="button" class="btn btn-secondary btn-block" id="calendar-download-event">${uiIcon('calendar')} Apple, Outlook, or another app</button>
+      </div>
+      <div class="section-label">All my upcoming plans</div>
+      <p class="field-help">Subscribed calendars refresh on their provider’s schedule. Check Third Shot for last-minute changes.</p>
+      <div class="calendar-choice-list">
         <button type="button" class="btn btn-secondary btn-block" id="calendar-subscribe-games">${uiIcon('refresh')} Subscribe to all my games</button>
       </div>
       <p class="field-help">Subscription links are private and include your upcoming games.</p>
@@ -35087,18 +35093,75 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     return modal;
   }
 
+  function appRunsStandalone() {
+    return state.appInstalled === true || navigator.standalone === true
+      || window.matchMedia('(display-mode: standalone)').matches;
+  }
+
+  function sessionVisitFactsHtml(game) {
+    const cost = game.cost_cents == null ? 'Cost not listed'
+      : Number(game.cost_cents) === 0 ? 'Free session'
+        : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
+    const count = Number(game.court_count);
+    const access = Number.isInteger(count) && count > 0
+      ? `Host says ${count} court${count === 1 ? ' is' : 's are'} reserved`
+      : 'Court booking not listed';
+    return `<div class="session-visit-facts" role="group" aria-label="Session cost and court access">
+      <span><b>${esc(cost)}</b></span><span>${esc(access)}</span>
+    </div>`;
+  }
+
+  function sessionReturnToolsHtml(game) {
+    if (!game.is_joined || game.status !== 'upcoming' || game.is_instant
+        || !(new Date(game.scheduled_at).getTime() > Date.now())) return '';
+    return `<div class="session-return-tools" role="group" aria-label="Keep this plan handy">
+      <button type="button" class="btn btn-secondary" id="gs-calendar">${uiIcon('calendar')} Add to calendar</button>
+      ${appRunsStandalone() ? '' : `<button type="button" class="btn btn-secondary" id="gs-install" aria-label="Add Third Shot to your Home Screen">${uiIcon('home')} Home Screen</button>`}
+    </div>`;
+  }
+
+  function openInstallApp() {
+    const modal = openModal(`${modalHead('Keep Third Shot handy', 'home')}
+      <p class="row-sub">Open your plans and chats from your Home Screen.</p>
+      <p class="field-help" id="install-status" role="status">${appRunsStandalone() ? 'Third Shot is already running as an app.' : 'Adding the app is optional.'}</p>
+      ${state.installPrompt && !appRunsStandalone() ? '<button type="button" class="btn btn-primary btn-block" id="install-native">Install Third Shot</button>' : ''}
+      <details class="simple-disclosure" open><summary>iPhone or iPad · Safari</summary><p class="row-sub">Open Third Shot in Safari. Tap Share, then Add to Home Screen. If shown, leave Open as Web App on, then tap Add.</p></details>
+      <details class="simple-disclosure"><summary>Android · Chrome</summary><p class="row-sub">Open Third Shot in Chrome. Open the browser menu, choose Add to Home screen or Install app, then follow the browser’s steps.</p></details>
+      <details class="simple-disclosure"><summary>Computer or another browser</summary><p class="row-sub">Look for Install in the address bar or browser menu. If it is unavailable, bookmark Third Shot to return later.</p></details>
+    `, { label: 'Add Third Shot to your Home Screen' });
+    modal.querySelector('#install-native')?.addEventListener('click', async (event) => {
+      const prompt = state.installPrompt;
+      if (!prompt) return;
+      state.installPrompt = null;
+      const button = event.currentTarget;
+      button.disabled = true;
+      const status = modal.querySelector('#install-status');
+      try {
+        await prompt.prompt();
+        const choice = await prompt.userChoice;
+        if (modal.isConnected) status.textContent = choice.outcome === 'accepted'
+          ? 'Install requested. Follow your browser to finish.'
+          : 'No changes made. You can keep using Third Shot in this browser.';
+      } catch {
+        if (modal.isConnected) status.textContent = 'The install prompt could not open. Use the steps below or bookmark Third Shot.';
+      } finally {
+        if (modal.isConnected) {
+          button.remove();
+          status.setAttribute('tabindex', '-1');
+          status.focus();
+        }
+      }
+    });
+    return modal;
+  }
+
   function openAccountSettings() {
-    const installHtml = !window.matchMedia('(display-mode: standalone)').matches
-      ? (state.installPrompt
-          ? `<button type="button" class="card row nav-row-button" id="account-install" aria-label="Install Third Shot">
-              <span class="nav-row-leading" aria-hidden="true">${uiIcon('external')}</span>
-              <span class="row-main"><span class="row-title">Install Third Shot</span><span class="row-sub">Open full screen and keep the app close</span></span>
-              ${uiIcon('chevron-right', 'chev')}
-            </button>`
-          : `<div class="card row settings-inline-row">
-              <span class="nav-row-leading" aria-hidden="true">${uiIcon('home')}</span>
-              <span class="row-main"><span class="row-title">Install Third Shot</span><span class="row-sub">Use your browser’s Add to Home Screen command</span></span>
-            </div>`) : '';
+    const installHtml = !appRunsStandalone()
+      ? `<button type="button" class="card row nav-row-button" id="account-install" aria-label="Install Third Shot">
+          <span class="nav-row-leading" aria-hidden="true">${uiIcon('home')}</span>
+          <span class="row-main"><span class="row-title">Add app to Home Screen</span><span class="row-sub">Quick access to your plans and chats</span></span>
+          ${uiIcon('chevron-right', 'chev')}
+        </button>` : '';
     const emailVerified = state.me?.email_verified === true;
     let mfaEnabled = state.me?.mfa?.enabled === true;
     const modal = openModal(`
@@ -35209,16 +35272,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         modal.querySelector('#account-sessions-mfa').addEventListener('input', () => modal.querySelector('#account-sessions-status').classList.add('hidden'));
       }
     };
-    modal.querySelector('#account-install')?.addEventListener('click', async () => {
-      const prompt = state.installPrompt;
-      if (!prompt) return;
-      state.installPrompt = null;
-      try {
-        prompt.prompt();
-        const choice = await prompt.userChoice;
-        toast(choice.outcome === 'accepted' ? 'Installing — see you on the home screen' : 'Maybe later');
-      } catch { /* browser cancelled */ }
-    });
+    modal.querySelector('#account-install')?.addEventListener('click', () => openChildModal(modal, openInstallApp));
     modal.querySelector('#account-verify-email')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
       const resetAction = beginButtonAction(button, 'Sending…');
@@ -35557,7 +35611,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     return modal;
   }
 
-  function openHelpSafety() {
+  function openHelpSafety({ topic = '' } = {}) {
     const topics = [
       ['Join a game', 'Open a session to check its date, court, level, cost and players. Join confirms your place; a waitlist is not a confirmed place. Use the session chat for meeting details.'],
       ['Session or ranked match?', 'A session is a group meeting to play. A ranked match has named teams and a score that affects your Third Shot match rating after confirmation. Your self-rating is separate.'],
@@ -35569,7 +35623,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     ];
     const modal = openModal(`
       ${modalHead('Help & safety')}
-      ${topics.map(([title, copy]) => `<details class="simple-disclosure"><summary>${esc(title)}</summary><p class="row-sub">${esc(copy)}</p></details>`).join('')}
+      ${topics.map(([title, copy]) => `<details class="simple-disclosure"${topic === title ? ' open' : ''}><summary>${esc(title)}</summary><p class="row-sub">${esc(copy)}</p></details>`).join('')}
       <div class="section-label">Get help</div>
       <a class="btn btn-primary btn-block" href="mailto:support@third-shot.app">Email support</a>
       <p class="field-help">Include the game or court link and what happened. Never send your password.</p>
@@ -37420,9 +37474,6 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         if (canFillRoster && !hostNeedsPlayers) {
           moreActions.push(fillRosterAction(false));
         }
-        if (!game.is_instant && startsAhead) {
-          moreActions.push(`<button class="btn btn-secondary btn-block" id="gs-calendar">${uiIcon('calendar')} Add to calendar</button>`);
-        }
         if (game.recurrence === 'weekly') {
           const standing = game.is_creator || game.my_recurrence_rsvp?.standing_rsvp === true;
           moreActions.push(`<section class="recurrence-rsvp-card" aria-label="Recurring RSVP preference">
@@ -37514,13 +37565,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     ].filter(Boolean) : [];
     const detailMeta = detailMetaItems.length
       ? `<div class="game-detail-meta">${detailMetaItems.map((item) => `<span>${esc(item)}</span>`).join('')}</div>` : '';
-    const costLabel = game.cost_cents == null ? ''
-      : Number(game.cost_cents) === 0 ? 'Free'
-        : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
-    const courtScaleLabel = game.court_count
-      ? `${game.court_count} court${Number(game.court_count) === 1 ? '' : 's'} reserved` : '';
     const notes = game.notes && !(game.is_instant && game.notes === '⚡ Instant rally') ? game.notes : '';
-    const planningFacts = [costLabel, courtScaleLabel, recurrencePattern,
+    const planningFacts = [recurrencePattern,
       recurrenceEndLabel ? `Through ${recurrenceEndLabel}` : ''].filter(Boolean);
     if (game.waitlist_offer && game.status === 'upcoming' && !game.is_joined) {
       actions = `<section class="game-consent-card"><b>A spot is held for you</b><p>Accept by ${esc(fmtTimeShort(game.waitlist_offer.expires_at))} to join this date.</p><div class="game-consent-actions"><button class="btn btn-primary" data-waitlist-reply="accept">Accept spot</button><button class="btn btn-secondary" data-waitlist-reply="pass">Pass</button></div></section>`;
@@ -37597,7 +37643,9 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         ${game.status === 'upcoming' && courtDirectionsUrl(court)
           ? `<a class="btn btn-secondary btn-block gs-directions" href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name || 'the court')} (opens Maps)">${uiIcon('external')}<span>Directions</span></a>` : ''}
       </div>
+      ${sessionVisitFactsHtml(game)}
       ${courtEntryNoticeHtml(game)}
+      ${closedRally ? '' : sessionReturnToolsHtml(game)}
       ${!hasScore ? `<section class="session-roster" aria-label="Players">
         <div class="session-roster-head"><h4>${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Going' : 'Signed up'} <span>${readyCount}</span></h4><span>${game.status === 'upcoming' && !closedRally ? rosterAvailability : ''}</span></div>
         ${playersHtml}
@@ -37610,7 +37658,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
         <button type="button" class="btn btn-secondary" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
       </div>
-      ${chatPreview}${infoStrip}${planningDetails}`;
+      ${chatPreview}${infoStrip}${planningDetails}
+      <button type="button" class="btn btn-secondary btn-block" id="gs-help">Help with this ${playNoun}</button>`;
   }
 
   async function openGameScreen(gameId, options = {}) {
@@ -37843,6 +37892,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       box.querySelector('#gs-calendar')?.addEventListener('click', () => {
         openChildModal(modal, () => openGameCalendarMenu(game));
       });
+      box.querySelector('#gs-install')?.addEventListener('click', () => openChildModal(modal, openInstallApp));
+      box.querySelector('#gs-help')?.addEventListener('click', () => openChildModal(modal, () => openHelpSafety({ topic: game.status === 'upcoming' ? (game.is_joined ? 'Change or cancel a plan' : 'Join a game') : game.game_type === 'ranked' ? 'An incorrect score' : 'Session or ranked match?' })));
       box.querySelector('#gs-find-nearby')?.addEventListener('click', () => {
         closeModal(modal);
         setPlaySegment('games', { render: false });
@@ -40804,6 +40855,12 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     state.installPrompt = e;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    state.appInstalled = true;
+    state.installPrompt = null;
+    document.querySelectorAll('#gs-install, #account-install, #install-native').forEach((button) => button.remove());
   });
 
   // Repaint ❤️ badges from a bounded {message_id: count} snapshot. Only
