@@ -2648,6 +2648,8 @@ class Game(TimestampMixin, db.Model):
         db.String(40), nullable=False, default='', server_default='',
     )
     court_count = db.Column(db.Integer)
+    play_style = db.Column(db.String(32))
+    court_access = db.Column(db.String(32))
     # Hosts can pause automatic FIFO promotion while they review the visible
     # waitlist.  Existing games retain the historical auto-fill behaviour.
     auto_fill_waitlist = db.Column(
@@ -3118,6 +3120,8 @@ class Game(TimestampMixin, db.Model):
             'cost_cents': self.cost_cents,
             'court_number': self.court_number or '',
             'court_count': self.court_count,
+            'play_style': self.play_style,
+            'court_access': self.court_access,
             'auto_fill_waitlist': bool(self.auto_fill_waitlist),
             'notes': self.notes,
             'is_challenge': self.is_direct_challenge,

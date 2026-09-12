@@ -240,9 +240,11 @@ def calendar_feed(token):
                 if game.cost_cents is not None else ''
             )
             court_scale = (
-                f'{game.court_count} court'
-                f'{"s" if game.court_count != 1 else ""} reserved'
-                if game.court_count else ''
+                'Public drop-in (host reported)' if game.court_access == 'public_drop_in'
+                else 'Court booking still needed' if game.court_access == 'booking_needed'
+                else f'Host says {game.court_count} court{"s" if game.court_count != 1 else ""} reserved'
+                if game.court_count else 'Host says the court is reserved'
+                if game.court_access == 'host_reserved' else 'Court booking not listed'
             )
             event_name = (
                 'Pickleball ranked match'
@@ -252,6 +254,7 @@ def calendar_feed(token):
             description = ' · '.join(filter(None, [
                 f'{len(game.players)}/{game.max_players} players',
                 game.description or '',
+                {'rotating_doubles':'Rotating doubles', 'singles':'Singles', 'mixed':'Mixed play'}.get(game.play_style, ''),
                 cost,
                 court_scale,
                 game.notes or '',
@@ -579,6 +582,20 @@ def _validated_game_level_range(payload, preferred_level='any'):
     return {'level_min': low, 'level_max': high}, None
 
 
+def _validate_game_play_access(fields, *, game_type, max_players, existing=None):
+    """Keep independent planning choices compatible without inventing a booking."""
+    style = fields.get('play_style', getattr(existing, 'play_style', None))
+    if style and (game_type == 'ranked' or (style == 'rotating_doubles' and max_players < 4)):
+        return 'invalid_play_style'
+    access = fields.get('court_access', getattr(existing, 'court_access', None))
+    count = fields.get('court_count', getattr(existing, 'court_count', None))
+    if access in {'public_drop_in', 'booking_needed'} and count is not None:
+        if fields.get('court_count') is not None:
+            return 'invalid_court_access'
+        fields['court_count'] = None
+    return None
+
+
 def _validated_game_plan_fields(payload, scheduled_at, *, partial=False):
     """Canonicalize optional planning details shared by create and edit.
 
@@ -588,6 +605,21 @@ def _validated_game_plan_fields(payload, scheduled_at, *, partial=False):
     POST.
     """
     fields = {}
+    for key, allowed in (
+        ('play_style', {'rotating_doubles', 'singles', 'mixed'}),
+        ('court_access', {'host_reserved', 'public_drop_in', 'booking_needed'}),
+    ):
+        if key not in payload:
+            if not partial:
+                fields[key] = None
+            continue
+        raw = payload[key]
+        if raw is None or raw == '':
+            fields[key] = None
+        elif not isinstance(raw, str) or raw not in allowed:
+            return None, f'invalid_{key}'
+        else:
+            fields[key] = raw
     for key, limit in (
         ('title', GAME_TITLE_MAX_LENGTH),
         ('description', GAME_DESCRIPTION_MAX_LENGTH),
@@ -776,6 +808,7 @@ SERIES_TEMPLATE_FIELDS = (
     'court_id', 'creator_id', 'club_id', 'crew_id', 'crew_roster_version',
     'game_type', 'visibility', 'max_players', 'title', 'description',
     'duration_minutes', 'cost_cents', 'court_number', 'court_count',
+    'play_style', 'court_access',
     'auto_fill_waitlist', 'notes', 'preferred_level', 'level_min', 'level_max',
     'recurrence', 'recurrence_timezone', 'recurrence_local_time',
     'recurrence_weekdays', 'recurrence_ends_on', 'scheduled_at',
@@ -1293,6 +1326,7 @@ def _game_attempt_fingerprint(normalized):
     for key, empty_value in (
         ('title', ''), ('description', ''), ('duration_minutes', None),
         ('cost_cents', None), ('court_number', ''), ('court_count', None),
+        ('play_style', None), ('court_access', None),
         ('level_min', None), ('level_max', None),
     ):
         if canonical.get(key) == empty_value:
@@ -5117,6 +5151,12 @@ def create_game():
     )
     if plan_error:
         return jsonify({'error': plan_error}), 400
+    plan_error = _validate_game_play_access(
+        plan_fields, game_type=normalized_attempt['game_type'],
+        max_players=normalized_attempt['max_players'],
+    )
+    if plan_error:
+        return jsonify({'error': plan_error}), 400
     normalized_attempt.update(plan_fields)
     level_fields, level_error = _validated_game_level_range(
         payload, normalized_attempt['preferred_level'],
@@ -5364,6 +5404,8 @@ def create_game():
         cost_cents=normalized_attempt['cost_cents'],
         court_number=normalized_attempt['court_number'],
         court_count=normalized_attempt['court_count'],
+        play_style=normalized_attempt['play_style'],
+        court_access=normalized_attempt['court_access'],
         preferred_level=preferred_level,
         level_min=normalized_attempt['level_min'],
         level_max=normalized_attempt['level_max'],
@@ -6385,6 +6427,8 @@ def preview_game_invite_link(game_id):
         'game_type': game.game_type, 'max_players': game.max_players,
         'scheduled_at': iso(game.scheduled_at), 'duration_minutes': game.duration_minutes,
         'expires_at': iso(game.invite_link_expires_at), 'cost_cents': game.cost_cents,
+        'play_style': game.play_style, 'court_access': game.court_access,
+        'court_count': game.court_count, 'court_number': game.court_number,
         'host_name': game.creator.display_name,
         'court': {'id': court.id, 'name': court.name, 'city': court.city, 'address': court.address},
         'joined_count': len(game.players),
@@ -7422,7 +7466,7 @@ def edit_game(game_id):
         'court_id', 'scheduled_at', 'max_players', 'visibility',
         'preferred_level', 'level_min', 'level_max', 'notes', 'recurrence', 'title', 'description',
         'duration_minutes', 'ends_at', 'cost_cents', 'court_number',
-        'court_count', 'recurrence_timezone', 'recurrence_weekdays',
+        'court_count', 'play_style', 'court_access', 'recurrence_timezone', 'recurrence_weekdays',
         'recurrence_ends_on', 'edit_scope', 'schedule_conflict_ack',
     }
     unknown = sorted(set(payload) - allowed)
@@ -7500,6 +7544,13 @@ def edit_game(game_id):
                 'player_count': len(game.players),
             }), 409
         proposed['max_players'] = max_players
+
+    plan_error = _validate_game_play_access(
+        proposed, game_type=game.game_type,
+        max_players=proposed.get('max_players', game.max_players), existing=game,
+    )
+    if plan_error:
+        return jsonify({'error': plan_error}), 400
 
     if 'visibility' in payload:
         visibility = payload.get('visibility')
@@ -7610,12 +7661,15 @@ def edit_game(game_id):
         'cost_cents': game.cost_cents,
         'court_number': game.court_number or '',
         'court_count': game.court_count,
+        'play_style': game.play_style,
+        'court_access': game.court_access,
     }
     changed = []
     for field in (
         'court_id', 'scheduled_at', 'max_players', 'visibility',
         'preferred_level', 'level_min', 'level_max', 'notes', 'recurrence', 'title', 'description',
         'duration_minutes', 'cost_cents', 'court_number', 'court_count',
+        'play_style', 'court_access',
         'recurrence_timezone', 'recurrence_local_time',
         'recurrence_weekdays', 'recurrence_ends_on',
     ):
@@ -7705,7 +7759,8 @@ def edit_game(game_id):
         'recurrence_ends_on': 'repeat end date',
         'title': 'title', 'description': 'description',
         'duration_minutes': 'duration', 'cost_cents': 'cost',
-        'court_number': 'court number', 'court_count': 'courts reserved',
+        'court_number': 'court number', 'court_count': 'host-reported reserved courts',
+        'play_style': 'play style', 'court_access': 'court access',
     }
     new_court_name = game.court.name if game.court else 'the court'
     details = []
@@ -7755,10 +7810,14 @@ def edit_game(game_id):
             f'Court/area: {game.court_number}'
             if game.court_number else 'Court/area removed'
         )
+    if 'play_style' in changed:
+        details.append('Play style: ' + {'rotating_doubles':'Rotating doubles', 'singles':'Singles', 'mixed':'Mixed play'}.get(game.play_style, 'No preference'))
+    if 'court_access' in changed:
+        details.append('Court access: ' + {'host_reserved':'Host reports a reservation', 'public_drop_in':'Public drop-in (host reported)', 'booking_needed':'Booking still needed'}.get(game.court_access, 'Not confirmed'))
     if 'court_count' in changed:
         details.append(
-            f'Courts reserved: {game.court_count}'
-            if game.court_count else 'Courts reserved removed'
+            f'Host-reported reserved courts: {game.court_count}'
+            if game.court_count else 'Host-reported reserved court count removed'
         )
     changed_copy = ', '.join(field_labels[field] for field in changed)
     for player in sorted(game.players, key=lambda row: row.user_id):

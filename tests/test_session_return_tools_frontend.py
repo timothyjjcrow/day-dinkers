@@ -77,7 +77,7 @@ openHelpSafety({topic:'<script>bad</script>'});assert.doesNotMatch(html, /<scrip
 
 
 def test_visit_facts_keep_unknowns_honest_and_attribute_host_booking_claims():
-    source = APP[APP.index('  function sessionVisitFactsHtml('):APP.index('  function sessionReturnToolsHtml(')]
+    source = APP[APP.index('  function sessionCourtAccessLabel('):APP.index('  function sessionReturnToolsHtml(')]
     run("const assert = require('node:assert/strict'); const esc = s => String(s);" + source + r"""
 assert.match(sessionVisitFactsHtml({}), /Cost not listed/);
 assert.match(sessionVisitFactsHtml({}), /Court booking not listed/);

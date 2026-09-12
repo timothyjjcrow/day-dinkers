@@ -165,6 +165,7 @@ REQUIRED_COLUMNS = {
         'assembly_closed_at', 'creator_id', 'client_attempt_id',
         'client_attempt_fingerprint', 'title', 'description',
         'duration_minutes', 'cost_cents', 'court_number', 'court_count',
+        'play_style', 'court_access',
         'auto_fill_waitlist', 'score_dispute_count', 'score_dispute_reason',
         'score_version', 'score_history', 'score_correction_pending',
         'invite_link_version', 'invite_link_expires_at',

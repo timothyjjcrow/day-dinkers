@@ -386,7 +386,7 @@ def test_crew_planner_keeps_the_group_and_offers_clear_session_visibility():
     assert '<b>Nearby players</b><small>Open at the court</small>' in planner
     assert "Accepted members start selected. Deselect anyone" in planner
     assert "const maximum = crewId ? 12 : CASUAL_GAME_MAX_PLAYERS" in planner
-    assert "const minimum = crewId ? Math.max(6, inviteIds.size + 1) : 6" in planner
+    assert "const minimum = crewId ? Math.max(2, inviteIds.size + 1) : 2" in planner
     assert "Selected group players are included; friends can fill the extra spots." in planner
     assert "Accepted Crew snapshot" not in planner
 

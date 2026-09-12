@@ -231,7 +231,7 @@ def test_group_planner_is_casual_supports_twelve_and_has_three_audiences():
         assert f'<b>{label}</b>' in planner
     assert "openPlayerCount.disabled = gameType === 'ranked'" in planner
     assert "const maximum = crewId ? 12 : CASUAL_GAME_MAX_PLAYERS" in planner
-    assert "const minimum = crewId ? Math.max(6, inviteIds.size + 1) : 6" in planner
+    assert "const minimum = crewId ? Math.max(2, inviteIds.size + 1) : 2" in planner
     assert "Ranked match setup" in planner
 
 

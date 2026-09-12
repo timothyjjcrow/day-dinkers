@@ -76,10 +76,11 @@ def test_capacity_is_three_choices_with_group_stepper_to_one_hundred():
     planner = planner_source()
     edit = section("function openEditGameSheet", "function gameFingerprint")
 
-    for label in ("Singles", "Doubles", "Group"):
-        assert capacity.count(f"label: '{label}'") == 1
-    assert 'aria-label="Group player capacity"' in capacity
-    assert 'min="6" max="${CASUAL_GAME_MAX_PLAYERS}"' in capacity
+    assert "gameType === 'ranked' ? 'Singles' : '2 players'" in capacity
+    assert "gameType === 'ranked' ? 'Doubles' : '4 players'" in capacity
+    assert "label: 'Custom'" in capacity
+    assert 'aria-label="Maximum players"' in capacity
+    assert 'min="2" max="${CASUAL_GAME_MAX_PLAYERS}"' in capacity
     assert "const CASUAL_GAME_MAX_PLAYERS = 100;" in APP
     assert "const maximum = crewId ? 12 : CASUAL_GAME_MAX_PLAYERS" in planner
     assert "Number(raw.maxPlayers) <= CASUAL_GAME_MAX_PLAYERS" in APP

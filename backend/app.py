@@ -17,8 +17,8 @@ BUNDLED_COURTS_FILE = os.path.join(PROJECT_ROOT, 'data', 'courts.json.gz')
 # Immutable frontend URLs are part of the executable shell contract. Keep the
 # prior release readable while an already-open service-worker client reloads
 # onto the current release.
-FRONTEND_RELEASE = 'r78'
-FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', 'r76', 'r77', FRONTEND_RELEASE})
+FRONTEND_RELEASE = 'r79'
+FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', 'r76', 'r77', 'r78', FRONTEND_RELEASE})
 FRONTEND_RELEASE_FILES = frozenset({
     'app-v15.min.js',
     'app-v15.min.js.map',
@@ -516,6 +516,9 @@ def _upgrade_schema(app):
                 statements.append(
                     'ALTER TABLE game ADD COLUMN court_count INTEGER'
                 )
+            for plan_column in ('play_style', 'court_access'):
+                if plan_column not in game_cols:
+                    statements.append(f'ALTER TABLE game ADD COLUMN {plan_column} VARCHAR(32)')
             if 'auto_fill_waitlist' not in game_cols:
                 statements.append(
                     'ALTER TABLE game ADD COLUMN auto_fill_waitlist BOOLEAN NOT NULL DEFAULT '
@@ -2731,6 +2734,8 @@ def create_app(config_name=None):
                 'max_players': game.max_players, 'player_count': len(game.players),
                 'spots_left': max(0, game.max_players - occupied),
                 'cost_cents': game.cost_cents,
+                'play_style': game.play_style, 'court_access': game.court_access,
+                'court_count': game.court_count, 'court_number': game.court_number,
                 'description': game.description or game.notes or '',
                 'court': {'id': game.court.id, 'name': game.court.name,
                           'city': game.court.city, 'address': game.court.address,

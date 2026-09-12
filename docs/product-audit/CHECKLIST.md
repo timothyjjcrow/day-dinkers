@@ -10,9 +10,9 @@ Canonical status and evidence: [requirements.json](requirements.json). Implement
 | PL-04 | 1. Play home, discovery and live refresh | P2 — feed completeness. Confirmed structural limitation. | implemented |
 | PL-05 | 2. My plans and calendar | P1 — future commitments can disappear from My plans. Confirmed rendering path. | implemented |
 | PL-06 | 2. My plans and calendar | P1 — personal schedule is not a unified schedule. Confirmed. | implemented |
-| PL-07 | 3. Create game / planner | P2 — group capacity and match format are mixed together. Judgment. | pending |
-| PL-08 | 3. Create game / planner | P2 — practical essentials are buried with optional prose. Judgment. | pending |
-| PL-09 | 3. Create game / planner | P2 — numeric level selection is clearer for experienced players than new ones. Judgment. | pending |
+| PL-07 | 3. Create game / planner | P2 — group capacity and match format are mixed together. Judgment. | implemented |
+| PL-08 | 3. Create game / planner | P2 — practical essentials are buried with optional prose. Judgment. | implemented |
+| PL-09 | 3. Create game / planner | P2 — numeric level selection is clearer for experienced players than new ones. Judgment. | implemented |
 | PL-10 | 4. Invitations and joining | P1 — Invite by link does not invite into the draft being created. Confirmed. | in_progress |
 | PL-11 | 4. Invitations and joining | P1 — a new user cannot straightforwardly create a private game for existing offline friends. Confirmed limitation. | verified |
 | PL-12 | 4. Invitations and joining | P2 — joined state should summarize the commitment. Judgment. | verified |

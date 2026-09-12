@@ -738,6 +738,8 @@
       cost_cents: costCents,
       court_number: String(value.court_number || '').trim().slice(0, 40),
       court_count: courtCount,
+      play_style: ['rotating_doubles', 'singles', 'mixed'].includes(value.play_style) ? value.play_style : null,
+      court_access: ['host_reserved', 'public_drop_in', 'booking_needed'].includes(value.court_access) ? value.court_access : null,
       notes: String(value.notes || '').trim().slice(0, 500),
       invite_user_ids: inviteIds,
       require_all_invitees: value.require_all_invitees === true,
@@ -836,6 +838,8 @@
             && Number(raw.maxPlayers) >= 2
             && Number(raw.maxPlayers) <= CASUAL_GAME_MAX_PLAYERS
           ? Number(raw.maxPlayers) : 4),
+      playStyle: allowed(raw.playStyle, ['rotating_doubles', 'singles', 'mixed'], null),
+      courtAccess: allowed(raw.courtAccess, ['host_reserved', 'public_drop_in', 'booking_needed'], null),
       preferredLevel: allowed(raw.preferredLevel, ['any', 'beginner', 'intermediate', 'advanced', 'pro'], 'any'),
       levelMin: normalizedGameLevel(raw.levelMin) ?? null,
       levelMax: normalizedGameLevel(raw.levelMax) ?? null,
@@ -1289,6 +1293,8 @@
     invalid_duration_minutes: 'Use a whole duration from 15 to 720 minutes.',
     invalid_ends_at: 'Choose an end time 15 minutes to 12 hours after the start.',
     duration_end_mismatch: 'The duration and end time do not match.',
+    invalid_play_style: 'Choose a casual play style. Rotating doubles needs at least four places.',
+    invalid_court_access: 'Choose how players access the court. Only host-reserved courts can have a reserved count.',
     invalid_cost_cents: 'Enter a cost from $0 to $10,000.',
     invalid_court_number: 'Keep the court or area label to 40 characters.',
     invalid_court_count: 'Use a whole number from 1 to 24 courts.',
@@ -8505,6 +8511,7 @@
         <p class="auth-preview-status">${esc(facts.stateLabel)}</p>
         <dl class="auth-preview-facts"><div><dt>When</dt><dd>${esc(fmtDateTime(data.scheduled_at))}<small>Your local time${data.duration_minutes ? ` · ${Number(data.duration_minutes)} minutes` : ''}</small></dd></div><div><dt>Where</dt><dd>${esc(data.court?.name || 'Court not listed')}<small>${esc([data.court?.address, data.court?.city].filter(Boolean).join(', '))}</small></dd></div><div><dt>Level</dt><dd>${esc(gameLevelRangeLabel(data))}</dd></div><div><dt>Cost</dt><dd>${esc(facts.cost)}</dd></div></dl>
         <p class="auth-preview-roster">${Number(data.player_count || 0)} going · ${Number(data.max_players)} places</p>
+        <p class="field-help">${esc(sessionCourtAccessLabel(data))}${sessionPlayStyleLabel(data) ? ` · ${esc(sessionPlayStyleLabel(data))}` : ''}</p>
         ${courtEntryNoticeHtml(data)}
         ${courtEntryDescriptionParts(data).note ? `<details class="simple-disclosure"><summary>Session details</summary><p>${esc(courtEntryDescriptionParts(data).note)}</p></details>` : ''}
         <button type="button" class="btn btn-primary btn-block" data-public-auth>${facts.ended ? 'Open session' : Number(data.spots_left) > 0 ? 'Join this session' : 'Join the waitlist'}</button>
@@ -11317,6 +11324,10 @@
     const locationLabel = [court.name, game.court_number, court.city].filter(Boolean).join(', ');
     const description = [
       game.description || '',
+      sessionPlayStyleLabel(game),
+      sessionCourtAccessLabel(game),
+      game.cost_cents == null ? 'Cost not listed' : Number(game.cost_cents) === 0
+        ? 'Free session' : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`,
       `${game.players.length}/${game.max_players} players`,
       `${location.origin}/#game/${game.id}`,
     ].filter(Boolean).join('\n\n');
@@ -11368,6 +11379,10 @@
     const locationLabel = [court.name, game.court_number, court.city].filter(Boolean).join(', ');
     const detail = [
       game.description || '',
+      sessionPlayStyleLabel(game),
+      sessionCourtAccessLabel(game),
+      game.cost_cents == null ? 'Cost not listed' : Number(game.cost_cents) === 0
+        ? 'Free session' : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`,
       `${game.players.length}/${game.max_players} players`,
       `${location.origin}/#game/${game.id}`,
     ].filter(Boolean).join('\n\n');
@@ -14043,27 +14058,27 @@
       </div>`;
   }
 
-  function gameCapacityChoicesHtml(prefix, value = 4) {
+  function gameCapacityChoicesHtml(prefix, value = 4, gameType = 'casual') {
     const selected = Math.max(2, Math.min(CASUAL_GAME_MAX_PLAYERS, Number(value) || 4));
-    const openPlayers = selected > 4 ? selected : 8;
+    const openPlayers = [2, 4].includes(selected) ? 8 : selected;
     const choices = [
-      { value: 2, label: 'Singles', copy: '2 players' },
-      { value: 4, label: 'Doubles', copy: '4 players' },
-      { value: 'open', label: 'Group', copy: `${openPlayers} players` },
+      { value: 2, label: gameType === 'ranked' ? 'Singles' : '2 players', copy: gameType === 'ranked' ? '1 vs 1' : 'Maximum' },
+      { value: 4, label: gameType === 'ranked' ? 'Doubles' : '4 players', copy: gameType === 'ranked' ? '2 vs 2' : 'Maximum' },
+      { value: 'open', label: 'Custom', copy: `${openPlayers} players` },
     ];
     return `
       <fieldset class="game-choice-field" id="${prefix}-capacity">
-        <legend>Format and players</legend>
+        <legend>${gameType === 'ranked' ? 'Match format' : 'Maximum players'}</legend>
         <div class="game-capacity-grid">
           ${choices.map((choice) => `
             <label class="game-choice-option">
-              <input type="radio" name="${prefix}-capacity" value="${choice.value}" ${choice.value === 'open' ? selected > 4 ? 'checked' : '' : selected === choice.value ? 'checked' : ''} />
+              <input type="radio" name="${prefix}-capacity" value="${choice.value}" ${choice.value === 'open' ? ![2, 4].includes(selected) ? 'checked' : '' : selected === choice.value ? 'checked' : ''} />
               <span class="game-capacity-card"><b>${choice.label}</b><small>${choice.copy}</small></span>
             </label>`).join('')}
         </div>
-        <div class="game-capacity-stepper ${selected > 4 ? '' : 'hidden'}" id="${prefix}-open-capacity" role="group" aria-label="Group player capacity">
+        <div class="game-capacity-stepper ${![2, 4].includes(selected) ? '' : 'hidden'}" id="${prefix}-open-capacity" role="group" aria-label="Maximum players">
           <button type="button" data-capacity-adjust="-1" aria-label="One fewer player">−</button>
-          <label><span>Players</span><input type="number" id="${prefix}-open-player-count" min="6" max="${CASUAL_GAME_MAX_PLAYERS}" step="1" inputmode="numeric" value="${openPlayers}" /></label>
+          <label><span>Players</span><input type="number" id="${prefix}-open-player-count" min="2" max="${CASUAL_GAME_MAX_PLAYERS}" step="1" inputmode="numeric" value="${openPlayers}" /></label>
           <button type="button" data-capacity-adjust="1" aria-label="One more player">＋</button>
         </div>
       </fieldset>`;
@@ -16127,7 +16142,8 @@
     const size = Number(game.max_players);
     const format = size === 2 ? 'singles' : size === 4 ? 'doubles' : '';
     if (game.game_type === 'ranked') return `Ranked ${format || 'match'}`;
-    if (format) return `Casual ${format}`;
+    if (game.play_style) return `Casual · ${sessionPlayStyleLabel(game)}`;
+    if (format) return game.is_instant || game.completion_kind !== 'session' && game.status !== 'upcoming' ? `Casual ${format}` : 'Casual session';
     return game.visibility === 'open' ? 'Pickup session' : 'Group session';
   }
 
@@ -16670,6 +16686,8 @@
         <div><dt>When</dt><dd>${esc(fmtDateTime(plan.scheduled_at))}<small>Your local time${plan.duration_minutes ? ` · ${Number(plan.duration_minutes)} minutes` : ''}</small></dd></div>
         <div><dt>Where</dt><dd>${esc(plan.court?.name || 'Court not listed')}<small>${esc([plan.court?.address, plan.court?.city].filter(Boolean).join(', '))}</small></dd></div>
         <div><dt>Cost</dt><dd>${esc(cost)}</dd></div>
+        <div><dt>Court access</dt><dd>${esc(sessionCourtAccessLabel(plan))}${plan.court_number ? `<small>${esc(plan.court_number)}</small>` : ''}</dd></div>
+        ${sessionPlayStyleLabel(plan) ? `<div><dt>Play style</dt><dd>${esc(sessionPlayStyleLabel(plan))}</dd></div>` : ''}
       </dl>
       <p class="game-invitation-places">${count} going · ${places ? `${places} ${places === 1 ? 'place' : 'places'} available` : 'Full · ask to join the waitlist'}</p>
     </div>`;
@@ -19635,6 +19653,8 @@
       ? restoredDraft.courtCount : Number(plannerOptions.courtCount);
     const presetCourtCount = Number.isInteger(requestedCourtCount)
       && requestedCourtCount >= 1 && requestedCourtCount <= 24 ? requestedCourtCount : null;
+    const presetPlayStyle = restoredDraft?.playStyle ?? plannerOptions.playStyle ?? null;
+    const presetCourtAccess = restoredDraft?.courtAccess ?? plannerOptions.courtAccess ?? (presetCourtCount ? 'host_reserved' : null);
     const presetVisibility = ['open', 'friends', 'private'].includes(plannerOptions.visibility)
       ? plannerOptions.visibility : null;
     const presetCrewId = plannerId(plannerOptions.crewId);
@@ -20015,7 +20035,7 @@
         ].filter((option) => !(lockGameType || crewId) || option.value === defaultType),
       })}
       </div>
-      ${gameCapacityChoicesHtml('ng', presetMaxPlayers)}
+      ${gameCapacityChoicesHtml('ng', presetMaxPlayers, defaultType)}
       <input type="hidden" id="ng-max" value="${presetMaxPlayers}" />
       ${crewId ? `<p class="planner-game-setup-note" id="ng-crew-capacity">${initialInviteIds.size + 1} group player${initialInviteIds.size === 0 ? '' : 's'} selected. Capacity cannot be lower than the selected players.</p>` : ''}`;
     plannerBox.innerHTML = `
@@ -20128,10 +20148,10 @@
             <button type="button" data-vis="friends" aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}" ${friends.length ? '' : 'disabled aria-disabled="true"'}><span class="vis-choice-icon" aria-hidden="true">${uiIcon('users')}</span><b>My friends</b><small>${friends.length ? 'Friends can join' : 'Add friends first'}</small></button>
             <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('lock')}</span><b>Invite only</b><small>Invited players or your private link</small></button>`}
         </div>
-        <div class="planner-inline-warning ${!crewId && friends.length === 0 ? '' : 'hidden'}" id="ng-friends-empty" role="status">
+        <div class="${plannerFeedErrors.friends ? 'planner-inline-warning' : 'field-help'} ${!crewId && friends.length === 0 ? '' : 'hidden'}" id="ng-friends-empty" role="status">
           ${plannerFeedErrors.friends
             ? 'Friends couldn’t load. You can still create a private session and share its invite link.'
-            : 'No friends added yet. Choose Invite only to share a private link.'}
+            : 'Use Invite only to share a private link.'}
         </div>
         <details class="flow-disclosure planner-invitations" id="ng-invitations" ${crewId || initialVisibility === 'private' || hasPresetInvites ? 'open' : ''}>
         <summary>${crewId ? 'Choose group players' : 'Invite specific players'} <span>${crewId ? 'Choose players' : 'Optional'}</span></summary>
@@ -20172,14 +20192,42 @@
 
       </section>
 
+      <section class="planner-essentials hidden" id="ng-essentials" aria-label="Session details">
+          <div class="form-field">
+            <label for="ng-title">Title <span class="row-sub">(optional)</span></label>
+            <input type="text" id="ng-title" maxlength="120" value="${esc(presetTitle)}" placeholder="e.g. Saturday morning round robin" />
+          </div>
+        <div class="form-grid">
+          <div class="form-field" id="ng-play-style-field"${defaultType === 'ranked' ? ' hidden' : ''}>
+            <label for="ng-play-style">Play style <span class="row-sub">(optional)</span></label>
+            <select id="ng-play-style"><option value="">No preference</option>${[['rotating_doubles','Rotating doubles'],['singles','Singles'],['mixed','Mixed play']].map(([value,label]) => `<option value="${value}"${value === presetPlayStyle ? ' selected' : ''}>${label}</option>`).join('')}</select>
+          </div>
+          <div class="form-field"><label for="ng-court-access">Court access</label><select id="ng-court-access"><option value="">Not confirmed yet</option>${[['host_reserved','Reserved by me'],['public_drop_in','Public drop-in'],['booking_needed','Booking still needed']].map(([value,label]) => `<option value="${value}"${value === presetCourtAccess ? ' selected' : ''}>${label}</option>`).join('')}</select></div>
+        </div>
+        <p class="field-help">Court bookings happen outside Third Shot.</p>
+          <div class="form-grid game-plan-fields">
+            <div class="form-field">
+              <label for="ng-cost">Cost per player</label>
+              <div class="game-money-input"><span aria-hidden="true">$</span><input type="number" id="ng-cost" min="0" max="10000" step="0.01" inputmode="decimal" value="${presetCostCents == null ? '' : (presetCostCents / 100).toFixed(2)}" placeholder="Not listed" aria-label="Cost per player in dollars" /></div><small class="field-help">Use 0 for free.</small>
+            </div>
+            <div class="form-field">
+              <label for="ng-court-number">Court or area</label>
+              <input type="text" id="ng-court-number" maxlength="40" value="${esc(presetCourtNumber)}" placeholder="e.g. Courts 3–4" />
+            </div>
+            <div class="form-field" id="ng-court-count-field">
+              <label for="ng-court-count">Courts you reserved</label>
+              <input type="number" id="ng-court-count" min="1" max="24" step="1" inputmode="numeric" value="${presetCourtCount ?? ''}" placeholder="Optional" />
+            </div>
+          </div>      </section>
+
       <details class="planner-advanced hidden" id="ng-advanced">
         <summary><span>More options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${crewId ? `${initialInviteIds.size + 1} selected group players` : (presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`)} · ${gameLevelRangeLabel({ levelMin: presetLevelMin, levelMax: presetLevelMax })}</span></summary>
         <div class="planner-advanced-body">
         <fieldset class="game-choice-field" id="ng-level">
           <legend>Self-rating range <span class="row-sub">(a matching hint, not a gate)</span></legend>
           <div class="form-grid">
-            <div class="form-field"><label for="ng-level-min">Minimum</label><select id="ng-level-min" data-select-title="Minimum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value]) => `<option value="${value}" ${value === presetLevelMin ? 'selected' : ''}>${value.toFixed(1)}</option>`).join('')}</select></div>
-            <div class="form-field"><label for="ng-level-max">Maximum</label><select id="ng-level-max" data-select-title="Maximum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value]) => `<option value="${value}" ${value === presetLevelMax ? 'selected' : ''}>${value.toFixed(1)}</option>`).join('')}</select></div>
+            <div class="form-field"><label for="ng-level-min">Minimum</label><select id="ng-level-min" data-select-title="Minimum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value, , description]) => `<option value="${value}" ${value === presetLevelMin ? 'selected' : ''}>${value.toFixed(1)} · ${esc(description)}</option>`).join('')}</select></div>
+            <div class="form-field"><label for="ng-level-max">Maximum</label><select id="ng-level-max" data-select-title="Maximum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value, , description]) => `<option value="${value}" ${value === presetLevelMax ? 'selected' : ''}>${value.toFixed(1)} · ${esc(description)}</option>`).join('')}</select></div>
           </div>
           <small class="field-help">Leave both at Any to welcome every level.</small>
         </fieldset>
@@ -20188,27 +20236,10 @@
           <input type="text" id="ng-notes" maxlength="500" placeholder="e.g. All levels welcome!" />
         </div>
           <div class="form-field">
-            <label for="ng-title">Title <span class="row-sub">(optional)</span></label>
-            <input type="text" id="ng-title" maxlength="120" value="${esc(presetTitle)}" placeholder="e.g. Saturday morning round robin" />
-          </div>
-          <div class="form-field">
             <label for="ng-description">Description <span class="row-sub">(optional)</span></label>
             <textarea id="ng-description" maxlength="1000" rows="3" placeholder="Share the format, rotation, or what to bring.">${esc(presetDescription)}</textarea>
           </div>
-          <div class="form-grid game-plan-fields">
-            <div class="form-field">
-              <label for="ng-cost">Cost per player</label>
-              <div class="game-money-input"><span aria-hidden="true">$</span><input type="number" id="ng-cost" min="0" max="10000" step="0.01" inputmode="decimal" value="${presetCostCents == null ? '' : (presetCostCents / 100).toFixed(2)}" placeholder="0.00" aria-label="Cost per player in dollars" /></div>
-            </div>
-            <div class="form-field">
-              <label for="ng-court-number">Court or area</label>
-              <input type="text" id="ng-court-number" maxlength="40" value="${esc(presetCourtNumber)}" placeholder="e.g. Courts 3–4" />
-            </div>
-            <div class="form-field">
-              <label for="ng-court-count">Courts reserved</label>
-              <input type="number" id="ng-court-count" min="1" max="24" step="1" inputmode="numeric" value="${presetCourtCount ?? ''}" placeholder="Optional" />
-            </div>
-          </div>
+
         </div>
       </details>
 
@@ -20283,6 +20314,8 @@
         ? Number(modal.querySelector('#ng-duration').value) : null,
       costCents: modal.querySelector('#ng-cost').value.trim()
         ? Math.round(Number(modal.querySelector('#ng-cost').value) * 100) : null,
+      playStyle: gameType === 'ranked' ? null : modal.querySelector('#ng-play-style').value || null,
+      courtAccess: modal.querySelector('#ng-court-access').value || null,
       courtNumber: modal.querySelector('#ng-court-number').value.trim(),
       courtCount: modal.querySelector('#ng-court-count').value.trim()
         ? Number(modal.querySelector('#ng-court-count').value) : null,
@@ -20397,7 +20430,14 @@
       const courtName = modal.querySelector('#ng-court-name').textContent || 'Choose a court';
       const scheduledIso = plannerScheduledIso();
       const whenText = scheduledIso ? fmtDateTime(scheduledIso) : 'Choose a time';
-      if (summary) summary.textContent = `${courtName} · ${whenText}`;
+      if (summary) {
+        const costText = modal.querySelector('#ng-cost').value.trim();
+        const costValue = Number(costText);
+        const cost = costText === '' ? 'Cost not listed' : !Number.isFinite(costValue) || costValue < 0 || costValue > 10000 ? 'Check cost' : costValue === 0 ? 'Free' : `$${costValue.toFixed(2)} per player`;
+        const access = {host_reserved:'Host-reserved court',public_drop_in:'Public drop-in',booking_needed:'Booking needed'}[modal.querySelector('#ng-court-access').value] || 'Access not confirmed';
+        summary.textContent = `${cost} · ${access}`;
+        summary.setAttribute('aria-label', `${courtName} · ${whenText} · ${cost} · ${access}`);
+      }
       const whereAnswer = modal.querySelector('#ng-answer-where');
       modal.querySelector('#ng-answer-where-value').textContent = courtName;
       whereAnswer.setAttribute('aria-label', `Where: ${courtName}`);
@@ -20642,6 +20682,10 @@
       typeInputs.forEach((input) => { input.checked = input.value === gameType; });
     };
     const syncCapacityChoices = () => {
+      modal.querySelector('#ng-capacity legend').textContent = gameType === 'ranked' ? 'Match format' : 'Maximum players';
+      modal.querySelector('#ng-play-style-field').hidden = gameType === 'ranked';
+      modal.querySelector('#ng-play-style').disabled = gameType === 'ranked';
+      if (gameType === 'ranked') modal.querySelector('#ng-play-style').value = '';
       const crewMinimum = crewId ? inviteIds.size + 1 : 1;
       let selectedCapacity = Number(maxInput.value);
       if (crewId && selectedCapacity < crewMinimum) {
@@ -20654,23 +20698,27 @@
         const unavailable = (gameType === 'ranked' && input.value === 'open')
           || (!!crewId && input.value !== 'open' && capacity < crewMinimum);
         input.checked = input.value === 'open'
-          ? selectedCapacity > 4 : capacity === selectedCapacity;
+          ? ![2, 4].includes(selectedCapacity) : capacity === selectedCapacity;
         input.disabled = unavailable;
         const option = input.closest('.game-choice-option');
+        if (input.value !== 'open') {
+          option.querySelector('b').textContent = gameType === 'ranked' ? (input.value === '2' ? 'Singles' : 'Doubles') : `${input.value} players`;
+          option.querySelector('small').textContent = gameType === 'ranked' ? (input.value === '2' ? '1 vs 1' : '2 vs 2') : 'Maximum';
+        }
         option?.classList.toggle('disabled', unavailable);
         if (unavailable && !crewId) option?.setAttribute('title', 'Ranked matches support Singles or Doubles');
         else option?.removeAttribute('title');
       });
       if (openPlayerCount) {
         const maximum = crewId ? 12 : CASUAL_GAME_MAX_PLAYERS;
-        const minimum = crewId ? Math.max(6, inviteIds.size + 1) : 6;
+        const minimum = crewId ? Math.max(2, inviteIds.size + 1) : 2;
         openPlayerCount.min = String(minimum);
         openPlayerCount.max = String(maximum);
-        if (selectedCapacity > 4) openPlayerCount.value = String(
+        if (![2, 4].includes(selectedCapacity)) openPlayerCount.value = String(
           Math.max(minimum, Math.min(maximum, selectedCapacity)),
         );
         openPlayerCount.disabled = gameType === 'ranked';
-        openCapacity?.classList.toggle('hidden', gameType === 'ranked' || selectedCapacity <= 4);
+        openCapacity?.classList.toggle('hidden', gameType === 'ranked' || [2, 4].includes(selectedCapacity));
         openCapacity?.querySelectorAll('[data-capacity-adjust]').forEach((button) => {
           button.disabled = openPlayerCount.disabled;
         });
@@ -20700,7 +20748,7 @@
       const input = e.target.closest('input[name="ng-type"]');
       if (!input || input.disabled) return;
       gameType = input.value;
-      if (gameType === 'ranked' && Number(maxInput.value) > 4) maxInput.value = '4';
+      if (gameType === 'ranked' && ![2, 4].includes(Number(maxInput.value))) maxInput.value = '4';
       syncRecurring();
       updateOptionsSummary();
       markPlannerDirty();
@@ -20744,7 +20792,7 @@
         ? (visibility === 'private'
             ? `${inviteIds.size + 1} group players`
             : `${players} spots · ${inviteIds.size + 1} group players included`)
-        : (players === 2 ? 'Singles' : players === 4 ? 'Doubles' : `${players} players`);
+        : gameType === 'ranked' ? (players === 2 ? 'Singles' : 'Doubles') : `${players} players`;
       const level = gameLevelRangeLabel({ levelMin, levelMax, preferredLevel });
       const duration = Number(modal.querySelector('#ng-duration').value);
       const timing = Number.isInteger(duration) && duration >= 15 && duration <= 720
@@ -20756,7 +20804,7 @@
         gameType === 'ranked' ? 'Ranked match' : 'Play session', size, timing, level, repeat,
       ].filter(Boolean).join(' · ');
       const carriedLabel = modal.querySelector('#ng-carried-setup-label');
-      if (carriedLabel) carriedLabel.textContent = `${gameType === 'ranked' ? 'Ranked' : 'Casual'} · ${players === 2 ? 'Singles' : players === 4 ? 'Doubles' : `${players} players`}`;
+      if (carriedLabel) carriedLabel.textContent = `${gameType === 'ranked' ? 'Ranked' : 'Casual session'} · ${size}`;
     };
     const setPlannerSetupExpanded = (expanded, { focus = false } = {}) => {
       const controls = modal.querySelector('#ng-setup-controls');
@@ -20774,14 +20822,14 @@
       const input = e.target.closest('input[name="ng-capacity"]');
       if (!input || input.disabled) return;
       maxInput.value = input.value === 'open'
-        ? String(Math.max(6, Number(openPlayerCount?.value) || 6)) : input.value;
+        ? String([2, 4].includes(Number(openPlayerCount?.value)) ? 6 : Math.max(2, Number(openPlayerCount?.value) || 6)) : input.value;
       syncCapacityChoices();
       updateOptionsSummary();
       markPlannerDirty();
     });
     const setOpenCapacity = (rawValue) => {
       if (!openPlayerCount || openPlayerCount.disabled) return;
-      const minimum = Number(openPlayerCount.min) || 6;
+      const minimum = Number(openPlayerCount.min) || 2;
       const maximum = Number(openPlayerCount.max) || CASUAL_GAME_MAX_PLAYERS;
       const value = Math.max(minimum, Math.min(maximum, Math.round(Number(rawValue) || minimum)));
       openPlayerCount.value = String(value);
@@ -21081,8 +21129,18 @@
       recurrenceEndsOn = event.target.value || null;
       markPlannerDirty();
     });
+    const syncCourtAccess = () => {
+      const reserved = modal.querySelector('#ng-court-access').value === 'host_reserved';
+      modal.querySelector('#ng-court-count-field').hidden = !reserved;
+      const count = modal.querySelector('#ng-court-count');
+      count.disabled = !reserved;
+      if (!reserved) count.value = '';
+    };
+    syncCourtAccess();
+    modal.querySelector('#ng-court-access').addEventListener('change', () => { syncCourtAccess(); updatePlannerSummary(); markPlannerDirty(); });
+    modal.querySelector('#ng-play-style').addEventListener('change', markPlannerDirty);
     ['ng-title', 'ng-description', 'ng-cost', 'ng-court-number', 'ng-court-count', 'ng-notes']
-      .forEach((id) => modal.querySelector(`#${id}`).addEventListener('input', markPlannerDirty));
+      .forEach((id) => modal.querySelector(`#${id}`).addEventListener('input', () => { updatePlannerSummary(); markPlannerDirty(); }));
     modal.querySelector('#ng-save-group')?.addEventListener('change', (event) => {
       modal.querySelector('#ng-save-group-name-wrap')?.classList.toggle('hidden', !event.target.checked);
       markPlannerDirty();
@@ -21228,6 +21286,7 @@
       whoStep.classList.toggle('hidden', plannerStep !== 'who');
       whereAnswer.classList.toggle('hidden', plannerStep === 'where');
       whenAnswer.classList.toggle('hidden', plannerStep !== 'who');
+      modal.querySelector('#ng-essentials').classList.toggle('hidden', !finalStep);
       modal.querySelector('#ng-advanced').classList.toggle('hidden', !finalStep);
       modal.querySelector('.planner-submit-bar').classList.toggle('hidden', !finalStep);
       [whereStep, whenStep, whoStep].forEach((step) => {
@@ -21361,6 +21420,8 @@
         cost_cents: restoredDraft.costCents,
         court_number: restoredDraft.courtNumber,
         court_count: restoredDraft.courtCount,
+        play_style: restoredDraft.playStyle,
+        court_access: restoredDraft.courtAccess,
         notes: restoredDraft.notes,
         invite_user_ids: restoredDraft.inviteUserIds,
         require_all_invitees: restoredDraft.visibility === 'private' && restoredDraft.requireAllInvitees,
@@ -21579,6 +21640,10 @@
           return;
         }
       }
+      if (!exactPayload && gameType !== 'ranked' && modal.querySelector('#ng-play-style').value === 'rotating_doubles' && Number(modal.querySelector('#ng-max').value) < 4) {
+        showPlannerSubmitError('Rotating doubles needs at least four places.', modal.querySelector('#ng-play-style'));
+        return;
+      }
       const requestPayload = exactPayload || sanitizeGameCreatePayload({
         court_id: Number(courtId),
         scheduled_at: scheduledAt.toISOString(),
@@ -21601,6 +21666,8 @@
         cost_cents: costCents,
         court_number: modal.querySelector('#ng-court-number').value.trim(),
         court_count: courtCount,
+        play_style: gameType === 'ranked' ? null : modal.querySelector('#ng-play-style').value || null,
+        court_access: modal.querySelector('#ng-court-access').value || null,
         notes: modal.querySelector('#ng-notes').value.trim(),
         invite_user_ids: [...inviteIds],
         require_all_invitees: visibility === 'private' && requireAllInvitees,
@@ -35098,14 +35165,28 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       || window.matchMedia('(display-mode: standalone)').matches;
   }
 
+  function sessionPlayStyleLabel(game) {
+    switch (game.play_style) {
+      case 'rotating_doubles': return 'Rotating doubles';
+      case 'singles': return 'Singles';
+      case 'mixed': return 'Mixed play';
+      default: return '';
+    }
+  }
+
+  function sessionCourtAccessLabel(game) {
+    if (game.court_access === 'public_drop_in') return 'Public drop-in · host reported';
+    if (game.court_access === 'booking_needed') return 'Court booking still needed';
+    const count = Number(game.court_count);
+    if (Number.isInteger(count) && count > 0) return `Host says ${count} court${count === 1 ? ' is' : 's are'} reserved`;
+    return game.court_access === 'host_reserved' ? 'Host says the court is reserved' : 'Court booking not listed';
+  }
+
   function sessionVisitFactsHtml(game) {
     const cost = game.cost_cents == null ? 'Cost not listed'
       : Number(game.cost_cents) === 0 ? 'Free session'
         : `$${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
-    const count = Number(game.court_count);
-    const access = Number.isInteger(count) && count > 0
-      ? `Host says ${count} court${count === 1 ? ' is' : 's are'} reserved`
-      : 'Court booking not listed';
+    const access = sessionCourtAccessLabel(game);
     return `<div class="session-visit-facts" role="group" aria-label="Session cost and court access">
       <span><b>${esc(cost)}</b></span><span>${esc(access)}</span>
     </div>`;
@@ -36703,11 +36784,15 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.DateTimeFormat().resolvedOptions().timeZone))}
           <p class="row-sub">Players keep their spot and will be asked to re-confirm if the court or time changes.</p>
         </div>
+        <div class="form-grid">
+          ${game.game_type === 'ranked' ? '' : `<div class="form-field"><label for="eg-play-style">Play style</label><select id="eg-play-style"><option value="">No preference</option>${[['rotating_doubles','Rotating doubles'],['singles','Singles'],['mixed','Mixed play']].map(([value,label]) => `<option value="${value}"${value === game.play_style ? ' selected' : ''}>${label}</option>`).join('')}</select></div>`}
+          <div class="form-field"><label for="eg-court-access">Court access</label><select id="eg-court-access"><option value="">Not confirmed yet</option>${[['host_reserved','Reserved by me'],['public_drop_in','Public drop-in'],['booking_needed','Booking still needed']].map(([value,label]) => `<option value="${value}"${value === (game.court_access || (game.court_count ? 'host_reserved' : null)) ? ' selected' : ''}>${label}</option>`).join('')}</select><small class="field-help">Third Shot does not book the court.</small></div>
+        </div>
         <div class="form-grid game-plan-fields">
           <div class="form-field"><label for="eg-duration">Duration (minutes)</label><input type="number" id="eg-duration" min="15" max="720" step="15" inputmode="numeric" value="${game.duration_minutes ?? ''}" placeholder="No end time" aria-describedby="eg-end-preview" /><small class="field-help" id="eg-end-preview"></small></div>
           <div class="form-field"><label for="eg-cost">Cost per player</label><div class="game-money-input"><span aria-hidden="true">$</span><input type="number" id="eg-cost" min="0" max="10000" step="0.01" inputmode="decimal" value="${game.cost_cents == null ? '' : (Number(game.cost_cents) / 100).toFixed(2)}" placeholder="0.00" aria-label="Cost per player in dollars" /></div></div>
           <div class="form-field"><label for="eg-court-number">Court or area</label><input type="text" id="eg-court-number" maxlength="40" value="${esc(game.court_number || '')}" placeholder="e.g. Courts 3–4" /></div>
-          <div class="form-field"><label for="eg-court-count">Courts reserved</label><input type="number" id="eg-court-count" min="1" max="24" step="1" inputmode="numeric" value="${game.court_count ?? ''}" placeholder="Optional" /></div>
+          <div class="form-field" id="eg-court-count-field"><label for="eg-court-count">Courts you reserved</label><input type="number" id="eg-court-count" min="1" max="24" step="1" inputmode="numeric" value="${game.court_count ?? ''}" placeholder="Optional" /></div>
         </div>
         <div class="form-grid">
           <div class="form-field"><label for="eg-capacity">Capacity</label>${capacityControlHtml}</div>
@@ -36715,8 +36800,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         </div>
         <p class="row-sub" style="margin:-6px 0 12px">You can open the game to more people, but not hide it from players who may already have seen it.</p>
         <div class="form-grid">
-          <div class="form-field"><label for="eg-level-min">Minimum self-rating</label><select id="eg-level-min" data-select-title="Minimum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value]) => `<option value="${value}" ${value === initialLevelMin ? 'selected' : ''}>${value.toFixed(1)}</option>`).join('')}</select></div>
-          <div class="form-field"><label for="eg-level-max">Maximum self-rating</label><select id="eg-level-max" data-select-title="Maximum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value]) => `<option value="${value}" ${value === initialLevelMax ? 'selected' : ''}>${value.toFixed(1)}</option>`).join('')}</select></div>
+          <div class="form-field"><label for="eg-level-min">Minimum self-rating</label><select id="eg-level-min" data-select-title="Minimum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value, , description]) => `<option value="${value}" ${value === initialLevelMin ? 'selected' : ''}>${value.toFixed(1)} · ${esc(description)}</option>`).join('')}</select></div>
+          <div class="form-field"><label for="eg-level-max">Maximum self-rating</label><select id="eg-level-max" data-select-title="Maximum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value, , description]) => `<option value="${value}" ${value === initialLevelMax ? 'selected' : ''}>${value.toFixed(1)} · ${esc(description)}</option>`).join('')}</select></div>
         </div>
         <div class="form-grid">
           <div class="form-field"><label for="eg-recurrence">Repeats</label><select id="eg-recurrence" data-select-title="Repeat schedule" ${canRepeat ? '' : 'disabled'}><option value="none">One time</option><option value="weekly" ${game.recurrence === 'weekly' ? 'selected' : ''}>Every week</option></select></div>
@@ -36760,6 +36845,15 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       title: 'Discard game changes?',
       message: `The ${playNoun} will keep its current details.`,
     });
+    const syncEditCourtAccess = () => {
+      const reserved = sheet.querySelector('#eg-court-access').value === 'host_reserved';
+      sheet.querySelector('#eg-court-count-field').hidden = !reserved;
+      const count = sheet.querySelector('#eg-court-count');
+      count.disabled = !reserved;
+      if (!reserved) count.value = '';
+    };
+    syncEditCourtAccess();
+    sheet.querySelector('#eg-court-access').addEventListener('change', syncEditCourtAccess);
     const updateEditEndPreview = () => {
       const output = sheet.querySelector('#eg-end-preview');
       const durationText = sheet.querySelector('#eg-duration').value.trim();
@@ -36956,6 +37050,10 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         formUX.showError('Choose a valid minimum and maximum self-rating.', editLevelMin);
         return;
       }
+      if (sheet.querySelector('#eg-play-style')?.value === 'rotating_doubles' && capacity < 4) {
+        formUX.showError('Rotating doubles needs at least four places.', sheet.querySelector('#eg-play-style'));
+        return;
+      }
       const next = {
         title: sheet.querySelector('#eg-title').value.trim(),
         description: sheet.querySelector('#eg-description').value.trim(),
@@ -36965,6 +37063,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         cost_cents: costCents,
         court_number: sheet.querySelector('#eg-court-number').value.trim(),
         court_count: courtCount,
+        play_style: sheet.querySelector('#eg-play-style')?.value || null,
+        court_access: sheet.querySelector('#eg-court-access').value || null,
         max_players: capacity,
         visibility: sheet.querySelector('#eg-visibility').value,
         preferred_level: 'any',
@@ -36987,6 +37087,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         cost_cents: game.cost_cents == null ? null : Number(game.cost_cents),
         court_number: String(game.court_number || '').trim(),
         court_count: game.court_count == null ? null : Number(game.court_count),
+        play_style: game.play_style || null,
+        court_access: game.court_access || (game.court_count ? 'host_reserved' : null),
         max_players: Number(game.max_players),
         visibility: game.visibility,
         preferred_level: game.preferred_level,
@@ -37084,7 +37186,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       game.max_players, game.can_enter_score, game.can_complete_session, game.completion_kind,
       game.creator_id, game.scheduled_at, game.visibility, game.preferred_level,
       game.title, game.description, game.duration_minutes, game.ends_at,
-      game.cost_cents, game.court_number, game.court_count,
+      game.cost_cents, game.court_number, game.court_count, game.play_style, game.court_access,
       game.notes, game.recurrence, game.recurrence_timezone,
       game.recurrence_local_time, game.recurrence_weekdays,
       game.recurrence_ends_on, game.recurrence_occurrence_on,

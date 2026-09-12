@@ -168,7 +168,7 @@ def test_planner_keeps_one_direct_setup_visible_for_every_entry_point():
     assert setup_at < advanced_at
     assert "const plannerSetupTitle = crewId || sessionMode ? 'Play session setup'" in planner
     assert "id: 'ng-type', name: 'ng-type', legend: 'Game type'" in planner
-    assert "gameCapacityChoicesHtml('ng', presetMaxPlayers)" in planner
+    assert "gameCapacityChoicesHtml('ng', presetMaxPlayers, defaultType)" in planner
     assert '<input type="hidden" id="ng-max" value="${presetMaxPlayers}" />' in planner
     assert '<select id="ng-max"' not in planner
     assert 'input[name="ng-type"]' in planner

@@ -51,11 +51,12 @@ def test_planner_collects_validates_recovers_and_posts_planning_details():
 def test_capacity_uses_three_distinct_choices_and_a_group_stepper():
     capacity = section('function gameCapacityChoicesHtml', 'function openGameFlow')
 
-    labels = ("label: 'Singles'", "label: 'Doubles'", "label: 'Group'")
-    for label in labels:
-        assert capacity.count(label) == 1
+    assert "gameType === 'ranked' ? 'Singles' : '2 players'" in capacity
+    assert "gameType === 'ranked' ? 'Doubles' : '4 players'" in capacity
+    assert "label: 'Custom'" in capacity
+    assert "'Match format' : 'Maximum players'" in capacity
     assert 'id="${prefix}-open-capacity"' in capacity
-    assert 'id="${prefix}-open-player-count" min="6" max="${CASUAL_GAME_MAX_PLAYERS}"' in capacity
+    assert 'id="${prefix}-open-player-count" min="2" max="${CASUAL_GAME_MAX_PLAYERS}"' in capacity
     assert 'data-capacity-adjust="-1"' in capacity
     assert 'data-capacity-adjust="1"' in capacity
     assert '.game-capacity-stepper' in STYLES
@@ -77,7 +78,7 @@ def test_cards_and_detail_surface_the_saved_plan_without_hiding_time():
     assert 'game.ends_at' in detail
     assert '${sessionVisitFactsHtml(game)}' in detail
     assert detail.index('${sessionVisitFactsHtml(game)}') < detail.index('${waitlistHtml}${arrivalsHtml}${gameConsentHtml(game)}')
-    visit_facts = section('function sessionVisitFactsHtml', 'function sessionReturnToolsHtml')
+    visit_facts = section('function sessionCourtAccessLabel', 'function sessionReturnToolsHtml')
     assert 'game.cost_cents' in visit_facts
     assert 'game.court_count' in visit_facts
     assert 'Host says' in visit_facts

@@ -96,9 +96,13 @@
       "finding": "P2 — group capacity and match format are mixed together. Judgment.",
       "source": "docs/product-audit/play-competition.md",
       "requirement": "**P2 — group capacity and match format are mixed together. Judgment.** `gameCapacityChoicesHtml` presents Singles/2, Doubles/4 and Group/6–12 as one “Format and players” choice (`:13566`). These are not mutually exclusive concepts: six people can rotate through doubles. The current six-player default is described as Casual · 6 players and hidden behind Change in Who (`:18995`), while title/description are under More options. Let a casual session define **Maximum players** and optionally **Play style: rotating doubles / singles / mixed**; let a ranked match define Singles/Doubles and named sides. Show the type and capacity summary persistently without repeating editable copies.",
-      "status": "pending",
-      "implementation": [],
-      "verification": []
+      "status": "implemented",
+      "implementation": [
+        "r79: separate casual capacity/play style, visible practical planning fields with explicit host-reported access, and descriptive self-rating choices; see docs/product-audit/planner-metadata-evidence.md."
+      ],
+      "verification": [
+        "Focused browser, executed JavaScript/API and 42 PostgreSQL checks recorded in planner-metadata-evidence.md. Full release and production migration gates pending."
+      ]
     },
     {
       "id": "PL-08",
@@ -106,9 +110,13 @@
       "finding": "P2 — practical essentials are buried with optional prose. Judgment.",
       "source": "docs/product-audit/play-competition.md",
       "requirement": "**P2 — practical essentials are buried with optional prose. Judgment.** Cost, court/area and “Courts reserved” are under More options alongside notes, title and description (`:19056–19095`). On paid or multi-court play, these are decision-critical. Ask for a short session name and cost/free status in the main flow when needed. Collapse truly optional notes. Use a structured court-access choice **Reserved by host / Public drop-in / Booking still needed** instead of making a numeric field imply an actual reservation.",
-      "status": "pending",
-      "implementation": [],
-      "verification": []
+      "status": "implemented",
+      "implementation": [
+        "r79: separate casual capacity/play style, visible practical planning fields with explicit host-reported access, and descriptive self-rating choices; see docs/product-audit/planner-metadata-evidence.md."
+      ],
+      "verification": [
+        "Focused browser, executed JavaScript/API and 42 PostgreSQL checks recorded in planner-metadata-evidence.md. Full release and production migration gates pending."
+      ]
     },
     {
       "id": "PL-09",
@@ -116,9 +124,13 @@
       "finding": "P2 — numeric level selection is clearer for experienced players than new ones. Judgment.",
       "source": "docs/product-audit/play-competition.md",
       "requirement": "**P2 — numeric level selection is clearer for experienced players than new ones. Judgment.** The matching range correctly says it is a hint, not a gate (`:19059`). Preserve that honesty. Add the same brief skill descriptions available in profile setup, or a compact beginner/intermediate/advanced range picker, while retaining numeric values for people who use them. Do not present Third Shot match rating as the same scale.",
-      "status": "pending",
-      "implementation": [],
-      "verification": []
+      "status": "implemented",
+      "implementation": [
+        "r79: separate casual capacity/play style, visible practical planning fields with explicit host-reported access, and descriptive self-rating choices; see docs/product-audit/planner-metadata-evidence.md."
+      ],
+      "verification": [
+        "Focused browser, executed JavaScript/API and 42 PostgreSQL checks recorded in planner-metadata-evidence.md. Full release and production migration gates pending."
+      ]
     },
     {
       "id": "PL-10",

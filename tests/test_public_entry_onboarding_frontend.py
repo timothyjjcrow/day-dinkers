@@ -16,7 +16,7 @@ def run_js(script):
 
 
 def test_public_details_show_real_decisions_and_escape_untrusted_content():
-    helpers = section('const COURT_OPEN_PLAY_PLAN_SOURCE', 'function openCourtWindowPlan') + section('function publicSessionFacts(', 'function renderSignedOutShareContext(')
+    helpers = section('function sessionPlayStyleLabel(', 'function sessionVisitFactsHtml(') + section('const COURT_OPEN_PLAY_PLAN_SOURCE', 'function openCourtWindowPlan') + section('function publicSessionFacts(', 'function renderSignedOutShareContext(')
     result = run_js("""
       const esc=x=>String(x).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
       const fmtDateTime=x=>x, gameLevelRangeLabel=x=>'2.0–3.0', courtDirectionsUrl=x=>'https://maps.google.com/?q=court', uiIcon=x=>'';

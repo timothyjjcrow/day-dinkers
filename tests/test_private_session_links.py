@@ -125,3 +125,22 @@ def test_retry_preserves_link_and_host_roster(setup):
     assert response.status_code in (200, 201) and response.get_json()['id'] == game['id']
     assert Game.query.count() == 1 and GamePlayer.query.count() == 1
     assert client.get(f"/api/games/{game['id']}/invite-link", headers=accounts[0][1]).get_json() == link
+
+
+def test_private_preview_and_calendar_keep_host_planning_facts_without_granting_access(setup):
+    client, accounts, _ = setup
+    game, _, token, _ = create_private(setup, max_players=5, play_style='mixed',
+        court_access='booking_needed', cost_cents=1250, court_number='North entrance')
+    preview = client.post(f"/api/games/{game['id']}/invite-link/preview", json={'token':token})
+    assert preview.status_code == 200
+    facts = preview.get_json()
+    assert (facts['play_style'], facts['court_access'], facts['cost_cents'], facts['court_number']) == ('mixed','booking_needed',1250,'North entrance')
+    assert GameInvite.query.count() == 0 and GamePlayer.query.count() == 1
+    user = db.session.get(User, accounts[0][0])
+    user.calendar_token = 'synthetic-planner-calendar'
+    db.session.commit()
+    response = client.get('/api/calendar/synthetic-planner-calendar.ics')
+    assert response.status_code == 200
+    calendar = response.get_data(as_text=True).replace('\r\n ', '')
+    for text in ['Mixed play', 'Court booking still needed', '$12.50', 'North entrance']:
+        assert text in calendar
