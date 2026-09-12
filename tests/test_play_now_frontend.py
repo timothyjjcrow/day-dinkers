@@ -236,7 +236,7 @@ def test_visible_play_feed_revalidates_live_cards_and_joins_from_fresh_state():
     assert "Game full." in detail
     assert "Join at the court to see who’s playing." in detail
     assert "const readyCount = assembly ? assembly.readyCount : game.players.length;" in detail
-    assert "${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Going' : 'Signed up'} <span>${readyCount}</span>" in detail
+    assert "${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Players' : 'Signed up'} <span>${readyCount}</span>" in detail
     assert 'const openSpots = Math.max(0, Number(game.spots_left) || 0);' in detail
 
     play = section("async function renderPlay", "function updatePlayHeader")

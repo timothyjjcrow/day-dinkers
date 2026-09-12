@@ -280,3 +280,58 @@ def test_following_date_edit_rechecks_roster_after_concurrent_join(fixture, monk
     print(f'following-date closure: PostgreSQL PIDs={pids}; wait={lock}; '
           f'roster snapshots={snapshots}; user locks={locked_rosters}; rollbacks={len(rollbacks)}; '
           f'HTTP={[joined_result[0], edited_result[0], accepted[0]]}')
+
+
+def test_confirmation_waits_for_price_edit_then_rejects_stale_review(fixture, monkeypatch):
+    data=fixture
+    game_id=_seed_game(data,0,data['start'])
+    with data['app'].app_context():
+        game=db.session.get(Game,game_id)
+        game.cost_cents=0
+        db.session.add(GamePlayer(game_id=game_id,user_id=data['people'][1],attending_at=utcnow()))
+        db.session.commit()
+    assert _request(data,'PATCH',f'/api/games/{game_id}',{'cost_cents':500},actor=0)[0]==200
+    _,detail=_request(data,'GET',f'/api/games/{game_id}',None,actor=1)
+    expected=detail['my_commitment_requested_at']
+    edit_locked=threading.Event()
+    confirmation_started=threading.Event()
+    release=threading.Event()
+    pids={}
+    original=game_routes._lock_stable_game_edit_scope
+
+    def pause_edit(game_id,actor_id,**kwargs):
+        result=original(game_id,actor_id,**kwargs)
+        if threading.current_thread().name.startswith('pg-reconfirm') and actor_id==data['people'][0]:
+            edit_locked.set()
+            assert release.wait(timeout=15)
+        return result
+
+    def before(connection,cursor,statement,parameters,context,many):
+        if (threading.current_thread().name=='pg-reconfirm_1' and 'FROM "user"' in statement
+                and 'FOR NO KEY UPDATE' in statement and not confirmation_started.is_set()):
+            pids['confirm']=_backend_pid(connection)
+            confirmation_started.set()
+
+    monkeypatch.setattr(game_routes,'_lock_stable_game_edit_scope',pause_edit)
+    event.listen(data['engine'],'before_cursor_execute',before)
+    try:
+        with ThreadPoolExecutor(max_workers=2,thread_name_prefix='pg-reconfirm') as pool:
+            edit=pool.submit(_request,data,'PATCH',f'/api/games/{game_id}',{'cost_cents':1000},0)
+            assert edit_locked.wait(timeout=10)
+            confirm=pool.submit(_request,data,'POST',f'/api/games/{game_id}/attend',
+                {'expected_commitment_requested_at':expected},1)
+            try:
+                assert confirmation_started.wait(timeout=10)
+                _wait_for_postgres_lock(data['engine'],pids['confirm'])
+            finally:
+                release.set()
+            assert edit.result(timeout=15)[0]==200
+            status,body=confirm.result(timeout=15)
+    finally:
+        release.set()
+        event.remove(data['engine'],'before_cursor_execute',before)
+    assert status==409 and body['error']=='game_commitment_changed'
+    assert body['game']['cost_cents']==1000 and body['game']['commitment_confirmation_due']
+    with data['app'].app_context():
+        player=GamePlayer.query.filter_by(game_id=game_id,user_id=data['people'][1]).one()
+        assert player.attending_at is None and player.commitment_requested_at is not None

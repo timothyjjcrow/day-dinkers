@@ -3194,6 +3194,10 @@ class Game(TimestampMixin, db.Model):
             'attendance_confirmed_count': attendance_confirmed_count,
             'attendance_unconfirmed_count': attendance_unconfirmed_count,
             'attendance_confirmation_due': attendance_confirmation_due,
+            'commitment_confirmation_due': bool(attendance_confirmation_due and viewer.commitment_confirmation_due()),
+            'my_commitment_requested_at': iso(viewer.commitment_requested_at) if viewer else None,
+            'rsvp_counts': {key: sum(p.rsvp_status() == key for p in players)
+                            for key in ('confirmed', 'needs_confirmation', 'reserved')},
             'spots_left': spots_left,
             'is_joined': viewer is not None,
             'is_creator': self.creator_id == viewer_id,
@@ -3300,6 +3304,8 @@ class GamePlayer(TimestampMixin, db.Model):
     # Explicit RSVP for this date. Actual attendance is recorded separately
     # when a completed session is submitted.
     attending_at = db.Column(db.DateTime)
+    # A material plan change needs fresh consent independently of reminders.
+    commitment_requested_at = db.Column(db.DateTime)
     recurrence_rsvp_automatic = db.Column(
         db.Boolean, nullable=False, default=False, server_default=db.false(),
     )
@@ -3315,7 +3321,21 @@ class GamePlayer(TimestampMixin, db.Model):
         only when the day sweep never reached this occurrence, so a player is
         never made to confirm twice for the same game.
         """
-        return self.day_reminded_at or self.reminded_at
+        reminder = self.day_reminded_at or self.reminded_at
+        return max((stamp for stamp in (reminder, self.commitment_requested_at)
+                    if stamp is not None), default=None)
+
+    def commitment_confirmation_due(self):
+        return bool(self.commitment_requested_at is not None
+                    and (self.attending_at is None or self.attending_at < self.commitment_requested_at)
+                    and (not self.game or self.user_id != self.game.creator_id))
+
+    def rsvp_status(self):
+        if self.attendance_confirmation_requested_at() and not self.attendance_confirmed():
+            return 'needs_confirmation'
+        if self.recurrence_rsvp_automatic or not self.attendance_confirmed():
+            return 'reserved'
+        return 'confirmed'
 
     def attendance_confirmed(self):
         if self.attending_at is None:
@@ -3332,6 +3352,7 @@ class GamePlayer(TimestampMixin, db.Model):
         data['team'] = self.team
         data['rating_delta'] = self.rating_delta
         data['attending'] = self.attendance_confirmed()
+        data['rsvp_status'] = self.rsvp_status()
         data['attendance_confirmation_requested_at'] = iso(
             self.attendance_confirmation_requested_at()
         )
@@ -3345,6 +3366,7 @@ class GamePlayer(TimestampMixin, db.Model):
         data['team'] = self.team
         data['rating_delta'] = self.rating_delta
         data['attending'] = self.attendance_confirmed()
+        data['rsvp_status'] = self.rsvp_status()
         data['attendance_confirmation_requested_at'] = iso(
             self.attendance_confirmation_requested_at()
         )

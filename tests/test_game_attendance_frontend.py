@@ -1,4 +1,4 @@
-"""Contracts for one RSVP followed by a reminder-only reconfirmation."""
+"""Contracts for RSVP, changed-plan review and reminder reconfirmation."""
 
 from pathlib import Path
 
@@ -14,10 +14,12 @@ def section(start: str, end: str) -> str:
 
 def test_joined_players_are_not_immediately_asked_to_rsvp_again():
     detail = section('function gameScreenHtml', 'async function openGameScreen')
-    assert 'game.attendance_confirmation_due && !game.is_creator' in detail
-    assert 'Still coming?' in detail
-    assert 'Yes, I’m coming' in detail
-    assert 'Can’t make it' in detail
+    confirmation = section('function sessionConfirmationHtml', 'function sessionVisitFactsHtml')
+    assert '${sessionConfirmationHtml(game)}' in detail
+    assert '!game.attendance_confirmation_due' in confirmation
+    assert 'Still coming?' in confirmation
+    assert 'Yes, I’m coming' in confirmation
+    assert 'Can’t make it' in confirmation
     assert "I'm coming — count me in" not in detail
 
 
@@ -33,7 +35,7 @@ def test_hosts_get_recruiting_as_the_primary_underfilled_action():
     assert 'data-roster-boost-channel="share"' in APP
     assert 'aria-label="Players"' in detail
     assert 'const openSpots = Math.max(0, Number(game.spots_left) || 0);' in detail
-    assert "game.attendance_confirmation_due && !p.attending && p.user_id !== game.creator_id" in detail
+    assert "sessionRsvpStatus(p) !== 'confirmed'" in detail
     assert 'Confirmed ${confirmed}' not in detail
     assert 'Unconfirmed ${unconfirmed}' not in detail
 

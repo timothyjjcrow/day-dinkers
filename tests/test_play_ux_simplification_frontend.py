@@ -150,7 +150,7 @@ def test_fill_game_uses_one_inline_invite_row_and_a_focused_channel_panel():
 def test_join_becomes_a_stable_open_action_and_waitlist_remains_manageable():
     cards = section("function gameCardHtml", "// Share text")
     assert 'class="game-joined-chip"' in cards
-    assert "game.is_creator ? 'Hosting' : 'You’re in'" in cards
+    assert "game.is_creator ? 'Hosting' : game.attendance_confirmation_due ? 'Place held' : 'You’re in'" in cards
     assert 'data-open-game="${game.id}"' in cards
     assert "showJoinedToast(Number(b.dataset.gameJoin)" in cards
     assert "label: 'Undo'" in cards

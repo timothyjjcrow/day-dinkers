@@ -1108,13 +1108,14 @@ def _edit_following_series_dates(game, following, proposed, changed, actor_id):
         if 'court_id' in changed:
             occurrence.court = game.court
         commitment_changed = schedule_changed or bool(
-            {'court_id', 'duration_minutes'} & set(changed)
+            {'court_id', 'duration_minutes', 'cost_cents', 'court_access', 'court_count', 'court_number', 'play_style'} & set(changed)
         )
         for player in occurrence.players:
             if commitment_changed:
                 player.reminded_at = None
                 player.day_reminded_at = None
                 player.attending_at = utcnow() if player.user_id == actor_id else None
+                player.commitment_requested_at = None if player.user_id == actor_id else utcnow()
             if player.user_id != actor_id:
                 notify(player.user_id, 'game_updated',
                        'An upcoming date in your recurring session changed',
@@ -5944,23 +5945,39 @@ def completed_game_crew(game_id):
 @rate_limit(30, 60)
 @login_required
 def confirm_attendance(game_id):
-    """'I'm coming 👋' — a player vouches they'll show up for this occurrence."""
-    game = db.session.get(Game, game_id)
+    """Confirm the reviewed plan under the same locks used to change it."""
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    try:
+        users, game = _lock_stable_game_edit_scope(game_id, g.current_user.id)
+    except RuntimeError:
+        return jsonify({'error': 'game_changed_retry'}), 409
+    actor = next((user for user in users if user.id == g.current_user.id), None)
+    if not actor or actor.deleted_at:
+        return jsonify({'error': 'authentication_required'}), 401
+    g.current_user = actor
     if not game:
         return jsonify({'error': 'game_not_found'}), 404
     if game.is_instant:
         return jsonify({'error': 'instant_rally_use_arrival'}), 409
     if game.status != 'upcoming':
         return jsonify({'error': 'game_not_open'}), 400
-    mine = next((p for p in game.players if p.user_id == g.current_user.id), None)
+    mine = next((p for p in game.players if p.user_id == actor.id), None)
     if not mine:
         return jsonify({'error': 'players_only'}), 403
-    # Refresh the timestamp even on a repeat confirmation so a reminder-window
-    # response is recorded after the latest schedule change.
+    if mine.commitment_confirmation_due() and payload.get('expected_commitment_requested_at') != iso(mine.commitment_requested_at):
+        return jsonify({'error': 'game_commitment_changed', 'game': _game_payload(game, actor.id)}), 409
+    conflict = schedule_review_needed(
+        [actor.id], game.scheduled_at, game.duration_minutes, payload,
+        scope=f'confirm_game:{game.id}', viewer_id=actor.id, exclude_game_id=game.id,
+    )
+    if conflict:
+        return jsonify(conflict), 409
     mine.attending_at = utcnow()
     mine.recurrence_rsvp_automatic = False
     db.session.commit()
-    return jsonify(game.to_dict(g.current_user.id))
+    return jsonify(_game_payload(game, actor.id))
 
 
 @games_bp.patch('/games/<int:game_id>/recurrence-rsvp')
@@ -6109,6 +6126,15 @@ def join_game(game_id):
         (p for p in game.players if p.user_id == g.current_user.id), None,
     )
     if existing_player:
+        if existing_player.commitment_confirmation_due():
+            if payload.get('expected_commitment_requested_at') != iso(existing_player.commitment_requested_at):
+                return jsonify({'error': 'game_commitment_changed', 'game': _game_payload(game, g.current_user.id)}), 409
+            conflict = schedule_review_needed(
+                [g.current_user.id], game.scheduled_at, game.duration_minutes, payload,
+                scope=f'confirm_game:{game.id}', viewer_id=g.current_user.id, exclude_game_id=game.id,
+            )
+            if conflict:
+                return jsonify(conflict), 409
         attendance_changed = existing_player.attending_at is None
         if attendance_changed:
             existing_player.attending_at = utcnow()
@@ -7157,6 +7183,10 @@ def respond_host_handoff(game_id, handoff_id):
             _end_game_open_calls(occurrence, 'host_changed')
             occurrence.creator_id = actor_id
             occurrence.creator = target
+            for player in occurrence.players:
+                if player.user_id == actor_id:
+                    player.attending_at = now
+                    player.recurrence_rsvp_automatic = False
             if not any(p.user_id == actor_id for p in occurrence.players):
                 db.session.add(GamePlayer(game=occurrence, user_id=actor_id, attending_at=now))
                 _participation_event(occurrence, actor_id, 'joined', actor_id=actor_id)
@@ -7697,13 +7727,14 @@ def edit_game(game_id):
 
     now = utcnow()
     commitment_changed = bool(
-        {'court_id', 'scheduled_at', 'duration_minutes'} & set(changed)
+        {'court_id', 'scheduled_at', 'duration_minutes', 'cost_cents', 'court_access', 'court_count', 'court_number', 'play_style'} & set(changed)
     )
     if commitment_changed:
         for player in sorted(game.players, key=lambda row: row.user_id):
             player.reminded_at = None
             player.day_reminded_at = None
             player.attending_at = now if player.user_id == actor.id else None
+            player.commitment_requested_at = None if player.user_id == actor.id else now
             _end_play_pulse_for_game(
                 player.user_id, game, 'game_rescheduled', now,
             )
@@ -7867,12 +7898,23 @@ def reschedule_game(game_id):
     if game.recurrence != 'none':
         return jsonify({'error': 'recurring_open_play'}), 400
 
-    when = _parse_scheduled_at((request.get_json(silent=True) or {}).get('scheduled_at'))
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    when = _parse_scheduled_at(payload.get('scheduled_at'))
     if not when:
         return jsonify({'error': 'invalid_scheduled_at'}), 400
     if when < utcnow() - timedelta(minutes=15):
         return jsonify({'error': 'scheduled_in_past'}), 400
 
+    if when == game.scheduled_at:
+        return jsonify(_game_payload(game, actor.id))
+    conflict = schedule_review_needed(
+        [player.user_id for player in game.players], when, game.duration_minutes, payload,
+        scope=f'edit_game:{game.id}', viewer_id=actor.id, exclude_game_id=game.id,
+    )
+    if conflict:
+        return jsonify(conflict), 409
     game.scheduled_at = when
     court_name = game.court.name if game.court else 'the court'
     for player in sorted(game.players, key=lambda row: row.user_id):
@@ -7881,6 +7923,7 @@ def reschedule_game(game_id):
         player.attending_at = (
             utcnow() if player.user_id == game.creator_id else None
         )  # the host's reschedule is already their renewed commitment
+        player.commitment_requested_at = None if player.user_id == game.creator_id else utcnow()
         _end_play_pulse_for_game(
             player.user_id, game, 'game_rescheduled', utcnow(),
         )

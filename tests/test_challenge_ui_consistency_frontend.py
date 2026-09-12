@@ -29,7 +29,7 @@ def test_challenge_success_feedback_uses_semantic_icons_and_a_persistent_join_st
     detail = section('function gameScreenHtml', 'async function openGameScreen')
     assert "isChallenge ? `${uiIcon('trophy')} Accept challenge`" in detail
     assert 'id="gs-joined-state" role="status"' in detail
-    assert "${uiIcon('check-circle')} ${game.is_creator ? 'You’re hosting' : 'You’re in'}" in detail
+    assert "${uiIcon('check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}" in detail
     assert 'id="gs-undo-join">Undo</button>' in detail
     # Play again now opens a reviewable planner; it must not claim a rematch or
     # invitations already exist before the player submits that plan.

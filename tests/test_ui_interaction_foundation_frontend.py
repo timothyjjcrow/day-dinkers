@@ -976,7 +976,7 @@ def test_remaining_cross_app_destinations_use_native_controls_and_product_icons(
     assert "uiIcon('grid')" in competition_create
     assert '<button type="button" class="card row nav-row-button competition-member-row"' in league
     assert "openChildModal(box, () => openLeagueChat(lg))" in league
-    assert '<button type="button" class="player-profile-link" data-view-user="${p.user_id}"' in game
+    assert '<button type="button" class="player-profile-link" id="session-player-${p.user_id}" data-view-user="${p.user_id}"' in game
     assert 'class="card row nav-row-button" id="gs-court"' in game
     assert '<button type="button" class="profile-relationship-link" data-view-user=' in profile
     assert "openToolChild(() => openBusinessDetailsEditor" in business

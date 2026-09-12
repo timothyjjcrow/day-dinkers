@@ -1157,6 +1157,11 @@ def _upgrade_schema(app):
 
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}
+            if 'commitment_requested_at' not in gp_cols:
+                statements.append(
+                    'ALTER TABLE game_player ADD COLUMN commitment_requested_at '
+                    + ('TIMESTAMP' if is_postgres else 'DATETIME')
+                )
             if 'recurrence_rsvp_automatic' not in gp_cols:
                 statements.append(
                     'ALTER TABLE game_player ADD COLUMN recurrence_rsvp_automatic '
