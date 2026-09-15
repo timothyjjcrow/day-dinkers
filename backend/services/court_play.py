@@ -11,7 +11,7 @@ from backend.services.business_visibility import public_business_query, hide_uns
 from backend.services.court_hours import project_hours, interval_hours_conflict
 
 
-def court_play_payload(court, viewer, start=None, end=None):
+def court_play_payload(court, viewer, start=None, end=None, viewer_timezone=None):
     from backend.routes.courts import friend_ids
     from backend.routes.games import _discovery_game_payload, _instant_game_discovery_allowed
     business = public_business_query().filter(BusinessProfile.court_id == court.id).first()
@@ -22,20 +22,29 @@ def court_play_payload(court, viewer, start=None, end=None):
         zone = ZoneInfo(timezone) if timezone else UTC
     except (ZoneInfoNotFoundError, ValueError):
         timezone, zone = '', UTC
-    start = start or local_today(timezone)
+    if viewer_timezone:
+        try:
+            ZoneInfo(viewer_timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError('invalid_schedule_timezone') from None
+    # Unknown court zones must not combine UTC day groups with viewer-local clocks.
+    # Keep the fallback separate: community wall-clock listings still need a court zone.
+    player_timezone = timezone or viewer_timezone or 'UTC'
+    player_zone = ZoneInfo(player_timezone)
+    start = start or local_today(player_timezone)
     end = end or start + timedelta(days=6)
     if end < start or (end-start).days > 30:
         raise ValueError('invalid_schedule_range')
     response = {'court_id':court.id, 'from':start.isoformat(), 'to':end.isoformat(),
-                'timezone':timezone, 'closed':bool(court.closed), 'items':[], 'undated_count':0,
+                'timezone':timezone, 'player_timezone':player_timezone, 'closed':bool(court.closed), 'items':[], 'undated_count':0,
                 'note':'Player plans do not reserve court space. Venue registration happens on the linked site.'}
     if court.closed:
         return response
     viewer_id = viewer.id if viewer else None
     friends = friend_ids(viewer_id) if viewer_id else set()
     hidden = blocked_pair_ids(viewer_id) if viewer_id else set()
-    lower = datetime.combine(start, time.min, zone).astimezone(UTC).replace(tzinfo=None)
-    upper = datetime.combine(end+timedelta(days=1), time.min, zone).astimezone(UTC).replace(tzinfo=None)
+    lower = datetime.combine(start, time.min, player_zone).astimezone(UTC).replace(tzinfo=None)
+    upper = datetime.combine(end+timedelta(days=1), time.min, player_zone).astimezone(UTC).replace(tzinfo=None)
     now = utcnow()
     games = Game.query.filter(Game.court_id == court.id, Game.status == 'upcoming',
         Game.scheduled_at >= max(lower, now-timedelta(hours=2)), Game.scheduled_at < upper).order_by(Game.scheduled_at, Game.id).limit(1000).all()
@@ -55,8 +64,8 @@ def court_play_payload(court, viewer, start=None, end=None):
         response['items'].append({'key':f'game:{game.id}', 'source':'player', 'source_label':'Player-organized',
             'title':game.title or ('Ranked match' if game.game_type == 'ranked' else 'Pickup session'),
             'starts_at':iso(game.scheduled_at), 'ends_at':data.get('ends_at'),
-            'event_date':game.scheduled_at.replace(tzinfo=UTC).astimezone(zone).date().isoformat(),
-            'timezone':timezone, 'game':data, 'status':'scheduled',
+            'event_date':game.scheduled_at.replace(tzinfo=UTC).astimezone(player_zone).date().isoformat(),
+            'timezone':player_timezone, 'game':data, 'status':'scheduled',
             'action':'open_session', 'action_label':'Open session' if data.get('is_joined') else 'View & join' if data.get('spots_left',0)>0 else 'View waitlist'})
 
     def add_venue(row, *, integrated=False):
@@ -146,7 +155,7 @@ def court_play_payload(court, viewer, start=None, end=None):
 
     def local_clock(row):
         if row.get('starts_at'):
-            return datetime.fromisoformat(row['starts_at'].replace('Z','+00:00')).astimezone(zone).strftime('%H:%M')
+            return datetime.fromisoformat(row['starts_at'].replace('Z','+00:00')).astimezone(ZoneInfo(row.get('timezone') or player_timezone)).strftime('%H:%M')
         values = row.get('schedule') or row.get('window') or {}
         return values.get('start_time') or values.get('start') or '99:99'
     response['items'].sort(key=lambda row:(row['event_date'], local_clock(row), row['key']))

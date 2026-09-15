@@ -1,6 +1,7 @@
 """One court timeline preserves visibility, provenance and review gates."""
 import hashlib
 import json
+import pytest
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -170,3 +171,63 @@ def test_entry_notice_is_visible_before_join_and_keeps_other_host_notes_separate
     '''],check=True,capture_output=True,text=True)
     game_screen=source[source.index('  function gameScreenHtml'):source.index('  async function openGameScreen')]
     assert game_screen.index('${courtEntryNoticeHtml(game)}') < game_screen.index('class="session-roster"')
+
+
+@pytest.mark.parametrize('zone_name,on,day_hours', [
+    ('America/Los_Angeles', '2099-03-08', 23),
+    ('America/Los_Angeles', '2099-11-01', 25),
+    ('Pacific/Kiritimati', '2099-03-08', 24),
+])
+def test_unknown_court_zone_filters_and_groups_the_entire_viewer_day(app, client, zone_name, on, day_hours):
+    owner = register(client, 'timeline-zone@example.test')
+    day = datetime.fromisoformat(on).date()
+    zone = ZoneInfo(zone_name)
+    lower = datetime.combine(day, time.min, zone).astimezone(UTC).replace(tzinfo=None)
+    upper = datetime.combine(day+timedelta(days=1), time.min, zone).astimezone(UTC).replace(tzinfo=None)
+    assert (upper-lower).total_seconds() == day_hours*3600
+    with app.app_context():
+        court = db.session.get(Court, 1)
+        court.structured_hours = '{}'
+        court.open_play_schedule_rows = json.dumps([{'weekday':day.strftime('%a').lower(),'start':'08:00','end':'10:00'}])
+        for name, stamp in [('Before',lower-timedelta(seconds=1)),('First',lower),('Last',upper-timedelta(seconds=1)),('After',upper)]:
+            game = Game(court_id=1, creator_id=owner['user']['id'], title=name, scheduled_at=stamp,
+                        max_players=4, visibility='open')
+            db.session.add(game)
+            db.session.flush()
+            db.session.add(GamePlayer(game=game,user_id=owner['user']['id']))
+        db.session.commit()
+    result = client.get(f'/api/courts/1/play?from={on}&to={on}&viewer_timezone={zone_name}').get_json()
+    games = [row for row in result['items'] if row['source']=='player']
+    assert [row['title'] for row in games] == ['First','Last']
+    assert all(row['event_date']==on and row['timezone']==zone_name for row in games)
+    assert result['timezone']=='' and result['player_timezone']==zone_name
+    community = next(row for row in result['items'] if row['source']=='community')
+    assert community['event_date']==on and community['starts_at'] is None and community['timezone']==''
+    assert [row['title'] for row in result['items']] == ['First','Open play','Last']
+
+
+def test_confirmed_court_zone_wins_over_viewer_zone(app, client, live):
+    owner,bid,day = seed(app,client,live)
+    baseline=client.get(f'/api/courts/1/play?from={day}&to={day}').get_json()
+    other=client.get(f'/api/courts/1/play?from={day}&to={day}&viewer_timezone=Pacific/Kiritimati').get_json()
+    assert baseline==other
+    assert other['player_timezone']=='America/Chicago'
+
+
+def test_unknown_zone_defaults_to_explicit_utc_and_validates_viewer_zone(client):
+    result=client.get('/api/courts/1/play').get_json()
+    assert result['timezone']=='' and result['player_timezone']=='UTC'
+    for zone in ('Not/AZone','../UTC','/etc/passwd'):
+        response=client.get('/api/courts/1/play',query_string={'viewer_timezone':zone})
+        assert response.status_code==400
+        assert response.get_json()=={'error':'invalid_schedule_timezone'}
+
+
+def test_default_range_uses_the_player_zone_near_midnight(app,client,monkeypatch):
+    from backend.services import court_play, business_schedule
+    instant=datetime(2099,1,2,3,tzinfo=UTC)
+    monkeypatch.setattr(court_play,'local_today',lambda zone:business_schedule.local_today(zone,instant))
+    west=client.get('/api/courts/1/play?viewer_timezone=America/Los_Angeles').get_json()
+    east=client.get('/api/courts/1/play?viewer_timezone=Pacific/Kiritimati').get_json()
+    assert (west['from'],west['to'])==('2099-01-01','2099-01-07')
+    assert (east['from'],east['to'])==('2099-01-02','2099-01-08')

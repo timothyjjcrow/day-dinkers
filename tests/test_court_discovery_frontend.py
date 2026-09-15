@@ -386,7 +386,7 @@ def test_verified_venue_programs_have_a_direct_accessible_discovery_path():
     assert 'data-preview-detail>View court</button>' in preview
     assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court,{mapPreview:true});" in preview
     next_opportunity = section("async function loadCourtNextOpportunity", "function loadCourtTimeline")
-    assert "api(`/courts/${court.id}/play`)" in next_opportunity
+    assert "api(`/courts/${court.id}/play${courtTimelineQuery()}`)" in next_opportunity
     assert 'courtTimelineItemHtml(item,{compact:true})' in next_opportunity
 
     card = section("function courtRowHtml", "function sortCourts")

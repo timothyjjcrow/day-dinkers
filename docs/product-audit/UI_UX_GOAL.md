@@ -22,7 +22,7 @@ Review every feature and the journeys between features. Make Third Shot professi
 | 2 | Public entry, signup, login, recovery, onboarding | Browse first and enter the intended task with minimal setup | In progress |
 | 3 | Play home, discovery, filters, personal agenda, calendar | Find suitable play and see every commitment | In progress |
 | 4 | Map, list, search scope, selected/saved courts | Explore freely while retaining the selected place | In progress |
-| 5 | Court detail, timelines, hours/access, photos, reviews, contributions | Understand a visit and find the right next action | Pending |
+| 5 | Court detail, timelines, hours/access, photos, reviews, contributions | Understand a visit and find the right next action | In progress |
 | 6 | Session creation/editing, recurring dates, host tools | Make or change a plan with concise, understandable controls | Pending |
 | 7 | Immediate play, on-the-way, arrival, presence, completion | Understand and control participation at each stage | Pending |
 | 8 | Ranked matches, score entry/confirmation/correction, rankings | Identify teams, result and required action without jargon | Pending |
@@ -58,3 +58,5 @@ Pass3 continued: `ui-ux-pass-03-plans.md` covers agenda hierarchy, complete date
 Pass3 continued: `ui-ux-pass-03-calendar.md` covers the calendar subscription sheet, separated provider choices, private-link disclosure, copy recovery, reset/reload states and account guards. Third-party calendar syncing remains unverified. Next broaden to court map/list navigation while retaining the remaining discovery/agenda integration checks.
 
 Pass4: `ui-ux-pass-04-court-browsing.md` covers direct list-to-details navigation, explicit map selection, compact court previews, Saved access, next-session drill-in, schedule retry and responsive preview actions. Next inspect court-detail hierarchy and schedule dates; map filter/search/pagination and richer multi-court coverage remain open.
+
+Pass5: `ui-ux-pass-05-court-schedule.md` covers consistent player date/time ranges, full-width schedule cards, concise week navigation, retry and return focus. Court access, photos, reviews and contributions remain open.

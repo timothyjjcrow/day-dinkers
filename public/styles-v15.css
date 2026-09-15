@@ -7579,3 +7579,22 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
   .court-sheet[data-snap="peek"].has-selection { max-height: calc(100% - 114px); }
   .court-preview-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
+
+/* Court schedules: one time zone, readable date navigation, full-width session facts. */
+.court-timeline-heading { flex-wrap: wrap; }
+.court-timeline-heading .btn-link { min-height: 44px; }
+.court-timeline-range { display: grid; grid-template-columns: 44px minmax(0,1fr) 44px; gap: 8px; align-items: center; margin: 14px 0 22px; }
+.court-timeline-range .btn { min-height: 44px; padding: 10px; }
+.court-timeline-range .court-timeline-dates { display: grid; gap: 2px; min-height: 52px; margin: 0; padding: 4px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink); cursor: pointer; text-align: center; line-height: 1.4; }
+.court-timeline-dates b { font-size: 14px; }
+.court-timeline-dates small { font-size: 12px; color: var(--ink-soft); }
+.court-timeline-day > h4 { margin-bottom: 10px; font-size: 13px; }
+.court-timeline-item.court-timeline-card { display: block; padding: 16px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.court-timeline-card-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.court-timeline-card .court-timeline-time { padding: 0; font-size: 15px; }
+.court-timeline-availability { padding: 4px 8px; border-radius: var(--radius-xs); background: var(--bg); color: var(--ink-soft); font-size: 12px; font-weight: 650; }
+.court-timeline-availability.has-space { background: var(--green-100); color: var(--ink); }
+.court-timeline-card .court-timeline-content h4 { font-size: 17px; margin-bottom: 6px; }
+.court-timeline-card .court-timeline-content .btn { min-height: 44px; }
+.court-timeline-card .court-timeline-content > small { margin-top: 10px; }
+.court-timeline-card.is-unavailable { opacity: 1; }

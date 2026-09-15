@@ -1253,9 +1253,9 @@ def court_play(court_id):
     try:
         start = date.fromisoformat(request.args['from']) if request.args.get('from') else None
         end = date.fromisoformat(request.args['to']) if request.args.get('to') else None
-        payload = court_play_payload(court, optional_current_user(), start, end)
-    except ValueError:
-        return jsonify({'error':'invalid_schedule_range'}), 400
+        payload = court_play_payload(court, optional_current_user(), start, end, request.args.get('viewer_timezone'))
+    except ValueError as error:
+        return jsonify({'error':'invalid_schedule_timezone' if str(error) == 'invalid_schedule_timezone' else 'invalid_schedule_range'}), 400
     return jsonify(payload)
 
 

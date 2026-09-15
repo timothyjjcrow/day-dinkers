@@ -7546,28 +7546,58 @@
     return new Date(`${value}T12:00:00`).toLocaleDateString([], {month:'short',day:'numeric'});
   }
 
+  function courtTimelineQuery(from='', to='') {
+    const query = new URLSearchParams({viewer_timezone:Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'});
+    if (from) query.set('from',from);
+    if (to) query.set('to',to);
+    return `?${query}`;
+  }
+
+  function courtTimelineDay(item, now=new Date()) {
+    const zone = item.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const on = item.starts_at ? calendarDateInTimeZone(new Date(item.starts_at),zone) : item.event_date;
+    if (on === calendarDateInTimeZone(now,zone)) return 'Today';
+    const next = new Date(`${calendarDateInTimeZone(now,zone)}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate()+1);
+    if (on === next.toISOString().slice(0,10)) return 'Tomorrow';
+    return courtTimelineDate(on);
+  }
+
+  function courtTimelineZoneLabel(timezone) {
+    try {
+      return new Intl.DateTimeFormat([], {timeZone:timezone,timeZoneName:'longGeneric'})
+        .formatToParts(new Date()).find(part=>part.type==='timeZoneName')?.value || timezone;
+    } catch { return String(timezone || 'UTC').replaceAll('_',' '); }
+  }
+
   function courtTimelineTime(item) {
     const row = item.schedule || item.window || {};
     if (item.starts_at) {
-      try { return new Date(item.starts_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',...(item.timezone ? {timeZone:item.timezone} : {})}); } catch { return fmtTimeShort(item.starts_at); }
+      try { return new Date(item.starts_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',...(item.timezone ? {timeZone:item.timezone,...(item.timezone !== Intl.DateTimeFormat().resolvedOptions().timeZone ? {timeZoneName:'short'} : {})} : {})}); } catch { return fmtTimeShort(item.starts_at); }
     }
     return businessTimeLabel(row.start_time || row.start) || 'Time not listed';
   }
 
   function courtTimelineItemHtml(item, {compact=false, mapPreview=false} = {}) {
     const game = item.game || {}, row = item.schedule || item.window || {};
+    const sourceLabel = item.source_label + (item.source!=='player' && !item.timezone ? ' · Local court time' : '');
     const status = item.status === 'cancelled' ? 'Cancelled' : item.status === 'sold_out' ? 'Full' : '';
     const facts = item.source === 'player'
-      ? [game.game_type === 'ranked' ? 'Ranked match' : Number(game.max_players)>4 ? 'Pickup session' : 'Casual match', gameLevelRangeLabel(game), game.is_joined ? 'You’re going' : game.spots_left > 0 ? `${game.spots_left} spots left` : 'Full', game.cost_cents == null ? null : Number(game.cost_cents) === 0 ? 'Free' : `$${(Number(game.cost_cents)/100).toFixed(2)} per player`]
+      ? [game.game_type === 'ranked' ? 'Ranked match' : Number(game.max_players)>4 ? 'Pickup session' : 'Casual match', gameLevelRangeLabel(game), game.is_joined ? 'You’re going' : game.spots_left > 0 ? `${game.spots_left} spot${game.spots_left===1 ? '' : 's'} left` : 'Full', game.cost_cents == null ? null : Number(game.cost_cents) === 0 ? 'Free' : `$${(Number(game.cost_cents)/100).toFixed(2)} per player`]
       : [row.skill_level || row.level, row.price_text || row.cost, row.availability_label || (item.source === 'venue' ? 'Check availability with venue' : '')];
     const booking = item.action === 'external' ? businessActionHref(row.booking_url) : '';
-    const action = item.action === 'open_session' ? `<button type="button" class="btn btn-primary btn-sm" data-court-timeline-game="${game.id}">${esc(item.action_label)}</button>`
+    const action = item.action === 'open_session' ? `<button type="button" class="btn ${!game.is_joined && !(game.spots_left>0) ? 'btn-secondary' : 'btn-primary'} btn-sm" data-court-timeline-game="${game.id}">${esc(item.action_label)}</button>`
       : item.action === 'plan' ? `<button type="button" class="btn btn-secondary btn-sm" data-court-timeline-plan="${esc(item.key)}">Plan to go</button>`
       : booking ? `<a class="btn btn-primary btn-sm" href="${esc(booking)}" target="_blank" rel="noopener"${businessTrackingAttributes('booking',row)}>${esc(item.action_label || 'Register externally')}${uiIcon('link')}<small>${esc(new URL(booking).hostname)}</small></a>`
       : `<span class="court-timeline-status">${esc(status || (item.hours_conflict ? 'Check court hours' : 'Registration details not listed'))}</span>`;
-    if (mapPreview) return `<article class="court-map-next"><div class="court-map-next-copy"><small>Next · ${esc(upcomingDayLabel(item.starts_at || `${item.event_date}T12:00:00`))} · ${esc(courtTimelineTime(item))}</small><b>${esc(item.title)}</b><span>${esc(item.source_label)} · ${facts.filter(Boolean).map(esc).join(' · ')}</span></div><div class="court-map-next-action">${action}</div></article>`;
-    const names = (game.players || []).slice(0,3).map(player=>player.display_name).filter(Boolean);
-    return `<article class="court-timeline-item is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-time">${esc(courtTimelineTime(item))}${compact ? `<small>${esc(upcomingDayLabel(item.starts_at || `${item.event_date}T12:00:00`))}</small>` : ''}</div><div class="court-timeline-content"><span class="court-timeline-source">${esc(item.source_label)}</span><h4>${esc(item.title)}</h4><p>${facts.filter(Boolean).map(esc).join(' · ')}</p>${!compact && names.length ? `<p>${esc(names.join(', '))}${game.players.length>names.length ? ` +${game.players.length-names.length}` : ''}</p>` : ''}${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${!compact && item.source==='community' ? '<small>A listed time. Planning does not register you with the venue.</small>' : ''}${action}</div></article>`;
+    if (mapPreview) return `<article class="court-map-next"><div class="court-map-next-copy"><small>Next · ${esc(courtTimelineDay(item))} · ${esc(courtTimelineTime(item))}</small><b>${esc(item.title)}</b><span>${esc(sourceLabel)} · ${facts.filter(Boolean).map(esc).join(' · ')}</span></div><div class="court-map-next-action">${action}</div></article>`;
+    if (!compact) {
+      const availability = item.source === 'player' ? (game.is_joined ? 'Joined' : game.spots_left > 0 ? `${game.spots_left} spot${game.spots_left===1 ? '' : 's'} left` : 'Full') : status;
+      const details = item.source === 'player' ? facts.filter((_,index)=>index!==2) : facts;
+      const names = (game.players || []).slice(0,3).map(player=>player.display_name).filter(Boolean);
+      return `<article class="court-timeline-item court-timeline-card is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-card-top"><time class="court-timeline-time"${item.starts_at ? ` datetime="${esc(item.starts_at)}"` : ''}>${esc(courtTimelineTime(item))}</time>${availability ? `<span class="court-timeline-availability${item.source==='player' && (game.is_joined || game.spots_left>0) ? ' has-space' : ''}">${esc(availability)}</span>` : ''}</div><div class="court-timeline-content"><h4>${esc(item.title)}</h4><span class="court-timeline-source">${esc(sourceLabel)}</span><p>${details.filter(Boolean).map(esc).join(' · ')}</p>${names.length ? `<p>${esc(names.join(', '))}${game.players.length>names.length ? ` +${game.players.length-names.length}` : ''}</p>` : ''}${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${item.source==='community' ? '<small>Player plan only. Venue registration is separate.</small>' : ''}${action}</div></article>`;
+    }
+    return `<article class="court-timeline-item is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-time">${esc(courtTimelineTime(item))}<small>${esc(courtTimelineDay(item))}</small></div><div class="court-timeline-content"><span class="court-timeline-source">${esc(sourceLabel)}</span><h4>${esc(item.title)}</h4><p>${facts.filter(Boolean).map(esc).join(' · ')}</p>${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${action}</div></article>`;
   }
 
   const COURT_OPEN_PLAY_PLAN_SOURCE = 'Player plan for community-listed open play.';
@@ -7608,7 +7638,7 @@
       const button = sheet.querySelector('[data-create-court-plan]');
       button.disabled=true;button.textContent='Checking this date…';error.classList.add('hidden');
       try {
-        const fresh = await api(`/courts/${court.id}/play?from=${item.event_date}&to=${item.event_date}`);
+        const fresh = await api(`/courts/${court.id}/play${courtTimelineQuery(item.event_date,item.event_date)}`);
         if (!sheet.isConnected) return;
         const listed = (fresh.items || []).find(value => value.source==='community' && value.window?.weekday===row.weekday && value.window?.start===row.start);
         if (!listed || listed.hours_conflict) throw new Error(listed?.hours_warning || 'This time is no longer listed. Check the court schedule before making a plan.');
@@ -7621,10 +7651,11 @@
 
   function bindCourtTimelineActions(root, court, items, parent) {
     root.querySelectorAll('[data-court-timeline-game]').forEach(button=>button.addEventListener('click',()=>{
+      if (parent) parent._courtTimelineReturnFocus = courtTimelineControlSelector(button);
       const open = () => openGameScreen(Number(button.dataset.courtTimelineGame), { returnFocus:button });
       return parent ? openChildModal(parent,open) : open();
     }));
-    root.querySelectorAll('[data-court-timeline-plan]').forEach(button=>button.addEventListener('click',()=>{const item=items.find(row=>row.key===button.dataset.courtTimelinePlan);if(item)openCourtWindowPlan(court,item,parent);}));
+    root.querySelectorAll('[data-court-timeline-plan]').forEach(button=>button.addEventListener('click',()=>{const item=items.find(row=>row.key===button.dataset.courtTimelinePlan);if(item){if(parent)parent._courtTimelineReturnFocus=courtTimelineControlSelector(button);openCourtWindowPlan(court,item,parent);}}));
     bindBusinessActionTracking(root,null);
   }
 
@@ -7633,7 +7664,7 @@
     slot.dataset.loading = 'true';
     slot.innerHTML = '<p class="row-sub" role="status">Finding the next session…</p>';
     try {
-      const data = await api(`/courts/${court.id}/play`);
+      const data = await api(`/courts/${court.id}/play${courtTimelineQuery()}`);
       if (!slot.isConnected) return;
       const item = (data.items || []).find(row => row.status !== 'cancelled' && row.status !== 'sold_out' && row.action !== 'none');
       slot.innerHTML = item ? (mapPreview ? courtTimelineItemHtml(item,{compact:true,mapPreview:true}) : `<span class="court-next-label">Next up</span>${courtTimelineItemHtml(item,{compact:true})}`)
@@ -7647,27 +7678,53 @@
     }
   }
 
+  function courtTimelineControlSelector(node) {
+    for (const name of ['data-court-timeline-game','data-court-timeline-plan','data-timeline-prev','data-timeline-next','data-timeline-today','data-timeline-create','data-timeline-retry']) {
+      if (node?.hasAttribute?.(name)) return `[${name}="${CSS.escape(node.getAttribute(name))}"]`;
+    }
+    return '';
+  }
+
   function loadCourtTimeline(modal,court) {
     const root=modal.querySelector('#cd-play-here');if(!root)return;
     let generation=0, from='', latest=null;
-    const load=async(newFrom='', {quiet=false}={})=>{
+    const load=async(newFrom='', {quiet=false,focus=''}={})=>{
       const seq=++generation;from=newFrom;
+      let returnFocus = focus || (root.contains(document.activeElement) ? courtTimelineControlSelector(document.activeElement) : '');
+      const captureFocus = () => {
+        if (root.contains(document.activeElement)) returnFocus = courtTimelineControlSelector(document.activeElement) || 'h3';
+      };
+      const restoreFocus = () => requestAnimationFrame(() => {
+        if (returnFocus && root.isConnected && seq===generation && !modal.closest('[inert]')
+            && (document.activeElement===document.body || document.activeElement===modal.querySelector('.modal'))) {
+          (root.querySelector(returnFocus) || root.querySelector('h3'))?.focus({preventScroll:true});
+        }
+      });
       if (!quiet) root.innerHTML='<h3>Play here</h3><p role="status">Loading this court’s schedule…</p>';
       root.setAttribute('aria-busy','true');
       try {
-        const data=await api(`/courts/${court.id}/play${from ? `?from=${from}` : ''}`);
+        const data=await api(`/courts/${court.id}/play${courtTimelineQuery(from)}`);
         if(!root.isConnected || seq!==generation)return;
         latest=data;
         const groups=new Map();for(const item of data.items || []){if(!groups.has(item.event_date))groups.set(item.event_date,[]);groups.get(item.event_date).push(item);}
-        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Play here</h3><button type="button" class="btn-link" data-timeline-create>Create game</button></div><p class="court-timeline-zone">${data.timezone ? `Times at this court · ${esc(data.timezone.replaceAll('_',' '))}` : 'Player sessions use your time zone. Listed open-play times are local to the court.'}</p><div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev>Previous week</button><button type="button" class="btn btn-secondary btn-sm" data-timeline-today>This week</button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next>Next week</button></div><p class="court-timeline-dates">${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</p>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>`<section class="court-timeline-day"><h4>${esc(new Date(`${on}T12:00:00`).toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</h4>${items.map(item=>courtTimelineItemHtml(item)).join('')}</section>`).join('') : '<p class="court-timeline-empty">No dated play is listed this week. Try next week or create a game.</p>'}${data.undated_count ? '<p class="simple-note">Some venue programs have no confirmed dates. Check the venue details below.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
-        const shift=days=>{const date=new Date(`${data.from}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+days);load(date.toISOString().slice(0,10));};
-        root.querySelector('[data-timeline-prev]').addEventListener('click',()=>shift(-7));root.querySelector('[data-timeline-next]').addEventListener('click',()=>shift(7));root.querySelector('[data-timeline-today]').addEventListener('click',()=>load());
+        captureFocus();
+        const zoneLabel = data.timezone ? `Court time · ${courtTimelineZoneLabel(data.timezone)}` : `Player times · ${courtTimelineZoneLabel(data.player_timezone || 'UTC')}`;
+        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Play here</h3><button type="button" class="btn-link" data-timeline-create>Create game</button></div><p class="court-timeline-zone">${esc(zoneLabel)}</p><div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev aria-label="Previous week">${uiIcon('arrow-left')}</button><button type="button" class="court-timeline-dates" data-timeline-today aria-label="${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}. Back to today"><b>${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</b><small>${from ? 'Back to today' : 'Next 7 days'}</small></button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next aria-label="Next week">${uiIcon('arrow-right')}</button></div><span class="sr-only" role="status">${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}</span>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>`<section class="court-timeline-day"><h4>${esc(new Date(`${on}T12:00:00`).toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</h4>${items.map(item=>courtTimelineItemHtml(item)).join('')}</section>`).join('') : '<p class="court-timeline-empty">No play listed this week. Try another week or create a game.</p>'}${data.undated_count ? '<p class="simple-note">More venue programs below · dates not confirmed.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
+        const shift=(days,focus)=>{const date=new Date(`${data.from}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+days);load(date.toISOString().slice(0,10),{focus});};
+        root.querySelector('[data-timeline-prev]').addEventListener('click',()=>shift(-7,'[data-timeline-prev]'));
+        root.querySelector('[data-timeline-next]').addEventListener('click',()=>shift(7,'[data-timeline-next]'));
+        root.querySelector('[data-timeline-today]').addEventListener('click',()=>load('',{focus:'[data-timeline-today]'}));
         const create=root.querySelector('[data-timeline-create]');create.disabled=data.closed;create.addEventListener('click',()=>openChildModal(modal,()=>openNewGameModal({court})));
         bindCourtTimelineActions(root,court,data.items,modal);
-      } catch(error){if(root.isConnected && seq===generation){root.innerHTML=`<h3>Play here</h3><p role="alert">${esc(error.message || 'The schedule could not load.')}</p><button type="button" class="btn btn-secondary" data-timeline-retry>Retry schedule</button>`;root.querySelector('[data-timeline-retry]').addEventListener('click',()=>load(from));}}
+        restoreFocus();
+      } catch(error){if(root.isConnected && seq===generation){captureFocus();root.innerHTML=`<h3 tabindex="-1">Play here</h3><p role="alert">${esc(error.message || 'The schedule could not load.')}</p><button type="button" class="btn btn-secondary" data-timeline-retry>Retry schedule</button>`;root.querySelector('[data-timeline-retry]').addEventListener('click',()=>load(from,{focus:'h3'}));restoreFocus();}}
       finally{if(root.isConnected && seq===generation)root.removeAttribute('aria-busy');}
     };
-    modal._onResume = () => load(from,{quiet:true});
+    modal._onResume = () => {
+      const focus = modal._courtTimelineReturnFocus || '';
+      delete modal._courtTimelineReturnFocus;
+      return load(from,{quiet:true,focus});
+    };
     load();return()=>latest;
   }
 

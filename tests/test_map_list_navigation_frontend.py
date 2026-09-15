@@ -20,7 +20,7 @@ def test_compact_map_session_keeps_price_capacity_date_and_external_booking_cont
     source=functions_between('function courtTimelineItemHtml(', 'function courtEntryDescriptionParts(')
     result=run_js('''
       const esc=value=>String(value).replaceAll('<','&lt;'),uiIcon=()=>'',gameLevelRangeLabel=()=> '3.0–3.5';
-      const businessActionHref=value=>value||'',businessTrackingAttributes=()=>'',courtTimelineTime=()=> '6 PM',upcomingDayLabel=()=> 'Tomorrow';
+      const businessActionHref=value=>value||'',businessTrackingAttributes=()=>'',courtTimelineTime=()=> '6 PM',courtTimelineDay=()=> 'Tomorrow';
     '''+source+'''
       const player={source:'player',source_label:'Player-organized',title:'Doubles <friends>',starts_at:'2030-01-01T18:00:00Z',
         action:'open_session',action_label:'View waitlist',game:{id:7,game_type:'ranked',max_players:4,spots_left:0,cost_cents:1500}};
