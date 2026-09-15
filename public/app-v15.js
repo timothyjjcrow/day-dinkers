@@ -3102,11 +3102,11 @@
       $('#auth-password-help').classList.toggle('hidden', !registering);
       $('#auth-forgot-password').classList.toggle('hidden', registering);
       $('#auth-eyebrow').textContent = registering ? 'Join the local game' : 'Welcome back';
-      $('#auth-title').textContent = registering ? 'Create your player account' : 'Log in to Third Shot';
+      $('#auth-title').textContent = registering ? 'Create your account' : 'Log in to Third Shot';
       $('#auth-support').textContent = registering
         ? (pendingInviteName
           ? `${pendingInviteName} invited you. Create an account to join them on court.`
-          : 'Create an account to join a session or save a court. Add profile details when you need them.')
+          : 'Save courts and join games.')
         : 'Find courts, meet players, and get on the court.';
       $('#auth-toggle').textContent = registering
         ? 'Already have an account? Log in' : 'New here? Create an account';
@@ -3152,6 +3152,9 @@
       const access = $('#auth-access');
       access.dataset.userOpened = '';
       access.classList.add('hidden');
+      const screen = $('#auth-screen');
+      screen?.setAttribute('aria-labelledby', 'auth-explore-title');
+      if (screen) screen.scrollTop = access._browseScrollTop || 0;
       $('#auth-access-toggle')?.focus({ preventScroll: true });
     });
     $('#auth-court-search-form')?.addEventListener('submit', (event) => {
@@ -8448,8 +8451,11 @@
   function showAuthEntryForm() {
     const access = $('#auth-access');
     if (!access) return;
+    const screen = $('#auth-screen');
+    if (access.classList.contains('hidden')) access._browseScrollTop = screen?.scrollTop || 0;
     access.dataset.userOpened = '1';
     access.classList.remove('hidden');
+    screen?.setAttribute('aria-labelledby', 'auth-title');
     syncAuthModeUi();
     access.scrollIntoView({ block: 'start', behavior: 'auto' });
     (authMode === 'register' ? $('#auth-name') : $('#auth-email'))?.focus({ preventScroll: true });

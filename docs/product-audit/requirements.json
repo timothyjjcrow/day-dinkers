@@ -1006,8 +1006,10 @@
       "finding": "simplify the frequent path, not just each isolated card.",
       "source": "docs/product-audit/identity-social.md",
       "requirement": "**P1 shared pattern:** simplify the frequent path, not just each isolated card. Use the same small vocabulary and ordering for every person/group/game detail: identity → next relevant information → primary action → secondary detail. Existing deep nesting is manageable technically but still makes basic tasks feel longer.",
-      "status": "pending",
-      "implementation": [],
+      "status": "in_progress",
+      "implementation": [
+        "Mobile account access now exposes one task at a time and keeps the password visibility control clear of enlarged text; see mobile-auth-clarity-next.md. Unreleased source work."
+      ],
       "verification": []
     },
     {
