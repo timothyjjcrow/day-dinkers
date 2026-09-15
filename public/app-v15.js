@@ -20113,7 +20113,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
     // Defaults: first preset at least ~1h away today, else tomorrow morning
     let selDayIdx = 0;
-    let selHour = timePresets.find((h) => {
+    let selHour = [9, 12, 17, 18].find((h) => {
       const d = setPlannerClock(new Date(days[0]), h);
       return d.getTime() > Date.now() + 50 * 60000;
     });
@@ -20178,6 +20178,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     // Keep the first decision light: offer three useful complete date/time
     // choices instead of asking players to scan a day-by-time matrix.
     const initialExactTime = initialTimeSelection?.date || setPlannerClock(new Date(days[selDayIdx]), selHour);
+    if (!recurrenceDaysTouched) {
+      try {
+        recurrenceWeekdays = new Set([new Intl.DateTimeFormat('en-US', { timeZone: recurrenceTimezone, weekday: 'short' }).format(initialExactTime).toLowerCase()]);
+      } catch { /* The submit validator explains an unavailable time zone. */ }
+    }
     const selectedPlannerPeople = () => [state.me, ...invitePeople.filter((person) => inviteIds.has(person.id))].filter(Boolean);
     const smartTimeChipsHtml = (selected) => plannerSuggestedTimes(selectedPlannerPeople(), selected).map((date, index) => {
       const midnight = new Date(date); midnight.setHours(0, 0, 0, 0);
@@ -20363,7 +20368,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         <div id="ng-later-fields">
           <div class="schedule-suggestions-heading"><b>Suggested times</b><button type="button" class="btn-link" id="ng-more-times" aria-expanded="false" aria-controls="ng-smart-times">More common times</button></div>
           ${smartTimeChoicesHtml}
+          <p id="ng-smart-empty" class="field-help hidden">No suggested times fit the listed hours.</p>
           ${scheduleDateTimePickerHtml('ng-when', initialTimeUnavailable ? '' : scheduleDateTimeValue(initialExactTime), plannerTimeZoneLabel(detectedRecurrenceTimezone))}
+          <div id="ng-hours-hint" class="planner-hours-hint" role="status" tabindex="-1"></div>
           <div id="ng-busy-hint" class="row-sub" style="margin-bottom:4px"></div>
           <fieldset class="game-choice-field planner-duration" id="ng-duration-choices">
             <legend><span>How long?</span><button type="button" class="btn-link" id="ng-duration-custom-toggle" aria-expanded="${presetDurationMinutes != null && ![60, 90, 120].includes(presetDurationMinutes)}" aria-controls="ng-custom-duration">${presetDurationMinutes != null && ![60, 90, 120].includes(presetDurationMinutes) ? `${presetDurationMinutes} min` : 'Custom'}</button></legend>
@@ -20383,9 +20390,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
             <span><span class="planner-recurring-title">${uiIcon('refresh')} Repeat weekly</span></span>
           </label>
           <div class="planner-recurrence-settings hidden" id="ng-recurrence-settings">
+            <div class="planner-repeat-preview" id="ng-repeat-preview" role="status"></div>
             <fieldset class="game-choice-field">
               <legend>Repeat on</legend>
-              <p class="field-help">Repeat days, times, and the end date follow ${esc(plannerTimeZoneLabel(recurrenceTimezone))}.</p>
+
               <div class="recurrence-weekdays" id="ng-recurrence-weekdays">
                 ${recurrenceDayKeys.map((day, index) => `<button type="button" data-recurrence-day="${day}" class="${recurrenceWeekdays.has(day) ? 'active' : ''}" aria-pressed="${recurrenceWeekdays.has(day)}">${recurrenceDayLabels[index]}</button>`).join('')}
               </div>
@@ -20473,6 +20481,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
       <section class="planner-essentials hidden" id="ng-essentials" aria-labelledby="ng-access-title">
         <h4 id="ng-access-title">Court access &amp; cost</h4>
+        <div id="ng-access-hours-warning" class="planner-hours-hint" role="status" tabindex="-1"></div>
         <div class="form-grid">
           <div class="form-field"><label for="ng-court-access">Court access</label><select id="ng-court-access"><option value="">Not confirmed yet</option>${[['host_reserved','Reserved by me'],['public_drop_in','Public drop-in'],['booking_needed','Booking still needed']].map(([value,label]) => `<option value="${value}"${value === presetCourtAccess ? ' selected' : ''}>${label}</option>`).join('')}</select></div>
           <div class="form-field">
@@ -20668,6 +20677,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
     // --- Busy-time hint: nudge scheduling toward when players actually show up ---
     let busyTimes = null; // for the currently selected court
+    let queuePlannerHours = () => {};
+    let busyHintSequence = 0;
+    let plannerHoursChecked = false;
     const busyWindowContains = (label, value) => {
       if (!(value instanceof Date) || !Number.isFinite(value.getTime())) return false;
       const match = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(\d+)(?:\s+(AM|PM))?–(\d+)\s+(AM|PM)$/.exec(String(label || ''));
@@ -20687,26 +20699,41 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const popularWindow = when
         ? busyTimes.find((row) => busyWindowContains(row.label, when)) : null;
       el.innerHTML = popularWindow
-        ? `${uiIcon('check-circle')} Good pick — ${esc(popularWindow.label)} is popular at this court`
+        ? `Usually busy · ${esc(popularWindow.label)}`
         : '';
     };
     const loadBusyHint = async (courtId) => {
+      const sequence = ++busyHintSequence;
       busyTimes = null;
+      queuePlannerHours();
       updateBusyHint();
       if (!courtId) return;
       try {
-        busyTimes = (await api(`/courts/${courtId}`)).busy_times || null;
+        const detail = await api(`/courts/${courtId}`);
+        if (sequence !== busyHintSequence || !modal.isConnected) return;
+        busyTimes = detail.busy_times || null;
         updateBusyHint();
       } catch { /* hint is optional */ }
     };
 
+    const plannerRepeatText = ({ includeTime = true } = {}) => {
+      const start = chosenPlannerTime();
+      if (!start) return '';
+      try {
+        const clock = new Intl.DateTimeFormat(undefined, { timeZone: recurrenceTimezone, hour: 'numeric', minute: '2-digit' });
+        const repeatDays = recurrenceDayKeys.filter(day => recurrenceWeekdays.has(day)).map(day => day[0].toUpperCase() + day.slice(1));
+        const until = recurrenceEndsOn ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${recurrenceEndsOn}T12:00:00Z`)) : null;
+        return [`Every ${repeatDays.join(', ')}`, includeTime ? clock.format(start) : '', plannerTimeZoneLabel(recurrenceTimezone), until ? `Until ${until}` : 'No end date'].filter(Boolean).join(' · ');
+      } catch { return 'Check the repeat time and time zone.'; }
+    };
     const updatePlannerSummary = () => {
       const summary = modal.querySelector('#ng-summary');
       const courtName = modal.querySelector('#ng-court-name').textContent || 'Choose a court';
       const scheduledIso = plannerScheduledIso();
       const duration = Number(modal.querySelector('#ng-duration').value);
       const end = scheduledIso && Number.isInteger(duration) && duration >= 15 && duration <= 720 ? new Date(new Date(scheduledIso).getTime() + duration * 60000) : null;
-      const repeats = modal.querySelector('#ng-recurring').checked ? `Weekly ${[...recurrenceWeekdays].map(day=>day[0].toUpperCase()+day.slice(1)).join(', ')} · ${plannerTimeZoneLabel(recurrenceTimezone)}${recurrenceEndsOn ? ` · Ends ${recurrenceEndsOn}` : ''}` : '';
+      const repeats = modal.querySelector('#ng-recurring').checked ? plannerRepeatText({ includeTime: false }) : '';
+      modal.querySelector('#ng-repeat-preview').textContent = repeats ? plannerRepeatText() : '';
       const whenText = scheduledIso ? `${fmtDateTime(scheduledIso)}${end ? `–${end.toDateString() === new Date(scheduledIso).toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ' · No end time'}${repeats ? ` · ${repeats}` : ''}` : 'Choose a time';
       if (summary) {
         const costText = modal.querySelector('#ng-cost').value.trim();
@@ -20857,7 +20884,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       if (recurrenceDaysTouched) return;
       const planned = chosenPlannerTime();
       if (!planned || !Number.isFinite(planned.getTime())) return;
-      recurrenceWeekdays = new Set([recurrenceDayKeys[planned.getDay()]]);
+      try {
+        recurrenceWeekdays = new Set([new Intl.DateTimeFormat('en-US', { timeZone: recurrenceTimezone, weekday: 'short' }).format(planned).toLowerCase()]);
+      } catch { return; }
       renderRecurrenceWeekdays();
     };
     updatePlannerSummary();
@@ -20871,11 +20900,12 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       if (rosterKey !== suggestedRosterKey) {
         modal.querySelector('#ng-smart-times').innerHTML = smartTimeChipsHtml(chosenPlannerTime());
         suggestedRosterKey = rosterKey;
+        queuePlannerHours();
       }
       const expanded = modal.querySelector('#ng-more-times')?.getAttribute('aria-expanded') === 'true';
       modal.querySelectorAll('#ng-smart-times button').forEach((button) => {
         const active = button.dataset.smartTime === plannerScheduledIso();
-        button.disabled = new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000;
+        button.disabled = !plannerHoursChecked || new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000;
         button.classList.toggle('hidden', button.hasAttribute('data-extra-time') && !expanded);
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
@@ -20892,6 +20922,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       updatePlannerSummary();
       updatePlannerEndPreview();
       syncDefaultRecurrenceWeekday();
+      updatePlannerSummary();
+      queuePlannerHours();
       refreshPlannerInviteChoices();
       markPlannerDirty();
     };
@@ -20911,8 +20943,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const value = new Date(exactTimeInput.value);
       syncPlannerTimeChoices();
       if (Number.isFinite(value.getTime()) && value.getTime() > Date.now()) modal.querySelector('#ng-time-warning')?.remove();
-      updateBusyHint(); updatePlannerSummary(); updatePlannerEndPreview();
-      syncDefaultRecurrenceWeekday(); refreshPlannerInviteChoices(); markPlannerDirty();
+      updateBusyHint(); updatePlannerSummary(); updatePlannerEndPreview(); queuePlannerHours();
+      syncDefaultRecurrenceWeekday(); updatePlannerSummary(); refreshPlannerInviteChoices(); markPlannerDirty();
     });
     syncPlannerTimeChoices();
     // Initial hint for a preselected court.
@@ -20920,6 +20952,81 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       if (court.busy_times) { busyTimes = court.busy_times; updateBusyHint(); }
       else loadBusyHint(court.id);
     }
+
+    const setPlannerHoursHint = (text, { warning = false, retry = false, final = false } = {}) => {
+      for (const id of ['ng-hours-hint', 'ng-access-hours-warning']) {
+        const el = modal.querySelector(`#${id}`);
+        el.classList.toggle('is-warning', warning);
+        const visibleText = id === 'ng-hours-hint' || warning || retry || final ? text : '';
+        el.textContent = visibleText && modal.querySelector('#ng-recurring').checked ? `First date · ${visibleText}` : visibleText;
+        if (retry) {
+          const button = document.createElement('button');
+          button.type = 'button'; button.className = 'btn-link'; button.textContent = 'Try again';
+          button.dataset.retryHours = '';
+          button.addEventListener('click', queuePlannerHours);
+          el.append(button);
+        }
+      }
+    };
+    let hoursTimer = null, hoursSequence = 0;
+    const hoursViewer = state.me?.id;
+    queuePlannerHours = () => {
+      clearTimeout(hoursTimer);
+      const retryFocus = document.activeElement?.closest('[data-retry-hours]')?.parentElement;
+      const sequence = ++hoursSequence;
+      plannerHoursChecked = false;
+      modal.querySelector('#ng-smart-empty').classList.add('hidden');
+      modal.querySelectorAll('#ng-smart-times button').forEach(button => { button.disabled = true; });
+      const courtId = Number(modal.querySelector('#ng-court-id').value);
+      const selected = plannerScheduledIso();
+      const durationRaw = modal.querySelector('#ng-duration').value.trim();
+      const duration = durationRaw === '' ? null : Number(durationRaw);
+      const suggestions = plannerSuggestedTimes(selectedPlannerPeople(), chosenPlannerTime());
+      const starts = [...new Set([selected, ...suggestions.map(date => date.toISOString())].filter(Boolean))];
+      if (!courtId || !starts.length || (duration !== null && (!Number.isInteger(duration) || duration < 15 || duration > 720))) {
+        setPlannerHoursHint('');
+        return;
+      }
+      setPlannerHoursHint('Checking court hours…', { final: true });
+      retryFocus?.focus({ preventScroll: true });
+      hoursTimer = setTimeout(async () => {
+        const current = () => sequence === hoursSequence && modal.isConnected && state.me?.id === hoursViewer;
+        try {
+          const result = await api(`/courts/${courtId}/planning-times`, { method: 'POST', body: JSON.stringify({ starts_at: starts, duration_minutes: duration }) });
+          if (!current()) return;
+          const focusedTime = document.activeElement?.closest('#ng-smart-times button')?.dataset.smartTime;
+          const conflicts = new Set(result.items.filter(row => row.hours_conflict).map(row => row.starts_at));
+          modal.querySelector('#ng-smart-times').innerHTML = smartTimeChipsHtml(chosenPlannerTime());
+          const chips = [...modal.querySelectorAll('#ng-smart-times button')];
+          chips.filter(button => !starts.includes(button.dataset.smartTime) || conflicts.has(button.dataset.smartTime)).forEach(button => button.remove());
+          [...modal.querySelectorAll('#ng-smart-times button')].forEach((button, index) => button.toggleAttribute('data-extra-time', index >= 3));
+          plannerHoursChecked = true;
+          // Preserve the filtered set while syncing selected/expanded state.
+          suggestedRosterKey = selectedPlannerPeople().map(person => `${person.id}:${person.away_until || ''}`).sort().join('|');
+          syncPlannerTimeChoices();
+          const selectedRow = result.items.find(row => row.starts_at === selected);
+          const source = result.hours_source === 'venue' ? 'Venue hours' : 'Court hours';
+          setPlannerHoursHint(selectedRow?.hours_conflict
+            ? `${source}: this time is outside listed hours. Confirm access before inviting players.`
+            : selectedRow ? `${source} · ${selectedRow.hours_label}${result.timezone && result.timezone !== detectedRecurrenceTimezone ? ` · ${plannerTimeZoneLabel(result.timezone)}` : ''}` : '', { warning: !!selectedRow?.hours_conflict });
+          const more = modal.querySelector('#ng-more-times');
+          const count = modal.querySelectorAll('#ng-smart-times button').length;
+          more.classList.toggle('hidden', count <= 3);
+          modal.querySelector('#ng-smart-empty').classList.toggle('hidden', count > 0);
+          if (focusedTime) {
+            const target = [...modal.querySelectorAll('#ng-smart-times button')].find(button => button.dataset.smartTime === focusedTime);
+            (target || modal.querySelector('#ng-hours-hint')).focus({ preventScroll: true });
+          }
+        } catch {
+          if (!current()) return;
+          setPlannerHoursHint('Couldn’t check court hours.', { retry: true });
+          // Keep custom date/time available; do not endorse unchecked chips.
+        }
+      }, 250);
+    };
+    modal._cleanupFns.push(() => { clearTimeout(hoursTimer); hoursSequence += 1; busyHintSequence += 1; });
+    modal.querySelector('#ng-duration').addEventListener('input', queuePlannerHours);
+    queuePlannerHours();
 
     // The accepted group snapshot supplies the available people. The session
     // keeps its own explicit selection so somebody can sit this week out.
@@ -21378,7 +21485,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modal.querySelector('#ng-recurring').addEventListener('change', () => {
       if (recurringBox.checked) syncDefaultRecurrenceWeekday();
       syncRecurring();
+      queuePlannerHours();
       updateOptionsSummary();
+      updatePlannerSummary();
       markPlannerDirty();
     });
     modal.querySelector('#ng-recurrence-weekdays').addEventListener('click', (event) => {
@@ -21399,10 +21508,12 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       modal.querySelector('#ng-recurrence-warning')?.remove();
       renderRecurrenceWeekdays();
       updateOptionsSummary();
+      updatePlannerSummary();
       markPlannerDirty();
     });
     modal.querySelector('#ng-recurrence-end').addEventListener('input', (event) => {
       recurrenceEndsOn = event.target.value || null;
+      updatePlannerSummary();
       markPlannerDirty();
     });
     const syncCourtAccess = () => {

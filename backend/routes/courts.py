@@ -1246,6 +1246,47 @@ def court_detail(court_id):
     return jsonify(payload)
 
 
+@courts_bp.post('/courts/<int:court_id>/planning-times')
+@login_required
+def court_planning_times(court_id):
+    """Read-only hours advice; never a court reservation or attendance check."""
+    from datetime import datetime
+    from backend.services.court_hours import public_hours_for, interval_hours_conflict, hours_status
+    court = db.session.get(Court, court_id)
+    if not court or court.closed or court.pending_submission:
+        return jsonify({'error': 'court_not_found'}), 404
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({'error': 'invalid_planning_times'}), 400
+    starts = body.get('starts_at')
+    duration = body.get('duration_minutes')
+    if (not isinstance(starts, list) or not 1 <= len(starts) <= 10
+            or (duration is not None and (type(duration) is not int or not 15 <= duration <= 720))):
+        return jsonify({'error': 'invalid_planning_times'}), 400
+    parsed = []
+    try:
+        for value in starts:
+            if not isinstance(value, str) or len(value) > 40:
+                raise ValueError()
+            start = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            if start.tzinfo is None or not 2000 <= start.year <= 2100:
+                raise ValueError()
+            parsed.append(start.astimezone(UTC))
+    except (ValueError, TypeError, OverflowError):
+        return jsonify({'error': 'invalid_planning_times'}), 400
+    projection = public_hours_for([court])[court.id]
+    items = []
+    for value, start in zip(starts, parsed):
+        end = start + timedelta(minutes=duration) if duration else None
+        status = hours_status(projection['structured_hours'],
+                              dawn=projection['hours_dawn_to_dusk'], as_of=start)
+        items.append({'starts_at': value,
+                      'hours_conflict': interval_hours_conflict(projection, start.isoformat(), end.isoformat() if end else None),
+                      'hours_label': status['label'], 'is_open': status['is_open']})
+    return jsonify({'court_id': court.id, 'hours_source': projection['hours_source'],
+                    'timezone': projection['structured_hours'].get('timezone'), 'items': items})
+
+
 @courts_bp.get('/courts/<int:court_id>/play')
 def court_play(court_id):
     court = db.session.get(Court, court_id)

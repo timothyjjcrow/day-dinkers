@@ -28,7 +28,7 @@ def test_planner_collects_timezone_multi_weekday_pattern_and_end_date():
         'recurrence_timezone: recurrenceTimezone',
         'recurrence_weekdays: [...recurrenceWeekdays]',
         'recurrence_ends_on: recurrenceEndsOn',
-        'Repeat days, times, and the end date follow',
+        'id="ng-repeat-preview"',
         "plannerOptions.recurrence === 'weekly'",
         'Array.isArray(plannerOptions.recurrenceWeekdays)',
         "${initiallyRecurring ? 'checked' : ''}",

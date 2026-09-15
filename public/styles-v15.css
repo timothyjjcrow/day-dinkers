@@ -7760,3 +7760,15 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 @media (max-width: 600px) {
   .session-planner-modal .planner-submit-bar { position: static; }
 }
+
+.session-planner-modal .planner-hours-hint { margin: 10px 0; font-size: 13px; line-height: 1.5; color: var(--ink-soft); display: flex; gap: 8px; flex-wrap: wrap; }
+.session-planner-modal .planner-hours-hint:empty { display: none; }
+.session-planner-modal .planner-hours-hint.is-warning { color: var(--ink); border-left: 3px solid var(--amber-500, #d99b24); padding: 8px 12px; background: var(--bg); }
+.session-planner-modal .planner-recurrence-settings { background: var(--bg); border-color: var(--line); padding: 14px; }
+.session-planner-modal .planner-repeat-preview { font-size: 14px; font-weight: 650; line-height: 1.6; }
+.session-planner-modal .recurrence-weekdays { font-size: 12px; grid-template-columns: repeat(auto-fit, minmax(2.4em, 1fr)); }
+
+@media (max-width: 600px) {
+  .session-planner-modal #ng-step-when > .planner-next { position: static; box-shadow: none; }
+}
+.session-planner-modal .schedule-suggestions { font-size: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 6em), 1fr)); }
