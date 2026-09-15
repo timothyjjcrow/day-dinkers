@@ -1,5 +1,6 @@
 """Disposable discovery/agenda browser fixture. All accounts and play are synthetic."""
 import os
+import json
 from pathlib import Path
 import re
 import sys
@@ -38,6 +39,23 @@ with app.app_context():
         latitude=45.5,longitude=-122.7,num_courts=4),
         Court(name='Riverside Indoor Courts',city='Portland',state='OR',address='200 Demo Lane',
         latitude=45.6,longitude=-122.6,num_courts=2)]
+    if os.environ.get('DISCOVERY_VISIT_SCENARIOS') == '1':
+        courts[0].lighted = True
+        courts[0].nets_provided = True
+        courts[0].has_restrooms = True
+        courts[0].has_water = True
+        courts[0].surface_type = 'Acrylic'
+        courts[0].fee_type = 'drop_in_fee'
+        courts[0].fees = '$5 per player. Pay at the front desk before playing.'
+        courts[0].visitor_info = json.dumps({'access_type':'fee','play_access':'both',
+            'entrance':'North gate beside the community center.',
+            'parking':'Free parking in the north lot. No overnight parking.',
+            'accessibility':'Step-free path from the accessible spaces to Courts 1 and 2.',
+            'guest_access':'Everyone is welcome. Children under 12 need an adult.'})
+        courts[0].structured_hours = json.dumps({'timezone':'America/Los_Angeles',
+            **{day:[{'open':'07:00','close':'21:00'}] for day in ['mon','tue','wed','thu','fri']},
+            'sat':[{'open':'08:00','close':'20:00'}],'sun':[{'open':'08:00','close':'18:00'}]})
+        courts[0].open_play_schedule_rows = json.dumps([{'weekday':'tue','start':'09:00','end':'11:00','level':'All levels','cost':'$5','notes':'Check in at the front desk.'}])
     db.session.add_all(courts);db.session.flush()
     tomorrow=datetime.now(ZoneInfo('America/Los_Angeles')).date()+timedelta(days=1)
     def starts(clock):

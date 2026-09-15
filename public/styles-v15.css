@@ -7598,3 +7598,28 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .court-timeline-card .court-timeline-content .btn { min-height: 44px; }
 .court-timeline-card .court-timeline-content > small { margin-top: 10px; }
 .court-timeline-card.is-unavailable { opacity: 1; }
+
+/* Court browsing and visit topics keep the selected task in view. */
+.cd-hero-facts { flex-wrap: wrap; overflow: visible; }
+.cd-hero-facts > span { min-height: 32px; max-width: 100%; overflow-wrap: anywhere; }
+.court-visit-tabs { display: grid; font-size: 13px; grid-template-columns: repeat(auto-fit,minmax(min(100%,5.5em),1fr)); gap: 4px; padding: 4px; margin-bottom: 18px; border-radius: var(--radius-md); background: var(--bg); }
+.court-visit-tabs button { min-height: 44px; min-width: 0; border: 0; border-radius: var(--radius-sm); padding: 8px 4px; background: transparent; color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.court-visit-tabs button[aria-selected="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 4px rgb(0 0 0 / .10); }
+.court-visit-panel { padding-top: 0; border-top: 0; }
+.court-visit-panel[hidden] { display: none; }
+.court-visit-source-group { margin-top: 20px; }
+.court-visit-section .court-visit-source { color: var(--ink-soft); font-size: var(--text-xs); margin: 10px 0; }
+.court-visit-source-group .court-visiting-facts { gap: 16px; }
+.court-visit-source-group .court-visiting-facts > div { gap: 4px; }
+.court-visit-correction { min-height: 44px; margin-top: 16px; }
+.court-visit-facilities { display: grid; font-size: 14px; grid-template-columns: repeat(auto-fit,minmax(min(100%,10em),1fr)); gap: 10px; }
+.court-visit-facilities li { align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 14px; line-height: 1.4; }
+.court-visit-facilities li .ui-icon { flex: none; }
+@media (max-width: 380px) { .court-visit-tabs { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+.modal.court-visit-dialog { height: min(760px,calc(100dvh - 68px)); display: flex; flex-direction: column; }
+.court-visit-dialog > .modal-head, .court-visit-dialog > p, .court-visit-dialog > .court-visit-tabs, .court-visit-dialog > .court-visit-links { flex: none; }
+.court-visit-dialog .court-visit-panel:not([hidden]) { flex: 1; min-height: 96px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; margin-right: -4px; }
+
+.cd-closed-banner { flex-wrap: wrap; }
+.cd-closed-banner .btn-link { min-height: 44px; margin-left: auto; color: inherit; }

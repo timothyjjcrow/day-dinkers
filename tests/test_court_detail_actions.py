@@ -75,17 +75,18 @@ def test_closed_detail_replaces_every_new_play_surface_but_keeps_exit_and_correc
     assert "const presenceControl = checkedIn ?" in detail
     assert 'id="cd-checkout">Check out</button>' in detail
     assert "courtClosed ? 'Still checked in'" in detail
-    assert "? `<button type=\"button\" data-cd-suggest>" in detail
+    assert 'data-cd-suggest>Fix listing</button>' in detail
 
 
-def test_primary_court_actions_and_conditions_are_not_hidden_in_an_overflow():
+def test_browsing_actions_are_direct_and_conditions_stay_with_arrival():
     detail = section(APP, "async function openCourtDetail", "function openCheckInSheet")
 
     assert 'class="cd-quick-actions" role="group" aria-label="Court actions"' in detail
     for control in ('id="cd-favorite"', 'id="cd-share"', 'id="cd-gallery"',
-                    'id="cd-add-photo"', 'id="cd-condition"'):
+                    'id="cd-review-inline"', 'id="cd-condition"'):
         assert control in detail
     assert "Report conditions" in detail
+    assert detail.index('id="cd-condition"') > detail.index('id="cd-now-heading"')
     assert detail.index("${quickActions}") < detail.index('class="card cd-now-card"')
     assert 'aria-label="More court actions"' not in detail
     assert ".cd-quick-actions" in STYLES
@@ -129,7 +130,7 @@ def test_empty_sessions_offer_a_context_preserving_action_and_detail_has_a_loadi
         "court = await api(`/courts/${normalizedCourtId}`)",
     )
     timeline = section(APP, "function loadCourtTimeline", "function courtConditionReportsHtml")
-    assert "No dated play is listed this week" in timeline
+    assert "No play listed this week" in timeline
     assert "data-timeline-create" in timeline
     assert "openChildModal(modal,()=>openNewGameModal({court}))" in timeline
     assert "openChildModal(modal, () => openNewGameModal" in detail

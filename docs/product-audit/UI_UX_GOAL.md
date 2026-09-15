@@ -60,3 +60,5 @@ Pass3 continued: `ui-ux-pass-03-calendar.md` covers the calendar subscription sh
 Pass4: `ui-ux-pass-04-court-browsing.md` covers direct list-to-details navigation, explicit map selection, compact court previews, Saved access, next-session drill-in, schedule retry and responsive preview actions. Next inspect court-detail hierarchy and schedule dates; map filter/search/pagination and richer multi-court coverage remain open.
 
 Pass5: `ui-ux-pass-05-court-schedule.md` covers consistent player date/time ranges, full-width schedule cards, concise week navigation, retry and return focus. Court access, photos, reviews and contributions remain open.
+
+Pass5 continued: `ui-ux-pass-05-court-visit.md` covers browsing shortcuts, topic-based visit details, grouped sources, facilities, keyboard/large-text behavior, photo retry and contextual access-edit entry. Next review reading/writing reviews, followed by the remaining photo and contribution flows.

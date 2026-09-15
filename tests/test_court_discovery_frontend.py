@@ -487,9 +487,9 @@ def test_closed_court_replaces_live_actions_and_favorite_writes_are_idempotent()
     timeline = section("function loadCourtTimeline", "function courtConditionReportsHtml")
     assert "New play is paused while this court is marked closed. Existing plans remain in My plans." in timeline
     assert 'create.disabled=data.closed' in timeline
-    assert "? `<button type=\"button\" data-cd-suggest>" in detail
+    assert 'data-cd-suggest>Fix listing</button>' in detail
     assert "p.is_me || court.closed ? ''" in detail
-    assert ": `<button type=\"button\" id=\"cd-condition\">" in detail
+    assert 'id="cd-condition">Report conditions</button>' in detail
     assert "uiIcon('activity')" in detail
     assert "courtClosed || venueBusiness ? ''" in detail
     assert "${checkedIn ? '' : `<button type=\"button\" class=\"btn btn-secondary\" id=\"cd-checkin\"" in detail

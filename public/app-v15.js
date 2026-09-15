@@ -7748,65 +7748,80 @@
 
   function courtVisitingInfoHtml(court) {
     const facts = court.visitor_info || {}, sources = court.visitor_info_sources || {};
-    const rows = Object.entries(facts).filter(([,value]) => value).map(([key,value]) => {
-      const summary = window.VenueWorkspace.visitingSummary({[key]:value});
-      const colon = summary.indexOf(':');
-      return `<div><dt>${esc(summary.slice(0,colon))}<small>${sources[key] === 'venue' ? 'From the venue' : 'Community information'}</small></dt><dd>${esc(summary.slice(colon+1).trim())}</dd></div>`;
+    const order = ['access_type','play_access','guest_access','entrance','parking','accessibility','rotation','court_labels'];
+    const keys = [...new Set([...order,...Object.keys(facts)])].filter(key=>facts[key]);
+    if (!keys.length) return '<p class="simple-note">Access and arrival details not listed.</p>';
+    return ['venue','community'].map(source=>{
+      const rows = keys.filter(key=>(sources[key]==='venue' ? 'venue' : 'community')===source);
+      if (!rows.length) return '';
+      return `<div class="court-visit-source-group"><p class="court-visit-source">${source==='venue' ? 'From the venue' : 'Community information'}</p><dl class="court-visiting-facts">${rows.map(key=>{
+        const summary = window.VenueWorkspace.visitingSummary({[key]:facts[key]}), colon = summary.indexOf(':');
+        return `<div><dt>${esc(key==='entrance' ? 'Entrance' : summary.slice(0,colon))}</dt><dd>${esc(summary.slice(colon+1).trim())}</dd></div>`;
+      }).join('')}</dl></div>`;
+    }).join('');
+  }
+
+  function courtVisitPanelsHtml(court) {
+    const rows = courtOpenPlayRows(court).sort((a,b)=>Object.keys(COURT_WEEKDAY_LABELS).indexOf(a.weekday)-Object.keys(COURT_WEEKDAY_LABELS).indexOf(b.weekday) || a.start.localeCompare(b.start));
+    const facilities = [
+      [true,court.indoor ? 'home' : 'sun',court.indoor ? 'Indoor courts' : 'Outdoor courts'],
+      [Number(court.num_courts)>0,'grid',`${court.num_courts} court${court.num_courts===1 ? '' : 's'}`],
+      [court.nets_provided,'net','Nets provided'],[court.has_restrooms,'restroom','Restrooms'],
+      [court.has_water,'water','Water'],[court.lighted,'lightbulb','Lights'],
+    ].filter(([listed])=>listed);
+    const reservation = businessActionHref(court.reservation_url);
+    return {
+      hours: `<h4 id="court-visit-hours-title" tabindex="-1">Hours</h4>${courtVisitHoursHtml(court)}`,
+      fees: `<h4 id="court-visit-fees-title" tabindex="-1">Fees &amp; access</h4><p class="court-visit-fee">${esc(court.fees || courtFeeTypeFact(court) || 'Fees not listed.')}</p>${reservation ? `<a class="btn btn-secondary btn-block" href="${esc(reservation)}" target="_blank" rel="noopener">${uiIcon('external')} View reservation details</a>` : ''}${courtVisitingInfoHtml(court)}${state.me && !court.business?.preview_only ? '<button type="button" class="btn-link court-visit-correction" id="court-visit-correction">Suggest an update</button>' : ''}`,
+      facilities: `<h4 id="court-visit-facilities-title" tabindex="-1">Facilities</h4><ul class="court-visit-facilities">${facilities.map(([,icon,label])=>`<li>${uiIcon(icon)}<span>${esc(label)}</span></li>`).join('')}</ul>${court.surface_type ? `<p>${esc(court.surface_type)} surface</p>` : ''}<p class="court-visit-source">Unlisted facilities are not confirmed.</p>`,
+      openplay: `<h4 id="court-visit-openplay-title" tabindex="-1">Open play</h4>${rows.length ? `<div class="court-visit-openplay">${rows.map(row=>`<div><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start,row.end)}`)}</b>${row.level || row.cost ? `<p class="row-sub">${esc([row.level,row.cost].filter(Boolean).join(' · '))}</p>` : ''}${row.notes ? `<p>${esc(row.notes)}</p>` : ''}</div>`).join('')}</div>` : ''}${court.open_play_schedule ? `<p>${esc(court.open_play_schedule)}</p>` : !rows.length ? '<p>No open-play schedule listed.</p>' : ''}${rows.length ? '<p class="court-visit-source">Community-listed times · venue entry is separate.</p>' : ''}`,
+    };
+  }
+
+  function bindCourtVisitTabs(modal, selected) {
+    const tabs = [...modal.querySelectorAll('[data-visit-tab]')];
+    const activate = (key,{focus=false}={}) => {
+      const chosen=tabs.find(tab=>tab.dataset.visitTab===key) || tabs[0];
+      if (!chosen || !modal.isConnected) return;
+      tabs.forEach(tab=>{const active=tab===chosen;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active ? 0 : -1;});
+      modal.querySelectorAll('[data-visit-panel]').forEach(panel=>{panel.hidden=panel.dataset.visitPanel!==chosen.dataset.visitTab;});
+      if (focus) chosen.focus({preventScroll:true});
+    };
+    tabs.forEach((tab,index)=>{
+      tab.addEventListener('click',()=>activate(tab.dataset.visitTab));
+      tab.addEventListener('keydown',event=>{
+        let next;
+        if(event.key==='ArrowRight')next=(index+1)%tabs.length;
+        if(event.key==='ArrowLeft')next=(index+tabs.length-1)%tabs.length;
+        if(event.key==='Home')next=0;
+        if(event.key==='End')next=tabs.length-1;
+        if(next===undefined)return;
+        event.preventDefault();activate(tabs[next].dataset.visitTab,{focus:true});
+      });
     });
-    return rows.length ? `<dl class="court-visiting-facts">${rows.join('')}</dl>` : '<p class="simple-note">Entrance, parking and access details have not been added yet.</p>';
+    activate(selected);
+    requestAnimationFrame(()=>{if(modal.isConnected && !modal.closest('[inert]'))activate(selected,{focus:true});});
   }
 
   function openCourtVisitSheet(court, section = 'hours') {
-    const rows = courtOpenPlayRows(court).sort((a, b) => (
-      Object.keys(COURT_WEEKDAY_LABELS).indexOf(a.weekday) - Object.keys(COURT_WEEKDAY_LABELS).indexOf(b.weekday)
-      || a.start.localeCompare(b.start)
-    ));
-    const facilities = [
-      [court.nets_provided, 'net', 'Nets provided'],
-      [court.has_restrooms, 'restroom', 'Restrooms'],
-      [court.has_water, 'water', 'Water'],
-      [court.lighted, 'lightbulb', 'Lights'],
-    ].filter(([listed]) => listed);
-    const website = businessActionHref(court.website);
-    const reservation = businessActionHref(court.reservation_url);
-    const phone = safeHref(court.phone && `tel:${court.phone}`, { tel: true });
-    const modal = openModal(`
-      ${modalHead('Before you go', 'map-pin')}
-      <p class="court-visit-intro"><b>${esc(court.name)}</b><span>Venue and community information</span></p>
+    const panels=courtVisitPanelsHtml(court);
+    const selected=Object.hasOwn(panels,section) ? section : 'hours';
+    const website=businessActionHref(court.website),phone=safeHref(court.phone && `tel:${court.phone}`,{tel:true});
+    const modal=openModal(`
+      ${modalHead('Before you go','map-pin')}
+      <p class="court-visit-intro"><b>${esc(court.name)}</b></p>
       ${court.closed ? '<p class="court-visit-closed">This court is reported permanently closed.</p>' : ''}
-      <section class="court-visit-section" aria-labelledby="court-visit-hours-title">
-        <h4 id="court-visit-hours-title" tabindex="-1">${uiIcon('clock')} Hours</h4>
-        ${courtVisitHoursHtml(court)}
-      </section>
-      <section class="court-visit-section" aria-labelledby="court-visit-fees-title">
-        <h4 id="court-visit-fees-title" tabindex="-1">${uiIcon('ticket')} Fees &amp; access</h4>
-        <p>${esc(court.fees || courtFeeTypeFact(court) || 'Fees have not been listed yet.')}</p>
-        ${reservation ? `<a class="btn btn-secondary btn-block" href="${esc(reservation)}" target="_blank" rel="noopener">${uiIcon('external')} View reservation details</a>` : ''}
-      </section>
-      <section class="court-visit-section"><h4>Arrival &amp; playing here</h4>${courtVisitingInfoHtml(court)}${state.me && !court.business?.preview_only ? '<button type="button" class="btn-link" id="court-visit-correction">Add or correct visiting details</button>' : ''}</section>
-      <section class="court-visit-section" aria-labelledby="court-visit-openplay-title">
-        <h4 id="court-visit-openplay-title" tabindex="-1">${uiIcon('calendar')} Open play</h4>
-        ${rows.length ? `<div class="court-visit-openplay">${rows.map((row) => `<div><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start, row.end)}`)}</b>${row.level || row.cost ? `<p class="row-sub">${esc([row.level, row.cost].filter(Boolean).join(' · '))}</p>` : ''}${row.notes ? `<p>${esc(row.notes)}</p>` : ''}</div>`).join('')}</div>` : ''}
-        ${court.open_play_schedule ? `<p>${esc(court.open_play_schedule)}</p>` : !rows.length ? '<p>No open-play schedule has been listed yet.</p>' : ''}
-      </section>
-      <section class="court-visit-section" aria-labelledby="court-visit-facilities-title">
-        <h4 id="court-visit-facilities-title">${uiIcon('grid')} Facilities</h4>
-        ${facilities.length ? `<ul class="court-visit-facilities">${facilities.map(([, icon, label]) => `<li>${uiIcon(icon)} ${label}</li>`).join('')}</ul>` : '<p>Facility details have not been listed yet.</p>'}
-      </section>
+      <div class="court-visit-tabs" role="tablist" aria-label="Visit information">${[['hours','Hours'],['fees','Access'],['facilities','Facilities'],['openplay','Open play']].map(([key,label])=>`<button type="button" role="tab" id="court-visit-tab-${key}" data-visit-tab="${key}" aria-controls="court-visit-panel-${key}" aria-selected="${key===selected}" tabindex="${key===selected ? 0 : -1}">${label}</button>`).join('')}</div>
+      ${Object.entries(panels).map(([key,html])=>`<section class="court-visit-section court-visit-panel" id="court-visit-panel-${key}" role="tabpanel" aria-labelledby="court-visit-tab-${key}" data-visit-panel="${key}" tabindex="0" ${key===selected ? '' : 'hidden'}>${html}</section>`).join('')}
       <div class="court-visit-links">
         <a class="btn btn-primary btn-block" href="${esc(courtDirectionsUrl(court))}" target="_blank" rel="noopener">${uiIcon('map-pin')} Directions</a>
         ${website ? `<a class="btn btn-secondary" href="${esc(website)}" target="_blank" rel="noopener">${uiIcon('external')} Court website</a>` : ''}
         ${phone ? `<a class="btn btn-secondary" href="${esc(phone)}">${uiIcon('phone')} Call the court</a>` : ''}
       </div>
-    `, { label: `Before you go to ${court.name}` });
-    modal.querySelector('#court-visit-correction')?.addEventListener('click', () => openChildModal(modal, () => openSuggestEditSheet(court, () => transitionModal(modal, () => openCourtDetail(court.id)))));
-    requestAnimationFrame(() => {
-      if (!modal.isConnected) return;
-      const key = ['hours', 'fees', 'openplay'].includes(section) ? section : 'hours';
-      const heading = modal.querySelector(`#court-visit-${key}-title`);
-      heading?.focus({ preventScroll: true });
-      if (key !== 'hours') heading?.scrollIntoView({ block: 'start', behavior: 'instant' });
-    });
+    `,{label:`Before you go to ${court.name}`});
+    modal.querySelector('#court-visit-correction')?.addEventListener('click',()=>openChildModal(modal,()=>openSuggestEditSheet(court,()=>transitionModal(modal,()=>openCourtDetail(court.id)),{focusVisiting:true})));
+    modal.querySelector('.modal')?.classList.add('court-visit-dialog');
+    bindCourtVisitTabs(modal,selected);
     return modal;
   }
 
@@ -8209,7 +8224,7 @@
     }
   }
 
-  function openSuggestEditSheet(court, onApplied) {
+  function openSuggestEditSheet(court, onApplied, {focusVisiting=false} = {}) {
     const check = (id, icon, label, value) => `
       <label class="choice-check-row" for="${id}">
         <input type="checkbox" id="${id}" ${value ? 'checked' : ''} /> ${uiIcon(icon)} <span>${label}</span>
@@ -8248,7 +8263,7 @@
         <div id="se-pending-list" aria-live="polite"></div>
       </section>
       <details class="court-form-section hidden" id="se-history"><summary>Your submitted corrections</summary><div id="se-history-list"></div></details>
-      <details class="court-form-section"><summary>Access, parking &amp; arrival</summary>${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'community-visit')}</details>
+      <details class="court-form-section" id="se-visiting"><summary>Access, parking &amp; arrival</summary>${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'community-visit')}</details>
       <section class="court-form-section" aria-labelledby="se-setup-label">
         <div class="section-label section-label-icon" id="se-setup-label">${uiIcon('grid')} Court setup</div>
         <div class="form-field">
@@ -8485,6 +8500,16 @@
         formUX.showError(e.message === 'no changes' ? 'Nothing changed from the current info.' : e.message);
       }
     });
+    if (focusVisiting) {
+      const visiting = modal.querySelector('#se-visiting');
+      visiting.open = true;
+      visiting.querySelectorAll('details').forEach(details=>{details.open=true;});
+      requestAnimationFrame(()=>{
+        if (!modal.isConnected || modal.closest('[inert]')) return;
+        visiting.querySelector('summary')?.focus({preventScroll:true});
+        visiting.scrollIntoView({block:'start',behavior:'instant'});
+      });
+    }
     return modal;
   }
 
@@ -12849,10 +12874,8 @@
     const heroFactsHtml = `
       <div class="cd-hero-facts" role="list" aria-label="Court facts">
         <span role="listitem">${uiIcon('grid')} ${court.num_courts} court${court.num_courts === 1 ? '' : 's'}</span>
+        <span role="listitem">${uiIcon(court.indoor ? 'home' : 'sun')} ${court.indoor ? 'Indoor' : 'Outdoor'}</span>
         ${court.lighted ? `<span role="listitem">${uiIcon('lightbulb')} Lights</span>` : ''}
-        ${feeFact ? `<span role="listitem">${uiIcon('ticket')} ${esc(feeFact)}</span>` : ''}
-        ${openStatusFact ? `<span role="listitem" class="is-${esc(openStatusFact.state)}">${uiIcon('clock')} ${esc(openStatusFact.label)}</span>` : ''}
-        ${court.rating_avg ? `<button type="button" role="listitem" id="cd-review-summary">${uiIcon('star')} ${court.rating_avg} (${court.rating_count})</button>` : ''}
       </div>`;
     const todayHours = openStatusFact?.label || compactCourtFact(court.hours, 44) || 'Hours not listed';
     const structuredOpenPlay = courtOpenPlayTodayFact(court, 54);
@@ -12864,7 +12887,7 @@
     const visitFactsHtml = `
       <dl class="cd-visit-facts" aria-label="Today at this court">
         <div><dt>${uiIcon('clock')} Today</dt><dd><button type="button" data-court-visit="hours" aria-label="View full court hours: ${esc(todayHours)}">${esc(todayHours)}${uiIcon('chevron-right')}</button></dd></div>
-        <div><dt>${uiIcon('ticket')} Fees</dt><dd><button type="button" data-court-visit="fees" aria-label="View full fees and access details: ${esc(feeFact || 'Not listed')}">${esc(feeFact || 'Not listed')}${uiIcon('chevron-right')}</button></dd></div>
+        <div><dt>${uiIcon('ticket')} Access</dt><dd><button type="button" data-court-visit="fees" aria-label="View full fees and access details: ${esc(feeFact || 'Not listed')}">${esc(feeFact || 'Not listed')}${uiIcon('chevron-right')}</button></dd></div>
         <div><dt>${uiIcon('calendar')} Open play</dt><dd><button type="button" data-court-visit="openplay" aria-label="View full open-play schedule: ${esc(openPlayFact)}">${esc(openPlayFact)}${uiIcon('chevron-right')}</button></dd></div>
       </dl>`;
     const linkParts = [];
@@ -12948,13 +12971,9 @@
       </div></details>`;
     const quickActions = `
       <div class="cd-quick-actions" role="group" aria-label="Court actions">
+        <button type="button" id="cd-gallery">${uiIcon('camera')}<span>Photos${court.photo_count ? ` (${court.photo_count})` : ''}</span></button>
+        <button type="button" id="cd-review-inline">${uiIcon('star')}<span>Reviews${court.rating_count ? ` (${court.rating_count})` : ''}</span></button>
         <button type="button" id="cd-share">${uiIcon('send')}<span>Share</span></button>
-        ${court.photo_count > 0
-          ? `<button type="button" id="cd-gallery">${uiIcon('camera')}<span>Photos (${court.photo_count})</span></button>`
-          : `<button type="button" id="cd-add-photo">${uiIcon('camera')}<span>Add photo</span></button>`}
-        ${courtClosed
-          ? `<button type="button" data-cd-suggest>${uiIcon('edit')}<span>Fix listing</span></button>`
-          : `<button type="button" id="cd-condition">${uiIcon('activity')}<span>Report conditions</span></button>`}
       </div>`;
     const morePreviewParts = [
       (court.regulars || []).length ? `${court.regulars.length} regular${court.regulars.length === 1 ? '' : 's'}` : '',
@@ -12983,12 +13002,12 @@
         </div>
       </div>
       <div class="cd-scroll">
-      ${court.closed ? `<div class="cd-closed-banner" role="status">${uiIcon('alert-triangle')}<span>This court is reported permanently closed</span></div>` : ''}
+      ${court.closed ? `<div class="cd-closed-banner" role="status">${uiIcon('alert-triangle')}<span>This court is reported permanently closed</span><button type="button" class="btn-link" data-cd-suggest>Fix listing</button></div>` : ''}
       ${heroFactsHtml}
       ${visitFactsHtml}
       ${quickActions}
       <section id="cd-play-here" class="court-play-timeline" aria-label="Dated play at this court"></section>
-      <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary>${checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</summary>
+      <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary>${courtClosed ? 'Court status' : checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</summary>
       <section class="card cd-now-card" aria-labelledby="cd-now-heading">
         <div class="cd-now-heading">
           <div>
@@ -13004,13 +13023,9 @@
         ${secondaryActions}
         <div id="cd-weather"></div>
         ${courtConditionReportsHtml(court)}
+        ${courtClosed ? '' : '<button type="button" class="btn-link" id="cd-condition">Report conditions</button>'}
       </section></details>
       <div id="cd-business" class="cd-business-slot" aria-live="polite"></div>
-      <button type="button" class="card row nav-row-button cd-review-inline" id="cd-review-inline">
-        <span class="nav-row-leading" aria-hidden="true">${uiIcon('star')}</span>
-        <span class="row-main"><span class="row-title">${court.rating_avg ? `${court.rating_avg} from ${court.rating_count} review${court.rating_count === 1 ? '' : 's'}` : 'No court reviews yet'}</span><span class="row-sub">${state.me ? (court.my_review ? 'Update your review' : 'Write a review') : 'See what players say'}</span></span>
-        ${uiIcon('chevron-right', 'chev')}
-      </button>
       <div class="section-label section-label-icon" id="cd-sec-players">${uiIcon('users')} Checked-in players (${nHere})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
       ${playersHtml}
       ${courtClosed ? '' : `
@@ -13154,7 +13169,6 @@
       requestAnimationFrame(() => summary.focus({ preventScroll: true }));
     };
     modal.querySelector('#cd-review-inline')?.addEventListener('click', openCourtReviews);
-    modal.querySelector('#cd-review-summary')?.addEventListener('click', openCourtReviews);
 
     // Playability at a glance — loads after the sheet so it never blocks.
     api(`/courts/${court.id}/weather`).then((w) => {
@@ -13373,16 +13387,6 @@
       });
       input.click();
     };
-    modal.querySelector('#cd-add-photo')?.addEventListener('click', (event) => {
-      uploadCourtPhoto(
-        () => refreshCourtDetailPreservingContext(modal, court.id),
-        {
-          contextModal: modal,
-          trigger: event.currentTarget,
-          onCancel: () => refreshCourtDetailPreservingContext(modal, court.id),
-        },
-      );
-    });
     modal.querySelector('#cd-gallery')?.addEventListener('click', () => {
       openChildModal(modal, () => openCourtGallery(court, uploadCourtPhoto));
     });
@@ -31657,7 +31661,7 @@
       const visible = photos.map((photo,index) => ({photo,index})).filter(({photo}) => category === 'all' || (photo.category || 'unclassified') === category);
       box.innerHTML = `
         ${modalHead(court.name, 'camera')}
-        <p class="gallery-count" aria-live="polite">${visible.length} photo${visible.length === 1 ? '' : 's'} · Select one to view full screen</p>
+        ${photos.length ? `<p class="gallery-count" aria-live="polite">${visible.length} photo${visible.length === 1 ? '' : 's'}</p>` : ''}
         ${photos.length ? `<label class="form-field" for="gallery-category">Show photos<select id="gallery-category"><option value="all">All photos</option>${[...courtPhotoCategories(),['unclassified','Unclassified']].filter(([key]) => photos.some(photo => (photo.category || 'unclassified') === key)).map(([key,label]) => `<option value="${key}" ${category === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}
         ${visible.length ? `<div class="gallery-scroll">
           ${visible.map(({photo,index}) => `
