@@ -7423,7 +7423,7 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .session-roster-more > summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--ink); font-weight: 700; }
 .session-roster .row-title { overflow-wrap: anywhere; white-space: normal; }
 .session-roster-group h5 { align-items: center; color: var(--ink); }
-.session-roster-group h5::before { content: ''; width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--ink-soft); }
+.session-roster-group h5::before { content: ''; width: 7px; height: 7px; flex: 0 0 7px; border-radius: var(--radius-pill); background: var(--ink-soft); }
 .session-roster-group[data-rsvp-state="confirmed"] h5::before { background: var(--green-600); }
 .session-roster-group[data-rsvp-state="needs_confirmation"] h5::before { background: var(--amber-500); }
 .session-roster-group h5 > span { color: var(--ink-soft); font-variant-numeric: tabular-nums; }

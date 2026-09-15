@@ -28,3 +28,16 @@ The user explicitly requested UI improvement on every pass. Apply `ui-pass-stand
 The r80 bundle is prepared with a new r82 service-worker cache and explicit Brotli/identity routes; r79 routes/assets remain intact. App transfer is approximately 288.5 KiB Brotli, all runtime files 358.3 KiB, within the existing caps. A first release-focused run exposed missing r80 Vercel negotiation routes; those routes were added and the asset checks rerun. This is preparation, not production deployment.
 
 Still required: complete full-suite/CI gates, PostgreSQL migration rehearsal and concurrency verification on the current source, production backup/migration and release verification. Initial join/offer stale-plan snapshots and broader handoff/scheduling review remain to inspect. Physical Here status for scheduled sessions must be based on fresh, privacy-appropriate presence; this work does not infer it from RSVP. Large sessions and actual-device checks remain; PL-14 is not fully verified.
+
+
+## September 14 release follow-up
+
+Current release candidate: `ee96d38c934eae4b3bb9e868c6da18e68958f434` on `codex/roster-commitment-resume`. PostgreSQL current-source checks: 41 API tests and 5 concurrency tests passed. The operator migration ran twice on a fresh clone of the prior synthetic r79 database; exact existing fields for its user/court/game/roster/message records remained unchanged and `commitment_requested_at` remained NULL.
+
+Release inspection found that the Flask previous-asset allowlist omitted r79. Fixed in1237d00; five added checks verify all prior runtime files return exact identity/Brotli bytes with immutable caching. Fifteen release asset tests passed.
+
+Initial CI34921079956 finished with1754passed,3failed,1PostgreSQL-only skip. Two failures caught a raw50% radius in the new status dot; the third expected the old service-worker cache. Corrected with the shared radius token and updated cache assertion inee96d38;28affected checks passed. The corrected full run34922007591 is still pending completion; poll that exact handle. Run34921469902 predates those corrections and is superseded, but was not cancelled.
+
+No production migration or deployment occurred. Automatic approval review rejected the planned local production backup because deployment authorization did not explicitly cover export of potentially sensitive user records/messages to the specified local destination. A user approval question is pending for `/Users/timothycrowley/pickleball local /tmp/product-audit-r80/production-before-r80.dump`. Do not retry the export or bypass that decision without approval. The rejected combined command did not create the backup or its helper script. The private temporary environment pull is being removed while awaiting approval.
+
+The next mobile account-access refinement is separately saved at `/tmp/thirdshot-mobile-auth-clarity` on `codex/mobile-auth-clarity`; it is not in this candidate. Two expected-failing next-wave reproductions in primary ignored `tmp/product-audit-r81/entry_consent_repro.py` show that a new join and waitlist acceptance can still accept a price changed since viewing. They are outside the release suite and are unfinished audit work.

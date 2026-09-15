@@ -4,6 +4,8 @@ The user explicitly resumed work and requested all current changes be pushed and
 
 ## Latest continuation
 
+Release gate update: r80 candidate is ee96d38; current full CI is34922007591. PostgreSQL rehearsal/API/concurrency checks passed. Production is unchanged; explicit backup-export approval is pending after automatic review rejection. See roster-reconfirmation-evidence.md. Next account-access UI work is separately saved on codex/mobile-auth-clarity.
+
 September 14: resumed at `/tmp/thirdshot-roster-resume` on `codex/roster-commitment-resume`. Roster consent and mobile UI improvements are prepared as r80, not deployed. See `roster-reconfirmation-evidence.md` and apply `ui-pass-standard.md` on every remaining pass.
 
 ## Previous r79 release
