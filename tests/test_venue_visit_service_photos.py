@@ -155,3 +155,22 @@ def test_successor_does_not_publish_former_owner_hours_or_private_visiting_draft
     assert public_court['structured_hours'] == community_hours
     assert public_court['visitor_info'] == {'entrance':'Community north gate'}
     assert 'Former owner' not in json.dumps(public_court)
+
+
+def test_venue_hours_do_not_replace_the_community_edit_baseline(app, client, live):
+    owner,bid=live
+    with app.app_context():
+        court=db.session.get(Court,1);court.hours='Community: opens at 7.'
+        venue=db.session.get(BusinessProfile,bid)
+        venue.hours='Venue: check in at reception.'
+        venue.structured_hours=json.dumps({'timezone':'America/Chicago','mon':[{'open':'08:00','close':'20:00'}]})
+        db.session.commit()
+    detail=client.get('/api/courts/1').get_json()
+    assert detail['hours_source']=='venue'
+    assert detail['hours']=='Venue: check in at reception.'
+    assert detail['community_hours']=='Community: opens at 7.'
+    with app.app_context():
+        db.session.get(BusinessProfile,bid).published=False;db.session.commit()
+    fallback=client.get('/api/courts/1').get_json()
+    assert fallback['hours_source']=='community'
+    assert fallback['hours']==fallback['community_hours']=='Community: opens at 7.'

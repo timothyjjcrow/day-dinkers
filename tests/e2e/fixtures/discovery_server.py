@@ -133,6 +133,22 @@ with app.app_context():
                 photo_data='data:image/png;base64,'+base64.b64encode(buffer.getvalue()).decode(),
                 category=['court','nets','entrance',''][index%4],
                 caption=['Courts beside the north entrance','Permanent nets on all four courts','The gate beside the parking lot',''][index%4]))
+    if os.environ.get('DISCOVERY_VENUE_SCENARIOS') == '1':
+        from backend.models import BusinessProfile, BusinessOrganizationMember
+        from backend.services.business_governance import ensure_organization
+        courts[0].hours = 'Community note: public courts open at 7 AM.'
+        venue = BusinessProfile(owner_id=players[0].id,court_id=courts[0].id,
+            name='Cedar Park Racquet Center',claim_status='verified',verified_at=utcnow(),
+            published=True,content_review_status='approved',
+            hours='Venue note: check in at reception before playing.',
+            structured_hours=json.dumps({'timezone':'America/Los_Angeles',
+                **{day:[{'open':'08:00','close':'20:00'}] for day in ['mon','tue','wed','thu','fri','sat','sun']}}),
+            visitor_info=json.dumps({'entrance':'Main reception beside Court 1.','guest_access':'Guests check in with reception.'}),
+            contact_phone='503-555-0100',website_url='https://example.com/cedar')
+        db.session.add(venue);db.session.flush()
+        organization=ensure_organization(venue,players[0].id)
+        for index,role in [(1,'editor'),(2,'viewer')]:
+            db.session.add(BusinessOrganizationMember(organization_id=organization.id,user_id=players[index].id,role=role))
     db.session.commit()
 port=int(os.environ.get('DISCOVERY_TEST_PORT', '8055'))
 print(f'DISCOVERY READY port{port} date{tomorrow}: discovery-0@example.test / local-discovery-test',flush=True)

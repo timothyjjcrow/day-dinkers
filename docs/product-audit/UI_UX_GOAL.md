@@ -72,3 +72,5 @@ Pass5 continued: `ui-ux-pass-05-court-upload.md` covers a separate short upload 
 Pass5 continued: `ui-ux-pass-05-court-corrections.md` covers topic-based corrections, edited-field-only submission, preserved pending topics, per-field receipts, draft/failure/pending feedback, compact Open play summaries and responsive/keyboard checks. Next inspect review/history/conflicts and source/permission-specific contribution states; court detail remains in progress.
 
 Pass5 continued: `ui-ux-pass-05-correction-review.md` covers current/proposed comparisons, own-update withdrawal, competing proposals, compact history, authoritative results, stale/read/write recovery and preservation of unsent edits. Remaining source/role-specific contribution coverage is recorded; then broaden to session creation and host tools.
+
+Pass5 continued: `ui-ux-pass-05-visit-sources.md` covers venue/community hours separation, role-specific workspace entry, contact source labels, community-editor context, in-place visit refresh/retry and a single mobile scroller. Remaining court states stay open. Next broaden to pass 6: session creation/editing, recurring dates and host tools.

@@ -107,3 +107,17 @@ def test_visit_sources_are_grouped_without_dropping_or_relabeling_facts():
       assert.ok(html.indexOf('Members only') < html.indexOf('Community information'));
       assert.ok(html.indexOf('North &lt;gate&gt;') < html.indexOf('Free lot'));
     ''')
+
+
+def test_visit_management_actions_match_the_current_role_and_preview_state():
+    run(r'''
+      state.me={id:1};
+      for(const role of ['owner','admin','editor']) {
+        assert.match(courtVisitManagementHtml({business:{is_manager:true,manager_role:role}}),/Manage venue details/);
+      }
+      assert.match(courtVisitManagementHtml({business:{is_manager:true,manager_role:'viewer'}}),/View venue workspace/);
+      assert.equal(courtVisitManagementHtml({business:{is_manager:false}}),'');
+      assert.equal(courtVisitManagementHtml({business:{is_manager:true,manager_role:'owner',preview_only:true}}),'');
+      state.me=null;
+      assert.equal(courtVisitManagementHtml({business:{is_manager:true,manager_role:'owner'}}),'');
+    ''')

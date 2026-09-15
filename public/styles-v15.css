@@ -7728,3 +7728,12 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
   .court-update-history > summary .ui-icon { grid-column: 2; grid-row: 1 / span 2; }
 }
 .court-contribution-modal .court-form-helper { margin: 8px 0 12px; }
+
+.court-visit-manage { margin-top: 16px; }
+.court-visit-refresh { padding: 12px; background: var(--bg); border-radius: var(--radius-md); margin-top: 12px; }
+.court-visit-refresh p { margin: 0 0 8px; }
+.court-correction-source { border-left: 3px solid var(--line); padding-left: 10px; margin: 0 0 16px; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
+@media (max-width: 600px) {
+  .modal.court-visit-dialog { display: block; height: auto; max-height: calc(100dvh - 68px); overflow-y: auto; }
+  .court-visit-dialog .court-visit-panel:not([hidden]) { overflow-y: visible; min-height: 0; padding-right: 0; margin-right: 0; }
+}

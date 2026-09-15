@@ -7763,6 +7763,14 @@
     }).join('');
   }
 
+  function courtVisitManagementHtml(court, section = 'fees') {
+    const business = court.business;
+    if (!state.me || !business || business.preview_only || !(business.is_owner || business.is_manager)) return '';
+    const role = String(business.manager_role || (business.is_owner ? 'owner' : 'viewer'));
+    const canEdit = ['owner','admin','editor'].includes(role);
+    return `<button type="button" class="btn btn-secondary btn-block court-visit-manage" id="court-visit-manage-${section}" data-visit-manage>${uiIcon(canEdit ? 'settings' : 'eye')} ${canEdit ? 'Manage venue details' : 'View venue workspace'}</button>`;
+  }
+
   function courtVisitPanelsHtml(court) {
     const rows = courtOpenPlayRows(court).sort((a,b)=>Object.keys(COURT_WEEKDAY_LABELS).indexOf(a.weekday)-Object.keys(COURT_WEEKDAY_LABELS).indexOf(b.weekday) || a.start.localeCompare(b.start));
     const facilities = [
@@ -7773,8 +7781,8 @@
     ].filter(([listed])=>listed);
     const reservation = businessActionHref(court.reservation_url);
     return {
-      hours: `<h4 id="court-visit-hours-title" tabindex="-1">Hours</h4>${courtVisitHoursHtml(court)}`,
-      fees: `<h4 id="court-visit-fees-title" tabindex="-1">Fees &amp; access</h4><p class="court-visit-fee">${esc(court.fees || courtFeeTypeFact(court) || 'Fees not listed.')}</p>${reservation ? `<a class="btn btn-secondary btn-block" href="${esc(reservation)}" target="_blank" rel="noopener">${uiIcon('external')} View reservation details</a>` : ''}${courtVisitingInfoHtml(court)}${state.me && !court.business?.preview_only ? '<button type="button" class="btn-link court-visit-correction" id="court-visit-correction">Suggest an update</button>' : ''}`,
+      hours: `<h4 id="court-visit-hours-title" tabindex="-1">Hours</h4><p class="court-visit-source">${court.hours_source === 'venue' ? 'From the venue' : 'Community information'}</p>${courtVisitHoursHtml(court)}${courtVisitManagementHtml(court,'hours')}`,
+      fees: `<h4 id="court-visit-fees-title" tabindex="-1">Fees &amp; access</h4><p class="court-visit-fee">${esc(court.fees || courtFeeTypeFact(court) || 'Fees not listed.')}</p>${reservation ? `<a class="btn btn-secondary btn-block" href="${esc(reservation)}" target="_blank" rel="noopener">${uiIcon('external')} View reservation details</a>` : ''}${courtVisitingInfoHtml(court)}${courtVisitManagementHtml(court)}${state.me && !court.business?.preview_only ? '<button type="button" class="btn-link court-visit-correction" id="court-visit-correction">Update community details</button>' : ''}`,
       facilities: `<h4 id="court-visit-facilities-title" tabindex="-1">Facilities</h4><ul class="court-visit-facilities">${facilities.map(([,icon,label])=>`<li>${uiIcon(icon)}<span>${esc(label)}</span></li>`).join('')}</ul>${court.surface_type ? `<p>${esc(court.surface_type)} surface</p>` : ''}<p class="court-visit-source">Unlisted facilities are not confirmed.</p>`,
       openplay: `<h4 id="court-visit-openplay-title" tabindex="-1">Open play</h4>${rows.length ? `<div class="court-visit-openplay">${rows.map(row=>`<div><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start,row.end)}`)}</b>${row.level || row.cost ? `<p class="row-sub">${esc([row.level,row.cost].filter(Boolean).join(' · '))}</p>` : ''}${row.notes ? `<p>${esc(row.notes)}</p>` : ''}</div>`).join('')}</div>` : ''}${court.open_play_schedule ? `<p>${esc(court.open_play_schedule)}</p>` : !rows.length ? '<p>No open-play schedule listed.</p>' : ''}${rows.length ? '<p class="court-visit-source">Community-listed times · venue entry is separate.</p>' : ''}`,
     };
@@ -7805,23 +7813,66 @@
     requestAnimationFrame(()=>{if(modal.isConnected && !modal.closest('[inert]'))activate(selected,{focus:true});});
   }
 
-  function openCourtVisitSheet(court, section = 'hours') {
+  function openCourtVisitSheet(court, section = 'hours', {onUpdated=null} = {}) {
+    const ownerId=state.me?.id;
+    let listingChanged=false, refreshSeq=0;
     const panels=courtVisitPanelsHtml(court);
     const selected=Object.hasOwn(panels,section) ? section : 'hours';
-    const website=businessActionHref(court.website),phone=safeHref(court.phone && `tel:${court.phone}`,{tel:true});
+    const visitLinks = () => {
+      const website=businessActionHref(court.business?.website_url || court.website);
+      const number=court.business?.phone || court.phone,phone=safeHref(number && `tel:${number}`,{tel:true});
+      return `<a class="btn btn-primary btn-block" href="${esc(courtDirectionsUrl(court))}" target="_blank" rel="noopener">${uiIcon('map-pin')} Directions</a>
+        ${website ? `<a class="btn btn-secondary" href="${esc(website)}" target="_blank" rel="noopener">${uiIcon('external')} ${court.business?.website_url ? 'Venue website' : 'Court website'}</a>` : ''}
+        ${phone ? `<a class="btn btn-secondary" href="${esc(phone)}">${uiIcon('phone')} ${court.business?.phone ? 'Call venue' : 'Call the court'}</a>` : ''}`;
+    };
     const modal=openModal(`
       ${modalHead('Before you go','map-pin')}
       <p class="court-visit-intro"><b>${esc(court.name)}</b></p>
       ${court.closed ? '<p class="court-visit-closed">This court is reported permanently closed.</p>' : ''}
       <div class="court-visit-tabs" role="tablist" aria-label="Visit information">${[['hours','Hours'],['fees','Access'],['facilities','Facilities'],['openplay','Open play']].map(([key,label])=>`<button type="button" role="tab" id="court-visit-tab-${key}" data-visit-tab="${key}" aria-controls="court-visit-panel-${key}" aria-selected="${key===selected}" tabindex="${key===selected ? 0 : -1}">${label}</button>`).join('')}</div>
       ${Object.entries(panels).map(([key,html])=>`<section class="court-visit-section court-visit-panel" id="court-visit-panel-${key}" role="tabpanel" aria-labelledby="court-visit-tab-${key}" data-visit-panel="${key}" tabindex="0" ${key===selected ? '' : 'hidden'}>${html}</section>`).join('')}
-      <div class="court-visit-links">
-        <a class="btn btn-primary btn-block" href="${esc(courtDirectionsUrl(court))}" target="_blank" rel="noopener">${uiIcon('map-pin')} Directions</a>
-        ${website ? `<a class="btn btn-secondary" href="${esc(website)}" target="_blank" rel="noopener">${uiIcon('external')} Court website</a>` : ''}
-        ${phone ? `<a class="btn btn-secondary" href="${esc(phone)}">${uiIcon('phone')} Call the court</a>` : ''}
-      </div>
+      <div id="court-visit-refresh" class="court-visit-refresh hidden" role="status"></div>
+      <div class="court-visit-links">${visitLinks()}</div>
     `,{label:`Before you go to ${court.name}`});
-    modal.querySelector('#court-visit-correction')?.addEventListener('click',()=>openChildModal(modal,()=>openSuggestEditSheet(court,()=>transitionModal(modal,()=>openCourtDetail(court.id)),{focusVisiting:true})));
+    const current=()=>modal.isConnected && !modal._destroyed && state.me?.id===ownerId;
+    currentOverlayEntry()?.afterClose.push(()=>{if(listingChanged && state.me?.id===ownerId)onUpdated?.();});
+    const refreshVisit = async () => {
+      if (!current()) return;
+      const seq=++refreshSeq, notice=modal.querySelector('#court-visit-refresh');
+      const restoreRetryFocus=notice.contains(document.activeElement);
+      notice.classList.remove('hidden');notice.textContent='Refreshing details…';
+      try {
+        const updated=await api(`/courts/${court.id}`);
+        if (!current() || seq!==refreshSeq) return;
+        const box=modal.querySelector('.modal'), scroll=box.scrollTop;
+        const panelScroll=Object.fromEntries([...modal.querySelectorAll('[data-visit-panel]')].map(panel=>[panel.dataset.visitPanel,panel.scrollTop]));
+        const focused=document.activeElement, activeId=modal.contains(focused) ? focused.id : '', wasRetry=restoreRetryFocus && (focused===document.body || notice.contains(focused));
+        court=updated;
+        Object.entries(courtVisitPanelsHtml(court)).forEach(([key,html])=>{const panel=modal.querySelector(`[data-visit-panel="${key}"]`);panel.innerHTML=html;panel.scrollTop=panelScroll[key] || 0;});
+        modal.querySelector('.court-visit-links').innerHTML=visitLinks();
+        bindActions();notice.classList.add('hidden');box.scrollTop=scroll;
+        if (currentOverlayEntry()?.el===modal) {
+          if (wasRetry) modal.querySelector('[data-visit-tab][aria-selected="true"]')?.focus({preventScroll:true});
+          else if (activeId && !focused.isConnected) modal.querySelector(`#${activeId}`)?.focus({preventScroll:true});
+        }
+      } catch {
+        if (!current() || seq!==refreshSeq) return;
+        notice.innerHTML='<p>Could not refresh. Previous details are shown.</p><button type="button" class="btn btn-secondary btn-sm" data-retry-visit>Try again</button>';
+        notice.querySelector('button').addEventListener('click',refreshVisit);
+        if (restoreRetryFocus && currentOverlayEntry()?.el===modal) notice.querySelector('button').focus({preventScroll:true});
+      }
+    };
+    const bindActions = () => {
+      modal.querySelector('#court-visit-correction')?.addEventListener('click',()=>openChildModal(modal,()=>openSuggestEditSheet(court,()=>{
+        listingChanged=true;refreshVisit();
+      },{focusVisiting:true})));
+      modal.querySelectorAll('[data-visit-manage]').forEach(button=>button.addEventListener('click',()=>{
+        openChildModal(modal,()=>openBusinessHub({court,businessId:court.business.id}));
+        const workspace=currentOverlayEntry();
+        if (workspace?.el!==modal) workspace?.afterClose.push(()=>{if(current()){listingChanged=true;refreshVisit();}});
+      }));
+    };
+    bindActions();
     modal.querySelector('.modal')?.classList.add('court-visit-dialog');
     bindCourtVisitTabs(modal,selected);
     return modal;
@@ -8235,6 +8286,7 @@
     const ownerId=state.me?.id;
     if(!ownerId)return null;
     let listingChanged=false,editorComplete=false,operationPending=false,suggestionRevision=0;
+    const hasVenueDetails = court.hours_source === 'venue' || Object.values(court.visitor_info_sources || {}).includes('venue');
     const check = (id, icon, label, value) => `
       <label class="choice-check-row" for="${id}">
         <input type="checkbox" id="${id}" ${value ? 'checked' : ''} /> ${uiIcon(icon)} <span>${label}</span>
@@ -8261,10 +8313,11 @@
       </fieldset>`;
     let nextOpenPlayRowKey = sourceOpenPlayRows.length;
     const modal = openModal(`
-      ${modalHead('Update court','edit')}
+      ${modalHead(hasVenueDetails ? 'Community update' : 'Update court','edit')}
       <p class="court-correction-place">${esc(court.name)}</p>
       <form id="se-form" class="court-contribution-form" novalidate>
       <p class="court-correction-note">Choose what needs updating. Another player confirms it before it goes live.</p>
+      ${hasVenueDetails ? '<p class="court-correction-source">Venue-provided details stay unchanged.</p>' : ''}
       <details class="court-form-section" id="se-visiting"><summary>Access &amp; fees</summary>        <div class="form-field">
           <label for="se-fees">Fees</label>
           <input type="text" id="se-fees" maxlength="200" placeholder="e.g. Free, $5 drop-in" value="${esc(court.fees || '')}" />
@@ -8291,7 +8344,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       <details class="court-form-section" id="se-hour-section"><summary id="se-visit-label">Hours note</summary>
         <div class="form-field">
           <label for="se-hours">Hours note</label>
-          <input type="text" id="se-hours" maxlength="120" placeholder="e.g. Daily 6am–10pm, Dawn to dusk" value="${esc(court.hours || '')}" />
+          <input type="text" id="se-hours" maxlength="120" placeholder="e.g. Daily 6am–10pm, Dawn to dusk" value="${esc(court.community_hours ?? (court.hours_source === 'venue' ? '' : court.hours || ''))}" />
         </div>
       </details>
       <details class="court-form-section" id="se-play-section"><summary id="se-open-play-label">Open play</summary>
@@ -13428,7 +13481,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     };
     modal.querySelectorAll('[data-court-visit]').forEach((button) => {
       button.addEventListener('click', () => {
-        openChildModal(modal, () => openCourtVisitSheet(court, button.dataset.courtVisit));
+        openChildModal(modal, () => openCourtVisitSheet(court, button.dataset.courtVisit,{onUpdated:()=>refreshCourtDetailPreservingContext(modal,court.id,{focusFallbackSelector:`[data-court-visit="${button.dataset.courtVisit}"]`})}));
       });
     });
     const commitLookingIntent = async (button, desiredLooking) => {

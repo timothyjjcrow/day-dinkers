@@ -1030,6 +1030,7 @@ def court_detail(court_id):
     payload.update(project_hours(court, payload['business']))
     payload.update(project_visiting(court, payload['business']))
     payload['community_visitor_info'] = visiting_dict(court.visitor_info)
+    payload['community_hours'] = court.hours or ''
     payload['condition_reports'] = _recent_condition_reports(court.id, current_user)
     payload['photo_count'] = CourtPhoto.query.filter_by(court_id=court.id).count()
     payload['latest_condition'] = _latest_condition_for(
