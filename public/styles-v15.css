@@ -2455,6 +2455,13 @@ a.card:active,
 .onboarding-divider::before, .onboarding-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }
 .home-area-search-field { margin-bottom: 9px; text-align: left; }
 .home-area-search-field input { min-height: 50px; background: var(--bg); }
+.home-area-sheet { text-align: left; }
+.home-area-heading { display: flex; align-items: center; gap: 10px; }
+.home-area-heading > .ui-icon { width: 24px; height: 24px; flex: 0 0 24px; color: var(--green-accent); }
+.home-area-sheet .onboarding-copy { margin: 8px 0 20px; }
+.home-area-sheet .home-area-primary-court { margin: 12px 0; }
+.home-area-sheet #ha-loc { margin-top: 12px; white-space: normal; }
+.home-area-sheet .home-area-note { margin: 16px 0 8px; font-size: 12px; line-height: 1.5; color: var(--ink-soft); }
 .onboarding-privacy-note {
   display: flex; grid-template-columns: none; align-items: flex-start; gap: 8px; margin-top: 9px; text-align: left;
 }

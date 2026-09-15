@@ -174,7 +174,7 @@ def test_join_becomes_a_stable_open_action_and_waitlist_remains_manageable():
 def test_home_area_onboarding_is_optional_account_scoped_and_has_one_settings_destination():
     onboarding = section("function homeAreaOnboardingKey", "// One-time 3-step welcome tour")
     assert "`pp_onboarded_home:${id}`" in onboarding
-    assert "Optional: choose a home area" in onboarding
+    assert "Find courts, games and players nearby." in onboarding
     assert "Maybe later" in onboarding
     assert "openHomeAreaOnboarding()" in onboarding
     assert "maybeSuggestStarterCourts" not in onboarding

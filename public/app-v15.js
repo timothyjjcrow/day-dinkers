@@ -39654,8 +39654,15 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     let searchSeq = 0;
     const renderFeedback = (message, isError = false) => {
       resultsEl.innerHTML = `<div class="city-search-feedback${isError ? ' is-error' : ''}" role="${isError ? 'alert' : 'status'}">${esc(message)}</div>`;
+      if (isError) {
+        resultsEl.insertAdjacentHTML('beforeend', '<button type="button" class="btn btn-secondary" data-city-retry>Try again</button>');
+        resultsEl.querySelector('[data-city-retry]')?.addEventListener('click', () => {
+          input.focus({ preventScroll: true });
+          search();
+        });
+      }
     };
-    input.addEventListener('input', () => {
+    const search = () => {
       clearTimeout(timer);
       const seq = ++searchSeq;
       const q = input.value.trim();
@@ -39667,6 +39674,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         try {
           const response = await api(`/geocode?q=${encodeURIComponent(q)}`);
           if (seq !== searchSeq || input.value.trim() !== q) return;
+          if (response.error) throw new Error(response.error);
           const places = (response.items || []).slice(0, 4);
           resultsEl.removeAttribute('aria-busy');
           if (!places.length) {
@@ -39690,7 +39698,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           renderFeedback('Couldn’t search cities. Check your connection and try again.', true);
         }
       }, 350);
-    });
+    };
+    input.addEventListener('input', search);
   }
 
   // Home-area picker: device location or a city search. Used by onboarding
@@ -39699,24 +39708,21 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const courtId = Number(state.me?.home_court_id);
     const primaryCourtId = Number.isSafeInteger(courtId) && courtId > 0 ? courtId : null;
     const modal = openModal(`
-      <div class="checkin-sheet onboarding-sheet">
-        <div class="checkin-sheet-icon home-area-hero" aria-hidden="true">${uiIcon('map-pin')}</div>
-        <span class="onboarding-kicker">Personalize nearby play</span>
-        <h3>Where do you usually play?</h3>
-        <p class="row-sub onboarding-copy">${esc(intro || 'Courts, games, and players near here greet you when the app opens.')}</p>
-        <button type="button" class="btn btn-primary btn-block onboarding-primary-action" id="ha-loc">${uiIcon('target')} <span>Use my current location</span></button>
-        ${primaryCourtId ? `<button type="button" class="btn btn-secondary btn-block home-area-primary-court" id="ha-primary-court">${uiIcon('home')} <span><b>Use my primary court’s area</b><small>${esc(state.me.home_court_name || 'My primary court')}</small></span></button>` : ''}
-        <div class="onboarding-divider" aria-hidden="true"><span>or</span></div>
+      <div class="checkin-sheet onboarding-sheet home-area-sheet">
+        <div class="home-area-heading">${uiIcon('map-pin')}<h3>Choose your area</h3></div>
+        <p class="row-sub onboarding-copy">${esc(intro || 'Find courts, games and players nearby.')}</p>
         <div class="form-field home-area-search-field">
           <label for="ha-city">Search by city</label>
           <input type="search" id="ha-city" placeholder="City or neighborhood" autocomplete="off" />
           <div id="ha-results" aria-live="polite"></div>
         </div>
+        ${primaryCourtId ? `<button type="button" class="btn btn-secondary btn-block home-area-primary-court" id="ha-primary-court">${uiIcon('home')} <span><b>Use my primary court’s area</b><small>${esc(state.me.home_court_name || 'My primary court')}</small></span></button>` : ''}
+        <button type="button" class="btn btn-secondary btn-block onboarding-primary-action" id="ha-loc">${uiIcon('target')} <span>Use current location</span></button>
         <div id="ha-save-status" class="city-search-feedback hidden" role="status" aria-live="polite" tabindex="-1"></div>
-        <p class="privacy-note onboarding-privacy-note">${uiIcon('shield')} <span>Your home area is optional and can be changed anytime in Privacy &amp; safety.</span></p>
+        <p class="onboarding-privacy-note home-area-note">${uiIcon('shield')} <span>Optional. Change it in Privacy &amp; safety.</span></p>
         <button type="button" class="btn-link modal-close btn-block">${esc(dismissLabel)}</button>
       </div>
-    `, { label: 'Choose your home area' });
+    `, { label: 'Choose your area' });
     const locationButton = modal.querySelector('#ha-loc');
     const primaryCourtButton = modal.querySelector('#ha-primary-court');
     const cityInput = modal.querySelector('#ha-city');
@@ -39725,6 +39731,11 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const status = modal.querySelector('#ha-save-status');
     let saving = false;
     let resolved = false;
+    cityInput.addEventListener('input', () => {
+      if (saving) return;
+      status.textContent = '';
+      status.classList.add('hidden');
+    });
     const done = (ok) => {
       if (!ok) return;
       resolved = true;
@@ -39977,8 +39988,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     };
     return openHomeAreaSheet({
       intro: replay
-        ? 'Choose the area Third Shot should use for nearby courts, games, and players.'
-        : 'Optional: choose a home area so Third Shot opens near the courts and players you care about.',
+        ? 'Choose where to find courts, games and players.'
+        : 'Find courts, games and players nearby.',
       dismissLabel: replay && committedAreaLatLng() ? 'Keep current area' : 'Maybe later',
       onSet: finish,
       onDismiss: finish,
