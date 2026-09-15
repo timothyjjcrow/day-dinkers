@@ -1353,6 +1353,8 @@
     too_many_invitees: 'Choose up to 11 players. A play group has room for 12 people, including you.',
     crew_invitation_changed: 'This invitation has changed. Refresh the group to see whether the player joined or was invited again.',
     invitation_version_required: 'Refresh the group before changing this invitation.',
+    suggestion_not_pending: 'This update has already changed.',
+    not_your_suggestion: 'Only your own pending updates can be withdrawn.',
     community_session_must_be_open: 'Public group sessions must be open so every member can view and join them.',
     no_friends: 'Add a friend before making a friends-only game, or choose Anyone nearby.',
     court_id_required: 'Choose a club or court.',
@@ -1736,7 +1738,7 @@
       };
     };
 
-    return { clearDraft, clearError, showError, startSubmitting, isDirty };
+    return { clearDraft, clearError, showError, startSubmitting, isDirty, saveDraft:()=>{clearTimeout(draftTimer);writeDraftNow();} };
   }
 
   // A mutation can be represented by more than one adjacent choice (for
@@ -8225,7 +8227,8 @@
   }
 
   function courtCorrectionChanges(initial,values) {
-    return Object.fromEntries(Object.entries(values).filter(([key,value])=>JSON.stringify(value)!==JSON.stringify(initial[key])));
+    const packed = value => JSON.stringify(value, (_key,item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))) : item);
+    return Object.fromEntries(Object.entries(values).filter(([key,value])=>packed(value)!==packed(initial[key])));
   }
 
   function openSuggestEditSheet(court, onApplied, {focusVisiting=false} = {}) {
@@ -8308,6 +8311,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       </details>
       <details class="court-form-section court-pending-suggestions hidden" id="se-pending"><summary id="se-pending-label">Review updates</summary>
         <p class="court-form-helper">Confirm only what you know firsthand.</p>
+        <p id="se-review-result" class="court-update-result hidden" role="status" tabindex="-1"></p>
         <div id="se-pending-list" aria-live="polite"></div>
       </details>
       <details class="court-form-section hidden" id="se-history"><summary>Your updates</summary><div id="se-history-list"></div></details>
@@ -8340,77 +8344,118 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       }
       return String(value ?? '') || 'Blank';
     };
-    let pendingSuggestions = [];
+    let pendingSuggestions = [], currentValues = {}, reviewLoadSeq = 0;
+    const comparisonHtml = (field, before, proposed, beforeLabel = 'Community now', afterLabel = 'Proposed') => `
+      <dl class="court-update-comparison">
+        <div><dt>${beforeLabel}</dt><dd>${before === undefined ? 'Not recorded' : esc(suggestionValueText(field, before))}</dd></div>
+        <div><dt>${afterLabel}</dt><dd>${esc(suggestionValueText(field, proposed))}</dd></div>
+      </dl>`;
     const renderPendingSuggestions = (items) => {
       pendingSuggestions = Array.isArray(items) ? items : [];
-      pendingPanel.classList.toggle('hidden', pendingSuggestions.length === 0);
-      modal.querySelector('#se-pending-label').textContent=`Review updates (${pendingSuggestions.length})`;
-      pendingList.innerHTML = pendingSuggestions.map((item, index) => `
+      pendingPanel.classList.remove('hidden');
+      modal.querySelector('#se-pending-label').textContent = pendingSuggestions.length
+        ? `Review updates (${pendingSuggestions.length})` : 'Review updates';
+      pendingList.innerHTML = pendingSuggestions.length ? pendingSuggestions.map((item, index) => {
+        const previous = pendingSuggestions.find(other => other.field === item.field && other.confirmed_by_me && JSON.stringify(other.value) !== JSON.stringify(item.value));
+        return `
         <article class="court-pending-suggestion" data-pending-suggestion="${index}">
-          <div class="court-pending-suggestion-copy">
-            <b>${esc(suggestionLabels[item.field] || item.field)}</b>
-            <span>${esc(suggestionValueText(item.field, item.value))}</span>
-            <small>${item.requires_review ? 'Awaiting operator review · ' + item.confirmations + ' report(s)' : item.confirmations + ' of 2 confirmations'}${item.rejections ? ` · ${item.rejections} marked not right` : ''}</small>
-          </div>
+          <div class="court-update-heading"><b>${esc(suggestionLabels[item.field] || item.field)}</b>
+            <span>${item.confirmed_by_me ? 'Your update' : 'Player update'}</span></div>
+          ${comparisonHtml(item.field, currentValues[item.field], item.value)}
+          ${previous ? `<p class="court-update-waiting">Replaces your pending update: <b>${esc(suggestionValueText(item.field,previous.value))}</b></p>` : ''}
+          <p class="court-update-waiting">${item.requires_review ? 'Needs operator review' : `${item.needed} confirmation${item.needed === 1 ? '' : 's'} needed`}${item.rejections ? ` · ${item.rejections} marked not right` : ''}</p>
           <div class="court-pending-suggestion-actions">
             ${item.confirmed_by_me
-              ? '<span class="court-suggestion-decision is-confirmed">Confirmed by you</span>'
-              : `<button type="button" class="btn btn-primary btn-sm" data-suggestion-confirm="${index}">${uiIcon('check')} Confirm</button>`}
-            ${item.rejected_by_me
-              ? '<span class="court-suggestion-decision">Marked not right</span>'
-              : `<button type="button" class="btn btn-ghost btn-sm" data-suggestion-reject="${index}">Not right</button>`}
+              ? `<button type="button" class="btn btn-ghost btn-sm" data-suggestion-withdraw="${index}">Withdraw update</button>`
+              : `<button type="button" class="btn btn-primary btn-sm" data-suggestion-confirm="${index}">${uiIcon('check')} ${previous ? 'Use this update' : item.requires_review ? 'Confirm report' : 'Confirm'}</button>
+                 ${item.rejected_by_me ? '<span class="court-suggestion-decision">Marked not right</span>' : `<button type="button" class="btn btn-ghost btn-sm" data-suggestion-reject="${index}">Not right</button>`}`}
           </div>
         </article>
-      `).join('');
+      `; }).join('') : '<p class="simple-note">No pending updates.</p>';
+    };
+    const renderHistory = (history = []) => {
+      modal.querySelector('#se-history').classList.toggle('hidden', !history.length);
+      modal.querySelector('#se-history-list').innerHTML = history.map(item => {
+        const changes = Object.entries(item.changes || {});
+        const title = changes.length === 1 ? suggestionLabels[changes[0][0]] || changes[0][0] : `${changes.length} details`;
+        const status = ({pending:'Pending',applied:'Confirmed',declined:'Not approved',withdrawn:'Withdrawn',rejected:'Not right'})[item.status] || item.status;
+        return `<details class="court-update-history"><summary><span><b>${esc(title)}</b><small>${esc(fmtDateTime(item.submitted_at))}</small></span><strong>${esc(status)}</strong>${uiIcon('chevron-right')}</summary>
+          <div>${changes.map(([field,value])=>`${changes.length > 1 ? `<b>${esc(suggestionLabels[field] || field)}</b>` : ''}${comparisonHtml(field,item.before?.[field],value,'Before','Update')}`).join('')}
+          ${item.review_note ? `<p class="simple-note">${esc(item.review_note)}</p>` : ''}</div></details>`;
+      }).join('');
+    };
+    const renderReview = (result) => {
+      currentValues = result.current_values || currentValues;
+      renderPendingSuggestions(result.items);
+      renderHistory(result.my_history);
     };
     const loadPendingSuggestions = async () => {
-      const revision=suggestionRevision;
+      const revision = suggestionRevision, loadSeq = ++reviewLoadSeq;
+      const restoreReviewFocus = pendingPanel.contains(document.activeElement);
+      pendingPanel.classList.remove('hidden');
+      pendingList.innerHTML = '<p class="simple-note" role="status">Loading updates…</p>';
       try {
         const result = await api(`/courts/${court.id}/suggestions`);
-        if (current() && !editorComplete && revision===suggestionRevision) {
-          renderPendingSuggestions(result.items);
-          const history = result.my_history || [];
-          modal.querySelector('#se-history').classList.toggle('hidden', !history.length);
-          modal.querySelector('#se-history-list').innerHTML = history.map(item => `<article class="court-pending-suggestion"><div class="court-pending-suggestion-copy"><b>${({pending:'Awaiting confirmation or review',applied:'Applied',declined:'Not approved',withdrawn:'Withdrawn',rejected:'Marked not right'})[item.status] || esc(item.status)}</b><small>${esc(fmtDateTime(item.submitted_at))}</small>${Object.entries(item.changes || {}).map(([key,value]) => `<span><b>${esc(suggestionLabels[key] || key)}</b> ${Object.hasOwn(item.before || {},key) ? `${esc(suggestionValueText(key,item.before[key]))} → ` : ''}${esc(suggestionValueText(key,value))}</span>`).join('')}${item.review_note ? `<small>${esc(item.review_note)}</small>` : ''}</div></article>`).join('');
+        if (current() && !editorComplete && revision === suggestionRevision && loadSeq === reviewLoadSeq) {
+          renderReview(result);
+          if (restoreReviewFocus) modal.querySelector('#se-pending-label').focus({preventScroll:true});
         }
       } catch {
-        if (!current() || editorComplete || revision!==suggestionRevision) return;
-        modal.querySelector('#se-history').classList.remove('hidden');
-        modal.querySelector('#se-history-list').innerHTML = '<p role="status">Submitted corrections could not load. You can still send a new correction.</p><button type="button" class="btn-link" data-retry-court-history>Retry history</button>';
+        if (!current() || editorComplete || revision !== suggestionRevision || loadSeq !== reviewLoadSeq) return;
+        modal.querySelector('#se-pending-label').textContent = 'Updates unavailable';
+        pendingList.innerHTML = '<p role="status">Updates could not load.</p><button type="button" class="btn btn-secondary btn-sm" data-retry-court-history>Try again</button>';
         modal.querySelector('[data-retry-court-history]').addEventListener('click', loadPendingSuggestions);
+        if (restoreReviewFocus) modal.querySelector('[data-retry-court-history]').focus({preventScroll:true});
       }
     };
     pendingList.addEventListener('click', async (event) => {
-      const button = event.target.closest('[data-suggestion-confirm], [data-suggestion-reject]');
+      const button = event.target.closest('[data-suggestion-confirm], [data-suggestion-reject], [data-suggestion-withdraw]');
       if (!button || operationPending || !current() || editorComplete) return;
-      const index = Number(button.dataset.suggestionConfirm ?? button.dataset.suggestionReject);
+      const index = Number(button.dataset.suggestionConfirm ?? button.dataset.suggestionReject ?? button.dataset.suggestionWithdraw);
       const item = pendingSuggestions[index];
       if (!item) return;
-      operationPending=true;
-      modal.querySelector('#se-form').dataset.submitting='true';
-      modal.querySelector('#se-submit').disabled=true;
-      const decision = button.hasAttribute('data-suggestion-confirm') ? 'confirm' : 'reject';
+      const decision = button.hasAttribute('data-suggestion-confirm') ? 'confirm' : button.hasAttribute('data-suggestion-withdraw') ? 'withdraw' : 'reject';
+      operationPending = true;
+      const form = modal.querySelector('#se-form');
+      form.dataset.submitting = 'true';
+      const controls = [...form.querySelectorAll('input,select,textarea,button')];
+      const disabled = controls.map(control => control.disabled);
+      controls.forEach(control => { control.disabled = true; });
       const row = button.closest('[data-pending-suggestion]');
-      row?.querySelectorAll('button').forEach((control) => { control.disabled = true; });
+      const resultEl = modal.querySelector('#se-review-result');
+      resultEl.classList.add('hidden');
       try {
         const result = await api(`/courts/${court.id}/suggestions/decision`, {
-          method: 'POST',
-          body: JSON.stringify({ field: item.field, value: item.value, decision }),
+          method: 'POST', body: JSON.stringify({field:item.field,value:item.value,decision}),
         });
         if (!current() || editorComplete) return;
         suggestionRevision++;
         if (result.applied_fields.length) {
-          court = { ...court, ...result.court };
-          toast('Court listing updated — thanks for confirming.');
-          listingChanged=true;
-        } else {
-          toast(decision === 'confirm' ? 'Correction confirmed.' : 'Thanks — marked as not right.');
+          court = {...court,...result.court};
+          listingChanged = true;
+          syncConfirmedFields(result.current_values, result.applied_fields);
         }
-        renderPendingSuggestions(result.items);
+        renderReview(result);
+        resultEl.textContent = `${suggestionLabels[item.field] || item.field}: ${decision === 'withdraw' ? 'update withdrawn' : decision === 'reject' ? 'marked not right' : result.applied_fields.includes(item.field) ? 'update confirmed' : item.requires_review ? 'report confirmed · operator review pending' : 'confirmation recorded'}.`;
+        resultEl.classList.remove('hidden');
+        resultEl.focus({preventScroll:true});
+        resultEl.scrollIntoView({block:'nearest'});
       } catch (error) {
-        row?.querySelectorAll('button').forEach((control) => { control.disabled = false; });
-        if(current() && !editorComplete)showInlineActionError(row, error.message);
-      } finally {operationPending=false;if(current() && !editorComplete){delete modal.querySelector('#se-form').dataset.submitting;syncSubmit();}}
+        if (!current() || editorComplete) return;
+        showInlineActionError(row, error.message);
+        if (['suggestion_not_pending','not_your_suggestion'].includes(error.code) && !row.querySelector('[data-refresh-updates]')) {
+          const refresh = document.createElement('button');
+          refresh.type='button';refresh.className='btn btn-secondary btn-sm';refresh.dataset.refreshUpdates='';refresh.textContent='Refresh updates';
+          refresh.addEventListener('click',loadPendingSuggestions);row.appendChild(refresh);
+        }
+      } finally {
+        operationPending = false;
+        if (current() && !editorComplete) {
+          delete form.dataset.submitting;
+          controls.forEach((control,index)=>{control.disabled=disabled[index];});
+          syncSubmit();
+        }
+      }
     });
     loadPendingSuggestions();
     const openPlayRows = modal.querySelector('#se-open-play-rows');
@@ -8450,6 +8495,27 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       visitor_info:window.VenueWorkspace.readVisitingForm(modal,'community-visit'),
     });
     const initialValues=readValues();
+    const syncConfirmedFields = (values, fields) => {
+      const edited = courtCorrectionChanges(initialValues, readValues());
+      const textFields = {num_courts:'se-courts',surface_type:'se-surface',fees:'se-fees',hours:'se-hours',open_play_schedule:'se-open-play'};
+      const checkFields = {indoor:'se-indoor',lighted:'se-lighted',nets_provided:'se-nets',has_restrooms:'se-restrooms',has_water:'se-water',closed:'se-closed'};
+      for (const field of fields) {
+        if (!Object.hasOwn(values || {},field)) continue;
+        const value = values[field];
+        if (!Object.hasOwn(edited,field)) {
+          if (textFields[field]) modal.querySelector(`#${textFields[field]}`).value = value ?? '';
+          else if (checkFields[field]) modal.querySelector(`#${checkFields[field]}`).checked = !!value;
+          else if (field === 'visitor_info') modal.querySelectorAll('[data-visiting-fields="community-visit"] [data-visit-field]').forEach(input=>{input.value=value?.[input.dataset.visitField] || '';});
+          else if (field === 'open_play_schedule_rows') {
+            openPlayRows.innerHTML = (value || []).map(row=>openPlayRowHtml(row,nextOpenPlayRowKey++)).join('');
+            syncOpenPlayAddState();
+          }
+        }
+        initialValues[field] = value;
+      }
+      formUX.clearDraft();
+      if (Object.keys(courtCorrectionChanges(initialValues,readValues())).length) formUX.saveDraft();
+    };
     const formUX = bindModalFormUX(modal, '#se-submit', { draftKey: `suggest-court-${court.id}` });
     const syncSubmit=()=>{
       if(editorComplete || !current())return;
@@ -8460,7 +8526,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modal.querySelector('#se-form').addEventListener('change',syncSubmit);
     syncSubmit();
     const discardGuard=bindModalDiscardConfirmation(modal, {
-      isDirty: formUX.isDirty,
+      isDirty: ()=>{
+        const dirty=Object.keys(courtCorrectionChanges(initialValues,readValues())).length > 0;
+        if (!dirty) formUX.clearDraft();
+        return dirty;
+      },
       onDiscard:()=>{formUX.clearDraft({disable:true});dismissModal(modal);},
       title: 'Discard this court suggestion?',
       message: 'Your proposed court details have not been submitted.',

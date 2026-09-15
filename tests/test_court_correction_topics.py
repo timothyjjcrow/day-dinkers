@@ -33,3 +33,47 @@ def test_other_topic_preserves_pending_closure_evidence_and_revises_only_its_own
         assert payload['closed'] is True and payload['_evidence']=='Posted closure notice at the north gate.'
         assert payload['fees']=='$10 drop-in'
     assert client.get('/api/courts/1').get_json()['closed'] is False
+
+
+def test_withdraw_is_owner_only_and_keeps_other_topics_without_a_rejection(client):
+    owner=register(client,'withdraw-owner@example.test');other=register(client,'withdraw-other@example.test')
+    headers=auth(owner['token'])
+    proposal={'fees':'$8','closed':True,'evidence':'Closure notice on the north gate.'}
+    assert client.post('/api/courts/1/suggest',headers=headers,json=proposal).status_code==201
+    decision={'field':'fees','value':'$8','decision':'withdraw'}
+    assert client.post('/api/courts/1/suggestions/decision',headers=auth(other['token']),json=decision).status_code==403
+    result=client.post('/api/courts/1/suggestions/decision',headers=headers,json=decision)
+    assert result.status_code==200
+    data=result.get_json()
+    assert [item['field'] for item in data['items']]==['closed']
+    assert data['current_values']['closed'] is False
+    assert any(row['status']=='withdrawn' and row['changes']=={'fees':'$8'} for row in data['my_history'])
+    assert any(row['status']=='pending' and row['changes']=={'closed':True} for row in data['my_history'])
+    assert not any(row['status']=='rejected' for row in data['my_history'])
+    assert client.post('/api/courts/1/suggestions/decision',headers=headers,json=decision).status_code==404
+    final=client.post('/api/courts/1/suggestions/decision',headers=headers,json={'field':'closed','value':True,'decision':'withdraw'}).get_json()
+    assert final['items']==[] and final['court']['closed'] is False
+    assert len([row for row in final['my_history'] if row['status']=='withdrawn'])==2
+
+
+def test_decision_returns_fresh_comparison_and_history_without_another_read(client):
+    owner=register(client,'review-owner@example.test');reviewer=register(client,'review-confirm@example.test')
+    assert client.post('/api/courts/1/suggest',headers=auth(owner['token']),json={'fees':'$8'}).status_code==201
+    before=client.get('/api/courts/1/suggestions',headers=auth(reviewer['token'])).get_json()
+    assert before['current_values']['fees']!='$8'
+    result=client.post('/api/courts/1/suggestions/decision',headers=auth(reviewer['token']),json={'field':'fees','value':'$8','decision':'confirm'}).get_json()
+    assert result['current_values']['fees']=='$8' and result['items']==[]
+    assert result['my_history'][0]['status']=='applied'
+    assert result['my_history'][0]['before']['fees']==before['current_values']['fees']
+
+
+def test_switching_to_another_pending_value_records_previous_choice_and_keeps_other_fields(client):
+    owner=register(client,'switch-owner@example.test');other=register(client,'switch-other@example.test')
+    headers=auth(owner['token'])
+    assert client.post('/api/courts/1/suggest',headers=headers,json={'fees':'$8','num_courts':9}).status_code==201
+    assert client.post('/api/courts/1/suggest',headers=auth(other['token']),json={'fees':'$10'}).status_code==201
+    result=client.post('/api/courts/1/suggestions/decision',headers=headers,json={'field':'fees','value':'$10','decision':'confirm'}).get_json()
+    assert result['court']['fees']=='$10'
+    assert any(row['status']=='withdrawn' and row['changes']=={'fees':'$8'} for row in result['my_history'])
+    assert any(row['status']=='applied' and row['changes']=={'fees':'$10'} for row in result['my_history'])
+    assert any(row['status']=='pending' and row['changes']=={'num_courts':9} for row in result['my_history'])

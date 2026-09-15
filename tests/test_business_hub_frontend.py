@@ -504,7 +504,7 @@ def test_staged_business_editors_confirm_before_discarding_every_unsaved_layer()
     form_ux = section("function bindModalFormUX", "// A mutation can be represented")
 
     assert "const isDirty = () => JSON.stringify(collectDraftFields()) !== JSON.stringify(initialDraftFields);" in form_ux
-    assert "return { clearDraft, clearError, showError, startSubmitting, isDirty };" in form_ux
+    assert "return { clearDraft, clearError, showError, startSubmitting, isDirty, saveDraft:()=>{clearTimeout(draftTimer);writeDraftNow();} };" in form_ux
 
     assert "bindModalDiscardConfirmation(modal, {" in offering_form
     assert "isDirty: formUX.isDirty" in offering_form

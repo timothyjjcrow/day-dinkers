@@ -7697,3 +7697,34 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .court-contribution-modal #se-status-section:not([open]) { border-color: var(--line); }
 
 .court-contribution-modal #se-done { color: var(--on-solid); }
+
+/* Make correction decisions readable before asking for a vote. */
+.court-update-heading { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.court-update-heading b { font-size: 15px; }
+.court-update-heading span, .court-update-waiting { font-size: 12px; color: var(--ink-soft); }
+.court-update-waiting { margin: 0; line-height: 1.5; }
+.court-update-comparison { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin: 0; }
+.court-update-comparison > div { background: var(--bg); border-radius: var(--radius-sm); padding: 10px; min-width: 0; }
+.court-update-comparison > div:last-child { background: var(--green-50); }
+.court-update-comparison dt { color: var(--ink-soft); font-size: 12px; margin-bottom: 4px; }
+.court-update-comparison dd { font-size: 15px; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.court-update-result { background: var(--green-50); border-radius: var(--radius-sm); padding: 12px; color: var(--green-700); font-weight: 700; }
+.court-update-history { border-top: 1px solid var(--line); }
+.court-update-history > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; }
+.court-update-history > summary > span { display: grid; gap: 4px; min-width: 0; }
+.court-update-history > summary small { font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+.court-update-history > summary strong { font-size: 12px; color: var(--ink-soft); }
+.court-update-history > div { display: grid; gap: 10px; padding-bottom: 12px; }
+@media (max-width: 359px) { .court-update-comparison { grid-template-columns: 1fr; } }
+
+.court-contribution-modal .court-pending-suggestion { border-color: var(--line); padding: 12px; }
+.court-update-history > summary .ui-icon { flex: 0 0 16px; width: 16px; height: 16px; }
+.court-update-history[open] > summary .ui-icon { transform: rotate(90deg); }
+.court-update-history > summary > span { flex: 1; }
+@media (max-width: 359px) {
+  .court-update-history > summary { display: grid; grid-template-columns: minmax(0,1fr) 16px; gap: 6px 10px; }
+  .court-update-history > summary > span { grid-column: 1; }
+  .court-update-history > summary strong { grid-column: 1; }
+  .court-update-history > summary .ui-icon { grid-column: 2; grid-row: 1 / span 2; }
+}
+.court-contribution-modal .court-form-helper { margin: 8px 0 12px; }

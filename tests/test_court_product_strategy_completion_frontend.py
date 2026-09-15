@@ -123,7 +123,7 @@ def test_court_corrections_expose_the_pending_value_and_explicit_decisions():
     assert "api(`/courts/${court.id}/suggestions`)" in editor
     assert 'data-suggestion-confirm' in editor
     assert 'data-suggestion-reject' in editor
-    assert "button.hasAttribute('data-suggestion-confirm') ? 'confirm' : 'reject'" in editor
+    assert "button.hasAttribute('data-suggestion-confirm') ? 'confirm' : button.hasAttribute('data-suggestion-withdraw') ? 'withdraw' : 'reject'" in editor
     assert "api(`/courts/${court.id}/suggestions/decision`" in editor
     assert '.court-pending-suggestion-actions' in CSS
     detail = section(APP, 'async function openCourtDetail', 'function openCourtPlayerActions')

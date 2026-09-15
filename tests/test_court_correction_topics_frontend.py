@@ -25,3 +25,27 @@ def test_open_play_entry_uses_times_without_losing_the_full_accessible_descripti
     assert result['one']['label']=='09:00–11:00'
     assert 'Pay at the front desk' in result['one']['raw']
     assert result['two']['label']=='2 times today'
+
+
+def test_nested_key_order_does_not_create_a_false_correction():
+    source=functions_between('function courtCorrectionChanges(', 'function openSuggestEditSheet(')
+    result=run_js(source+'''
+    console.log(JSON.stringify(courtCorrectionChanges({visitor_info:{parking:'North',entrance:'Gate'}},{visitor_info:{entrance:'Gate',parking:'North'}})));
+    ''')
+    assert result=={}
+
+
+def test_confirmed_fields_refresh_untouched_inputs_and_preserve_unsent_edits():
+    equality=functions_between('function courtCorrectionChanges(', 'function openSuggestEditSheet(')
+    sync=functions_between('    const syncConfirmedFields = (', '    const formUX = bindModalFormUX')
+    result=run_js(equality+'''
+    const initialValues={fees:'$5',num_courts:4};
+    const inputs={'#se-fees':{value:'$5'},'#se-courts':{value:'9'}};
+    const modal={querySelector:key=>inputs[key]};
+    const readValues=()=>({fees:inputs['#se-fees'].value,num_courts:Number(inputs['#se-courts'].value)});
+    let cleared=false,saved=false;const formUX={clearDraft:()=>{cleared=true},saveDraft:()=>{saved=true}};
+    '''+sync+'''
+    syncConfirmedFields({fees:'$10',num_courts:6},['fees','num_courts']);
+    console.log(JSON.stringify({values:readValues(),changes:courtCorrectionChanges(initialValues,readValues()),cleared,saved}));
+    ''')
+    assert result=={'values':{'fees':'$10','num_courts':9},'changes':{'num_courts':9},'cleared':True,'saved':True}

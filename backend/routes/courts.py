@@ -1590,23 +1590,35 @@ def suggest_court_edit(court_id):
     }), 201
 
 
+def _court_correction_review(court, user_id):
+    history = []
+    rows = CourtEditSuggestion.query.filter_by(court_id=court.id, user_id=user_id).order_by(
+        CourtEditSuggestion.id.desc()).limit(20).all()
+    for row in rows:
+        payload = _court_suggestion_payload(row)
+        history.append({
+            'id': row.id,
+            'changes': {key: value for key, value in payload.items() if key in SUGGESTABLE_FIELDS},
+            'before': payload.get('_before', {'closed': payload.get('_previous_closed')} if row.reviewed_at else {}),
+            'status': row.status, 'submitted_at': iso(row.created_at),
+            'reviewed_at': iso(row.reviewed_at), 'review_note': row.review_note,
+        })
+    return {
+        'items': _pending_court_suggestion_items(court.id, user_id),
+        'current_values': {field: _court_suggest_value(court, field) for field in SUGGESTABLE_FIELDS},
+        'consensus_required': SUGGESTION_CONSENSUS,
+        'my_history': history,
+    }
+
+
 @courts_bp.get('/courts/<int:court_id>/suggestions')
 @login_required
 def list_court_edit_suggestions(court_id):
-    """Expose pending community corrections so the second vote is an informed one."""
+    """Expose proposed and current community values for an informed review."""
     court = db.session.get(Court, court_id)
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
-    return jsonify({
-        'items': _pending_court_suggestion_items(court.id, g.current_user.id),
-        'consensus_required': SUGGESTION_CONSENSUS,
-        'my_history': [{'id': row.id, 'changes': {key: value for key, value in _court_suggestion_payload(row).items() if not key.startswith('_')},
-                        'before': _court_suggestion_payload(row).get('_before', {'closed':_court_suggestion_payload(row).get('_previous_closed')} if row.reviewed_at else {}),
-                        'status': row.status, 'submitted_at': iso(row.created_at),
-                        'reviewed_at': iso(row.reviewed_at), 'review_note': row.review_note}
-                       for row in CourtEditSuggestion.query.filter_by(court_id=court.id, user_id=g.current_user.id)
-                       .order_by(CourtEditSuggestion.id.desc()).limit(20).all()],
-    })
+    return jsonify(_court_correction_review(court, g.current_user.id))
 
 
 @courts_bp.post('/courts/<int:court_id>/suggestions/decision')
@@ -1620,7 +1632,7 @@ def decide_court_edit_suggestion(court_id):
     body = request.get_json(silent=True) or {}
     field = str(body.get('field') or '').strip()
     decision = str(body.get('decision') or '').strip().lower()
-    if field not in SUGGESTABLE_FIELDS or decision not in ('confirm', 'reject'):
+    if field not in SUGGESTABLE_FIELDS or decision not in ('confirm', 'reject', 'withdraw'):
         return jsonify({'error': 'invalid_decision'}), 400
     try:
         value = SUGGESTABLE_FIELDS[field](body.get('value'))
@@ -1647,7 +1659,29 @@ def decide_court_edit_suggestion(court_id):
     ).first()
     rejected_changes = _court_suggestion_payload(rejected_row) if rejected_row else {}
 
-    if decision == 'confirm':
+    if decision == 'withdraw':
+        if not own_pending or field not in own_changes or own_changes[field] != value:
+            return jsonify({'error': 'not_your_suggestion'}), 403
+        withdrawn = {field: value, '_before': {field: own_changes.get('_before', {}).get(field)}}
+        if field == 'closed':
+            withdrawn['_evidence'] = own_changes.get('_evidence', '')
+            own_changes.pop('_evidence', None)
+        own_changes.pop(field)
+        own_changes.get('_before', {}).pop(field, None)
+        if any(key in SUGGESTABLE_FIELDS for key in own_changes):
+            own_pending.payload = json.dumps(own_changes, separators=(',', ':'))
+            db.session.add(CourtEditSuggestion(court_id=court.id, user_id=g.current_user.id,
+                status='withdrawn', payload=json.dumps(withdrawn)))
+        else:
+            own_pending.status = 'withdrawn'
+            own_pending.payload = json.dumps(withdrawn)
+    elif decision == 'confirm':
+        if field in own_changes and own_changes[field] != value:
+            superseded = {field: own_changes[field], '_before': {field: own_changes.get('_before', {}).get(field)}}
+            if field == 'closed':
+                superseded['_evidence'] = own_changes.pop('_evidence', '')
+            db.session.add(CourtEditSuggestion(court_id=court.id, user_id=g.current_user.id,
+                status='withdrawn', payload=json.dumps(superseded)))
         own_changes[field] = value
         own_changes.setdefault('_before', {})[field] = _court_suggest_value(court, field)
         if not own_pending:
@@ -1685,7 +1719,7 @@ def decide_court_edit_suggestion(court_id):
         'decision': decision,
         'applied_fields': sorted(applied),
         'court': court.to_dict(),
-        'items': _pending_court_suggestion_items(court.id, g.current_user.id),
+        **_court_correction_review(court, g.current_user.id),
     })
 
 
