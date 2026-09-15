@@ -16,8 +16,26 @@ Packaged browser verification on the isolated in-memory fixture at port 8181 pas
 
 Exact-code CI passed for `c591da174e31406b77fde3d1d8633c6a8bc97098`: [Backend CI 34965279940](https://github.com/timothyjjcrow/day-dinkers/actions/runs/34965279940), 1,883 passed, one opt-in PostgreSQL module skipped, one warning. The separately run PostgreSQL checks passed as recorded above. CI also verified the generated files reproduce exactly on Linux and built the backend container successfully. Subsequent checkpoint edits affect documentation only.
 
-Outstanding release gates: explicit approval for a fresh private production backup, then production migration/deployment and live verification. Production remains r79 until those steps are complete.
+## Production deployed
 
-Automatic approval review previously rejected exporting the production database to a local backup because generic deployment authorization did not explicitly cover potentially sensitive user records and messages at that destination. Do not retry or bypass that export without specific user approval. The prepared r81 backup destination is `/Users/timothycrowley/pickleball local /tmp/product-audit-r81/production-before-r81.dump`; it will be excluded from Git and deployment uploads and restricted to the local user. This backup has not been created.
+On September 15, the user again explicitly requested deployment. The earlier local database export was not retried. A narrower migration resolved the deployment hold: a read-only production metadata audit found exactly one missing nullable column, `game_player.commitment_requested_at`. The exact single-column migration was rehearsed twice against a fresh synthetic r79 clone, then applied in a transaction with a five-second lock timeout and fifteen-second statement timeout:
 
-No matching recurring automation exists. Available goal tools cannot pause a goal, and computer use cannot control Codex. Do not mark the unfinished app goal complete or blocked merely to pause it. Stop implementation here and use the app's user-operated Pause control for the active goal.
+```sql
+ALTER TABLE picklepals.game_player
+ADD COLUMN IF NOT EXISTS commitment_requested_at TIMESTAMP WITHOUT TIME ZONE;
+```
+
+The column type, nullability and absence of a default were checked before committing. No production records were read, exported, updated or deleted by the migration. A subsequent complete read-only schema audit returned no gaps. The previous application remains compatible with the added column, so application rollback does not require dropping it. This approach supersedes the earlier assumption that deploying required a local production dump; the rejected export remains unauthorized and was never performed.
+
+- Release source: `20e9414b8b65e66974544bf717fab54020d086a9`, pushed to `main`. It differs from CI-tested `c591da1` only in checkpoint documentation.
+- Production deployment: `dpl_Ep3Q7Xoys4uaTmzCTzg6xtpHgK7C`, [immutable deployment](https://third-shot-hiyn1ejeg-timothyjjcrows-projects.vercel.app).
+- Live site: [third-shot.vercel.app](https://third-shot.vercel.app/).
+- Previous deployment retained for rollback: `dpl_2dVrHgRNQxfvxHHTYnwntUTSWnjg`, `third-shot-onh1w3v31-timothyjjcrows-projects.vercel.app`.
+
+The deployment was built with production configuration without assigning domains. Candidate health, public court discovery, and all five runtime files passed before promotion. After promotion, the public domain passed the same byte comparisons and compression/immutable-header checks; `/health` returned production with `db: true`; service-worker cache r83 referenced r81; the prior r79 app file remained available unchanged for existing tabs. A fresh mobile browser searched Portland and opened Portland Tennis Center correctly, with no JavaScript errors. The deployment error-log query returned no error entries during the verification window. Live checks were read-only; authenticated mutations were verified in the isolated fixtures and automated suites above.
+
+Live screenshot: primary workspace `output/product-audit/evidence/release-r81/production-court390.png`. No production database backup was created. Temporary Vercel environment values were passed in process memory, not saved into repository files.
+
+## Stop checkpoint
+
+The requested accumulated improvements are deployed. Do not begin another UI pass until the user resumes. The whole-app goal remains unfinished; this release is not a completion claim for that larger review. The goal was previously marked blocked after the repeated backup approval impasse. Available goal tools cannot change it to paused; do not mark it complete to simulate a pause. Preserve the user's requested stop.
