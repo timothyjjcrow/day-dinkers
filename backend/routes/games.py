@@ -989,6 +989,14 @@ def _future_series_dates(game):
     return _future_series_dates_query(game).all()
 
 
+def _owns_future_series_scope(game, following, actor_id):
+    """An occurrence host cannot rewrite another host's future dates/defaults."""
+    root = _series_root(game)
+    template = json.loads(root.recurrence_template or '{}')
+    future_host_id = template.get('creator_id', root.creator_id)
+    return future_host_id == actor_id and all(row.creator_id == actor_id for row in following)
+
+
 def _edit_dates_payload(game, following):
     import hashlib
     rows = [game, *following]
@@ -7126,6 +7134,8 @@ def _request_host_handoff(game, target_id, scope, leave_on_accept=False):
         return jsonify({'error': 'invalid_new_host'}), 400
     if _game_has_blocked_participant(game, target_id):
         return jsonify({'error': 'invalid_new_host'}), 400
+    if scope == 'following_dates' and not _owns_future_series_scope(game, _future_series_dates(game), g.current_user.id):
+        return jsonify({'error': 'future_host_changed'}), 409
     now = utcnow()
     for pending in game.host_handoffs:
         if pending.status != 'pending':
@@ -7204,6 +7214,8 @@ def respond_host_handoff(game_id, handoff_id):
     affected = [game]
     if proposal.scope == 'following_dates':
         affected += _future_series_dates(game)
+    if payload['accept'] and proposal.scope == 'following_dates' and not _owns_future_series_scope(game, affected[1:], proposal.requested_by_id):
+        return jsonify({'error': 'host_scope_changed'}), 409
     if payload['accept']:
         # Taking over hosting must not silently accept a changed playing plan.
         # Review each affected occurrence before changing any host or roster.
@@ -7489,11 +7501,16 @@ def cancel_game(game_id):
     if error:
         return jsonify(error[0]), error[1]
     if game.recurrence == 'weekly':
-        root = _series_root(game, create=True)
-        if scope == 'following_dates':
-            for occurrence in _future_series_dates(game):
-                _cancel_series_date(occurrence, g.current_user.id)
-            root.recurrence_stopped_at = utcnow()
+        _series_root(game, create=True)
+    if scope == 'following_dates':
+        following = _future_series_dates(game)
+        if not _owns_future_series_scope(game, following, g.current_user.id):
+            return jsonify({'error': 'future_host_changed'}), 409
+        if 'expected_edit_dates' in payload and payload['expected_edit_dates'] != _edit_dates_payload(game, following)['token']:
+            return jsonify({'error': 'edit_dates_changed'}), 409
+        for occurrence in following:
+            _cancel_series_date(occurrence, g.current_user.id)
+        _series_root(game, create=True).recurrence_stopped_at = utcnow()
     for player in game.players:
         _participation_event(game, player.user_id, 'cancelled', actor_id=g.current_user.id)
     game.status = 'cancelled'
@@ -7533,7 +7550,7 @@ def game_edit_dates(game_id):
     if game.status != 'upcoming' or game.is_instant:
         return jsonify({'error': 'game_not_open'}), 409
     following = _future_series_dates_query(game).all() if game.recurrence_series_id else []
-    if any(row.creator_id != g.current_user.id for row in following):
+    if not _owns_future_series_scope(game, following, g.current_user.id):
         return jsonify({'error': 'future_host_changed'}), 409
     return jsonify(_edit_dates_payload(game, following))
 
@@ -7583,7 +7600,7 @@ def edit_game(game_id):
         return jsonify(scope_error[0]), scope_error[1]
     series_root = _series_root(game, create=True) if game.recurrence == 'weekly' else None
     following = _future_series_dates(game) if edit_scope == 'following_dates' else []
-    if any(row.creator_id != actor.id for row in following):
+    if edit_scope == 'following_dates' and not _owns_future_series_scope(game, following, actor.id):
         return jsonify({'error': 'future_host_changed'}), 409
     if edit_scope == 'following_dates' and 'expected_edit_dates' in payload:
         if payload['expected_edit_dates'] != _edit_dates_payload(game, following)['token']:

@@ -7840,10 +7840,16 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .host-transfer-note, .host-transfer-empty p { margin: 8px 0 16px; }
 .host-transfer-modal #hh-send { white-space: normal; overflow-wrap: anywhere; min-height: 48px; position: static; box-shadow: none; }
 .host-transfer-option .avatar { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 2.5em; height: 2.5em; }
-.host-transfer-option input, .host-transfer-leave input { appearance: none; display: inline-grid; place-content: center; margin: 0; border: 1.5px solid var(--ink-soft); background: var(--card); }
-.host-transfer-option input { border-radius: 50%; }
-.host-transfer-option input:checked::before { content: ''; width: 9px; height: 9px; background: var(--green-accent); border-radius: 50%; }
-.host-transfer-leave input { border-radius: 4px; }
+.host-transfer-option input, .host-transfer-leave input, .recurrence-scope-picker input { appearance: none; display: inline-grid; place-content: center; margin: 0; border: 1.5px solid var(--ink-soft); background: var(--card); }
+.host-transfer-option input, .recurrence-scope-picker input { border-radius: var(--radius-pill); }
+.host-transfer-option input:checked::before, .recurrence-scope-picker input:checked::before { content: ''; width: 9px; height: 9px; background: var(--green-accent); border-radius: var(--radius-pill); }
+.host-transfer-leave input { border-radius: var(--radius-xxs); }
 .host-transfer-leave input:checked { background: var(--green-700); border-color: var(--green-700); }
 .host-transfer-leave input:checked::before { content: ''; width: 5px; height: 10px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
-.host-transfer-option input:focus-visible, .host-transfer-leave input:focus-visible { outline: 3px solid var(--green-accent); outline-offset: 3px; }
+.host-transfer-option input:focus-visible, .host-transfer-leave input:focus-visible, .recurrence-scope-picker input:focus-visible { outline: 3px solid var(--green-accent); outline-offset: 3px; }
+
+.game-cancel-confirmation.is-series .game-cancel-hero { display: none; }
+.game-cancel-confirmation.is-series .game-cancel-summary-tags { display: none; }
+.game-cancel-confirmation.is-series .game-cancel-impact { padding: 12px; }
+.game-cancel-confirmation.is-series #gc-dates { margin-top: 16px; }
+.game-cancel-confirmation.is-series .game-cancel-actions { position: static; }

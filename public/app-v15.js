@@ -1325,8 +1325,9 @@
     invalid_recurrence: 'Choose a valid repeat schedule.',
     invalid_recurrence_timezone: 'Choose a valid timezone for this repeating session.',
     invalid_recurrence_weekdays: 'Choose at least one valid repeat day.',
-    future_host_changed: 'Some future dates have another host. Choose This date only.',
-    edit_dates_changed: 'The affected dates changed. Review the updated list before saving.',
+    future_host_changed: 'Another host manages part of this series. Choose This date only.',
+    host_scope_changed: 'Hosting changed for these dates. Ask the current host to send a new request.',
+    edit_dates_changed: 'The affected dates changed. Review the updated list before continuing.',
     invalid_recurrence_ends_on: 'Choose a valid repeat end date.',
     recurrence_end_before_start: 'Choose an end date on or after the first session.',
     invalid_standing_rsvp: 'Choose whether to RSVP automatically for future dates.',
@@ -16192,17 +16193,17 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const playerCount = Array.isArray(game.players) ? game.players.length : Number(game.player_count) || 0;
     const roster = playerCount ? `${playerCount} player${playerCount === 1 ? '' : 's'} joined` : '';
     const sheet = openModal(`
-      <div class="game-cancel-confirmation">
+      <div class="game-cancel-confirmation${recurring ? ' is-series' : ''}">
         ${modalHead(variant === 'challenge' ? 'Decline challenge' : `Cancel ${playNoun}`)}
         <div class="game-cancel-hero">
           <span class="game-cancel-icon" aria-hidden="true">${uiIcon(config.icon)}</span>
           <div><span class="game-cancel-eyebrow">${esc(config.eyebrow)}</span><h2>${esc(config.heading)}</h2><p>${esc(config.intro)}</p></div>
         </div>
         <div class="game-cancel-summary" aria-label="${playNoun === 'match' ? 'Match' : 'Play session'} being cancelled">
-          <div class="game-cancel-summary-court"><span aria-hidden="true">${uiIcon('map-pin')}</span><div><b>${esc(courtName)}</b><span>${esc(when)}</span></div></div>
+          <div class="game-cancel-summary-court"><span aria-hidden="true">${uiIcon('map-pin')}</span><div><b>${esc(recurring && game.title ? game.title : courtName)}</b><span>${esc(recurring && game.title ? courtName + ' · ' + when : when)}</span></div></div>
           <div class="game-cancel-summary-tags"><span>${esc(type)}</span><span>${esc(format)}</span>${roster ? `<span>${esc(roster)}</span>` : ''}</div>
         </div>
-        ${recurring ? recurrenceScopeChoicesHtml(game, 'gc', 'Cancel') : ''}
+        ${recurring ? recurrenceScopeChoicesHtml(game, 'gc', 'Cancel') + '<section id="gc-dates" class="edit-date-scope hidden" aria-label="Dates to cancel" tabindex="-1"></section>' : ''}
         <div class="game-cancel-impact"><span class="game-cancel-impact-icon" aria-hidden="true">${uiIcon('alert-triangle')}</span><div><b>What happens next</b><p>${esc(config.impact)}</p></div></div>
         <div class="game-cancel-error hidden" role="alert" tabindex="-1"></div>
         <div class="game-cancel-actions">
@@ -16225,29 +16226,74 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const error = sheet.querySelector('.game-cancel-error');
     const closeButton = sheet.querySelector('.modal-close');
     const selectedScope = () => sheet.querySelector('input[name="gc-scope"]:checked')?.value || 'this_date';
+    let cancelDates = null, dateSequence = 0;
+    const viewerId = state.me?.id;
+    sheet._cleanupFns.push(() => { dateSequence += 1; });
+    const loadCancelDates = async ({ focus = false } = {}) => {
+      const panel = sheet.querySelector('#gc-dates');
+      const sequence = ++dateSequence;
+      cancelDates = null;
+      panel.classList.remove('hidden'); panel.setAttribute('aria-busy', 'true');
+      panel.textContent = 'Loading dates…'; confirmButton.disabled = true;
+      if (focus) { panel.scrollIntoView({block:'center'}); panel.focus({preventScroll:true}); }
+      const current = () => sheet.isConnected && sequence === dateSequence && selectedScope() === 'following_dates' && state.me?.id === viewerId;
+      try {
+        const data = await api(`/games/${resolvedGameId}/edit-dates`);
+        if (!current()) return;
+        if (!data.token || !Array.isArray(data.dates) || !data.dates.some(row => row.id === resolvedGameId)) throw new Error('Missing dates');
+        cancelDates = data;
+        panel.removeAttribute('aria-busy');
+        panel.innerHTML = `<div class="edit-date-scope-head"><b>${data.dates.length} scheduled date${data.dates.length === 1 ? '' : 's'}</b><span>Will cancel</span></div>
+          <ul>${data.dates.map((row,i) => `<li${i >= 3 ? ' class="hidden" data-extra-cancel-date' : ''}><span>${esc(fmtDateTime(row.scheduled_at))}</span>${row.is_selected ? '<small>This date</small>' : ''}</li>`).join('')}</ul>
+          ${data.dates.length > 3 ? `<button type="button" class="btn-link" data-expand-cancel-dates aria-expanded="false">Show all ${data.dates.length} dates</button>` : ''}`;
+        panel.querySelector('[data-expand-cancel-dates]')?.addEventListener('click', event => {
+          const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
+          event.currentTarget.setAttribute('aria-expanded', String(expanded));
+          event.currentTarget.textContent = expanded ? 'Show fewer dates' : `Show all ${data.dates.length} dates`;
+          panel.querySelectorAll('[data-extra-cancel-date]').forEach(row => row.classList.toggle('hidden', !expanded));
+        });
+        config.action = `Cancel ${data.dates.length} date${data.dates.length === 1 ? '' : 's'}`;
+        confirmButton.textContent = config.action; confirmButton.disabled = false;
+      } catch (requestError) {
+        if (!current()) return;
+        panel.removeAttribute('aria-busy');
+        if (requestError.code === 'future_host_changed') panel.textContent = requestError.message;
+        else {
+          panel.innerHTML = '<p>Couldn’t load the dates.</p><button type="button" class="btn btn-secondary btn-sm" data-retry-cancel-dates>Try again</button>';
+          panel.querySelector('[data-retry-cancel-dates]').addEventListener('click', () => loadCancelDates({focus:true}));
+        }
+      }
+    };
     const syncScope = () => {
       if (!recurring) return;
+      dateSequence += 1; cancelDates = null;
+      error.textContent = ''; error.classList.add('hidden');
       const following = selectedScope() === 'following_dates';
+      sheet.querySelector('#gc-dates').classList.toggle('hidden', !following);
       config.heading = following ? 'Cancel this and future dates?' : 'Cancel only this date?';
       config.action = following ? 'Cancel these dates' : 'Cancel this date';
       config.success = following ? 'Upcoming dates cancelled' : 'This date cancelled';
-      config.successCopy = following ? 'The selected date and later sessions are cancelled. Earlier sessions stay unchanged.' : 'Your other session dates are unchanged.';
+      config.successCopy = following ? 'The reviewed dates are cancelled. Earlier sessions stay unchanged.' : 'Your other session dates are unchanged.';
       sheet.querySelector('.game-cancel-hero h2').textContent = config.heading;
-      sheet.querySelector('.game-cancel-hero p').textContent = fmtDateTime(game.scheduled_at);
+      sheet.querySelector('.game-cancel-impact b').textContent = 'Players will be notified';
       sheet.querySelector('.game-cancel-impact p').textContent = following
-        ? 'Players on this and later dates will be notified. Earlier dates and results stay in their history.'
-        : 'Players on this date will be notified. The rest of the weekly schedule stays active.';
-      confirmButton.textContent = config.action;
+        ? 'Repeating stops. Earlier dates and results stay in history.'
+        : 'Other dates and results stay unchanged.';
+      confirmButton.textContent = config.action; confirmButton.disabled = false;
+      if (following) loadCancelDates();
     };
-    sheet.querySelectorAll('input[name="gc-scope"]').forEach((input) => input.addEventListener('change', syncScope));
+    sheet.querySelectorAll('input[name="gc-scope"]').forEach(input => input.addEventListener('change', syncScope));
     syncScope();
     keep.addEventListener('click', () => closeModal(sheet));
     confirmButton.addEventListener('click', async () => {
-      if (committing) return;
+      if (committing || (recurring && selectedScope() === 'following_dates' && !cancelDates)) return;
+      const scope = selectedScope();
+      const dateToken = cancelDates?.token;
       committing = true;
       keep.disabled = true;
       confirmButton.disabled = true;
       closeButton.disabled = true;
+      sheet.querySelectorAll('input[name="gc-scope"]').forEach(input => { input.disabled = true; });
       confirmButton.setAttribute('aria-busy', 'true');
       sheet.querySelector('.game-cancel-confirmation').setAttribute('aria-busy', 'true');
       confirmButton.textContent = variant === 'challenge' ? 'Declining…' : 'Cancelling…';
@@ -16256,7 +16302,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       try {
         const fresh = await api(endpoint || `/games/${resolvedGameId}/cancel`, {
           method: 'POST',
-          ...(recurring ? { body: JSON.stringify({ edit_scope: selectedScope() }) } : {}),
+          ...(recurring ? { body: JSON.stringify({ edit_scope: scope, ...(scope === 'following_dates' ? {expected_edit_dates:dateToken} : {}) }) } : {}),
         });
         committing = false;
         if (!document.body.contains(sheet)) return;
@@ -16280,12 +16326,14 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         keep.disabled = false;
         confirmButton.disabled = false;
         closeButton.disabled = false;
+        sheet.querySelectorAll('input[name="gc-scope"]').forEach(input => { input.disabled = false; });
         confirmButton.removeAttribute('aria-busy');
         sheet.querySelector('.game-cancel-confirmation').removeAttribute('aria-busy');
         confirmButton.textContent = config.action;
         error.textContent = requestError.message || `Could not cancel this ${playNoun}. Try again.`;
         error.classList.remove('hidden');
         error.focus?.({ preventScroll: true });
+        if (recurring && scope === 'following_dates' && ['edit_dates_changed', 'future_host_changed'].includes(requestError.code)) loadCancelDates({focus:true});
       }
     });
     return sheet;
