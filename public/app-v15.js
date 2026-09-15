@@ -15051,104 +15051,97 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     return modal;
   }
 
+  function livePlayCountsHtml(rally) {
+    return `<dl class="live-play-counts">${[
+      [rally.readyCount, 'Here'], [rally.onWayCount, 'On the way'], [rally.spotsLeft, 'Open spots'],
+    ].map(([count,label])=>`<div><dt>${label}</dt><dd>${Math.max(0, Number(count) || 0)}</dd></div>`).join('')}</dl>`;
+  }
+
+  function arrivalRallyCardHtml(rally) {
+    const action = rallyActionState(rally);
+    return `<article class="live-play-card">
+      <div class="live-play-card-heading"><div><small>Casual pickup</small><h4>${esc(rally.courtName)}</h4>${rally.courtCity ? `<span>${esc(rally.courtCity)}</span>` : ''}</div>
+        ${rally.distanceMiles != null ? `<span class="tag">${esc(rally.distanceMiles)} mi</span>` : ''}</div>
+      ${livePlayCountsHtml(rally)}
+      <div class="live-play-card-actions"><button type="button" class="btn btn-secondary" data-live-court="${rally.courtId}" aria-label="View ${esc(rally.courtName)} court details">Court details</button>
+      <button type="button" class="btn btn-primary" data-play-soon-rally ${rallyDatasetAttributes(rally)} ${action.enabled ? '' : 'disabled'}>${esc(action.label)}</button></div>
+    </article>`;
+  }
+
   async function openPlaySoonArrivalChoices() {
     const accountId = Number(state.me && state.me.id);
     const modal = openModal(`
-      ${modalHead('Games starting now')}
-      <p class="play-now-intro">Choose a pickup game and tell players when you’ll arrive, or open a court where someone is waiting to play.</p>
-      <div id="play-soon-rallies" aria-live="polite" aria-busy="true">
-        <div class="play-now-loading" role="status"><span class="spinner"></span><span>Finding games starting now…</span></div>
-      </div>
+      ${modalHead('Nearby play now', 'users')}
+      <div class="live-play-location"><span id="live-play-area"></span><button type="button" class="btn btn-secondary btn-sm" id="live-play-refresh">Refresh</button></div>
+      <div id="play-soon-rallies" tabindex="-1" aria-live="polite" aria-busy="true"></div>
       <button type="button" class="btn btn-secondary btn-block hidden" id="play-soon-hour-fallback">Share that I’m free this hour</button>
-      <button type="button" class="btn-link modal-close btn-block">Not now</button>
     `, { label: 'Pickup games near you' });
+    modal.querySelector('.modal').classList.add('live-play-modal');
     const results = modal.querySelector('#play-soon-rallies');
     const fallback = modal.querySelector('#play-soon-hour-fallback');
+    const refresh = modal.querySelector('#live-play-refresh');
+    let sequence = 0;
+    modal._cleanupFns.push(()=>{sequence += 1;});
     fallback.addEventListener('click', () => transitionModal(modal, openPlayPulseCourtPicker));
-    try {
+    const load = async (focus = false) => {
+      const current = ++sequence;
+      const active = () => current === sequence && modal.isConnected && Number(state.me && state.me.id) === accountId;
+      results.setAttribute('aria-busy','true');
+      results.innerHTML = '<div class="play-now-loading" role="status"><span class="spinner"></span><span>Finding nearby play…</span></div>';
+      fallback.classList.add('hidden'); refresh.disabled = true;
+      if (focus) { results.scrollIntoView({block:'start'}); results.focus({preventScroll:true}); }
       const loc = committedAreaLatLng();
-      if (!loc) {
-        results.setAttribute('aria-busy', 'false');
-        fallback.classList.add('hidden');
-        results.innerHTML = `<section class="play-area-setup" role="status">
-          <span class="play-area-setup-icon" aria-hidden="true">${uiIcon('map-pin')}</span>
-          <span class="row-main"><b>Set your area to find nearby play</b><small>Choose a city or use your location before Third Shot searches for live sessions and players.</small></span>
-          <button type="button" class="btn btn-primary" data-set-arrival-area>Set area</button>
-        </section>`;
-        results.querySelector('[data-set-arrival-area]')?.addEventListener('click', () => {
-          transitionModal(modal, () => openHomeAreaOnboarding({
-            replay: true, onComplete: openPlaySoonArrivalChoices,
-          }));
+      modal.querySelector('#live-play-area').textContent = loc ? `${state.areaLabel || state.me?.home_area || 'Your area'} · 25 mi` : '';
+      refresh.classList.toggle('hidden',!loc);
+      try {
+        if (!loc) {
+          results.innerHTML = `<section class="live-play-empty"><span aria-hidden="true">${uiIcon('map-pin')}</span><h4>Set your area</h4><p>Find nearby games and players.</p><button type="button" class="btn btn-primary" data-set-arrival-area>Set area</button></section>`;
+          results.querySelector('[data-set-arrival-area]').addEventListener('click',()=>transitionModal(modal,()=>openHomeAreaOnboarding({replay:true,onComplete:openPlaySoonArrivalChoices})));
+          return;
+        }
+        const response = await api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=25`);
+        if (!active()) return;
+        const rallies = normalizeLookingRallies(response).filter((rally) => {
+          const ownArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
+          return !!ownArrival || (rally.arrivalAvailable && rally.spotsLeft > 0);
         });
-        return modal;
-      }
-      const response = await api(`/players/looking?lat=${loc.lat}&lng=${loc.lng}&radius=25`);
-      if (!document.body.contains(modal) || Number(state.me && state.me.id) !== accountId) return modal;
-      const rallies = normalizeLookingRallies(response).filter((rally) => {
-        const ownArrival = activeArrivalForGame(rally.gameId, rally.myArrival, rally);
-        return !!ownArrival || (rally.arrivalAvailable && rally.spotsLeft > 0);
-      });
-      const lookingPlayers = normalizeLookingPlayersWithoutRally(response).slice(0, 12);
-      results.setAttribute('aria-busy', 'false');
-      fallback.classList.toggle('hidden', rallies.length > 0 || lookingPlayers.length > 0);
-      const rallyHtml = rallies.length ? `<div class="section-label">Pickup games near you</div>${rallies.map((rally) => {
-        const action = rallyActionState(rally);
-        return `<article class="card nearby-rally-card">
-          <div class="row">
-            <div class="row-main"><div class="row-title">${esc(rally.courtName)}</div><div class="row-sub">${esc(rallyCountsText(rally))}</div></div>
-            ${rally.distanceMiles != null ? `<span class="tag">${esc(rally.distanceMiles)} mi</span>` : ''}
-          </div>
-          <button type="button" class="btn btn-primary btn-block" data-play-soon-rally ${rallyDatasetAttributes(rally)}>${esc(action.label)}</button>
-        </article>`;
-      }).join('')}` : '';
-      const playerHtml = lookingPlayers.length ? `<div class="section-label">Players waiting at a court</div>${lookingPlayers.map((player) => {
-        const firstName = String(player.display_name || 'A player').split(/\s+/)[0];
-        return `<article class="card nearby-rally-card">
-          <div class="row">
-            ${avatarHtml(player, 'sm')}
-            <div class="row-main"><div class="row-title">${esc(player.display_name || 'Player looking to play')}</div><div class="row-sub">At ${esc(player.courtName)} now · looking for casual play</div></div>
-            ${player.distanceMiles != null ? `<span class="tag">${esc(player.distanceMiles)} mi to court</span>` : ''}
-          </div>
-          <div class="row" style="justify-content:flex-end">
-            ${player.isFriend ? `<button type="button" class="btn btn-secondary btn-sm" data-play-soon-coming="${player.id}">Tell ${esc(firstName)} I can come</button>` : ''}
-            <button type="button" class="btn btn-primary btn-sm" data-play-soon-player-court="${player.courtId}">Open ${esc(player.courtName)}</button>
-          </div>
-        </article>`;
-      }).join('')}` : '';
-      results.innerHTML = rallyHtml || playerHtml
-        ? `${rallyHtml}${playerHtml}`
-        : '<div class="empty-state" style="padding:14px">No pickup game has an open spot right now and nobody is waiting at a court. You can still let players know you’re free this hour.</div>';
-      results.querySelectorAll('[data-play-soon-rally]').forEach((button) => {
-        button.addEventListener('click', () => {
-          const rally = rallies.find((item) => item.gameId === Number(button.dataset.rallyGameId));
-          openReadyRally(rally || rallySummaryFromDataset(button), button);
-        });
-      });
-      results.querySelectorAll('[data-play-soon-player-court]').forEach((button) => {
-        button.addEventListener('click', () => {
-          transitionModal(modal, () => openCourtDetail(Number(button.dataset.playSoonPlayerCourt)));
-        });
-      });
-      results.querySelectorAll('[data-play-soon-coming]').forEach((button) => {
-        button.addEventListener('click', async () => {
-          if (button.disabled) return;
-          button.disabled = true;
+        const lookingPlayers = normalizeLookingPlayersWithoutRally(response).slice(0, 12);
+        fallback.classList.toggle('hidden',rallies.length > 0 || lookingPlayers.length > 0);
+        const rallyHtml = rallies.length ? `<section aria-label="Pickup games"><h4 class="live-play-section-title">Pickup games <span>${rallies.length}</span></h4>${rallies.map(arrivalRallyCardHtml).join('')}</section>` : '';
+        const playerHtml = lookingPlayers.length ? `<section aria-label="Players waiting at a court"><h4 class="live-play-section-title">Players looking to play <span>${lookingPlayers.length}</span></h4>${lookingPlayers.map((player)=>{
+          const firstName = String(player.display_name || 'Player').split(/\s+/)[0];
+          return `<article class="live-play-card"><div class="live-play-person">${avatarHtml(player,'sm','span')}<div><h4>${esc(player.display_name || 'Player')}</h4><p>${esc(player.courtName)}</p><small>Here now · looking for casual play${player.distanceMiles != null ? ` · ${esc(player.distanceMiles)} mi` : ''}</small></div></div>
+            <div class="live-play-card-actions">${player.isFriend ? `<button type="button" class="btn btn-secondary" data-play-soon-coming="${player.id}">Tell ${esc(firstName)} I can come</button>` : ''}<button type="button" class="btn btn-primary" data-play-soon-player-court="${player.courtId}">Court details</button></div></article>`;
+        }).join('')}</section>` : '';
+        results.innerHTML = rallyHtml || playerHtml ? `${rallyHtml}${playerHtml}` : `<section class="live-play-empty"><span aria-hidden="true">${uiIcon('users')}</span><h4>No nearby play right now</h4><p>Let players know you’re free this hour.</p><button type="button" class="btn btn-secondary" data-retry-live-play>Check again</button></section>`;
+        results.querySelectorAll('[data-play-soon-rally]').forEach(button=>button.addEventListener('click',()=>{
+          const rally = rallies.find(item=>item.gameId === Number(button.dataset.rallyGameId));
+          openReadyRally(rally || rallySummaryFromDataset(button),button);
+        }));
+        results.querySelectorAll('[data-live-court], [data-play-soon-player-court]').forEach(button=>button.addEventListener('click',()=>{
+          openChildModal(modal,()=>openCourtDetail(Number(button.dataset.liveCourt || button.dataset.playSoonPlayerCourt)));
+        }));
+        results.querySelectorAll('[data-play-soon-coming]').forEach(button=>button.addEventListener('click',async()=>{
+          const reset=beginButtonAction(button,'Sending…'); if (!reset) return;
           try {
-            await api(`/players/${button.dataset.playSoonComing}/coming`, { method: 'POST' });
-            button.innerHTML = `${uiIcon('check')} Sent`;
-            toast('They know you can be there soon', { tone: 'success', icon: 'pickleball' });
-          } catch (error) {
-            button.disabled = false;
-            toast(error.message);
-          }
-        });
-      });
-    } catch {
-      if (!document.body.contains(modal)) return modal;
-      results.setAttribute('aria-busy', 'false');
-      results.innerHTML = '<div class="empty-state" style="padding:14px">Games starting now aren’t available. You can still share that you’re free this hour.</div>';
-      fallback.classList.remove('hidden');
-    }
+            await api(`/players/${button.dataset.playSoonComing}/coming`,{method:'POST'});
+            if (!active()) return;
+            button.innerHTML = `${uiIcon('check')} Sent`;button.removeAttribute('aria-busy');
+            toast('They know you can be there soon',{tone:'success',icon:'pickleball'});
+          } catch(error) { if (active()) {reset();toast(error.message);} }
+        }));
+      } catch(error) {
+        if (!active()) return;
+        results.innerHTML = `<section class="live-play-empty" role="alert"><h4>Couldn’t load nearby play</h4><p>${esc(error.message)}</p><button type="button" class="btn btn-primary" data-retry-live-play>Try again</button></section>`;
+      } finally {
+        if (active()) {
+          results.setAttribute('aria-busy','false'); refresh.disabled=false;
+          results.querySelector('[data-retry-live-play]')?.addEventListener('click',()=>load(true));
+        }
+      }
+    };
+    refresh.addEventListener('click',()=>load(true));
+    await load();
     return modal;
   }
 

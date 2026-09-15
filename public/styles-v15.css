@@ -7874,3 +7874,37 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .hosting-review-actions .btn { flex: 1 1 150px; min-height: 48px; white-space: normal; }
 
 .hosting-date-card.is-full { border-color: var(--red-700); }
+
+/* Nearby live play: full court names, distinct counts, and normal-flow actions. */
+.play-action-bar .play-now-quick-actions button { flex-direction: row; }
+.play-action-bar .play-now-quick-actions b { font-size: 14px; overflow-wrap: anywhere; }
+.live-play-modal { max-width: 580px; }
+.live-play-location { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.live-play-location > span { color: var(--ink-soft); font-size: 13px; overflow-wrap: anywhere; }
+.live-play-location .btn { flex-shrink: 0; min-height: 44px; }
+.live-play-section-title { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 18px 0 10px; }
+.live-play-section-title > span { color: var(--ink-soft); font-weight: 500; }
+.live-play-card { border: 1px solid var(--line); background: var(--card); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 12px; }
+.live-play-card-heading { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; justify-content: space-between; }
+.live-play-card-heading > div { min-width: 0; flex: 1 1 12em; }
+.live-play-card h4 { font-size: 17px; line-height: 1.3; margin: 3px 0; overflow-wrap: anywhere; }
+.live-play-card small, .live-play-card-heading > div > span { color: var(--ink-soft); font-size: 13px; }
+.live-play-card-heading > .tag { flex-shrink: 0; }
+.live-play-counts { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); margin: 16px 0; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.live-play-counts > div { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 0 6px; }
+.live-play-counts > div + div { border-left: 1px solid var(--line); padding-left: 12px; }
+.live-play-counts dt { color: var(--ink-soft); font-size: 12px; overflow-wrap: anywhere; }
+.live-play-counts dd { grid-row: 1; margin: 0; font-size: 24px; line-height: 1; font-weight: 700; }
+.live-play-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.live-play-card-actions .btn { flex: 1 1 9em; min-height: 46px; white-space: normal; overflow-wrap: anywhere; }
+.live-play-person { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; }
+.live-play-person > div { min-width: 0; }
+.live-play-person .avatar { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 2.5em; height: 2.5em; }
+.live-play-person p { margin: 3px 0; overflow-wrap: anywhere; }
+.live-play-empty { text-align: center; padding: 24px 8px; }
+.live-play-empty > span { display: block; color: var(--green-ink); margin-bottom: 12px; }
+.live-play-empty h4 { margin: 0 0 8px; font-size: 18px; }
+.live-play-empty p { color: var(--ink-soft); font-size: 14px; line-height: 1.5; margin: 0 0 18px; }
+.live-play-empty .btn { min-height: 44px; }
+
+#play-soon-rallies:focus { outline: 2px solid var(--green-accent); outline-offset: 3px; border-radius: var(--radius-sm); }

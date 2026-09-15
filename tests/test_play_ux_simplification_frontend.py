@@ -42,7 +42,7 @@ def test_arriving_choice_uses_live_rallies_and_existing_arrival_backend_flow():
     assert "Players waiting at a court" in arriving
     assert "looking for casual play" in arriving
     assert "data-play-soon-player-court" in arriving
-    assert "openCourtDetail(Number(button.dataset.playSoonPlayerCourt))" in arriving
+    assert "openChildModal(modal,()=>openCourtDetail(Number(button.dataset.liveCourt || button.dataset.playSoonPlayerCourt)))" in arriving
     assert "data-play-soon-coming" in arriving
     assert "api(`/players/${button.dataset.playSoonComing}/coming`" in arriving
     assert "Share that I’m free this hour" in arriving

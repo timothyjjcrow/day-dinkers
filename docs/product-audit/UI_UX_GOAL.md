@@ -24,7 +24,7 @@ Review every feature and the journeys between features. Make Third Shot professi
 | 4 | Map, list, search scope, selected/saved courts | Explore freely while retaining the selected place | In progress |
 | 5 | Court detail, timelines, hours/access, photos, reviews, contributions | Understand a visit and find the right next action | In progress |
 | 6 | Session creation/editing, recurring dates, host tools | Make or change a plan with concise, understandable controls | In progress |
-| 7 | Immediate play, on-the-way, arrival, presence, completion | Understand and control participation at each stage | Pending |
+| 7 | Immediate play, on-the-way, arrival, presence, completion | Understand and control participation at each stage | In progress |
 | 8 | Ranked matches, score entry/confirmation/correction, rankings | Identify teams, result and required action without jargon | Pending |
 | 9 | Competition discovery, registration, partners, brackets, organizer controls | Find the next match and understand event progress | Pending |
 | 10 | League opponents, proposals, scheduling, rounds, standings, seasons | Know who to play, arrange it and understand progress | Pending |
@@ -90,3 +90,5 @@ Pass6 continued: `ui-ux-pass-06-host-tools.md` covers the consolidated host menu
 Pass6 continued: `ui-ux-pass-06-series-actions.md` covers counted cancellation dates, moved exceptions, stale/read recovery, locked request scope, and ownership checks across recurring edit/cancel/host requests and acceptance. Next review the dates and plans shown for recurring host requests/acceptance, retaining cancellation and editing edge cases.
 
 Pass6 continued: `ui-ux-pass-06-hosting-review.md` covers explicit dated plans and standing schedules before requesting/accepting hosting, current-review consent, changed-plan/capacity/read/write recovery, and verified host/roster updates. Next broaden to pass 7: immediate play, on-the-way, arrival and completion. Remaining pass 6 correctness and UI states stay open for cross-feature verification.
+
+Pass7: `ui-ux-pass-07-live-discovery.md` covers readable live-game/player cards, separate presence/ETA/open-spot counts, court details with return focus, compact Play now menu, no-area/empty/read-retry states, and verified ETA sharing. Next review arrival status, cancellation and at-court joining, followed by immediate creation and completion.
