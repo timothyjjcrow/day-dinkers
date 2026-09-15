@@ -69,6 +69,6 @@ def test_court_photo_preview_and_progress_reuse_the_launching_modal():
     assert 'ERROR_TEXT.invalid_photo' in upload
     assert 'openModal(' not in upload
     assert 'openActionConfirmation({' not in upload
-    assert 'contextModal: modal' in gallery
-    assert 'onCancel: reopenGallery' in gallery
+    assert 'contextModal:modal' in gallery
+    assert 'onCancel:reopenGallery' in gallery
     assert '.court-photo-cover-notice' in STYLES

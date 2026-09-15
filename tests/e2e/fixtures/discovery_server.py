@@ -13,7 +13,7 @@ os.environ.update(APP_ENV='testing',TEST_DATABASE_URL='sqlite:///:memory:',
     DATABASE_URL='sqlite:///:memory:',AUTO_SEED_COURTS='false',PUSH_DELIVERY_ENABLED='false')
 from flask import request
 from backend.app import create_app, db
-from backend.models import Court, CourtReview, User, Game, GamePlayer, GameWaitlist, GameHostHandoff, GameInvite, notify, utcnow
+from backend.models import Court, CourtReview, CourtPhoto, User, Game, GamePlayer, GameWaitlist, GameHostHandoff, GameInvite, notify, utcnow
 
 app=create_app('testing')
 
@@ -114,6 +114,25 @@ with app.app_context():
                 comment=['Good lighting for evening games. The entrance is beside the north parking lot.',
                          'Four courts with permanent nets. Bring water on warm days.',
                          'Friendly open play. Check the posted times before heading over.'][index%3]))
+    if os.environ.get('DISCOVERY_PHOTO_SCENARIOS') == '1':
+        # Generated court diagrams are disposable visual fixtures, not real venue photos.
+        from PIL import Image, ImageDraw
+        from io import BytesIO
+        import base64
+        for index in range(8):
+            picture=Image.new('RGB',(720,480),['#d2dacc','#c9dae0','#e4d9c8'][index%3])
+            draw=ImageDraw.Draw(picture)
+            draw.rectangle((140,45,580,435),fill=['#386e79','#506d8a','#497767'][index%3],outline='white',width=5)
+            draw.line((140,240,580,240),fill='white',width=5)
+            draw.rectangle((140,175,580,305),outline='white',width=4)
+            draw.line((360,45,360,175),fill='white',width=4)
+            draw.line((360,305,360,435),fill='white',width=4)
+            draw.text((18,18),f'SYNTHETIC COURT PHOTO {index+1}',fill='#243b32')
+            buffer=BytesIO();picture.save(buffer,format='PNG')
+            db.session.add(CourtPhoto(court_id=courts[0].id,user_id=players[index%4].id,
+                photo_data='data:image/png;base64,'+base64.b64encode(buffer.getvalue()).decode(),
+                category=['court','nets','entrance',''][index%4],
+                caption=['Courts beside the north entrance','Permanent nets on all four courts','The gate beside the parking lot',''][index%4]))
     db.session.commit()
 port=int(os.environ.get('DISCOVERY_TEST_PORT', '8055'))
 print(f'DISCOVERY READY port{port} date{tomorrow}: discovery-0@example.test / local-discovery-test',flush=True)

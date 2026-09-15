@@ -357,8 +357,8 @@ def test_stateful_and_text_link_controls_meet_shared_interaction_contracts():
 
     gallery = app_section("async function openCourtGallery", "async function openGameChat")
     like = js_function("toggleCourtPhotoLike")
-    assert 'aria-pressed="${photo.liked_by_me}"' in gallery
-    assert "uiIcon('heart', photo.liked_by_me ? 'is-filled' : '')" in gallery
+    assert 'aria-pressed="${photo.liked_by_me}"' in app_section("function openCourtPhotoLightbox", "async function openCourtGallery")
+    assert "uiIcon('heart', photo.liked_by_me ? 'is-filled' : '')" in like
     assert "if (button.disabled) return false;" in like
     assert "button.disabled = true;" in like
     assert "button.setAttribute('aria-busy', 'true');" in like

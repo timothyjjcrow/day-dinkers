@@ -176,10 +176,10 @@ def test_court_detail_rating_gallery_and_section_navigation_are_accessible():
     detail = section("async function openCourtDetail", "function openCourtPlayerActions")
     assert "window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'" in detail
     gallery = section("async function openCourtGallery", "async function openBusinessHub")
-    assert "modalHead(court.name, 'camera')" in gallery
+    assert "modalHead('Photos','camera')" in gallery
     assert "modalHead(`${uiIcon('camera')} ${court.name}`)" not in gallery
     gallery_helpers = section("function galleryPhotoMetaHtml", "async function openBusinessHub")
-    assert 'data-delete-photo="${photo.id}"' in gallery_helpers
+    assert 'data-lightbox-delete' in gallery_helpers
     assert "method: 'DELETE'" in gallery_helpers
     assert 'class="gallery-lightbox-counter" aria-live="polite">${index + 1} of ${photos.length}' in gallery_helpers
     assert 'class="gallery-lightbox-caption"' in gallery_helpers

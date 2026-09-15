@@ -13335,8 +13335,20 @@
       });
       input.click();
     };
+    let refreshPhotosOnResume=false;
+    modal._onResume=()=>{
+      if(!refreshPhotosOnResume)return;
+      refreshPhotosOnResume=false;
+      refreshCourtDetailPreservingContext(modal,court.id,{focusFallbackSelector:'#cd-gallery'});
+    };
     modal.querySelector('#cd-gallery')?.addEventListener('click', () => {
-      openChildModal(modal, () => openCourtGallery(court, uploadCourtPhoto));
+      openChildModal(modal, () => openCourtGallery(court, uploadCourtPhoto,{
+        onChange:()=>{
+          refreshPhotosOnResume=true;
+          const label=modal.querySelector('#cd-gallery span');
+          if(label)label.textContent=`Photos${court.photo_count ? ` (${court.photo_count})` : ''}`;
+        },
+      }));
     });
 
     const courtShareUrl = `${location.origin}/c/${court.id}`; // short link → OG preview in chat apps
@@ -31469,17 +31481,21 @@
     const uploaded = resultDayLabel(photo.created_at);
     const taken = photo.captured_on ? new Intl.DateTimeFormat(undefined, {month:'short',day:'numeric',year:'numeric'}).format(new Date(`${photo.captured_on}T12:00:00`)) : '';
     const category = courtPhotoCategories().find(([key]) => key === photo.category)?.[1];
-    return `${photo.caption ? `<strong>${esc(photo.caption)}</strong>` : `<strong>${esc(category || 'Court photo')}</strong>`}
-      <span>${category && photo.caption ? `${esc(category)} · ` : ''}${taken ? `Taken ${esc(taken)}` : 'Date taken not provided'}</span>
-      <span>by ${esc(photo.user_name)}${uploaded ? ` · Uploaded ${esc(uploaded)}` : ''}</span>`;
+    return `<strong>${esc(photo.caption || category || 'Court photo')}</strong>
+      ${category && photo.caption ? `<span>${esc(category)}</span>` : ''}
+      ${taken ? `<span>Taken ${esc(taken)}</span>` : ''}
+      <span>${esc(photo.user_name)}${uploaded ? ` · Uploaded ${esc(uploaded)}` : ''}</span>`;
   }
 
   async function toggleCourtPhotoLike(court, photo, button) {
     if (button.disabled) return false;
+    const ownerId=state.me?.id;
+    if(!ownerId)return false;
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
     try {
       const result = await api(`/courts/${court.id}/photos/${photo.id}/like`, { method: 'POST' });
+      if(state.me?.id!==ownerId)return false;
       photo.liked_by_me = !!result.liked;
       photo.likes = Number(result.likes) || 0;
       button.innerHTML = `${uiIcon('heart', photo.liked_by_me ? 'is-filled' : '')} <span data-like-count>${photo.likes || ''}</span>`;
@@ -31492,7 +31508,7 @@
       }
       return true;
     } catch (error) {
-      toast(error.message || 'That reaction could not be saved.');
+      if(state.me?.id===ownerId)toast(error.message || 'That reaction could not be saved.');
       return false;
     } finally {
       if (button.isConnected) {
@@ -31503,182 +31519,179 @@
   }
 
   async function deleteCourtPhoto(court, photo, trigger) {
+    const ownerId=state.me?.id;
     const approved = await openActionConfirmation({
-      eyebrow: 'Your court photo',
-      title: 'Delete this photo?',
+      eyebrow: 'Your court photo', title: 'Delete this photo?',
       message: 'This photo and its hearts will be removed from the court gallery.',
-      detail: 'This cannot be undone.',
-      confirmLabel: 'Delete photo',
-      cancelLabel: 'Keep photo',
-      icon: 'trash',
-      trigger,
+      detail: 'This cannot be undone.', confirmLabel: 'Delete photo', cancelLabel: 'Keep photo',
+      icon: 'trash', trigger,
     });
-    if (!approved) return null;
+    if (!approved || !ownerId || state.me?.id!==ownerId || !trigger.isConnected) return null;
     const result = await api(`/courts/${court.id}/photos/${photo.id}`, { method: 'DELETE' });
+    if(state.me?.id!==ownerId)return null;
     court.photo_count = result.photo_count;
     court.photo_url = result.photo_url || '';
-    toast('Your court photo was deleted.');
+    toast('Photo deleted.',{tone:'success'});
     return result;
   }
 
   function openCourtPhotoLightbox(court, photos, startIndex, { onChange } = {}) {
     if (!photos.length) return null;
-    let index = Math.max(0, Math.min(Number(startIndex) || 0, photos.length - 1));
-    const modal = openModal('<div id="court-photo-lightbox"></div>', {
-      label: `${court.name} photo viewer`,
-    });
+    const ownerId=state.me?.id||null;
+    let index = Math.max(0, Math.min(Number(startIndex) || 0, photos.length - 1)), busy=false;
+    const modal = openModal('', {label: `${court.name} photo viewer`});
     const box = modal.querySelector('.modal');
     box.classList.add('gallery-lightbox-modal');
-    const render = () => {
-      if (!photos.length) {
-        closeModal(modal);
-        return;
-      }
+    const current=()=>modal.isConnected && !modal._destroyed && (state.me?.id||null)===ownerId;
+    const change=event=>{try{onChange?.(event);}catch{/* The committed photo action remains valid. */}};
+    const render = (focus=null) => {
+      if(!current())return;
+      if (!photos.length) {dismissModal(modal);return;}
       index = Math.max(0, Math.min(index, photos.length - 1));
       const photo = photos[index];
       box.innerHTML = `
-        ${modalHead(`${court.name} photo`, 'camera')}
-        <div class="gallery-lightbox-counter" aria-live="polite">${index + 1} of ${photos.length}</div>
-        <div class="gallery-lightbox-stage">
+        ${modalHead('Photos', 'camera')}
+        <p class="gallery-place">${esc(court.name)}</p>
+        <div class="gallery-lightbox-stage" tabindex="-1">
           <div class="gallery-photo-fallback" aria-hidden="true">${uiIcon('camera')}<span>Photo unavailable</span></div>
           <img src="${esc(photo.url)}" alt="${esc(photo.caption || `Photo of ${court.name}`)}" data-remove-on-error />
         </div>
+        <div class="gallery-view-navigation">
+          <button type="button" class="btn btn-secondary" data-gallery-prev ${index === 0 ? 'disabled' : ''} aria-label="Previous photo">${uiIcon('arrow-left')}</button>
+          <span class="gallery-lightbox-counter" aria-live="polite">${index + 1} of ${photos.length}</span>
+          <button type="button" class="btn btn-secondary" data-gallery-next ${index === photos.length - 1 ? 'disabled' : ''} aria-label="Next photo">${uiIcon('arrow-right')}</button>
+        </div>
         <div class="gallery-lightbox-caption">${galleryPhotoMetaHtml(photo)}</div>
         <div class="gallery-lightbox-actions">
-          <button type="button" class="btn btn-secondary" data-gallery-prev ${index === 0 ? 'disabled' : ''} aria-label="Previous photo">${uiIcon('arrow-left')} Previous</button>
-          <button type="button" class="btn-link gallery-like" data-lightbox-like aria-label="${photo.liked_by_me ? 'Unlike' : 'Like'} photo by ${esc(photo.user_name)}" aria-pressed="${photo.liked_by_me}">${uiIcon('heart', photo.liked_by_me ? 'is-filled' : '')} <span data-like-count>${photo.likes || ''}</span></button>
-          <button type="button" class="btn btn-secondary" data-gallery-next ${index === photos.length - 1 ? 'disabled' : ''} aria-label="Next photo">Next ${uiIcon('arrow-right')}</button>
+          ${ownerId ? `<button type="button" class="btn-link gallery-like" data-lightbox-like aria-label="${photo.liked_by_me ? 'Unlike' : 'Like'} photo by ${esc(photo.user_name)}" aria-pressed="${photo.liked_by_me}">${uiIcon('heart', photo.liked_by_me ? 'is-filled' : '')} <span data-like-count>${photo.likes || ''}</span></button>` : ''}
+          ${photo.can_delete ? `<button type="button" class="btn-link gallery-delete" data-lightbox-delete>${uiIcon('trash')} Delete photo</button>` : ''}
+          ${ownerId && !photo.can_delete ? `<button type="button" class="gallery-report" data-lightbox-report aria-label="Report photo">${uiIcon('flag')}</button>` : ''}
         </div>
-        ${photo.can_delete ? `<button type="button" class="btn-link gallery-delete" data-lightbox-delete>${uiIcon('trash')} Delete your photo</button>` : ''}
-        ${state.me && !photo.can_delete ? `<button type="button" class="btn-link gallery-report" data-lightbox-report>${uiIcon('alert-triangle')} Report photo</button>` : ''}
+        <p class="form-error hidden" data-photo-error role="alert" tabindex="-1"></p>
       `;
       setDialogLabel(box, `${court.name} photo ${index + 1} of ${photos.length}`);
-      box.querySelector('[data-gallery-prev]')?.addEventListener('click', () => { index -= 1; render(); });
-      box.querySelector('[data-gallery-next]')?.addEventListener('click', () => { index += 1; render(); });
-      box.querySelector('[data-lightbox-like]')?.addEventListener('click', async (event) => {
-        if (await toggleCourtPhotoLike(court, photo, event.currentTarget)) onChange?.();
+      decorateFlowChildModal(modal);
+      const move=step=>{
+        if(busy || index+step<0 || index+step>=photos.length)return;
+        index+=step;render(step<0 ? '[data-gallery-prev]' : '[data-gallery-next]');
+      };
+      box.querySelector('[data-gallery-prev]').addEventListener('click',()=>move(-1));
+      box.querySelector('[data-gallery-next]').addEventListener('click',()=>move(1));
+      box.onkeydown=event=>{
+        if(event.key!=='ArrowLeft' && event.key!=='ArrowRight')return;
+        if(event.target.closest('input,textarea,select'))return;
+        event.preventDefault();move(event.key==='ArrowLeft' ? -1 : 1);
+      };
+      box.querySelector('[data-lightbox-like]')?.addEventListener('click', async event => {
+        if(busy)return;
+        busy=true;
+        try{if(await toggleCourtPhotoLike(court,photo,event.currentTarget))change({photoId:photo.id});}
+        finally{busy=false;}
       });
-      box.querySelector('[data-lightbox-report]')?.addEventListener('click', () => openContentReport({
-        contentType: 'court_photo', contentId: photo.id, label: 'court photo',
-      }));
-      box.querySelector('[data-lightbox-delete]')?.addEventListener('click', async (event) => {
-        const button = event.currentTarget;
-        button.disabled = true;
-        try {
-          if (!await deleteCourtPhoto(court, photo, button)) return;
-          photos.splice(index, 1);
-          if (index >= photos.length) index = Math.max(0, photos.length - 1);
-          onChange?.();
-          render();
-        } catch (error) {
-          toast(error.message || 'That photo could not be deleted.');
-          button.disabled = false;
+      box.querySelector('[data-lightbox-report]')?.addEventListener('click',()=>{
+        if(!busy)openContentReport({contentType:'court_photo',contentId:photo.id,label:'court photo'});
+      });
+      box.querySelector('[data-lightbox-delete]')?.addEventListener('click',async event=>{
+        if(busy)return;
+        busy=true;
+        const button=event.currentTarget;
+        const controls=[...box.querySelectorAll('[data-gallery-prev],[data-gallery-next],[data-lightbox-like],[data-lightbox-delete]')];
+        const disabled=controls.map(control=>control.disabled);
+        controls.forEach(control=>{control.disabled=true;});
+        const errorBox=box.querySelector('[data-photo-error]');
+        errorBox.classList.add('hidden');
+        try{
+          if(!await deleteCourtPhoto(court,photo,button) || !current())return;
+          // Remove the confirmed photo by identity, never by an index that may have changed.
+          const removed=photos.findIndex(item=>Number(item.id)===Number(photo.id));
+          if(removed>=0)photos.splice(removed,1);
+          change({deletedId:photo.id});
+          render('.gallery-lightbox-stage');
+        }catch(error){
+          if(current()){errorBox.textContent=error.message||'This photo could not be deleted.';errorBox.classList.remove('hidden');errorBox.focus();}
+        }finally{
+          busy=false;
+          controls.forEach((control,i)=>{if(control.isConnected)control.disabled=disabled[i];});
         }
       });
+      if(focus)requestAnimationFrame(()=>{
+        if(!current() || currentOverlayEntry()?.el!==modal)return;
+        const target=box.querySelector(focus);
+        (target && !target.disabled ? target : box.querySelector('.gallery-lightbox-stage'))?.focus({preventScroll:true});
+      });
     };
-    render();
-    return modal;
+    render();return modal;
   }
 
-  async function openCourtGallery(court, uploadFn) {
-    const shell = openDetailLoadShell({
-      title: 'Opening court photos',
-      copy: `Loading photos from ${court.name}…`,
-      label: `Loading photos from ${court.name}`,
-      rows: 2,
-    });
+  async function openCourtGallery(court, uploadFn, {onChange=()=>{}}={}) {
+    const ownerId=state.me?.id||null;
+    const shell = openDetailLoadShell({title:'Photos',copy:court.name,label:`Photos of ${court.name}`,rows:2});
     if (!shell) return;
     const { modal, box, load: modalLoad } = shell;
     let data;
+    const current=()=>modal.isConnected && !modal._destroyed && (state.me?.id||null)===ownerId;
     try { data = await api(`/courts/${court.id}/photos`); } catch (e) {
-      if (!routedOverlayLoadIsCurrent(modalLoad) || !modal.isConnected) return;
-      renderDetailLoadError(
-        shell,
-        e.message || 'Court photos could not load.',
-        () => retryDetailLoad(shell, () => openCourtGallery(court, uploadFn)),
-        `Photos from ${court.name} could not load`,
-      );
+      if (!routedOverlayLoadIsCurrent(modalLoad) || !current()) return;
+      renderDetailLoadError(shell,e.message || 'Court photos could not load.',
+        () => retryDetailLoad(shell, () => openCourtGallery(court, uploadFn,{onChange})),`Photos from ${court.name} could not load`);
       return modal;
     }
-    if (!routedOverlayLoadIsCurrent(modalLoad) || !modal.isConnected) return;
-    box.removeAttribute('aria-busy');
+    if (!routedOverlayLoadIsCurrent(modalLoad) || !current()) return;
+    box.removeAttribute('aria-busy');box.classList.add('court-gallery-modal');
     const photos = data.items || [];
-    let category = 'all';
-    const renderGallery = () => {
-      if (!modal.isConnected) return;
-      const visible = photos.map((photo,index) => ({photo,index})).filter(({photo}) => category === 'all' || (photo.category || 'unclassified') === category);
-      box.innerHTML = `
-        ${modalHead(court.name, 'camera')}
-        ${photos.length ? `<p class="gallery-count" aria-live="polite">${visible.length} photo${visible.length === 1 ? '' : 's'}</p>` : ''}
-        ${photos.length ? `<label class="form-field" for="gallery-category">Show photos<select id="gallery-category"><option value="all">All photos</option>${[...courtPhotoCategories(),['unclassified','Unclassified']].filter(([key]) => photos.some(photo => (photo.category || 'unclassified') === key)).map(([key,label]) => `<option value="${key}" ${category === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}
-        ${visible.length ? `<div class="gallery-scroll">
-          ${visible.map(({photo,index}) => `
-            <figure class="gallery-item" data-gallery-photo-id="${photo.id}">
-              <button type="button" class="gallery-open" data-open-photo-index="${index}" aria-label="Open photo ${index + 1} of ${photos.length}">
-                <span class="gallery-photo-fallback" aria-hidden="true">${uiIcon('camera')}<span>Photo unavailable</span></span>
-                <img src="${esc(photo.url)}" alt="${esc(photo.caption || `Photo of ${court.name}`)}" loading="lazy" data-remove-on-error />
-              </button>
-              <figcaption>
-                <span class="gallery-caption-copy">${galleryPhotoMetaHtml(photo)}</span>
-                <span class="gallery-item-actions">
-                  <button type="button" class="btn-link gallery-like" data-like-photo="${photo.id}" aria-label="${photo.liked_by_me ? 'Unlike' : 'Like'} photo by ${esc(photo.user_name)}" aria-pressed="${photo.liked_by_me}">${uiIcon('heart', photo.liked_by_me ? 'is-filled' : '')} <span data-like-count>${photo.likes || ''}</span></button>
-                  ${photo.can_delete ? `<button type="button" class="btn-link gallery-delete" data-delete-photo="${photo.id}">${uiIcon('trash')} Delete</button>` : ''}
-                  ${state.me && !photo.can_delete ? `<button type="button" class="btn-link gallery-report" data-report-photo="${photo.id}">${uiIcon('alert-triangle')} Report</button>` : ''}
-                </span>
-              </figcaption>
-            </figure>`).join('')}
-        </div>` : '<div class="empty-state compact"><b>No photos yet</b><span>Add a helpful view of the courts, nets, or entrance.</span></div>'}
-        <button class="btn btn-secondary btn-block" id="gal-add" style="margin-top:12px">${uiIcon('camera')} Add your photo</button>
+    let category='all',returnPhotoId=null;
+    const renderGallery = ({deletedId=null}={}) => {
+      if (!current()) return;
+      if(deletedId!==null){const index=photos.findIndex(photo=>Number(photo.id)===Number(deletedId));if(index>=0)photos.splice(index,1);onChange();}
+      const categories=[...courtPhotoCategories(),['unclassified','Uncategorized']].filter(([key])=>photos.some(photo=>(photo.category||'unclassified')===key));
+      if(category!=='all' && !categories.some(([key])=>key===category))category='all';
+      const visible=photos.filter(photo=>category==='all' || (photo.category||'unclassified')===category);
+      box.innerHTML=`
+        ${modalHead('Photos','camera')}
+        <p class="gallery-place">${esc(court.name)}</p>
+        ${ownerId && uploadFn ? `<button type="button" class="btn btn-secondary btn-block" id="gal-add">${uiIcon('plus')} Add photo</button>` : ''}
+        ${photos.length ? `<div class="gallery-filter-row"><label for="gallery-category" class="sr-only">Show photos</label><select id="gallery-category"><option value="all">All photos</option>${categories.map(([key,label])=>`<option value="${key}" ${category===key ? 'selected' : ''}>${label}</option>`).join('')}</select><span class="gallery-count" aria-live="polite">${visible.length} photo${visible.length===1 ? '' : 's'}</span></div>` : ''}
+        ${visible.length ? `<div class="gallery-grid">${visible.map((photo,index)=>{
+          const title=photo.caption || courtPhotoCategories().find(([key])=>key===photo.category)?.[1] || 'Court photo';
+          return `<figure class="gallery-item" data-gallery-photo-id="${photo.id}">
+            <button type="button" class="gallery-open" data-open-photo-id="${photo.id}" aria-label="Open photo ${index+1} of ${visible.length}: ${esc(title)}">
+              <span class="gallery-photo-fallback" aria-hidden="true">${uiIcon('camera')}<span>Photo unavailable</span></span>
+              <img src="${esc(photo.url)}" alt="${esc(title)}" loading="lazy" data-remove-on-error />
+            </button><figcaption><strong>${esc(title)}</strong>${photo.can_delete ? '<span>Your photo</span>' : ''}</figcaption>
+          </figure>`;
+        }).join('')}</div>` : '<div class="empty-state compact"><b>No photos yet</b><span>Show players the courts or the way in.</span></div>'}
       `;
-      setDialogLabel(box, `${court.name} photos`);
-      box.querySelector('#gallery-category')?.addEventListener('change', event => { category = event.target.value; renderGallery(); box.querySelector('#gallery-category')?.focus(); });
-      box.querySelector('#gal-add').addEventListener('click', (event) => {
-        if (!uploadFn) return;
-        const reopenGallery = () => transitionModal(
-          modal, () => openCourtGallery(court, uploadFn),
-        );
-        uploadFn(reopenGallery, {
-          contextModal: modal,
-          trigger: event.currentTarget,
-          onCancel: reopenGallery,
+      setDialogLabel(box,`${court.name} photos`);
+      decorateFlowChildModal(modal);
+      box.querySelector('#gallery-category')?.addEventListener('change',event=>{category=event.target.value;renderGallery();box.querySelector('#gallery-category')?.focus();});
+      box.querySelector('#gal-add')?.addEventListener('click',event=>{
+        const reopenGallery=()=>transitionModal(modal,()=>openCourtGallery(court,uploadFn,{onChange}));
+        uploadFn(reopenGallery,{contextModal:modal,trigger:event.currentTarget,onCancel:reopenGallery});
+      });
+      box.querySelectorAll('[data-open-photo-id]').forEach(button=>button.addEventListener('click',()=>{
+        returnPhotoId=Number(button.dataset.openPhotoId);
+        const openedId=returnPhotoId;
+        openChildModal(modal,()=>{
+          const viewer=openCourtPhotoLightbox(court,[...visible],visible.findIndex(photo=>Number(photo.id)===openedId),{
+            onChange:event=>{
+              renderGallery(event);
+              // The grid was rebuilt; give Back a connected replacement target.
+              viewer._returnFocus=box.querySelector(`[data-open-photo-id="${openedId}"]`) || box.querySelector('[data-open-photo-id]') || box.querySelector('#gal-add');
+            },
+          });
+          return viewer;
         });
-      });
-      box.querySelectorAll('[data-open-photo-index]').forEach((button) => {
-        button.addEventListener('click', () => openCourtPhotoLightbox(
-          court, photos, Number(button.dataset.openPhotoIndex), { onChange: renderGallery },
-        ));
-      });
-      box.querySelectorAll('[data-like-photo]').forEach((button) => {
-        button.addEventListener('click', async () => {
-          const photo = photos.find((item) => Number(item.id) === Number(button.dataset.likePhoto));
-          if (photo) await toggleCourtPhotoLike(court, photo, button);
-        });
-      });
-      box.querySelectorAll('[data-report-photo]').forEach((button) => {
-        button.addEventListener('click', () => openContentReport({
-          contentType: 'court_photo',
-          contentId: Number(button.dataset.reportPhoto),
-          label: 'court photo',
-        }));
-      });
-      box.querySelectorAll('[data-delete-photo]').forEach((button) => {
-        button.addEventListener('click', async () => {
-          const index = photos.findIndex((item) => Number(item.id) === Number(button.dataset.deletePhoto));
-          if (index < 0) return;
-          button.disabled = true;
-          try {
-            if (!await deleteCourtPhoto(court, photos[index], button)) return;
-            photos.splice(index, 1);
-            renderGallery();
-          } catch (error) {
-            toast(error.message || 'That photo could not be deleted.');
-            button.disabled = false;
-          }
-        });
+      }));
+    };
+    modal._onResume=()=>{
+      if(returnPhotoId===null)return;
+      const photoId=returnPhotoId;returnPhotoId=null;
+      requestAnimationFrame(()=>{
+        if(!current() || currentOverlayEntry()?.el!==modal)return;
+        (box.querySelector(`[data-open-photo-id="${photoId}"]`) || box.querySelector('[data-open-photo-id]') || box.querySelector('#gal-add'))?.focus({preventScroll:true});
       });
     };
-    renderGallery();
-    return modal;
+    renderGallery();return modal;
   }
 
   async function openGameChat(game) {

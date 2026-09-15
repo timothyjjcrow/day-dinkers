@@ -1713,11 +1713,7 @@ textarea[aria-invalid="true"]:focus-visible {
   font-size: 13.5px; color: var(--ink);
 }
 
-.gallery-scroll {
-  display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch; margin: 4px -4px 0; padding: 0 4px 6px;
-}
-.gallery-item { flex: 0 0 92%; scroll-snap-align: center; margin: 0; }
+
 .gallery-open {
   position: relative; width: 100%; padding: 0; overflow: hidden; border: 0;
   border-radius: var(--radius-md); background: var(--green-50); color: var(--ink-soft);
@@ -7647,3 +7643,31 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .court-review-card:has(.court-review-report) .court-review-card-head { padding-right: 32px; }
 .court-review-card .court-review-report { position: absolute; top: 5px; right: 5px; width: 44px; height: 44px; display: grid; place-items: center; padding: 10px; border: 0; background: transparent; color: var(--ink-soft); border-radius: var(--radius-sm); }
 .court-review-report .ui-icon { width: 16px; height: 16px; }
+
+/* Court photos: scan the gallery, then inspect one full image. */
+.gallery-place { margin: 0 0 16px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.gallery-filter-row { display: flex; align-items: center; gap: 14px; margin: 18px 0 14px; }
+.gallery-filter-row select { flex: 1; min-width: 0; }
+.gallery-filter-row .gallery-count { margin: 0; flex-shrink: 0; }
+.gallery-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px 12px; }
+.gallery-grid .gallery-item { min-width: 0; margin: 0; }
+.gallery-grid .gallery-open { display: block; aspect-ratio: 4/3; border-radius: var(--radius-md); }
+.gallery-grid .gallery-open img { height: 100%; aspect-ratio: auto; border-radius: 0; }
+.gallery-grid figcaption { display: block; margin: 8px 1px 0; overflow-wrap: anywhere; line-height: 1.4; }
+.gallery-grid figcaption strong { display: block; color: var(--ink); font-weight: 600; }
+.gallery-grid figcaption span { display: block; margin-top: 3px; }
+.gallery-view-navigation { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 12px; margin: 12px 0; }
+.gallery-view-navigation .btn { padding: 0; min-width: 44px; min-height: 44px; }
+.gallery-view-navigation .gallery-lightbox-counter { margin: 0; }
+.gallery-lightbox-stage { min-height: 180px; }
+.gallery-lightbox-stage img { max-height: 42svh; min-height: 180px; width: 100%; object-fit: contain; }
+.gallery-lightbox-stage:focus-visible { outline: 3px solid var(--green-accent); outline-offset: 2px; }
+.gallery-lightbox-caption { text-align: left; line-height: 1.5; margin: 14px 0 8px; }
+.gallery-lightbox-caption strong { font-size: 16px; margin-bottom: 4px; }
+.gallery-lightbox-actions { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.gallery-lightbox-actions .gallery-report { display: grid; place-items: center; min-width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--ink-soft); border-radius: var(--radius-xs); }
+.gallery-lightbox-actions .gallery-delete { display: flex; align-items: center; gap: 6px; white-space: normal; }
+@media (min-width: 700px) { .gallery-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media (max-width: 359px) { .gallery-filter-row { flex-wrap: wrap; gap: 8px; } .gallery-filter-row select { flex-basis: 100%; } }
+
+.gallery-lightbox-actions .gallery-like { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
