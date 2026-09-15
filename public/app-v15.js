@@ -3169,14 +3169,21 @@
     });
     $('#auth-forgot-password').addEventListener('click', openForgotPassword);
     $('#auth-access-toggle')?.addEventListener('click', showAuthEntryForm);
+    $('#auth-browse-back')?.addEventListener('click', () => {
+      const target = $('#auth-browse-back').dataset.publicRoute || '';
+      publicBrowseReturnPending = !target;
+      location.hash = target;
+    });
     $('#auth-access-back')?.addEventListener('click', () => {
       const access = $('#auth-access');
       access.dataset.userOpened = '';
       access.classList.add('hidden');
       const screen = $('#auth-screen');
-      screen?.setAttribute('aria-labelledby', 'auth-explore-title');
+      screen?.setAttribute('aria-labelledby', $('#auth-share-context:not(.hidden) [data-share-preview-title]')?.id || 'auth-explore-title');
       if (screen) screen.scrollTop = access._browseScrollTop || 0;
-      $('#auth-access-toggle')?.focus({ preventScroll: true });
+      const trigger = access._browseTrigger;
+      (trigger?.isConnected && trigger.checkVisibility() ? trigger
+        : $('#auth-share-context:not(.hidden) [data-public-auth], #auth-share-context:not(.hidden) [data-invitation-signin]') || $('#auth-access-toggle'))?.focus({ preventScroll: true });
     });
     $('#auth-court-search-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -8474,6 +8481,7 @@
     if (!access) return;
     const screen = $('#auth-screen');
     if (access.classList.contains('hidden')) access._browseScrollTop = screen?.scrollTop || 0;
+    access._browseTrigger = document.activeElement;
     access.dataset.userOpened = '1';
     access.classList.remove('hidden');
     screen?.setAttribute('aria-labelledby', 'auth-title');
@@ -8485,6 +8493,8 @@
   let publicCourtSearchSeq = 0;
   let publicCourtSearchQuery = '';
   let publicCourtSearchCursor = null;
+  let publicBrowseReturn = null;
+  let publicBrowseReturnPending = false;
   async function searchPublicCourts({ more = false } = {}) {
     const results = $('#auth-court-results');
     const query = more ? publicCourtSearchQuery : $('#auth-court-query')?.value.trim();
@@ -8509,7 +8519,10 @@
       publicCourtSearchCursor = payload.next_cursor || null;
       if (publicCourtSearchCursor) results.insertAdjacentHTML('beforeend', '<button type="button" class="btn-link" data-public-court-more>Show more courts</button>');
       results.querySelectorAll('[data-public-court]').forEach((button) => {
-        button.onclick = () => { location.hash = `#court/${button.dataset.publicCourt}`; };
+        button.onclick = () => {
+          publicBrowseReturn = { button, scrollTop: $('#auth-screen')?.scrollTop || 0 };
+          location.hash = `#court/${button.dataset.publicCourt}`;
+        };
       });
       results.querySelector('[data-public-court-more]')?.addEventListener('click', () => searchPublicCourts({ more: true }));
     } catch (error) {
@@ -8539,13 +8552,12 @@
       return `<span class="auth-preview-kicker">${esc(facts.format)}</span><h3 data-share-preview-title tabindex="-1">${esc(preview.title)}</h3>
         <p class="auth-preview-status">${esc(facts.stateLabel)}</p>
         <dl class="auth-preview-facts"><div><dt>When</dt><dd>${esc(fmtDateTime(data.scheduled_at))}<small>Your local time${data.duration_minutes ? ` · ${Number(data.duration_minutes)} minutes` : ''}</small></dd></div><div><dt>Where</dt><dd>${esc(data.court?.name || 'Court not listed')}<small>${esc([data.court?.address, data.court?.city].filter(Boolean).join(', '))}</small></dd></div><div><dt>Level</dt><dd>${esc(gameLevelRangeLabel(data))}</dd></div><div><dt>Cost</dt><dd>${esc(facts.cost)}</dd></div></dl>
-        <p class="auth-preview-roster">${Number(data.player_count || 0)} going · ${Number(data.max_players)} places</p>
+        <p class="auth-preview-roster">${Number(data.player_count || 0)} signed up · ${Number(data.max_players)} places</p>
         <p class="field-help">${esc(sessionCourtAccessLabel(data))}${sessionPlayStyleLabel(data) ? ` · ${esc(sessionPlayStyleLabel(data))}` : ''}</p>
         ${courtEntryNoticeHtml(data)}
         ${courtEntryDescriptionParts(data).note ? `<details class="simple-disclosure"><summary>Session details</summary><p>${esc(courtEntryDescriptionParts(data).note)}</p></details>` : ''}
         <button type="button" class="btn btn-primary btn-block" data-public-auth>${facts.ended ? 'Open session' : Number(data.spots_left) > 0 ? 'Join this session' : 'Join the waitlist'}</button>
-        <small class="auth-preview-footnote">Log in or create an account to continue. Your place is confirmed after you join.</small>
-        ${data.court?.id ? `<button type="button" class="btn-link" data-public-route="#court/${Number(data.court.id)}">View this court</button>` : ''}`;
+        <small class="auth-preview-footnote">Log in or create an account to continue. Your place is confirmed after you join.</small>`;
     }
     const court = data.court;
     if (preview.kind !== 'court' || !court) return '';
@@ -8557,7 +8569,7 @@
       <dl class="auth-preview-facts"><div><dt>Hours</dt><dd>${esc(data.hours?.open_status?.label || 'Hours not listed')}<small>${esc(data.hours?.hours || '')}</small></dd></div><div><dt>Cost</dt><dd>${esc(court.fees || (court.fee_type === 'free' ? 'Free' : court.fee_type ? court.fee_type.replaceAll('_', ' ') : 'Not listed'))}</dd></div></dl>
       ${directions ? `<a class="btn btn-secondary btn-block" href="${esc(directions)}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
       <h4>Next public sessions</h4>${data.sessions?.length ? data.sessions.map((game) => { const facts = publicSessionFacts(game); return `<button type="button" class="auth-court-result" data-public-route="#game/${Number(game.id)}"><span><b>${esc(game.title)}</b><small>${esc(fmtDateTime(game.scheduled_at))} · ${esc(facts.format)}</small><small>${esc(gameLevelRangeLabel(game))} · ${esc(facts.stateLabel)}</small></span>${uiIcon('chevron-right')}</button>`; }).join('') : '<p>No public sessions listed yet.</p>'}
-      <button type="button" class="btn btn-primary btn-block" data-public-auth>Save this court or plan a session</button><small class="auth-preview-footnote">Log in or create an account to continue.</small>`;
+      <button type="button" class="btn btn-primary btn-block" data-public-auth>Open court</button><small class="auth-preview-footnote">Log in to save this court or plan a session.</small>`;
   }
 
   function renderSignedOutShareContext() {
@@ -8565,11 +8577,25 @@
     if (!container) return;
     const route = normalizeOverlayRoute(location.hash);
     const access = $('#auth-access');
+    const browseBack = $('#auth-browse-back');
+    if (access?.classList.contains('hidden')) $('#auth-screen')?.setAttribute('aria-labelledby', 'auth-explore-title');
+    browseBack?.classList.toggle('hidden', !route || !!state.token);
+    if (browseBack) {
+      browseBack.textContent = 'Back to courts';
+      browseBack.dataset.publicRoute = '';
+    }
     if (!state.token && access && access.dataset.userOpened !== '1') access.classList.toggle('hidden', !!route || localStorage.getItem('pp_has_account') !== '1');
     if (!route || state.token) {
       signedOutSharePreviewSeq += 1;
       container.replaceChildren();
       container.classList.add('hidden');
+      if (publicBrowseReturnPending && !state.token) {
+        publicBrowseReturnPending = false;
+        const screen = $('#auth-screen');
+        if (screen) screen.scrollTop = publicBrowseReturn?.scrollTop || 0;
+        const target = publicBrowseReturn?.button;
+        (target?.isConnected ? target : $('#auth-court-query'))?.focus({ preventScroll: true });
+      }
       return;
     }
     const details = {
@@ -8590,7 +8616,6 @@
     container.classList.remove('is-public-detail');
     container.innerHTML = `${uiIcon(details[0])}<span><b data-share-preview-title>${esc(details[1])}</b><span data-share-preview-copy>Log in or create an account, and we’ll take you straight there.</span></span>`;
     container.classList.remove('hidden');
-    $('#auth-court-discovery')?.removeAttribute('open');
     if (route.inviteToken) {
       renderSignedOutGameInvitation(container, route, stillCurrent);
       return;
@@ -8616,6 +8641,15 @@
         container.classList.toggle('is-public-detail', !!detail);
         if (detail) {
           container.innerHTML = detail;
+          const heading = container.querySelector('[data-share-preview-title]');
+          if (heading) {
+            heading.id = 'auth-preview-title';
+            if (access?.classList.contains('hidden')) $('#auth-screen')?.setAttribute('aria-labelledby', heading.id);
+          }
+          if (browseBack && preview.kind === 'game' && preview.details?.court?.id) {
+            browseBack.textContent = 'Back to court';
+            browseBack.dataset.publicRoute = `#court/${Number(preview.details.court.id)}`;
+          }
           container.querySelector('[data-public-auth]')?.addEventListener('click', showAuthEntryForm);
           container.querySelectorAll('[data-public-route]').forEach((button) => button.addEventListener('click', () => { location.hash = button.dataset.publicRoute; }));
           container.querySelector('[data-share-preview-title]')?.focus({ preventScroll: false });
@@ -8629,9 +8663,12 @@
       .catch((error) => {
         if (!stillCurrent()) return;
         const missing = error.status === 404;
-        container.innerHTML = `${uiIcon(missing ? 'search' : 'alert-triangle')}<span><b>${missing ? 'This link is unavailable' : 'Preview could not load'}</b><span>${missing ? 'Browse courts below to find another place or public session.' : 'Check your connection and try again.'}</span>${missing ? '' : '<button type="button" class="btn-link" data-preview-retry>Try again</button>'}</span>`;
+        container.innerHTML = `${uiIcon(missing ? 'search' : 'alert-triangle')}<span><b id="auth-preview-title" data-share-preview-title tabindex="-1">${missing ? 'This link is unavailable' : 'Preview could not load'}</b><span>${missing ? 'Use Back to courts to find another place.' : 'Check your connection and try again.'}</span>${missing ? '' : '<button type="button" class="btn-link" data-preview-retry>Try again</button>'}</span>`;
+        if (access?.classList.contains('hidden')) {
+          $('#auth-screen')?.setAttribute('aria-labelledby', 'auth-preview-title');
+          container.querySelector('[data-share-preview-title]')?.focus();
+        }
         container.querySelector('[data-preview-retry]')?.addEventListener('click', renderSignedOutShareContext);
-        if (missing) $('#auth-court-discovery')?.setAttribute('open', '');
       });
   }
   const overlayRouteHash = (route) => route

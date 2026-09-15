@@ -28,7 +28,7 @@ def test_public_details_show_real_decisions_and_escape_untrusted_content():
       const court=publicShareDetailHtml({public:true,kind:'court',details:{court:{id:1,name:'<Court>',num_courts:2,photo_url:'javascript:alert(1)'},sessions:[]}});
       console.log(JSON.stringify({game,full,ended,court,hidden:publicShareDetailHtml({public:false,details})}));
     """)
-    assert '2 places available' in result['game'] and '4 going · 6 places' in result['game']
+    assert '2 places available' in result['game'] and '4 signed up · 6 places' in result['game']
     assert '$5.00 per player' in result['game'] and 'Your local time · 90 minutes' in result['game']
     assert '&lt;Session&gt;' in result['game'] and '<Court>' not in result['game']
     assert 'Join the waitlist' in result['full'] and 'Join this session' not in result['full']

@@ -19,7 +19,7 @@ Review every feature and the journeys between features. Make Third Shot professi
 | Pass | Feature coverage | Main user outcome | UI review status |
 | --- | --- | --- | --- |
 | 1 | Session detail, roster, joining, invitations, waitlist offers, changed plans | Know what the plan is, who is coming and what accepting means | In progress |
-| 2 | Public entry, signup, login, recovery, onboarding | Browse first and enter the intended task with minimal setup | Pending |
+| 2 | Public entry, signup, login, recovery, onboarding | Browse first and enter the intended task with minimal setup | In progress |
 | 3 | Play home, discovery, filters, personal agenda, calendar | Find suitable play and see every commitment | Pending |
 | 4 | Map, list, search scope, selected/saved courts | Explore freely while retaining the selected place | Pending |
 | 5 | Court detail, timelines, hours/access, photos, reviews, contributions | Understand a visit and find the right next action | Pending |
@@ -48,3 +48,5 @@ The current production database backup approval boundary remains unchanged. This
 ## Current evidence
 
 Pass1: `ui-ux-pass-01-session.md` covers session essentials and first-join review; `ui-ux-pass-01-decisions.md` covers held offers, hosting decisions, cancellation and outcome feedback; `ui-ux-pass-01-rosters.md` covers direct-invitation acceptance and compact large rosters; `ui-ux-pass-01-ended.md` covers full invitation decline, queue focus and ended/cancelled plans. The pass remains in progress with its unverified states explicitly listed. Next, broaden into first-time entry and discovery, retaining the remaining session states for cross-feature verification.
+
+Pass2: `ui-ux-pass-02-public-entry.md` covers public search, court/session previews, Back paths, signup return and responsive entry layout. Actual account setup, area selection and first-plan continuation are next.
