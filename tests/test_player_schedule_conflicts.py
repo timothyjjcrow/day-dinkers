@@ -60,6 +60,23 @@ def test_acknowledgement_belongs_to_current_conflicts_and_protects_other_players
     assert other['starts_at'] is None and other['ends_at'] is None and other['action_url'] is None
 
 
+def test_batch_review_includes_each_proposed_duration_and_requires_review_after_it_changes(setup):
+    from backend.services.player_schedule import schedule_batch_review_needed
+    _, players, court, start = setup
+    game_for(players[0], court, start)
+    plans=[{'user_ids':[players[0].id], 'start':start+timedelta(minutes=15), 'duration_minutes':45},
+           {'user_ids':[players[0].id], 'start':start+timedelta(minutes=30), 'duration_minutes':90}]
+    warning=schedule_batch_review_needed(plans, {}, scope='edit-series:7', viewer_id=players[0].id)
+    assert [row['proposed_duration_minutes'] for row in warning['conflicts']]==[45,90]
+    assert warning['conflicts'][0]['proposed_start']!=warning['conflicts'][1]['proposed_start']
+    payload={'schedule_conflict_ack':warning['schedule_conflict_token']}
+    assert schedule_batch_review_needed(plans,payload,scope='edit-series:7',viewer_id=players[0].id) is None
+    plans[1]['duration_minutes']=120
+    changed=schedule_batch_review_needed(plans,payload,scope='edit-series:7',viewer_id=players[0].id)
+    assert changed['schedule_conflict_token']!=warning['schedule_conflict_token']
+    assert changed['conflicts'][1]['proposed_duration_minutes']==120
+
+
 def test_accepted_competition_appointments_share_the_policy_but_proposals_and_voids_do_not(setup):
     _, players, court, start = setup
     league=League(name='Evening league',court_id=court.id,organizer_id=players[0].id,
@@ -98,14 +115,18 @@ def test_join_requires_current_review_and_does_not_take_a_place_before_acceptanc
     target=game_for(players[1],court,start+timedelta(minutes=15))
     target.visibility='open';db.session.commit()
     client=app.test_client();path=f'/api/games/{target.id}/join'
-    response=client.post(path,headers=auth(players[0]),json={})
+    plan=client.post(path,headers=auth(players[0]),json={})
+    assert plan.status_code==409 and plan.json['error']=='game_plan_review_required'
+    assert not GamePlayer.query.filter_by(game_id=target.id,user_id=players[0].id).first()
+    reviewed={'expected_plan_token':plan.json['game']['plan_token']}
+    response=client.post(path,headers=auth(players[0]),json=reviewed)
     assert response.status_code==409 and response.json['error']=='schedule_conflict'
     assert not GamePlayer.query.filter_by(game_id=target.id,user_id=players[0].id).first()
     token=response.json['schedule_conflict_token']
     existing.duration_minutes=120;db.session.commit()
-    stale=client.post(path,headers=auth(players[0]),json={'schedule_conflict_ack':token})
+    stale=client.post(path,headers=auth(players[0]),json={**reviewed,'schedule_conflict_ack':token})
     assert stale.status_code==409 and stale.json['schedule_conflict_token']!=token
-    joined=client.post(path,headers=auth(players[0]),json={'schedule_conflict_ack':stale.json['schedule_conflict_token']})
+    joined=client.post(path,headers=auth(players[0]),json={**reviewed,'schedule_conflict_ack':stale.json['schedule_conflict_token']})
     assert joined.status_code==200 and joined.json['is_joined'] is True
     assert client.post(path,headers=auth(players[0]),json={}).status_code==200
 
@@ -145,10 +166,14 @@ def test_waitlist_acceptance_keeps_the_held_place_until_conflict_is_reviewed(set
         offered_at=utcnow(),offer_expires_at=utcnow()+timedelta(hours=1))
     db.session.add(offered);db.session.commit()
     client=app.test_client();path=f'/api/games/{target.id}/waitlist/respond'
-    warning=client.post(path,headers=auth(players[0]),json={'accept':True})
+    plan=client.post(path,headers=auth(players[0]),json={'accept':True})
+    assert plan.status_code==409 and plan.json['error']=='game_plan_review_required'
+    assert GameWaitlist.query.count()==1 and len(target.players)==1
+    reviewed={'accept':True,'expected_plan_token':plan.json['game']['plan_token']}
+    warning=client.post(path,headers=auth(players[0]),json=reviewed)
     assert warning.status_code==409 and GameWaitlist.query.count()==1
     assert len(target.players)==1
-    response=client.post(path,headers=auth(players[0]),json={'accept':True,
+    response=client.post(path,headers=auth(players[0]),json={**reviewed,
         'schedule_conflict_ack':warning.json['schedule_conflict_token']})
     assert response.status_code==200 and response.json['is_joined']
     assert GameWaitlist.query.count()==0

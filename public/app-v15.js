@@ -11187,20 +11187,64 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     });
   }
 
-  function confirmScheduleConflict(data) {
+  function scheduleConflictReviewHtml(data) {
     const conflicts = Array.isArray(data?.conflicts) ? data.conflicts : [];
-    const details = conflicts.slice(0, 4).map((item) => {
-      const time = item.starts_at ? fmtDateTime(item.starts_at) : '';
-      return [item.kind === 'busy' ? item.player_name || 'Player' : '', item.title || 'Another commitment', time,
-        item.proposed_start ? `New time: ${fmtDateTime(item.proposed_start)}` : '',
-        item.timing === 'estimated' ? 'Estimated time' : ''].filter(Boolean).join(' · ');
-    });
-    if (conflicts.length > 4) details.push(`And ${conflicts.length - 4} other overlapping plans.`);
-    return openActionConfirmation({
-      eyebrow: 'Overlapping plans', title: 'There’s already a plan at this time',
-      message: 'Continuing keeps both plans. Check that everyone can make it.',
-      detail: details.join('\n'), confirmLabel: 'Keep both plans', cancelLabel: 'Go back',
-      tone: 'primary', icon: 'calendar', trigger: document.activeElement,
+    const range = (start, end) => {
+      if (!start || !Number.isFinite(Date.parse(start))) return 'Time unavailable';
+      if (!end || !Number.isFinite(Date.parse(end))) return fmtDateTime(start);
+      const sameDay = new Date(start).toDateString() === new Date(end).toDateString();
+      return `${fmtDateTime(start)} – ${sameDay ? fmtTimeShort(end) : fmtDateTime(end)}`;
+    };
+    const groups = new Map();
+    for (const item of conflicts) {
+      const start = item.proposed_start || data.proposed_start;
+      const minutes = item.proposed_duration_minutes ?? data.proposed_duration_minutes;
+      const key = `${start || ''}/${minutes || ''}`;
+      if (!groups.has(key)) groups.set(key, { start, minutes, items: [] });
+      groups.get(key).items.push(item);
+    }
+    return `${modalHead('Time overlap')}
+      <div class="schedule-conflict-review">
+        ${[...groups.values()].map(group => {
+          const end = group.start && Number.isFinite(Date.parse(group.start)) && Number(group.minutes) > 0
+            ? new Date(Date.parse(group.start) + Number(group.minutes) * 60000).toISOString() : null;
+          return `<section class="schedule-conflict-group" aria-label="Overlapping times">
+            <div class="schedule-conflict-proposed"><small>Proposed time</small><b>${esc(range(group.start, end))}</b></div>
+            <h4>Already scheduled</h4>
+            <ul>${group.items.map(item => {
+              const privatePlan = item.kind === 'busy';
+              const kind = { game: 'Your session', league_match: 'Your league match', tournament_match: 'Your tournament match' }[item.kind] || 'Your plan';
+              return `<li><small>${esc(privatePlan ? 'Player’s schedule' : kind)}</small>
+                <b>${esc(privatePlan ? item.player_name || 'Player' : item.title || 'Another commitment')}</b>
+                <span>${esc(privatePlan ? 'Has another commitment' : range(item.starts_at, item.ends_at))}</span>
+                ${!privatePlan && item.timing === 'estimated' ? '<small>Estimated time</small>' : ''}</li>`;
+            }).join('')}</ul>
+          </section>`;
+        }).join('')}
+        <p class="schedule-conflict-note">${conflicts.length ? 'Continuing keeps these overlapping plans.' : 'Couldn’t read the overlapping plans. Go back and try again.'}</p>
+        <div class="schedule-conflict-actions">
+          <button type="button" class="btn btn-secondary" data-schedule-review-cancel>Go back</button>
+          ${conflicts.length ? '<button type="button" class="btn btn-primary" data-schedule-review-accept>Keep these times</button>' : ''}
+        </div>
+      </div>`;
+  }
+
+  function confirmScheduleConflict(data) {
+    return new Promise(resolve => {
+      let settled = false;
+      const trigger = document.activeElement;
+      const sheet = openModal(scheduleConflictReviewHtml(data), { label: 'Review overlapping times' });
+      sheet.classList.add('schedule-conflict-backdrop');
+      sheet._returnFocus = trigger;
+      const finish = accepted => {
+        if (settled) return;
+        settled = true;
+        dismissModal(sheet, () => resolve(accepted));
+      };
+      sheet._cleanupFns?.push(() => { if (!settled) { settled = true; resolve(false); } });
+      sheet.querySelector('[data-schedule-review-accept]')?.addEventListener('click', () => finish(true));
+      sheet.querySelector('[data-schedule-review-cancel]').addEventListener('click', () => finish(false));
+      requestAnimationFrame(() => sheet.querySelector('[data-schedule-review-cancel]')?.focus({ preventScroll: true }));
     });
   }
 
@@ -37789,6 +37833,13 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       } catch (error) {
         sheet.querySelector('#eg-form').removeAttribute('inert');
         resetSubmitting();
+        if (error.code === 'schedule_conflict_cancelled') {
+          sheet.querySelector('#eg-section-time').open = true;
+          requestAnimationFrame(() => {
+            if (sheet.isConnected && !sheet.closest('[inert]')) sheet.querySelector('#eg-when-clock').focus();
+          });
+          return;
+        }
         formUX.showError(error.message);
         if (['edit_dates_changed', 'future_host_changed'].includes(error.code)) loadEditDates({focus:true});
       }

@@ -82,3 +82,5 @@ Pass6 continued: `ui-ux-pass-06-scheduling.md` covers court-hours-aware time sug
 Pass6 continued: `ui-ux-pass-06-editing.md` covers grouped session editing, closed-section summaries, date-versus-series controls, validation focus, pending locks, and a verified one-date exception beyond the series end. Future-date previews/conflict recovery and remaining host actions stay open.
 
 Pass6 continued: `ui-ux-pass-06-edit-scope.md` covers explicit existing-date scope, moved exceptions, stale-list rejection and draft recovery, host boundaries, loading retry, and a verified stop-repeating result with counted cancellations. Next review schedule-conflict recovery and remaining host workflows; full recurrence projections and the recorded editing gaps stay open.
+
+Pass6 continued: `ui-ux-pass-06-conflicts.md` covers structured proposed/existing time comparisons, all returned conflicts, private-player labels, multi-date grouping, host-editor return focus, changed-conflict review and failed-save recovery. Next review host management and its reschedule/cancel/transfer journeys. Other shared-review entry points and the remaining editing gaps stay open.

@@ -7803,3 +7803,18 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .edit-date-scope li.hidden { display: none; }
 .edit-date-scope p { margin: 8px 0 0; }
 .edit-date-scope .btn-link { min-height: 40px; margin-top: 0; }
+
+.schedule-conflict-backdrop .modal { max-width: 540px; }
+.schedule-conflict-review { min-width: 0; }
+.schedule-conflict-group + .schedule-conflict-group { margin-top: 24px; }
+.schedule-conflict-proposed { display: grid; gap: 5px; padding: 14px; background: var(--green-50); border: 1px solid var(--green-200); border-radius: var(--radius-md); }
+.schedule-conflict-review small { color: var(--ink-soft); font-size: 12px; }
+.schedule-conflict-review b, .schedule-conflict-review span { overflow-wrap: anywhere; }
+.schedule-conflict-review h4 { margin: 18px 0 8px; font-size: 13px; }
+.schedule-conflict-review ul { list-style: none; padding: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+.schedule-conflict-review li { display: grid; gap: 4px; padding: 12px 14px; }
+.schedule-conflict-review li + li { border-top: 1px solid var(--line); }
+.schedule-conflict-review li span { font-size: 14px; }
+.schedule-conflict-note { margin: 16px 0; color: var(--ink-soft); font-size: 13px; }
+.schedule-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.schedule-conflict-actions .btn { flex: 1 1 160px; white-space: normal; min-height: 46px; }

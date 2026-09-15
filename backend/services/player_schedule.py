@@ -146,7 +146,8 @@ def schedule_batch_review_needed(plans, payload, *, scope, viewer_id=None):
         exclusions = plan.get('exclusions', {})
         found = player_schedule_conflicts(users, start, minutes, viewer_id=viewer_id, **exclusions)
         snapshots.append([users, iso(start), minutes, exclusions, [row['version'] for row in found]])
-        conflicts.extend({**row, 'proposed_start': iso(start)} for row in found)
+        conflicts.extend({**row, 'proposed_start': iso(start),
+                          'proposed_duration_minutes': minutes} for row in found)
     if not conflicts:
         return None
     token = hashlib.sha256(json.dumps([scope, snapshots], sort_keys=True, separators=(',', ':')).encode()).hexdigest()

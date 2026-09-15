@@ -103,3 +103,41 @@ def test_saved_overlap_cards_link_to_each_plan_and_escape_untrusted_titles():
     assert 'data-play-competition="tournament" data-competition-id="3" data-match-id="9"' in html
     assert 'Includes an estimated time' in html and '3 time overlaps' in html
     assert '&lt;img' in html and '<img' not in html and 'javascript:' not in html
+
+
+def render_review(data):
+    start=APP.index('  function scheduleConflictReviewHtml(')
+    renderer=APP[start:APP.index('  function confirmScheduleConflict(',start)]
+    source="""
+      const esc=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+      const fmtDateTime=s=>'DATE '+s,fmtTimeShort=s=>'TIME '+s,modalHead=s=>'<h3>'+s+'</h3>';
+    """+renderer+'\nconsole.log(JSON.stringify(scheduleConflictReviewHtml('+json.dumps(data)+')));'
+    result=subprocess.run(['node','-e',source],capture_output=True,text=True)
+    assert result.returncode==0,result.stderr
+    return json.loads(result.stdout)
+
+
+def test_conflict_review_shows_all_plans_and_ranges_without_revealing_private_details():
+    rows=[{'kind':'game','title':f'Session {i}','starts_at':'2026-09-17T18:00:00Z',
+           'ends_at':'2026-09-17T19:30:00Z'} for i in range(6)]
+    rows.append({'kind':'busy','player_name':'<Alex>','title':'PRIVATE TITLE',
+                 'starts_at':'PRIVATE START','ends_at':'PRIVATE END','action_url':'PRIVATE URL'})
+    html=render_review({'proposed_start':'2026-09-17T19:00:00Z','proposed_duration_minutes':90,'conflicts':rows})
+    assert all(f'Session {i}' in html for i in range(6))
+    assert '2026-09-17T20:30:00.000Z' in html and '2026-09-17T19:30:00Z' in html
+    assert '&lt;Alex>' in html and '<Alex>' not in html and 'PRIVATE' not in html
+    assert html.count('Proposed time')==1
+
+
+def test_multiple_proposed_slots_have_separate_ranges_and_unknown_or_estimated_times_are_honest():
+    html=render_review({'conflicts':[
+        {'kind':'tournament_match','title':'Late event','starts_at':'2026-09-17T23:30:00Z',
+         'ends_at':'2026-09-18T00:30:00Z','timing':'estimated',
+         'proposed_start':'2026-09-17T23:45:00Z','proposed_duration_minutes':60},
+        {'kind':'game','title':'<Second>','proposed_start':'invalid'},
+    ]})
+    assert html.count('Proposed time')==2
+    assert '2026-09-18T00:45:00.000Z' in html and 'Estimated time' in html
+    assert 'Time unavailable' in html and '&lt;Second>' in html
+    empty=render_review({})
+    assert 'data-schedule-review-accept' not in empty and 'Go back' in empty
