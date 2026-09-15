@@ -1325,6 +1325,8 @@
     invalid_recurrence: 'Choose a valid repeat schedule.',
     invalid_recurrence_timezone: 'Choose a valid timezone for this repeating session.',
     invalid_recurrence_weekdays: 'Choose at least one valid repeat day.',
+    future_host_changed: 'Some future dates have another host. Choose This date only.',
+    edit_dates_changed: 'The affected dates changed. Review the updated list before saving.',
     invalid_recurrence_ends_on: 'Choose a valid repeat end date.',
     recurrence_end_before_start: 'Choose an end date on or after the first session.',
     invalid_standing_rsvp: 'Choose whether to RSVP automatically for future dates.',
@@ -16120,7 +16122,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const upcoming = dates.filter((row) => row.status === 'upcoming' && Date.parse(row.scheduled_at) > Date.now());
     const next = upcoming.find((row) => Number(row.id) !== Number(game.id));
     const isPast = !['upcoming', 'awaiting_confirmation'].includes(game.status);
-    return `<div class="series-date-heading"><span>${uiIcon('calendar')} <b>Weekly sessions</b></span><small>${upcoming.length} upcoming</small></div>
+    return `<div class="series-date-heading"><span>${uiIcon('calendar')} <b>Session dates</b></span><small>${upcoming.length} upcoming</small></div>
       <label class="series-date-select"><span class="sr-only">Choose a session date</span><select id="gs-occurrence-select" aria-label="Choose a session date" data-native-select>
         ${dates.map((row) => `<option value="${row.id}" ${Number(row.id) === Number(game.id) ? 'selected' : ''}>${esc(fmtDateTime(row.scheduled_at))} · ${esc(statusLabel(row))}</option>`).join('')}
       </select></label>
@@ -37346,6 +37348,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
 <p class="session-edit-identity">${esc(game.title || (game.game_type === 'ranked' ? 'Ranked match' : 'Casual session'))}</p>
       <form id="eg-form" novalidate>
         ${recurrenceScopeChoicesHtml(game, 'eg')}
+        <section id="eg-date-scope" class="edit-date-scope hidden" aria-label="Dates in this change" tabindex="-1"></section>
         <details class="session-edit-section" id="eg-section-time" open>
           <summary><span><b>Time & court</b><small id="eg-summary-time"></small></span></summary>
           <div class="session-edit-section-body">        <div class="form-field">
@@ -37434,6 +37437,68 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     updateEditEndPreview();
     const editRecurrenceSelect = sheet.querySelector('#eg-recurrence');
     const editScope = () => sheet.querySelector('input[name="eg-scope"]:checked')?.value || 'this_date';
+
+    let editDates = null, editDatesSequence = 0;
+    const editDatesViewer = state.me?.id;
+    const editImpact = sheet.querySelector('.session-edit-impact');
+    const standardEditImpact = editImpact.textContent;
+    const renderEditDates = () => {
+      const panel = sheet.querySelector('#eg-date-scope');
+      const following = datedSeries && editScope() === 'following_dates';
+      panel.classList.toggle('hidden', !following);
+      editImpact.textContent = standardEditImpact;
+      const save = sheet.querySelector('#eg-save');
+      save.classList.remove('btn-danger'); save.classList.add('btn-primary');
+      if (!following || !editDates) return;
+      const rows = editDates.dates;
+      const stopping = editRecurrenceSelect.value === 'none';
+      if (stopping) {
+        const count = rows.length - 1;
+        editImpact.textContent = count ? `Repeating stops. ${count} other scheduled date${count === 1 ? '' : 's'} will be cancelled. This date stays scheduled.` : 'This date stays scheduled. No more dates will be generated.';
+        save.textContent = count ? `Save and cancel ${count} date${count === 1 ? '' : 's'}` : 'Stop repeating';
+        save.classList.remove('btn-primary'); save.classList.add('btn-danger');
+      }
+      panel.innerHTML = `<div class="edit-date-scope-head"><b>${rows.length} scheduled date${rows.length === 1 ? '' : 's'}</b><span>In this change</span></div>
+        <ul>${rows.map((row, index) => `<li${index >= 3 ? ' class="hidden" data-extra-edit-date' : ''}><span>${esc(fmtDateTime(row.scheduled_at))}</span><small>${row.is_selected ? 'This date' : stopping ? 'Will cancel' : ''}</small></li>`).join('')}</ul>
+        ${rows.length > 3 ? `<button type="button" class="btn-link" data-expand-edit-dates aria-expanded="false">Show all ${rows.length} dates</button>` : ''}
+        <p>${stopping ? `Repeating stops.${rows.length > 1 ? ` The other ${rows.length - 1} scheduled date${rows.length === 2 ? '' : 's'} will be cancelled.` : ''}` : 'Future sessions also use these settings.'}</p>`;
+      panel.querySelector('[data-expand-edit-dates]')?.addEventListener('click', event => {
+        const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
+        event.currentTarget.setAttribute('aria-expanded', String(expanded));
+        event.currentTarget.textContent = expanded ? 'Show fewer dates' : `Show all ${rows.length} dates`;
+        panel.querySelectorAll('[data-extra-edit-date]').forEach(row => row.classList.toggle('hidden', !expanded));
+      });
+    };
+    const loadEditDates = async ({ focus = false } = {}) => {
+      const panel = sheet.querySelector('#eg-date-scope');
+      const sequence = ++editDatesSequence;
+      const retryFocus = focus || panel.contains(document.activeElement);
+      editDates = null;
+      panel.classList.remove('hidden'); panel.setAttribute('aria-busy', 'true');
+      panel.textContent = 'Loading dates…';
+      sheet.querySelector('#eg-save').disabled = true;
+      if (retryFocus) { panel.scrollIntoView({block:'center'}); panel.focus({preventScroll:true}); }
+      const current = () => sequence === editDatesSequence && sheet.isConnected && state.me?.id === editDatesViewer && editScope() === 'following_dates';
+      try {
+        const data = await api(`/games/${game.id}/edit-dates`);
+        if (!current()) return;
+        if (!Array.isArray(data.dates) || !data.dates.some(row => row.id === game.id) || !data.token) throw new Error('Incomplete date list');
+        editDates = data;
+        panel.removeAttribute('aria-busy');
+        renderEditDates();
+        sheet.querySelector('#eg-save').disabled = false;
+      } catch (error) {
+        if (!current()) return;
+        panel.removeAttribute('aria-busy');
+        if (error.code === 'future_host_changed') panel.textContent = error.message;
+        else {
+          panel.innerHTML = '<p>Couldn’t load the affected dates.</p><button type="button" class="btn btn-secondary btn-sm" data-retry-edit-dates>Try again</button>';
+          panel.querySelector('[data-retry-edit-dates]').addEventListener('click', loadEditDates);
+        }
+      }
+    };
+    sheet._cleanupFns.push(() => { editDatesSequence += 1; });
+
     const syncEditRecurrence = () => {
       const dateOnly = datedSeries && editScope() === 'this_date';
       sheet.querySelector('#eg-repeat-controls').classList.toggle('hidden', !canRepeat || dateOnly);
@@ -37445,9 +37510,14 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       sheet.querySelector('#eg-save').textContent = datedSeries
         ? dateOnly ? 'Save this date' : 'Save this and future dates' : 'Save changes';
     };
-    sheet.querySelectorAll('input[name="eg-scope"]').forEach((input) => input.addEventListener('change', syncEditRecurrence));
+    sheet.querySelectorAll('input[name="eg-scope"]').forEach(input => input.addEventListener('change', () => {
+      syncEditRecurrence();
+      editDatesSequence += 1;
+      if (editScope() === 'following_dates') loadEditDates();
+      else { renderEditDates(); sheet.querySelector('#eg-save').disabled = false; }
+    }));
     syncEditRecurrence();
-    editRecurrenceSelect.addEventListener('change', syncEditRecurrence);
+    editRecurrenceSelect.addEventListener('change', () => { syncEditRecurrence(); renderEditDates(); });
     sheet.querySelector('#eg-recurrence-weekdays').addEventListener('click', (event) => {
       const button = event.target.closest('[data-recurrence-day]');
       if (!button) return;
@@ -37699,6 +37769,10 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         return;
       }
       if (datedSeries) payload.edit_scope = editScope();
+      if (datedSeries && editScope() === 'following_dates') {
+        if (!editDates) { formUX.showError('Load the affected dates before saving.', sheet.querySelector('#eg-date-scope')); return; }
+        payload.expected_edit_dates = editDates.token;
+      }
       const resetSubmitting = formUX.startSubmitting('Saving changes…');
       if (!resetSubmitting) return;
       sheet.querySelector('#eg-form').setAttribute('inert', '');
@@ -37716,6 +37790,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         sheet.querySelector('#eg-form').removeAttribute('inert');
         resetSubmitting();
         formUX.showError(error.message);
+        if (['edit_dates_changed', 'future_host_changed'].includes(error.code)) loadEditDates({focus:true});
       }
     });
     return sheet;

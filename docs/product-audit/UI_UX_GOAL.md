@@ -80,3 +80,5 @@ Pass6: `ui-ux-pass-06-session-planner.md` covers a compact final scheduling step
 Pass6 continued: `ui-ux-pass-06-scheduling.md` covers court-hours-aware time suggestions, retained custom times with warnings, stale/failure recovery, concise weekly summaries and responsive controls. Next review session editing, date-versus-series changes and host tools; future-date hours review and the remaining creation entry points stay open.
 
 Pass6 continued: `ui-ux-pass-06-editing.md` covers grouped session editing, closed-section summaries, date-versus-series controls, validation focus, pending locks, and a verified one-date exception beyond the series end. Future-date previews/conflict recovery and remaining host actions stay open.
+
+Pass6 continued: `ui-ux-pass-06-edit-scope.md` covers explicit existing-date scope, moved exceptions, stale-list rejection and draft recovery, host boundaries, loading retry, and a verified stop-repeating result with counted cancellations. Next review schedule-conflict recovery and remaining host workflows; full recurrence projections and the recorded editing gaps stay open.

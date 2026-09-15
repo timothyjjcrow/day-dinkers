@@ -7794,3 +7794,12 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 @media (max-width: 600px) {
   .session-editor-modal #eg-form > #eg-save { position: static; box-shadow: none; }
 }
+
+.edit-date-scope { margin: -4px 0 18px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg); font-size: 13px; line-height: 1.5; }
+.edit-date-scope-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.edit-date-scope-head span, .edit-date-scope small, .edit-date-scope p { color: var(--ink-soft); }
+.edit-date-scope ul { margin: 8px 0; padding: 0; list-style: none; }
+.edit-date-scope li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.edit-date-scope li.hidden { display: none; }
+.edit-date-scope p { margin: 8px 0 0; }
+.edit-date-scope .btn-link { min-height: 40px; margin-top: 0; }

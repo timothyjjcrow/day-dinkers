@@ -975,14 +975,29 @@ def _materialize_series(game, *, now=None):
     return created
 
 
-def _future_series_dates(game):
-    root = _series_root(game, create=True)
+def _future_series_dates_query(game):
     return Game.query.filter(
-        Game.recurrence_series_id == root.id,
+        Game.recurrence_series_id == (game.recurrence_series_id or game.id),
         Game.id != game.id,
         Game.scheduled_at >= game.scheduled_at,
         Game.status == 'upcoming',
-    ).order_by(Game.scheduled_at, Game.id).all()
+    ).order_by(Game.scheduled_at, Game.id)
+
+
+def _future_series_dates(game):
+    _series_root(game, create=True)
+    return _future_series_dates_query(game).all()
+
+
+def _edit_dates_payload(game, following):
+    import hashlib
+    rows = [game, *following]
+    dates = [{'id': row.id, 'scheduled_at': iso(row.scheduled_at),
+              'occurrence_on': row.recurrence_occurrence_on.isoformat() if row.recurrence_occurrence_on else None,
+              'status': row.status, 'is_selected': row.id == game.id} for row in rows]
+    stamp = [(row.id, iso(row.scheduled_at), row.creator_id, row.status) for row in rows]
+    token = hashlib.sha256(json.dumps(stamp, separators=(',', ':')).encode()).hexdigest()
+    return {'dates': dates, 'token': token, 'boundary': iso(game.scheduled_at)}
 
 
 def _cancel_series_date(game, actor_id):
@@ -7506,6 +7521,23 @@ def cancel_game(game_id):
     return jsonify(_game_payload(game, g.current_user.id))
 
 
+@games_bp.get('/games/<int:game_id>/edit-dates')
+@rate_limit(60, 60)
+@login_required
+def game_edit_dates(game_id):
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.creator_id != g.current_user.id:
+        return jsonify({'error': 'forbidden'}), 403
+    if game.status != 'upcoming' or game.is_instant:
+        return jsonify({'error': 'game_not_open'}), 409
+    following = _future_series_dates_query(game).all() if game.recurrence_series_id else []
+    if any(row.creator_id != g.current_user.id for row in following):
+        return jsonify({'error': 'future_host_changed'}), 409
+    return jsonify(_edit_dates_payload(game, following))
+
+
 @games_bp.patch('/games/<int:game_id>')
 @rate_limit(30, 60)
 @login_required
@@ -7519,7 +7551,7 @@ def edit_game(game_id):
         'preferred_level', 'level_min', 'level_max', 'notes', 'recurrence', 'title', 'description',
         'duration_minutes', 'ends_at', 'cost_cents', 'court_number',
         'court_count', 'play_style', 'court_access', 'recurrence_timezone', 'recurrence_weekdays',
-        'recurrence_ends_on', 'edit_scope', 'schedule_conflict_ack',
+        'recurrence_ends_on', 'edit_scope', 'schedule_conflict_ack', 'expected_edit_dates',
     }
     unknown = sorted(set(payload) - allowed)
     if unknown:
@@ -7551,6 +7583,11 @@ def edit_game(game_id):
         return jsonify(scope_error[0]), scope_error[1]
     series_root = _series_root(game, create=True) if game.recurrence == 'weekly' else None
     following = _future_series_dates(game) if edit_scope == 'following_dates' else []
+    if any(row.creator_id != actor.id for row in following):
+        return jsonify({'error': 'future_host_changed'}), 409
+    if edit_scope == 'following_dates' and 'expected_edit_dates' in payload:
+        if payload['expected_edit_dates'] != _edit_dates_payload(game, following)['token']:
+            return jsonify({'error': 'edit_dates_changed'}), 409
     proposed = {}
     if 'court_id' in payload:
         court_id = _strict_whole_number(payload.get('court_id'))
