@@ -123,8 +123,8 @@ def test_court_preview_actions_are_separate_from_the_selection_announcement():
     preview = section("function selectCourtOnMap", "function autoCheckInStorageKey")
     assert "selectionStatus.textContent = `${court.name} selected. ${live}.`;" in preview
     assert '<div class="court-next-opportunity" data-preview-next></div>' in preview
-    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court);" in preview
-    assert 'data-preview-detail>All dates & court details</button>' in preview
+    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court,{mapPreview:true});" in preview
+    assert 'data-preview-detail>View court</button>' in preview
     assert "openCourtFromDiscovery(court)" in preview
     assert 'data-preview-play' not in preview
     assert "gameType: 'casual'" not in preview
@@ -383,8 +383,8 @@ def test_verified_venue_programs_have_a_direct_accessible_discovery_path():
     preview = section("function selectCourtOnMap", "function autoCheckInStorageKey")
     assert 'Official profile from ${esc(court.business.name)}' in preview
     assert 'data-preview-next' in preview
-    assert 'data-preview-detail>All dates & court details</button>' in preview
-    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court);" in preview
+    assert 'data-preview-detail>View court</button>' in preview
+    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court,{mapPreview:true});" in preview
     next_opportunity = section("async function loadCourtNextOpportunity", "function loadCourtTimeline")
     assert "api(`/courts/${court.id}/play`)" in next_opportunity
     assert 'courtTimelineItemHtml(item,{compact:true})' in next_opportunity

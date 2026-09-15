@@ -6326,9 +6326,8 @@
         ? `Showing ${n} of ${total}. ${searching ? 'Load more results' : 'Zoom in or load more'}.`
         : '';
       const scope = savedOnly ? 'Your saved courts' : searching ? 'Matching court names and cities' : 'Visible map area';
-      context.textContent = `${scope} · Distances from map center · ` + (active.length ? `${searching ? `For “${state.searchQ}” · ` : ''}Matching ${active.join(' · ')}${partial ? ` · ${partial}` : ''}`
-        : searching ? `For “${state.searchQ}”${partial ? ` · ${partial}` : ''}`
-          : partial || 'Tap a court to compare and act');
+      context.textContent = [scope, 'Distances from map center', searching ? `“${state.searchQ}”` : '',
+        active.length ? `Matching ${active.join(' · ')}` : '', partial].filter(Boolean).join(' · ');
     }
     const status = $('#court-sheet-status');
     if (status && state.courtResultsTruncated && total > n) {
@@ -6942,20 +6941,20 @@
       preview.innerHTML = `
         <div class="row court-preview-head">
           <div class="row-main">
-            <p class="court-peek-eyebrow">Selected court</p>
             <h3 class="row-title court-preview-title" tabindex="-1">${esc(court.name)}${court.business ? `<span class="verified-venue-badge">${uiIcon('check-circle')} Verified venue</span>` : ''}</h3>
-            <div class="row-sub">${[court.distance_miles != null ? `${court.distance_miles} mi` : '', esc(court.city || ''), live].filter(Boolean).join(' · ')}</div>
+            <div class="row-sub">${[esc(court.address || ''), esc(court.city || '')].filter(Boolean).join(' · ')}</div>
             ${court.players_here ? `<p class="simple-note">${esc(courtPresenceSummaryText(court.presence_summary))}</p>` : ''}
             ${court.business ? `<div class="court-preview-venue">Official profile from ${esc(court.business.name)}${court.business.booking_available ? ' · Booking available' : ''}</div>` : ''}
           </div>
           <button type="button" class="court-preview-close" data-preview-close aria-label="Clear selected court">${uiIcon('x')}</button>
         </div>
+        <div class="court-preview-facts">${[Number(court.num_courts)>0 ? `${court.num_courts} court${Number(court.num_courts)===1 ? '' : 's'}` : '', court.indoor ? 'Indoor' : 'Outdoor', court.lighted ? 'Lights' : '', live].filter(Boolean).map(value=>`<span>${esc(value)}</span>`).join('')}</div>
         <div class="court-next-opportunity" data-preview-next></div>
         <div class="court-preview-actions">
-          <button type="button" class="btn btn-secondary" data-preview-detail>All dates & court details</button>
+          <button type="button" class="btn btn-primary" data-preview-detail>View court</button>
           <a class="btn btn-secondary" data-preview-directions href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name)} (opens Maps)">${uiIcon('external')}<span>Directions</span></a>
         </div>`;
-      loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court);
+      loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court,{mapPreview:true});
       preview.classList.remove('hidden');
       preview.scrollTop = 0;
       preview.querySelector('[data-preview-close]').addEventListener('click', () => {
@@ -6970,7 +6969,7 @@
     document.querySelectorAll('#court-list-items [data-court-card]').forEach((card) => {
       const selected = Number(card.dataset.courtCard) === court.id;
       card.classList.toggle('selected', selected);
-      card.querySelector('[data-court]')?.setAttribute('aria-pressed', String(selected));
+      card.querySelector('.court-peek-main, [data-court-map]')?.setAttribute('aria-pressed', String(selected));
     });
     if (!preserveList) setCourtSheetSnap('peek');
     syncCourtDockLayout();
@@ -7555,7 +7554,7 @@
     return businessTimeLabel(row.start_time || row.start) || 'Time not listed';
   }
 
-  function courtTimelineItemHtml(item, {compact=false} = {}) {
+  function courtTimelineItemHtml(item, {compact=false, mapPreview=false} = {}) {
     const game = item.game || {}, row = item.schedule || item.window || {};
     const status = item.status === 'cancelled' ? 'Cancelled' : item.status === 'sold_out' ? 'Full' : '';
     const facts = item.source === 'player'
@@ -7566,6 +7565,7 @@
       : item.action === 'plan' ? `<button type="button" class="btn btn-secondary btn-sm" data-court-timeline-plan="${esc(item.key)}">Plan to go</button>`
       : booking ? `<a class="btn btn-primary btn-sm" href="${esc(booking)}" target="_blank" rel="noopener"${businessTrackingAttributes('booking',row)}>${esc(item.action_label || 'Register externally')}${uiIcon('link')}<small>${esc(new URL(booking).hostname)}</small></a>`
       : `<span class="court-timeline-status">${esc(status || (item.hours_conflict ? 'Check court hours' : 'Registration details not listed'))}</span>`;
+    if (mapPreview) return `<article class="court-map-next"><div class="court-map-next-copy"><small>Next · ${esc(upcomingDayLabel(item.starts_at || `${item.event_date}T12:00:00`))} · ${esc(courtTimelineTime(item))}</small><b>${esc(item.title)}</b><span>${esc(item.source_label)} · ${facts.filter(Boolean).map(esc).join(' · ')}</span></div><div class="court-map-next-action">${action}</div></article>`;
     const names = (game.players || []).slice(0,3).map(player=>player.display_name).filter(Boolean);
     return `<article class="court-timeline-item is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-time">${esc(courtTimelineTime(item))}${compact ? `<small>${esc(upcomingDayLabel(item.starts_at || `${item.event_date}T12:00:00`))}</small>` : ''}</div><div class="court-timeline-content"><span class="court-timeline-source">${esc(item.source_label)}</span><h4>${esc(item.title)}</h4><p>${facts.filter(Boolean).map(esc).join(' · ')}</p>${!compact && names.length ? `<p>${esc(names.join(', '))}${game.players.length>names.length ? ` +${game.players.length-names.length}` : ''}</p>` : ''}${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${!compact && item.source==='community' ? '<small>A listed time. Planning does not register you with the venue.</small>' : ''}${action}</div></article>`;
   }
@@ -7620,12 +7620,15 @@
   }
 
   function bindCourtTimelineActions(root, court, items, parent) {
-    root.querySelectorAll('[data-court-timeline-game]').forEach(button=>button.addEventListener('click',()=>parent ? openChildModal(parent,()=>openGameScreen(Number(button.dataset.courtTimelineGame))) : openGameScreen(Number(button.dataset.courtTimelineGame))));
+    root.querySelectorAll('[data-court-timeline-game]').forEach(button=>button.addEventListener('click',()=>{
+      const open = () => openGameScreen(Number(button.dataset.courtTimelineGame), { returnFocus:button });
+      return parent ? openChildModal(parent,open) : open();
+    }));
     root.querySelectorAll('[data-court-timeline-plan]').forEach(button=>button.addEventListener('click',()=>{const item=items.find(row=>row.key===button.dataset.courtTimelinePlan);if(item)openCourtWindowPlan(court,item,parent);}));
     bindBusinessActionTracking(root,null);
   }
 
-  async function loadCourtNextOpportunity(slot, court) {
+  async function loadCourtNextOpportunity(slot, court, {mapPreview=false} = {}) {
     if (!slot || slot.dataset.loading) return;
     slot.dataset.loading = 'true';
     slot.innerHTML = '<p class="row-sub" role="status">Finding the next session…</p>';
@@ -7633,14 +7636,14 @@
       const data = await api(`/courts/${court.id}/play`);
       if (!slot.isConnected) return;
       const item = (data.items || []).find(row => row.status !== 'cancelled' && row.status !== 'sold_out' && row.action !== 'none');
-      slot.innerHTML = item ? `<span class="court-next-label">Next up</span>${courtTimelineItemHtml(item,{compact:true})}`
+      slot.innerHTML = item ? (mapPreview ? courtTimelineItemHtml(item,{compact:true,mapPreview:true}) : `<span class="court-next-label">Next up</span>${courtTimelineItemHtml(item,{compact:true})}`)
         : `<p class="row-sub">${data.closed ? 'Court marked closed' : 'No dated play listed in the next 7 days'}</p>`;
       bindCourtTimelineActions(slot,court,item ? [item] : [],null);
       syncCourtDockLayout();
     } catch {
       if (!slot.isConnected) return;
       slot.innerHTML = '<p class="row-sub">Next session unavailable.</p><button type="button" class="btn-link" data-next-retry>Retry schedule</button>';
-      slot.querySelector('[data-next-retry]').addEventListener('click',()=>{delete slot.dataset.loading;loadCourtNextOpportunity(slot,court);});
+      slot.querySelector('[data-next-retry]').addEventListener('click',()=>{delete slot.dataset.loading;loadCourtNextOpportunity(slot,court,{mapPreview});});
     }
   }
 
@@ -7846,7 +7849,7 @@
       c.has_water ? 'Water' : '',
     ].filter(Boolean).join(', ');
     const accessibleSummary = [
-      `Show ${c.name} on the map`,
+      `Open ${c.name} court details`,
       c.distance_miles != null ? `${c.distance_miles} miles away` : c.city,
       accessibleActivity,
       cond ? cond[1] : '',
@@ -7866,7 +7869,7 @@
     const selected = state.selectedCourtId === c.id;
     return `
       <article class="court-decision-card ${quietNow ? 'quiet' : ''} ${selected ? 'selected' : ''}" data-court-card="${c.id}">
-        <button type="button" class="court-card-main" data-court="${c.id}" aria-label="${esc(accessibleSummary)}" aria-pressed="${selected}">
+        <button type="button" class="court-card-main" data-court="${c.id}" aria-label="${esc(accessibleSummary)}">
         <span class="court-card-layout">
           ${courtPhotoHtml(c)}
           <span class="court-card-copy">
@@ -7874,7 +7877,7 @@
               <span class="court-card-name">${esc(c.name)}${c.business ? ` <span class="verified-venue-badge">${uiIcon('check-circle')} Venue</span>` : ''}${cond ? ` <span class="tag ${c.condition === 'good' ? 'live' : 'warn'}" style="margin:0 0 0 5px;font-size:var(--text-xs);padding:2px 7px">${courtConditionIcon(c.condition)} ${esc(cond[1].split(' — ')[0].split(' /')[0])}</span>` : ''}</span>
               <span class="court-card-trailing">
                 <span class="court-card-distance">${c.distance_miles != null ? `${c.distance_miles} mi` : esc(c.city || '')}</span>
-                <span class="court-card-open-icon ${selected ? 'is-selected' : ''}" aria-hidden="true">${uiIcon(selected ? 'check' : 'chevron-right')}</span>
+                <span class="court-card-open-icon" aria-hidden="true">${uiIcon('chevron-right')}</span>
               </span>
             </span>
             ${reasonHtml}
@@ -7887,6 +7890,7 @@
           </span>
         </span>
         </button>
+        <button type="button" class="court-card-map" data-court-map="${c.id}" aria-pressed="${selected}" aria-label="Show ${esc(c.name)} on map">${uiIcon('map')} Show on map</button>
         ${businessDiscovery ? `<button type="button" class="court-card-programs" data-court-business="${c.id}" aria-label="${esc(`${businessLabel} at ${c.name}`)}"><span>${uiIcon('calendar')} ${esc(businessLabel)}</span><span aria-hidden="true">${uiIcon('chevron-right')}</span></button>` : ''}
       </article>
     `;
@@ -8122,8 +8126,12 @@
     const byId = new Map(courts.map((court) => [court.id, court]));
     el.querySelectorAll('[data-court]').forEach((row) => {
       row.addEventListener('click', () => {
-        activateCourtFromDiscovery(byId.get(Number(row.dataset.court)));
+        if (row.classList.contains('court-card-main')) openCourtFromDiscovery(byId.get(Number(row.dataset.court)));
+        else activateCourtFromDiscovery(byId.get(Number(row.dataset.court)));
       });
+    });
+    el.querySelectorAll('[data-court-map]').forEach((row) => {
+      row.addEventListener('click', () => activateCourtFromDiscovery(byId.get(Number(row.dataset.courtMap))));
     });
     el.querySelectorAll('[data-court-open]').forEach((row) => {
       row.addEventListener('click', () => openCourtFromDiscovery(

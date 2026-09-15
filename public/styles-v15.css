@@ -2131,7 +2131,6 @@ textarea[aria-invalid="true"]:focus-visible {
   background: var(--green-50); color: var(--green-accent);
 }
 .court-card-open-icon .ui-icon { width: 13px; height: 13px; }
-.court-card-open-icon.is-selected { background: var(--green-600); color: var(--on-solid); }
 .court-card-reason { margin-top: 3px; color: var(--green-accent); font-size: 12px; font-weight: 800; }
 .court-card-facts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .court-card-fact {
@@ -7552,3 +7551,31 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .calendar-link-tools .btn-link { margin: 0; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; }
 .calendar-subscription-sheet .calendar-copy-status { color: var(--ink); text-align: left; line-height: 1.5; font-weight: 500; }
 .calendar-subscription-sheet .calendar-copy-status:empty { display: none; }
+
+/* Court selection preserves room to explore the map; the list opens details. */
+.court-preview { background: var(--card); border-color: var(--line); }
+.court-preview-facts { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 8px 0; color: var(--ink-soft); font-size: var(--text-xs); }
+.court-preview .court-preview-title { font-size: var(--text-lg); }
+.court-map-next { padding: 10px 0; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.court-map-next-copy { flex: 1 1 170px; min-width: 0; display: grid; gap: 4px; }
+.court-map-next-copy b { font-size: var(--text-sm); line-height: 1.4; overflow-wrap: anywhere; }
+.court-map-next-copy small, .court-map-next-copy > span { font-size: var(--text-xs); line-height: 1.4; color: var(--ink-soft); overflow-wrap: anywhere; }
+.court-map-next-action { flex: 0 1 auto; }
+.court-map-next-action .btn { display: flex; align-items: center; justify-content: center; min-height: 44px; white-space: normal; }
+.court-card-map { display: flex; align-items: center; gap: 7px; min-height: 44px; width: 100%; padding: 8px 12px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink-soft); font-size: var(--text-xs); font-weight: 650; }
+.court-card-map[aria-pressed="true"] { color: var(--green-accent); }
+@media (max-width: 899px) {
+  .court-sheet[data-snap="peek"].has-selection { height: auto; max-height: 60%; }
+  .court-sheet[data-snap="peek"].has-selection .court-preview { display: block; overflow-y: auto; flex: 0 1 auto; }
+  .court-sheet[data-snap="peek"].has-selection .court-next-opportunity { overflow: visible; padding-right: 0; }
+}
+
+.court-map-next-action .btn-primary { background: var(--green-50); color: var(--green-accent); border: 1px solid var(--line); }
+
+.court-preview-actions { grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); position: sticky; bottom: 0; z-index: 2; background: var(--card); }
+.court-preview-actions .btn { min-width: 0; white-space: normal; }
+.court-preview-actions .btn > span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 899px) and (max-height: 500px) and (orientation: landscape) {
+  .court-sheet[data-snap="peek"].has-selection { max-height: calc(100% - 114px); }
+  .court-preview-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}

@@ -72,10 +72,11 @@ def test_court_cards_have_a_visible_open_or_selected_affordance():
     card = section("function courtRowHtml", "function sortCourts")
     assert "const selected = state.selectedCourtId === c.id;" in card
     assert 'class="court-card-trailing"' in card
-    assert 'class="court-card-open-icon ${selected ? \'is-selected\' : \'\'}"' in card
-    assert "uiIcon(selected ? 'check' : 'chevron-right')" in card
+    assert 'class="court-card-open-icon"' in card
+    assert 'data-court-map="${c.id}" aria-pressed="${selected}"' in card
+    assert "uiIcon('chevron-right')" in card
     assert 'aria-pressed="${selected}"' in card
-    assert ".court-card-open-icon.is-selected" in STYLES
+    assert '.court-card-map[aria-pressed="true"]' in STYLES
 
 
 def test_add_court_flow_exposes_the_pin_and_collects_supported_location_fields():

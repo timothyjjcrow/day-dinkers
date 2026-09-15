@@ -222,9 +222,9 @@ def test_play_launcher_is_intent_specific_while_map_and_court_keep_compatibility
     assert "openRankedMatchFlow();" in ctas
 
     preview = section("function selectCourtOnMap", "function autoCheckInStorageKey")
-    assert "data-preview-detail>All dates & court details</button>" in preview
+    assert "data-preview-detail>View court</button>" in preview
     assert "openCourtFromDiscovery(court)" in preview
-    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court)" in preview
+    assert "loadCourtNextOpportunity(preview.querySelector('[data-preview-next]'),court,{mapPreview:true})" in preview
     assert "startInstantRally" not in preview
 
     detail = section("async function openCourtDetail", "function openCheckInSheet")
