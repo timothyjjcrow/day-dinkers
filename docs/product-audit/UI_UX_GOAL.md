@@ -1,6 +1,8 @@
 # Complete-app UI and UX review
 
-Active user direction, September 14, 2026. This supersedes the previous pause checkpoint: the app goal was replaced and resumed with this focus.
+User-requested stop checkpoint, September 15, 2026: finish and publish the current accumulated improvements, verify the release, then stop. Do not begin another UI pass unless the user resumes. See `release-r81.md` for release evidence and the production backup approval boundary. The app-wide goal remains unfinished; its active runtime must be paused using the app’s user control because available goal tools cannot pause it.
+
+The UI/UX direction below was set September 14, 2026 and remains the scope for a future resumption.
 
 Review every feature and the journeys between features. Make Third Shot professional, inviting, beautiful, simple and easy to use. Use the fewest words and steps that communicate the task accurately. Remove redundant content, visual clutter and unnecessary choices. Move controls and information to where people need them. Improve the actual application, with visual evidence of the result.
 
