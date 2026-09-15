@@ -80,12 +80,11 @@ def test_game_detail_status_and_primary_actions_use_product_icons():
     assert "crewTarget.querySelectorAll('[data-connect-crew]')" in hydration
 
     play = section("async function renderPlay", "function updatePlayHeader")
-    assert "${uiIcon(toConfirm.includes(next) ? 'activity' : toScore.includes(next) ? 'check-circle' : 'calendar')}" in play
-    assert "Next up · Confirm the score" in play
-    assert "Next up · Finish recent play" in play
-    assert "Next up · Waiting on opponents" in play
+    assert 'playPlanRowHtml(game, { showDate:true })' in play
+    assert 'playScheduleHtml(mine.items, priorityIds, competitions)' in play
     assert '<div class="section-label">⚡ Confirm the score</div>' not in play
     assert '<div class="section-label">⏳ Waiting on opponents</div>' not in play
+
 
 
 def test_checkin_roster_score_and_cancel_surfaces_share_the_same_icon_language():

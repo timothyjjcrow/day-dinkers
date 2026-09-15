@@ -7503,3 +7503,32 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .game-consent-facts { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 8px; color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
 .game-consent-facts > span { overflow-wrap: anywhere; }
 .session-main-actions > .game-consent-card { margin: 0; }
+
+/* Agenda rows keep names readable and distinguish plans from decisions. */
+.play-schedule-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 14px; }
+.play-schedule-row > .play-schedule-time { grid-column: 1; grid-row: 1; font-size: var(--text-xs); line-height: 1.5; overflow-wrap: anywhere; }
+.play-schedule-row > .row-main { grid-column: 1 / -1; grid-row: 2; display: grid; gap: 5px; min-width: 0; }
+.play-schedule-row > .row-main b { font-size: var(--text-sm); line-height: 1.4; overflow-wrap: anywhere; }
+.play-schedule-row > .row-main small { color: var(--ink-soft); line-height: 1.5; overflow-wrap: anywhere; }
+.play-schedule-row > .tag { grid-column: 2; grid-row: 1; justify-self: end; max-width: 100%; white-space: normal; text-align: right; overflow-wrap: anywhere; }
+.play-plan-decisions { margin: 16px 0; }
+.play-plan-decisions > .play-schedule-row { background: var(--card); }
+.play-plan-decisions .play-game-depth { margin-top: 0; }
+.plan-overlaps { padding: 4px 14px; border-color: var(--line); background: var(--amber-50); }
+.plan-overlaps > details > summary { display: flex; align-items: center; gap: 8px; list-style: none; color: var(--ink); }
+.plan-overlaps > details > summary::-webkit-details-marker { display: none; }
+.plan-overlaps > details > summary > .ui-icon { flex: 0 0 auto; }
+.plan-overlaps > details > summary > b { font-size: var(--text-sm); flex: 1; }
+.plan-overlaps > details > summary > span { font-size: var(--text-xs); text-decoration: underline; text-underline-offset: 3px; }
+.plan-overlaps > details[open] { padding-bottom: 10px; }
+
+.play-schedule-row > .play-schedule-time { color: var(--ink); font-weight: 650; }
+.play-calendar-sync { color: var(--green-accent); min-height: 44px; }
+
+.play-plan-decisions > .play-schedule-row:first-of-type { border-radius: var(--radius-md) var(--radius-md) 0 0; }
+.play-plan-decisions > .play-schedule-row:last-of-type { border-radius: 0 0 var(--radius-md) var(--radius-md); }
+.play-plan-decisions > .play-schedule-row:only-of-type { border-radius: var(--radius-md); }
+.play-profile-setup-link { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; margin-top: 16px; padding: 12px 0; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; }
+.play-profile-setup-link > span { flex: 1; display: grid; gap: 4px; font-size: var(--text-sm); }
+.play-profile-setup-link small { color: var(--ink-soft); font-size: var(--text-xs); }
+.play-profile-setup-link > .ui-icon { flex: 0 0 auto; }

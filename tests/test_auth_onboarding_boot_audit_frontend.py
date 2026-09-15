@@ -104,7 +104,7 @@ def test_incomplete_profile_stays_visible_on_play_until_four_useful_fields_are_s
     assert "data-complete-player-setup" in card
     assert "progress.isComplete && state.me.onboarding_complete !== false" in card
     play = section("async function renderPlay", "function updatePlayHeader")
-    assert "html += playerProfileSetupCardHtml();" in play
+    assert "html += playerProfileSetupCardHtml({ compact:true });" in play
     assert "runNewPlayerOnboarding({ replay: true, profileOnly: true })" in play
     completion = section("async function completeNewPlayerOnboarding", "function openPlayerBasicsOnboarding")
     assert "if (!playerProfileSetupProgress().isComplete) return false;" in completion

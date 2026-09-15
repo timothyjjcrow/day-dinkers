@@ -21,7 +21,7 @@ def run_js(source):
 
 def test_schedule_keeps_later_dates_without_duplicating_the_featured_plan():
     source = (functions_between('function playGameDecision(', 'function gameRosterStatus(')
-              + functions_between('function playScheduleHtml(', 'function playNearbyNowHtml('))
+              + functions_between('function playPlanStatus(', 'function playNearbyNowHtml('))
     html = run_js('''
       Date.now = () => Date.parse('2030-01-01T12:00:00Z');
       const esc = value => String(value), uiIcon = () => '';
@@ -94,7 +94,7 @@ def test_planner_sharing_uses_the_created_game_not_an_unrelated_cached_game():
 
 
 def test_competition_plans_show_opponent_context_and_true_pending_actions():
-    source = functions_between('function playScheduleHtml(', 'function playNearbyNowHtml(')
+    source = functions_between('function playPlanStatus(', 'function playNearbyNowHtml(')
     result = run_js('''
       Date.now=()=>Date.parse('2030-01-01T12:00:00Z');
       const esc=String,uiIcon=()=>'',instantRallyClosed=()=>false;
@@ -155,3 +155,60 @@ def test_rankings_show_the_independent_position_and_distinct_recovery_actions():
     assert 'Complete a ranked match' in output['fresh']
     assert 'data-rankings-retry' in output['oldServer']
     assert 'Complete a ranked match' not in output['oldServer']
+
+
+def test_agenda_status_distinguishes_decisions_membership_and_waiting():
+    source = (functions_between('function playGameDecision(', 'function gameRosterStatus(')
+              + functions_between('function playPlanStatus(', 'function playScheduleHtml('))
+    result = run_js('''
+      Date.now=()=>Date.parse('2030-01-01T12:00:00Z');
+      const esc=String,fmtDateTime=String,fmtTimeShort=String;
+    ''' + source + '''
+      const base={id:1,title:'Evening doubles',status:'upcoming',scheduled_at:'2030-01-02T18:00:00Z',is_joined:true};
+      const cases=[{is_creator:true},{},{attendance_confirmation_due:true},
+        {attendance_confirmation_due:true,commitment_confirmation_due:true},
+        {is_joined:false,my_invite_status:'pending'},
+        {is_joined:false,my_invite_status:'pending',waitlist_position:2},
+        {is_joined:false,waitlist_offer:{expires_at:'2030-01-01T13:00:00Z'}},
+        {my_recurrence_rsvp:{is_skipped:true}},
+        {status:'awaiting_confirmation',awaiting_your_confirmation:true},
+        {status:'awaiting_confirmation'},
+        {scheduled_at:'2030-01-01T10:00:00Z',can_complete_session:true},
+        {status:'cancelled'}, {status:'completed'}, {status:'expired'},
+        {status:'expired',can_complete_session:true}];
+      console.log(JSON.stringify(cases.map(fields=>playPlanStatus({...base,...fields}).label)));
+    ''')
+    assert result == ['Hosting','Joined','Confirm spot','Review changes','Reply to invite',
+        'Waitlist #2','Spot offered','Skipping this date','Confirm score',
+        'Awaiting confirmation','Wrap up session','Cancelled','Completed','Ended','Wrap up session']
+
+
+def test_overlap_summary_retains_every_pair_and_route_without_expanding_by_default():
+    source = functions_between('function playScheduleConflictsHtml(', 'function playFeedPageControlHtml(')
+    html = run_js('const esc=String,fmtDateTime=String,uiIcon=()=>"";\n' + source + '''
+      const pair=i=>({plans:[{title:'Session '+i,starts_at:'2030-01-02',action_url:'/#game/'+i},
+        {title:'League '+i,starts_at:'2030-01-02',action_url:'/#league/2/match/'+i}]});
+      console.log(JSON.stringify(playScheduleConflictsHtml([pair(1),pair(2),pair(3)])));
+    ''')
+    assert '3 time overlaps' in html and '<span>Review</span>' in html
+    assert 'data-open-game="3"' in html and 'data-match-id="3"' in html
+    assert '<details data-view-state-key="all-plan-overlaps">' in html
+    assert ' open' not in html
+
+
+def test_agenda_return_focus_finds_the_replaced_visible_row_and_respects_account_navigation():
+    source = functions_between("rootEl.querySelectorAll('[data-open-game]')", "rootEl.querySelectorAll('[data-game-attend]')")
+    result = run_js('''
+      const state={me:{id:1},tab:'play'},card={dataset:{openGame:'8'}};let activate,options;
+      const rootEl={querySelectorAll:()=>[card]};
+      const makePressable=(_node,fn)=>activate=fn,openDrillInFrom=(_root,fn)=>fn();
+      const openGameScreen=(_id,opts)=>options=opts;
+      const hidden={checkVisibility:()=>false},visible={checkVisibility:()=>true,closest:()=>null};
+      const document={querySelectorAll:()=>[hidden,visible]};
+    ''' + source + '''
+      activate();const initial=options.returnFocus===card,replaced=options.returnFocusFallback()===visible;
+      state.tab='profile';const left=options.returnFocusFallback();
+      state.tab='play';state.me.id=2;const switched=options.returnFocusFallback();
+      console.log(JSON.stringify({initial,replaced,left,switched}));
+    ''')
+    assert result == {'initial':True,'replaced':True,'left':None,'switched':None}

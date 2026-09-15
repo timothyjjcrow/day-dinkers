@@ -16571,9 +16571,17 @@
   function bindGameButtons(rootEl, refresh) {
     // Each card has one primary detail target; mutation actions are siblings,
     // so joining or confirming can never accidentally open the detail screen.
-    rootEl.querySelectorAll('[data-open-game]').forEach((card) => makePressable(
-      card, () => openDrillInFrom(rootEl, () => openGameScreen(Number(card.dataset.openGame))),
-    ));
+    rootEl.querySelectorAll('[data-open-game]').forEach((card) => makePressable(card, () => {
+      const ownerId = state.me?.id;
+      const sourceTab = state.tab;
+      const gameId = Number(card.dataset.openGame);
+      return openDrillInFrom(rootEl, () => openGameScreen(gameId, {
+        returnFocus:card,
+        returnFocusFallback:() => state.me?.id === ownerId && state.tab === sourceTab
+          ? [...document.querySelectorAll(`[data-open-game="${gameId}"]`)]
+            .find(node => node.checkVisibility() && !node.closest('[inert]')) : null,
+      }));
+    }));
     rootEl.querySelectorAll('[data-game-attend]').forEach((button) => button.addEventListener('click', async () => {
       const reset = beginButtonAction(button, 'Confirming…');
       if (!reset) return;
@@ -18183,6 +18191,40 @@
     </button>`;
   }
 
+  function playPlanStatus(game) {
+    const decision = playGameDecision(game);
+    if (decision) return { label:decision.label, tone:'warn' };
+    if (game.awaiting_your_confirmation) return { label:'Confirm score', tone:'warn' };
+    if (game.status === 'awaiting_confirmation') return { label:'Awaiting confirmation', tone:'' };
+    if (game.status === 'cancelled') return { label:'Cancelled', tone:'' };
+    if (game.status === 'completed') return { label:'Completed', tone:'' };
+    if (game.status === 'expired') return { label:game.can_complete_session ? 'Wrap up session' : 'Ended', tone:game.can_complete_session ? 'warn' : '' };
+    if (game.my_recurrence_rsvp?.is_skipped) return { label:'Skipping this date', tone:'' };
+    if (game.waitlist_position) return { label:`Waitlist #${game.waitlist_position}`, tone:'' };
+    if (game.attendance_confirmation_due && game.is_joined && !game.is_creator) {
+      return { label:game.commitment_confirmation_due ? 'Review changes' : 'Confirm spot', tone:'warn' };
+    }
+    if (!game.is_joined && game.my_invite_status === 'pending' && Date.parse(game.scheduled_at) > Date.now()) return { label:'Reply to invite', tone:'warn' };
+    if (Date.parse(game.scheduled_at) <= Date.now()) {
+      if (game.can_enter_score) return { label:'Enter score', tone:'warn' };
+      if (game.can_complete_session) return { label:'Wrap up session', tone:'warn' };
+      return { label:'Started', tone:'' };
+    }
+    return game.is_creator ? { label:'Hosting', tone:'live' }
+      : game.is_joined ? { label:'Joined', tone:'live' } : { label:'Not joined', tone:'' };
+  }
+
+  function playPlanRowHtml(game, { showDate = false } = {}) {
+    const court = game.court || {};
+    const status = playPlanStatus(game);
+    const format = game.game_type === 'ranked' ? `Ranked ${Number(game.max_players) === 2 ? 'singles' : 'doubles'}` : 'Pickup session';
+    return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(status.label)}">
+      <span class="play-schedule-time">${esc(showDate ? fmtDateTime(game.scheduled_at) : fmtTimeShort(game.scheduled_at))}</span>
+      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
+      <span class="tag ${status.tone}">${esc(status.label)}</span>
+    </button>`;
+  }
+
   function playScheduleHtml(games, excludedIds = new Set(), competitions = []) {
     const now = Date.now();
     const upcomingGames = (games || []).filter((game) => {
@@ -18209,17 +18251,7 @@
       <div class="section-heading-row"><div class="section-label" id="play-schedule-title">Upcoming plans</div><button type="button" class="btn-link play-calendar-sync" data-sync-play-calendar>Subscribe to calendar</button></div>
       ${groups.map((group) => `<div class="play-schedule-day"><b>${esc(group.day)}</b>${group.events.map((event) => {
         if (event.kind !== 'game') return playCompetitionRowHtml(event.item);
-        const game = event.item;
-        const court = game.court || {};
-        const rsvp = playGameDecision(game)?.label || (game.waitlist_position ? `Waitlist #${game.waitlist_position}`
-          : game.my_recurrence_rsvp?.is_skipped ? 'Skipping this date'
-            : game.attendance_confirmation_due && !game.is_creator ? 'Confirm spot'
-              : game.is_joined ? 'Going' : 'Invited');
-        return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(rsvp)}">
-          <span class="play-schedule-time">${esc(fmtTimeShort(game.scheduled_at))}</span>
-          <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${game.game_type === 'ranked' ? `Ranked ${Number(game.max_players) === 2 ? 'singles' : 'doubles'}` : 'Pickup session'}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
-          <span class="tag ${rsvp === 'Going' ? 'live' : ''}">${esc(rsvp)}</span>
-        </button>`;
+        return playPlanRowHtml(event.item);
       }).join('')}</div>`).join('')}
     </section>`;
   }
@@ -18285,7 +18317,7 @@
       return attrs ? `<button type="button" class="plan-overlap-link" ${attrs}>${content}${uiIcon('chevron-right')}</button>` : `<div class="plan-overlap-link">${content}</div>`;
     };
     const itemHtml = (item) => `<div class="plan-overlap-pair">${(item.plans || []).map(planHtml).join('')}${item.estimated ? '<small class="row-sub">Includes an estimated time</small>' : ''}</div>`;
-    return `<section class="plan-overlaps" aria-label="Overlapping plans"><div class="section-label">${uiIcon('calendar')} ${conflicts.length} time overlap${conflicts.length === 1 ? '' : 's'}</div><p class="row-sub">Both plans are still saved. Open either one to review the time.</p>${conflicts.slice(0, 2).map(itemHtml).join('')}${conflicts.length > 2 ? `<details data-view-state-key="all-plan-overlaps"><summary>Show ${conflicts.length - 2} more overlap${conflicts.length - 2 === 1 ? '' : 's'}</summary>${conflicts.slice(2).map(itemHtml).join('')}</details>` : ''}</section>`;
+    return `<section class="plan-overlaps" aria-label="Overlapping plans"><details data-view-state-key="all-plan-overlaps"><summary>${uiIcon('calendar')}<b>${conflicts.length} time overlap${conflicts.length === 1 ? '' : 's'}</b><span>Review</span></summary><p class="row-sub">Plans stay saved until you change them.</p>${conflicts.map(itemHtml).join('')}</details></section>`;
   }
 
   function playFeedPageControlHtml(feed, key, label) {
@@ -18735,7 +18767,7 @@
       const toDecide = mine.items.filter((game) => playGameDecision(game, nowMs))
         .sort((a, b) => playGameDecision(a, nowMs).deadline - playGameDecision(b, nowMs).deadline);
       const toScore = mine.items.filter((g) =>
-        g.status === 'upcoming' && (g.can_enter_score || g.can_complete_session)
+        (g.status === 'upcoming' || g.status === 'expired' && g.can_complete_session) && (g.can_enter_score || g.can_complete_session)
           && (g.is_instant
             ? (instantRallyScorePending(g) || instantSessionWrapPending(g))
             : new Date(g.scheduled_at).getTime() <= nowMs));
@@ -18743,6 +18775,9 @@
       const toReconfirm = mine.items.filter((g) => g.status === 'upcoming' && !g.is_instant && g.is_joined && !toDecide.includes(g)
         && g.attendance_confirmation_due && !g.is_creator
         && new Date(g.scheduled_at).getTime() > nowMs);
+      const invitations = mine.items.filter((game) => game.status === 'upcoming' && !game.is_joined
+        && game.my_invite_status === 'pending' && !game.waitlist_position && !game.waitlist_offer
+        && !game.my_recurrence_rsvp?.is_skipped && Date.parse(game.scheduled_at) > nowMs);
       const waiting = mine.items.filter((g) =>
         g.status === 'awaiting_confirmation' && !g.awaiting_your_confirmation);
       const upcoming = mine.items.filter((g) =>
@@ -18775,7 +18810,7 @@
         || item.kind === 'league_match' && item.schedule_status === 'needs_time' && item.can_propose_schedule
         || item.kind === 'tournament' && (item.my_waitlist?.status === 'offered' || item.my_partner_action
           || item.partner_status === 'needed' || !item.is_entered && !item.is_organizer && !item.my_waitlist)).length;
-      const attentionCount = new Set([...toDecide, ...toConfirm, ...toScore, ...toReconfirm].map((game) => game.id)).size + competitionDecisionCount;
+      const attentionCount = new Set([...toDecide, ...invitations, ...toConfirm, ...toScore, ...toReconfirm].map((game) => game.id)).size + competitionDecisionCount;
       html += `<div class="segmented play-lanes" role="tablist" aria-label="Games and plans">
         <button type="button" role="tab" id="play-lane-find" data-play-lane="find" aria-controls="play-find-panel" aria-selected="true" class="active">Find games</button>
         <button type="button" role="tab" id="play-lane-plans" data-play-lane="plans" aria-controls="play-plans-panel" aria-selected="false">My plans${planCount ? ` · ${planCount}` : ''}${attentionCount ? ` <span class="plan-attention">${attentionCount} to do</span>` : ''}</button>
@@ -18797,34 +18832,23 @@
       html += playScheduleConflictsHtml(gameBundle.scheduleConflicts);
       if (gameBundle.scheduleConflicts === null) html += playFeedNoticeHtml('Time-overlap check unavailable', 'Your saved plans are shown below. Retry to check for overlapping times.');
 
-      const priorityItems = [...new Map([...toDecide, ...toConfirm, ...toReconfirm, ...toScore, ...waiting, ...upcoming].map((game) => [game.id, game])).values()];
-      let displayedNextGameId = null;
+      const priorityItems = [...new Map([...toDecide, ...invitations, ...toConfirm, ...toReconfirm, ...toScore].map((game) => [game.id, game])).values()];
+      const priorityIds = new Set(priorityItems.map(game => Number(game.id)));
       if (priorityItems.length) {
-        const next = priorityItems[0];
-        displayedNextGameId = next.id;
-        const nextLabel = toDecide.includes(next) ? `Needs your reply · ${playGameDecision(next, nowMs).label}`
-          : toConfirm.includes(next) ? 'Next up · Confirm the score'
-          : toReconfirm.includes(next) ? 'Next up · Confirm your spot'
-          : toScore.includes(next) ? 'Next up · Finish recent play'
-            : waiting.includes(next) ? 'Next up · Waiting on opponents'
-              : 'Next up';
-        html += `<div class="section-label section-label-icon" style="margin-top:6px">${uiIcon(toConfirm.includes(next) ? 'activity' : toScore.includes(next) ? 'check-circle' : 'calendar')} ${nextLabel}</div>`;
-        html += gameCardHtml(next);
-        const moreAttention = priorityItems.slice(1).filter((game) => !upcoming.includes(game)
-          || new Date(game.scheduled_at).getTime() < nowMs);
-        if (moreAttention.length) {
-          html += `<details class="play-game-depth" data-view-state-key="plan-attention"><summary>${moreAttention.length} more item${moreAttention.length === 1 ? ' needs' : 's need'} attention</summary><div class="play-game-depth-body">${moreAttention.map((game) => gameCardHtml(game, { compact: true })).join('')}</div></details>`;
-        }
+        html += `<section class="play-plan-decisions" aria-labelledby="play-plan-decisions-title"><div class="section-label" id="play-plan-decisions-title">To do · ${priorityItems.length}</div>
+          ${priorityItems.slice(0,3).map(game => playPlanRowHtml(game, { showDate:true })).join('')}
+          ${priorityItems.length > 3 ? `<details class="play-game-depth" data-view-state-key="plan-attention"><summary>View ${priorityItems.length - 3} more</summary><div>${priorityItems.slice(3).map(game => playPlanRowHtml(game, { showDate:true })).join('')}</div></details>` : ''}</section>`;
       }
-      if (competitionActions.length) html += `<section class="play-schedule" aria-labelledby="play-competition-actions"><div class="section-label" id="play-competition-actions">Competition plans &amp; decisions</div>${competitionActions.map(playCompetitionRowHtml).join('')}</section>`;
-      html += playScheduleHtml(
-        mine.items,
-        new Set(displayedNextGameId ? [Number(displayedNextGameId)] : []),
-        competitions,
-      );
+      if (competitionActions.length) html += `<section class="play-schedule" aria-labelledby="play-competition-actions"><div class="section-label" id="play-competition-actions">Competition updates</div>${competitionActions.map(playCompetitionRowHtml).join('')}</section>`;
+      const scheduleHtml = playScheduleHtml(mine.items, priorityIds, competitions);
+      html += scheduleHtml;
+      if (!scheduleHtml && planCount) html += `<button type="button" class="btn-link play-calendar-sync" data-sync-play-calendar>Subscribe to calendar</button>`;
+      const otherPlans = [...new Map([...waiting, ...upcoming.filter(game => Date.parse(game.scheduled_at) <= nowMs)]
+        .filter(game => !priorityIds.has(Number(game.id))).map(game => [game.id,game])).values()];
+      if (otherPlans.length) html += `<section class="play-plan-decisions" aria-labelledby="play-other-plans-title"><div class="section-label" id="play-other-plans-title">Recent &amp; awaiting confirmation</div>${otherPlans.map(game => playPlanRowHtml(game, { showDate:true })).join('')}</section>`;
       html += playFeedPageControlHtml(mine, 'mine', 'Show more plans');
-      if (!planCount && !competitions.length && !feedErrors.mine) html += `<div class="empty-state flow-empty"><span class="empty-state-icon" aria-hidden="true">${uiIcon('calendar')}</span><b>Your next game belongs here</b><p>Join a nearby game or plan one with your friends.</p><button type="button" class="btn btn-primary" data-find-play>Find a game</button></div>`;
-      html += playerProfileSetupCardHtml();
+      if (!planCount && !competitions.length && !feedErrors.mine) html += `<div class="empty-state flow-empty"><span class="empty-state-icon" aria-hidden="true">${uiIcon('calendar')}</span><b>No plans yet</b><p>Find a game or create your own.</p><button type="button" class="btn btn-primary" data-find-play>Find a game</button></div>`;
+      html += playerProfileSetupCardHtml({ compact:true });
       html += `<button class="btn btn-secondary btn-block" id="pl-log-game" style="margin-top:14px">${uiIcon('target')} Log a game you already played</button>`;
       const playAgainGame = recent.find((game) => game.status === 'completed' && game.is_joined && game.players?.length >= 2);
       if (playAgainGame) html += playAgainRowHtml(playAgainGame);
@@ -37978,6 +38002,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     });
     if (!shell) return;
     const { modal, box, load: routeLoad } = shell;
+    if (options.returnFocus) modal._returnFocus = options.returnFocus;
+    if (options.returnFocusFallback) modal._returnFocusFallback = options.returnFocusFallback;
     let game;
     try { game = await api(`/games/${gameId}`); } catch (e) {
       if (!routedOverlayLoadIsCurrent(routeLoad) || !modal.isConnected) return;
@@ -40154,10 +40180,11 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     return true;
   }
 
-  function playerProfileSetupCardHtml() {
+  function playerProfileSetupCardHtml({ compact = false } = {}) {
     if (!state.me) return '';
     const progress = playerProfileSetupProgress();
     if (progress.isComplete && state.me.onboarding_complete !== false) return '';
+    if (compact) return `<button type="button" class="play-profile-setup-link" data-complete-player-setup>${uiIcon('user')}<span>Profile setup <small>${progress.complete} of ${progress.total} complete</small></span>${uiIcon('chevron-right')}</button>`;
     const missing = progress.items.filter((item) => !item.complete).map((item) => item.label);
     const title = `Complete your profile (${progress.complete} of ${progress.total})`;
     return `<section class="card play-profile-setup" aria-labelledby="play-profile-setup-title">

@@ -101,5 +101,5 @@ def test_saved_overlap_cards_link_to_each_plan_and_escape_untrusted_titles():
     assert 'data-open-game="7"' in html
     assert 'data-play-competition="league" data-competition-id="2" data-match-id="8"' in html
     assert 'data-play-competition="tournament" data-competition-id="3" data-match-id="9"' in html
-    assert 'Includes an estimated time' in html and 'Show 1 more overlap' in html
+    assert 'Includes an estimated time' in html and '3 time overlaps' in html
     assert '&lt;img' in html and '<img' not in html and 'javascript:' not in html

@@ -52,3 +52,5 @@ Pass1: `ui-ux-pass-01-session.md` covers session essentials and first-join revie
 Pass2: `ui-ux-pass-02-public-entry.md` covers public search, court/session previews, Back paths, signup return and responsive entry layout. `ui-ux-pass-02-area.md` covers first-account area selection, saved-area editing, geocoder retry and location-denial recovery. Email verification and account recovery remain open. Next inspect the Find games controls and available-play hierarchy recorded in the area receipt.
 
 Pass3: `ui-ux-pass-03-discovery.md` covers consolidated game filters, a direct open-spots switch, filter cancellation and validation, responsive layouts, empty searches and service retry. Personal agenda, calendar and remaining discovery states still need review.
+
+Pass3 continued: `ui-ux-pass-03-plans.md` covers agenda hierarchy, complete date groups, invitation/hosting decision transitions, overlap disclosures, profile prompt reduction and return focus after a plan changes. Calendar entry was checked; provider syncing and mixed competition schedules remain open.
