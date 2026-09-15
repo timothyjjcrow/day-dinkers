@@ -1,4 +1,5 @@
 """Available-this-hour pulses are remote, bounded, private, and retry-safe."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -523,7 +524,7 @@ def test_overlapping_ordinary_game_consumes_pulse_but_future_game_does_not(clien
         'client_attempt_id': 'near-game',
     }, headers=_headers(creator))
     assert near.status_code == 201, near.get_json()
-    joined = client.post(
+    joined = post_reviewed_game(client,
         f"/api/games/{near.get_json()['id']}/join",
         headers=_headers(joiner),
     )
@@ -575,7 +576,7 @@ def test_waitlist_acceptance_and_reschedule_consume_overlapping_pulses(client):
         'max_players': 2,
         'client_attempt_id': 'promotion-game',
     }, headers=_headers(host)).get_json()
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{full_game['id']}/join", headers=_headers(occupant),
     ).status_code == 200
     waiter_pulse = _publish(
@@ -592,7 +593,7 @@ def test_waitlist_acceptance_and_reschedule_consume_overlapping_pulses(client):
     with client.application.app_context():
         assert db.session.get(PlayAvailabilityPulse, waiter_pulse['id']).end_reason == ''
         assert GamePlayer.query.filter_by(game_id=full_game['id'], user_id=waiter['user']['id']).count() == 0
-    accepted = client.post(f"/api/games/{full_game['id']}/waitlist/respond",
+    accepted = post_reviewed_game(client, f"/api/games/{full_game['id']}/waitlist/respond",
         json={'accept': True}, headers=_headers(waiter))
     assert accepted.status_code == 200, accepted.get_json()
 
@@ -603,7 +604,7 @@ def test_waitlist_acceptance_and_reschedule_consume_overlapping_pulses(client):
         'max_players': 4,
         'client_attempt_id': 'reschedule-game',
     }, headers=_headers(rescheduler)).get_json()
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{future_game['id']}/join", headers=_headers(partner),
     ).status_code == 200
     host_pulse = _publish(

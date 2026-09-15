@@ -1,4 +1,5 @@
 """Chat reads keep the group's current membership context without exposing it to outsiders."""
+from tests.session_plan_helpers import post_reviewed_game
 from tests.test_crew_community_api import (
     app, client, register, headers, make_friends, create_direct_crew, accept_crew,
     court_ids, scheduled_payload,
@@ -51,7 +52,7 @@ def test_chat_next_session_tracks_rsvp_and_moves_past_cancelled_or_old_games(cli
     assert read(member)['is_invited'] is True
     assert read(member)['is_joined'] is False
     assert read(member)['court']['name'] == 'Community Court'
-    joined = client.post(f'/api/games/{ids[0]}/join', headers=headers(member))
+    joined = post_reviewed_game(client, f'/api/games/{ids[0]}/join', headers=headers(member))
     assert joined.status_code == 200, joined.get_json()
     assert read(member)['is_joined'] is True
     with app.app_context():

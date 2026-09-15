@@ -967,6 +967,7 @@
       responseMeta = false,
       _reauthAttempted = false,
       _scheduleReviewCount = 0,
+      _planReviewCount = 0,
       ...requestOptions
     } = options;
     const requestActiveElement = typeof document === 'undefined' ? null : document.activeElement;
@@ -1085,6 +1086,25 @@
       // contract. That makes an exact replay safe even for POST/PATCH/DELETE;
       // `_reauthAttempted` is the hard one-replay dedupe boundary.
       return api(path, { ...options, _reauthAttempted: true });
+    }
+    if (res.status === 409 && data?.error === 'game_plan_review_required'
+        && /^\/games\/\d+\/(join|waitlist\/respond)$/.test(path)
+        && String(requestOptions.method || '').toUpperCase() === 'POST') {
+      assertRequestStillActive();
+      if (_planReviewCount >= 3 || !/^[a-f0-9]{64}$/.test(data.game?.plan_token || '')) {
+        throw Object.assign(new Error('The plan kept changing. Open the session to review it again.'), { code: 'game_plan_changed' });
+      }
+      const accepted = await confirmGamePlanReview(data.game, {
+        changed: !!(requestOptions.body && JSON.parse(requestOptions.body).expected_plan_token),
+      });
+      assertCurrentSession();
+      assertRequestStillActive();
+      if (!accepted || requestActiveElement?.isConnected === false) {
+        throw Object.assign(new Error('No place taken.'), { code: 'game_plan_review_cancelled', isCancelled: true, data: { game: data.game } });
+      }
+      const payload = requestOptions.body ? JSON.parse(requestOptions.body) : {};
+      return api(path, { ...options, _planReviewCount: _planReviewCount + 1,
+        body: JSON.stringify({ ...payload, expected_plan_token: data.game.plan_token }) });
     }
     if (res.status === 409 && data?.error === 'schedule_conflict'
         && ['POST', 'PATCH', 'PUT'].includes(String(requestOptions.method || '').toUpperCase())) {
@@ -1294,6 +1314,7 @@
     invalid_ends_at: 'Choose an end time 15 minutes to 12 hours after the start.',
     duration_end_mismatch: 'The duration and end time do not match.',
     game_commitment_changed: 'This plan changed. Review the latest details before confirming.',
+    game_plan_review_required: 'Review the current plan before joining.',
     host_plan_confirmation_required: 'Confirm the updated plan before taking over as host.',
     invalid_play_style: 'Choose a casual play style. Rotating doubles needs at least four places.',
     invalid_court_access: 'Choose how players access the court. Only host-reserved courts can have a reserved count.',
@@ -10844,6 +10865,42 @@
   // A single, branded decision sheet replaces native browser confirmations.
   // It works above an existing modal, resolves false for every dismissal path,
   // and keeps the consequence visible long enough to make a deliberate choice.
+  function gamePlanReviewHtml(game, { changed = false } = {}) {
+    const people = Array.isArray(game.players) ? game.players : [];
+    const price = game.cost_cents == null ? 'Join session' : Number(game.cost_cents) === 0
+      ? 'Join free session' : `Join · $${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
+    return `${modalHead(changed ? 'The plan changed' : 'Review before joining')}
+      <section class="entry-plan-review" aria-labelledby="entry-plan-title">
+        <span class="action-confirm-eyebrow">${game.game_type === 'ranked' ? 'Ranked match' : 'Play session'}${sessionPlayStyleLabel(game) ? ` · ${esc(sessionPlayStyleLabel(game))}` : ''}</span>
+        <h2 id="entry-plan-title">${esc(game.title || 'Play at ' + (game.court?.name || 'the court'))}</h2>
+        <div class="entry-plan-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>
+        <div class="entry-plan-court">${uiIcon('map-pin')}<span><b>${esc(game.court?.name || 'Court')}</b>${game.court_number ? `<small>${esc(game.court_number)}</small>` : ''}</span></div>
+        ${sessionVisitFactsHtml(game)}
+        <div class="entry-plan-players"><b>${people.length} signed up · ${Number(game.max_players) || 0} places</b>
+          ${people.length ? `<p>${people.slice(0, 6).map(p => esc(p.display_name || 'Player')).join(' · ')}${people.length > 6 ? ` · +${people.length - 6} more` : ''}</p>` : ''}</div>
+        <div class="entry-plan-actions"><button type="button" class="btn btn-primary" data-entry-plan-accept>${esc(price)}</button>
+          <button type="button" class="btn btn-secondary" data-entry-plan-cancel>Go back</button></div>
+      </section>`;
+  }
+
+  function confirmGamePlanReview(game, options = {}) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const trigger = document.activeElement;
+      const sheet = openModal(gamePlanReviewHtml(game, options), { label: 'Review the current session plan' });
+      const finish = accepted => {
+        if (settled) return;
+        settled = true;
+        dismissModal(sheet, () => resolve(accepted));
+      };
+      sheet._returnFocus = trigger;
+      sheet._cleanupFns?.push(() => { if (!settled) { settled = true; resolve(false); } });
+      sheet.querySelector('[data-entry-plan-accept]').addEventListener('click', () => finish(true));
+      sheet.querySelector('[data-entry-plan-cancel]').addEventListener('click', () => finish(false));
+      requestAnimationFrame(() => sheet.querySelector('[data-entry-plan-cancel]')?.focus({ preventScroll: true }));
+    });
+  }
+
   function confirmScheduleConflict(data) {
     const conflicts = Array.isArray(data?.conflicts) ? data.conflicts : [];
     const details = conflicts.slice(0, 4).map((item) => {
@@ -37258,7 +37315,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       game.max_players, game.can_enter_score, game.can_complete_session, game.completion_kind,
       game.creator_id, game.scheduled_at, game.visibility, game.preferred_level,
       game.title, game.description, game.duration_minutes, game.ends_at,
-      game.cost_cents, game.court_number, game.court_count, game.play_style, game.court_access,
+      game.cost_cents, game.court_number, game.court_count, game.play_style, game.court_access, game.plan_token,
       game.notes, game.recurrence, game.recurrence_timezone,
       game.recurrence_local_time, game.recurrence_weekdays,
       game.recurrence_ends_on, game.recurrence_occurrence_on,
@@ -37931,7 +37988,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           if (!reset) return;
           let endpoint, payload, method='POST';
           if (button.dataset.waitlistReply) {
-            endpoint=`/games/${gameId}/waitlist/respond`; payload={accept:button.dataset.waitlistReply === 'accept'};
+            endpoint=`/games/${gameId}/waitlist/respond`; payload={accept:button.dataset.waitlistReply === 'accept', expected_plan_token:game.plan_token};
           } else if (button.dataset.hostReply) {
             endpoint=`/games/${gameId}/host-handoff/${game.host_handoff.id}/respond`; payload={accept:button.dataset.hostReply === 'accept'};
           } else {
@@ -37945,7 +38002,10 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
             toast(button.dataset.attendanceCorrect ? 'Attendance corrected. RSVP history is preserved.' : 'Response saved');
           } catch (error) {
             reset();
-            if (error.code === 'host_plan_confirmation_required' && error.data?.game) {
+            if (error.code === 'game_plan_review_cancelled' && error.data?.game) {
+              render(error.data.game);
+              toast(error.message);
+            } else if (error.code === 'host_plan_confirmation_required' && error.data?.game) {
               if (Number(error.data.review_game_id) !== Number(gameId)) {
                 openGameScreen(error.data.review_game_id, { replaceModal: modal });
               } else {
@@ -38378,7 +38438,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         button.setAttribute('aria-busy', 'true');
         button.textContent = 'Joining…';
         try {
-          const fresh = await api(`/games/${gameId}/join`, { method: 'POST' });
+          const fresh = await api(`/games/${gameId}/join`, { method: 'POST',
+            body: JSON.stringify({ expected_plan_token: game.plan_token }) });
           if (Number(state.me?.id) !== accountId || !modal.isConnected || modal._destroyed) return;
           rememberFresh(fresh);
           state.playGamesCache = null;
@@ -38392,6 +38453,11 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           button.disabled = false;
           button.removeAttribute('aria-busy');
           button.innerHTML = original;
+          if (e.code === 'game_plan_review_cancelled' && e.data?.game
+              && Number(state.me?.id) === accountId && modal.isConnected && !modal._destroyed) {
+            render(e.data.game);
+            box.querySelector('#gs-join')?.focus({ preventScroll: true });
+          }
           toast(e.message);
         }
       });

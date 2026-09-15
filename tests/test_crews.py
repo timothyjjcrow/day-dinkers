@@ -1,6 +1,7 @@
 """Focused API contract tests for private, durable shared Crews."""
 
 from __future__ import annotations
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -81,7 +82,7 @@ def completed_game(client, owner, court, team1, team2, *, no_shows=()):
     for user_id, player in participants.items():
         if user_id == owner_id:
             continue
-        joined = client.post(
+        joined = post_reviewed_game(client,
             f"/api/games/{game['id']}/join",
             headers=auth_headers(player),
         )
@@ -863,7 +864,7 @@ def test_completed_private_crew_game_stays_out_of_participant_friend_results(cli
     }, headers=auth_headers(owner))
     assert linked.status_code == 201, linked.get_json()
     game_id = linked.get_json()['id']
-    assert client.post(
+    assert post_reviewed_game(client,
         f'/api/games/{game_id}/join', headers=auth_headers(member),
     ).status_code == 200
     completed = client.post(f'/api/games/{game_id}/complete', json={
@@ -999,7 +1000,7 @@ def test_account_deletion_versions_transfers_and_archives_without_breaking_histo
     linked_game = linked.get_json()
     assert linked_game['crew_id'] == shared_id
     for invitee in (oldest, newer, departing):
-        joined = client.post(
+        joined = post_reviewed_game(client,
             f"/api/games/{linked_game['id']}/join",
             headers=auth_headers(invitee),
         )
@@ -1325,7 +1326,7 @@ def test_linked_rematch_never_replaces_an_archived_or_missing_crew(client):
     }, headers=auth_headers(owner))
     assert created.status_code == 201, created.get_json()
     linked = created.get_json()
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{linked['id']}/join",
         headers=auth_headers(member),
     ).status_code == 200

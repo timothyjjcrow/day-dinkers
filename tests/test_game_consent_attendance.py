@@ -1,4 +1,5 @@
 """Consent, capacity, and preserved attendance are exercised through real APIs."""
+from tests.session_plan_helpers import post_reviewed_game
 import json
 from datetime import timedelta
 
@@ -12,7 +13,7 @@ def fill_and_wait(client):
     host, player, first, second = [register(client, f'consent-{n}', name) for n, name in
                                   enumerate(('Host', 'Player', 'First', 'Second'))]
     game = create_game(client, host)
-    assert client.post(f"/api/games/{game['id']}/join", headers=auth(player)).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth(player)).status_code == 200
     for person in (first, second):
         assert client.post(f"/api/games/{game['id']}/waitlist", headers=auth(person)).status_code == 200
     return game, host, player, first, second
@@ -25,12 +26,12 @@ def test_waitlist_offer_needs_consent_and_reserves_capacity(client):
     pending = client.get(url, headers=auth(first)).get_json()
     assert pending['waitlist_offer'] and not pending['is_joined']
     assert pending['spots_left'] == 0 and len(pending['players']) == 1
-    assert client.post(url+'/join', headers=auth(second)).status_code == 400
-    accepted = client.post(url+'/waitlist/respond', json={'accept':True}, headers=auth(first))
+    assert post_reviewed_game(client, url+'/join', headers=auth(second)).status_code == 400
+    accepted = post_reviewed_game(client, url+'/waitlist/respond', json={'accept':True}, headers=auth(first))
     assert accepted.status_code == 200, accepted.get_json()
     assert accepted.get_json()['is_joined']
     assert accepted.get_json()['waitlist_offer'] is None
-    assert client.post(url+'/waitlist/respond', json={'accept':True}, headers=auth(first)).status_code == 200
+    assert post_reviewed_game(client, url+'/waitlist/respond', json={'accept':True}, headers=auth(first)).status_code == 200
     assert GamePlayer.query.filter_by(game_id=game['id']).count() == 2
 
 
@@ -42,9 +43,9 @@ def test_offer_expiry_advances_fifo_and_rejects_stale_acceptance(client):
     offer.offer_expires_at = utcnow() - timedelta(seconds=1)
     db.session.commit()
     maintain_game_consent()
-    assert client.post(url+'/waitlist/respond', json={'accept':True}, headers=auth(first)).status_code == 409
+    assert post_reviewed_game(client, url+'/waitlist/respond', json={'accept':True}, headers=auth(first)).status_code == 409
     assert client.get(url, headers=auth(second)).get_json()['waitlist_offer']
-    passed = client.post(url+'/waitlist/respond', json={'accept':False}, headers=auth(second))
+    passed = post_reviewed_game(client, url+'/waitlist/respond', json={'accept':False}, headers=auth(second))
     assert passed.status_code == 200
     assert len(passed.get_json()['players']) == 1
 
@@ -53,7 +54,7 @@ def test_handoff_does_not_change_host_until_recipient_accepts(client):
     host, player, outsider = [register(client,f'host-{n}',name) for n,name in enumerate(('Host','Next','Other'))]
     game = create_game(client,host)
     url = f"/api/games/{game['id']}"
-    client.post(url+'/join', headers=auth(player))
+    post_reviewed_game(client, url+'/join', headers=auth(player))
     denied = client.post(url+'/leave', headers=auth(host))
     assert denied.status_code == 409
     requested = client.post(url+'/leave',json={'transfer_to_user_id':player['user']['id']},headers=auth(host))
@@ -76,7 +77,7 @@ def test_completion_keeps_rsvp_history_and_private_access_for_nonattendees(clien
     game = create_game(client,host,max_players=3)
     url=f"/api/games/{game['id']}"
     for person in (player,absent):
-        client.post(url+'/join',headers=auth(person))
+        post_reviewed_game(client, url+'/join',headers=auth(person))
     row=db.session.get(Game,game['id'])
     row.visibility='private'; row.scheduled_at=utcnow()-timedelta(hours=1)
     db.session.commit()
@@ -119,7 +120,7 @@ def test_recurring_handoff_changes_only_accepted_scope_and_future_defaults(clien
     dates=Game.query.filter_by(recurrence_series_id=game['id']).order_by(Game.scheduled_at).all()
     selected=dates[1]
     url=f'/api/games/{selected.id}'
-    client.post(url+'/join',headers=auth(player))
+    post_reviewed_game(client, url+'/join',headers=auth(player))
     request=client.post(url+'/host-handoff',json={'target_user_id':player['user']['id'],
                         'edit_scope':'following_dates','leave_on_accept':True},headers=auth(host))
     assert request.status_code == 202, request.get_json()
@@ -142,7 +143,7 @@ def test_offer_is_actionable_in_activity_and_agenda_until_acceptance(client):
     agenda=client.get('/api/play/home',headers=auth(first)).get_json()['mine']['items']
     offered=next(g for g in agenda if g['id']==game['id'])
     assert offered['waitlist_offer'] and not offered['is_joined'] and offered['spots_left']==0
-    assert client.post(url+'/waitlist/respond',json={'accept':True},headers=auth(first)).status_code==200
+    assert post_reviewed_game(client, url+'/waitlist/respond',json={'accept':True},headers=auth(first)).status_code==200
     assert client.get('/api/notifications?filter=action',headers=auth(first)).get_json()['items']==[]
     history=client.get('/api/notifications',headers=auth(first)).get_json()['items']
     assert next(n for n in history if n['id']==offers[0]['id'])['needs_action'] is False
@@ -165,7 +166,7 @@ def test_handoff_has_its_own_activity_action_and_resolves_after_acceptance(clien
     host, player=[register(client,f'agenda-host-{n}',name) for n,name in enumerate(('Host','Next'))]
     game=create_game(client,host)
     url=f"/api/games/{game['id']}"
-    client.post(url+'/join',headers=auth(player))
+    post_reviewed_game(client, url+'/join',headers=auth(player))
     pending=client.post(url+'/host-handoff',json={'target_user_id':player['user']['id']},headers=auth(host))
     assert pending.status_code==202
     handoff=pending.get_json()['host_handoff']

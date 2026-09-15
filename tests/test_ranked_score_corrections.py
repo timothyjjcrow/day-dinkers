@@ -1,4 +1,5 @@
 """Same-match score decisions preserve consent, original sides and rating history."""
+from tests.session_plan_helpers import post_reviewed_game
 import json
 from datetime import timedelta
 
@@ -12,7 +13,7 @@ def setup_match(client, doubles=False):
     players = [register(client, f'correction-{i}', name) for i, name in enumerate(['Alex', 'Jordan', 'Sam', 'Morgan'][:4 if doubles else 2])]
     game = create_game(client, players[0], game_type='ranked', max_players=len(players))
     for player in players[1:]:
-        assert client.post(f"/api/games/{game['id']}/join", headers=auth(player)).status_code == 200
+        assert post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth(player)).status_code == 200
     ids = [p['user']['id'] for p in players]
     payload = {'team1': ids[:len(ids)//2], 'team2': ids[len(ids)//2:], 'score_team1': 11, 'score_team2': 7}
     return game['id'], players, payload

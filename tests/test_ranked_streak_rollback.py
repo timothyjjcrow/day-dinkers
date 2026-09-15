@@ -1,4 +1,5 @@
 """Late score disputes rebuild current streaks from settled ranked results."""
+from tests.session_plan_helpers import post_reviewed_game
 from datetime import timedelta
 
 import pytest
@@ -13,7 +14,7 @@ from tests.test_game_detail_manage import app, client, register, auth, create_ga
 
 def finish(client, host, opponent, *, won=True, timeout=False, ranked=True):
     game = create_game(client, host, game_type='ranked' if ranked else 'casual')
-    assert client.post(f"/api/games/{game['id']}/join", headers=auth(opponent)).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth(opponent)).status_code == 200
     response = client.post(f"/api/games/{game['id']}/complete", json={
         'team1': [host['user']['id']], 'team2': [opponent['user']['id']],
         'score_team1': 11 if won else 7, 'score_team2': 7 if won else 11,

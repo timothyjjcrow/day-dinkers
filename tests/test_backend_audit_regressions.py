@@ -1,4 +1,5 @@
 """Focused regressions for community privacy, challenges, and venue discovery."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import datetime, timedelta
 
@@ -337,7 +338,7 @@ def test_challenge_validation_has_no_side_effects_and_retries_converge(client, a
     )
     assert fresh.status_code == 201, fresh.get_json()
     assert fresh.get_json()['id'] != game_id
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{fresh.get_json()['id']}/join",
         headers=headers(target),
     ).status_code == 200

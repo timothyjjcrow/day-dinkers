@@ -1,4 +1,5 @@
 """Durable inviter attribution and optional play-destination contracts."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 from pathlib import Path
@@ -99,7 +100,7 @@ def test_joined_player_can_share_their_next_open_game(client):
     inviter = register(client, 'destination-joined-player')
     court = create_court()
     game = create_game(client, host, court)
-    joined = client.post(
+    joined = post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=headers(inviter), json={},
     )
     assert joined.status_code == 200, joined.get_json()

@@ -1,4 +1,5 @@
 """Presence freshness and durable unscored-game lifecycle regressions."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -64,7 +65,7 @@ def create_ranked_singles(client, host, opponent, court_id):
     }, headers=auth(host))
     assert response.status_code == 201, response.get_json()
     game = response.get_json()
-    joined = client.post(
+    joined = post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth(opponent),
     )
     assert joined.status_code == 200, joined.get_json()

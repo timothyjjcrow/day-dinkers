@@ -1,4 +1,5 @@
 """End-to-end contracts for the game detail/manage audit fixes."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -63,7 +64,7 @@ def test_waitlist_identity_is_host_only_and_manual_promotion_is_explicit(client)
     player = register(client, 'wait-player', 'Player')
     waiting = register(client, 'wait-person', 'Waiting Player')
     game = create_game(client, host)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth(player),
     ).status_code == 200
     queued = client.post(
@@ -109,7 +110,7 @@ def test_waitlist_identity_is_host_only_and_manual_promotion_is_explicit(client)
     assert waiting['user']['id'] not in {
         row['user_id'] for row in promoted.get_json()['players']
     }
-    accepted = client.post(f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=auth(waiting))
+    accepted = post_reviewed_game(client, f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=auth(waiting))
     assert accepted.status_code == 200
     assert accepted.get_json()['is_joined'] is True
 
@@ -151,7 +152,7 @@ def test_score_correction_counter_deadline_and_second_dispute_are_durable(client
         client, host, game_type='ranked', visibility='private',
         invite_user_ids=[opponent['user']['id']],
     )
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth(opponent),
     ).status_code == 200
     row = db.session.get(Game, game['id'])
@@ -237,7 +238,7 @@ def test_score_reminder_timeout_provenance_and_late_dispute_rollback(client):
         client, host, game_type='ranked', visibility='private',
         invite_user_ids=[opponent['user']['id']],
     )
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth(opponent),
     ).status_code == 200
     row = db.session.get(Game, game['id'])
@@ -309,7 +310,7 @@ def test_casual_score_has_bounded_correction_window_and_notifies_peers(client):
     host = register(client, 'casual-score-host', 'Casual Host')
     opponent = register(client, 'casual-score-opponent', 'Casual Opponent')
     game = create_game(client, host, game_type='casual')
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth(opponent),
     ).status_code == 200
     row = db.session.get(Game, game['id'])
@@ -355,7 +356,7 @@ def test_host_can_choose_successor_and_leave_response_explains_outcome(client):
     chosen = register(client, 'leave-chosen', 'Chosen Host')
     game = create_game(client, host, max_players=4)
     for person in (first, chosen):
-        assert client.post(
+        assert post_reviewed_game(client,
             f"/api/games/{game['id']}/join", headers=auth(person),
         ).status_code == 200
 
@@ -375,7 +376,7 @@ def test_game_chat_preview_and_unread_count_ignore_your_own_messages(client):
     host = register(client, 'chat-host', 'Chat Host')
     player = register(client, 'chat-player', 'Chat Player')
     game = create_game(client, host)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth(player),
     ).status_code == 200
     sent = client.post(

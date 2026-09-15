@@ -1,4 +1,5 @@
 """Local-time recurrence rules and per-player series RSVP lifecycle."""
+from tests.session_plan_helpers import post_reviewed_game
 
 import json
 from datetime import UTC, date, datetime, timedelta
@@ -178,7 +179,7 @@ def test_standing_preference_skip_and_rejoin_preserve_series_membership(client):
         '/api/games', json=recurring_payload(), headers=auth(host),
     ).get_json()
 
-    joined = client.post(
+    joined = post_reviewed_game(client,
         f"/api/games/{created['id']}/join",
         json={'standing_rsvp': True},
         headers=auth(player),
@@ -226,7 +227,7 @@ def test_standing_preference_skip_and_rejoin_preserve_series_membership(client):
     assert retry.status_code == 200, retry.get_json()
     assert retry.get_json()['my_recurrence_rsvp']['is_skipped'] is True
 
-    rejoined = client.post(
+    rejoined = post_reviewed_game(client,
         f"/api/games/{created['id']}/join",
         json={'standing_rsvp': True},
         headers=auth(player),
@@ -267,7 +268,7 @@ def test_host_edits_local_rule_without_wiping_current_roster_or_preferences(clie
     created = client.post(
         '/api/games', json=recurring_payload(), headers=auth(host),
     ).get_json()
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{created['id']}/join",
         json={'standing_rsvp': True}, headers=auth(player),
     ).status_code == 200
@@ -473,7 +474,7 @@ def test_real_dates_are_materialized_once_and_keep_independent_history(client, m
     assert len({row.recurrence_occurrence_on for row in rows}) == len(rows)
     assert client.post('/api/games', json=payload, headers=auth(host)).status_code == 200
     assert identities == {(row.id, row.scheduled_at, row.recurrence_occurrence_on) for row in dated_rows(first['id'])}
-    assert client.post(f"/api/games/{first['id']}/join", json={'standing_rsvp': True}, headers=auth(player)).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{first['id']}/join", json={'standing_rsvp': True}, headers=auth(player)).status_code == 200
     original_start = rows[0].scheduled_at
     import backend.routes.games as games_route
     import backend.models as models
@@ -507,7 +508,7 @@ def test_multiple_skips_are_dated_and_standing_changes_preserve_explicit_rsvps(c
     host = register(client, 'skip-host@example.com', 'Host')
     player = register(client, 'skip-player@example.com', 'Player')
     first = client.post('/api/games', json=recurring_payload(), headers=auth(host)).get_json()
-    assert client.post(f"/api/games/{first['id']}/join", json={'standing_rsvp': True}, headers=auth(player)).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{first['id']}/join", json={'standing_rsvp': True}, headers=auth(player)).status_code == 200
     dates = dated_rows(first['id'])
     second, third, fourth = dates[1:4]
     for occurrence in (second, third):
@@ -620,7 +621,7 @@ def test_scored_occurrence_does_not_score_or_move_other_dates(client, monkeypatc
     host = register(client, 'score-host@example.com', 'Host')
     player = register(client, 'score-player@example.com', 'Player')
     first = client.post('/api/games', json=recurring_payload(max_players=2), headers=auth(host)).get_json()
-    assert client.post(f"/api/games/{first['id']}/join", json={'standing_rsvp': True}, headers=auth(player)).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{first['id']}/join", json={'standing_rsvp': True}, headers=auth(player)).status_code == 200
     game = db.session.get(Game, first['id'])
     scheduled_at = game.scheduled_at
     import backend.routes.games as games_route
@@ -644,7 +645,7 @@ def test_leaving_series_from_later_date_removes_all_future_rsvps(client):
     host = register(client, 'leave-host@example.com', 'Host')
     player = register(client, 'leave-player@example.com', 'Player')
     first = client.post('/api/games', json=recurring_payload(), headers=auth(host)).get_json()
-    assert client.post(f"/api/games/{first['id']}/join", json={'standing_rsvp': True}, headers=auth(player)).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{first['id']}/join", json={'standing_rsvp': True}, headers=auth(player)).status_code == 200
     later = dated_rows(first['id'])[3]
     response = client.post(f'/api/games/{later.id}/leave', headers=auth(player))
     assert response.status_code == 200, response.get_json()

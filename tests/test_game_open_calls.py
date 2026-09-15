@@ -1,4 +1,5 @@
 """Durable court-room recruiting cards for underfilled local games."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -187,7 +188,7 @@ def test_open_call_rejects_ineligible_or_non_host_games(client):
     friends = create_game(client, host, court, visibility='friends')
     weekly = create_game(client, host, court, recurrence='weekly')
     full = create_game(client, host, court, max_players=2)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{full['id']}/join", headers=headers(invitee),
     ).status_code == 200
     instant = create_game(client, host, court)
@@ -245,7 +246,7 @@ def test_live_card_tracks_roster_waitlist_and_reopens_without_reposting(client):
     call = post_call(client, host, game['id'], 'live-card').get_json()['open_call']
 
     for person in (player2, player3, player4):
-        joined = client.post(
+        joined = post_reviewed_game(client,
             f"/api/games/{game['id']}/join", headers=headers(person),
         )
         assert joined.status_code == 200, joined.get_json()
@@ -278,7 +279,7 @@ def test_live_card_tracks_roster_waitlist_and_reopens_without_reposting(client):
     assert promoted['state'] == 'full'
     assert promoted['is_joined'] is False
     assert promoted['offer_pending'] is True
-    accepted = client.post(f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=headers(waiter))
+    accepted = post_reviewed_game(client, f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=headers(waiter))
     assert accepted.status_code == 200, accepted.get_json()
 
     assert client.post(
@@ -301,7 +302,7 @@ def test_host_transfer_and_message_delete_preserve_retry_ledgers(client):
     new_host = register(client, 'transfer-new', 'New Host')
     court = court_id(client)
     game = create_game(client, old_host, court)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=headers(new_host),
     ).status_code == 200
     old_call = post_call(
@@ -381,7 +382,7 @@ def test_whole_roster_block_hides_linked_court_card_everywhere(client):
     viewer = register(client, 'privacy-viewer', 'Viewer')
     court = court_id(client)
     game = create_game(client, host, court)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=headers(teammate),
     ).status_code == 200
     generic = client.post(

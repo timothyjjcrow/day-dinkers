@@ -1,4 +1,5 @@
 """Focused API regressions for pickleball score and team validation."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -77,7 +78,7 @@ def create_rostered_game(
     assert response.status_code == 201, response.get_json()
     game = response.get_json()
     for player in players:
-        joined = client.post(
+        joined = post_reviewed_game(client,
             f"/api/games/{game['id']}/join", headers=headers(player),
         )
         assert joined.status_code == 200, joined.get_json()

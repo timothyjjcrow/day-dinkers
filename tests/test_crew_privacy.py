@@ -1,6 +1,7 @@
 """Privacy regressions at the boundary between Crews and existing surfaces."""
 
 from __future__ import annotations
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -70,7 +71,7 @@ def completed_game(client, owner, players, *, visibility='open'):
     assert created.status_code == 201, created.get_json()
     game = created.get_json()
     for player in players[1:]:
-        joined = client.post(
+        joined = post_reviewed_game(client,
             f"/api/games/{game['id']}/join", headers=headers(player),
         )
         assert joined.status_code == 200, joined.get_json()
@@ -136,7 +137,7 @@ def test_public_profile_uses_requester_for_crew_privacy_and_owner_for_result(cli
     }, headers=headers(owner))
     assert created.status_code == 201, created.get_json()
     linked_game = created.get_json()
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{linked_game['id']}/join", headers=headers(invitee),
     ).status_code == 200
     completed = client.post(f"/api/games/{linked_game['id']}/complete", json={

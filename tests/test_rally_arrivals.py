@@ -1,4 +1,5 @@
 """On-my-way ETA statuses for live rallies stay remote, private, and bounded."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -503,7 +504,7 @@ def test_on_my_way_status_does_not_block_walk_in_capacity(client):
             f"/api/courts/{court['id']}/checkin", json={},
             headers=_headers(person),
         )
-        joined = client.post(
+        joined = post_reviewed_game(client,
             f"/api/games/{game['id']}/join", headers=_headers(person),
         )
         assert joined.status_code == 200, joined.get_json()
@@ -533,7 +534,7 @@ def test_on_my_way_status_does_not_block_walk_in_capacity(client):
         f"/api/courts/{court['id']}/checkin", json={},
         headers=_headers(walk_in),
     )
-    full = client.post(
+    full = post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=_headers(walk_in),
     )
     assert full.status_code == 200, full.get_json()
@@ -543,7 +544,7 @@ def test_on_my_way_status_does_not_block_walk_in_capacity(client):
         f"/api/courts/{court['id']}/checkin", json={},
         headers=_headers(traveler),
     )
-    converted = client.post(
+    converted = post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=_headers(traveler),
     )
     assert converted.status_code == 400
@@ -570,7 +571,7 @@ def test_partial_departure_changes_physical_ready_not_durable_occupancy(client):
         f"/api/courts/{court['id']}/checkin", json={},
         headers=_headers(departing),
     )
-    joined = client.post(
+    joined = post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=_headers(departing),
     )
     assert joined.status_code == 200, joined.get_json()
@@ -811,7 +812,7 @@ def test_cancel_score_and_account_deletion_end_arrivals(client):
         f"/api/courts/{larson['id']}/checkin", json={},
         headers=_headers(opponent),
     )
-    joined = client.post(
+    joined = post_reviewed_game(client,
         f"/api/games/{score_game['id']}/join", headers=_headers(opponent),
     )
     assert joined.status_code == 200, joined.get_json()
@@ -920,7 +921,7 @@ def test_blocked_on_the_way_player_prevents_admission_and_invitation(client):
         f"/api/courts/{court['id']}/checkin", json={},
         headers=_headers(blocked),
     )
-    denied_join = client.post(
+    denied_join = post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=_headers(blocked),
     )
     assert denied_join.status_code == 404
@@ -963,7 +964,7 @@ def test_member_of_another_live_rally_cannot_reserve_remotely(client):
         f"/api/courts/{larson['id']}/checkin", json={},
         headers=_headers(member),
     )
-    joined = client.post(
+    joined = post_reviewed_game(client,
         f"/api/games/{first_game['id']}/join", headers=_headers(member),
     )
     assert joined.status_code == 200, joined.get_json()

@@ -2304,6 +2304,14 @@ def _close_instant_assembly_without_fresh_members(game, now=None):
     return True
 
 
+def _entry_plan_review_needed(game, payload, viewer_id):
+    # Call only after checking the actor's visibility/offer and under Game lock.
+    # Missing snapshots also require review: an older tab cannot bypass consent.
+    if not game.is_instant and payload.get('expected_plan_token') != game.plan_review_token():
+        return {'error': 'game_plan_review_required', 'game': _game_payload(game, viewer_id)}
+    return None
+
+
 def _game_payload(game, viewer_id=None, perspective_user_id=None, now=None,
                   *, slim_players=False):
     """Serialize explicit live-vs-score-pending instant lifecycle truth."""
@@ -6294,6 +6302,9 @@ def join_game(game_id):
     if not game.visible_to(g.current_user.id, friend_ids(g.current_user.id)):
         return jsonify({'error': 'not_invited'}), 403
 
+    review = _entry_plan_review_needed(game, payload, g.current_user.id)
+    if review:
+        return jsonify(review), 409
     conflict = schedule_review_needed(
         [g.current_user.id], game.scheduled_at, game.duration_minutes, payload,
         scope=f'join_game:{game.id}', viewer_id=g.current_user.id, exclude_game_id=game.id,
@@ -6939,6 +6950,9 @@ def respond_waitlist_offer(game_id):
     if payload['accept']:
         if len(game.players) >= game.max_players:
             return jsonify({'error': 'game_full'}), 409
+        review = _entry_plan_review_needed(game, payload, g.current_user.id)
+        if review:
+            return jsonify(review), 409
         conflict = schedule_review_needed(
             [g.current_user.id], game.scheduled_at, game.duration_minutes, payload,
             scope=f'accept_place:{game.id}', viewer_id=g.current_user.id, exclude_game_id=game.id,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -2844,6 +2845,20 @@ class Game(TimestampMixin, db.Model):
                     and deadline and not expired and attempts < 2
                 )}
 
+    def plan_review_token(self):
+        """Fingerprint the public playing terms, not roster churn or copy edits."""
+        terms = {key: getattr(self, key) for key in (
+            'id', 'creator_id', 'court_id', 'duration_minutes', 'cost_cents', 'court_number',
+            'court_count', 'play_style', 'court_access', 'game_type',
+            'max_players', 'preferred_level', 'level_min', 'level_max',
+        )}
+        terms['scheduled_at'] = iso(self.scheduled_at)
+        for key in ('level_min', 'level_max'):
+            terms[key] = float(terms[key]) if terms[key] is not None else None
+        terms['court_number'] = terms['court_number'] or ''
+        return hashlib.sha256(json.dumps(terms, sort_keys=True,
+                                         separators=(',', ':')).encode()).hexdigest()
+
     def to_dict(self, viewer_id=None, perspective_user_id=None, *,
                 slim_players=False):
         """Serialize a game for ``viewer_id``.
@@ -3118,6 +3133,7 @@ class Game(TimestampMixin, db.Model):
                 self.scheduled_at + timedelta(minutes=self.duration_minutes)
             ) if self.scheduled_at and self.duration_minutes else None,
             'cost_cents': self.cost_cents,
+            'plan_token': self.plan_review_token(),
             'court_number': self.court_number or '',
             'court_count': self.court_count,
             'play_style': self.play_style,

@@ -1,4 +1,5 @@
 """End-to-end API tests: auth, courts, friends, chat, games, ranked ELO."""
+from tests.session_plan_helpers import post_reviewed_game
 import base64
 import json
 import time
@@ -274,7 +275,7 @@ def test_profile_dashboard_matches_existing_profile_endpoints(client):
     ).get_json()['favorited'] is True
 
     completed = make_game(client, ana['token'], court_id, hours_ahead=1)
-    client.post(
+    post_reviewed_game(client,
         f"/api/games/{completed['id']}/join",
         headers=auth_headers(ben['token']),
     )
@@ -498,7 +499,7 @@ def test_friends_games_feed(client):
     assert all(g['creator_id'] == b['user']['id'] for g in feed['items'])  # only friends
 
     # Games Ana is already in are excluded from her friends feed
-    client.post(f"/api/games/{bens['id']}/join", headers=auth_headers(a['token']))
+    post_reviewed_game(client, f"/api/games/{bens['id']}/join", headers=auth_headers(a['token']))
     feed2 = client.get('/api/games?friends=1', headers=auth_headers(a['token'])).get_json()
     assert bens['id'] not in [g['id'] for g in feed2['items']]
 
@@ -770,7 +771,7 @@ def test_expire_stale_unscored(client, app):
         'game_type': 'casual', 'visibility': 'open', 'recurrence': 'weekly',
     }, headers=auth_headers(a['token']))
     weekly = weekly_res.get_json()
-    client.post(f"/api/games/{ancient['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{ancient['id']}/join", headers=auth_headers(b['token']))
 
     from backend.routes.games import expire_stale_unscored, roll_forward_recurring
     with app.app_context():
@@ -821,7 +822,7 @@ def test_recurring_session_rolls_forward(client, app):
     assert weekly['recurrence'] == 'weekly'
 
     # Ben RSVPs
-    client.post(f"/api/games/{weekly['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{weekly['id']}/join", headers=auth_headers(b['token']))
 
     # The selected recurring date can keep a score, without changing future dates.
     with app.app_context():
@@ -862,7 +863,7 @@ def test_game_reminder_fires_in_window(client, app):
     b = register(client, 'b@example.com', 'Ben')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=48)
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
     # Ana has vouched she's coming; Ben hasn't.
     client.post(f"/api/games/{game['id']}/attend", headers=auth_headers(a['token']))
 
@@ -939,7 +940,7 @@ def test_day_before_reminder(client, app):
     b = register(client, 'b@example.com', 'Ben')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=48)
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
 
     from backend.routes.games import send_game_reminders
     with app.app_context():
@@ -1409,7 +1410,7 @@ def test_court_open_game_count_respects_visibility_and_roster_space(client):
         client, host['token'], court_id, hours_ahead=48, visibility='open',
     )
     for player in fillers:
-        joined = client.post(
+        joined = post_reviewed_game(client,
             f"/api/games/{full['id']}/join",
             headers=auth_headers(player['token']),
         )
@@ -1540,7 +1541,7 @@ def test_my_record_at_court(client):
 
     def play(court_id, ana_wins):
         g = make_game(client, a['token'], court_id, hours_ahead=1)
-        client.post(f"/api/games/{g['id']}/join", headers=auth_headers(b['token']))
+        post_reviewed_game(client, f"/api/games/{g['id']}/join", headers=auth_headers(b['token']))
         s1, s2 = (11, 4) if ana_wins else (4, 11)
         res = client.post(f"/api/games/{g['id']}/complete", json={
             'team1': [a['user']['id']], 'team2': [b['user']['id']],
@@ -1713,7 +1714,7 @@ def test_court_leaders(client):
 
     def play(ana_wins):
         game = make_game(client, a['token'], court_id, hours_ahead=1)
-        client.post(f"/api/games/{game['id']}/join", headers=bh)
+        post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
         client.post(f"/api/games/{game['id']}/complete", json={
             'team1': [a['user']['id']], 'team2': [b['user']['id']],
             'score_team1': 11 if ana_wins else 4,
@@ -1731,7 +1732,7 @@ def test_court_leaders(client):
     # A player with zero wins here is omitted.
     c = register(client, 'c@example.com', 'Cam')
     g2 = make_game(client, a['token'], court_id, hours_ahead=1)
-    client.post(f"/api/games/{g2['id']}/join", headers=auth_headers(c['token']))
+    post_reviewed_game(client, f"/api/games/{g2['id']}/join", headers=auth_headers(c['token']))
     client.post(f"/api/games/{g2['id']}/complete", json={
         'team1': [a['user']['id']], 'team2': [c['user']['id']],
         'score_team1': 11, 'score_team2': 2,
@@ -1785,7 +1786,7 @@ def test_anonymous_court_surfaces_never_publish_player_identities(client, app):
     )
     upcoming = make_game(client, host['token'], court_id, hours_ahead=24)
     scored = make_game(client, host['token'], court_id, hours_ahead=1)
-    client.post(f"/api/games/{scored['id']}/join", headers=opponent_headers)
+    post_reviewed_game(client, f"/api/games/{scored['id']}/join", headers=opponent_headers)
     client.post(f"/api/games/{scored['id']}/complete", json={
         'team1': [host['user']['id']], 'team2': [opponent['user']['id']],
         'score_team1': 11, 'score_team2': 4,
@@ -1998,7 +1999,7 @@ def test_friend_suggestions(client):
     def play_with(*users):
         game = make_game(client, a['token'], court_id, hours_ahead=1)
         for u in users:
-            client.post(f"/api/games/{game['id']}/join", headers=auth_headers(u['token']))
+            post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(u['token']))
         client.post(f"/api/games/{game['id']}/complete", json={
             'team1': [a['user']['id']], 'team2': [users[0]['user']['id']],
             'score_team1': 11, 'score_team2': 5,
@@ -2229,8 +2230,8 @@ def test_leave_notifies_host(client):
     ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=3)
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
-    client.post(f"/api/games/{game['id']}/join", headers=ch)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=ch)
 
     # Ben leaves → Ana (host) is told a spot opened.
     client.post(f"/api/games/{game['id']}/leave", headers=bh)
@@ -2265,7 +2266,7 @@ def test_reschedule_game(client):
     ah, bh = auth_headers(a['token']), auth_headers(b['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=3)
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
     client.post(f"/api/games/{game['id']}/attend", headers=bh)  # Ben confirms
 
     new_when = (utcnow() + timedelta(days=1)).isoformat() + 'Z'
@@ -2298,8 +2299,8 @@ def test_host_removes_player(client):
     ah, bh, ch = auth_headers(a['token']), auth_headers(b['token']), auth_headers(c['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=2)  # max 4
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
-    client.post(f"/api/games/{game['id']}/join", headers=ch)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=ch)
 
     # Non-host can't remove anyone.
     assert client.post(f"/api/games/{game['id']}/remove/{c['user']['id']}",
@@ -2323,14 +2324,14 @@ def test_host_removes_player(client):
     # A removed spot pulls from the waitlist: fill the game, waitlist Ben, remove Cam.
     d = register(client, 'd@example.com', 'Dee')
     e = register(client, 'e@example.com', 'Eve')
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(d['token']))
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(e['token']))  # now full: a,c,d,e
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(d['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(e['token']))  # now full: a,c,d,e
     client.post(f"/api/games/{game['id']}/waitlist", headers=bh)
     client.post(f"/api/games/{game['id']}/remove/{c['user']['id']}", headers=ah)
     players = {p['user_id'] for p in client.get(f"/api/games/{game['id']}", headers=ah).get_json()['players']}
     assert b['user']['id'] not in players and c['user']['id'] not in players
     assert client.get(f"/api/games/{game['id']}", headers=bh).get_json()['waitlist_offer']
-    accepted = client.post(f"/api/games/{game['id']}/waitlist/respond", headers=bh, json={'accept': True})
+    accepted = post_reviewed_game(client, f"/api/games/{game['id']}/waitlist/respond", headers=bh, json={'accept': True})
     assert b['user']['id'] in {p['user_id'] for p in accepted.get_json()['players']}
 
 
@@ -2387,7 +2388,7 @@ def test_peak_rating(client, app):
 
     def ranked(a_wins):
         game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
-        client.post(f"/api/games/{game['id']}/join", headers=bh)
+        post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
         client.post(f"/api/games/{game['id']}/complete", json={
             'team1': [a['user']['id']], 'team2': [b['user']['id']],
             'score_team1': 11 if a_wins else 4, 'score_team2': 4 if a_wins else 11,
@@ -2414,7 +2415,7 @@ def test_peak_rating(client, app):
     while client.get('/api/me', headers=ah).get_json()['user']['rating'] < 1305 and n < 15:
         opp = register(client, f'opp{n}@example.com', f'Opp{n}')
         game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
-        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(opp['token']))
+        post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(opp['token']))
         client.post(f"/api/games/{game['id']}/complete", json={
             'team1': [a['user']['id']], 'team2': [opp['user']['id']],
             'score_team1': 11, 'score_team2': 5,
@@ -2445,7 +2446,7 @@ def test_badge_earned_notification(client):
 
     # Win a game → 'first_win' badge earned; next stats load congratulates once.
     game = make_game(client, a['token'], court_id, hours_ahead=1)
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
     client.post(f"/api/games/{game['id']}/complete", json={
         'team1': [a['user']['id']], 'team2': [b['user']['id']],
         'score_team1': 11, 'score_team2': 3,
@@ -2564,7 +2565,7 @@ def test_weekly_recap_notification(client, app):
 
     # A ranked win, then shift it into last ISO week.
     game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
     client.post(f"/api/games/{game['id']}/complete", json={
         'team1': [a['user']['id']], 'team2': [b['user']['id']],
         'score_team1': 11, 'score_team2': 6,
@@ -2612,7 +2613,7 @@ def test_attendance_confirmation(client, app):
     ah, bh = auth_headers(a['token']), auth_headers(b['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=3)
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
 
     # Creating and joining are the RSVP: nobody is asked to confirm twice.
     detail = client.get(f"/api/games/{game['id']}", headers=ah).get_json()
@@ -2676,7 +2677,7 @@ def test_game_chat_unread_badge(client):
     ah, bh = auth_headers(a['token']), auth_headers(b['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=2)
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
 
     def unread(headers):
         mine = client.get('/api/games?mine=1', headers=headers).get_json()['items']
@@ -2946,12 +2947,12 @@ def test_visibility_join_guards(client):
                           invite_user_ids=[invitee['user']['id']])
 
     # Stranger cannot join a private game they weren't invited to
-    res = client.post(f"/api/games/{private_g['id']}/join", headers=auth_headers(stranger['token']))
+    res = post_reviewed_game(client, f"/api/games/{private_g['id']}/join", headers=auth_headers(stranger['token']))
     assert res.status_code == 403
     assert res.get_json()['error'] == 'not_invited'
 
     # Invitee can join
-    res = client.post(f"/api/games/{private_g['id']}/join", headers=auth_headers(invitee['token']))
+    res = post_reviewed_game(client, f"/api/games/{private_g['id']}/join", headers=auth_headers(invitee['token']))
     assert res.status_code == 200
 
     # Friends-only game: non-friend stranger cannot join
@@ -2964,7 +2965,7 @@ def test_visibility_join_guards(client):
         json={'accept': True}, headers=auth_headers(invitee['token']),
     )
     friends_g = make_game(client, a['token'], court_id, visibility='friends')
-    res = client.post(f"/api/games/{friends_g['id']}/join", headers=auth_headers(stranger['token']))
+    res = post_reviewed_game(client, f"/api/games/{friends_g['id']}/join", headers=auth_headers(stranger['token']))
     assert res.status_code == 403
 
 
@@ -3066,7 +3067,7 @@ def test_friends_digest(client):
     # Ben plays Cam twice this week: one win, one loss.
     def play(ben_wins):
         game = make_game(client, b['token'], larson, hours_ahead=1)
-        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(c['token']))
+        post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(c['token']))
         res = client.post(f"/api/games/{game['id']}/complete", json={
             'team1': [b['user']['id']], 'team2': [c['user']['id']],
             'score_team1': 11 if ben_wins else 4,
@@ -3118,7 +3119,7 @@ def test_my_stats(client):
 
     def play(court_id):
         g = make_game(client, a['token'], court_id, hours_ahead=1)
-        client.post(f"/api/games/{g['id']}/join", headers=auth_headers(b['token']))
+        post_reviewed_game(client, f"/api/games/{g['id']}/join", headers=auth_headers(b['token']))
         res = client.post(f"/api/games/{g['id']}/complete", json={
             'team1': [a['user']['id']], 'team2': [b['user']['id']],
             'score_team1': 11, 'score_team2': 4,
@@ -3145,7 +3146,7 @@ def test_my_stats(client):
     d = register(client, 'd@example.com', 'Dee')
     doubles = make_game(client, a['token'], larson, hours_ahead=1)
     for u in (b, c, d):
-        client.post(f"/api/games/{doubles['id']}/join", headers=auth_headers(u['token']))
+        post_reviewed_game(client, f"/api/games/{doubles['id']}/join", headers=auth_headers(u['token']))
     client.post(f"/api/games/{doubles['id']}/complete", json={
         'team1': [a['user']['id'], c['user']['id']],
         'team2': [b['user']['id'], d['user']['id']],
@@ -3163,7 +3164,7 @@ def test_my_stats(client):
 
     # One confirmed ranked win draws the first trajectory segment.
     ranked = make_game(client, a['token'], larson, game_type='ranked', hours_ahead=1)
-    client.post(f"/api/games/{ranked['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{ranked['id']}/join", headers=auth_headers(b['token']))
     client.post(f"/api/games/{ranked['id']}/complete", json={
         'team1': [a['user']['id']], 'team2': [b['user']['id']],
         'score_team1': 11, 'score_team2': 9,
@@ -3256,7 +3257,7 @@ def test_delete_account(client, app):
     fid = client.post('/api/friends/request', json={'user_id': b['user']['id']}, headers=ah).get_json()['friendship_id']
     client.post(f'/api/friends/{fid}/respond', json={'accept': True}, headers=bh)
     game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
     client.post(f"/api/games/{game['id']}/complete", json={
         'team1': [a['user']['id']], 'team2': [b['user']['id']],
         'score_team1': 11, 'score_team2': 7,
@@ -3265,7 +3266,7 @@ def test_delete_account(client, app):
 
     # Ana also hosts an upcoming game that Ben joined.
     upcoming = make_game(client, a['token'], court_id, hours_ahead=24)
-    client.post(f"/api/games/{upcoming['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{upcoming['id']}/join", headers=bh)
 
     # Wrong password → 403, account untouched (and no session-expired logout).
     assert client.delete('/api/me', json={'password': 'wrong'}, headers=ah).status_code == 403
@@ -3546,7 +3547,7 @@ def test_block_is_two_way_profile_court_notification_and_game_boundary(client):
     ).get_json()['items']
     assert all(item['id'] != game['id'] for item in feed)
     assert client.get(f"/api/games/{game['id']}", headers=vh).status_code == 404
-    assert client.post(f"/api/games/{game['id']}/join", headers=vh).status_code == 404
+    assert post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=vh).status_code == 404
 
     # Once the only block is removed, normal discovery returns; no hidden
     # friendship or stale request is resurrected.
@@ -3557,7 +3558,7 @@ def test_block_is_two_way_profile_court_notification_and_game_boundary(client):
     assert client.get('/api/friends', headers=vh).get_json() == {
         'friends': [], 'incoming': [], 'outgoing': [],
     }
-    assert client.post(f"/api/games/{game['id']}/join", headers=vh).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=vh).status_code == 200
 
 
 def test_reciprocal_friend_request_is_one_atomic_accepted_relationship(client):
@@ -3599,7 +3600,7 @@ def test_blocked_pair_cannot_be_assembled_into_the_same_new_game(client):
     hh = auth_headers(host['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, host['token'], court_id, visibility='open')
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth_headers(player['token']),
     ).status_code == 200
     assert client.post(
@@ -3615,7 +3616,7 @@ def test_blocked_pair_cannot_be_assembled_into_the_same_new_game(client):
     assert invite.get_json()['skipped'] == [{
         'user_id': target['user']['id'], 'reason': 'user_blocked',
     }]
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth_headers(target['token']),
     ).status_code == 404
 
@@ -3644,7 +3645,7 @@ def test_head_to_head_on_profile(client):
 
     def play(winner, loser, winner_token):
         g = make_game(client, winner_token, court_id, game_type='ranked', hours_ahead=1)
-        client.post(f"/api/games/{g['id']}/join", headers=bh if winner_token == a['token'] else ah)
+        post_reviewed_game(client, f"/api/games/{g['id']}/join", headers=bh if winner_token == a['token'] else ah)
         res = client.post(f"/api/games/{g['id']}/complete", json={
             'team1': [winner['user']['id']], 'team2': [loser['user']['id']],
             'score_team1': 11, 'score_team2': 6,
@@ -3679,7 +3680,7 @@ def test_head_to_head_on_profile(client):
     d = register(client, 'd@example.com', 'Dee')
     doubles = make_game(client, a['token'], court_id, hours_ahead=1)
     for u in (b, c, d):
-        client.post(f"/api/games/{doubles['id']}/join", headers=auth_headers(u['token']))
+        post_reviewed_game(client, f"/api/games/{doubles['id']}/join", headers=auth_headers(u['token']))
     res = client.post(f"/api/games/{doubles['id']}/complete", json={
         'team1': [a['user']['id'], b['user']['id']],
         'team2': [c['user']['id'], d['user']['id']],
@@ -4010,7 +4011,7 @@ def test_game_chat(client):
     c = register(client, 'c@example.com', 'Cam')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id)
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
 
     # Players only: outsiders and anonymous get rejected; bad game 404s.
     assert client.get(f"/api/games/{game['id']}/chat").status_code == 401
@@ -4049,7 +4050,7 @@ def test_competition_chat_inbox_is_complete_private_and_recency_sorted(client):
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
 
     game = make_game(client, ana['token'], court_id)
-    assert client.post(f"/api/games/{game['id']}/join", headers=bh).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh).status_code == 200
     tournament = make_tournament(client, ana['token'], court_id)
     _register_entry(client, tournament['id'], ana['token'])
     _register_entry(client, tournament['id'], ben['token'])
@@ -4156,7 +4157,7 @@ def test_game_chat_notifications(client):
     ah, bh = auth_headers(a['token']), auth_headers(b['token'])
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id)
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
 
     def pings(headers):
         notes = client.get('/api/notifications', headers=headers).get_json()
@@ -4219,7 +4220,7 @@ def test_challenge(client):
     challenge = [n for n in notes['items'] if n['kind'] == 'challenge'][0]
     assert challenge['related_game_id'] == game['id']
 
-    res = client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    res = post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
     assert res.get_json()['spots_left'] == 0
 
 
@@ -4231,6 +4232,10 @@ def post_with_schedule_review(client, path, **kwargs):
     Exercise the same explicit second request as Keep both plans in the UI;
     never suppress a conflict or change production scheduling behavior.
     """
+    if path.endswith('/join'):
+        viewed = client.get(path.removesuffix('/join'), headers=kwargs.get('headers')).get_json()
+        if viewed.get('plan_token'):
+            kwargs = {**kwargs, 'json': {**(kwargs.get('json') or {}), 'expected_plan_token': viewed['plan_token']}}
     response = client.post(path, **kwargs)
     if response.status_code == 409 and response.get_json().get('error') == 'schedule_conflict':
         body = dict(kwargs.get('json') or {})
@@ -4338,7 +4343,7 @@ def test_instant_rally_creates_once_and_invites_only_ready_same_court_players(cl
     assert changed.status_code == 409
     assert changed.get_json() == {'error': 'client_attempt_id_conflict'}
 
-    joined = client.post(f"/api/games/{game['id']}/join", headers=headers['Ready'])
+    joined = post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=headers['Ready'])
     assert joined.status_code == 200
     assert {p['user_id'] for p in joined.get_json()['players']} == {
         host['user']['id'], ready['user']['id'],
@@ -4435,8 +4440,8 @@ def test_instant_rally_joins_existing_live_game_instead_of_creating_a_duplicate(
                 headers=auth_headers(cam['token']))
     client.post(f'/api/courts/{court_id}/checkin', json={},
                 headers=auth_headers(dee['token']))
-    assert client.post(f'/api/games/{game_id}/join', headers=auth_headers(cam['token'])).status_code == 200
-    assert client.post(f'/api/games/{game_id}/join', headers=auth_headers(dee['token'])).status_code == 200
+    assert post_reviewed_game(client, f'/api/games/{game_id}/join', headers=auth_headers(cam['token'])).status_code == 200
+    assert post_reviewed_game(client, f'/api/games/{game_id}/join', headers=auth_headers(dee['token'])).status_code == 200
     replay = client.post('/api/games/rally', json=payload, headers=bh)
     assert replay.status_code == 200
     assert replay.get_json()['game']['id'] == game_id
@@ -4710,7 +4715,7 @@ def test_play_now_provenance_summary_assembly_capacity_and_deep_links(client):
     for person, expected_state in ((third, 'ready'), (fourth, 'full')):
         headers = auth_headers(person['token'])
         client.post(f"/api/courts/{court['id']}/checkin", json={}, headers=headers)
-        response = client.post(f"/api/games/{game['id']}/join", headers=headers)
+        response = post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=headers)
         assert response.status_code == 200, response.get_json()
         assert response.get_json()['assembly_state'] == expected_state
 
@@ -4735,12 +4740,12 @@ def test_play_now_provenance_summary_assembly_capacity_and_deep_links(client):
         f"/api/courts/{court['id']}/checkin", json={},
         headers=overflow_headers,
     )
-    full = client.post(f"/api/games/{game['id']}/join", headers=overflow_headers)
+    full = post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=overflow_headers)
     assert full.status_code == 400
     assert full.get_json() == {'error': 'game_full'}
     # Membership is authoritative before capacity/presence on a retry.
     client.post('/api/checkout', headers=auth_headers(fourth['token']))
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join",
         headers=auth_headers(fourth['token']),
     ).status_code == 200
@@ -4780,7 +4785,7 @@ def test_instant_join_requires_exact_presence_and_one_active_rally(client):
         headers=auth_headers(first_host['token']),
     )
 
-    no_presence = client.post(
+    no_presence = post_reviewed_game(client,
         f"/api/games/{first['id']}/join", headers=actor_headers,
     )
     assert no_presence.status_code == 409
@@ -4789,7 +4794,7 @@ def test_instant_join_requires_exact_presence_and_one_active_rally(client):
     }
 
     client.post(f'/api/courts/{adorni}/checkin', json={}, headers=actor_headers)
-    mismatch = client.post(
+    mismatch = post_reviewed_game(client,
         f"/api/games/{first['id']}/join", headers=actor_headers,
     )
     assert mismatch.status_code == 409
@@ -4800,17 +4805,17 @@ def test_instant_join_requires_exact_presence_and_one_active_rally(client):
     }
 
     client.post(f'/api/courts/{larson}/checkin', json={}, headers=actor_headers)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{first['id']}/join", headers=actor_headers,
     ).status_code == 200
     client.post('/api/checkout', headers=actor_headers)
     # Exact target membership is an idempotent read even after presence ends.
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{first['id']}/join", headers=actor_headers,
     ).status_code == 200
 
     client.post(f'/api/courts/{adorni}/checkin', json={}, headers=actor_headers)
-    conflict = client.post(
+    conflict = post_reviewed_game(client,
         f"/api/games/{second['id']}/join", headers=actor_headers,
     )
     assert conflict.status_code == 409
@@ -5167,7 +5172,7 @@ def test_closed_real_rally_stays_scoreable_but_never_resurrects(client):
         f"/api/courts/{larson['id']}/checkin", json={},
         headers=ghost_headers,
     )
-    moved = client.post(
+    moved = post_reviewed_game(client,
         f"/api/games/{replacement_game['id']}/join", headers=ghost_headers,
     )
     assert moved.status_code == 200, moved.get_json()
@@ -5184,7 +5189,7 @@ def test_closed_real_rally_stays_scoreable_but_never_resurrects(client):
         f"/api/courts/{adorni['id']}/checkin", json={},
         headers=ghost_new_headers,
     )
-    recent_ghost = client.post(
+    recent_ghost = post_reviewed_game(client,
         f"/api/games/{ghost['id']}/join", headers=ghost_new_headers,
     )
     assert recent_ghost.status_code == 404
@@ -5193,7 +5198,7 @@ def test_closed_real_rally_stays_scoreable_but_never_resurrects(client):
     ghost_row = db.session.get(Game, ghost['id'])
     ghost_row.scheduled_at = utcnow() - timedelta(minutes=91)
     db.session.commit()
-    expired_tap = client.post(
+    expired_tap = post_reviewed_game(client,
         f"/api/games/{ghost['id']}/join", headers=ghost_new_headers,
     )
     assert expired_tap.status_code == 404
@@ -5233,7 +5238,7 @@ def test_presence_lapse_closes_assembly_before_replacement_and_blocks_invites(cl
         'client_attempt_id': 'lapse-old-host',
     }, headers=host_headers).get_json()['game']
     client.post(f'/api/courts/{court_id}/checkin', json={}, headers=mate_headers)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{old['id']}/join", headers=mate_headers,
     ).status_code == 200
     client.post('/api/checkout', headers=host_headers)
@@ -5330,7 +5335,7 @@ def test_roster_removal_closes_instant_rally_when_no_present_member_remains(clie
         'client_attempt_id': 'removal-close-leave-old',
     }, headers=host_headers).get_json()['game']
     client.post(f'/api/courts/{larson}/checkin', json={}, headers=mate_headers)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{old['id']}/join", headers=mate_headers,
     ).status_code == 200
 
@@ -5364,7 +5369,7 @@ def test_roster_removal_closes_instant_rally_when_no_present_member_remains(clie
         'client_attempt_id': 'removal-close-remove-old',
     }, headers=remover_headers).get_json()['game']
     client.post(f'/api/courts/{adorni}/checkin', json={}, headers=present_headers)
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{removable['id']}/join", headers=present_headers,
     ).status_code == 200
 
@@ -5406,7 +5411,7 @@ def test_account_deletion_closes_instant_rally_after_last_presence_is_removed(cl
     client.post(
         f'/api/courts/{court_id}/checkin', json={}, headers=deleting_headers,
     )
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{old['id']}/join", headers=deleting_headers,
     ).status_code == 200
 
@@ -5450,7 +5455,7 @@ def test_instant_score_submission_serializes_against_leave_and_duplicate_scores(
         'client_attempt_id': 'score-lock-rally',
     }, headers=host_headers).get_json()['game']
     client.post(f'/api/courts/{court_id}/checkin', json={}, headers=mate_headers)
-    client.post(f"/api/games/{game['id']}/join", headers=mate_headers)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=mate_headers)
     score = {
         'team1': [host['user']['id']],
         'team2': [mate['user']['id']],
@@ -5687,7 +5692,7 @@ def test_instant_rally_discovery_redacts_live_location_and_roster(client):
         host['user']['id'], mate['user']['id'],
     }
 
-    local_join = client.post(
+    local_join = post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=outsider_headers,
     )
     assert local_join.status_code == 200, local_join.get_json()
@@ -5743,7 +5748,7 @@ def test_instant_rally_rejects_and_clears_legacy_waitlist(client):
     for member in members:
         headers = auth_headers(member['token'])
         client.post(f'/api/courts/{court_id}/checkin', json={}, headers=headers)
-        assert client.post(
+        assert post_reviewed_game(client,
             f"/api/games/{game['id']}/join", headers=headers,
         ).status_code == 200
 
@@ -6180,7 +6185,7 @@ def test_game_create_join_leave(client):
     assert game['players'][0]['display_name'] == 'Ana'
     assert game['spots_left'] == 3
 
-    res = client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    res = post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
     assert res.status_code == 200
     assert res.get_json()['spots_left'] == 2
 
@@ -6217,7 +6222,7 @@ def test_game_mvp_votes(client):
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, hours_ahead=1)
     for u in (b, c, d):
-        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(u['token']))
+        post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(u['token']))
 
     # Voting before the game finishes is rejected.
     assert client.post(f"/api/games/{game['id']}/mvp", json={'user_id': b['user']['id']},
@@ -6273,10 +6278,10 @@ def test_game_waitlist(client):
         'scheduled_at': (utcnow() + timedelta(hours=5)).isoformat() + 'Z',
         'game_type': 'casual', 'max_players': 2,
     }, headers=auth_headers(a['token'])).get_json()
-    assert client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token'])).status_code == 200
+    assert post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token'])).status_code == 200
 
     # Not-full guard, then Cam and Dee queue up in order.
-    assert client.post(f"/api/games/{game['id']}/join",
+    assert post_reviewed_game(client, f"/api/games/{game['id']}/join",
                        headers=auth_headers(c['token'])).get_json()['error'] == 'game_full'
     res = client.post(f"/api/games/{game['id']}/waitlist", headers=auth_headers(c['token']))
     assert res.status_code == 200 and res.get_json()['waitlist_position'] == 1
@@ -6293,7 +6298,7 @@ def test_game_waitlist(client):
     client.post(f"/api/games/{game['id']}/leave", headers=auth_headers(b['token']))
     detail = client.get(f"/api/games/{game['id']}", headers=auth_headers(c['token'])).get_json()
     assert detail['is_joined'] is False and detail['waitlist_offer']
-    detail = client.post(f"/api/games/{game['id']}/waitlist/respond", headers=auth_headers(c['token']), json={'accept': True}).get_json()
+    detail = post_reviewed_game(client, f"/api/games/{game['id']}/waitlist/respond", headers=auth_headers(c['token']), json={'accept': True}).get_json()
     assert detail['is_joined'] is True and detail['waitlist_position'] is None
     assert detail['waitlist_count'] == 1
     notes = client.get('/api/notifications', headers=auth_headers(c['token'])).get_json()
@@ -6316,8 +6321,8 @@ def test_game_full(client):
     game = make_game(client, a['token'], court_id)
     tokens = [register(client, f'p{i}@example.com', f'P{i}')['token'] for i in range(4)]
     for token in tokens[:3]:
-        assert client.post(f"/api/games/{game['id']}/join", headers=auth_headers(token)).status_code == 200
-    res = client.post(f"/api/games/{game['id']}/join", headers=auth_headers(tokens[3]))
+        assert post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(token)).status_code == 200
+    res = post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(tokens[3]))
     assert res.status_code == 400
     assert res.get_json()['error'] == 'game_full'
 
@@ -6331,7 +6336,7 @@ def setup_ranked_doubles(client):
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id, game_type='ranked')
     for player in (b, c, d):
-        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(player['token']))
+        post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(player['token']))
     return {'a': a, 'b': b, 'c': c, 'd': d}, game, court_id
 
 
@@ -6499,7 +6504,7 @@ def test_challenge_banner_and_decline(client):
 
     # Accepting a challenge turns it into a live game for both
     game3 = client.post(f"/api/users/{b['user']['id']}/challenge", json={'court_id': court_id}, headers=auth_headers(a['token'])).get_json()
-    client.post(f"/api/games/{game3['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game3['id']}/join", headers=auth_headers(b['token']))
     me_b = client.get('/api/me', headers=auth_headers(b['token'])).get_json()
     assert me_b['active_game']['id'] == game3['id']
     assert me_b['active_game']['banner_state'] == 'live'
@@ -6547,7 +6552,7 @@ def test_direct_game_invites(client):
 
     # Joining clears the invite state. Because this session is more than an
     # hour away it stays in My schedule instead of the persistent banner.
-    joined = client.post(
+    joined = post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=auth_headers(b['token']),
     )
     assert joined.status_code == 200
@@ -6672,7 +6677,7 @@ def test_monthly_leaderboard(client, app):
 
     def ranked_win(winner_tok, loser, confirm_headers):
         g = make_game(client, winner_tok, court_id, game_type='ranked', hours_ahead=1)
-        client.post(f"/api/games/{g['id']}/join", headers=confirm_headers)
+        post_reviewed_game(client, f"/api/games/{g['id']}/join", headers=confirm_headers)
         me = client.get('/api/me', headers=auth_headers(winner_tok)).get_json()['user']
         client.post(f"/api/games/{g['id']}/complete", json={
             'team1': [me['id']], 'team2': [loser['user']['id']],
@@ -6804,7 +6809,7 @@ def test_results_feed_filters_rankings_by_scope_type_and_period(client, app):
     casual_host = register(client, 'results-casual-host@example.com', 'Casual Host')
     casual_guest = register(client, 'results-casual-guest@example.com', 'Casual Guest')
     casual = make_game(client, casual_host['token'], court_id, game_type='casual')
-    client.post(
+    post_reviewed_game(client,
         f"/api/games/{casual['id']}/join",
         headers=auth_headers(casual_guest['token']),
     )
@@ -6842,7 +6847,7 @@ def test_complete_validation(client):
     b = register(client, 'b@example.com')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id)
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
 
     res = client.post(f"/api/games/{game['id']}/complete", json={
         'team1': [a['user']['id']],
@@ -8118,7 +8123,7 @@ def test_stats_insights(client):
 
     def play(score_a, score_b):
         game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
-        client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+        post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
         client.post(f"/api/games/{game['id']}/complete", json={
             'team1': [a['user']['id']], 'team2': [b['user']['id']],
             'score_team1': score_a, 'score_team2': score_b,
@@ -8295,7 +8300,7 @@ def test_leaderboard_shows_title_counts(client):
 
     # Get both on the board with one ranked game
     game = make_game(client, a['token'], court_id, game_type='ranked', hours_ahead=1)
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
     client.post(f"/api/games/{game['id']}/complete", json={
         'team1': [a['user']['id']], 'team2': [b['user']['id']],
         'score_team1': 11, 'score_team2': 4,
@@ -8462,7 +8467,7 @@ def test_decline_game_invite(client):
     # A joined player can't "decline" (invite + join edge)
     game2 = make_game(client, a['token'], court_id, visibility='private',
                       invite_user_ids=[b['user']['id']])
-    client.post(f"/api/games/{game2['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game2['id']}/join", headers=auth_headers(b['token']))
     assert client.post(f"/api/games/{game2['id']}/invites/decline",
                        headers=auth_headers(b['token'])).status_code == 400
 
@@ -8591,7 +8596,7 @@ def test_cancel_stale_unplayed_game(client):
     b = register(client, 'b@example.com', 'Ben')
     court_id = client.get('/api/courts?q=larson').get_json()['items'][0]['id']
     game = make_game(client, a['token'], court_id)
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(b['token']))
 
     # Time-travel the start into yesterday (in-context; then assert via HTTP,
     # which is safe here since we mutate before any dependent reads)
@@ -10087,7 +10092,7 @@ def test_room_photo_messages_and_authz(client):
     game = client.post('/api/games', json={
         'court_id': court_id, 'scheduled_at': (utcnow() + timedelta(days=1)).isoformat() + 'Z',
     }, headers=ah).get_json()
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
     res = client.post(f"/api/games/{game['id']}/chat", json={'image': img}, headers=bh)
     assert res.status_code == 201
     assert client.get(f"/api/messages/{res.get_json()['id']}/image",
@@ -10232,7 +10237,7 @@ def test_share_preview_pages(client):
         'court_id': court_id, 'scheduled_at': when,
     }, headers=ah).get_json()
     bh = auth_headers(b['token'])
-    client.post(f"/api/games/{played['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{played['id']}/join", headers=bh)
     client.post(f"/api/games/{played['id']}/complete", json={
         'team1': [a['user']['id']], 'team2': [b['user']['id']],
         'score_team1': 11, 'score_team2': 6,
@@ -10452,7 +10457,7 @@ def test_streak_nag(client, app):
 
     # Ana played a completed game; shift it into last ISO week.
     game = make_game(client, a['token'], court_id, hours_ahead=1)
-    client.post(f"/api/games/{game['id']}/join", headers=bh)
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=bh)
     client.post(f"/api/games/{game['id']}/complete", json={
         'team1': [a['user']['id']], 'team2': [b['user']['id']],
         'score_team1': 11, 'score_team2': 7,
@@ -11184,7 +11189,7 @@ def test_completed_game_crew_is_actual_roster_scoped_and_connection_aware(client
         'max_players': 6,
     }, headers=host_headers).get_json()
     for person in (friend, incoming, outgoing, no_show):
-        assert client.post(
+        assert post_reviewed_game(client,
             f"/api/games/{game['id']}/join", headers=auth_headers(person['token']),
         ).status_code == 200
 
@@ -11291,7 +11296,7 @@ def test_private_game_details_and_profile_history_require_visibility(client):
     assert client.get(
         f"/api/games/{game['id']}", headers=auth_headers(invitee['token']),
     ).status_code == 200
-    client.post(f"/api/games/{game['id']}/join", headers=auth_headers(invitee['token']))
+    post_reviewed_game(client, f"/api/games/{game['id']}/join", headers=auth_headers(invitee['token']))
     completed = client.post(f"/api/games/{game['id']}/complete", json={
         'team1': [host['user']['id']],
         'team2': [invitee['user']['id']],

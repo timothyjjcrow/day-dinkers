@@ -1,4 +1,5 @@
 """A material plan change retains a place without silently renewing consent."""
+from tests.session_plan_helpers import post_reviewed_game
 from datetime import timedelta
 import pytest
 from tests.test_game_planning_fields import app, client, register, auth, create_payload
@@ -9,7 +10,7 @@ def joined_plan(client, **fields):
     host=register(client)
     guest=client.post('/api/auth/register',json={'email':'guest@example.test','display_name':'Guest','password':'synthetic-password'}).get_json()
     game=client.post('/api/games',headers=auth(host),json=create_payload(cost_cents=0,**fields)).get_json()
-    assert client.post(f"/api/games/{game['id']}/join",headers=auth(guest),json={}).status_code==200
+    assert post_reviewed_game(client, f"/api/games/{game['id']}/join",headers=auth(guest),json={}).status_code==200
     return host,guest,game
 
 
@@ -70,7 +71,7 @@ def test_following_date_edit_preserves_prior_confirmation(client):
     dates=Game.query.filter_by(recurrence_series_id=game['id']).order_by(Game.scheduled_at).all()
     # Join a second dated occurrence explicitly, then change that and future dates.
     later=dates[1]
-    assert client.post(f'/api/games/{later.id}/join',headers=auth(guest),json={}).status_code==200
+    assert post_reviewed_game(client, f'/api/games/{later.id}/join',headers=auth(guest),json={}).status_code==200
     changed=client.patch(f'/api/games/{later.id}',headers=auth(host),json={'edit_scope':'following_dates','cost_cents':800})
     assert changed.status_code==200,changed.get_json()
     earlier=client.get(f"/api/games/{game['id']}",headers=auth(guest)).get_json()
@@ -88,7 +89,7 @@ def test_host_handoff_cannot_accept_a_changed_plan_for_the_player(client, scope)
     if scope == 'following_dates':
         dates = Game.query.filter_by(recurrence_series_id=game['id']).order_by(Game.scheduled_at).all()
         changed_id = dates[1].id
-        assert client.post(f'/api/games/{changed_id}/join', headers=auth(guest), json={}).status_code == 200
+        assert post_reviewed_game(client, f'/api/games/{changed_id}/join', headers=auth(guest), json={}).status_code == 200
     proposal = client.post(path+'/host-handoff', headers=auth(host), json={
         'target_user_id': guest['user']['id'], 'edit_scope': scope, 'leave_on_accept': True,
     })

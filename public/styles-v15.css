@@ -7429,3 +7429,13 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .session-roster-group h5 > span { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .attendance-confirmation-actions .btn { min-height: 44px; }
 .attendance-confirmation-actions .btn-secondary { background: transparent; color: var(--ink-soft); }
+
+.entry-plan-review { display: grid; gap: 14px; padding: 4px 0; }
+.entry-plan-review h2 { margin: 0; font-size: 24px; line-height: 1.2; overflow-wrap: anywhere; }
+.entry-plan-when, .entry-plan-court { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; }
+.entry-plan-when .ui-icon, .entry-plan-court .ui-icon { flex: 0 0 20px; width: 20px; height: 20px; color: var(--green-accent); }
+.entry-plan-court small { display: block; color: var(--ink-soft); }
+.entry-plan-review .session-visit-facts { margin: 0; padding: 14px; border-radius: var(--radius-md); background: var(--green-50); }
+.entry-plan-players { padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.entry-plan-players p { color: var(--ink-soft); line-height: 1.5; overflow-wrap: anywhere; margin: 6px 0 0; }
+.entry-plan-actions { display: grid; gap: 8px; }

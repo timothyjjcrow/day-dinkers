@@ -1,4 +1,5 @@
 """Creator-only, in-place scheduled game editing contracts."""
+from tests.session_plan_helpers import post_reviewed_game
 
 from datetime import timedelta
 
@@ -108,7 +109,7 @@ def test_host_edits_full_game_promotes_fifo_and_moves_typed_court_post(client):
     call_id = posted.get_json()['open_call']['id']
     message_id = posted.get_json()['open_call']['court_message_id']
 
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=headers(player),
     ).status_code == 200
     queued = client.post(
@@ -145,7 +146,7 @@ def test_host_edits_full_game_promotes_fifo_and_moves_typed_court_post(client):
         host['user']['id'], player['user']['id'],
     }
     assert body['waitlist_count'] == 1
-    accepted = client.post(f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=headers(waiter))
+    accepted = post_reviewed_game(client, f"/api/games/{game['id']}/waitlist/respond", json={'accept': True}, headers=headers(waiter))
     assert accepted.status_code == 200, accepted.get_json()
     assert accepted.get_json()['is_joined']
 
@@ -207,7 +208,7 @@ def test_edit_validation_prevents_data_loss_and_only_allows_visibility_widening(
         'max_players': 2,
         'invite_user_ids': [invitee['user']['id']],
     }, headers=headers(host)).get_json()
-    assert client.post(
+    assert post_reviewed_game(client,
         f"/api/games/{game['id']}/join", headers=headers(invitee),
     ).status_code == 200
 
