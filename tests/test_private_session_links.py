@@ -67,7 +67,8 @@ def test_opening_invitation_then_joining_are_distinct_and_idempotent(setup):
     assert GameInvite.query.count() == 1 and GamePlayer.query.count() == 1
     detail = client.get(path, headers=accounts[1][1]).get_json()
     assert len(detail['players']) == 1
-    response = client.post(path+'/join', headers=accounts[1][1], json={})
+    response = client.post(path+'/join', headers=accounts[1][1],
+                           json={'expected_plan_token': detail['plan_token']})
     assert response.status_code == 200 and response.get_json()['is_joined']
     assert GamePlayer.query.count() == 2
     # Revocation closes the link; a previously accepted invitation/RSVP stays.

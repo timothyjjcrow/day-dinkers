@@ -19,7 +19,7 @@ app=create_app('testing')
 
 @app.after_request
 def source_assets(response):
-    if request.path == '/':
+    if request.path == '/' and os.environ.get('DISCOVERY_RELEASE_ASSETS') != '1':
         response.direct_passthrough=False
         response.set_data(re.sub(r'/release-assets/r\d+/([\w-]+)\.min\.(js|css)',
             r'/\1.\2',response.get_data(as_text=True)))

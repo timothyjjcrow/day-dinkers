@@ -34,7 +34,7 @@ if not _disposable_database_selected():
                 allow_module_level=True)
 
 from backend.app import create_app, db
-from backend.models import Court, Game, GamePlayer, User, utcnow
+from backend.models import Court, Game, GamePlayer, GameWaitlist, User, utcnow
 from backend.routes.auth import _issue_token
 from backend.routes import games as game_routes
 
@@ -120,7 +120,10 @@ def test_same_player_overlapping_commitments_serialize_before_review(fixture, op
             requests.append(('POST', '/api/games', _create_payload(data, f'pg-create-race-{index}')))
         else:
             target = _seed_game(data, index + 1, data['start'])
-            requests.append(('POST', f'/api/games/{target}/join', {}))
+            status, viewed = _request(data, 'GET', f'/api/games/{target}', None)
+            assert status == 200
+            requests.append(('POST', f'/api/games/{target}/join',
+                             {'expected_plan_token': viewed['plan_token']}))
     barrier = threading.Barrier(2)
     first_locked = threading.Event()
     release = threading.Event()
@@ -187,6 +190,8 @@ def test_following_date_edit_rechecks_roster_after_concurrent_join(fixture, monk
             recurrence_series_id=root_id).all()}
     # Joining the original date is conflict-free; moving the series by 90 minutes is not.
     _seed_game(data, 1, original + timedelta(minutes=90), visibility='private')
+    status, viewed = _request(data, 'GET', f'/api/games/{following_id}', None, actor=1)
+    assert status == 200
     join_locked = threading.Event()
     edit_attempted_lock = threading.Event()
     release_join = threading.Event()
@@ -234,7 +239,7 @@ def test_following_date_edit_rechecks_roster_after_concurrent_join(fixture, monk
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix='pg-join') as joins, \
                 ThreadPoolExecutor(max_workers=1, thread_name_prefix='pg-edit') as edits:
             joined = joins.submit(_request, data, 'POST', f'/api/games/{following_id}/join',
-                                  {'standing_rsvp': False}, 1)
+                                  {'standing_rsvp': False, 'expected_plan_token': viewed['plan_token']}, 1)
             try:
                 assert join_locked.wait(timeout=10)
                 edited = edits.submit(_request, data, 'PATCH', f'/api/games/{root_id}', {
@@ -335,3 +340,67 @@ def test_confirmation_waits_for_price_edit_then_rejects_stale_review(fixture, mo
     with data['app'].app_context():
         player=GamePlayer.query.filter_by(game_id=game_id,user_id=data['people'][1]).one()
         assert player.attending_at is None and player.commitment_requested_at is not None
+
+
+@pytest.mark.parametrize('offer', [False, True])
+def test_new_commitment_waits_for_price_edit_and_requires_fresh_review(fixture, monkeypatch, offer):
+    data = fixture
+    game_id = _seed_game(data, 0, data['start'])
+    path = f'/api/games/{game_id}'
+    endpoint = path + ('/waitlist/respond' if offer else '/join')
+    if offer:
+        with data['app'].app_context():
+            db.session.add(GameWaitlist(
+                game_id=game_id, user_id=data['people'][1], offer_status='offered',
+                offered_at=utcnow(), offer_expires_at=utcnow() + timedelta(minutes=10)))
+            db.session.commit()
+    status, viewed = _request(data, 'GET', path, None, actor=1)
+    assert status == 200
+    payload = {'accept': True, 'expected_plan_token': viewed['plan_token']}
+    edit_locked = threading.Event()
+    join_started = threading.Event()
+    release = threading.Event()
+    pids = {}
+    original = game_routes._lock_stable_game_edit_scope
+
+    def pause_edit(game_id, actor_id, **kwargs):
+        result = original(game_id, actor_id, **kwargs)
+        if threading.current_thread().name.startswith('pg-entry-edit'):
+            edit_locked.set()
+            assert release.wait(timeout=15)
+        return result
+
+    def before(connection, cursor, statement, parameters, context, many):
+        if (threading.current_thread().name.startswith('pg-entry-join')
+                and ('FOR UPDATE' in statement or 'FOR NO KEY UPDATE' in statement)):
+            pids['join'] = _backend_pid(connection)
+            join_started.set()
+
+    monkeypatch.setattr(game_routes, '_lock_stable_game_edit_scope', pause_edit)
+    event.listen(data['engine'], 'before_cursor_execute', before)
+    try:
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix='pg-entry-edit') as edits, \
+                ThreadPoolExecutor(max_workers=1, thread_name_prefix='pg-entry-join') as joins:
+            edit = edits.submit(_request, data, 'PATCH', path, {'cost_cents': 1200}, 0)
+            try:
+                assert edit_locked.wait(timeout=10)
+                join = joins.submit(_request, data, 'POST', endpoint, payload, 1)
+                assert join_started.wait(timeout=10)
+                lock = _wait_for_postgres_lock(data['engine'], pids['join'])
+            finally:
+                release.set()
+            assert edit.result(timeout=15)[0] == 200
+            status, body = join.result(timeout=15)
+    finally:
+        release.set()
+        event.remove(data['engine'], 'before_cursor_execute', before)
+    assert status == 409 and body['error'] == 'game_plan_review_required', body
+    assert body['game']['cost_cents'] == 1200 and not body['game']['is_joined']
+    with data['app'].app_context():
+        assert GamePlayer.query.filter_by(game_id=game_id, user_id=data['people'][1]).count() == 0
+        if offer:
+            assert GameWaitlist.query.filter_by(game_id=game_id, user_id=data['people'][1]).one().offer_status == 'offered'
+    accepted = _request(data, 'POST', endpoint,
+                        {**payload, 'expected_plan_token': body['game']['plan_token']}, actor=1)
+    assert accepted[0] == 200 and accepted[1]['is_joined'], accepted
+    print(f'entry offer={offer}: PostgreSQL wait={lock}; stale HTTP=409; reviewed HTTP=200')

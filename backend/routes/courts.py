@@ -1248,6 +1248,7 @@ def court_detail(court_id):
 
 @courts_bp.post('/courts/<int:court_id>/planning-times')
 @login_required
+@rate_limit(60, 60)
 def court_planning_times(court_id):
     """Read-only hours advice; never a court reservation or attendance check."""
     from datetime import datetime
