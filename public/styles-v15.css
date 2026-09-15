@@ -6542,14 +6542,25 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 
 /* Keep discovery controls above results and show each roster count once. */
 .play-discovery-controls-row { margin: -4px 0 20px; }
-.play-filter-trigger { width: 100%; justify-content: flex-start; text-align: left; margin: -8px 0 18px; }
+.play-filter-bar { display: flex; align-items: stretch; flex-wrap: wrap; gap: 8px; margin: -4px 0 18px; }
+.play-filter-trigger, .play-spots-toggle { display: flex; align-items: center; gap: 8px; min-height: var(--tap-min); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--ink); padding: 10px 12px; }
+.play-filter-trigger { flex: 1 1 160px; min-width: 0; text-align: left; }
+.play-filter-trigger > span { display: grid; gap: 2px; }
+.play-filter-trigger b { font-size: var(--text-xs); }
+.play-filter-trigger small { font-size: var(--text-xs); color: var(--ink-soft); font-weight: 400; }
+.play-spots-toggle { flex: 0 1 auto; font-size: var(--text-xs); font-weight: 650; }
+.play-spots-toggle[aria-pressed="true"] { background: var(--green-50); border-color: var(--green-600); }
+.play-spots-toggle .ui-icon { flex: 0 0 auto; }
+.play-spots-toggle[aria-pressed="false"] .ui-icon { opacity: 0; }
+.play-filter-time-row .app-select { min-width: 0; }
+.play-filter-time-row .app-select-trigger { width: 100%; }
 .play-filter-trigger > span { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
 .play-filter-trigger > .ui-icon { flex: 0 0 auto; }
 .play-filter-form { display: grid; gap: 12px; }
 .play-filter-form > label, .play-filter-time-row > label { color: var(--ink); font-size: var(--text-sm); font-weight: 650; }
 .play-filter-form > label > small { color: var(--ink-soft); font-weight: 400; margin-left: 5px; }
 .play-filter-form input:not([type="checkbox"]):not([type="hidden"]) { width: 100%; min-width: 0; min-height: var(--tap-min); box-sizing: border-box; }
-.play-filter-time-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.play-filter-time-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10em), 1fr)); gap: 12px; }
 .play-filter-time-row > label { display: grid; gap: 8px; min-width: 0; }
 .play-filter-form .play-filter-hint { margin: -3px 0 4px; color: var(--ink-soft); font-size: var(--text-xs); line-height: 1.5; }
 .play-filter-form .play-filter-spots { display: flex; align-items: center; gap: 10px; min-height: var(--tap-min); margin: 0; cursor: pointer; }

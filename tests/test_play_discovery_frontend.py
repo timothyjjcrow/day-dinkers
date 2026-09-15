@@ -141,3 +141,32 @@ def test_consent_decisions_expire_and_never_treat_host_request_as_joining():
     assert output[1:3]==[None,None]
     assert output[3]['kind']=='host' and output[3]['action']=='Review host request'
     assert output[4] is None
+
+
+def test_filter_sheet_applies_preferences_together_and_rejects_unselected_court():
+    output = run('''
+      const state={me:{id:1},playRadius:25,playLevelFilter:'',playWhen:'week',playFilters:{openSpots:true}};
+      const SELF_RATING_CHOICES=[[3,'','Intermediate']],esc=x=>String(x),modalHead=()=>'';
+      const normalizedGameLevel=x=>x!=='' && [3,3.5].includes(Number(x)) ? Number(x) : null;
+      const scheduleDateTimeValue=()=> '2026-09-15T12:00';
+      const fields={},applied=[],errors=[];let closed=0;
+      const node=id=>fields[id] ||= {value:'',checked:false,addEventListener(event,fn){this[event]=fn;}};
+      const modal={querySelector:node};
+      const openModal=()=>modal,clubCourtPicker=()=>{},closeModal=()=>closed++;
+      const bindModalFormUX=()=>({showError:message=>errors.push(message)});
+    ''' + function('openPlayDiscoveryFilters','playDiscoveryFilterLabel') + '''
+      openPlayDiscoveryFilters(change=>applied.push(change));
+      node('#pd-radius').value='50';node('#pd-level').value='3';node('#pd-spots').checked=true;
+      node('#pd-court-search').value='Cedar';
+      node('#pd-form').submit({preventDefault(){}});
+      const invalid={closed,applied:applied.length,errors:errors.length};
+      node('#pd-court-search').value='';node('#pd-form').submit({preventDefault(){}});
+      state.me.id=2;node('#pd-clear').click();
+      console.log(JSON.stringify({invalid,closed,applied,state}));
+    ''')
+    assert output['invalid'] == {'closed':0,'applied':0,'errors':1}
+    assert output['closed'] == 1 and len(output['applied']) == 1
+    applied = output['applied'][0]
+    assert applied['playRadius'] == 50 and applied['playLevelFilter'] == '3'
+    assert applied['playWhen'] == 'week' and applied['playFilters']['openSpots']
+    assert output['state']['playRadius'] == 25  # Sheet never changes saved state itself.

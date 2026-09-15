@@ -16213,14 +16213,20 @@
     const filters = state.playFilters || {};
     const ownerId = state.me?.id;
     const today = scheduleDateTimeValue(new Date()).slice(0, 10);
-    const modal = openModal(`${modalHead('Find a game')}
+    const activeLevel = normalizedGameLevel(state.playLevelFilter);
+    const modal = openModal(`${modalHead('Game filters')}
       <form id="pd-form" class="play-filter-form">
+        <div class="play-filter-time-row">
+          <label>Distance<select id="pd-radius" data-select-title="Distance">${[10,25,50,100].map(radius => `<option value="${radius}" ${state.playRadius === radius ? 'selected' : ''}>Within ${radius} mi</option>`).join('')}</select></label>
+          <label>Player level<select id="pd-level" data-select-title="Player level"><option value="">Any level</option>${SELF_RATING_CHOICES.map(([value,,description]) => `<option value="${value}" ${value === activeLevel ? 'selected' : ''}>${value.toFixed(1)} · ${value <= 2.5 ? 'Beginner' : description}</option>`).join('')}</select></label>
+        </div>
         <label for="pd-date">Date</label><input type="date" id="pd-date" min="${today}" value="${esc(filters.date || '')}">
         <div class="play-filter-time-row"><label>Earliest start<input type="time" id="pd-start" value="${esc(filters.startTime || '')}"></label><label>Starts before<input type="time" id="pd-end" value="${esc(filters.endTime || '')}"></label></div>
-        <p class="play-filter-hint">Times use your timezone. Leave blank for the whole day.</p>
+        <p class="play-filter-hint">Your local time. Choose a date to set times.</p>
         <label for="pd-court-search">Court <small>Optional</small></label>
         <input id="pd-court-search" placeholder="Any court, or search by name" value="${esc(filters.courtName || '')}" autocomplete="off">
         <input type="hidden" id="pd-court-id" value="${filters.courtId || ''}"><div id="pd-court-results"></div>
+        <p class="play-filter-hint">A selected court replaces the distance filter.</p>
         <label class="play-filter-spots"><input type="checkbox" id="pd-spots" ${filters.openSpots ? 'checked' : ''}><span>Open spots only</span></label>
         <button type="submit" class="btn btn-primary btn-block" id="pd-apply">Show games</button>
         <button type="button" class="btn-link btn-block" id="pd-clear">Clear filters</button>
@@ -16249,12 +16255,16 @@
         openSpots:modal.querySelector('#pd-spots').checked};
       try { if (date) playCustomDiscoveryWindow(next); }
       catch (error) { formUX.showError(error.message, modal.querySelector('#pd-date')); return; }
-      apply({playFilters:next,playWhen:date ? 'custom' : state.playWhen === 'custom' ? 'any' : state.playWhen});
+      const radius = Number(modal.querySelector('#pd-radius').value);
+      const level = normalizedGameLevel(modal.querySelector('#pd-level').value);
+      apply({playFilters:next, playRadius:[10,25,50,100].includes(radius) ? radius : 25,
+        playLevelFilter:level == null ? '' : String(level),
+        playWhen:date ? 'custom' : state.playWhen === 'custom' ? 'any' : state.playWhen});
     });
     return modal;
   }
 
-  function playDiscoveryFilterLabel() {
+  function playDiscoveryFilterLabel({ includeOpenSpots = true } = {}) {
     const filters = state.playFilters || {};
     const clock = (value) => new Date(`${filters.date || '2000-01-01'}T${value}`)
       .toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
@@ -16262,7 +16272,7 @@
       : filters.startTime ? `From ${clock(filters.startTime)}`
         : filters.endTime ? `Before ${clock(filters.endTime)}` : '';
     return [filters.date ? new Date(`${filters.date}T12:00`).toLocaleDateString([], {month:'short',day:'numeric'}) : '',
-      time,filters.courtName,filters.openSpots ? 'Open spots' : ''].filter(Boolean).join(' · ');
+      time,filters.courtName,includeOpenSpots && filters.openSpots ? 'Open spots' : ''].filter(Boolean).join(' · ');
   }
 
   function gameActivityLabel(game) {
@@ -18825,13 +18835,18 @@
       ${state.playWhen === 'now' ? '<p class="play-discovery-context">Playing now or starting within an hour.</p>' : ''}`;
 
       const activePlayLevel = normalizedGameLevel(state.playLevelFilter);
-      if (hasDiscoveryLocation) html += `<div class="play-discovery-controls-row" role="group" aria-label="Game search preferences"><div class="play-discovery-controls">${state.playFilters?.courtId ? '' : `<label class="play-radius-filter"><span class="sr-only">Travel radius in miles</span><select id="play-radius-filter" data-select-title="How far will you travel?">${[10, 25, 50, 100].map((radius) => `<option value="${radius}" ${state.playRadius === radius ? 'selected' : ''}>Within ${radius} mi</option>`).join('')}</select></label>`}<label class="play-level-filter"><span class="sr-only">Filter play by self-rating</span><select id="play-level-filter" data-select-title="Filter play by self-rating" data-select-prefix="Level"><option value="" ${activePlayLevel == null ? 'selected' : ''}>Any level</option>${SELF_RATING_CHOICES.map(([value,,description]) => `<option value="${value}" ${value === activePlayLevel ? 'selected' : ''}>${value.toFixed(1)} · ${value <= 2.5 ? 'Beginner' : description}</option>`).join('')}</select></label></div></div>`;
-      html += `<button type="button" class="btn btn-secondary play-filter-trigger" data-play-filters>${uiIcon('sliders')}<span>${esc(playDiscoveryFilterLabel() || 'Date, court & open spots')}</span></button>`;
+      const filterSummary = [state.playFilters?.courtId ? '' : hasDiscoveryLocation ? `Within ${state.playRadius} mi` : '',
+        activePlayLevel == null ? 'Any level' : `Level ${activePlayLevel.toFixed(1)}`,
+        playDiscoveryFilterLabel({ includeOpenSpots:false })].filter(Boolean).join(' · ');
+      html += `<div class="play-filter-bar">
+        <button type="button" class="play-filter-trigger" data-play-filters>${uiIcon('sliders')}<span><b>Filters</b><small>${esc(filterSummary)}</small></span></button>
+        <button type="button" class="play-spots-toggle" data-play-open-spots aria-pressed="${!!state.playFilters?.openSpots}">${uiIcon('check')}<span>Open spots</span></button>
+      </div>`;
 
       if (!hasDiscoveryLocation) {
         html += `<section class="play-area-setup" role="status">
           <span class="play-area-setup-icon" aria-hidden="true">${uiIcon('map-pin')}</span>
-          <span class="row-main"><b>Set your area for nearby play</b><small>Choose a city or use your location before Third Shot searches for local courts, games, and players.</small></span>
+          <span class="row-main"><b>Set your area for nearby play</b><small>Find games near your city.</small></span>
           <button type="button" class="btn btn-primary" data-set-play-area>Set area</button>
         </section>`;
       }
@@ -18872,7 +18887,7 @@
       const featuredDiscovery = discovery.slice(0, 3);
       const discoveryFeedFailed = !!feedErrors.nearby;
       const discoveryFailureTitle = 'Nearby play did not load';
-      const discoveryFailureDetail = 'You can still explore courts, invite friends, or retry these listings.';
+      const discoveryFailureDetail = 'Try again or browse nearby courts.';
       if (hasDiscoveryLocation) html += `<div class="section-label">${state.playFilters?.courtId ? `Games at ${esc(state.playFilters.courtName)}` : 'Nearby games'}</div>`;
       if (hasDiscoveryLocation && featuredDiscovery.length) {
         html += featuredDiscovery.map((game) => gameCardHtml(game, { compact: true })).join('');
@@ -18885,10 +18900,10 @@
         </div>`;
       } else if (hasDiscoveryLocation) {
         const emptyDiscoveryText = sortedFriendGames.length || weeklySessions.length
-          ? 'No other games match these choices yet.'
+          ? 'No other matching games.'
           : state.playWhen !== 'any' || activePlayLevel != null || playDiscoveryFilterLabel()
-            ? 'No games match these choices yet.' : 'No open games nearby yet.';
-        html += `<div class="empty-state play-discovery-empty" style="padding:18px">${emptyDiscoveryText} Try another time, explore a court, or create a game for others to join.<div class="play-empty-actions">${state.playWhen !== 'any' || activePlayLevel != null || playDiscoveryFilterLabel() ? '<button type="button" class="btn btn-primary" data-reset-play-filters>Clear search filters</button>' : ''}<button class="btn btn-secondary" data-goto="courts-list">${uiIcon('map-pin')} Explore nearby courts</button></div></div>`;
+            ? 'No matching games.' : 'No games nearby yet.';
+        html += `<div class="empty-state play-discovery-empty" style="padding:18px"><b>${emptyDiscoveryText}</b><div class="play-empty-actions">${state.playWhen !== 'any' || activePlayLevel != null || playDiscoveryFilterLabel() ? '<button type="button" class="btn btn-primary" data-reset-play-filters>Clear search filters</button>' : ''}<button class="btn btn-secondary" data-goto="courts-list">${uiIcon('map-pin')} Explore nearby courts</button></div></div>`;
       }
       const moreDiscovery = discovery.slice(3);
       if (hasDiscoveryLocation && moreDiscovery.length) {
@@ -18976,27 +18991,28 @@
         button.disabled = true;
         renderPlay();
       }));
-      const changeDiscovery = (change) => {
+      const changeDiscovery = async (change, focusSelector = '[data-play-filters]') => {
         Object.assign(state, change);
         savePlayPreferences();
         state.playGamesCache = null;
-        renderPlay();
+        const ownerId = state.me?.id;
+        await renderPlay();
+        if (state.me?.id === ownerId && state.tab === 'play' && state.playSeg === 'games'
+            && document.activeElement === document.body) {
+          $('#play-content')?.querySelector(focusSelector)?.focus({ preventScroll:true });
+        }
       };
       el.querySelectorAll('[data-play-when]').forEach((button) => button.addEventListener('click', () => {
         if (state.playWhen !== button.dataset.playWhen) changeDiscovery({ playWhen: button.dataset.playWhen,
-          playFilters:{...state.playFilters,date:'',startTime:'',endTime:''} });
+          playFilters:{...state.playFilters,date:'',startTime:'',endTime:''} }, `[data-play-when="${button.dataset.playWhen}"]`);
       }));
       el.querySelector('[data-play-filters]')?.addEventListener('click', () => openPlayDiscoveryFilters(changeDiscovery));
-      el.querySelector('#play-radius-filter')?.addEventListener('change', (event) => changeDiscovery({ playRadius: Number(event.currentTarget.value) }));
+      el.querySelector('[data-play-open-spots]')?.addEventListener('click', () => changeDiscovery({
+        playFilters:{...state.playFilters,openSpots:!state.playFilters?.openSpots},
+      }, '[data-play-open-spots]'));
       el.querySelector('[data-reset-play-filters]')?.addEventListener('click', () => changeDiscovery({ playWhen: 'any', playLevelFilter: '', playFilters:null }));
       el.querySelector('[data-play-again-game]')?.addEventListener('click', (event) => {
         if (playAgainGame) openPostGamePlanner(playAgainGame, null, event.currentTarget);
-      });
-      el.querySelector('#play-level-filter')?.addEventListener('change', (event) => {
-        state.playLevelFilter = event.currentTarget.value;
-        savePlayPreferences();
-        state.playGamesCache = null;
-        renderPlay();
       });
       el.querySelector('#pl-log-game')?.addEventListener('click', openLogGameSheet);
       el.querySelector('[data-host-play-session]')?.addEventListener('click', () => {
