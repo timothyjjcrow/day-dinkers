@@ -2,13 +2,19 @@
 
 The user explicitly resumed work and requested all current changes be pushed and deployed. Production deployment is now authorized. The earlier whole-app implementation goal remains incomplete; this release does not claim that every one of the 104 original requirement groups has passed every acceptance gate.
 
-## September 12 continuation
+## Latest continuation
+
+r79 is live from 1b80e9b: separate casual capacity/play style, visible cost/court access, shared invitation/calendar facts and described self-ratings. All 1,740 Linux tests passed; 42 PostgreSQL checks passed; additive production migration preserved the existing data. See release-r79.md.
+
+The next roster/reconfirmation changes are isolated in `/tmp/thirdshot-roster-commitment` on `codex/roster-commitment`; they are not deployed. See roster-commitment-next.md for the reproduced defects. Continue the whole-app goal; do not treat r79 as completion.
+
+## Earlier r78 continuation
 
 r78 is live from code commit 5032ab9 after a fully green Linux run (1,723 passed, one PostgreSQL-only skip). Cost/access facts now precede Join; confirmed dated sessions expose calendar and optional Home Screen access; session Help is contextual. Private guest signup → explicit acceptance → host revocation was verified locally, including retention of the accepted roster place. Production health, asset hashes and mobile public entry passed. See release-r78.md and session-return-evidence.md.
 
 The next planner wave is in progress locally: distinct play style and court access, main-flow practical details and clearer skill labels. It is not included in r78 and requires its own migration and verification. See remaining-implementation-review.md for the remaining work.
 
-## Current release
+## Earlier r77 release
 
 The audit integration gaps are implemented: holiday/venue access continuity, durable venue-entry notes, following-date conflict projection and participant locking, saved overlapping plans, expired tournament partner recovery, and access to all active competition matches. Account export now produces a complete readable download, including after MFA step-up. Mobile selected-court controls and export layout were corrected from real browser findings.
 
