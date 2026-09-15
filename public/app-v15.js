@@ -37343,49 +37343,41 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const [initialLevelMin, initialLevelMax] = gameLevelRange(game);
     const sheet = openModal(`
       ${modalHead(`Edit ${playNoun}`, 'edit')}
-      <p class="row-sub" style="margin-bottom:12px">${datedSeries ? 'Choose the dates to update, then make your changes.' : 'Changes to time, court, price or play style ask players to confirm again. Their places stay reserved.'}</p>
+<p class="session-edit-identity">${esc(game.title || (game.game_type === 'ranked' ? 'Ranked match' : 'Casual session'))}</p>
       <form id="eg-form" novalidate>
         ${recurrenceScopeChoicesHtml(game, 'eg')}
-        <div class="form-field"><label for="eg-title">Title <span class="row-sub">(optional)</span></label><input type="text" id="eg-title" maxlength="120" value="${esc(game.title || '')}" placeholder="e.g. Saturday morning round robin" /></div>
-        <div class="form-field"><label for="eg-description">Description <span class="row-sub">(optional)</span></label><textarea id="eg-description" maxlength="1000" rows="3" placeholder="Share the format, rotation, or what to bring.">${esc(game.description || '')}</textarea></div>
-        <div class="form-field">
+        <details class="session-edit-section" id="eg-section-time" open>
+          <summary><span><b>Time & court</b><small id="eg-summary-time"></small></span></summary>
+          <div class="session-edit-section-body">        <div class="form-field">
           <label for="eg-court-search">Court</label>
           <input type="search" id="eg-court-search" value="${esc(court.name || '')}" placeholder="Search courts…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="eg-court-results" aria-expanded="false" />
           <div id="eg-court-results" role="listbox" hidden></div>
         </div>
-        <div class="form-field">
-          ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.DateTimeFormat().resolvedOptions().timeZone))}
-        </div>
-        <div class="form-grid">
-          ${game.game_type === 'ranked' ? '' : `<div class="form-field"><label for="eg-play-style">Play style</label><select id="eg-play-style"><option value="">No preference</option>${[['rotating_doubles','Rotating doubles'],['singles','Singles'],['mixed','Mixed play']].map(([value,label]) => `<option value="${value}"${value === game.play_style ? ' selected' : ''}>${label}</option>`).join('')}</select></div>`}
-          <div class="form-field"><label for="eg-court-access">Court access</label><select id="eg-court-access"><option value="">Not confirmed yet</option>${[['host_reserved','Reserved by me'],['public_drop_in','Public drop-in'],['booking_needed','Booking still needed']].map(([value,label]) => `<option value="${value}"${value === (game.court_access || (game.court_count ? 'host_reserved' : null)) ? ' selected' : ''}>${label}</option>`).join('')}</select><small class="field-help">Third Shot does not book the court.</small></div>
-        </div>
-        <div class="form-grid game-plan-fields">
-          <div class="form-field"><label for="eg-duration">Duration (minutes)</label><input type="number" id="eg-duration" min="15" max="720" step="15" inputmode="numeric" value="${game.duration_minutes ?? ''}" placeholder="No end time" aria-describedby="eg-end-preview" /><small class="field-help" id="eg-end-preview"></small></div>
-          <div class="form-field"><label for="eg-cost">Cost per player</label><div class="game-money-input"><span aria-hidden="true">$</span><input type="number" id="eg-cost" min="0" max="10000" step="0.01" inputmode="decimal" value="${game.cost_cents == null ? '' : (Number(game.cost_cents) / 100).toFixed(2)}" placeholder="0.00" aria-label="Cost per player in dollars" /></div></div>
-          <div class="form-field"><label for="eg-court-number">Court or area</label><input type="text" id="eg-court-number" maxlength="40" value="${esc(game.court_number || '')}" placeholder="e.g. Courts 3–4" /></div>
-          <div class="form-field" id="eg-court-count-field"><label for="eg-court-count">Courts you reserved</label><input type="number" id="eg-court-count" min="1" max="24" step="1" inputmode="numeric" value="${game.court_count ?? ''}" placeholder="Optional" /></div>
-        </div>
-        <div class="form-grid">
-          <div class="form-field"><label for="eg-capacity">Capacity</label>${capacityControlHtml}</div>
-          <div class="form-field"><label for="eg-visibility">Who can join</label><select id="eg-visibility" data-select-title="Who can join">${visibilityOptions.map((value) => `<option value="${value}" ${value === game.visibility ? 'selected' : ''}>${visibilityLabels[value]}</option>`).join('')}</select></div>
-        </div>
-        <p class="row-sub" style="margin:-6px 0 12px">You can open the game to more people, but not hide it from players who may already have seen it.</p>
-        <div class="form-grid">
-          <div class="form-field"><label for="eg-level-min">Minimum self-rating</label><select id="eg-level-min" data-select-title="Minimum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value, , description]) => `<option value="${value}" ${value === initialLevelMin ? 'selected' : ''}>${value.toFixed(1)} · ${esc(description)}</option>`).join('')}</select></div>
-          <div class="form-field"><label for="eg-level-max">Maximum self-rating</label><select id="eg-level-max" data-select-title="Maximum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value, , description]) => `<option value="${value}" ${value === initialLevelMax ? 'selected' : ''}>${value.toFixed(1)} · ${esc(description)}</option>`).join('')}</select></div>
-        </div>
-        <div class="form-grid">
-          <div class="form-field"><label for="eg-recurrence">Repeats</label><select id="eg-recurrence" data-select-title="Repeat schedule" ${canRepeat ? '' : 'disabled'}><option value="none">One time</option><option value="weekly" ${game.recurrence === 'weekly' ? 'selected' : ''}>Every week</option></select></div>
-        </div>
-        <div class="planner-recurrence-settings ${game.recurrence === 'weekly' ? '' : 'hidden'}" id="eg-recurrence-settings">
+<div class="form-field"><label for="eg-court-number">Court or area</label><input type="text" id="eg-court-number" maxlength="40" value="${esc(game.court_number || '')}" placeholder="e.g. Courts 3–4" /></div>
+${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.DateTimeFormat().resolvedOptions().timeZone))}<div class="form-field"><label for="eg-duration">Duration (minutes)</label><input type="number" id="eg-duration" min="15" max="720" step="1" inputmode="numeric" value="${game.duration_minutes ?? ''}" placeholder="No end time" aria-describedby="eg-end-preview" /><small class="field-help" id="eg-end-preview"></small></div>
+<div id="eg-repeat-controls"><div class="form-field"><label for="eg-recurrence">Repeats</label><select id="eg-recurrence" data-select-title="Repeat schedule" ${canRepeat ? '' : 'disabled'}><option value="none">One time</option><option value="weekly" ${game.recurrence === 'weekly' ? 'selected' : ''}>Every week</option></select></div>        <div class="planner-recurrence-settings ${game.recurrence === 'weekly' ? '' : 'hidden'}" id="eg-recurrence-settings">
           <fieldset class="game-choice-field"><legend>Repeat on</legend><p class="field-help">Repeat days, times, and the end date follow ${esc(plannerTimeZoneLabel(editRecurrenceTimezone))}.</p><div class="recurrence-weekdays" id="eg-recurrence-weekdays">${recurrenceDayKeys.map((day, index) => `<button type="button" data-recurrence-day="${day}" class="${editRecurrenceDays.has(day) ? 'active' : ''}" aria-pressed="${editRecurrenceDays.has(day)}">${recurrenceDayLabels[index]}</button>`).join('')}</div></fieldset>
           <div class="form-field"><label for="eg-recurrence-end">End date <span class="row-sub">(optional)</span></label><input type="date" id="eg-recurrence-end" value="${esc(game.recurrence_ends_on || '')}" /></div>
         </div>
-        <div class="form-field"><label for="eg-notes">Note <span class="row-sub">(optional)</span></label><textarea id="eg-notes" maxlength="500" rows="3" placeholder="What should players know?">${esc(game.notes || '')}</textarea></div>
+</div></div>
+        </details>
+        <details class="session-edit-section" id="eg-section-players">
+          <summary><span><b>Players & format</b><small id="eg-summary-players"></small></span></summary>
+          <div class="session-edit-section-body"><div class="form-field"><label for="eg-capacity">Capacity</label>${capacityControlHtml}</div><div class="form-field"><label for="eg-visibility">Who can join</label><select id="eg-visibility" data-select-title="Who can join">${visibilityOptions.map((value) => `<option value="${value}" ${value === game.visibility ? 'selected' : ''}>${visibilityLabels[value]}</option>`).join('')}</select></div><p class="field-help">Existing players keep access.</p>${game.game_type === 'ranked' ? '' : `<div class="form-field"><label for="eg-play-style">Play style</label><select id="eg-play-style"><option value="">No preference</option>${[['rotating_doubles','Rotating doubles'],['singles','Singles'],['mixed','Mixed play']].map(([value,label]) => `<option value="${value}"${value === game.play_style ? ' selected' : ''}>${label}</option>`).join('')}</select></div>`}<div class="form-grid"><div class="form-field"><label for="eg-level-min">Minimum self-rating</label><select id="eg-level-min" data-select-title="Minimum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value, , description]) => `<option value="${value}" ${value === initialLevelMin ? 'selected' : ''}>${value.toFixed(1)} · ${esc(description)}</option>`).join('')}</select></div><div class="form-field"><label for="eg-level-max">Maximum self-rating</label><select id="eg-level-max" data-select-title="Maximum self-rating"><option value="">Any</option>${SELF_RATING_CHOICES.map(([value, , description]) => `<option value="${value}" ${value === initialLevelMax ? 'selected' : ''}>${value.toFixed(1)} · ${esc(description)}</option>`).join('')}</select></div></div></div>
+        </details>
+        <details class="session-edit-section" id="eg-section-access">
+          <summary><span><b>Access & cost</b><small id="eg-summary-access"></small></span></summary>
+          <div class="session-edit-section-body"><div class="form-field"><label for="eg-court-access">Court access</label><select id="eg-court-access"><option value="">Not confirmed yet</option>${[['host_reserved','Reserved by me'],['public_drop_in','Public drop-in'],['booking_needed','Booking still needed']].map(([value,label]) => `<option value="${value}"${value === (game.court_access || (game.court_count ? 'host_reserved' : null)) ? ' selected' : ''}>${label}</option>`).join('')}</select><small class="field-help">Third Shot does not book the court.</small></div><div class="form-grid"><div class="form-field"><label for="eg-cost">Cost per player</label><div class="game-money-input"><span aria-hidden="true">$</span><input type="number" id="eg-cost" min="0" max="10000" step="0.01" inputmode="decimal" value="${game.cost_cents == null ? '' : (Number(game.cost_cents) / 100).toFixed(2)}" placeholder="Not listed" aria-label="Cost per player in dollars" /></div></div><div class="form-field" id="eg-court-count-field"><label for="eg-court-count">Courts you reserved</label><input type="number" id="eg-court-count" min="1" max="24" step="1" inputmode="numeric" value="${game.court_count ?? ''}" placeholder="Optional" /></div></div></div>
+        </details>
+        <details class="session-edit-section" id="eg-section-details">
+          <summary><span><b>More details</b><small id="eg-summary-details"></small></span></summary>
+          <div class="session-edit-section-body"><div class="form-field"><label for="eg-title">Title <span class="row-sub">(optional)</span></label><input type="text" id="eg-title" maxlength="120" value="${esc(game.title || '')}" placeholder="e.g. Saturday morning round robin" /></div><div class="form-field"><label for="eg-description">Description <span class="row-sub">(optional)</span></label><textarea id="eg-description" maxlength="1000" rows="3" placeholder="Share the format, rotation, or what to bring.">${esc(game.description || '')}</textarea></div><div class="form-field"><label for="eg-notes">Note <span class="row-sub">(optional)</span></label><textarea id="eg-notes" maxlength="500" rows="3" placeholder="What should players know?">${esc(game.notes || '')}</textarea></div></div>
+        </details>
+        <p class="session-edit-impact">Time, court, price or style changes ask players to confirm again. Their places stay reserved.</p>
         <button type="submit" class="btn btn-primary btn-block" id="eg-save" style="padding:15px">Save changes</button>
       </form>
     `, { label: `Edit ${playNoun}` });
+    sheet.querySelector('.modal').classList.add('session-editor-modal');
     enhanceAppSelects(sheet);
     bindScheduleDateTimePicker(sheet, 'eg-when');
     const formUX = bindModalFormUX(sheet, '#eg-save');
@@ -37444,6 +37436,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const editScope = () => sheet.querySelector('input[name="eg-scope"]:checked')?.value || 'this_date';
     const syncEditRecurrence = () => {
       const dateOnly = datedSeries && editScope() === 'this_date';
+      sheet.querySelector('#eg-repeat-controls').classList.toggle('hidden', !canRepeat || dateOnly);
       editRecurrenceSelect.disabled = !canRepeat || dateOnly;
       syncAppSelect(editRecurrenceSelect);
       sheet.querySelector('#eg-recurrence-settings').classList.toggle(
@@ -37475,6 +37468,25 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const results = sheet.querySelector('#eg-court-results');
     let chosenCourtId = Number(court.id) || null;
     let chosenCourtName = String(court.name || '');
+    const syncEditSummaries = () => {
+      const value = id => sheet.querySelector(`#${id}`).value;
+      const selected = id => sheet.querySelector(`#${id}`).selectedOptions[0]?.textContent || '';
+      const when = new Date(value('eg-when'));
+      const duration = Number(value('eg-duration'));
+      const end = Number.isFinite(when.getTime()) && Number.isInteger(duration) && duration >= 15 && duration <= 720 ? new Date(when.getTime() + duration * 60000) : null;
+      const timing = Number.isFinite(when.getTime()) ? `${fmtDateTime(when.toISOString())}${end ? `–${end.toDateString() === when.toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ''}` : 'Choose a time';
+      sheet.querySelector('#eg-summary-time').textContent = [timing, chosenCourtId ? chosenCourtName : 'Choose a court', datedSeries && editScope() === 'this_date' ? '' : selected('eg-recurrence')].filter(Boolean).join(' · ');
+      sheet.querySelector('#eg-summary-players').textContent = [game.game_type === 'ranked' ? selected('eg-capacity') : `${value('eg-capacity')} places`, selected('eg-visibility'), sessionPlayStyleLabel({play_style: sheet.querySelector('#eg-play-style')?.value}), gameLevelRangeLabel({level_min:normalizedGameLevel(value('eg-level-min')),level_max:normalizedGameLevel(value('eg-level-max'))})].filter(Boolean).join(' · ');
+      const price = value('eg-cost').trim();
+      const amount = Number(price);
+      const cost = !price ? 'Cost not listed' : !Number.isFinite(amount) || amount < 0 || amount > 10000 ? 'Check cost' : amount === 0 ? 'Free' : `$${amount.toFixed(2)} per player`;
+      sheet.querySelector('#eg-summary-access').textContent = [selected('eg-court-access'), cost].join(' · ');
+      sheet.querySelector('#eg-summary-details').textContent = [value('eg-title').trim(), value('eg-description').trim() || value('eg-notes').trim() ? 'Notes added' : ''].filter(Boolean).join(' · ') || 'Title and notes';
+    };
+    sheet.querySelector('#eg-form').addEventListener('input', syncEditSummaries);
+    sheet.querySelector('#eg-form').addEventListener('change', syncEditSummaries);
+    syncEditSummaries();
+
     let searchTimer = null;
     let searchSequence = 0;
     const navigation = bindCourtComboboxNavigation(search, results, {
@@ -37567,11 +37579,11 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       const recurrenceEndInput = sheet.querySelector('#eg-recurrence-end');
       const recurrenceEnd = recurrenceEndInput.value || null;
       const localStartDate = calendarDateInTimeZone(when, editRecurrenceTimezone);
-      if (recurrence === 'weekly' && !editRecurrenceDays.size) {
+      if (!dateOnly && recurrence === 'weekly' && !editRecurrenceDays.size) {
         formUX.showError('Choose at least one repeat day.', sheet.querySelector('#eg-recurrence-weekdays'));
         return;
       }
-      if (recurrence === 'weekly' && recurrenceEnd && recurrenceEnd < localStartDate) {
+      if (!dateOnly && recurrence === 'weekly' && recurrenceEnd && recurrenceEnd < localStartDate) {
         formUX.showError('Choose an end date on or after the first session.', recurrenceEndInput);
         return;
       }
@@ -37689,6 +37701,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       if (datedSeries) payload.edit_scope = editScope();
       const resetSubmitting = formUX.startSubmitting('Saving changes…');
       if (!resetSubmitting) return;
+      sheet.querySelector('#eg-form').setAttribute('inert', '');
       try {
         const updated = await api(`/games/${game.id}`, {
           method: 'PATCH', body: JSON.stringify(payload),
@@ -37700,6 +37713,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         toast('Game updated — players were notified', { tone: 'success', icon: 'check-circle' });
         if (state.tab === 'play') renderPlay();
       } catch (error) {
+        sheet.querySelector('#eg-form').removeAttribute('inert');
         resetSubmitting();
         formUX.showError(error.message);
       }

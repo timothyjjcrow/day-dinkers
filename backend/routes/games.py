@@ -7648,16 +7648,23 @@ def edit_game(game_id):
             return jsonify({'error': 'ranked_cannot_recur'}), 400
         proposed['recurrence'] = recurrence
 
-    if edit_scope == 'this_date' and game.recurrence_series_id:
+    date_only = edit_scope == 'this_date' and bool(game.recurrence_series_id)
+    if date_only:
+        requested_days = payload.get('recurrence_weekdays')
         rule_changes = (
             ('recurrence' in payload and payload['recurrence'] != game.recurrence)
-            or ('recurrence_weekdays' in payload and sorted(payload['recurrence_weekdays'] or []) != sorted(_stored_recurrence_weekdays(game)))
+            or ('recurrence_weekdays' in payload and (not isinstance(requested_days, list)
+                or not all(isinstance(day, str) for day in requested_days)
+                or sorted(requested_days) != sorted(_stored_recurrence_weekdays(game))))
+            or ('recurrence_timezone' in payload and payload['recurrence_timezone'] != (game.recurrence_timezone or 'UTC'))
             or ('recurrence_ends_on' in payload and payload['recurrence_ends_on'] != (game.recurrence_ends_on.isoformat() if game.recurrence_ends_on else None))
         )
         if rule_changes:
             return jsonify({'error': 'series_rule_requires_following_dates'}), 400
 
-    if any(key in payload for key in (
+    # An occurrence is an exception to the standing rule. Moving it must not
+    # rewrite that rule or compare its new date against the series end date.
+    if not date_only and any(key in payload for key in (
         'recurrence', 'recurrence_timezone', 'recurrence_weekdays',
         'recurrence_ends_on', 'scheduled_at',
     )):

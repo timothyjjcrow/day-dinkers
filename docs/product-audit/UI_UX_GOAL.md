@@ -78,3 +78,5 @@ Pass5 continued: `ui-ux-pass-05-visit-sources.md` covers venue/community hours s
 Pass6: `ui-ux-pass-06-session-planner.md` covers a compact final scheduling step, grouped format/style, explicit audience meaning, optional details, mobile footer, draft recovery, locked submissions and private-sharing success. Recurrence/time suggestions, editing and host tools remain open.
 
 Pass6 continued: `ui-ux-pass-06-scheduling.md` covers court-hours-aware time suggestions, retained custom times with warnings, stale/failure recovery, concise weekly summaries and responsive controls. Next review session editing, date-versus-series changes and host tools; future-date hours review and the remaining creation entry points stay open.
+
+Pass6 continued: `ui-ux-pass-06-editing.md` covers grouped session editing, closed-section summaries, date-versus-series controls, validation focus, pending locks, and a verified one-date exception beyond the series end. Future-date previews/conflict recovery and remaining host actions stay open.

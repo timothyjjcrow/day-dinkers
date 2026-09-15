@@ -7772,3 +7772,25 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
   .session-planner-modal #ng-step-when > .planner-next { position: static; box-shadow: none; }
 }
 .session-planner-modal .schedule-suggestions { font-size: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 6em), 1fr)); }
+
+.session-editor-modal .session-edit-identity { margin: -4px 0 18px; color: var(--ink-soft); font-size: 14px; }
+.session-edit-section { border: 1px solid var(--line); border-radius: var(--radius-md); margin-bottom: 12px; background: var(--card); }
+.session-edit-section > summary { display: flex; align-items: center; gap: 12px; padding: 15px; list-style: none; cursor: pointer; min-height: 64px; }
+.session-edit-section > summary::-webkit-details-marker { display: none; }
+.session-edit-section > summary > span { min-width: 0; flex: 1; }
+.session-edit-section > summary b { display: block; font-size: 15px; }
+.session-edit-section > summary small { display: block; margin-top: 5px; font-size: 13px; color: var(--ink-soft); line-height: 1.5; overflow-wrap: anywhere; }
+.session-edit-section > summary::after { content: ''; width: 8px; height: 8px; border-right: 2px solid var(--ink-soft); border-bottom: 2px solid var(--ink-soft); transform: rotate(45deg); flex-shrink: 0; }
+.session-edit-section[open] > summary::after { transform: rotate(225deg); }
+.session-edit-section-body { border-top: 1px solid var(--line); padding: 15px 15px 0; }
+.session-edit-impact { font-size: 13px; line-height: 1.5; color: var(--ink-soft); margin: 16px 0; }
+.session-editor-modal .recurrence-weekdays { font-size: 12px; grid-template-columns: repeat(auto-fit, minmax(2.1em, 1fr)); }
+.session-editor-modal #eg-repeat-controls.hidden { display: none; }
+.session-editor-modal form[aria-busy="true"] .session-edit-section { opacity: .65; }
+@media (max-width: 450px) {
+  .session-editor-modal .form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .session-editor-modal #eg-form > #eg-save { position: static; box-shadow: none; }
+}

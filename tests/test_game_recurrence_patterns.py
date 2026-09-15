@@ -673,3 +673,45 @@ def test_following_edit_normalizes_legacy_empty_local_rule(client):
     }, headers=auth(host))
     assert result.status_code == 200, result.get_json()
     assert all(row.title == 'Renamed regulars' for row in dated_rows(root.id)[1:])
+
+
+@pytest.mark.parametrize('selected_index', [0, 1])
+def test_one_date_can_move_past_series_end_without_rewriting_rule(client, selected_index):
+    host = register(client, 'single-exception@example.com', 'Host')
+    first = client.post('/api/games', json=recurring_payload(), headers=auth(host)).get_json()
+    rows = dated_rows(first['id'])
+    selected = rows[selected_index]
+    root = db.session.get(Game, first['id'])
+    old_template = root.recurrence_template
+    old_rule = (selected.recurrence_local_time, selected.recurrence_timezone,
+                selected.recurrence_weekdays, selected.recurrence_ends_on)
+    before = {row.id: row.scheduled_at for row in rows}
+    moved = selected.scheduled_at + timedelta(days=60)
+    result = client.patch(f'/api/games/{selected.id}', json={
+        'scheduled_at': moved.isoformat() + 'Z', 'cost_cents': 800, 'edit_scope':'this_date',
+    }, headers=auth(host))
+    assert result.status_code == 200, result.get_json()
+    db.session.expire_all()
+    selected = db.session.get(Game, selected.id)
+    assert selected.scheduled_at == moved
+    assert selected.cost_cents == 800
+    assert (selected.recurrence_local_time, selected.recurrence_timezone,
+            selected.recurrence_weekdays, selected.recurrence_ends_on) == old_rule
+    assert db.session.get(Game, first['id']).recurrence_template == old_template
+    assert all(db.session.get(Game, ident).scheduled_at == when for ident, when in before.items() if ident != selected.id)
+    rejected = client.patch(f'/api/games/{selected.id}', json={
+        'recurrence_timezone':'Asia/Tokyo', 'edit_scope':'this_date',
+    }, headers=auth(host))
+    assert rejected.status_code == 400
+    assert rejected.get_json()['error'] == 'series_rule_requires_following_dates'
+
+
+@pytest.mark.parametrize('days', [1, [None], ['mon', 2]])
+def test_one_date_rejects_malformed_repeat_rule_without_server_error(client, days):
+    host = register(client, 'invalid-exception-rule@example.com', 'Host')
+    first = client.post('/api/games', json=recurring_payload(), headers=auth(host)).get_json()
+    result = client.patch(f"/api/games/{first['id']}", json={
+        'recurrence_weekdays': days, 'edit_scope':'this_date',
+    }, headers=auth(host))
+    assert result.status_code == 400
+    assert result.get_json()['error'] == 'series_rule_requires_following_dates'
