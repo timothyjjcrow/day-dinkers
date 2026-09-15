@@ -10871,7 +10871,7 @@
       ? 'Join free session' : `Join · $${(Number(game.cost_cents) / 100).toFixed(2)} per player`;
     return `${modalHead(changed ? 'The plan changed' : 'Review before joining')}
       <section class="entry-plan-review" aria-labelledby="entry-plan-title">
-        <span class="action-confirm-eyebrow">${game.game_type === 'ranked' ? 'Ranked match' : 'Play session'}${sessionPlayStyleLabel(game) ? ` · ${esc(sessionPlayStyleLabel(game))}` : ''}</span>
+        <span class="action-confirm-eyebrow">${game.game_type === 'ranked' ? 'Ranked match' : 'Casual'}${sessionPlayStyleLabel(game) ? ` · ${esc(sessionPlayStyleLabel(game))}` : ''}</span>
         <h2 id="entry-plan-title">${esc(game.title || 'Play at ' + (game.court?.name || 'the court'))}</h2>
         <div class="entry-plan-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>
         <div class="entry-plan-court">${uiIcon('map-pin')}<span><b>${esc(game.court?.name || 'Court')}</b>${game.court_number ? `<small>${esc(game.court_number)}</small>` : ''}</span></div>
@@ -37841,7 +37841,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const rosterAvailability = openSpots ? `${openSpots} spot${openSpots === 1 ? '' : 's'} left`
       : heldSpots ? `${heldSpots} spot${heldSpots === 1 ? '' : 's'} awaiting acceptance` : 'Full';
     return `
-      <div class="modal-head game-detail-header">
+      <div class="modal-head game-detail-header${game.status === 'upcoming' && !game.is_instant ? ' is-planned' : ''}">
         <div class="session-heading-copy">
           <span class="session-eyebrow">${hasScore ? 'Match result' : esc(gameActivityLabel(game))}</span>
           <h3 class="game-detail-title" data-status="${esc(game.status)}"><span class="game-detail-status-icon" aria-hidden="true">${statusIcon}</span><span class="game-detail-headline">${headline}</span></h3>
@@ -37855,8 +37855,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         ${detailMeta}
       </div>
       ${hasScore ? playersHtml : ''}
+      <section class="session-plan-card" aria-label="Time, court and cost">
       ${when}
-      ${gameHasDatedSeries(game) ? '<section class="series-date-card" id="gs-series-dates" aria-label="Session dates" aria-busy="true"><span class="row-sub">Loading session dates…</span></section>' : ''}
       <div class="session-place-wrap">
         <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
           <span class="nav-row-leading">${uiIcon('map-pin')}</span>
@@ -37868,6 +37868,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           ? `<a class="btn btn-secondary btn-block gs-directions" href="${courtDirectionsUrl(court)}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name || 'the court')} (opens Maps)">${uiIcon('external')}<span>Directions</span></a>` : ''}
       </div>
       ${sessionVisitFactsHtml(game)}
+      </section>
+      ${gameHasDatedSeries(game) ? '<section class="series-date-card" id="gs-series-dates" aria-label="Session dates" aria-busy="true"><span class="row-sub">Loading session dates…</span></section>' : ''}
       ${courtEntryNoticeHtml(game)}
       ${sessionConfirmationHtml(game)}
       ${!hasScore ? `<section class="session-roster" aria-label="Players">
@@ -37880,11 +37882,11 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       ${scoreHistoryHtml(game)}
       <div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
         ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
-        <button type="button" class="btn btn-secondary" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
+        <button type="button" class="btn btn-ghost" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
+        <button type="button" class="btn btn-ghost" id="gs-help" aria-label="Help with this ${playNoun}">Help</button>
       </div>
       ${closedRally ? '' : sessionReturnToolsHtml(game)}
-      ${chatPreview}${infoStrip}${planningDetails}
-      <button type="button" class="btn btn-secondary btn-block" id="gs-help">Help with this ${playNoun}</button>`;
+      ${chatPreview}${infoStrip}${planningDetails}`;
   }
 
   async function openGameScreen(gameId, options = {}) {
@@ -38004,7 +38006,10 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
             reset();
             if (error.code === 'game_plan_review_cancelled' && error.data?.game) {
               render(error.data.game);
-              toast(error.message);
+              requestAnimationFrame(() => {
+                if (currentOverlayEntry()?.el === modal) box.querySelector('[data-waitlist-reply="accept"]')?.focus({ preventScroll: true });
+              });
+              announceViewStatus('Latest plan shown. No place taken.');
             } else if (error.code === 'host_plan_confirmation_required' && error.data?.game) {
               if (Number(error.data.review_game_id) !== Number(gameId)) {
                 openGameScreen(error.data.review_game_id, { replaceModal: modal });
@@ -38456,7 +38461,13 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           if (e.code === 'game_plan_review_cancelled' && e.data?.game
               && Number(state.me?.id) === accountId && modal.isConnected && !modal._destroyed) {
             render(e.data.game);
-            box.querySelector('#gs-join')?.focus({ preventScroll: true });
+            requestAnimationFrame(() => {
+              if (Number(state.me?.id) === accountId && currentOverlayEntry()?.el === modal) {
+                box.querySelector('#gs-join')?.focus({ preventScroll: true });
+              }
+            });
+            announceViewStatus('Latest plan shown. No place taken.');
+            return;
           }
           toast(e.message);
         }

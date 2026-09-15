@@ -7439,3 +7439,23 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .entry-plan-players { padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
 .entry-plan-players p { color: var(--ink-soft); line-height: 1.5; overflow-wrap: anywhere; margin: 6px 0 0; }
 .entry-plan-actions { display: grid; gap: 8px; }
+
+/* Session essentials form one readable block; secondary actions stay quiet. */
+.game-detail-header.is-planned .game-detail-status-icon { display: none; }
+.game-detail-meta { flex-wrap: wrap; row-gap: 4px; }
+.session-plan-card { padding: 16px; margin: 0 0 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg); }
+.session-plan-card .session-when { margin: 0 0 14px; font-size: 18px; }
+.session-plan-card .session-place-wrap { margin: 0; gap: 10px; }
+.session-plan-card #gs-court { flex: 1 1 8rem; padding: 0; box-shadow: none; background: transparent; }
+.session-plan-card #gs-court .row-title { font-size: 15px; }
+.session-plan-card #gs-court .row-sub { font-size: 12px; }
+.session-plan-card .gs-directions { background: transparent; border: none; box-shadow: none; padding: 6px; }
+.session-plan-card .session-visit-facts { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.game-detail-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.game-detail-toolbar #gs-chat { grid-column: 1 / -1; }
+.game-detail-toolbar .btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--ink-soft); }
+.game-detail-toolbar .btn-ghost:hover { background: var(--bg); color: var(--ink); }
+@media (max-width: 360px) {
+  .session-plan-card { padding: 13px; }
+  .session-plan-card .session-when { font-size: 17px; }
+}

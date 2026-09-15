@@ -1,5 +1,7 @@
 # Complete product audit implementation
 
+September 14: the active goal now prioritizes a complete UI/UX review. Follow [UI_UX_GOAL.md](UI_UX_GOAL.md) for the current scope, pass order and completion standard. Preserve the audit requirements and behavior already implemented below.
+
 Goal: implement the complete audit so a player or venue manager can finish the intended task easily from entry to outcome. The goal remains active until the implementation, production release and requirement-by-requirement verification are complete.
 
 ## Scope control

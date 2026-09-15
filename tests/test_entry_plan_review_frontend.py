@@ -45,10 +45,13 @@ def test_cancel_closed_trigger_and_changed_account_never_retry_the_join():
                            ("authSessionEpoch++;state.token='player-two';return true",'stale_session')]:
         r=run_case('''
           replies=[changed(1200,'a')];onReview=()=>{'''+behavior+'''};
-          let error;try{await api('/games/7/join',{method:'POST',body:'{}'})}catch(e){error=e.code}
-          console.log(JSON.stringify({requests,error}));
+          let error,currentPlan;try{await api('/games/7/join',{method:'POST',body:'{}'})}catch(e){error=e.code;currentPlan=e.data?.game}
+          console.log(JSON.stringify({requests,error,currentPlan}));
         ''')
         assert len(r['requests'])==1 and r['error']==code
+        if code=='game_plan_review_cancelled':
+            assert r['currentPlan']['cost_cents']==1200
+            assert r['currentPlan']['plan_token']=='a'*64
 
 
 def test_repeated_changes_have_a_bounded_review_loop():

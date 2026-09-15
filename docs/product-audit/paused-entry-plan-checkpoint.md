@@ -1,5 +1,7 @@
 # Saved checkpoint — UI focus and session entry
 
+Superseded September 14: the user replaced and resumed the app goal with a complete UI/UX focus. Continue using `UI_UX_GOAL.md`. The code/release and backup-approval boundaries below still apply.
+
 Work is saved on `codex/mobile-auth-clarity` in response to the user's request to push the changes and pause. Future passes must follow `ui-pass-standard.md`; do not resume the audit loop until the user asks.
 
 This branch contains mobile account-access improvements and source changes requiring review of the current session plan before a new join or waitlist acceptance. A changed price, time, court, host, or other playing terms produces an explicit review sheet showing the current plan and players before a place is taken. Missing snapshots also require review. Existing membership retries retain their separate reconfirmation policy.
