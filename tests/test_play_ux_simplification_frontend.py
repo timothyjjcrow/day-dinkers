@@ -88,13 +88,14 @@ def test_answered_planner_questions_become_accessible_summaries_with_change_acti
     assert "answer.setAttribute('aria-hidden', String(answer.classList.contains('hidden')))" in planner
 
 
-def test_planner_explains_empty_friends_visibility_and_calls_advanced_settings_more_options():
+def test_planner_hides_unavailable_friends_and_groups_optional_details():
     planner = section("async function openNewGameModal", "async function renderTournaments")
     assert 'id="ng-friends-empty" role="status"' in planner
     assert "initialVisibility === 'friends' && friends.length === 0" in planner
     assert "button.dataset.vis === 'friends' && friends.length === 0" in planner
     assert "'Add friends first'" in planner
-    assert '<summary><span>More options</span>' in planner
+    assert '<summary><span>More details</span>' in planner
+    assert "button.classList.toggle('hidden', missingAudience && !plannerFeedErrors.friends)" in planner
     assert '<summary><span>Game options</span>' not in planner
 
 

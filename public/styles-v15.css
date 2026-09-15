@@ -1349,6 +1349,9 @@ textarea[aria-invalid="true"]:focus-visible {
 .planner-invite-link { min-height: 44px; margin-top: 5px; display: inline-flex; align-items: center; gap: 5px; }
 .planner-invite-link .ui-icon { width: 15px; height: 15px; }
 .planner-submitting .planner-step,
+.planner-submitting .planner-essentials,
+.planner-submitting #ng-answer-where,
+.planner-submitting #ng-answer-when,
 .planner-submitting .planner-advanced,
 .planner-submitting .planner-submit-bar { opacity: .66; pointer-events: none; }
 
@@ -7736,4 +7739,24 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 @media (max-width: 600px) {
   .modal.court-visit-dialog { display: block; height: auto; max-height: calc(100dvh - 68px); overflow-y: auto; }
   .court-visit-dialog .court-visit-panel:not([hidden]) { overflow-y: visible; min-height: 0; padding-right: 0; margin-right: 0; }
+}
+
+/* Keep the last planning step focused on participation, access and cost. */
+.session-planner-modal #ng-answer-where, .session-planner-modal #ng-answer-when { border-color: var(--line); background: var(--bg); margin-bottom: 8px; padding: 8px 12px; }
+.session-planner-modal #ng-answer-where .row-title, .session-planner-modal #ng-answer-when .row-title { font-size: 13px; line-height: 1.5; }
+.session-planner-modal .planner-game-setup { padding: 0; margin-bottom: 14px; border: 0; background: none; }
+.session-planner-modal .planner-carried-setup { border-color: var(--line); background: var(--card); padding: 10px 12px; }
+.session-planner-modal #ng-setup-controls { padding: 14px 0 0; }
+.session-planner-modal #ng-vis { font-size: 14px; display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,6.5em),1fr)); gap: 8px; }
+.session-planner-modal #ng-vis button { padding: 10px 8px; min-height: 72px; }
+.session-planner-modal #ng-vis button small { display: none; }
+.session-planner-modal .planner-audience-hint { font-size: 13px; line-height: 1.5; color: var(--ink-soft); margin: 8px 0 12px; }
+.session-planner-modal .planner-essentials { margin-top: 14px; }
+.session-planner-modal .planner-essentials h4 { font-size: 15px; margin: 0 0 12px; }
+.session-planner-modal .planner-essentials > .field-help { margin: 0; }
+.session-planner-modal .planner-advanced-copy { font-size: 12px; font-weight: 400; }
+@media (max-width: 359px) { .session-planner-modal #ng-essentials .form-grid { grid-template-columns: 1fr; } }
+
+@media (max-width: 600px) {
+  .session-planner-modal .planner-submit-bar { position: static; }
 }

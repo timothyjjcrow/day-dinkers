@@ -85,7 +85,8 @@ def test_create_choice_opens_the_correct_planner_without_immediate_side_effects(
 
 def test_planner_sharing_uses_the_created_game_not_an_unrelated_cached_game():
     handler = functions_between("let shareCreatedPlan = false;", 'refreshPlannerInviteChoices();')
-    assert "requestSubmit()" in handler
+    assert "requestSubmit()" not in handler
+    assert "shareCreatedPlan = !crewId && requestPayload.visibility === 'private';" in APP
     assert 'shareInviteLink' not in handler
     created = functions_between("const createdGame = await api('/games'", '} catch (err)')
     assert "openGameScreen(createdGame.id" in created

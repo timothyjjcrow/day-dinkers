@@ -178,7 +178,7 @@ def test_planner_keeps_one_direct_setup_visible_for_every_entry_point():
     assert "carriedFromGameFlow" not in planner
     assert 'class="planner-carried-setup" id="ng-carried-setup"' in planner
     assert 'id="ng-change-setup" aria-expanded="false"' in planner
-    assert '<div class="planner-game-setup-head">' in planner
+    assert 'class="sr-only" id="ng-game-setup-title"' in planner
     assert planner.count("${plannerSetupControlsHtml}") == 1
 
     capacity = section("function gameCapacityChoicesHtml", "function openGameFlow")

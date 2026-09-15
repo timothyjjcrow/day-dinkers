@@ -23,7 +23,7 @@ Review every feature and the journeys between features. Make Third Shot professi
 | 3 | Play home, discovery, filters, personal agenda, calendar | Find suitable play and see every commitment | In progress |
 | 4 | Map, list, search scope, selected/saved courts | Explore freely while retaining the selected place | In progress |
 | 5 | Court detail, timelines, hours/access, photos, reviews, contributions | Understand a visit and find the right next action | In progress |
-| 6 | Session creation/editing, recurring dates, host tools | Make or change a plan with concise, understandable controls | Pending |
+| 6 | Session creation/editing, recurring dates, host tools | Make or change a plan with concise, understandable controls | In progress |
 | 7 | Immediate play, on-the-way, arrival, presence, completion | Understand and control participation at each stage | Pending |
 | 8 | Ranked matches, score entry/confirmation/correction, rankings | Identify teams, result and required action without jargon | Pending |
 | 9 | Competition discovery, registration, partners, brackets, organizer controls | Find the next match and understand event progress | Pending |
@@ -74,3 +74,5 @@ Pass5 continued: `ui-ux-pass-05-court-corrections.md` covers topic-based correct
 Pass5 continued: `ui-ux-pass-05-correction-review.md` covers current/proposed comparisons, own-update withdrawal, competing proposals, compact history, authoritative results, stale/read/write recovery and preservation of unsent edits. Remaining source/role-specific contribution coverage is recorded; then broaden to session creation and host tools.
 
 Pass5 continued: `ui-ux-pass-05-visit-sources.md` covers venue/community hours separation, role-specific workspace entry, contact source labels, community-editor context, in-place visit refresh/retry and a single mobile scroller. Remaining court states stay open. Next broaden to pass 6: session creation/editing, recurring dates and host tools.
+
+Pass6: `ui-ux-pass-06-session-planner.md` covers a compact final scheduling step, grouped format/style, explicit audience meaning, optional details, mobile footer, draft recovery, locked submissions and private-sharing success. Recurrence/time suggestions, editing and host tools remain open.

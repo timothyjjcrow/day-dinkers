@@ -20298,13 +20298,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         </div>` : '';
     const modal = plannerShell;
     const plannerBox = modal.querySelector('.modal');
+    plannerBox.classList.add('session-planner-modal');
     const plannerSetupTitle = crewId || sessionMode ? 'Play session setup'
       : rankedMatchMode ? 'Ranked match setup' : 'Game setup';
-    const plannerSetupCopy = crewId || sessionMode
-      ? 'Choose how many people can join this casual group.'
-      : rankedMatchMode && setupCarried ? 'Your ranked setup is carried over. Change it only if you need to.'
-        : rankedMatchMode ? 'Choose singles or doubles for this ranked match.'
-        : 'Choose casual or ranked, then set the group size.';
     const plannerSetupControlsHtml = `
       <div ${lockGameType || crewId ? 'hidden' : ''}>
       ${gameChoiceCardsHtml({
@@ -20316,6 +20312,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       })}
       </div>
       ${gameCapacityChoicesHtml('ng', presetMaxPlayers, defaultType)}
+          <div class="form-field" id="ng-play-style-field"${defaultType === 'ranked' ? ' hidden' : ''}>
+            <label for="ng-play-style">Play style <span class="row-sub">(optional)</span></label>
+            <select id="ng-play-style"><option value="">No preference</option>${[['rotating_doubles','Rotating doubles'],['singles','Singles'],['mixed','Mixed play']].map(([value,label]) => `<option value="${value}"${value === presetPlayStyle ? ' selected' : ''}>${label}</option>`).join('')}</select>
+          </div>
       <input type="hidden" id="ng-max" value="${presetMaxPlayers}" />
       ${crewId ? `<p class="planner-game-setup-note" id="ng-crew-capacity">${initialInviteIds.size + 1} group player${initialInviteIds.size === 0 ? '' : 's'} selected. Capacity cannot be lower than the selected players.</p>` : ''}`;
     plannerBox.innerHTML = `
@@ -20334,7 +20334,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       <section class="planner-step" id="ng-step-where" aria-labelledby="planner-where-title">
         <div class="planner-step-head">
           <span class="planner-step-num">1</span>
-          <div><div class="planner-step-title" id="planner-where-title">Where are you playing?</div><div class="planner-step-sub">Current, saved, and nearby courts come first.</div></div>
+          <div><div class="planner-step-title" id="planner-where-title">Where are you playing?</div></div>
         </div>
         ${restoredCourtMissing ? '<div class="planner-inline-warning" id="ng-court-warning">Your saved court is not available right now. Pick another court before scheduling.</div>' : ''}
         <div id="ng-court-selected" class="${court ? '' : 'hidden'} court-selected">
@@ -20358,7 +20358,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       <section class="planner-step hidden" id="ng-step-when" aria-labelledby="planner-when-title">
         <div class="planner-step-head">
           <span class="planner-step-num">2</span>
-          <div><div class="planner-step-title" id="planner-when-title">When?</div><div class="planner-step-sub">${initialScheduledAt ? 'Review the selected time, or choose another.' : 'Pick a suggestion or choose any other time.'}</div></div>
+          <div><div class="planner-step-title" id="planner-when-title">When?</div></div>
         </div>
         <div id="ng-later-fields">
           <div class="schedule-suggestions-heading"><b>Suggested times</b><button type="button" class="btn-link" id="ng-more-times" aria-expanded="false" aria-controls="ng-smart-times">More common times</button></div>
@@ -20409,17 +20409,16 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <div><div class="planner-step-title" id="planner-who-title">${crewId ? 'Which group players are joining?' : initialClubId ? 'Who can join this community session?' : 'Who can join?'}</div><div class="planner-step-sub" id="planner-who-sub">${crewId ? 'Accepted members start selected. Deselect anyone who is sitting this session out, then choose who can fill extra spots.' : initialClubId ? 'Community sessions stay open so every member can see and join them.' : 'Keep it open, share with friends, or invite specific players.'}</div></div>
         </div>
       <section class="planner-game-setup" aria-labelledby="ng-game-setup-title">
-        <div class="planner-game-setup-head"><b id="ng-game-setup-title">${plannerSetupTitle}</b></div>
+        <b class="sr-only" id="ng-game-setup-title">${plannerSetupTitle}</b>
         <div class="planner-carried-setup" id="ng-carried-setup">
-          <span class="row-main"><b id="ng-carried-setup-label">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`}</b><small>${lockGameType || crewId ? 'Choose your group size' : 'Type and group size'}</small></span>
+          <span class="row-main"><b id="ng-carried-setup-label">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`}</b></span>
           <button type="button" class="btn btn-secondary btn-sm" id="ng-change-setup" aria-expanded="false" aria-controls="ng-setup-controls">Change</button>
         </div>
         <div class="hidden" id="ng-setup-controls">
-          <p class="planner-game-setup-note">${plannerSetupCopy}</p>
           ${plannerSetupControlsHtml}
         </div>
       </section>
-        <div class="type-cards vis-cards" id="ng-vis" role="group" aria-label="Who can join">
+        <div class="type-cards vis-cards" id="ng-vis" role="group" aria-label="Who can join" aria-describedby="ng-audience-hint">
           ${crewId ? `
             <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('lock')}</span><b>Group only</b><small>Selected players</small></button>
             <button type="button" data-vis="friends" aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('users')}</span><b>Friends</b><small>Selected group + friends</small></button>
@@ -20428,12 +20427,13 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
             <button type="button" data-vis="friends" aria-pressed="${initialVisibility === 'friends'}" class="${initialVisibility === 'friends' ? 'active' : ''}" ${friends.length ? '' : 'disabled aria-disabled="true"'}><span class="vis-choice-icon" aria-hidden="true">${uiIcon('users')}</span><b>My friends</b><small>${friends.length ? 'Friends can join' : 'Add friends first'}</small></button>
             <button type="button" data-vis="private" aria-pressed="${initialVisibility === 'private'}" class="${initialVisibility === 'private' ? 'active' : ''}"><span class="vis-choice-icon" aria-hidden="true">${uiIcon('lock')}</span><b>Invite only</b><small>Invited players or your private link</small></button>`}
         </div>
+        <p class="planner-audience-hint" id="ng-audience-hint" role="status"></p>
         <div class="${plannerFeedErrors.friends ? 'planner-inline-warning' : 'field-help'} ${!crewId && friends.length === 0 ? '' : 'hidden'}" id="ng-friends-empty" role="status">
           ${plannerFeedErrors.friends
             ? 'Friends couldn’t load. You can still create a private session and share its invite link.'
             : 'Use Invite only to share a private link.'}
         </div>
-        <details class="flow-disclosure planner-invitations" id="ng-invitations" ${crewId || initialVisibility === 'private' || hasPresetInvites ? 'open' : ''}>
+        <details class="flow-disclosure planner-invitations ${!invitePeople.length && !crewId ? 'hidden' : ''}" id="ng-invitations" ${crewId || initialVisibility === 'private' || hasPresetInvites ? 'open' : ''}>
         <summary>${crewId ? 'Choose group players' : 'Invite specific players'} <span>${crewId ? 'Choose players' : 'Optional'}</span></summary>
         <div id="ng-friends-wrap" style="margin-top:10px">
           ${invitePeople.length
@@ -20444,7 +20444,6 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
             : `<div class="empty-state planner-invite-empty"><span>${plannerFeedErrors.friends
               ? 'Friends couldn’t load. Reload setup choices to invite someone.'
               : 'Create this session, then share its private invite link. Your friends can join even if they are new to Third Shot.'}</span><button type="button" class="btn btn-secondary btn-sm" data-goto="chat-friends">Find players</button></div>`}
-          <button type="button" class="btn-link planner-invite-link" id="ng-copy-invite-link">${uiIcon('link')} Create session &amp; get invite link</button>
           <p class="row-sub" id="ng-invite-hint" style="margin-top:6px">${hasPresetInvites ? `${initialInviteIds.size} selected for a direct invitation.` : 'Select people to ping directly after scheduling.'}</p>
         </div>
         </details>
@@ -20472,37 +20471,33 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
       </section>
 
-      <section class="planner-essentials hidden" id="ng-essentials" aria-label="Session details">
+      <section class="planner-essentials hidden" id="ng-essentials" aria-labelledby="ng-access-title">
+        <h4 id="ng-access-title">Court access &amp; cost</h4>
+        <div class="form-grid">
+          <div class="form-field"><label for="ng-court-access">Court access</label><select id="ng-court-access"><option value="">Not confirmed yet</option>${[['host_reserved','Reserved by me'],['public_drop_in','Public drop-in'],['booking_needed','Booking still needed']].map(([value,label]) => `<option value="${value}"${value === presetCourtAccess ? ' selected' : ''}>${label}</option>`).join('')}</select></div>
+          <div class="form-field">
+            <label for="ng-cost">Cost per player</label>
+            <div class="game-money-input"><span aria-hidden="true">$</span><input type="number" id="ng-cost" min="0" max="10000" step="0.01" inputmode="decimal" value="${presetCostCents == null ? '' : (presetCostCents / 100).toFixed(2)}" placeholder="Not listed" aria-label="Cost per player in dollars" /></div><small class="field-help">0 = free</small>
+          </div>
+          <div class="form-field" id="ng-court-count-field">
+            <label for="ng-court-count">Courts you reserved</label><input type="number" id="ng-court-count" min="1" max="24" step="1" inputmode="numeric" value="${presetCourtCount ?? ''}" placeholder="Optional" />
+          </div>
+        </div>
+        <p class="field-help">Court bookings happen outside Third Shot.</p>
+      </section>
+
+      <details class="planner-advanced hidden" id="ng-advanced">
+        <summary><span>More details</span><span class="planner-advanced-copy" id="ng-options-summary">${gameLevelRangeLabel({ levelMin: presetLevelMin, levelMax: presetLevelMax })}</span></summary>
+        <div class="planner-advanced-body">
           <div class="form-field">
             <label for="ng-title">Title <span class="row-sub">(optional)</span></label>
             <input type="text" id="ng-title" maxlength="120" value="${esc(presetTitle)}" placeholder="e.g. Saturday morning round robin" />
           </div>
-        <div class="form-grid">
-          <div class="form-field" id="ng-play-style-field"${defaultType === 'ranked' ? ' hidden' : ''}>
-            <label for="ng-play-style">Play style <span class="row-sub">(optional)</span></label>
-            <select id="ng-play-style"><option value="">No preference</option>${[['rotating_doubles','Rotating doubles'],['singles','Singles'],['mixed','Mixed play']].map(([value,label]) => `<option value="${value}"${value === presetPlayStyle ? ' selected' : ''}>${label}</option>`).join('')}</select>
-          </div>
-          <div class="form-field"><label for="ng-court-access">Court access</label><select id="ng-court-access"><option value="">Not confirmed yet</option>${[['host_reserved','Reserved by me'],['public_drop_in','Public drop-in'],['booking_needed','Booking still needed']].map(([value,label]) => `<option value="${value}"${value === presetCourtAccess ? ' selected' : ''}>${label}</option>`).join('')}</select></div>
-        </div>
-        <p class="field-help">Court bookings happen outside Third Shot.</p>
-          <div class="form-grid game-plan-fields">
-            <div class="form-field">
-              <label for="ng-cost">Cost per player</label>
-              <div class="game-money-input"><span aria-hidden="true">$</span><input type="number" id="ng-cost" min="0" max="10000" step="0.01" inputmode="decimal" value="${presetCostCents == null ? '' : (presetCostCents / 100).toFixed(2)}" placeholder="Not listed" aria-label="Cost per player in dollars" /></div><small class="field-help">Use 0 for free.</small>
-            </div>
             <div class="form-field">
               <label for="ng-court-number">Court or area</label>
               <input type="text" id="ng-court-number" maxlength="40" value="${esc(presetCourtNumber)}" placeholder="e.g. Courts 3–4" />
             </div>
-            <div class="form-field" id="ng-court-count-field">
-              <label for="ng-court-count">Courts you reserved</label>
-              <input type="number" id="ng-court-count" min="1" max="24" step="1" inputmode="numeric" value="${presetCourtCount ?? ''}" placeholder="Optional" />
-            </div>
-          </div>      </section>
 
-      <details class="planner-advanced hidden" id="ng-advanced">
-        <summary><span>More options</span><span class="planner-advanced-copy" id="ng-options-summary">${defaultType === 'ranked' ? 'Ranked' : 'Casual'} · ${crewId ? `${initialInviteIds.size + 1} selected group players` : (presetMaxPlayers === 2 ? 'Singles' : presetMaxPlayers === 4 ? 'Doubles' : `${presetMaxPlayers} players`)} · ${gameLevelRangeLabel({ levelMin: presetLevelMin, levelMax: presetLevelMax })}</span></summary>
-        <div class="planner-advanced-body">
         <fieldset class="game-choice-field" id="ng-level">
           <legend>Self-rating range <span class="row-sub">(a matching hint, not a gate)</span></legend>
           <div class="form-grid">
@@ -20709,7 +20704,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const summary = modal.querySelector('#ng-summary');
       const courtName = modal.querySelector('#ng-court-name').textContent || 'Choose a court';
       const scheduledIso = plannerScheduledIso();
-      const whenText = scheduledIso ? fmtDateTime(scheduledIso) : 'Choose a time';
+      const duration = Number(modal.querySelector('#ng-duration').value);
+      const end = scheduledIso && Number.isInteger(duration) && duration >= 15 && duration <= 720 ? new Date(new Date(scheduledIso).getTime() + duration * 60000) : null;
+      const repeats = modal.querySelector('#ng-recurring').checked ? `Weekly ${[...recurrenceWeekdays].map(day=>day[0].toUpperCase()+day.slice(1)).join(', ')} · ${plannerTimeZoneLabel(recurrenceTimezone)}${recurrenceEndsOn ? ` · Ends ${recurrenceEndsOn}` : ''}` : '';
+      const whenText = scheduledIso ? `${fmtDateTime(scheduledIso)}${end ? `–${end.toDateString() === new Date(scheduledIso).toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ' · No end time'}${repeats ? ` · ${repeats}` : ''}` : 'Choose a time';
       if (summary) {
         const costText = modal.querySelector('#ng-cost').value.trim();
         const costValue = Number(costText);
@@ -21074,17 +21072,16 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
             : `${players} spots · ${inviteIds.size + 1} group players included`)
         : gameType === 'ranked' ? (players === 2 ? 'Singles' : 'Doubles') : `${players} players`;
       const level = gameLevelRangeLabel({ levelMin, levelMax, preferredLevel });
-      const duration = Number(modal.querySelector('#ng-duration').value);
-      const timing = Number.isInteger(duration) && duration >= 15 && duration <= 720
-        ? `${duration} min` : 'No end time';
-      const repeat = recurringBox.checked
-        ? `Repeats ${[...recurrenceWeekdays].map((day) => day.slice(0, 1).toUpperCase() + day.slice(1)).join(', ')}`
-        : '';
       modal.querySelector('#ng-options-summary').textContent = [
-        gameType === 'ranked' ? 'Ranked match' : 'Play session', size, timing, level, repeat,
+        level,
+        modal.querySelector('#ng-title').value.trim() ? 'Title' : '',
+        modal.querySelector('#ng-court-number').value.trim() ? 'Court area' : '',
+        modal.querySelector('#ng-notes').value.trim() || modal.querySelector('#ng-description').value.trim() ? 'Notes' : '',
       ].filter(Boolean).join(' · ');
       const carriedLabel = modal.querySelector('#ng-carried-setup-label');
-      if (carriedLabel) carriedLabel.textContent = `${gameType === 'ranked' ? 'Ranked' : 'Casual session'} · ${size}`;
+      const style = gameType === 'ranked' ? ''
+        : sessionPlayStyleLabel({ play_style: modal.querySelector('#ng-play-style').value });
+      if (carriedLabel) carriedLabel.textContent = [gameType === 'ranked' ? 'Ranked' : 'Casual', style, size].filter(Boolean).join(' · ');
     };
     const setPlannerSetupExpanded = (expanded, { focus = false } = {}) => {
       const controls = modal.querySelector('#ng-setup-controls');
@@ -21174,6 +21171,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       modal.querySelector('#planner-who-title').textContent = crewId
         ? 'Which group players are joining?'
         : clubId ? 'Who can join this community session?' : 'Who can join?';
+      modal.querySelector('#planner-who-sub').classList.toggle('hidden', !crewId && !clubId);
+      modal.querySelector('#ng-audience-hint').textContent = clubId ? 'Every community member can see and join.' : crewId ? (visibility === 'private' ? 'Selected group players only.' : visibility === 'friends' ? 'Selected players and friends can join.' : 'Nearby players can fill the extra spots.') : visibility === 'private' ? 'Invited players or people with your private link can join.' : visibility === 'friends' ? 'Friends and invited players can join.' : 'Anyone nearby can join.';
       modal.querySelector('#planner-who-sub').textContent = crewId
         ? 'Accepted members start selected. Deselect anyone sitting this session out, then choose who can fill extra spots.'
         : clubId ? 'Community sessions stay open so every member can see and join them.'
@@ -21184,6 +21183,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         const unavailable = (!!clubId && button.dataset.vis !== 'open') || missingAudience;
         button.classList.toggle('active', active);
         button.disabled = unavailable;
+        button.classList.toggle('hidden', missingAudience && !plannerFeedErrors.friends);
         button.setAttribute('aria-pressed', String(active));
         if (missingAudience) button.title = button.dataset.vis === 'friends'
           ? 'Add friends first' : 'Find players first';
@@ -21192,7 +21192,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       });
       friendsWrap.classList.remove('hidden');
       if (crewId) modal.querySelector('#ng-invitations').open = true;
-      friendsEmpty?.classList.toggle('hidden', !!crewId || friends.length > 0 || visibility === 'private');
+      friendsEmpty?.classList.toggle('hidden', !plannerFeedErrors.friends || !!crewId || friends.length > 0 || visibility === 'private');
       syncCapacityChoices();
       updateOptionsSummary();
       updateCrewPresetBanner();
@@ -21313,10 +21313,6 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       });
     }
     let shareCreatedPlan = false;
-    modal.querySelector('#ng-copy-invite-link')?.addEventListener('click', () => {
-      shareCreatedPlan = true;
-      modal.querySelector('#ng-form').requestSubmit();
-    });
     refreshPlannerInviteChoices();
     updateInviteHint();
 
@@ -21418,9 +21414,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     };
     syncCourtAccess();
     modal.querySelector('#ng-court-access').addEventListener('change', () => { syncCourtAccess(); updatePlannerSummary(); markPlannerDirty(); });
-    modal.querySelector('#ng-play-style').addEventListener('change', markPlannerDirty);
+    modal.querySelector('#ng-play-style').addEventListener('change', () => { updateOptionsSummary(); markPlannerDirty(); });
     ['ng-title', 'ng-description', 'ng-cost', 'ng-court-number', 'ng-court-count', 'ng-notes']
-      .forEach((id) => modal.querySelector(`#${id}`).addEventListener('input', () => { updatePlannerSummary(); markPlannerDirty(); }));
+      .forEach((id) => modal.querySelector(`#${id}`).addEventListener('input', () => { updatePlannerSummary(); updateOptionsSummary(); markPlannerDirty(); }));
     modal.querySelector('#ng-save-group')?.addEventListener('change', (event) => {
       modal.querySelector('#ng-save-group-name-wrap')?.classList.toggle('hidden', !event.target.checked);
       markPlannerDirty();
@@ -21714,7 +21710,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     }
     if (plannerSubmitting) {
       modal.classList.add('planner-submitting');
-      modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+      modal.querySelectorAll('.planner-step, .planner-essentials, .planner-advanced, .planner-submit-bar, #ng-answer-where, #ng-answer-when')
         .forEach((section) => section.setAttribute('inert', ''));
       const retry = modal.querySelector('#ng-retry-exact');
       if (retry && !frozenSubmitPayload) {
@@ -21726,7 +21722,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const requestExactPlannerRetry = () => {
       if (!frozenSubmitPayload) return;
       exactRetryRequested = true;
-      modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+      modal.querySelectorAll('.planner-step, .planner-essentials, .planner-advanced, .planner-submit-bar, #ng-answer-where, #ng-answer-when')
         .forEach((section) => section.removeAttribute('inert'));
       const submit = modal.querySelector('#ng-submit');
       submit.disabled = false;
@@ -21791,7 +21787,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       if (!slot) return;
       modal.classList.add('planner-submitting');
       modal.querySelector('.modal')?.removeAttribute('aria-busy');
-      modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+      modal.querySelectorAll('.planner-step, .planner-essentials, .planner-advanced, .planner-submit-bar, #ng-answer-where, #ng-answer-when')
         .forEach((section) => section.setAttribute('inert', ''));
       const submit = modal.querySelector('#ng-submit');
       submit.disabled = true;
@@ -21968,6 +21964,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       plannerSubmitting = true;
       plannerSubmitStartedAt ||= Date.now();
       frozenSubmitPayload = requestPayload;
+      shareCreatedPlan = !crewId && requestPayload.visibility === 'private';
       if (!flushPlannerDraft('submitting')) {
         plannerSubmitting = false;
         plannerSubmitStartedAt = null;
@@ -21979,7 +21976,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       }
       modal.classList.add('planner-submitting');
       modal.querySelector('.modal')?.setAttribute('aria-busy', 'true');
-      modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+      modal.querySelectorAll('.planner-step, .planner-essentials, .planner-advanced, .planner-submit-bar, #ng-answer-where, #ng-answer-when')
         .forEach((section) => section.setAttribute('inert', ''));
       try {
         const createdGame = await api('/games', {
@@ -22035,7 +22032,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           clearGameDraft(plannerAttemptId);
           modal.classList.remove('planner-submitting');
           modal.querySelector('.modal')?.removeAttribute('aria-busy');
-          modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+          modal.querySelectorAll('.planner-step, .planner-essentials, .planner-advanced, .planner-submit-bar, #ng-answer-where, #ng-answer-when')
             .forEach((section) => section.removeAttribute('inert'));
           const submitButton = modal.querySelector('#ng-submit');
           submitButton.disabled = true;
@@ -22058,7 +22055,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           modal.querySelector('.planner-recovery.warn')?.remove();
           modal.classList.remove('planner-submitting');
           modal.querySelector('.modal')?.removeAttribute('aria-busy');
-          modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+          modal.querySelectorAll('.planner-step, .planner-essentials, .planner-advanced, .planner-submit-bar, #ng-answer-where, #ng-answer-when')
             .forEach((section) => section.removeAttribute('inert'));
           const submitButton = modal.querySelector('#ng-submit');
           submitButton.disabled = true;
@@ -22115,7 +22112,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           modal.querySelector('.planner-recovery.warn')?.remove();
           modal.classList.remove('planner-submitting');
           modal.querySelector('.modal')?.removeAttribute('aria-busy');
-          modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+          modal.querySelectorAll('.planner-step, .planner-essentials, .planner-advanced, .planner-submit-bar, #ng-answer-where, #ng-answer-when')
             .forEach((section) => section.removeAttribute('inert'));
           const btn = modal.querySelector('#ng-submit');
           btn.disabled = false;
@@ -22169,7 +22166,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         modal.querySelector('.planner-recovery.warn')?.remove();
         modal.classList.remove('planner-submitting');
         modal.querySelector('.modal')?.removeAttribute('aria-busy');
-        modal.querySelectorAll('.planner-step, .planner-advanced, .planner-submit-bar')
+        modal.querySelectorAll('.planner-step, .planner-essentials, .planner-advanced, .planner-submit-bar, #ng-answer-where, #ng-answer-when')
           .forEach((section) => section.removeAttribute('inert'));
         const submit = modal.querySelector('#ng-submit');
         submit.disabled = false;

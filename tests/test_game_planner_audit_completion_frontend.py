@@ -59,7 +59,8 @@ def test_audience_options_and_invites_are_visible_searchable_and_additive():
     assert "f.display_name" in planner
     assert '${playerSkillIdentityHtml(f)}' in planner
     assert "planner-availability-match" in planner
-    assert 'id="ng-copy-invite-link"' in who
+    assert 'id="ng-copy-invite-link"' not in planner
+    assert "shareCreatedPlan = !crewId && requestPayload.visibility === 'private';" in planner
     assert "invite_user_ids: [...inviteIds]" in planner
     assert "visibility === 'private' ? [...inviteIds] : []" not in planner
     assert "button.dataset.vis === 'friends' && friends.length === 0" in planner
