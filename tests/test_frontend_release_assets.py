@@ -248,3 +248,16 @@ def test_ci_rebuilds_assets_for_every_release_affecting_change():
         'git ls-files --others --exclude-standard -- public/assets'
         in CI_WORKFLOW
     )
+
+
+@pytest.mark.parametrize('filename', RUNTIME_FILES)
+def test_previous_release_still_serves_committed_assets_for_existing_tabs(filename):
+    client = create_app('testing').test_client()
+    previous = PUBLIC / 'assets' / 'r79' / filename
+    identity = client.get(f'/release-assets/r79/{filename}', headers={'Accept-Encoding':'identity'})
+    compressed = client.get(f'/release-assets/r79/{filename}', headers={'Accept-Encoding':'br'})
+    assert identity.status_code == compressed.status_code == 200
+    assert identity.data == previous.read_bytes()
+    assert compressed.headers['Content-Encoding'] == 'br'
+    assert compressed.data == previous.with_name(filename+'.br').read_bytes()
+    assert 'immutable' in identity.headers['Cache-Control']
