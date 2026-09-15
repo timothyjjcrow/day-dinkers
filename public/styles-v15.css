@@ -5300,7 +5300,7 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .attendance-confirmation > div:first-child { display: grid; gap: 3px; }
 .attendance-confirmation > div:first-child span { color: var(--ink-soft); font-size: 13px; }
 .attendance-confirmation-actions {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7em), 1fr)); gap: 8px;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px;
 }
 .game-danger-actions { margin-top: 4px; border-top: 1px solid var(--line); }
 .game-danger-actions > summary {
@@ -7067,8 +7067,8 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .session-roster { margin: 0 0 16px; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius-lg); }
 .session-roster-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .session-roster-head h4 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 15px; }
-.session-roster-head h4 span { display: inline-flex; align-items: center; justify-content: center; min-width: 25px; height: 25px; border-radius: var(--radius-pill); background: var(--green-100); color: var(--green-800); font-size: 12px; }
-.session-roster-head > span { color: var(--green-700); font-size: 12px; font-weight: 700; }
+.session-roster-head h4 span { display: inline-flex; align-items: center; justify-content: center; min-width: 25px; height: 25px; border-radius: var(--radius-pill); background: var(--green-100); color: var(--green-ink); font-size: 12px; }
+.session-roster-head > span { color: var(--green-ink); font-size: 12px; font-weight: 700; }
 .session-roster .game-player-row { padding: 0; margin: 0; border-radius: 0; }
 .session-roster .game-player-row + .game-player-row { border-top: 1px solid var(--line); }
 .session-roster .player-profile-link { padding: 7px 0; min-height: 48px; gap: 10px; }
@@ -7416,4 +7416,11 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .session-roster-group + .session-roster-group { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .session-roster-group h5 { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 6px; font-size: 13px; color: var(--ink-soft); }
 .session-roster-more > summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--ink); font-weight: 700; }
-.session-roster .row-title { overflow-wrap: anywhere; }
+.session-roster .row-title { overflow-wrap: anywhere; white-space: normal; }
+.session-roster-group h5 { align-items: center; color: var(--ink); }
+.session-roster-group h5::before { content: ''; width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--ink-soft); }
+.session-roster-group[data-rsvp-state="confirmed"] h5::before { background: var(--green-600); }
+.session-roster-group[data-rsvp-state="needs_confirmation"] h5::before { background: var(--amber-500); }
+.session-roster-group h5 > span { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.attendance-confirmation-actions .btn { min-height: 44px; }
+.attendance-confirmation-actions .btn-secondary { background: transparent; color: var(--ink-soft); }

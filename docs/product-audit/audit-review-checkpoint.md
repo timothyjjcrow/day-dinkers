@@ -4,6 +4,10 @@ The user explicitly resumed work and requested all current changes be pushed and
 
 ## Latest continuation
 
+September 14: resumed at `/tmp/thirdshot-roster-resume` on `codex/roster-commitment-resume`. Roster consent and mobile UI improvements are prepared as r80, not deployed. See `roster-reconfirmation-evidence.md` and apply `ui-pass-standard.md` on every remaining pass.
+
+## Previous r79 release
+
 r79 is live from 1b80e9b: separate casual capacity/play style, visible cost/court access, shared invitation/calendar facts and described self-ratings. All 1,740 Linux tests passed; 42 PostgreSQL checks passed; additive production migration preserved the existing data. See release-r79.md.
 
 The next roster/reconfirmation changes are isolated in `/tmp/thirdshot-roster-commitment` on `codex/roster-commitment`; they are not deployed. See roster-commitment-next.md for the reproduced defects. Continue the whole-app goal; do not treat r79 as completion.

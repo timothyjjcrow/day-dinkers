@@ -7176,6 +7176,14 @@ def respond_host_handoff(game_id, handoff_id):
     if proposal.scope == 'following_dates':
         affected += _future_series_dates(game)
     if payload['accept']:
+        # Taking over hosting must not silently accept a changed playing plan.
+        # Review each affected occurrence before changing any host or roster.
+        for occurrence in affected:
+            mine = next((p for p in occurrence.players if p.user_id == actor_id), None)
+            if mine and mine.commitment_confirmation_due():
+                return jsonify({'error': 'host_plan_confirmation_required',
+                                'review_game_id': occurrence.id,
+                                'game': _game_payload(occurrence, actor_id)}), 409
         if any(len(date.players) >= date.max_players and not any(p.user_id == actor_id for p in date.players)
                for date in affected):
             return jsonify({'error': 'future_session_full'}), 409

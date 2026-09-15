@@ -17,7 +17,7 @@ BUNDLED_COURTS_FILE = os.path.join(PROJECT_ROOT, 'data', 'courts.json.gz')
 # Immutable frontend URLs are part of the executable shell contract. Keep the
 # prior release readable while an already-open service-worker client reloads
 # onto the current release.
-FRONTEND_RELEASE = 'r79'
+FRONTEND_RELEASE = 'r80'
 FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', 'r76', 'r77', 'r78', FRONTEND_RELEASE})
 FRONTEND_RELEASE_FILES = frozenset({
     'app-v15.min.js',

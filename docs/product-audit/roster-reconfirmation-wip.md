@@ -1,3 +1,5 @@
+> Resumed September 14: this is the historical pause handoff. Current source, evidence and remaining gates are in `roster-reconfirmation-evidence.md`; r80 is now prepared in `/tmp/thirdshot-roster-resume`.
+
 # Roster reconfirmation handoff — paused
 
 Saved at the user’s request on `codex/roster-commitment`. This is unfinished source work and has not been deployed. Production remains on r79; the production release receipt is in `release-r79.md` on main.

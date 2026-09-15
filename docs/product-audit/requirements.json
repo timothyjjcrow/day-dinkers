@@ -191,9 +191,13 @@
       "finding": "P2 — clearer roster state distinctions. Judgment.",
       "source": "docs/product-audit/play-competition.md",
       "requirement": "**P2 — clearer roster state distinctions. Judgment.** Keep separate headings/counts for **Going**, **Needs reconfirmation**, **Waitlist**, and **Here**. Do not let one checkmark cover intent, an automatic promotion and physical arrival. The existing code already has the relevant states but combines some into a general roster count. Large sessions should default to a compact face/name grid, show host + first few players, and expand the rest without moving the action button off-screen.",
-      "status": "pending",
-      "implementation": [],
-      "verification": []
+      "status": "in_progress",
+      "implementation": [
+        "Roster/reconfirmation implementation and UI refinement: docs/product-audit/roster-reconfirmation-evidence.md. Not yet deployed; physical-presence scope remains."
+      ],
+      "verification": [
+        "September 14 synthetic mobile success/stale-plan flows, per-player API checks, migration and UI tests; see roster-reconfirmation-evidence.md for exact scope and remaining gates."
+      ]
     },
     {
       "id": "PL-15",

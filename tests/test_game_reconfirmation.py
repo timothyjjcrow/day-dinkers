@@ -77,3 +77,53 @@ def test_following_date_edit_preserves_prior_confirmation(client):
     future=client.get(f'/api/games/{later.id}',headers=auth(guest)).get_json()
     assert not earlier['commitment_confirmation_due'] and earlier['cost_cents']==0
     assert future['commitment_confirmation_due'] and future['cost_cents']==800
+
+
+@pytest.mark.parametrize('scope', ['this_date', 'following_dates'])
+def test_host_handoff_cannot_accept_a_changed_plan_for_the_player(client, scope):
+    fields = {'recurrence': 'weekly', 'recurrence_timezone': 'UTC'} if scope == 'following_dates' else {}
+    host, guest, game = joined_plan(client, **fields)
+    path = f"/api/games/{game['id']}"
+    changed_id = game['id']
+    if scope == 'following_dates':
+        dates = Game.query.filter_by(recurrence_series_id=game['id']).order_by(Game.scheduled_at).all()
+        changed_id = dates[1].id
+        assert client.post(f'/api/games/{changed_id}/join', headers=auth(guest), json={}).status_code == 200
+    proposal = client.post(path+'/host-handoff', headers=auth(host), json={
+        'target_user_id': guest['user']['id'], 'edit_scope': scope, 'leave_on_accept': True,
+    })
+    assert proposal.status_code == 202, proposal.get_json()
+    assert client.patch(f'/api/games/{changed_id}', headers=auth(host), json={'cost_cents':1500, 'edit_scope':'this_date'}).status_code == 200
+    reply_path = path+f"/host-handoff/{proposal.get_json()['host_handoff']['id']}/respond"
+    rejected = client.post(reply_path, headers=auth(guest), json={'accept':True})
+    assert rejected.status_code == 409, rejected.get_json()
+    body = rejected.get_json()
+    assert body['error'] == 'host_plan_confirmation_required'
+    assert body['review_game_id'] == changed_id
+    assert body['game']['cost_cents'] == 1500
+    assert db.session.get(Game, game['id']).creator_id == host['user']['id']
+    row = GamePlayer.query.filter_by(game_id=changed_id, user_id=guest['user']['id']).one()
+    assert row.attending_at is None and row.commitment_confirmation_due()
+    confirmed = client.post(f'/api/games/{changed_id}/attend', headers=auth(guest), json={
+        'expected_commitment_requested_at': body['game']['my_commitment_requested_at'],
+    })
+    assert confirmed.status_code == 200, confirmed.get_json()
+    accepted = client.post(reply_path, headers=auth(guest), json={'accept':True})
+    assert accepted.status_code == 200, accepted.get_json()
+    assert accepted.get_json()['creator_id'] == guest['user']['id']
+
+
+def test_legacy_roster_migration_preserves_confirmation_without_inventing_requests(client, app):
+    from sqlalchemy import text
+    from backend.app import _upgrade_schema
+    host, guest, game = joined_plan(client)
+    db.session.remove()
+    with db.engine.begin() as connection:
+        before = connection.execute(text('SELECT user_id, attending_at FROM game_player ORDER BY user_id')).all()
+        connection.execute(text('ALTER TABLE game_player DROP COLUMN commitment_requested_at'))
+    _upgrade_schema(app)
+    _upgrade_schema(app)
+    with db.engine.connect() as connection:
+        after = connection.execute(text('SELECT user_id, attending_at FROM game_player ORDER BY user_id')).all()
+        assert after == before
+        assert connection.execute(text('SELECT COUNT(*) FROM game_player WHERE commitment_requested_at IS NOT NULL')).scalar_one() == 0

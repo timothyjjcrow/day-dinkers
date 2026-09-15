@@ -134,3 +134,29 @@ def test_consent_summary_separates_rsvps_attendance_and_pending_responsibility()
       assert.match(html,/data-host-reply="accept"/);
       assert.match(html,/data-host-reply="decline"/);
     ''')
+
+
+def test_host_handoff_review_opens_the_changed_date_and_focuses_current_plan():
+    start = APP.index('    function bind() {', APP.index('async function openGameScreen'))
+    body = APP[start + len('    function bind() {'):APP.index('      const datesHost', start)]
+    run('''
+      const assert=require('node:assert/strict');
+      const gameId=27,game={id:27,host_handoff:{id:91}},state={tab:'profile'},modal={};
+      const button={dataset:{hostReply:'accept'},addEventListener:(name,fn)=>button[name]=fn};
+      let reviewId=27,focused=false,rendered=[],opened=[],messages=[];
+      const box={querySelector:q=>q==='#attendance-confirmation-title'?{focus:()=>focused=true}:null,
+        querySelectorAll:()=>[button]};
+      const beginButtonAction=()=>()=>{},refreshMe=()=>{},render=x=>rendered.push(x);
+      const toast=x=>messages.push(x),showInlineActionError=()=>{throw Error('wrong error path');};
+      const openGameScreen=(id,opts)=>opened.push([id,opts.replaceModal]);
+      const api=async()=>{throw Object.assign(Error('Confirm the updated plan'),{
+        code:'host_plan_confirmation_required',data:{review_game_id:reviewId,game:{id:reviewId,cost_cents:1500}}
+      });};
+    ''' + body + '''
+      (async()=>{
+        await button.click();
+        assert.equal(focused,true);assert.equal(rendered[0].cost_cents,1500);assert.equal(opened.length,0);
+        reviewId=28;await button.click();
+        assert.deepEqual(opened,[[28,modal]]);assert.equal(rendered.length,1);assert.equal(messages.length,2);
+      })().catch(error=>{console.error(error);process.exitCode=1;});
+    ''')

@@ -1294,6 +1294,7 @@
     invalid_ends_at: 'Choose an end time 15 minutes to 12 hours after the start.',
     duration_end_mismatch: 'The duration and end time do not match.',
     game_commitment_changed: 'This plan changed. Review the latest details before confirming.',
+    host_plan_confirmation_required: 'Confirm the updated plan before taking over as host.',
     invalid_play_style: 'Choose a casual play style. Rotating doubles needs at least four places.',
     invalid_court_access: 'Choose how players access the court. Only host-reserved courts can have a reserved count.',
     invalid_cost_cents: 'Enter a cost from $0 to $10,000.',
@@ -8845,6 +8846,30 @@
     });
   }
 
+  function observeModalHeaderInset(box) {
+    if (!window.ResizeObserver || !window.MutationObserver) return () => {};
+    let header = null;
+    const sync = () => {
+      const height = header?.getBoundingClientRect().height || 0;
+      box.style.scrollPaddingTop = `${Math.ceil(height + 8)}px`;
+    };
+    const resize = new ResizeObserver(sync);
+    const followHeader = () => {
+      const next = box.querySelector(':scope > .modal-head');
+      if (next === header) return;
+      if (header) resize.unobserve(header);
+      header = next;
+      if (header) resize.observe(header);
+      sync();
+    };
+    // A detail refresh replaces its header. Keep focused controls below the
+    // current sticky title, including when enlarged text makes it taller.
+    const changes = new MutationObserver(followHeader);
+    changes.observe(box, { childList: true });
+    followHeader();
+    return () => { resize.disconnect(); changes.disconnect(); };
+  }
+
   function openModal(html, opts = {}) {
     const root = $('#overlay-root');
     const previousFocus = document.activeElement;
@@ -8880,7 +8905,7 @@
     });
     backdrop._returnFocus = opts.returnFocus || previousFocus;
     backdrop._returnFocusFallback = opts.returnFocusFallback || null;
-    backdrop._cleanupFns = [];
+    backdrop._cleanupFns = [observeModalHeaderInset(modalBox)];
     enhanceAppSelects(backdrop);
 
     // Keep every form sheet inside the visual viewport when a mobile software
@@ -35207,7 +35232,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         if (!people.length) return '';
         const first = people.slice(0, 6).map(renderPlayer).join('');
         const extra = people.slice(6);
-        return `<div class="session-roster-group"><h5>${label} <span>${people.length}</span></h5>${first}
+        return `<div class="session-roster-group" data-rsvp-state="${key}"><h5>${label} <span>${people.length}</span></h5>${first}
           ${extra.length ? `<details class="session-roster-more" id="session-roster-more-${key}"><summary>Show ${extra.length} more</summary>${extra.map(renderPlayer).join('')}</details>` : ''}</div>`;
       }).join('');
   }
@@ -35219,7 +35244,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const changed = game.commitment_confirmation_due;
     return `<section class="attendance-confirmation" aria-labelledby="attendance-confirmation-title">
       <div><b id="attendance-confirmation-title" tabindex="-1">${changed ? 'The plan changed' : 'Still coming?'}</b>
-        <span>${changed ? 'Review the details above. Your place is still held.' : 'Confirm your place for this date.'}</span></div>
+        <span>${changed ? 'Check the current time, court and cost.' : 'Confirm your place for this date.'}</span></div>
       <div class="attendance-confirmation-actions"><button class="btn btn-primary" id="gs-attend">${changed ? 'Confirm this plan' : 'Yes, I’m coming'}</button><button class="btn btn-secondary" id="gs-not-coming">Can’t make it</button></div>
     </section>`;
   }
@@ -37745,7 +37770,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         : isRankedMatch ? 'Confirmed result' : 'Final score'
       : '';
     const joinedState = game.is_joined && game.status === 'upcoming' && !closedRally
-      ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${uiIcon('check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}</span>${joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>' : ''}</div>` : '';
+      ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${uiIcon(game.attendance_confirmation_due && !game.is_creator ? 'clock' : 'check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}</span>${joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>' : ''}</div>` : '';
     const when = !game.is_instant && game.scheduled_at
       ? `<div class="session-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
     const openSpots = Math.max(0, Number(game.spots_left) || 0);
@@ -37782,7 +37807,6 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       ${sessionVisitFactsHtml(game)}
       ${courtEntryNoticeHtml(game)}
       ${sessionConfirmationHtml(game)}
-      ${closedRally ? '' : sessionReturnToolsHtml(game)}
       ${!hasScore ? `<section class="session-roster" aria-label="Players">
         <div class="session-roster-head"><h4>${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Players' : 'Signed up'} <span>${readyCount}</span></h4><span>${game.status === 'upcoming' && !closedRally ? rosterAvailability : ''}</span></div>
         ${playersHtml}
@@ -37795,6 +37819,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
         <button type="button" class="btn btn-secondary" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
       </div>
+      ${closedRally ? '' : sessionReturnToolsHtml(game)}
       ${chatPreview}${infoStrip}${planningDetails}
       <button type="button" class="btn btn-secondary btn-block" id="gs-help">Help with this ${playNoun}</button>`;
   }
@@ -37912,7 +37937,18 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
             state.playGamesCache=null; render(fresh); refreshMe();
             if (state.tab === 'play') renderPlay();
             toast(button.dataset.attendanceCorrect ? 'Attendance corrected. RSVP history is preserved.' : 'Response saved');
-          } catch (error) { reset(); showInlineActionError(box,error.message); }
+          } catch (error) {
+            reset();
+            if (error.code === 'host_plan_confirmation_required' && error.data?.game) {
+              if (Number(error.data.review_game_id) !== Number(gameId)) {
+                openGameScreen(error.data.review_game_id, { replaceModal: modal });
+              } else {
+                render(error.data.game);
+                box.querySelector('#attendance-confirmation-title')?.focus();
+              }
+              toast(error.message);
+            } else showInlineActionError(box,error.message);
+          }
         });
       });
       const datesHost = box.querySelector('#gs-series-dates');
