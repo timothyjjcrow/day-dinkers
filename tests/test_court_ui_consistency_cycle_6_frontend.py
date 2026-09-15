@@ -104,15 +104,15 @@ def test_add_court_flow_exposes_the_pin_and_collects_supported_location_fields()
 
 def test_suggest_edit_flow_groups_fields_and_protects_unsaved_changes():
     edit = section("function openSuggestEditSheet", "// ---------- Modal helpers")
-    assert "Community-verified details" in edit
+    assert "Update court" in edit
     assert 'id="se-setup-label"' in edit
-    assert 'id="se-visit-label"' in edit
+    assert 'id="se-visiting"><summary>Access &amp; fees' in edit
     assert 'class="court-form-section court-closure-field"' in edit
-    assert "Another player confirms a change before it goes live." in edit
+    assert "Another player confirms it before it goes live." in edit
     assert "Number.isInteger(courtCount)" in edit
     assert "Enter a court count from 1 to 100." in edit
     assert "title: 'Discard this court suggestion?'" in edit
-    assert 'id="se-submit">${uiIcon(\'check\')} Submit suggestion' in edit
+    assert 'id="se-submit">${uiIcon(\'check\')} Submit update' in edit
     assert ".court-closure-field" in STYLES
     assert ".court-form-section > .choice-check-list { margin: 0; padding: 0; border: 0; }" in STYLES
 

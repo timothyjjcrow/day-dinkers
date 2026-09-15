@@ -27,8 +27,8 @@ def test_open_play_has_normalized_editor_today_fact_and_legacy_fallback():
         'data-open-play-level', 'data-open-play-cost', 'data-open-play-notes',
     ):
         assert field in editor
-    assert 'open_play_schedule_rows: normalizedOpenPlayRows' in editor
-    assert 'General note <span class="field-optional">Fallback</span>' in editor
+    assert 'body.open_play_schedule_rows=normalizedOpenPlayRows' in editor
+    assert 'Schedule note <span class="field-optional">Optional</span>' in editor
     assert 'const structuredOpenPlay = courtOpenPlayTodayFact(court, 54);' in detail
     assert '${structuredOpenPlayHtml}' in detail
     assert '.court-open-play-row-head' in CSS
@@ -118,8 +118,8 @@ def test_court_context_strip_and_compact_metadata_are_consolidated():
 def test_court_corrections_expose_the_pending_value_and_explicit_decisions():
     editor = section(APP, 'function openSuggestEditSheet', '// ---------- Modal helpers')
 
-    assert 'Confirm a player’s correction' in editor
-    assert 'Review the exact value before it can update the listing.' in editor
+    assert 'Review updates' in editor
+    assert 'Confirm only what you know firsthand.' in editor
     assert "api(`/courts/${court.id}/suggestions`)" in editor
     assert 'data-suggestion-confirm' in editor
     assert 'data-suggestion-reject' in editor

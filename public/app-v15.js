@@ -7484,7 +7484,7 @@
     const today = rows.filter((row) => row.weekday === courtTodayKey(court));
     return {
       label: today.length
-        ? compactCourtFact(today.map((row) => courtOpenPlayRowLabel(row, { includeDay: false })).join('; '), maximum)
+        ? compactCourtFact(today.length===1 ? courtTimeRangeLabel(today[0].start,today[0].end) : `${today.length} times today`, maximum)
         : 'None scheduled today',
       raw: today.length
         ? today.map((row) => courtOpenPlayRowLabel(row, { includeDay: false })).join('; ')
@@ -8224,7 +8224,14 @@
     }
   }
 
+  function courtCorrectionChanges(initial,values) {
+    return Object.fromEntries(Object.entries(values).filter(([key,value])=>JSON.stringify(value)!==JSON.stringify(initial[key])));
+  }
+
   function openSuggestEditSheet(court, onApplied, {focusVisiting=false} = {}) {
+    const ownerId=state.me?.id;
+    if(!ownerId)return null;
+    let listingChanged=false,editorComplete=false,operationPending=false,suggestionRevision=0;
     const check = (id, icon, label, value) => `
       <label class="choice-check-row" for="${id}">
         <input type="checkbox" id="${id}" ${value ? 'checked' : ''} /> ${uiIcon(icon)} <span>${label}</span>
@@ -8251,21 +8258,16 @@
       </fieldset>`;
     let nextOpenPlayRowKey = sourceOpenPlayRows.length;
     const modal = openModal(`
-      ${modalHead('Suggest an edit')}
+      ${modalHead('Update court','edit')}
+      <p class="court-correction-place">${esc(court.name)}</p>
       <form id="se-form" class="court-contribution-form" novalidate>
-      <div class="court-contribution-intro">
-        <span aria-hidden="true">${uiIcon('shield')}</span>
-        <div><b>Community-verified details</b><small>Update only what you know about ${esc(court.name)}. Another player confirms a change before it goes live.</small></div>
-      </div>
-      <section class="court-form-section court-pending-suggestions hidden" id="se-pending" aria-labelledby="se-pending-label">
-        <div class="section-label section-label-icon" id="se-pending-label">${uiIcon('users')} Confirm a player’s correction</div>
-        <p class="court-form-helper">Review the exact value before it can update the listing.</p>
-        <div id="se-pending-list" aria-live="polite"></div>
-      </section>
-      <details class="court-form-section hidden" id="se-history"><summary>Your submitted corrections</summary><div id="se-history-list"></div></details>
-      <details class="court-form-section" id="se-visiting"><summary>Access, parking &amp; arrival</summary>${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'community-visit')}</details>
-      <section class="court-form-section" aria-labelledby="se-setup-label">
-        <div class="section-label section-label-icon" id="se-setup-label">${uiIcon('grid')} Court setup</div>
+      <p class="court-correction-note">Choose what needs updating. Another player confirms it before it goes live.</p>
+      <details class="court-form-section" id="se-visiting"><summary>Access &amp; fees</summary>        <div class="form-field">
+          <label for="se-fees">Fees</label>
+          <input type="text" id="se-fees" maxlength="200" placeholder="e.g. Free, $5 drop-in" value="${esc(court.fees || '')}" />
+        </div>
+${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'community-visit')}</details>
+      <details class="court-form-section" id="se-setup"><summary id="se-setup-label">Court setup</summary>
         <div class="form-field">
           <label for="se-courts">Number of courts</label>
           <input type="number" id="se-courts" min="1" max="100" value="${court.num_courts || 1}" inputmode="numeric" />
@@ -8278,53 +8280,51 @@
           ${check('se-restrooms', 'restroom', 'Restrooms', court.has_restrooms)}
           ${check('se-water', 'water', 'Water fountain', court.has_water)}
         </fieldset>
-      </section>
-      <section class="court-form-section" aria-labelledby="se-visit-label">
-        <div class="section-label section-label-icon" id="se-visit-label">${uiIcon('clock')} Visitor information</div>
         <div class="form-field">
           <label for="se-surface">Surface</label>
           <input type="text" id="se-surface" maxlength="60" placeholder="e.g. Concrete, Asphalt, Sport court" value="${esc(court.surface_type || '')}" />
         </div>
+      </details>
+      <details class="court-form-section" id="se-hour-section"><summary id="se-visit-label">Hours note</summary>
         <div class="form-field">
-          <label for="se-fees">Fees</label>
-          <input type="text" id="se-fees" maxlength="200" placeholder="e.g. Free, $5 drop-in" value="${esc(court.fees || '')}" />
-        </div>
-        <div class="form-field">
-          <label for="se-hours">Hours</label>
+          <label for="se-hours">Hours note</label>
           <input type="text" id="se-hours" maxlength="120" placeholder="e.g. Daily 6am–10pm, Dawn to dusk" value="${esc(court.hours || '')}" />
         </div>
-      </section>
-      <section class="court-form-section" aria-labelledby="se-open-play-label">
-        <div class="section-label section-label-icon" id="se-open-play-label">${uiIcon('calendar')} Open-play schedule</div>
-        <p class="court-form-helper">Add recurring, time-bounded windows so players can tell exactly when open play happens.</p>
+      </details>
+      <details class="court-form-section" id="se-play-section"><summary id="se-open-play-label">Open play</summary>
         <div id="se-open-play-rows" class="court-open-play-rows">${sourceOpenPlayRows.map((row, index) => openPlayRowHtml(row, index)).join('')}</div>
         <button type="button" class="btn btn-secondary btn-block" id="se-add-open-play">${uiIcon('plus')} Add open-play time</button>
         <div class="form-field court-open-play-fallback">
-          <label for="se-open-play">General note <span class="field-optional">Fallback</span></label>
-          <textarea id="se-open-play" maxlength="1000" rows="3" placeholder="Use only when exact days and times are not known">${esc(court.open_play_schedule || '')}</textarea>
+          <label for="se-open-play">Schedule note <span class="field-optional">Optional</span></label>
+          <textarea id="se-open-play" maxlength="1000" rows="3" placeholder="Details not covered by the times above">${esc(court.open_play_schedule || '')}</textarea>
         </div>
-      </section>
-      <fieldset class="court-form-section court-closure-field">
-        <legend class="section-label section-label-icon">${uiIcon('alert-triangle')} Closure</legend>
+      </details>
+      <details class="court-form-section court-closure-field" id="se-status-section"><summary>Court status</summary>
         <div class="choice-check-list">
           ${check('se-closed', 'x', 'This court is permanently closed or gone', court.closed)}
-          <label for="se-closure-evidence">Closure or reopening evidence<input id="se-closure-evidence" maxlength="500" placeholder="What changed, when, and where you confirmed it" /></label>
-          <small>Changing closure status requires an operator review. Other factual corrections use community confirmation.</small>
+          <label for="se-closure-evidence" id="se-closure-evidence-row" class="hidden">Closure or reopening evidence<input id="se-closure-evidence" maxlength="500" placeholder="What changed, when, and where you confirmed it" /></label>
         </div>
-        <p class="row-sub">An operator reviews the evidence and the effect on upcoming sessions before closure status changes.</p>
-      </fieldset>
+        <p class="row-sub">Closure and reopening need an operator review.</p>
+      </details>
+      <details class="court-form-section court-pending-suggestions hidden" id="se-pending"><summary id="se-pending-label">Review updates</summary>
+        <p class="court-form-helper">Confirm only what you know firsthand.</p>
+        <div id="se-pending-list" aria-live="polite"></div>
+      </details>
+      <details class="court-form-section hidden" id="se-history"><summary>Your updates</summary><div id="se-history-list"></div></details>
       <div class="court-contribution-actions">
-        <button type="submit" class="btn btn-primary btn-block" id="se-submit">${uiIcon('check')} Submit suggestion</button>
+        <button type="submit" class="btn btn-primary btn-block" id="se-submit">${uiIcon('check')} Submit update</button>
       </div>
       </form>
     `, { label: `Suggest an edit to ${court.name}` });
     modal.querySelector('.modal')?.classList.add('court-contribution-modal');
+    const current=()=>modal.isConnected && !modal._destroyed && state.me?.id===ownerId;
+    currentOverlayEntry()?.afterClose.push(()=>{if(listingChanged && state.me?.id===ownerId)onApplied?.();});
     const pendingPanel = modal.querySelector('#se-pending');
     const pendingList = modal.querySelector('#se-pending-list');
     const suggestionLabels = {
       num_courts: 'Number of courts', indoor: 'Indoor', lighted: 'Lighted',
       nets_provided: 'Nets provided', has_restrooms: 'Restrooms', has_water: 'Water fountain',
-      surface_type: 'Surface', fees: 'Fees', hours: 'Hours', visitor_info: 'Access & arrival',
+      surface_type: 'Surface', fees: 'Fees', hours: 'Hours note', visitor_info: 'Access & arrival',
       open_play_schedule: 'Open-play note', open_play_schedule_rows: 'Open-play times',
       closed: 'Permanently closed',
     };
@@ -8344,6 +8344,7 @@
     const renderPendingSuggestions = (items) => {
       pendingSuggestions = Array.isArray(items) ? items : [];
       pendingPanel.classList.toggle('hidden', pendingSuggestions.length === 0);
+      modal.querySelector('#se-pending-label').textContent=`Review updates (${pendingSuggestions.length})`;
       pendingList.innerHTML = pendingSuggestions.map((item, index) => `
         <article class="court-pending-suggestion" data-pending-suggestion="${index}">
           <div class="court-pending-suggestion-copy">
@@ -8363,16 +8364,17 @@
       `).join('');
     };
     const loadPendingSuggestions = async () => {
+      const revision=suggestionRevision;
       try {
         const result = await api(`/courts/${court.id}/suggestions`);
-        if (modal.isConnected) {
+        if (current() && !editorComplete && revision===suggestionRevision) {
           renderPendingSuggestions(result.items);
           const history = result.my_history || [];
           modal.querySelector('#se-history').classList.toggle('hidden', !history.length);
           modal.querySelector('#se-history-list').innerHTML = history.map(item => `<article class="court-pending-suggestion"><div class="court-pending-suggestion-copy"><b>${({pending:'Awaiting confirmation or review',applied:'Applied',declined:'Not approved',withdrawn:'Withdrawn',rejected:'Marked not right'})[item.status] || esc(item.status)}</b><small>${esc(fmtDateTime(item.submitted_at))}</small>${Object.entries(item.changes || {}).map(([key,value]) => `<span><b>${esc(suggestionLabels[key] || key)}</b> ${Object.hasOwn(item.before || {},key) ? `${esc(suggestionValueText(key,item.before[key]))} → ` : ''}${esc(suggestionValueText(key,value))}</span>`).join('')}${item.review_note ? `<small>${esc(item.review_note)}</small>` : ''}</div></article>`).join('');
         }
       } catch {
-        if (!modal.isConnected) return;
+        if (!current() || editorComplete || revision!==suggestionRevision) return;
         modal.querySelector('#se-history').classList.remove('hidden');
         modal.querySelector('#se-history-list').innerHTML = '<p role="status">Submitted corrections could not load. You can still send a new correction.</p><button type="button" class="btn-link" data-retry-court-history>Retry history</button>';
         modal.querySelector('[data-retry-court-history]').addEventListener('click', loadPendingSuggestions);
@@ -8380,10 +8382,13 @@
     };
     pendingList.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-suggestion-confirm], [data-suggestion-reject]');
-      if (!button) return;
+      if (!button || operationPending || !current() || editorComplete) return;
       const index = Number(button.dataset.suggestionConfirm ?? button.dataset.suggestionReject);
       const item = pendingSuggestions[index];
       if (!item) return;
+      operationPending=true;
+      modal.querySelector('#se-form').dataset.submitting='true';
+      modal.querySelector('#se-submit').disabled=true;
       const decision = button.hasAttribute('data-suggestion-confirm') ? 'confirm' : 'reject';
       const row = button.closest('[data-pending-suggestion]');
       row?.querySelectorAll('button').forEach((control) => { control.disabled = true; });
@@ -8392,19 +8397,20 @@
           method: 'POST',
           body: JSON.stringify({ field: item.field, value: item.value, decision }),
         });
-        if (!modal.isConnected) return;
+        if (!current() || editorComplete) return;
+        suggestionRevision++;
         if (result.applied_fields.length) {
           court = { ...court, ...result.court };
           toast('Court listing updated — thanks for confirming.');
-          onApplied?.();
+          listingChanged=true;
         } else {
           toast(decision === 'confirm' ? 'Correction confirmed.' : 'Thanks — marked as not right.');
         }
         renderPendingSuggestions(result.items);
       } catch (error) {
         row?.querySelectorAll('button').forEach((control) => { control.disabled = false; });
-        showInlineActionError(row, error.message);
-      }
+        if(current() && !editorComplete)showInlineActionError(row, error.message);
+      } finally {operationPending=false;if(current() && !editorComplete){delete modal.querySelector('#se-form').dataset.submitting;syncSubmit();}}
     });
     loadPendingSuggestions();
     const openPlayRows = modal.querySelector('#se-open-play-rows');
@@ -8431,23 +8437,48 @@
       openPlayRows.dispatchEvent(new Event('input', { bubbles: true }));
     });
     syncOpenPlayAddState();
+    const readValues=()=>({
+      num_courts:Number(modal.querySelector('#se-courts').value),
+      indoor:modal.querySelector('#se-indoor').checked,lighted:modal.querySelector('#se-lighted').checked,
+      nets_provided:modal.querySelector('#se-nets').checked,has_restrooms:modal.querySelector('#se-restrooms').checked,has_water:modal.querySelector('#se-water').checked,
+      surface_type:modal.querySelector('#se-surface').value.trim(),fees:modal.querySelector('#se-fees').value.trim(),hours:modal.querySelector('#se-hours').value.trim(),
+      open_play_schedule:modal.querySelector('#se-open-play').value.trim(),
+      open_play_schedule_rows:[...openPlayRows.querySelectorAll('[data-open-play-row]')].map(row=>({
+        weekday:row.querySelector('[data-open-play-day]').value,start:row.querySelector('[data-open-play-start]').value,end:row.querySelector('[data-open-play-end]').value,
+        level:row.querySelector('[data-open-play-level]').value.trim(),cost:row.querySelector('[data-open-play-cost]').value.trim(),notes:row.querySelector('[data-open-play-notes]').value.trim(),
+      })),closed:modal.querySelector('#se-closed').checked,
+      visitor_info:window.VenueWorkspace.readVisitingForm(modal,'community-visit'),
+    });
+    const initialValues=readValues();
     const formUX = bindModalFormUX(modal, '#se-submit', { draftKey: `suggest-court-${court.id}` });
-    bindModalDiscardConfirmation(modal, {
+    const syncSubmit=()=>{
+      if(editorComplete || !current())return;
+      modal.querySelector('#se-submit').disabled=operationPending || !Object.keys(courtCorrectionChanges(initialValues,readValues())).length;
+      modal.querySelector('#se-closure-evidence-row').classList.toggle('hidden',modal.querySelector('#se-closed').checked===initialValues.closed);
+    };
+    modal.querySelector('#se-form').addEventListener('input',syncSubmit);
+    modal.querySelector('#se-form').addEventListener('change',syncSubmit);
+    syncSubmit();
+    const discardGuard=bindModalDiscardConfirmation(modal, {
       isDirty: formUX.isDirty,
+      onDiscard:()=>{formUX.clearDraft({disable:true});dismissModal(modal);},
       title: 'Discard this court suggestion?',
       message: 'Your proposed court details have not been submitted.',
     });
     modal.querySelector('#se-form').addEventListener('submit', async (event) => {
       event.preventDefault();
+      if(!current() || operationPending || editorComplete)return;
       formUX.clearError();
+      const body=courtCorrectionChanges(initialValues,readValues());
+      if(!Object.keys(body).length){formUX.showError('Change a detail before submitting.');return;}
       const courtCountInput = modal.querySelector('#se-courts');
       const courtCount = Number(courtCountInput.value);
-      if (!Number.isInteger(courtCount) || courtCount < 1 || courtCount > 100) {
+      if (Object.hasOwn(body,'num_courts') && (!Number.isInteger(courtCount) || courtCount < 1 || courtCount > 100)) {
         formUX.showError('Enter a court count from 1 to 100.', courtCountInput);
         return;
       }
       const normalizedOpenPlayRows = [];
-      for (const row of openPlayRows.querySelectorAll('[data-open-play-row]')) {
+      for (const row of Object.hasOwn(body,'open_play_schedule_rows') ? openPlayRows.querySelectorAll('[data-open-play-row]') : []) {
         const startInput = row.querySelector('[data-open-play-start]');
         const endInput = row.querySelector('[data-open-play-end]');
         if (!startInput.value || !endInput.value) {
@@ -8467,36 +8498,39 @@
           notes: row.querySelector('[data-open-play-notes]').value.trim(),
         });
       }
-      const body = {
-        num_courts: courtCount,
-        indoor: modal.querySelector('#se-indoor').checked,
-        lighted: modal.querySelector('#se-lighted').checked,
-        nets_provided: modal.querySelector('#se-nets').checked,
-        has_restrooms: modal.querySelector('#se-restrooms').checked,
-        has_water: modal.querySelector('#se-water').checked,
-        surface_type: modal.querySelector('#se-surface').value.trim(),
-        fees: modal.querySelector('#se-fees').value.trim(),
-        hours: modal.querySelector('#se-hours').value.trim(),
-        open_play_schedule: modal.querySelector('#se-open-play').value.trim(),
-        open_play_schedule_rows: normalizedOpenPlayRows,
-        closed: modal.querySelector('#se-closed').checked,
-        evidence: modal.querySelector('#se-closure-evidence').value.trim(),
-        visitor_info: window.VenueWorkspace.readVisitingForm(modal, 'community-visit'),
-      };
-      const finish = formUX.startSubmitting('Submitting suggestion…');
+      if(Object.hasOwn(body,'open_play_schedule_rows'))body.open_play_schedule_rows=normalizedOpenPlayRows;
+      if(Object.hasOwn(body,'closed')){
+        const evidence=modal.querySelector('#se-closure-evidence');
+        if(evidence.value.trim().length<12){formUX.showError('Describe what changed and how you confirmed it.',evidence);return;}
+        body.evidence=evidence.value.trim();
+      }
+      const finish = formUX.startSubmitting('Submitting…');
       if (!finish) return;
+      operationPending=true;
+      const controls=[...modal.querySelectorAll('input,select,textarea,button')];
+      const disabled=controls.map(control=>control.disabled);
+      controls.forEach(control=>{control.disabled=true;});
       try {
         const res = await api(`/courts/${court.id}/suggest`, { method: 'POST', body: JSON.stringify(body) });
-        formUX.clearDraft({ disable: true });
-        closeModal(modal);
-        if (res.applied_fields.length) {
-          toast('Court updated — thanks!', { tone: 'success', icon: 'edit' });
-          if (onApplied) onApplied();
-        } else {
-          toast(body.closed !== !!court.closed ? 'Closure update submitted for review.' : 'Suggestion recorded — one more confirmation applies it', { tone: 'success', icon: 'check-circle' });
-        }
+        if(!current())return;
+        editorComplete=true;suggestionRevision++;
+        formUX.clearDraft({ disable: true });discardGuard.authorizeClose();
+        listingChanged=listingChanged || !!res.applied_fields.length;
+        const applied=new Set(res.applied_fields||[]);
+        const fields=Object.keys(body).filter(field=>field!=='evidence');
+        const waiting=fields.some(field=>!applied.has(field) && field!=='closed');
+        const box=modal.querySelector('.modal');
+        box.innerHTML=`${modalHead('Update submitted','check-circle')}<p class="court-correction-place">${esc(court.name)}</p>
+          <div class="court-correction-result">${fields.map(field=>`<article><div><b>${esc(suggestionLabels[field]||field)}</b><span>${esc(suggestionValueText(field,body[field]))}</span></div><strong class="${applied.has(field)?'is-live':''}">${applied.has(field)?'Confirmed':field==='closed'?'In review':'Pending'}</strong></article>`).join('')}</div>
+          ${waiting?'<p class="court-correction-note">Another player needs to confirm pending details.</p>':''}
+          ${fields.includes('closed')?'<p class="court-correction-note">An operator reviews closure and reopening reports.</p>':''}
+          <button type="button" class="btn btn-primary btn-block modal-close" id="se-done">Done</button>`;
+        setDialogLabel(box,`Update submitted for ${court.name}`);decorateFlowChildModal(modal);
+        requestAnimationFrame(()=>{if(current() && currentOverlayEntry()?.el===modal)modal.querySelector('#se-done')?.focus({preventScroll:true});});
       } catch (e) {
-        finish();
+        if(!current())return;
+        controls.forEach((control,index)=>{control.disabled=disabled[index];});
+        operationPending=false;finish();
         formUX.showError(e.message === 'no changes' ? 'Nothing changed from the current info.' : e.message);
       }
     });
@@ -13211,7 +13245,7 @@
     });
     modal.querySelectorAll('[data-cd-suggest]').forEach((button) => button.addEventListener('click', () => {
       openChildModal(modal, () => openSuggestEditSheet(
-        court, () => refreshCourtDetailPreservingContext(modal, court.id),
+        court, () => refreshCourtDetailPreservingContext(modal, court.id,{focusFallbackSelector:'#cd-suggest'}),
       ));
     }));
     modal.querySelector('#cd-report-closure')?.addEventListener('click', () => {

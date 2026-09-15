@@ -1538,7 +1538,7 @@ def _pending_court_suggestion_items(court_id, user_id):
 @login_required
 def suggest_court_edit(court_id):
     """Record proposed data fixes; apply a field once two users agree on it."""
-    court = db.session.get(Court, court_id)
+    court = Court.query.filter_by(id=court_id).with_for_update().first()
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
 
@@ -1563,14 +1563,22 @@ def suggest_court_edit(court_id):
         changes['_evidence'] = evidence
     changes['_before'] = {field: _court_suggest_value(court, field) for field in changes if not field.startswith('_')}
 
-    # One live suggestion per user per court — resubmitting replaces it.
+    # Keep unrelated pending topics when a player edits another part of the listing.
     suggestion = CourtEditSuggestion.query.filter_by(
         court_id=court.id, user_id=g.current_user.id, status='pending',
     ).first()
     if not suggestion:
         suggestion = CourtEditSuggestion(court_id=court.id, user_id=g.current_user.id)
         db.session.add(suggestion)
-    suggestion.payload = json.dumps(changes)
+    prior = _court_suggestion_payload(suggestion)
+    previous_values = {key: value for key, value in prior.items() if key in SUGGESTABLE_FIELDS}
+    prior_before = prior.get('_before') if isinstance(prior.get('_before'), dict) else {}
+    before = {**prior_before, **changes.get('_before', {})}
+    # A revised field starts from its latest observed value; other fields keep their evidence.
+    merged = {**previous_values, **changes, '_before': before}
+    if 'closed' in previous_values and '_evidence' not in changes:
+        merged['_evidence'] = prior.get('_evidence', '')
+    suggestion.payload = json.dumps(merged)
     db.session.flush()
 
     applied = _apply_court_suggestion_consensus(court)
@@ -1606,7 +1614,7 @@ def list_court_edit_suggestions(court_id):
 @login_required
 def decide_court_edit_suggestion(court_id):
     """Confirm or reject one exact pending value without retyping the whole listing."""
-    court = db.session.get(Court, court_id)
+    court = Court.query.filter_by(id=court_id).with_for_update().first()
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
     body = request.get_json(silent=True) or {}

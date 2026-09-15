@@ -7669,3 +7669,31 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .court-upload-fields:disabled { opacity: .65; }
 
 .gallery-capacity-note { margin: 8px 0 0; color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+
+/* Court corrections are grouped by the detail a player wants to change. */
+.court-correction-place { margin: 0 0 10px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.court-correction-note { margin: 0 0 18px; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
+.court-contribution-modal .court-contribution-form > details { padding: 0 14px; background: var(--card); border-radius: var(--radius-md); }
+.court-contribution-modal .court-contribution-form > details > summary { min-height: 52px; padding: 15px 0; font-size: 15px; font-weight: 650; cursor: pointer; }
+.court-contribution-modal .court-contribution-form > details[open] { padding-bottom: 14px; }
+.court-contribution-modal #se-setup .choice-check-list { margin-bottom: 16px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.court-contribution-modal #se-setup .choice-check-row { min-width: 0; margin: 0; padding: 10px; }
+.court-contribution-modal #se-setup .choice-check-row span { overflow-wrap: anywhere; }
+.court-contribution-modal .court-open-play-row-head { grid-template-columns: minmax(0,1fr) 44px; }
+.court-contribution-modal .court-open-play-row-head label:first-child { grid-column: 1; grid-row: 1; }
+.court-contribution-modal .court-open-play-row-head .icon-btn { grid-column: 2; grid-row: 1; }
+.court-contribution-modal .court-open-play-row-head label:not(:first-child) { grid-column: 1 / -1; }
+.court-correction-result { display: grid; gap: 12px; margin: 18px 0; }
+.court-correction-result article { display: flex; flex-wrap: wrap; align-items: start; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.court-correction-result article > div { flex: 1; min-width: min(180px,100%); display: grid; gap: 5px; overflow-wrap: anywhere; }
+.court-correction-result article span { color: var(--ink-soft); line-height: 1.5; }
+.court-correction-result article > strong { color: var(--ink-soft); font-size: 12px; padding: 5px 8px; background: var(--bg); border-radius: var(--radius-xs); }
+.court-correction-result article > strong.is-live { color: var(--green-700); background: var(--green-50); }
+@media (max-width: 359px) {
+  .court-contribution-modal #se-setup .choice-check-list,
+  .court-contribution-modal .court-open-play-row-details { grid-template-columns: 1fr; }
+}
+
+.court-contribution-modal #se-status-section:not([open]) { border-color: var(--line); }
+
+.court-contribution-modal #se-done { color: var(--on-solid); }
