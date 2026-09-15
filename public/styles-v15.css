@@ -7623,3 +7623,27 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 
 .cd-closed-banner { flex-wrap: wrap; }
 .cd-closed-banner .btn-link { min-height: 44px; margin-left: auto; color: inherit; }
+
+/* Court reviews: read first, write in a focused editor. */
+.court-review-place { color: var(--ink-soft); margin: 0 0 18px; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.court-rating-total { display: flex; align-items: center; gap: 16px; margin: 6px 0 20px; color: var(--ink); }
+.court-rating-total > b { font-size: 44px; line-height: 1; letter-spacing: -.04em; }
+.court-rating-total > div { display: grid; gap: 4px; font-size: 13px; color: var(--ink-soft); }
+.court-rating-total .stars-inline { font-size: 20px; }
+.court-review-section-label { margin: 22px 0 10px; font-size: 13px; color: var(--ink-soft); }
+#court-review-write { margin-bottom: 18px; }
+#court-review-list .court-review-card, #court-review-own .court-review-card { box-shadow: none; border: 1px solid var(--line); padding: 16px; }
+.court-review-card-head { flex-wrap: wrap; gap: 6px 12px; }
+.court-review-card-head .row-title { display: flex; flex-wrap: wrap; gap: 5px 10px; }
+.court-review-card .court-review-copy { color: var(--ink); font-size: 14px; line-height: 1.55; margin-top: 10px; }
+.court-review-editor .star-row { margin: 8px 0 24px; }
+.court-review-editor .court-review-comment-label { font-size: 14px; margin-bottom: 8px; }
+.court-review-editor textarea { width: 100%; min-height: 120px; }
+.court-review-editor .court-review-form-meta { justify-content: flex-end; margin-bottom: 18px; }
+.court-review-editor .court-review-delete { display: block; margin: 12px auto 0; }
+.court-review-editor[aria-busy="true"] { opacity: .8; }
+
+.court-review-card { position: relative; }
+.court-review-card:has(.court-review-report) .court-review-card-head { padding-right: 32px; }
+.court-review-card .court-review-report { position: absolute; top: 5px; right: 5px; width: 44px; height: 44px; display: grid; place-items: center; padding: 10px; border: 0; background: transparent; color: var(--ink-soft); border-radius: var(--radius-sm); }
+.court-review-report .ui-icon { width: 16px; height: 16px; }

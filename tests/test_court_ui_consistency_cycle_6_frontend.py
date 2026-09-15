@@ -159,18 +159,18 @@ def test_court_detail_rating_gallery_and_section_navigation_are_accessible():
     assert '<fieldset class="star-row" id="cd-stars"><legend class="sr-only">Your rating</legend>' in review
     assert "starRow.addEventListener('change'" in review
     assert "starRow.innerHTML = starsHtml" not in review
-    assert '<form class="card" id="cd-review-form" novalidate>' in review
+    assert '<form class="court-review-editor" id="cd-review-form" novalidate>' in review
     assert 'for="cd-review-comment">Comment <span>optional</span></label>' in review
-    assert '<textarea id="cd-review-comment" maxlength="500" rows="3"' in review
-    assert 'id="cd-review-count" aria-live="polite"' in review
-    assert 'type="submit" class="btn btn-primary btn-sm" id="cd-review-save"' in review
+    assert '<textarea id="cd-review-comment" maxlength="500" rows="4"' in review
+    assert 'id="cd-review-count"' in review
+    assert 'type="submit" class="btn btn-primary btn-block" id="cd-review-save"' in review
     assert 'id="cd-review-delete"' in review
-    assert "deleteCourtReview(court, mine, button)" in review
-    assert 'id="cd-review-all">See all' in review
-    assert "params.set('before_id', String(beforeId))" in review
+    assert "deleteCourtReview(court,mine,button)" in review
+    assert 'id="court-review-write"' in review
+    assert "params.set('before_id',String(beforeId))" in review
     assert 'id="court-review-more">Load more reviews' in review
-    assert "el.querySelector('#cd-review-form').addEventListener('submit'" in review
-    assert "e.preventDefault();" in review
+    assert "form.addEventListener('submit'" in review
+    assert "event.preventDefault();" in review
     assert ".star-choice input:focus-visible + .star-btn { outline: 3px solid var(--green-accent)" in STYLES
 
     detail = section("async function openCourtDetail", "function openCourtPlayerActions")

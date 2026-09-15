@@ -13,7 +13,7 @@ os.environ.update(APP_ENV='testing',TEST_DATABASE_URL='sqlite:///:memory:',
     DATABASE_URL='sqlite:///:memory:',AUTO_SEED_COURTS='false',PUSH_DELIVERY_ENABLED='false')
 from flask import request
 from backend.app import create_app, db
-from backend.models import Court, User, Game, GamePlayer, GameWaitlist, GameHostHandoff, GameInvite, notify, utcnow
+from backend.models import Court, CourtReview, User, Game, GamePlayer, GameWaitlist, GameHostHandoff, GameInvite, notify, utcnow
 
 app=create_app('testing')
 
@@ -107,6 +107,13 @@ with app.app_context():
         ended=session('Morning open play','08:00',joined=(2,))
         ended.scheduled_at-=timedelta(days=2)
         ended.status='expired'
+    if os.environ.get('DISCOVERY_REVIEW_SCENARIOS') == '1':
+        reviewers = [*players[1:],*User.query.filter(User.email.like('roster-%')).order_by(User.id).all()]
+        for index,person in enumerate(reviewers):
+            db.session.add(CourtReview(court_id=courts[0].id,user_id=person.id,rating=3+index%3,
+                comment=['Good lighting for evening games. The entrance is beside the north parking lot.',
+                         'Four courts with permanent nets. Bring water on warm days.',
+                         'Friendly open play. Check the posted times before heading over.'][index%3]))
     db.session.commit()
 port=int(os.environ.get('DISCOVERY_TEST_PORT', '8055'))
 print(f'DISCOVERY READY port{port} date{tomorrow}: discovery-0@example.test / local-discovery-test',flush=True)

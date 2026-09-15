@@ -62,3 +62,5 @@ Pass4: `ui-ux-pass-04-court-browsing.md` covers direct list-to-details navigatio
 Pass5: `ui-ux-pass-05-court-schedule.md` covers consistent player date/time ranges, full-width schedule cards, concise week navigation, retry and return focus. Court access, photos, reviews and contributions remain open.
 
 Pass5 continued: `ui-ux-pass-05-court-visit.md` covers browsing shortcuts, topic-based visit details, grouped sources, facilities, keyboard/large-text behavior, photo retry and contextual access-edit entry. Next review reading/writing reviews, followed by the remaining photo and contribution flows.
+
+Pass5 continued: `ui-ux-pass-05-court-reviews.md` covers the dedicated reader/editor, own-review paging, authoritative save/edit/delete totals, draft and failure recovery, stale-page protection, report entry and responsive/focus checks. Next inspect photo upload/gallery and contribution workflows; pass 5 remains in progress.

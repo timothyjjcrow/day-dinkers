@@ -169,7 +169,7 @@
     'ticket', 'external', 'check-circle', 'check', 'bell', 'pickleball',
     'edit', 'link', 'shield', 'chart', 'lock', 'settings', 'eye', 'refresh', 'zap', 'plus', 'phone',
     'sun', 'lightbulb', 'net', 'restroom', 'water', 'key', 'alert-triangle', 'user', 'map', 'copy',
-    'upload', 'download',
+    'upload', 'download', 'flag',
   ]);
   function uiIcon(name, className = '') {
     const icon = UI_ICON_NAMES.has(name) ? name : 'pickleball';
@@ -11281,11 +11281,11 @@
     return out;
   }
 
-  function courtReviewCardHtml(review, { allowDelete = false } = {}) {
+  function courtReviewCardHtml(review) {
     const date = resultDayLabel(review.updated_at || review.created_at);
     const allowReport = !!state.me && Number(review.user_id) !== Number(state.me.id);
     return `
-      <article class="card row court-review-card" style="align-items:flex-start" data-review-id="${review.id}">
+      <article class="card row court-review-card" style="align-items:flex-start" tabindex="-1" data-review-id="${review.id}">
         ${avatarHtml({ display_name: review.user_name, avatar_color: review.avatar_color, avatar_url: review.avatar_url }, 'sm')}
         <div class="row-main">
           <div class="court-review-card-head">
@@ -11293,235 +11293,195 @@
             ${date ? `<time class="row-sub" datetime="${esc(review.updated_at || review.created_at)}">${esc(date)}</time>` : ''}
           </div>
           ${review.comment ? `<div class="row-sub court-review-copy">${esc(review.comment)}</div>` : ''}
-          ${allowDelete ? `<button type="button" class="btn-link court-review-delete" data-delete-review="${review.id}">${uiIcon('trash')} Delete your review</button>` : ''}
-          ${allowReport ? `<button type="button" class="btn-link court-review-report" data-report-review="${review.id}">${uiIcon('alert-triangle')} Report review</button>` : ''}
+          ${allowReport ? `<button type="button" class="court-review-report" data-report-review="${review.id}" aria-label="Report review by ${esc(review.user_name)}">${uiIcon('flag')}</button>` : ''}
         </div>
       </article>`;
   }
 
-  async function deleteCourtReview(court, review, trigger) {
-    const approved = await openActionConfirmation({
-      eyebrow: 'Your court review',
-      title: 'Delete this review?',
-      message: 'Your rating and comment will be removed from this court.',
-      detail: 'You can write a new review at any time.',
-      confirmLabel: 'Delete review',
-      cancelLabel: 'Keep review',
-      icon: 'trash',
-      trigger,
+  function courtReviewSummaryHtml(court) {
+    const count=Number(court.rating_count)||0;
+    return count ? `<div class="court-rating-total"><b>${esc(court.rating_avg)}</b><div><span class="stars-inline" aria-hidden="true">${starsHtml(Math.round(Number(court.rating_avg)))}</span><span>${count} rating${count===1 ? '' : 's'} · out of 5</span></div></div>` : '';
+  }
+
+  function syncCourtReviewTrigger(modal,court) {
+    const button=modal.querySelector('#cd-review-inline');
+    if (!button) return;
+    const count=Number(court.rating_count)||0;
+    button.innerHTML=`${uiIcon('star')}<span>${count ? `${esc(court.rating_avg)} · ` : ''}Reviews</span>`;
+    button.setAttribute('aria-label',count ? `Reviews: ${court.rating_avg} out of 5 from ${count} ratings` : 'Reviews');
+  }
+
+  function commitCourtReview(court,result,{deletedId=null}={}) {
+    if (deletedId!==null) {
+      if(Number(court.my_review?.id)===Number(deletedId))court.my_review=null;
+      court.reviews=(court.reviews||[]).filter(row=>Number(row.id)!==Number(deletedId));
+    } else {
+      court.my_review=result.review;
+      court.reviews=[result.review,...(court.reviews||[]).filter(row=>Number(row.user_id)!==Number(result.review.user_id))];
+    }
+    court.rating_avg=result.rating_avg;
+    court.rating_count=result.rating_count;
+    for(const cached of Array.isArray(state.courts) ? state.courts : []) {
+      if(Number(cached.id)===Number(court.id))Object.assign(cached,{rating_avg:result.rating_avg,rating_count:result.rating_count});
+    }
+  }
+
+  async function deleteCourtReview(court,review,trigger) {
+    const ownerId=state.me?.id;
+    const approved=await openActionConfirmation({
+      eyebrow:'Your court review',title:'Delete this review?',
+      message:'Your rating and comment will be removed from this court.',
+      confirmLabel:'Delete review',cancelLabel:'Keep review',icon:'trash',trigger,
     });
-    if (!approved) return false;
-    const result = await api(`/courts/${court.id}/reviews/${review.id}`, { method: 'DELETE' });
-    court.my_review = Number(court.my_review?.id) === Number(review.id) ? null : court.my_review;
-    court.reviews = (court.reviews || []).filter((item) => Number(item.id) !== Number(review.id));
-    court.rating_avg = result.rating_avg;
-    court.rating_count = result.rating_count;
-    toast('Your court review was deleted.');
+    if(!approved || state.me?.id!==ownerId || (trigger && !trigger.isConnected))return false;
+    const result=await api(`/courts/${court.id}/reviews/${review.id}`,{method:'DELETE'});
+    if(state.me?.id!==ownerId)return false;
+    commitCourtReview(court,result,{deletedId:review.id});
+    toast('Review deleted.',{tone:'success'});
     return true;
   }
 
-  function renderReviewSection(el, court) {
-    const mine = court.my_review;
-    let chosen = mine ? mine.rating : 0;
-    const reviews = court.reviews || [];
-    const formCard = state.me ? `
-      <form class="card" id="cd-review-form" novalidate>
-        <div class="row-title" style="font-size:14px;margin-bottom:6px">${mine ? 'Your review' : 'Rate this court'}</div>
-        <fieldset class="star-row" id="cd-stars"><legend class="sr-only">Your rating</legend>${starsHtml(chosen, true)}</fieldset>
+  function openCourtReviewEditor(court,{onSaved=()=>{},returnFocus=null}={}) {
+    if(!state.me)return;
+    const ownerId=state.me.id, mine=court.my_review;
+    let chosen=Number(mine?.rating)||0, busy=false;
+    const modal=openModal(`
+      ${modalHead(mine ? 'Edit your review' : 'Write a review','star')}
+      <p class="court-review-place">${esc(court.name)}</p>
+      <form class="court-review-editor" id="cd-review-form" novalidate>
+        <fieldset class="star-row" id="cd-stars"><legend class="sr-only">Your rating</legend>${starsHtml(chosen,true)}</fieldset>
         <label class="court-review-comment-label" for="cd-review-comment">Comment <span>optional</span></label>
-        <textarea id="cd-review-comment" maxlength="500" rows="3" placeholder="What should other players know?">${esc(mine ? mine.comment : '')}</textarea>
-        <div class="court-review-form-meta"><span>Be specific and respectful.</span><span id="cd-review-count" aria-live="polite">${String(mine?.comment || '').length}/500</span></div>
+        <textarea id="cd-review-comment" maxlength="500" rows="4" placeholder="What should players know?">${esc(mine?.comment||'')}</textarea>
+        <div class="court-review-form-meta"><span id="cd-review-count">${String(mine?.comment||'').length}/500</span></div>
         <p class="form-error hidden" id="cd-review-error" role="alert" tabindex="-1"></p>
-        <div class="court-review-form-actions">
-          <button type="submit" class="btn btn-primary btn-sm" id="cd-review-save">${mine ? 'Update review' : 'Post review'}</button>
-          ${mine ? `<button type="button" class="btn-link court-review-delete" id="cd-review-delete">${uiIcon('trash')} Delete your review</button>` : ''}
-        </div>
-      </form>` : '';
-    const others = reviews.filter((r) => !state.me || r.user_id !== state.me.id);
-    const listHtml = others.length
-      ? others.map((r) => courtReviewCardHtml(r)).join('')
-      : (reviews.length ? '' : '<div class="row-sub" style="padding:4px 4px 8px">No reviews yet — be the first!</div>');
-    const allReviewsAction = Number(court.rating_count) > 0
-      ? `<button type="button" class="btn btn-secondary btn-block" id="cd-review-all">See all ${Number(court.rating_count)} review${Number(court.rating_count) === 1 ? '' : 's'}</button>`
-      : '';
-    el.innerHTML = formCard + listHtml + allReviewsAction;
-    el.querySelector('#cd-review-all')?.addEventListener('click', () => openCourtReviews(court));
-    el.querySelectorAll('[data-report-review]').forEach((button) => {
-      button.addEventListener('click', () => openContentReport({
-        contentType: 'court_review',
-        contentId: Number(button.dataset.reportReview),
-        label: 'court review',
-      }));
+        <button type="submit" class="btn btn-primary btn-block" id="cd-review-save">${mine ? 'Save changes' : 'Post review'}</button>
+        ${mine ? `<button type="button" class="btn-link court-review-delete" id="cd-review-delete">${uiIcon('trash')} Delete review</button>` : ''}
+      </form>`,{label:`${mine ? 'Edit' : 'Write'} a review of ${court.name}`,returnFocus});
+    const form=modal.querySelector('#cd-review-form'),starRow=modal.querySelector('#cd-stars');
+    const comment=modal.querySelector('#cd-review-comment'),errorEl=modal.querySelector('#cd-review-error');
+    const current=()=>modal.isConnected && !modal._destroyed && state.me?.id===ownerId;
+    const guard=bindModalDiscardConfirmation(modal,{
+      isDirty:()=>chosen!==(Number(mine?.rating)||0) || comment.value.trim()!==String(mine?.comment||'').trim(),
+      title:'Discard this review?',message:'Your review changes have not been saved.',detail:'',
     });
-
-    if (!state.me) return;
-    const reviewerId = state.me.id;
-    const starRow = el.querySelector('#cd-stars');
-    const comment = el.querySelector('#cd-review-comment');
-    const commentCount = el.querySelector('#cd-review-count');
-    const errorEl = el.querySelector('#cd-review-error');
-    const clearError = () => {
-      errorEl.textContent = '';
-      errorEl.classList.add('hidden');
+    const finish=()=>{
+      guard.authorizeClose();
+      try {onSaved();} catch { /* the committed review remains valid */ }
+      closeModal(modal);
     };
-    const showError = (message) => {
-      errorEl.textContent = message;
-      errorEl.classList.remove('hidden');
-      errorEl.focus({ preventScroll: true });
+    const showError=message=>{errorEl.textContent=message;errorEl.classList.remove('hidden');errorEl.focus({preventScroll:true});};
+    const clearError=()=>{errorEl.textContent='';errorEl.classList.add('hidden');};
+    const setBusy=value=>{
+      busy=value;form.dataset.submitting=String(value);
+      form.querySelectorAll('input,textarea,button').forEach(control=>{control.disabled=value;});
+      form.setAttribute('aria-busy',String(value));
     };
-    starRow.addEventListener('change', (e) => {
-      const input = e.target.closest('input[data-star]');
-      if (!input) return;
-      chosen = Number(input.value);
-      starRow.querySelectorAll('input[data-star]').forEach((radio) => {
-        radio.nextElementSibling?.classList.toggle('on', Number(radio.value) <= chosen);
-      });
+    starRow.addEventListener('change',event=>{
+      const input=event.target.closest('input[data-star]');if(!input)return;
+      chosen=Number(input.value);
+      starRow.querySelectorAll('input[data-star]').forEach(radio=>radio.nextElementSibling?.classList.toggle('on',Number(radio.value)<=chosen));
       clearError();
     });
-    comment.addEventListener('input', () => {
-      clearError();
-      commentCount.textContent = `${comment.value.length}/500`;
-    });
-    el.querySelector('#cd-review-delete')?.addEventListener('click', async (event) => {
-      const button = event.currentTarget;
-      button.disabled = true;
+    comment.addEventListener('input',()=>{clearError();modal.querySelector('#cd-review-count').textContent=`${comment.value.length}/500`;});
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();if(busy || !current())return;
+      if(!chosen){showError('Pick a star rating first.');return;}
+      clearError();setBusy(true);
+      const button=modal.querySelector('#cd-review-save'),label=button.textContent;
+      button.textContent='Saving…';
       try {
-        if (await deleteCourtReview(court, mine, button)) renderReviewSection(el, court);
-      } catch (err) {
-        showError(err.message || 'Your review could not be deleted.');
-      } finally {
-        if (button.isConnected) button.disabled = false;
-      }
+        const saved=await api(`/courts/${court.id}/reviews`,{method:'POST',body:JSON.stringify({rating:chosen,comment:comment.value.trim()})});
+        if(!current())return;
+        // A successful mutation owns the result; no follow-up GET can undo it.
+        commitCourtReview(court,saved);
+        finish();
+        toast(mine ? 'Review updated.' : 'Review posted.',{tone:'success'});
+      } catch(error) {if(current())showError(error.message||'Your review could not be saved.');}
+      finally {if(current()){setBusy(false);button.textContent=label;}}
     });
-    el.querySelector('#cd-review-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      if (!chosen) { showError('Pick a star rating first.'); return; }
-      const btn = el.querySelector('#cd-review-save');
-      const resetAction = beginButtonAction(btn, mine ? 'Updating review…' : 'Posting review…');
-      if (!resetAction) return;
-      clearError();
-      let saved;
+    modal.querySelector('#cd-review-delete')?.addEventListener('click',async event=>{
+      if(busy || !current())return;
+      const button=event.currentTarget;clearError();setBusy(true);
       try {
-        saved = await api(`/courts/${court.id}/reviews`, {
-          method: 'POST',
-          body: JSON.stringify({ rating: chosen, comment: comment.value.trim() }),
-        });
-      } catch (err) {
-        resetAction();
-        showError(err.message);
-        return;
-      }
-
-      // The mutation response is authoritative. Commit it before any optional
-      // detail refresh so a later GET failure can never look like a failed save
-      // or invite the player to submit the same review again.
-      court.my_review = saved.review;
-      court.reviews = [
-        saved.review,
-        ...(court.reviews || []).filter((review) => review.user_id !== reviewerId),
-      ];
-      court.rating_avg = saved.rating_avg;
-      court.rating_count = saved.rating_count;
-      const commitSeq = Number(el.dataset.reviewCommitSeq || 0) + 1;
-      el.dataset.reviewCommitSeq = String(commitSeq);
-      toast('Thanks for the review!', { tone: 'success', icon: 'star' });
-      renderReviewSection(el, court);
-
-      // Refresh any server-enriched review fields quietly. The saved response
-      // already owns the UI, and a newer review submission always wins.
-      api(`/courts/${court.id}`).then((fresh) => {
-        if (!el.isConnected || el.dataset.reviewCommitSeq !== String(commitSeq)) return;
-        court.my_review = fresh.my_review;
-        court.reviews = fresh.reviews;
-        court.rating_avg = fresh.rating_avg;
-        court.rating_count = fresh.rating_count;
-      }).catch(() => { /* the committed review remains valid */ });
+        if(await deleteCourtReview(court,mine,button) && current()) {
+          finish();
+        }
+      } catch(error) {if(current())showError(error.message||'Your review could not be deleted.');}
+      finally {if(current())setBusy(false);}
     });
+    return modal;
   }
 
-  function openCourtReviews(court) {
-    const modal = openModal(`
-      ${modalHead(`${court.name} reviews`, 'star')}
-      <div class="court-review-list-summary" id="court-review-list-summary" aria-live="polite"></div>
-      <div id="court-review-list" aria-busy="true">${skeletonHtml(4)}</div>
+  function openCourtReviews(court,{onChange=()=>{}}={}) {
+    const ownerId=state.me?.id||null;
+    const modal=openModal(`
+      ${modalHead('Reviews','star')}
+      <p class="court-review-place">${esc(court.name)}</p>
+      <div id="court-review-list-summary" class="court-review-list-summary" tabindex="-1"><p role="status">Loading reviews…</p></div>
+      ${ownerId ? '<button type="button" class="btn btn-secondary btn-block" id="court-review-write" disabled>Write a review</button>' : ''}
+      <div id="court-review-own"></div>
+      <div id="court-review-list" aria-busy="true">${skeletonHtml(3)}</div>
+      <div id="court-review-load-error" role="alert"></div>
       <button type="button" class="btn btn-secondary btn-block hidden" id="court-review-more">Load more reviews</button>
-    `, { label: `${court.name} reviews` });
-    const list = modal.querySelector('#court-review-list');
-    const summary = modal.querySelector('#court-review-list-summary');
-    const more = modal.querySelector('#court-review-more');
-    let beforeId = null;
-    let loading = false;
-
-    const load = async ({ append = false } = {}) => {
-      if (loading) return;
-      loading = true;
-      more.disabled = true;
-      if (!append) {
-        list.setAttribute('aria-busy', 'true');
-        list.innerHTML = skeletonHtml(4);
-      }
-      try {
-        const params = new URLSearchParams({ limit: '10' });
-        if (append && beforeId) params.set('before_id', String(beforeId));
-        const page = await api(`/courts/${court.id}/reviews?${params}`);
-        if (!modal.isConnected) return;
-        const html = (page.items || []).map((review) => courtReviewCardHtml(review, {
-          allowDelete: Number(review.user_id) === Number(state.me?.id),
-        })).join('');
-        if (append) list.insertAdjacentHTML('beforeend', html);
-        else list.innerHTML = html || '<div class="empty-state compact"><b>No reviews yet</b><span>Be the first to help other players.</span></div>';
-        list.removeAttribute('aria-busy');
-        court.rating_avg = page.rating_avg;
-        court.rating_count = page.rating_count;
-        summary.textContent = page.rating_count
-          ? `${page.rating_avg} out of 5 · ${page.rating_count} review${page.rating_count === 1 ? '' : 's'}`
-          : 'No ratings yet';
-        beforeId = page.next_before_id;
-        more.classList.toggle('hidden', !page.has_more);
-        list.querySelectorAll('[data-delete-review]').forEach((button) => {
-          if (button.dataset.deleteBound === '1') return;
-          button.dataset.deleteBound = '1';
-          button.addEventListener('click', async () => {
-            const reviewId = Number(button.dataset.deleteReview);
-            const review = (page.items || []).find((item) => Number(item.id) === reviewId)
-              || { id: reviewId };
-            button.disabled = true;
-            try {
-              if (!await deleteCourtReview(court, review, button)) return;
-              button.closest('[data-review-id]')?.remove();
-              summary.textContent = court.rating_count
-                ? `${court.rating_avg} out of 5 · ${court.rating_count} review${court.rating_count === 1 ? '' : 's'}`
-                : 'No ratings yet';
-              if (!list.querySelector('[data-review-id]')) {
-                list.innerHTML = '<div class="empty-state compact"><b>No reviews yet</b><span>Be the first to help other players.</span></div>';
-              }
-            } catch (error) {
-              toast(error.message || 'Your review could not be deleted.');
-              button.disabled = false;
-            }
-          });
-        });
-        list.querySelectorAll('[data-report-review]').forEach((button) => {
-          if (button.dataset.reportBound === '1') return;
-          button.dataset.reportBound = '1';
-          button.addEventListener('click', () => openContentReport({
-            contentType: 'court_review',
-            contentId: Number(button.dataset.reportReview),
-            label: 'court review',
-          }));
-        });
-      } catch (error) {
-        if (!modal.isConnected) return;
-        if (!append) renderError(list, error.message || 'Reviews could not load.', () => load());
-        else toast(error.message || 'More reviews could not load.');
-      } finally {
-        loading = false;
-        if (more.isConnected) more.disabled = false;
-      }
+    `,{label:`Reviews of ${court.name}`});
+    const list=modal.querySelector('#court-review-list'),summary=modal.querySelector('#court-review-list-summary');
+    const own=modal.querySelector('#court-review-own'),write=modal.querySelector('#court-review-write');
+    const more=modal.querySelector('#court-review-more'),errorBox=modal.querySelector('#court-review-load-error');
+    let items=[],beforeId=null,loading=false,changeSeq=0,returnToEditorAction=false;
+    const current=()=>modal.isConnected && !modal._destroyed && (state.me?.id||null)===ownerId;
+    const render=()=>{
+      summary.innerHTML=courtReviewSummaryHtml(court);
+      if(write){write.disabled=false;write.textContent=court.my_review ? 'Edit your review' : 'Write a review';}
+      own.innerHTML=court.my_review ? `<h4 class="court-review-section-label">Your review</h4>${courtReviewCardHtml(court.my_review)}` : '';
+      const others=items.filter(row=>!ownerId || Number(row.user_id)!==Number(ownerId));
+      list.innerHTML=others.map(row=>courtReviewCardHtml(row)).join('') || (!court.my_review ? `<div class="empty-state compact"><b>${court.rating_count ? 'No reviews to show' : 'No reviews yet'}</b></div>` : '');
+      list.querySelectorAll('[data-report-review]').forEach(button=>button.addEventListener('click',()=>openContentReport({contentType:'court_review',contentId:Number(button.dataset.reportReview),label:'court review'})));
+      onChange();
     };
-    more.addEventListener('click', () => load({ append: true }));
-    load();
-    return modal;
+    const saved=()=>{changeSeq++;render();};
+    write?.addEventListener('click',()=>{
+      returnToEditorAction=true;
+      openChildModal(modal,()=>openCourtReviewEditor(court,{onSaved:saved,returnFocus:write}));
+    });
+    modal._onResume=()=>{
+      if(!returnToEditorAction)return;
+      returnToEditorAction=false;
+      requestAnimationFrame(()=>{
+        if(current() && currentOverlayEntry()?.el===modal && (document.activeElement===document.body || document.activeElement===modal.querySelector('.modal') || document.activeElement===write))write?.focus({preventScroll:true});
+      });
+    };
+    const load=async({append=false}={})=>{
+      if(loading || !current())return;
+      const seq=changeSeq,focused=document.activeElement;
+      const restoreFocus=focused===more || focused?.hasAttribute('data-review-retry');
+      const previousIds=new Set(items.map(row=>Number(row.id)));
+      loading=true;more.disabled=true;errorBox.innerHTML='';
+      if(!append){list.setAttribute('aria-busy','true');list.innerHTML=skeletonHtml(3);}
+      try {
+        const params=new URLSearchParams({limit:'10'});
+        if(append && beforeId)params.set('before_id',String(beforeId));
+        const page=await api(`/courts/${court.id}/reviews?${params}`);
+        if(!current() || seq!==changeSeq)return;
+        items=[...new Map([...(append ? items : []),...(page.items||[])].map(row=>[Number(row.id),row])).values()];
+        court.my_review=page.my_review||null;
+        court.rating_avg=page.rating_avg;court.rating_count=page.rating_count;
+        beforeId=page.next_before_id;
+        render();more.classList.toggle('hidden',!page.has_more);
+        if(restoreFocus)requestAnimationFrame(()=>{
+          if(!current() || modal.closest('[inert]') || !(document.activeElement===more || document.activeElement===document.body))return;
+          const firstNew=items.find(row=>!previousIds.has(Number(row.id)) && (!ownerId || Number(row.user_id)!==Number(ownerId)));
+          (firstNew ? list.querySelector(`[data-review-id="${Number(firstNew.id)}"]`) : summary)?.focus({preventScroll:false});
+        });
+      } catch(error) {
+        if(!current() || seq!==changeSeq)return;
+        if(!append){list.innerHTML='';summary.innerHTML='';}
+        more.classList.add('hidden');
+        errorBox.innerHTML=`<p>${esc(error.message||'Reviews could not load.')}</p><button type="button" class="btn btn-secondary" data-review-retry>Try again</button>`;
+        errorBox.querySelector('[data-review-retry]').addEventListener('click',()=>load({append}));
+      } finally {loading=false;if(current()){more.disabled=false;list.removeAttribute('aria-busy');}}
+    };
+    more.addEventListener('click',()=>load({append:true}));
+    load();return modal;
   }
 
   // Build a calendar event from the same duration, title, and court details
@@ -13111,10 +13071,6 @@
         ${court.recent_results.map(resultRowHtml).join('')}` : ''}
         </div>
       </details>
-      <details class="card cd-progressive cd-reviews-details">
-        <summary id="cd-sec-reviews">Reviews${court.rating_avg ? ` · ${uiIcon('star')} ${court.rating_avg} (${court.rating_count})` : ''}</summary>
-        <div class="cd-progressive-body" id="cd-reviews"></div>
-      </details>
       </div>`;
     modalBox.setAttribute('aria-busy', 'false');
     modalBox.classList.remove('court-detail-refreshing');
@@ -13131,7 +13087,7 @@
       slot.querySelectorAll('details').forEach(details => { details.open = true; });
       const timeline = modal.querySelector('#cd-play-here');
       timeline.innerHTML = `<h3>Play here</h3><p class="simple-note">Preview of player sessions. Your draft venue dates appear in the venue schedule below.</p>${playerOrganizedGames.map(game => courtTimelineItemHtml({source:'player',source_label:'Player-organized',title:game.title || 'Player session',starts_at:game.scheduled_at,game,status:'scheduled',action:'open_session',action_label:'View session'})).join('')}`;
-      modal.querySelector('#cd-reviews').innerHTML = `<p class="row-sub">${Number(court.rating_count) || 0} court reviews. The live court page contains the full review and contribution tools.</p>`;
+
       modalBox.querySelectorAll('button:not(.modal-close), input, select, textarea').forEach(control => { control.disabled = true; });
       modalBox.querySelectorAll('a, [data-goto], [data-view-user], [data-game]').forEach(link => { link.setAttribute('aria-disabled', 'true'); link.removeAttribute('href'); link.removeAttribute('data-goto'); link.removeAttribute('data-view-user'); link.removeAttribute('data-game'); });
       // Capture prevents document-level delegated player actions as well.
@@ -13142,7 +13098,7 @@
       return modal;
     }
 
-    renderReviewSection(modal.querySelector('#cd-reviews'), court);
+    syncCourtReviewTrigger(modal,court);
     loadCourtTimeline(modal,court);
     loadCourtBusiness(modal, court, { expanded: focusBusiness });
     const addMorePreview = (label) => {
@@ -13159,16 +13115,8 @@
         modal.querySelector(`#${btn.dataset.scrollTo}`)?.scrollIntoView({ behavior, block: 'start' });
       });
     });
-    const openCourtReviews = () => {
-      const disclosure = modal.querySelector('.cd-reviews-details');
-      const summary = modal.querySelector('#cd-sec-reviews');
-      if (!disclosure || !summary) return;
-      disclosure.open = true;
-      const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-      summary.scrollIntoView({ behavior, block: 'start' });
-      requestAnimationFrame(() => summary.focus({ preventScroll: true }));
-    };
-    modal.querySelector('#cd-review-inline')?.addEventListener('click', openCourtReviews);
+    const showCourtReviews = () => openChildModal(modal,()=>openCourtReviews(court,{onChange:()=>syncCourtReviewTrigger(modal,court)}));
+    modal.querySelector('#cd-review-inline')?.addEventListener('click',showCourtReviews);
 
     // Playability at a glance — loads after the sheet so it never blocks.
     api(`/courts/${court.id}/weather`).then((w) => {

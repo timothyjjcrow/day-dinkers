@@ -1088,15 +1088,15 @@ def test_court_contribution_flows_use_back_navigation_and_shared_form_feedback()
     assert "bindModalFormUX(modal, '#hp-save')" in hours
 
 
-def test_review_save_commits_before_best_effort_detail_refresh():
-    review = js_function("renderReviewSection")
-    assert "beginButtonAction(btn, mine ? 'Updating review…' : 'Posting review…')" in review
-    commit = review.index("court.my_review = saved.review;")
-    refresh = review.index("api(`/courts/${court.id}`).then")
-    assert commit < refresh
-    assert ".catch(() => { /* the committed review remains valid */ });" in review
-    assert "showError(err.message);" in review[:commit]
-    assert "showError(err.message);" not in review[refresh:]
+def test_review_save_commits_without_a_followup_get_and_protects_unsaved_changes():
+    review = js_function("openCourtReviewEditor")
+    assert "commitCourtReview(court,saved);" in review
+    assert "bindModalDiscardConfirmation(modal" in review
+    assert "title:'Discard this review?'" in review
+    assert "api(`/courts/${court.id}`)" not in review
+    assert "current()" in review and "if(busy || !current())return" in review
+    assert "form.dataset.submitting=String(value)" in review
+    assert "/* the committed review remains valid */" in review
 
 
 def test_invite_join_commits_before_the_best_effort_profile_refresh():

@@ -151,11 +151,11 @@ def test_map_refresh_diffs_layers_without_blanketing_existing_results():
 
 
 def test_form_validation_and_destructive_actions_use_persistent_in_app_feedback():
-    review = section("function renderReviewSection", "function gameToIcs")
+    review = section("function openCourtReviewEditor", "function gameToIcs")
     score = section("function openScoreModal", "const T_FORMAT_LABEL")
     feedback = section("async function renderProfile", "function openEditProfile")
     assert "showError('Pick a star rating first.')" in review
-    assert "showError(err.message)" in review
+    assert "showError(error.message" in review
     assert "formUX.showError('Each side needs at least one player.')" in score
     assert "formUX.showError(`Game ${index + 1} cannot end tied." in score
     assert "formUX.showError(err.message)" in score

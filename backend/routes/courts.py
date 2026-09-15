@@ -1277,11 +1277,13 @@ def court_reviews(court_id):
     has_more = len(rows) > limit
     reviews = rows[:limit]
     summary = _rating_summary_for([court.id]).get(court.id)
+    mine = CourtReview.query.filter_by(court_id=court.id, user_id=current_user.id).first() if current_user else None
     return jsonify({
         'items': [
             (r.to_dict() if current_user else _anonymous_court_review_payload(r))
             for r in reviews
         ],
+        'my_review': mine.to_dict() if mine else None,
         'rating_avg': summary['rating_avg'] if summary else None,
         'rating_count': summary['rating_count'] if summary else 0,
         'has_more': has_more,

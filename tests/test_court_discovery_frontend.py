@@ -466,7 +466,8 @@ def test_court_detail_leads_with_dated_play_and_defers_arrival_and_venue_managem
     assert 'id="cd-checkout">Check out' in detail
     assert "${venueBusiness ? 'Community court details' : 'Court details'}" in detail
     assert '<span>More at this court</span><small id="cd-more-preview">' in detail
-    assert 'class="card cd-progressive cd-reviews-details"' in detail
+    assert 'cd-reviews-details' not in detail
+    assert 'openChildModal(modal,()=>openCourtReviews(court,' in detail
     assert "modal.querySelector('#cd-checkin')?.addEventListener" in detail
     assert "modal.querySelector('#cd-checkout')?.addEventListener" in detail
     assert "modal.querySelector('#cd-play-now')?.addEventListener" in detail
