@@ -7459,3 +7459,10 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
   .session-plan-card { padding: 13px; }
   .session-plan-card .session-when { font-size: 17px; }
 }
+
+.game-consent-card.is-actionable { background: var(--green-50); border-color: var(--green-200); }
+.game-consent-card > b, .game-consent-card p { overflow-wrap: anywhere; }
+.game-consent-card p { margin: 8px 0 0; font-size: 13px; }
+.game-consent-facts { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 8px; color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+.game-consent-facts > span { overflow-wrap: anywhere; }
+.session-main-actions > .game-consent-card { margin: 0; }

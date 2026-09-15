@@ -44,3 +44,7 @@ Inspect reachable routes and actions within each pass and add any discovered fea
 Each pass records the actual screens and roles examined, changes made, concise-copy and hierarchy decisions, browser evidence and relevant behavioral checks. Verify 320px and typical mobile widths, desktop, both themes, enlarged text and keyboard use. Record physical-device and assistive-technology limitations honestly. Finish with complete player, organizer and venue-owner journeys against the final built assets. Keep source work, verified builds and deployed versions distinct.
 
 The current production database backup approval boundary remains unchanged. This UI goal update is not approval for the previously rejected data export.
+
+## Current evidence
+
+Pass1: `ui-ux-pass-01-session.md` covers session essentials and first-join review; `ui-ux-pass-01-decisions.md` covers held offers, hosting decisions, cancellation and outcome feedback. The pass remains in progress with its unverified states explicitly listed.

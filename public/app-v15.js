@@ -11020,14 +11020,15 @@
 
   async function confirmGameLeave(game, playNoun, trigger) {
     if (!game.is_creator) {
+      const noun = playNoun === 'play session' ? 'session' : playNoun;
       return {
         accepted: await openActionConfirmation({
-          eyebrow: 'Open your spot',
-          title: `Leave this ${playNoun}?`,
-          message: `The host and other players will see that your spot in this ${playNoun} opened.`,
-          detail: 'You can rejoin only if the game is still open and a spot remains.',
-          confirmLabel: `Leave ${playNoun}`,
-          cancelLabel: `Stay in ${playNoun}`,
+          eyebrow: 'Your place',
+          title: `Leave this ${noun}?`,
+          message: 'Your spot will open for another player.',
+          detail: 'You can rejoin if a spot is still available.',
+          confirmLabel: `Leave ${noun}`,
+          cancelLabel: 'Stay',
           icon: 'users',
           trigger,
         }),
@@ -37264,16 +37265,24 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     return sheet;
   }
 
-  function gameConsentHtml(game) {
+  function gameHostRequestHtml(game) {
     const handoff = game.host_handoff;
+    if (!handoff) return '';
+    const source = handoff.requested_by_name || 'The host';
+    const target = handoff.target_name || 'the player';
+    const accepts = handoff.can_respond ? 'you accept' : `${target} accepts`;
+    return `<section class="game-consent-card${handoff.can_respond ? ' is-actionable' : ''}" aria-label="Host request">
+      <b>${esc(handoff.can_respond ? `${source} asked you to host` : `Waiting for ${target} to host`)}</b>
+      <div class="game-consent-facts"><span>${handoff.scope === 'following_dates' ? 'This and future dates' : 'This date only'}</span><span>Reply by ${esc(fmtDateTime(handoff.expires_at))}</span></div>
+      <p>${esc(`${source} stays host until ${accepts}${handoff.leave_on_accept ? ', then leaves.' : '.'}`)}</p>
+      <div class="game-consent-actions">${handoff.can_respond ? '<button class="btn btn-primary" data-host-reply="accept">Accept hosting</button><button class="btn btn-secondary" data-host-reply="decline">Decline</button>' : '<button class="btn btn-secondary" data-host-reply="decline">Withdraw request</button>'}</div>
+    </section>`;
+  }
+
+  function gameConsentHtml(game) {
     const record = game.attendance_record;
     const attendanceKnown = (record?.people || []).some((person) => person.attended === true || person.attended === false);
-    return `${handoff ? `<section class="game-consent-card" aria-label="Host handoff">
-      <b>${handoff.can_respond ? `${esc(handoff.requested_by_name)} asked you to host` : `Waiting for ${esc(handoff.target_name)}`}</b>
-      <p>${handoff.scope === 'following_dates' ? 'This and future dates' : 'This date only'} · Reply by ${esc(fmtDateTime(handoff.expires_at))}</p>
-      <small>The current host stays responsible until this is accepted.${handoff.leave_on_accept ? ' They will leave after acceptance.' : ''}</small>
-      <div class="game-consent-actions">${handoff.can_respond ? '<button class="btn btn-primary" data-host-reply="accept">Accept hosting</button><button class="btn btn-secondary" data-host-reply="decline">Decline</button>' : '<button class="btn btn-secondary" data-host-reply="decline">Withdraw request</button>'}</div>
-    </section>` : ''}${record ? `<details class="game-attendance-history"><summary>Attendance record · ${record.signed_up_count} signed up${game.status === 'completed' && attendanceKnown ? ` · ${record.played_count} played` : ''}</summary>
+    return `${record ? `<details class="game-attendance-history"><summary>Attendance record · ${record.signed_up_count} signed up${game.status === 'completed' && attendanceKnown ? ` · ${record.played_count} played` : ''}</summary>
       ${(record.people || []).map((person) => `<div class="game-attendance-person"><span><b>${esc(person.display_name)}</b><small>${person.attended === true ? 'Played' : person.attended === false ? 'Did not play' : person.rsvp_status === 'cancelled' ? 'Session cancelled' : person.rsvp_status === 'left' ? 'Left before play' : person.rsvp_status === 'skipped' ? 'Skipped this date' : 'Attendance not recorded'}</small></span>
       ${game.completion_kind === 'session' && (game.is_creator || Number(person.user_id) === Number(state.me?.id)) ? `<button class="btn btn-secondary btn-sm" data-attendance-correct="${person.user_id}" data-attended="${person.attended !== true}">${person.attended ? 'Mark did not play' : 'Mark played'}</button>` : ''}</div>`).join('')}
       <small>RSVPs and corrections stay in the session history.${game.completion_kind === 'session' ? ' No match score or rating changes.' : ''}</small>
@@ -37594,8 +37603,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       playersHtml = '<div class="empty-state" style="padding:12px">Join at the court to see who’s playing.</div>';
     }
     const waitlistPeople = Array.isArray(game.waitlist_people) ? game.waitlist_people : [];
-    const waitlistHtml = game.waitlist_count ? `<section class="game-waitlist" aria-labelledby="game-waitlist-title">
-      <div class="game-waitlist-head"><div><b id="game-waitlist-title">Waitlist (${game.waitlist_count})</b><span>${game.waitlist_offer ? 'Your spot is ready. Accept below to join.' : `${game.waitlist_position ? `You’re #${game.waitlist_position}. ` : ''}${game.auto_fill_waitlist ? 'Spots are offered in order. Players must accept.' : 'The host chooses when to offer a spot.'}`}</span></div>
+    const waitlistHtml = game.is_creator && game.waitlist_count ? `<section class="game-waitlist" aria-labelledby="game-waitlist-title">
+      <div class="game-waitlist-head"><div><b id="game-waitlist-title">Waitlist (${game.waitlist_count})</b><span>${game.waitlist_offer ? 'A spot is held for you.' : `${game.waitlist_position ? `You’re #${game.waitlist_position}. ` : ''}${game.auto_fill_waitlist ? 'Offers sent in order · acceptance required' : 'Choose a player to offer a spot'}`}</span></div>
         ${game.is_creator ? `<label class="game-waitlist-toggle"><input type="checkbox" id="gs-waitlist-auto" ${game.auto_fill_waitlist ? 'checked' : ''} /><span>Auto-offer</span></label>` : ''}
       </div>
       ${game.is_creator ? `<div class="game-waitlist-people">${waitlistPeople.map((person) => `<div class="game-waitlist-person">
@@ -37657,7 +37666,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       } else if (!game.is_joined && game.spots_left > 0) {
         const skipped = game.recurrence === 'weekly' && game.my_recurrence_rsvp?.is_skipped;
         const inviteCopy = !skipped && game.my_invite_status === 'pending' && game.invited_by
-          ? `<div class="game-invite-context"><b>${esc(game.invited_by.display_name)} invited you</b><span>Accept to join the roster, or let the host know you can’t make it.</span></div>` : '';
+          ? `<div class="game-invite-context"><b>${esc(game.invited_by.display_name)} invited you</b></div>` : '';
         actions = `${inviteCopy}${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
@@ -37666,8 +37675,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         }
       } else if (!game.is_joined) {
         actions = game.waitlist_position
-            ? `<div class="empty-state" style="padding:12px">${uiIcon('clock')} You're #${game.waitlist_position} on the waitlist — we'll notify you when a spot opens.</div>
-               <button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button>`
+            ? `<section class="game-consent-card" aria-label="Your waitlist place"><b>#${game.waitlist_position} on the waitlist</b><p>Accept an offer when a spot opens.</p><button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button></section>`
             : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">${uiIcon('clock')} Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
       } else if (game.is_joined) {
         const startsAhead = new Date(game.scheduled_at).getTime() > Date.now();
@@ -37793,7 +37801,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const planningFacts = [recurrencePattern,
       recurrenceEndLabel ? `Through ${recurrenceEndLabel}` : ''].filter(Boolean);
     if (game.waitlist_offer && game.status === 'upcoming' && !game.is_joined) {
-      actions = `<section class="game-consent-card"><b>A spot is held for you</b><p>Accept by ${esc(fmtTimeShort(game.waitlist_offer.expires_at))} to join this date.</p><div class="game-consent-actions"><button class="btn btn-primary" data-waitlist-reply="accept">Accept spot</button><button class="btn btn-secondary" data-waitlist-reply="pass">Pass</button></div></section>`;
+      actions = `<section class="game-consent-card is-actionable" aria-label="Your waitlist offer"><b>Your spot is ready</b><p>Accept by ${esc(fmtDateTime(game.waitlist_offer.expires_at))}</p><div class="game-consent-actions"><button class="btn btn-primary" data-waitlist-reply="accept">Accept spot</button><button class="btn btn-secondary" data-waitlist-reply="pass">Pass</button></div></section>`;
     }
     const descriptionNote = courtEntryDescriptionParts(game).note;
     const planningDetails = descriptionNote || notes || planningFacts.length
@@ -37839,7 +37847,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const openSpots = Math.max(0, Number(game.spots_left) || 0);
     const heldSpots = Math.max(0, Number(game.reserved_offer_count) || 0);
     const rosterAvailability = openSpots ? `${openSpots} spot${openSpots === 1 ? '' : 's'} left`
-      : heldSpots ? `${heldSpots} spot${heldSpots === 1 ? '' : 's'} awaiting acceptance` : 'Full';
+      : heldSpots ? `${heldSpots} spot${heldSpots === 1 ? '' : 's'} on hold` : 'Full';
     return `
       <div class="modal-head game-detail-header${game.status === 'upcoming' && !game.is_instant ? ' is-planned' : ''}">
         <div class="session-heading-copy">
@@ -37872,6 +37880,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       ${gameHasDatedSeries(game) ? '<section class="series-date-card" id="gs-series-dates" aria-label="Session dates" aria-busy="true"><span class="row-sub">Loading session dates…</span></section>' : ''}
       ${courtEntryNoticeHtml(game)}
       ${sessionConfirmationHtml(game)}
+      ${gameHostRequestHtml(game)}
       ${!hasScore ? `<section class="session-roster" aria-label="Players">
         <div class="session-roster-head"><h4>${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Players' : 'Signed up'} <span>${readyCount}</span></h4><span>${game.status === 'upcoming' && !closedRally ? rosterAvailability : ''}</span></div>
         ${playersHtml}
@@ -38001,7 +38010,18 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
             const fresh=await api(endpoint,{method,body:JSON.stringify(payload)});
             state.playGamesCache=null; render(fresh); refreshMe();
             if (state.tab === 'play') renderPlay();
-            toast(button.dataset.attendanceCorrect ? 'Attendance corrected. RSVP history is preserved.' : 'Response saved');
+            const message = button.dataset.attendanceCorrect ? 'Attendance updated'
+              : button.dataset.waitlistReply ? (button.dataset.waitlistReply === 'accept' ? 'You’re in' : 'Spot passed')
+                : button.dataset.hostReply === 'accept' ? 'You’re hosting'
+                  : fresh.is_creator ? 'Request withdrawn' : 'Hosting declined';
+            requestAnimationFrame(() => {
+              if (currentOverlayEntry()?.el !== modal) return;
+              const target = box.querySelector('#gs-joined-state') || box.querySelector('.game-detail-title');
+              target?.setAttribute('tabindex', '-1');
+              target?.focus();
+            });
+            const acceptedRole = button.dataset.waitlistReply === 'accept' || button.dataset.hostReply === 'accept';
+            if (!acceptedRole || !box.querySelector('#gs-joined-state')) toast(message);
           } catch (error) {
             reset();
             if (error.code === 'game_plan_review_cancelled' && error.data?.game) {
@@ -38010,6 +38030,12 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
                 if (currentOverlayEntry()?.el === modal) box.querySelector('[data-waitlist-reply="accept"]')?.focus({ preventScroll: true });
               });
               announceViewStatus('Latest plan shown. No place taken.');
+            } else if (error.isCancelled) {
+              requestAnimationFrame(() => {
+                if (currentOverlayEntry()?.el !== modal) return;
+                if (button.isConnected) button.focus();
+                announceViewStatus(error.message);
+              });
             } else if (error.code === 'host_plan_confirmation_required' && error.data?.game) {
               if (Number(error.data.review_game_id) !== Number(gameId)) {
                 openGameScreen(error.data.review_game_id, { replaceModal: modal });

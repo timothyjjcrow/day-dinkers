@@ -92,6 +92,7 @@ def test_consent_controls_dispatch_explicit_responses_to_the_correct_date():
     run('''
       const assert=require('node:assert/strict');
       const gameId=27, game={id:27,host_handoff:{id:91}}, state={tab:'profile'};
+      const modal={},currentOverlayEntry=()=>({el:modal}),requestAnimationFrame=fn=>fn();
       const buttons=[{dataset:{waitlistReply:'accept'}},{dataset:{hostReply:'decline'}},
                      {dataset:{attendanceCorrect:'8',attended:'true'}}];
       for(const button of buttons) button.addEventListener=(name,fn)=>{button[name]=fn;};
@@ -120,19 +121,31 @@ def test_consent_summary_separates_rsvps_attendance_and_pending_responsibility()
       const state={me:{id:8}};
       const esc=x=>String(x).replaceAll('<','&lt;').replaceAll('>','&gt;');
       const fmtDateTime=x=>x;
-    ''' + section('function gameConsentHtml', 'function openHostHandoffModal') + '''
+    ''' + section('function gameHostRequestHtml', 'function openHostHandoffModal') + '''
+      const request={id:1,can_respond:true,requested_by_name:'<Host>',target_name:'Alex',
+        scope:'this_date',expires_at:'Tomorrow',leave_on_accept:true};
       const html=gameConsentHtml({status:'completed',completion_kind:'session',is_creator:false,
-        host_handoff:{id:1,can_respond:true,requested_by_name:'<Host>',scope:'this_date',expires_at:'Tomorrow'},
         attendance_record:{signed_up_count:3,played_count:2,people:[
           {user_id:8,display_name:'Me',attended:false}, {user_id:9,display_name:'Another',attended:true}
         ]}});
       assert.match(html,/3 signed up · 2 played/);
-      assert.match(html,/current host stays responsible/);
-      assert.match(html,/&lt;Host&gt;/);
       assert.match(html,/data-attendance-correct="8"/);
       assert.ok(!html.includes('data-attendance-correct="9"'));
-      assert.match(html,/data-host-reply="accept"/);
-      assert.match(html,/data-host-reply="decline"/);
+      const incoming=gameHostRequestHtml({host_handoff:request});
+      assert.match(incoming,/&lt;Host&gt; stays host until you accept, then leaves/);
+      assert.match(incoming,/This date only/);
+      assert.match(incoming,/Reply by Tomorrow/);
+      assert.match(incoming,/data-host-reply="accept"/);
+      assert.match(incoming,/data-host-reply="decline"/);
+      assert.ok(!incoming.includes('<Host>'));
+      const outgoing=gameHostRequestHtml({host_handoff:{...request,can_respond:false,
+        scope:'following_dates',leave_on_accept:false}});
+      assert.match(outgoing,/This and future dates/);
+      assert.match(outgoing,/stays host until Alex accepts/);
+      assert.match(outgoing,/Withdraw request/);
+      assert.ok(!outgoing.includes('data-host-reply="accept"'));
+      assert.ok(!outgoing.includes('then leaves'));
+      assert.equal(gameHostRequestHtml({}), '');
     ''')
 
 
@@ -159,4 +172,44 @@ def test_host_handoff_review_opens_the_changed_date_and_focuses_current_plan():
         reviewId=28;await button.click();
         assert.deepEqual(opened,[[28,modal]]);assert.equal(rendered.length,1);assert.equal(messages.length,2);
       })().catch(error=>{console.error(error);process.exitCode=1;});
+    ''')
+
+
+def test_waitlist_decisions_restore_focus_without_false_error_or_duplicate_success_toast():
+    start = APP.index('    function bind() {', APP.index('async function openGameScreen'))
+    body = APP[start + len('    function bind() {'):APP.index('      const datesHost', start)]
+    run('''
+      const assert=require('node:assert/strict');
+      const gameId=27,game={id:27,plan_token:'a'.repeat(64)},state={tab:'profile'};
+      const modal={},frames=[],messages=[],announcements=[],renders=[],requests=[];
+      let top=modal,mode='cancel',focused='',resets=0;
+      const currentOverlayEntry=()=>({el:top}),requestAnimationFrame=fn=>frames.push(fn);
+      const button={dataset:{waitlistReply:'accept'},isConnected:true,focus:()=>focused='accept',
+        addEventListener:(event,fn)=>button[event]=fn};
+      const result={setAttribute(){},focus:()=>focused='joined'};
+      const box={querySelector:selector=>selector==='#gs-joined-state'?result:null,
+        querySelectorAll:()=>[button]};
+      const beginButtonAction=()=>()=>resets++,render=value=>renders.push(value),refreshMe=()=>{};
+      const toast=value=>messages.push(value),announceViewStatus=value=>announcements.push(value);
+      const showInlineActionError=()=>{throw Error('Cancellation is not a form error')};
+      const api=async(path,options)=>{
+        requests.push([path,JSON.parse(options.body)]);
+        if(mode==='cancel') throw Object.assign(new Error('Existing plans kept'),{isCancelled:true});
+        return {id:27,is_joined:true};
+      };
+    ''' + body + '''
+      (async()=>{
+        await button.click();frames.splice(0).forEach(fn=>fn());
+        assert.equal(focused,'accept');assert.equal(resets,1);assert.equal(renders.length,0);
+        assert.deepEqual(announcements,['Existing plans kept']);assert.deepEqual(messages,[]);
+        mode='success';await button.click();frames.splice(0).forEach(fn=>fn());
+        assert.equal(focused,'joined');assert.equal(renders.length,1);assert.deepEqual(messages,[]);
+        focused='elsewhere';await button.click();top={};frames.splice(0).forEach(fn=>fn());
+        assert.equal(focused,'elsewhere','Late focus must not follow navigation');
+        assert.equal(requests.length,3);
+        for(const [path,payload] of requests){
+          assert.equal(path,'/games/27/waitlist/respond');
+          assert.deepEqual(payload,{accept:true,expected_plan_token:'a'.repeat(64)});
+        }
+      })().catch(error=>{console.error(error);process.exitCode=1});
     ''')
