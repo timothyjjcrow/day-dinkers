@@ -63,7 +63,6 @@ def test_game_detail_status_and_primary_actions_use_product_icons():
         "${uiIcon('clock')} Join waitlist",
         "${uiIcon('clock')} Reschedule",
         "${uiIcon('calendar')} Play again",
-        "${uiIcon('message')} Message the group",
     ):
         assert action in detail
     for old_markup in (

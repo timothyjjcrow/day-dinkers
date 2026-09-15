@@ -80,6 +80,15 @@ with app.app_context():
             db.session.add(GamePlayer(game_id=group.id,user_id=person.id,
                 attending_at=utcnow() if status == 0 else None,
                 commitment_requested_at=utcnow() if status == 1 else None))
+        full_invite=session('Doubles with Sam','12:00',capacity=2,joined=(2,))
+        db.session.add(GameInvite(game_id=full_invite.id,user_id=players[0].id))
+        queued=session('Lunch break doubles','12:30',capacity=2,joined=(2,))
+        db.session.add(GameWaitlist(game_id=queued.id,user_id=players[0].id))
+        cancelled=session('Sunset doubles','19:00',joined=(0,2))
+        cancelled.status='cancelled'
+        ended=session('Morning open play','08:00',joined=(2,))
+        ended.scheduled_at-=timedelta(days=2)
+        ended.status='expired'
     db.session.commit()
 port=int(os.environ.get('DISCOVERY_TEST_PORT', '8055'))
 print(f'DISCOVERY READY port{port} date{tomorrow}: discovery-0@example.test / local-discovery-test',flush=True)

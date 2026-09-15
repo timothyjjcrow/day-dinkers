@@ -27,7 +27,8 @@ def test_detail_header_roster_waitlist_and_dead_end_actions_are_visible():
     assert '${waitlistHtml}' in detail
     assert 'id="gs-find-nearby"' in detail
     assert 'id="gs-plan-new"' in detail
-    assert 'id="gs-message-group"' in detail
+    assert 'id="gs-chat"' in detail
+    assert 'id="gs-message-group"' not in detail
 
 
 def test_invitation_score_and_host_leave_flows_are_explicit():

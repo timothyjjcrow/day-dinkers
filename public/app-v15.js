@@ -37578,10 +37578,12 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         : 'Waiting for players to join';
     }
 
+    const endedPlan = !game.is_instant && ['cancelled', 'expired'].includes(game.status);
     if (hasScore) headline = esc(gameActivityLabel(game));
-    else if (game.status === 'upcoming' && !game.is_instant) {
+    else if ((game.status === 'upcoming' || endedPlan) && !game.is_instant) {
       headline = esc(game.title || gameActivityLabel(game));
       if (live) subline = 'In progress';
+      if (endedPlan && game.status === 'cancelled') subline = '';
     }
     const team1 = game.players.filter((p) => p.team === 1);
     const team2 = game.players.filter((p) => p.team === 2);
@@ -37639,11 +37641,9 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         }).join('') : '<div class="empty-state" style="padding:12px">One player is on the way — join to see who.</div>'}
       </div>` : '';
 
-    const whatNowHtml = `<section class="game-what-now" aria-label="What now">
-      <div><b>What now?</b><span>Keep playing without rebuilding the details yourself.</span></div>
+    const whatNowHtml = `<section class="game-what-now" aria-label="Find your next game">
       <button type="button" class="btn btn-primary btn-block" id="gs-find-nearby">Find a game nearby</button>
-      <button type="button" class="btn btn-secondary btn-block" id="gs-plan-new">Plan a new game at ${esc(court.name || 'this court')}</button>
-      ${game.is_joined ? `<button type="button" class="btn btn-secondary btn-block" id="gs-message-group">${uiIcon('message')} Message the group</button>` : ''}
+      <button type="button" class="btn btn-secondary btn-block" id="gs-plan-new">Plan at this court</button>
     </section>`;
     let actions = '';
     if (game.status === 'upcoming') {
@@ -37679,8 +37679,11 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         }
       } else if (!game.is_joined) {
         actions = game.waitlist_position
-            ? `<section class="game-consent-card" aria-label="Your waitlist place"><b>#${game.waitlist_position} on the waitlist</b><p>Accept an offer when a spot opens.</p><button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button></section>`
+            ? `<section class="game-consent-card" aria-label="Your waitlist place"><b id="gs-waitlist-state" tabindex="-1">#${game.waitlist_position} on the waitlist</b><p>Accept an offer when a spot opens.</p><button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button></section>`
             : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">${uiIcon('clock')} Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
+        if (game.my_invite_status === 'pending' && !game.waitlist_position && !game.waitlist_offer) {
+          actions += '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
+        }
       } else if (game.is_joined) {
         const startsAhead = new Date(game.scheduled_at).getTime() > Date.now();
         const moreActions = [];
@@ -37853,7 +37856,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const rosterAvailability = openSpots ? `${openSpots} spot${openSpots === 1 ? '' : 's'} left`
       : heldSpots ? `${heldSpots} spot${heldSpots === 1 ? '' : 's'} on hold` : 'Full';
     return `
-      <div class="modal-head game-detail-header${game.status === 'upcoming' && !game.is_instant ? ' is-planned' : ''}">
+      <div class="modal-head game-detail-header${(game.status === 'upcoming' || endedPlan) && !game.is_instant ? ' is-planned' : ''}">
         <div class="session-heading-copy">
           <span class="session-eyebrow">${hasScore ? 'Match result' : esc(gameActivityLabel(game))}</span>
           <h3 class="game-detail-title" data-status="${esc(game.status)}"><span class="game-detail-status-icon" aria-hidden="true">${statusIcon}</span><span class="game-detail-headline">${headline}</span></h3>
@@ -37862,6 +37865,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       </div>
       ${joinedState}
       <div class="game-detail-summary">
+        ${endedPlan ? `<span class="session-ended-state" data-status="${game.status}">${uiIcon(game.status === 'cancelled' ? 'x' : 'clock')} ${game.status === 'cancelled' ? 'Cancelled' : 'Ended'}</span>` : ''}
         ${resultState ? `<span class="match-result-state${game.status === 'awaiting_confirmation' ? ' is-pending' : ''}">${uiIcon(game.status === 'awaiting_confirmation' ? 'clock' : 'check-circle')} ${resultState}</span>` : ''}
         ${subline ? `<div class="row-sub">${subline}</div>` : ''}
         ${detailMeta}
@@ -37900,6 +37904,13 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       </div>
       ${closedRally ? '' : sessionReturnToolsHtml(game)}
       ${chatPreview}${infoStrip}${planningDetails}`;
+  }
+
+  function focusGameControl(modal, box, selector) {
+    requestAnimationFrame(() => {
+      if (!modal.isConnected || currentOverlayEntry()?.el !== modal) return;
+      box.querySelector(selector)?.focus();
+    });
   }
 
   async function openGameScreen(gameId, options = {}) {
@@ -38160,7 +38171,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           reset();
         }
       });
-      box.querySelectorAll('#gs-chat, #gs-chat-card, #gs-message-group').forEach((button) => {
+      box.querySelectorAll('#gs-chat, #gs-chat-card').forEach((button) => {
         button.addEventListener('click', () => openChildModal(modal, () => openGameChat(game)));
       });
       box.querySelector('#gs-calendar')?.addEventListener('click', () => {
@@ -38356,6 +38367,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
             state.playGamesCache = null;
             render(fresh);
             toast('Left the waitlist');
+            focusGameControl(modal, box, '#gs-waitlist, #gs-join');
             if (state.tab === 'play') renderPlay();
           } catch (e) {
             button.disabled = false;
@@ -38372,7 +38384,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           const fresh = await api(`/games/${gameId}/waitlist`, { method: 'POST' });
           state.playGamesCache = null;
           render(fresh);
-          toast("Waitlisted — we'll let you know if a spot opens", { tone: 'success', icon: 'clock' });
+          focusGameControl(modal, box, '#gs-waitlist-state, [data-waitlist-reply="accept"]');
           maybeOfferPhoneNotifications('Get a ping if a spot opens?');
           if (state.tab === 'play') renderPlay();
         } catch (e) {
@@ -38392,6 +38404,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           state.playGamesCache = null;
           render(fresh);
           toast('Left the waitlist');
+          focusGameControl(modal, box, '#gs-waitlist, #gs-join');
           if (state.tab === 'play') renderPlay();
         } catch (e) {
           button.disabled = false;
@@ -38517,6 +38530,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         });
       });
       box.querySelector('#gs-decline-invite')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        if (button.disabled) return;
         if (!await openActionConfirmation({
           eyebrow: 'Game invitation',
           title: 'Tell the host you can’t make it?',
@@ -38525,9 +38540,10 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           confirmLabel: 'Decline invitation',
           cancelLabel: 'Keep invitation',
           icon: 'send',
-          trigger: event.currentTarget,
+          trigger: button,
         })) return;
-        const resetAction = beginButtonAction(event.currentTarget, 'Declining…');
+        if (!modal.isConnected || currentOverlayEntry()?.el !== modal) return;
+        const resetAction = beginButtonAction(button, 'Declining…');
         if (!resetAction) return;
         try {
           await api(`/games/${gameId}/invites/decline`, { method: 'POST' });

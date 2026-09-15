@@ -5503,7 +5503,9 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .score-auto-confirm-card > div { display: grid; gap: 3px; }
 .score-auto-confirm-card b { display: flex; align-items: center; gap: 6px; color: var(--amber-800); }
 .score-auto-confirm-card span, .score-auto-confirm-card small { color: var(--ink-soft); font-size: 12px; line-height: 1.4; }
-.game-what-now { display: grid; gap: 8px; }
+.game-what-now { display: grid; gap: 8px; padding: 0; border: 0; background: transparent; }
+.session-ended-state { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--radius-pill); color: var(--ink); background: var(--line); font-size: 13px; font-weight: 700; }
+.session-ended-state .ui-icon { width: 16px; height: 16px; flex: 0 0 16px; }
 .game-waitlist {
   display: grid; gap: 8px; margin: 12px 0; padding: 12px;
   border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card);
