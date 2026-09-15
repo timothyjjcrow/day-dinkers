@@ -1739,21 +1739,6 @@ textarea[aria-invalid="true"]:focus-visible {
 .gallery-like,
 .gallery-delete { min-width: 44px; min-height: 44px; white-space: nowrap; }
 .gallery-delete { color: var(--red-700); }
-.court-photo-cover-notice {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  margin: 12px 0 4px;
-  padding: 12px;
-  border: 1px solid var(--green-200);
-  border-radius: var(--radius-sm);
-  background: var(--green-50);
-  color: var(--ink-soft);
-  font-size: var(--text-xs);
-  line-height: 1.45;
-}
-.court-photo-cover-notice .ui-icon { flex: 0 0 auto; color: var(--green-accent); }
-.court-photo-cover-notice b { display: block; margin-bottom: 2px; color: var(--ink); }
 .gallery-like.is-popping .ui-icon { animation: gallery-heart-pop 420ms cubic-bezier(.2,.9,.3,1.35); }
 @keyframes gallery-heart-pop {
   0% { transform: scale(.72); }
@@ -7671,3 +7656,16 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 @media (max-width: 359px) { .gallery-filter-row { flex-wrap: wrap; gap: 8px; } .gallery-filter-row select { flex-basis: 100%; } }
 
 .gallery-lightbox-actions .gallery-like { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+
+/* A short photo form keeps the gallery and its scroll position intact behind it. */
+.court-upload-preview { display: block; width: auto; max-width: 100%; height: auto; max-height: min(24svh,200px); object-fit: contain; background: var(--green-50); border-radius: var(--radius-md); margin: 0 auto 16px; }
+.court-upload-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.court-upload-fields .form-field { display: block; margin-bottom: 14px; }
+.court-upload-fields .form-field input, .court-upload-fields .form-field select { display: block; margin-top: 6px; }
+.court-upload-date { margin: 0 0 12px; }
+.court-upload-date summary { min-height: 44px; padding: 10px 0; cursor: pointer; font-size: 14px; }
+.court-upload-date input { width: 100%; margin: 4px 0 8px; }
+.court-upload-cover { color: var(--ink-soft); font-size: 12px; line-height: 1.5; margin: 4px 0 14px; }
+.court-upload-fields:disabled { opacity: .65; }
+
+.gallery-capacity-note { margin: 8px 0 0; color: var(--ink-soft); font-size: 12px; line-height: 1.5; }

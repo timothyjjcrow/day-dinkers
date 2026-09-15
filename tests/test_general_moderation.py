@@ -176,6 +176,7 @@ def test_reviewers_can_remove_unsafe_court_content_with_audit(app, client):
         db.session.flush()
         db.session.add(CourtPhotoLike(user_id=owner['user']['id'], photo_id=photo.id))
         photo_id, review_id = photo.id, review.id
+        photo.court.photo_url = f'/api/courts/1/photos/{photo.id}'
         db.session.commit()
 
     removed_photo = client.delete(
@@ -192,6 +193,7 @@ def test_reviewers_can_remove_unsafe_court_content_with_audit(app, client):
     assert removed_review.status_code == 204
     with app.app_context():
         assert db.session.get(CourtPhoto, photo_id) is None
+        assert db.session.get(Court, 1).photo_url == ''
         assert db.session.get(CourtReview, review_id) is None
         assert CourtPhotoLike.query.filter_by(photo_id=photo_id).count() == 0
 

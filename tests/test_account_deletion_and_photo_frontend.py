@@ -54,21 +54,19 @@ def test_account_deletion_fetches_exact_impact_and_waits_on_success_screen():
     assert '.account-deletion-success' in STYLES
 
 
-def test_court_photo_preview_and_progress_reuse_the_launching_modal():
-    upload = section('const uploadCourtPhoto =', 'const courtShareUrl =')
+def test_court_photo_upload_keeps_gallery_context_and_uses_a_guarded_child_form():
+    picker = section('const uploadCourtPhoto =', 'const courtShareUrl =')
+    editor = section('function openCourtPhotoUpload', 'function galleryPhotoMetaHtml')
     gallery = section('async function openCourtGallery', 'async function openGameChat')
-
-    assert 'contextModal = modal' in upload
-    assert "beginButtonAction(trigger, 'Preparing photo…')" in upload
-    assert "formUX.startSubmitting('Adding photo…')" in upload
-    assert 'contextBox.innerHTML =' in upload
-    assert 'const becomesCoverPhoto =' in upload
-    assert 'Court views are preferred for the cover.' in upload
-    assert 'The venue-supplied cover photo will remain in place.' in upload
-    assert 'ERROR_TEXT.photo_too_large' in upload
-    assert 'ERROR_TEXT.invalid_photo' in upload
-    assert 'openModal(' not in upload
-    assert 'openActionConfirmation({' not in upload
-    assert 'contextModal:modal' in gallery
-    assert 'onCancel:reopenGallery' in gallery
-    assert '.court-photo-cover-notice' in STYLES
+    assert 'openChildModal(contextModal,()=>openCourtPhotoUpload' in picker
+    assert 'contextBox.innerHTML =' not in picker
+    assert 'ERROR_TEXT.photo_too_large' in picker and 'ERROR_TEXT.invalid_photo' in picker
+    assert 'routedOverlayLoadIsCurrent(modalLoad)' in picker
+    assert 'state.me?.id!==ownerId' in picker
+    assert 'bindModalDiscardConfirmation(modal' in editor
+    assert "formUX.startSubmitting('Adding photo…')" in editor
+    assert 'fields.disabled=true' in editor and 'fields.disabled=false' in editor
+    assert 'commitCourtPhoto(court,result)' in editor
+    assert 'photos.unshift(result.photo)' in gallery
+    assert 'transitionModal(modal,()=>openCourtGallery' not in gallery
+    assert 'court-upload-preview' in STYLES

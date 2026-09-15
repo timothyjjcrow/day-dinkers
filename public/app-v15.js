@@ -13226,113 +13226,29 @@
       openChildModal(modal, () => openBusinessHub({ court }));
     });
 
-    const uploadCourtPhoto = (onDone, {
-      contextModal = modal,
-      trigger = null,
-      onCancel = null,
-    } = {}) => {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.addEventListener('change', async () => {
-        const file = input.files && input.files[0];
-        if (!file) return;
-        const modalLoad = beginRoutedOverlayLoad(null);
-        const activeContext = contextModal?.isConnected ? contextModal : modal;
-        const contextBox = activeContext?.querySelector('.modal');
-        const resetPreparing = trigger?.isConnected
-          ? beginButtonAction(trigger, 'Preparing photo…') : null;
-        contextBox?.setAttribute('aria-busy', 'true');
-        let photo;
-        try { photo = await imageFileToDataUrl(file); }
-        catch (error) {
-          resetPreparing?.();
-          contextBox?.removeAttribute('aria-busy');
-          if (!routedOverlayLoadIsCurrent(modalLoad)) return;
-          toast(error?.message === 'image_too_large'
-            ? ERROR_TEXT.photo_too_large : ERROR_TEXT.invalid_photo, { tone: 'warning' });
-          return;
-        }
-        if (!routedOverlayLoadIsCurrent(modalLoad)) {
-          resetPreparing?.();
-          contextBox?.removeAttribute('aria-busy');
-          return;
-        }
-        resetPreparing?.();
-        contextBox?.removeAttribute('aria-busy');
-        if (!activeContext?.isConnected || !contextBox) return;
-
-        // Preview, caption, conversion state, and upload progress all stay in
-        // the context that launched the picker. A gallery opened from Court
-        // detail therefore never grows a third modal layer.
-        const returnToContext = () => {
-          if (typeof onCancel === 'function') return onCancel();
-          return refreshCourtDetailPreservingContext(activeContext, court.id);
-        };
-        const previousDismissBlocked = activeContext._dismissBlocked;
-        const previousOnDismissBlocked = activeContext._onDismissBlocked;
-        let previewActive = true;
-        const restoreDismissBehavior = () => {
-          previewActive = false;
-          if (activeContext._dismissBlocked === previewDismissBlocked) {
-            activeContext._dismissBlocked = previousDismissBlocked;
-          }
-          if (activeContext._onDismissBlocked === previewDismiss) {
-            activeContext._onDismissBlocked = previousOnDismissBlocked;
-          }
-        };
-        const discardPreview = () => {
-          if (!previewActive) return;
-          restoreDismissBehavior();
-          returnToContext();
-        };
-        const previewDismissBlocked = () => previewActive;
-        const previewDismiss = () => discardPreview();
-        activeContext._dismissBlocked = previewDismissBlocked;
-        activeContext._onDismissBlocked = previewDismiss;
-        activeContext._cleanupFns?.push(() => { previewActive = false; });
-        const becomesCoverPhoto = !court.photo_url
-          || String(court.photo_url).startsWith('/api/courts/');
-
-        contextBox.innerHTML = `
-          ${modalHead('Add court photo')}
-          <form id="cap-form" novalidate>
-            <img src="${photo}" alt="Selected court photo preview" style="width:100%;border-radius: var(--radius-md);margin-bottom:10px" />
-            <div class="form-field">
-              <label for="cap-text">Caption <span class="row-sub">(optional)</span></label>
-              <input type="text" id="cap-text" maxlength="140" placeholder="e.g. Fresh nets on courts 1–2!" />
-            </div>
-            <label class="form-field" for="cap-category">What does this show?<select id="cap-category"><option value="">Choose a category</option>${courtPhotoCategories().map(([key,label]) => `<option value="${key}">${label}</option>`).join('')}</select></label>
-            <label class="form-field" for="cap-date">Date taken <span class="field-optional">Optional</span><input type="date" id="cap-date" max="${new Date().toISOString().slice(0,10)}" /><small>Leave blank if you do not know. The upload date is shown separately.</small></label>
-            <p class="court-photo-cover-notice">${uiIcon('camera')} <span>${becomesCoverPhoto
-              ? '<b>Court views are preferred for the cover.</b> Other views help players find their way in the gallery.'
-              : '<b>This joins the court gallery.</b> The venue-supplied cover photo will remain in place.'}</span></p>
-            <button type="submit" class="btn btn-primary btn-block" id="cap-save" style="margin-top:12px">${uiIcon('camera')} Add photo</button>
-            <button type="button" class="btn btn-secondary btn-block" data-photo-upload-cancel>Back without adding</button>
-          </form>
-        `;
-        setDialogLabel(contextBox, `Add a photo of ${court.name}`);
-        const formUX = bindModalFormUX(activeContext, '#cap-save');
-        activeContext.querySelector('[data-photo-upload-cancel]')?.addEventListener('click', discardPreview);
-        requestAnimationFrame(() => activeContext.querySelector('#cap-text')?.focus({ preventScroll: true }));
-        activeContext.querySelector('#cap-form').addEventListener('submit', async (event) => {
-          event.preventDefault();
-          const resetSubmitting = formUX.startSubmitting('Adding photo…');
-          if (!resetSubmitting) return;
-          try {
-            await api(`/courts/${court.id}/photo`, {
-              method: 'POST',
-              body: JSON.stringify({ photo, caption: activeContext.querySelector('#cap-text').value.trim(), category: activeContext.querySelector('#cap-category').value, captured_on: activeContext.querySelector('#cap-date').value || null }),
-            });
-            restoreDismissBehavior();
-            toast('Photo added. Thanks for contributing!', { tone: 'success', icon: 'camera' });
-            onDone();
-          } catch (err) {
-            resetSubmitting();
-            formUX.showError(err.message);
-          }
-        });
-      });
+    const uploadCourtPhoto = (onDone, {contextModal=modal,trigger=null}={}) => {
+      const ownerId=state.me?.id;
+      if(!ownerId || !contextModal?.isConnected || currentOverlayEntry()?.el!==contextModal)return;
+      const input=document.createElement('input');
+      input.type='file';input.accept='image/*';input.hidden=true;
+      input.dataset.courtPhotoPicker='true';
+      contextModal.querySelector('[data-court-photo-picker]')?.remove();
+      contextModal.append(input);
+      input.addEventListener('cancel',()=>input.remove(),{once:true});
+      input.addEventListener('change',async()=>{
+        const file=input.files?.[0];input.remove();
+        if(!file || state.me?.id!==ownerId || !contextModal.isConnected || currentOverlayEntry()?.el!==contextModal)return;
+        const modalLoad=beginRoutedOverlayLoad(null);
+        const resetPreparing=beginButtonAction(trigger,'Preparing photo…');
+        const box=contextModal.querySelector('.modal');box?.setAttribute('aria-busy','true');
+        try{
+          const photo=await imageFileToDataUrl(file);
+          if(!routedOverlayLoadIsCurrent(modalLoad) || state.me?.id!==ownerId || !contextModal.isConnected)return;
+          openChildModal(contextModal,()=>openCourtPhotoUpload(court,photo,{onSaved:onDone,returnFocus:trigger}));
+        }catch(error){
+          if(routedOverlayLoadIsCurrent(modalLoad) && state.me?.id===ownerId)toast(error?.message==='image_too_large' ? ERROR_TEXT.photo_too_large : ERROR_TEXT.invalid_photo,{tone:'warning'});
+        }finally{resetPreparing?.();box?.removeAttribute('aria-busy');}
+      },{once:true});
       input.click();
     };
     let refreshPhotosOnResume=false;
@@ -31477,6 +31393,73 @@
     return [['court','Courts'],['entrance','Entrance'],['parking','Parking'],['nets','Nets'],['accessibility','Accessibility'],['other','Other']];
   }
 
+  function commitCourtPhoto(court,result) {
+    court.photo_count=result.photo_count;
+    court.photo_url=result.photo_url||'';
+    for(const cached of Array.isArray(state.courts) ? state.courts : []) {
+      if(Number(cached.id)===Number(court.id))Object.assign(cached,{photo_count:court.photo_count,photo_url:court.photo_url});
+    }
+  }
+
+  function openCourtPhotoUpload(court,photo,{onSaved=()=>null,returnFocus=null}={}) {
+    const ownerId=state.me?.id;
+    if(!ownerId)return null;
+    const communityCover=!court.photo_url || String(court.photo_url).startsWith('/api/courts/');
+    const modal=openModal(`
+      ${modalHead('Add photo','camera')}
+      <p class="gallery-place">${esc(court.name)}</p>
+      <form id="cap-form" novalidate>
+        <img class="court-upload-preview" src="${esc(photo)}" alt="Selected court photo" />
+        <fieldset class="court-upload-fields">
+          <label class="form-field" for="cap-category">Category <span class="field-optional">Optional</span>
+            <select id="cap-category"><option value="">Uncategorized</option>${courtPhotoCategories().map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select>
+          </label>
+          <label class="form-field" for="cap-text">Caption <span class="field-optional">Optional</span>
+            <input type="text" id="cap-text" maxlength="140" />
+          </label>
+          <details class="court-upload-date"><summary>Date taken <span class="field-optional">Optional</span></summary>
+            <label class="sr-only" for="cap-date">Date taken</label>
+            <input type="date" id="cap-date" max="${calendarDateInTimeZone(new Date(),Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')}" />
+          </details>
+        </fieldset>
+        <p class="court-upload-cover">${communityCover ? 'Court views are preferred for the cover.' : 'Added to the gallery. The venue cover stays.'}</p>
+        <button type="submit" class="btn btn-primary btn-block" id="cap-save">Add photo</button>
+      </form>
+    `,{label:`Add a photo of ${court.name}`,returnFocus});
+    modal.querySelector('.modal').classList.add('court-upload-modal');
+    const form=modal.querySelector('#cap-form'),fields=form.querySelector('fieldset');
+    const current=()=>modal.isConnected && !modal._destroyed && state.me?.id===ownerId;
+    const guard=bindModalDiscardConfirmation(modal,{
+      isDirty:()=>true,title:'Discard this photo?',message:'This photo has not been added.',detail:'',
+      // Commit Back through history before the shared guard's close fallback.
+      onDiscard:()=>dismissModal(modal),
+    });
+    const formUX=bindModalFormUX(modal,'#cap-save');
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();if(!current())return;
+      const date=form.querySelector('#cap-date');
+      if(date.value && date.value>date.max){
+        form.querySelector('details').open=true;
+        formUX.showError('Choose today or an earlier date.',date);return;
+      }
+      const payload={photo,caption:form.querySelector('#cap-text').value.trim(),category:form.querySelector('#cap-category').value,captured_on:date.value||null};
+      const reset=formUX.startSubmitting('Adding photo…');
+      if(!reset)return;
+      fields.disabled=true;
+      try{
+        const result=await api(`/courts/${court.id}/photo`,{method:'POST',body:JSON.stringify(payload)});
+        if(!current())return;
+        commitCourtPhoto(court,result);
+        guard.authorizeClose();
+        // The saved photo is already in this response; refreshing the gallery is optional.
+        try{const target=onSaved(result);if(target?.isConnected)modal._returnFocus=target;}catch{/* Preserve the successful upload. */}
+        dismissModal(modal);
+        toast('Photo added.',{tone:'success',icon:'camera'});
+      }catch(error){if(current()){reset();fields.disabled=false;formUX.showError(error.message||'This photo could not be added.');}}
+    });
+    return modal;
+  }
+
   function galleryPhotoMetaHtml(photo) {
     const uploaded = resultDayLabel(photo.created_at);
     const taken = photo.captured_on ? new Intl.DateTimeFormat(undefined, {month:'short',day:'numeric',year:'numeric'}).format(new Date(`${photo.captured_on}T12:00:00`)) : '';
@@ -31529,8 +31512,7 @@
     if (!approved || !ownerId || state.me?.id!==ownerId || !trigger.isConnected) return null;
     const result = await api(`/courts/${court.id}/photos/${photo.id}`, { method: 'DELETE' });
     if(state.me?.id!==ownerId)return null;
-    court.photo_count = result.photo_count;
-    court.photo_url = result.photo_url || '';
+    commitCourtPhoto(court,result);
     toast('Photo deleted.',{tone:'success'});
     return result;
   }
@@ -31639,6 +31621,7 @@
     if (!routedOverlayLoadIsCurrent(modalLoad) || !current()) return;
     box.removeAttribute('aria-busy');box.classList.add('court-gallery-modal');
     const photos = data.items || [];
+    const photoLimit=Number(data.limit)>0 ? Number(data.limit) : 12;
     let category='all',returnPhotoId=null;
     const renderGallery = ({deletedId=null}={}) => {
       if (!current()) return;
@@ -31649,7 +31632,7 @@
       box.innerHTML=`
         ${modalHead('Photos','camera')}
         <p class="gallery-place">${esc(court.name)}</p>
-        ${ownerId && uploadFn ? `<button type="button" class="btn btn-secondary btn-block" id="gal-add">${uiIcon('plus')} Add photo</button>` : ''}
+        ${ownerId && uploadFn ? `<button type="button" class="btn btn-secondary btn-block" id="gal-add" ${photos.length>=photoLimit ? 'disabled' : ''}>${photos.length>=photoLimit ? `Gallery full · ${photoLimit} photos` : `${uiIcon('plus')} Add photo`}</button>${photos.length>=photoLimit && photos.some(photo=>photo.can_delete) ? '<p class="gallery-capacity-note">Remove one of your photos to add another.</p>' : ''}` : ''}
         ${photos.length ? `<div class="gallery-filter-row"><label for="gallery-category" class="sr-only">Show photos</label><select id="gallery-category"><option value="all">All photos</option>${categories.map(([key,label])=>`<option value="${key}" ${category===key ? 'selected' : ''}>${label}</option>`).join('')}</select><span class="gallery-count" aria-live="polite">${visible.length} photo${visible.length===1 ? '' : 's'}</span></div>` : ''}
         ${visible.length ? `<div class="gallery-grid">${visible.map((photo,index)=>{
           const title=photo.caption || courtPhotoCategories().find(([key])=>key===photo.category)?.[1] || 'Court photo';
@@ -31665,8 +31648,16 @@
       decorateFlowChildModal(modal);
       box.querySelector('#gallery-category')?.addEventListener('change',event=>{category=event.target.value;renderGallery();box.querySelector('#gallery-category')?.focus();});
       box.querySelector('#gal-add')?.addEventListener('click',event=>{
-        const reopenGallery=()=>transitionModal(modal,()=>openCourtGallery(court,uploadFn,{onChange}));
-        uploadFn(reopenGallery,{contextModal:modal,trigger:event.currentTarget,onCancel:reopenGallery});
+        uploadFn(result=>{
+          if(!current())return null;
+          if(result.photo){
+            const existing=photos.findIndex(photo=>Number(photo.id)===Number(result.photo.id));
+            if(existing>=0)photos.splice(existing,1);
+            photos.unshift(result.photo);
+          }
+          category='all';renderGallery();onChange();
+          return box.querySelector(`[data-open-photo-id="${Number(result.photo_id)}"]`) || box.querySelector('#gal-add');
+        },{contextModal:modal,trigger:event.currentTarget});
       });
       box.querySelectorAll('[data-open-photo-id]').forEach(button=>button.addEventListener('click',()=>{
         returnPhotoId=Number(button.dataset.openPhotoId);

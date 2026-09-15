@@ -11,10 +11,11 @@ from datetime import UTC, date, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, Response, current_app, g, jsonify, request
-from sqlalchemy import and_, case, false, func, or_
+from sqlalchemy import and_, false, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from backend.app import db
+from backend.services.court_photos import preferred_court_photo, refresh_community_cover, remove_court_photo
 from backend.models import (
     COURT_CONDITIONS, BusinessOffering, BusinessProfile, BusinessScheduleItem,
     CheckIn, Court,
@@ -1952,6 +1953,19 @@ def _photo_response(data_url):
     )
 
 
+def _gallery_photo_payload(photo, viewer, *, likes=0, liked=False):
+    return {
+        'id': photo.id,
+        'url': f'/api/courts/{photo.court_id}/photos/{photo.id}',
+        'user_name': photo.user.display_name if viewer and photo.user else 'Player',
+        'caption': photo.caption or '', 'category': photo.category or '',
+        'captured_on': photo.captured_on.isoformat() if photo.captured_on else None,
+        'likes': likes, 'liked_by_me': liked,
+        'can_delete': bool(viewer and photo.user_id == viewer.id),
+        'created_at': iso(photo.created_at),
+    }
+
+
 @courts_bp.post('/courts/<int:court_id>/photo')
 @login_required
 @rate_limit(10, 3600)
@@ -1995,12 +2009,12 @@ def upload_court_photo(court_id):
     )
     db.session.add(photo)
     db.session.flush()
-    if not court.photo_url or court.photo_url.startswith('/api/courts/'):
-        court.photo_url = f'/api/courts/{court.id}/photo'
+    refresh_community_cover(court)
     db.session.commit()
     return jsonify({
         'photo_url': court.photo_url,
         'photo_id': photo.id,
+        'photo': _gallery_photo_payload(photo, g.current_user),
         'photo_count': CourtPhoto.query.filter_by(court_id=court.id).count(),
     }), 201
 
@@ -2011,12 +2025,12 @@ def court_photo(court_id):
     court = db.session.get(Court, court_id)
     if not court:
         return jsonify({'error': 'photo_not_found'}), 404
-    newest = (
-        CourtPhoto.query.filter_by(court_id=court.id)
-        .order_by(case((CourtPhoto.category == 'court', 0), (CourtPhoto.category == '', 1), else_=2), CourtPhoto.id.desc())
-        .first()
-    )
-    return _photo_response(newest.photo_data if newest else court.photo_data)
+    newest = preferred_court_photo(court_id)
+    response = _photo_response(newest.photo_data if newest else court.photo_data)
+    if isinstance(response, Response):
+        # Legacy mutable cover URLs must revalidate; individual photo URLs stay cacheable.
+        response.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
+    return response
 
 
 @courts_bp.get('/courts/<int:court_id>/photos')
@@ -2047,18 +2061,10 @@ def court_photos(court_id):
                     CourtPhotoLike.user_id == viewer.id,
                 )
             }
-    return jsonify({'items': [{
-        'id': p.id,
-        'url': f'/api/courts/{court_id}/photos/{p.id}',
-        'user_name': p.user.display_name if viewer and p.user else 'Player',
-        'caption': p.caption or '',
-        'category': p.category or '',
-        'captured_on': p.captured_on.isoformat() if p.captured_on else None,
-        'likes': likes.get(p.id, 0),
-        'liked_by_me': p.id in mine,
-        'can_delete': bool(viewer and p.user_id == viewer.id),
-        'created_at': iso(p.created_at),
-    } for p in rows]})
+    return jsonify({'limit': MAX_COURT_PHOTOS, 'items': [
+        _gallery_photo_payload(p, viewer, likes=likes.get(p.id, 0), liked=p.id in mine)
+        for p in rows
+    ]})
 
 
 @courts_bp.post('/courts/<int:court_id>/photos/<int:photo_id>/like')
@@ -2093,17 +2099,9 @@ def delete_court_photo(court_id, photo_id):
         return jsonify({'error': 'photo_not_found'}), 404
     if photo.user_id != g.current_user.id:
         return jsonify({'error': 'photo_not_owned'}), 403
-    from backend.models import CourtPhotoLike
-    CourtPhotoLike.query.filter_by(photo_id=photo.id).delete(
-        synchronize_session=False,
-    )
-    db.session.delete(photo)
-    db.session.flush()
-    court = db.session.get(Court, court_id)
+    court = photo.court
+    remove_court_photo(photo)
     remaining = CourtPhoto.query.filter_by(court_id=court_id).count()
-    if court and court.photo_url.startswith('/api/courts/') and not remaining \
-            and not court.photo_data:
-        court.photo_url = ''
     db.session.commit()
     return jsonify({
         'deleted': True,

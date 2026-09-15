@@ -1122,16 +1122,16 @@ def test_leave_failure_restores_the_action_and_stays_visible_in_the_game_sheet()
 
 
 def test_small_modal_actions_use_semantic_forms_and_shared_feedback():
-    court = js_function("openCourtDetail")
+    photo = js_function("openCourtPhotoUpload")
     profile = js_function("renderProfile")
     game = js_function("openGameScreen")
 
-    assert 'id="cap-form" novalidate' in court
-    assert '<label for="cap-text">Caption' in court
-    assert "bindModalFormUX(activeContext, '#cap-save')" in court
-    assert "formUX.startSubmitting('Adding photo…')" in court
-    assert 'const previewDismissBlocked = () => previewActive;' in court
-    assert 'Back without adding' in court
+    assert 'id="cap-form" novalidate' in photo
+    assert 'for="cap-text">Caption' in photo
+    assert "bindModalFormUX(modal,'#cap-save')" in photo
+    assert "formUX.startSubmitting('Adding photo…')" in photo
+    assert 'bindModalDiscardConfirmation(modal' in photo
+    assert "onDiscard:()=>dismissModal(modal)" in photo
 
     assert 'id="feedback-form" novalidate' in profile
     assert '<label for="fb-text">What should we know?</label>' in profile

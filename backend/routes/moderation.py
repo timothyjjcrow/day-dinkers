@@ -10,7 +10,6 @@ from flask import Blueprint, g, jsonify, request
 from backend.app import db
 from backend.models import (
     CourtPhoto,
-    CourtPhotoLike,
     CourtReview,
     GameOpenCall,
     Message,
@@ -25,6 +24,7 @@ from backend.models import (
 )
 from backend.routes.auth import login_required
 from backend.security import rate_limit
+from backend.services.court_photos import remove_court_photo
 
 
 moderation_bp = Blueprint('moderation', __name__)
@@ -212,10 +212,7 @@ def _remove_reported_content(report):
         photo = db.session.get(CourtPhoto, report.content_id)
         if not photo:
             return False
-        CourtPhotoLike.query.filter_by(photo_id=photo.id).delete(
-            synchronize_session=False,
-        )
-        db.session.delete(photo)
+        remove_court_photo(photo)
         return True
     if report.content_type == 'court_review':
         review = db.session.get(CourtReview, report.content_id)
@@ -488,8 +485,7 @@ def moderate_court_photo(photo_id):
     if not photo:
         return jsonify({'error': 'photo_not_found'}), 404
     owner_id = photo.user_id
-    CourtPhotoLike.query.filter_by(photo_id=photo.id).delete(synchronize_session=False)
-    db.session.delete(photo)
+    remove_court_photo(photo)
     _record('remove_court_photo', target_user_id=owner_id, reason=reason)
     db.session.commit()
     return '', 204

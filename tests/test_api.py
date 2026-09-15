@@ -1240,7 +1240,7 @@ def test_court_photo_upload_and_serve(client):
                       headers=auth_headers(a['token']))
     assert res.status_code == 201
     body = res.get_json()
-    assert body['photo_url'] == f'/api/courts/{court_id}/photo'
+    assert body['photo_url'] == f"/api/courts/{court_id}/photos/{body['photo_id']}"
     assert body['photo_count'] == 1
 
     img = client.get(f'/api/courts/{court_id}/photo')
@@ -1250,7 +1250,7 @@ def test_court_photo_upload_and_serve(client):
     assert 'max-age' in img.headers.get('Cache-Control', '')
 
     detail = client.get(f'/api/courts/{court_id}').get_json()
-    assert detail['photo_url'] == f'/api/courts/{court_id}/photo'
+    assert detail['photo_url'] == body['photo_url']
     assert detail['photo_count'] == 1
 
     # A second photo appends to the gallery; newest becomes the hero.

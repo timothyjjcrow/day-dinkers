@@ -66,3 +66,5 @@ Pass5 continued: `ui-ux-pass-05-court-visit.md` covers browsing shortcuts, topic
 Pass5 continued: `ui-ux-pass-05-court-reviews.md` covers the dedicated reader/editor, own-review paging, authoritative save/edit/delete totals, draft and failure recovery, stale-page protection, report entry and responsive/focus checks. Next inspect photo upload/gallery and contribution workflows; pass 5 remains in progress.
 
 Pass5 continued: `ui-ux-pass-05-court-photos.md` covers the scannable gallery, category-specific viewer, concise metadata, photo actions, delete/cancel/failure consistency, keyboard/return focus, empty and missing-image states. Next simplify and verify the upload editor and cover refresh/caching, then contribution workflows.
+
+Pass5 continued: `ui-ux-pass-05-court-upload.md` covers a separate short upload form, preserved gallery context, draft/date/pending/error states, authoritative saved cards, capacity feedback and stable cover selection across player/moderator removals. Next review listing contributions, confirmations and history/conflicts; also simplify the overly detailed current-day Open play chip.
