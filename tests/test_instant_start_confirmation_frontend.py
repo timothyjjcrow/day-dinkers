@@ -25,7 +25,7 @@ def test_game_detail_owns_instant_game_cancellation_after_navigation():
     detail = section("function gameScreenHtml", "async function openGameScreen")
     handler = section(
         "box.querySelector('#gs-cancel')?.addEventListener",
-        "box.querySelector('#gs-reschedule')?.addEventListener",
+        "box.querySelectorAll('[data-remove-player]')",
     )
     assert 'id="gs-cancel"' in detail
     assert "openGameCancellationConfirmation({" in handler

@@ -1139,12 +1139,15 @@ def test_small_modal_actions_use_semantic_forms_and_shared_feedback():
     assert "formUX.startSubmitting('Sending feedback…')" in profile
     assert "formUX.showError(err.message);" in profile
 
-    assert 'id="rs-form" novalidate' in game
-    assert "scheduleDateTimePickerHtml('rs-when'" in game
-    assert "bindModalFormUX(sheet, '#rs-save')" in game
-    assert "formUX.startSubmitting('Saving new time…')" in game
-    assert "Number.isFinite(when.getTime())" in game
-    assert "title: 'Discard the new time?'" in game
+    # Time changes use the same full editor, including its validation and draft recovery.
+    edit = js_function("openEditGameSheet")
+    assert 'id="rs-form"' not in game
+    assert "openEditGameSheet(game" in game
+    assert 'id="eg-form" novalidate' in edit
+    assert "bindModalFormUX(sheet, '#eg-save')" in edit
+    assert "formUX.startSubmitting('Saving changes…')" in edit
+    assert "bindModalDiscardConfirmation(sheet" in edit
+
 
 
 def test_score_and_account_security_actions_are_real_forms():

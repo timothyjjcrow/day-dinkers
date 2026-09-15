@@ -7818,3 +7818,32 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .schedule-conflict-note { margin: 16px 0; color: var(--ink-soft); font-size: 13px; }
 .schedule-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .schedule-conflict-actions .btn { flex: 1 1 160px; white-space: normal; min-height: 46px; }
+
+.game-host-toolbar-actions { display: block; }
+.host-management-action { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 0; text-align: left; color: var(--ink); background: none; border: 0; min-height: 52px; }
+.host-management-action + .host-management-action { border-top: 1px solid var(--line); }
+.host-management-action > span { flex: 1; min-width: 0; }
+.host-management-action b, .host-management-action small { display: block; overflow-wrap: anywhere; }
+.host-management-action b { font-size: 14px; }
+.host-management-action small { color: var(--ink-soft); margin-top: 3px; font-size: 12px; }
+.host-management-action > .ui-icon { flex: 0 0 20px; width: 20px; height: 20px; }
+.host-management-action > .ui-icon:last-child { color: var(--ink-soft); width: 16px; height: 16px; }
+.host-management-action.is-danger { color: var(--red-700); }
+.host-management-action:hover { background: var(--bg); }
+.host-transfer-plan { display: grid; gap: 4px; margin-bottom: 18px; }
+.host-transfer-plan b, .host-transfer-option > span { overflow-wrap: anywhere; }
+.host-transfer-plan small, .host-transfer-note, .host-transfer-empty p { color: var(--ink-soft); font-size: 13px; }
+.host-transfer-option:has(input:checked) { border-color: var(--green-600); background: var(--green-50); }
+.host-transfer-option input { flex-shrink: 0; }
+.host-transfer-leave { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; }
+.host-transfer-leave input { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--green-accent); }
+.host-transfer-note, .host-transfer-empty p { margin: 8px 0 16px; }
+.host-transfer-modal #hh-send { white-space: normal; overflow-wrap: anywhere; min-height: 48px; position: static; box-shadow: none; }
+.host-transfer-option .avatar { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 2.5em; height: 2.5em; }
+.host-transfer-option input, .host-transfer-leave input { appearance: none; display: inline-grid; place-content: center; margin: 0; border: 1.5px solid var(--ink-soft); background: var(--card); }
+.host-transfer-option input { border-radius: 50%; }
+.host-transfer-option input:checked::before { content: ''; width: 9px; height: 9px; background: var(--green-accent); border-radius: 50%; }
+.host-transfer-leave input { border-radius: 4px; }
+.host-transfer-leave input:checked { background: var(--green-700); border-color: var(--green-700); }
+.host-transfer-leave input:checked::before { content: ''; width: 5px; height: 10px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+.host-transfer-option input:focus-visible, .host-transfer-leave input:focus-visible { outline: 3px solid var(--green-accent); outline-offset: 3px; }

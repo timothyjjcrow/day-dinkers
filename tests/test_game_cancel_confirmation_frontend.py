@@ -62,7 +62,7 @@ def test_all_whole_game_cancel_entry_points_delegate_to_the_sheet():
 
     detail = section(
         "box.querySelector('#gs-cancel')?.addEventListener",
-        "box.querySelector('#gs-reschedule')?.addEventListener",
+        "box.querySelectorAll('[data-remove-player]')",
     )
     assert "openGameCancellationConfirmation({" in detail
     assert "game.is_instant ? 'instant' : 'scheduled'" in detail

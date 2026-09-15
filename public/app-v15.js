@@ -37872,27 +37872,54 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
   }
 
   function openHostHandoffModal(game, onUpdated) {
-    const candidates = (game.players || []).filter((person) => Number(person.user_id) !== Number(game.creator_id));
-    const modal = openModal(`${modalHead('Ask someone to host', 'users')}
-      <p class="row-sub">You stay the host until they accept.</p>
-      ${recurrenceScopeChoicesHtml(game, 'hh', 'Transfer')}
-      <fieldset class="host-transfer-options"><legend>Choose a player</legend>${candidates.map((person, i) => `<label class="host-transfer-option"><input type="radio" name="hh-person" value="${person.user_id}" ${i === 0 ? 'checked' : ''} />${avatarHtml(person, 'sm', 'span')}<span>${esc(person.display_name)}</span></label>`).join('')}</fieldset>
-      ${!candidates.length ? '<p class="row-sub">Another player needs to join before you can request a handoff.</p>' : ''}
-      <label class="session-attendance-row"><input type="checkbox" id="hh-leave" />Leave these dates after they accept</label>
-      <p id="hh-error" class="form-error hidden" role="alert"></p>
-      <button class="btn btn-primary btn-block" id="hh-send" ${candidates.length ? '' : 'disabled'}>Request handoff</button>`, {label:'Request a host handoff'});
-    modal.querySelector('#hh-send').addEventListener('click', async (event) => {
-      const reset = beginButtonAction(event.currentTarget, 'Sending…');
+    const candidates = (game.players || []).filter(person => Number(person.user_id) !== Number(game.creator_id));
+    const modal = openModal(`${modalHead('Ask a player to host', 'users')}
+      <div class="host-transfer-plan"><b>${esc(game.title || (game.game_type === 'ranked' ? 'Ranked match' : 'Play session'))}</b><small>${esc(game.is_instant ? 'Playing now' : fmtDateTime(game.scheduled_at))}</small></div>
+      ${candidates.length ? `<form id="hh-form" novalidate>
+        ${recurrenceScopeChoicesHtml(game, 'hh', 'Host')}
+        <fieldset class="host-transfer-options"><legend>Choose a player</legend>${candidates.map(person => `<label class="host-transfer-option"><input type="radio" name="hh-person" value="${person.user_id}" />${avatarHtml(person, 'sm', 'span')}<span>${esc(person.display_name)}</span></label>`).join('')}</fieldset>
+        <label class="host-transfer-leave"><input type="checkbox" id="hh-leave" /><span>Leave after they accept</span></label>
+        <p class="host-transfer-note">You stay host until they accept.</p>
+        <p id="hh-error" class="form-error hidden" role="alert"></p>
+        <button type="submit" class="btn btn-primary btn-block" id="hh-send" disabled>Choose a player</button>
+      </form>` : `<div class="host-transfer-empty"><b>No other players yet</b><p>Someone needs to join before they can host.</p><button type="button" class="btn btn-secondary btn-block" data-hh-back>Back to session</button></div>`}
+      `, {label:'Ask a player to host'});
+    modal.querySelector('.modal').classList.add('host-transfer-modal');
+    if (!candidates.length) {
+      modal.querySelector('[data-hh-back]').addEventListener('click', () => dismissModal(modal));
+      return modal;
+    }
+    const form = modal.querySelector('#hh-form');
+    modal.querySelectorAll('.host-transfer-option .avatar').forEach(avatar => avatar.setAttribute('aria-hidden', 'true'));
+    const send = modal.querySelector('#hh-send');
+    const selectedPerson = () => candidates.find(person => Number(person.user_id) === Number(modal.querySelector('[name="hh-person"]:checked')?.value));
+    modal.querySelectorAll('[name="hh-person"]').forEach(input => input.addEventListener('change', () => {
+      const person = selectedPerson();
+      send.disabled = !person;
+      send.textContent = person ? `Ask ${person.display_name} to host` : 'Choose a player';
+    }));
+    const formUX = bindModalFormUX(modal, '#hh-send');
+    let sending = false;
+    modal._dismissBlocked = () => sending;
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const person = selectedPerson();
+      if (!person || sending) return;
+      const payload = {
+        target_user_id:Number(person.user_id),
+        edit_scope:modal.querySelector('[name="hh-scope"]:checked')?.value || 'this_date',
+        leave_on_accept:modal.querySelector('#hh-leave').checked,
+      };
+      const reset = formUX.startSubmitting('Sending request…');
       if (!reset) return;
+      sending = true; form.setAttribute('inert', '');
       try {
-        const fresh = await api(`/games/${game.id}/host-handoff`, {method:'POST', body:JSON.stringify({
-          target_user_id:Number(modal.querySelector('[name="hh-person"]:checked')?.value),
-          edit_scope:modal.querySelector('[name="hh-scope"]:checked')?.value || 'this_date',
-          leave_on_accept:modal.querySelector('#hh-leave').checked,
-        })});
-        closeModal(modal); onUpdated?.(fresh); toast('Request sent. You remain the host until they accept.');
+        const fresh = await api(`/games/${game.id}/host-handoff`, {method:'POST', body:JSON.stringify(payload)});
+        sending = false;
+        dismissModal(modal, () => { onUpdated?.(fresh); toast('Host request sent'); });
       } catch (error) {
-        reset(); const target=modal.querySelector('#hh-error'); target.textContent=error.message; target.classList.remove('hidden');
+        sending = false; form.removeAttribute('inert'); reset();
+        formUX.showError(error.message);
       }
     });
     return modal;
@@ -38303,10 +38330,9 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
           actions += `<details class="game-host-toolbar simple-disclosure" aria-label="Host tools">
             <summary>${uiIcon('shield')} Manage ${playNoun}<small>You’re hosting</small></summary>
             <div class="game-host-toolbar-actions">
-              ${game.is_instant ? '' : `<button type="button" class="btn btn-secondary" id="gs-edit">${uiIcon('edit')} Edit game</button>`}
-              ${!game.host_handoff ? '<button type="button" class="btn btn-secondary" id="gs-handoff">Ask someone to host</button>' : ''}
-              ${!game.is_instant && startsAhead && game.recurrence !== 'weekly' ? `<button type="button" class="btn btn-secondary" id="gs-reschedule">${uiIcon('clock')} Reschedule</button>` : ''}
-              <button type="button" class="btn btn-danger" id="gs-cancel">Cancel ${playNoun}</button>
+              ${game.is_instant ? '' : `<button type="button" class="host-management-action" id="gs-edit">${uiIcon('edit')}<span><b>Edit ${playNoun}</b><small>Time, court & players</small></span>${uiIcon('chevron-right')}</button>`}
+              ${!game.host_handoff ? `<button type="button" class="host-management-action" id="gs-handoff">${uiIcon('users')}<span><b>Ask a player to host</b></span>${uiIcon('chevron-right')}</button>` : ''}
+              <button type="button" class="host-management-action is-danger" id="gs-cancel">${uiIcon('x')}<span><b>Cancel ${playNoun}</b></span>${uiIcon('chevron-right')}</button>
             </div>
           </details>`;
         }
@@ -39401,52 +39427,6 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         openChildModal(modal, () => openEditGameSheet(game, (updated) => {
           if (modal.isConnected) render(updated);
         }));
-      });
-      box.querySelector('#gs-reschedule')?.addEventListener('click', () => {
-        const cur = new Date(game.scheduled_at);
-        const val = scheduleDateTimeValue(cur);
-        openChildModal(modal, () => {
-          const sheet = openModal(`
-            ${modalHead(`Reschedule ${playNoun}`)}
-            <p class="row-sub" style="margin-bottom:10px">Players keep their spot and will be asked to re-confirm for the new time.</p>
-            <form id="rs-form" novalidate>
-              ${scheduleDateTimePickerHtml('rs-when', val, plannerTimeZoneLabel(Intl.DateTimeFormat().resolvedOptions().timeZone))}
-              <button type="submit" class="btn btn-primary btn-block" id="rs-save" style="padding:15px">Save new time</button>
-            </form>
-          `, { label: `Reschedule ${playNoun}` });
-          bindScheduleDateTimePicker(sheet, 'rs-when');
-          const formUX = bindModalFormUX(sheet, '#rs-save');
-          bindModalDiscardConfirmation(sheet, {
-            isDirty: () => formUX.isDirty() || sheet.querySelector('#rs-when').value !== val,
-            title: 'Discard the new time?',
-            message: `This ${playNoun} will keep its current date and time.`,
-          });
-          sheet.querySelector('#rs-form').addEventListener('submit', async (event) => {
-            event.preventDefault();
-            const field = sheet.querySelector('#rs-when');
-            const raw = field.value;
-            if (!raw) {
-              formUX.showError('Choose the new date and time.', sheet.querySelector('#rs-when-clock'));
-              return;
-            }
-            const when = new Date(raw);
-            if (!Number.isFinite(when.getTime()) || when.getTime() < Date.now() - 15 * 60000) {
-              formUX.showError('Choose a date and time that has not already passed.', sheet.querySelector('#rs-when-clock'));
-              return;
-            }
-            const resetSubmitting = formUX.startSubmitting('Saving new time…');
-            if (!resetSubmitting) return;
-            try {
-              render(await api(`/games/${gameId}/reschedule`, { method: 'POST', body: JSON.stringify({ scheduled_at: when.toISOString() }) }));
-              closeModal(sheet);
-              toast(`${playNoun === 'match' ? 'Match' : 'Play session'} rescheduled — players notified`, { tone: 'success', icon: 'clock' });
-            } catch (err) {
-              resetSubmitting();
-              formUX.showError(err.message);
-            }
-          });
-          return sheet;
-        });
       });
       box.querySelectorAll('[data-remove-player]').forEach((b) => b.addEventListener('click', async (e) => {
         e.stopPropagation();

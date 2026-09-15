@@ -61,7 +61,7 @@ def test_game_detail_status_and_primary_actions_use_product_icons():
     assert "${uiIcon('edit')} Enter the score" in detail
     for action in (
         "${uiIcon('clock')} Join waitlist",
-        "${uiIcon('clock')} Reschedule",
+        "${uiIcon('edit')}<span><b>Edit ${playNoun}</b>",
         "${uiIcon('calendar')} Play again",
     ):
         assert action in detail
