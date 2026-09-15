@@ -47,4 +47,4 @@ The current production database backup approval boundary remains unchanged. This
 
 ## Current evidence
 
-Pass1: `ui-ux-pass-01-session.md` covers session essentials and first-join review; `ui-ux-pass-01-decisions.md` covers held offers, hosting decisions, cancellation and outcome feedback. The pass remains in progress with its unverified states explicitly listed.
+Pass1: `ui-ux-pass-01-session.md` covers session essentials and first-join review; `ui-ux-pass-01-decisions.md` covers held offers, hosting decisions, cancellation and outcome feedback; `ui-ux-pass-01-rosters.md` covers direct-invitation acceptance and compact large rosters. The pass remains in progress with its unverified states explicitly listed.

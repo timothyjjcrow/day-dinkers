@@ -7427,6 +7427,11 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .session-roster-group[data-rsvp-state="confirmed"] h5::before { background: var(--green-600); }
 .session-roster-group[data-rsvp-state="needs_confirmation"] h5::before { background: var(--amber-500); }
 .session-roster-group h5 > span { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.session-roster-counts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 4px 0 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.session-roster-counts > span { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; font-size: 12px; color: var(--ink-soft); }
+.session-roster-counts b { color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; }
+.session-player-rsvp { font-size: 12px; color: var(--ink-soft); }
+.session-player-rsvp[data-rsvp-state="needs_confirmation"] { color: var(--amber-800); }
 .attendance-confirmation-actions .btn { min-height: 44px; }
 .attendance-confirmation-actions .btn-secondary { background: transparent; color: var(--ink-soft); }
 

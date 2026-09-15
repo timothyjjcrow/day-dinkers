@@ -35289,15 +35289,21 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       : player.attendance_confirmation_requested_at ? 'needs_confirmation' : 'reserved';
   }
 
-  function sessionRosterGroupsHtml(game, renderPlayer) {
-    return [['confirmed', 'Confirmed'], ['needs_confirmation', 'Confirm again'], ['reserved', 'Place reserved']]
+  function sessionRosterGroupsHtml(game, renderPlayer, viewerId = null) {
+    if (game.players.length > 8) {
+      const priority = (person) => person.user_id === game.creator_id ? 0 : person.user_id === viewerId ? 1 : 2;
+      const people = [...game.players].sort((a, b) => priority(a) - priority(b));
+      const counts = [['confirmed', 'Confirmed'], ['needs_confirmation', 'To confirm'], ['reserved', 'Reserved']]
+        .map(([key, label]) => `<span data-rsvp-state="${key}"><b>${people.filter((person) => sessionRsvpStatus(person) === key).length}</b>${label}</span>`).join('');
+      const row = (person) => renderPlayer(person, true);
+      return `<div class="session-roster-counts" aria-label="Player confirmations">${counts}</div>${people.slice(0, 4).map(row).join('')}
+        <details class="session-roster-more" id="session-roster-more-all"><summary>View ${people.length - 4} more players</summary>${people.slice(4).map(row).join('')}</details>`;
+    }
+    return [['confirmed', 'Confirmed'], ['needs_confirmation', 'Needs confirmation'], ['reserved', 'Place reserved']]
       .map(([key, label]) => {
         const people = game.players.filter((player) => sessionRsvpStatus(player) === key);
         if (!people.length) return '';
-        const first = people.slice(0, 6).map(renderPlayer).join('');
-        const extra = people.slice(6);
-        return `<div class="session-roster-group" data-rsvp-state="${key}"><h5>${label} <span>${people.length}</span></h5>${first}
-          ${extra.length ? `<details class="session-roster-more" id="session-roster-more-${key}"><summary>Show ${extra.length} more</summary>${extra.map(renderPlayer).join('')}</details>` : ''}</div>`;
+        return `<div class="session-roster-group" data-rsvp-state="${key}"><h5>${label} <span>${people.length}</span></h5>${people.map(renderPlayer).join('')}</div>`;
       }).join('');
   }
 
@@ -37582,13 +37588,13 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     // Host can remove other players from an upcoming game (no-show swap).
     const canRemove = (p) => game.is_creator && game.status === 'upcoming'
       && !closedRally && p.user_id !== game.creator_id;
-    const playerRow = (p) => `
+    const playerRow = (p, showRsvp = false) => `
       <div class="game-player-row">
         <button type="button" class="player-profile-link" id="session-player-${p.user_id}" data-view-user="${p.user_id}" aria-label="View ${esc(p.display_name)}'s profile">
           ${avatarHtml(p, 'sm', 'span')}
           <span class="row-main">
             <span class="row-title">${esc(p.display_name)}${p.user_id === state.me?.id ? ' <span class="game-player-role">You</span>' : ''}${p.user_id === game.creator_id ? ' <span class="game-player-role">Host</span>' : ''}</span>
-            ${game.status === 'upcoming' && !game.is_instant && team1.length && team2.length && sessionRsvpStatus(p) !== 'confirmed' ? `<span class="row-sub game-attendance-pending">${sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : ''}
+            ${showRsvp === true ? `<span class="row-sub session-player-rsvp" data-rsvp-state="${sessionRsvpStatus(p)}">${sessionRsvpStatus(p) === 'confirmed' ? 'Confirmed' : sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : game.status === 'upcoming' && !game.is_instant && team1.length && team2.length && sessionRsvpStatus(p) !== 'confirmed' ? `<span class="row-sub game-attendance-pending">${sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : ''}
           </span>
         </button>
         ${canRemove(p) ? `<button type="button" class="game-player-overflow" id="session-player-actions-${p.user_id}" data-remove-player="${p.user_id}" title="Player actions" aria-label="Actions for ${esc(p.display_name)}"><span aria-hidden="true">•••</span></button>` : ''}
@@ -37598,7 +37604,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           <div><div class="section-label" style="margin-top:0">Team 1</div>${team1.map(playerRow).join('')}</div>
           <div><div class="section-label" style="margin-top:0">Team 2</div>${team2.map(playerRow).join('')}</div>
         </div>`
-      : game.status === 'upcoming' && !game.is_instant ? sessionRosterGroupsHtml(game, playerRow) : game.players.map(playerRow).join('');
+      : game.status === 'upcoming' && !game.is_instant ? sessionRosterGroupsHtml(game, playerRow, state.me?.id) : game.players.map(playerRow).join('');
     if (!playersHtml && assembly && rosterCount > 0) {
       playersHtml = '<div class="empty-state" style="padding:12px">Join at the court to see who’s playing.</div>';
     }
@@ -37665,9 +37671,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         }
       } else if (!game.is_joined && game.spots_left > 0) {
         const skipped = game.recurrence === 'weekly' && game.my_recurrence_rsvp?.is_skipped;
-        const inviteCopy = !skipped && game.my_invite_status === 'pending' && game.invited_by
-          ? `<div class="game-invite-context"><b>${esc(game.invited_by.display_name)} invited you</b></div>` : '';
-        actions = `${inviteCopy}${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
+        actions = `${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
         } else if (!skipped && game.my_invite_status === 'pending') {

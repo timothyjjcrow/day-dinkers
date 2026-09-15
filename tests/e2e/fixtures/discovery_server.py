@@ -12,7 +12,7 @@ os.environ.update(APP_ENV='testing',TEST_DATABASE_URL='sqlite:///:memory:',
     DATABASE_URL='sqlite:///:memory:',AUTO_SEED_COURTS='false',PUSH_DELIVERY_ENABLED='false')
 from flask import request
 from backend.app import create_app, db
-from backend.models import Court, User, Game, GamePlayer, GameWaitlist, GameHostHandoff, notify, utcnow
+from backend.models import Court, User, Game, GamePlayer, GameWaitlist, GameHostHandoff, GameInvite, notify, utcnow
 
 app=create_app('testing')
 
@@ -66,6 +66,20 @@ with app.app_context():
     notify(players[0].id,'game_host_handoff','Sam asked you to host',related_game_id=handoff.id,action_url=f'/#game/{handoff.id}',unread_dedupe_key=f'game-handoff:{handoff_request.id}')
     session('Late evening play','19:30')
     session('Riverside evening','18:00',court=1)
+    if os.environ.get('DISCOVERY_ROSTER_SCENARIOS') == '1':
+        invited=session('After-work doubles','16:00',joined=(2,))
+        db.session.add(GameInvite(game_id=invited.id,user_id=players[0].id))
+        group=session('Tuesday open play','14:00',capacity=24)
+        for n in range(17):
+            person=User(email=f'roster-{n}@example.test',
+                display_name=['Jordan Alexander Martinez','Taylor Nguyen','Robin Patel'][n % 3] + f' {n+1}',
+                onboarding_completed_at=utcnow(),email_verified_at=utcnow())
+            person.set_password('local-discovery-test')
+            db.session.add(person);db.session.flush()
+            status=n % 3
+            db.session.add(GamePlayer(game_id=group.id,user_id=person.id,
+                attending_at=utcnow() if status == 0 else None,
+                commitment_requested_at=utcnow() if status == 1 else None))
     db.session.commit()
 port=int(os.environ.get('DISCOVERY_TEST_PORT', '8055'))
 print(f'DISCOVERY READY port{port} date{tomorrow}: discovery-0@example.test / local-discovery-test',flush=True)
