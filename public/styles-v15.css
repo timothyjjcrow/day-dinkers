@@ -7853,3 +7853,24 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .game-cancel-confirmation.is-series .game-cancel-impact { padding: 12px; }
 .game-cancel-confirmation.is-series #gc-dates { margin-top: 16px; }
 .game-cancel-confirmation.is-series .game-cancel-actions { position: static; }
+
+.hosting-review-modal { max-width: 600px; }
+.hosting-review-content { margin: 14px 0; }
+.hosting-review-content h4 { font-size: 14px; margin: 0 0 10px; }
+.hosting-review-content ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.hosting-date-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); display: grid; gap: 5px; }
+.hosting-date-card > b, .hosting-date-card > span, .hosting-rule > b, .hosting-rule > span { display: block; overflow-wrap: anywhere; }
+.hosting-date-card > b { font-size: 15px; }
+.hosting-date-card > span, .hosting-date-meta, .hosting-plan-facts { font-size: 13px; }
+.hosting-date-meta { display: flex; gap: 8px 14px; flex-wrap: wrap; color: var(--ink-soft); }
+.hosting-review-content small, .hosting-review-impact { font-size: 13px; color: var(--ink-soft); }
+.hosting-review-content details summary { min-height: 40px; padding: 10px 0; cursor: pointer; font-size: 13px; color: var(--green-ink); }
+.hosting-plan-facts { display: grid; gap: 6px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.hosting-plan-facts p { margin: 0; white-space: pre-line; }
+.hosting-extra-dates { margin: 4px 0 12px; }
+.hosting-rule { padding: 12px 14px; margin-top: 14px; background: var(--green-50); border: 1px solid var(--line); border-radius: var(--radius-md); display: grid; gap: 5px; }
+.hosting-review-impact { line-height: 1.5; margin: 16px 0; }
+.hosting-review-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.hosting-review-actions .btn { flex: 1 1 150px; min-height: 48px; white-space: normal; }
+
+.hosting-date-card.is-full { border-color: var(--red-700); }

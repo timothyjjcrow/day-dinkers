@@ -1327,6 +1327,8 @@
     invalid_recurrence_weekdays: 'Choose at least one valid repeat day.',
     future_host_changed: 'Another host manages part of this series. Choose This date only.',
     host_scope_changed: 'Hosting changed for these dates. Ask the current host to send a new request.',
+    host_review_required: 'Review the dates and details before accepting hosting.',
+    host_review_changed: 'The hosting plan changed. Review the updated details before continuing.',
     edit_dates_changed: 'The affected dates changed. Review the updated list before continuing.',
     invalid_recurrence_ends_on: 'Choose a valid repeat end date.',
     recurrence_end_before_start: 'Choose an end date on or after the first session.',
@@ -37905,7 +37907,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       <b>${esc(handoff.can_respond ? `${source} asked you to host` : `Waiting for ${target} to host`)}</b>
       <div class="game-consent-facts"><span>${handoff.scope === 'following_dates' ? 'This and future dates' : 'This date only'}</span><span>Reply by ${esc(fmtDateTime(handoff.expires_at))}</span></div>
       <p>${esc(`${source} stays host until ${accepts}${handoff.leave_on_accept ? ', then leaves.' : '.'}`)}</p>
-      <div class="game-consent-actions">${handoff.can_respond ? '<button class="btn btn-primary" data-host-reply="accept">Accept hosting</button><button class="btn btn-secondary" data-host-reply="decline">Decline</button>' : '<button class="btn btn-secondary" data-host-reply="decline">Withdraw request</button>'}</div>
+      <div class="game-consent-actions">${handoff.can_respond ? '<button class="btn btn-primary" data-host-reply="accept">' + (handoff.scope === 'following_dates' ? 'Review hosting' : 'Accept hosting') + '</button><button class="btn btn-secondary" data-host-reply="decline">Decline</button>' : '<button class="btn btn-secondary" data-host-reply="decline">Withdraw request</button>'}</div>
     </section>`;
   }
 
@@ -37919,12 +37921,105 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     </details>` : ''}`;
   }
 
+  function hostingPlanFactsHtml(plan) {
+    const level = plan.level_min != null || plan.level_max != null
+      ? `${plan.level_min ?? 'Any'}–${plan.level_max ?? 'Any'} level` : plan.preferred_level || 'Any level';
+    return `<div class="hosting-plan-facts"><b>${esc(plan.title || 'Play session')}</b>
+      <span>${esc([plan.game_type === 'ranked' ? 'Ranked match' : 'Casual', sessionPlayStyleLabel(plan), level].filter(Boolean).join(' · '))}</span>
+      <span>${esc(sessionCourtAccessLabel(plan))}</span>
+      <span>${plan.duration_minutes ? `${Number(plan.duration_minutes)} minutes` : 'Duration not listed'}</span>
+      <span>${esc(plan.visibility === 'private' ? 'Invite only' : plan.visibility === 'friends' ? 'Friends' : 'Open to players')}</span>
+      ${plan.description ? `<p>${esc(plan.description)}</p>` : ''}${plan.notes ? `<p>${esc(plan.notes)}</p>` : ''}</div>`;
+  }
+
+  function hostingReviewHtml(data) {
+    const price = plan => plan.cost_cents == null ? 'Cost not listed' : Number(plan.cost_cents) === 0 ? 'Free' : `$${(Number(plan.cost_cents)/100).toFixed(2)} per player`;
+    const dateCard = plan => `<li class="hosting-date-card${data.handoff_id && !plan.already_joined && plan.player_count >= plan.max_players ? ' is-full' : ''}"><b>${esc(fmtDateTime(plan.scheduled_at))}${plan.ends_at ? ` – ${esc(new Date(plan.scheduled_at).toDateString() === new Date(plan.ends_at).toDateString() ? fmtTimeShort(plan.ends_at) : fmtDateTime(plan.ends_at))}` : ''}</b>
+      <span>${esc(plan.court?.name || 'Court not listed')}${plan.court_number ? ` · ${esc(plan.court_number)}` : ''}</span>
+      <div class="hosting-date-meta"><span>${esc(price(plan))}</span><span>${plan.player_count} / ${plan.max_players} places</span></div>
+      ${data.handoff_id && !plan.already_joined ? `<small>${plan.player_count >= plan.max_players ? 'Full — no place available' : 'You’ll join as host'}</small>` : ''}
+      <details><summary>Session details</summary>${hostingPlanFactsHtml(plan)}</details></li>`;
+    const rows = data.dates;
+    const rule = data.rule;
+    const days = {mon:'Mon',tue:'Tue',wed:'Wed',thu:'Thu',fri:'Fri',sat:'Sat',sun:'Sun'};
+    const end = rule?.recurrence_ends_on ? new Date(rule.recurrence_ends_on + 'T12:00:00').toLocaleDateString([], {month:'short',day:'numeric',year:'numeric'}) : '';
+    return `<div class="hosting-review-content"><h4>${rows.length} scheduled date${rows.length === 1 ? '' : 's'}</h4>
+      <ol>${rows.slice(0,2).map(dateCard).join('')}</ol>
+      ${rows.length > 2 ? `<details class="hosting-extra-dates"><summary>${rows.length-2} more dates</summary><ol>${rows.slice(2).map(dateCard).join('')}</ol></details>` : ''}
+      ${rule ? `<section class="hosting-rule"><small>Repeating schedule</small><b>${esc((rule.recurrence_weekdays || []).map(day=>days[day] || day).join(' & '))} · ${esc(recurrenceClockLabel(rule))}</b><span>${esc(end ? `Until ${end}` : 'No end date')}</span><span>${esc(rule.court?.name || 'Court not listed')}${rule.court_number ? ` · ${esc(rule.court_number)}` : ''} · ${esc(price(rule))}</span><details><summary>Future session details</summary>${hostingPlanFactsHtml(rule)}</details></section>` : ''}
+      </div>`;
+  }
+
+  function openHostingAcceptanceReview(game, onUpdated) {
+    const handoffId = game.host_handoff.id;
+    const modal = openModal(`${modalHead('Review hosting', 'users')}
+      <div id="hosting-review-context" class="host-transfer-plan"><b>${esc(game.title || 'Play session')}</b><small>From ${esc(game.host_handoff.requested_by_name || 'the current host')}</small></div>
+      <p class="form-error hidden" id="hosting-review-error" role="alert" tabindex="-1"></p>
+      <div id="hosting-review-body" tabindex="-1"></div>
+      <p class="hosting-review-impact" id="hosting-review-impact"></p>
+      <div class="hosting-review-actions"><button type="button" class="btn btn-secondary" id="hosting-review-back">Go back</button><button type="button" class="btn btn-primary" id="hosting-review-accept" disabled>Accept hosting</button></div>`, {label:'Review hosting'});
+    modal.querySelector('.modal').classList.add('hosting-review-modal');
+    const body = modal.querySelector('#hosting-review-body'), accept = modal.querySelector('#hosting-review-accept'), error = modal.querySelector('#hosting-review-error');
+    const viewerId = state.me?.id;
+    let review = null, sequence = 0, saving = false;
+    modal._dismissBlocked = () => saving;
+    modal._cleanupFns.push(() => { sequence += 1; });
+    const load = async (focus = false) => {
+      const current = ++sequence;
+      review = null; accept.disabled = true; body.setAttribute('aria-busy','true'); body.textContent = 'Loading dates…';
+      if (focus) { const target = error.classList.contains('hidden') ? body : error; target.scrollIntoView({block:'start'}); target.focus({preventScroll:true}); }
+      try {
+        const data = await api(`/games/${game.id}/host-handoff/${handoffId}/preview`);
+        if (!modal.isConnected || current !== sequence || viewerId !== state.me?.id) return;
+        if (!data.token || !Array.isArray(data.dates) || !data.dates.length) throw new Error('Couldn’t load the hosting plan.');
+        review = data; body.innerHTML = hostingReviewHtml(data);
+        modal.querySelector('#hosting-review-context').innerHTML = `<b>${esc(data.dates[0].title || 'Play session')}</b><small>From ${esc(data.requested_by_name || 'the current host')}</small>`;
+        modal.querySelector('#hosting-review-impact').textContent = `You’ll host and join ${data.rule ? 'these dates and future sessions on this schedule' : 'these dates'}.${data.leave_on_accept ? ` ${data.requested_by_name || 'The current host'} leaves after you accept.` : ''}`;
+        const fullDates = data.dates.filter(date => !date.already_joined && date.player_count >= date.max_players);
+        const full = fullDates.length > 0;
+        accept.disabled = full; accept.textContent = `Host ${data.dates.length} date${data.dates.length === 1 ? '' : 's'}`;
+        if (full) {
+          error.textContent = `${fullDates.length === 1 ? fmtDateTime(fullDates[0].scheduled_at) + ' is full.' : `${fullDates.length} dates are full.`} Ask the current host to make room, then reload.`;
+          error.classList.remove('hidden');
+          const more = body.querySelector('.hosting-extra-dates');
+          if (more) more.open = true;
+          body.insertAdjacentHTML('beforeend','<button type="button" class="btn btn-secondary" data-retry-host-review>Reload dates</button>');
+        }
+      } catch (failure) {
+        if (!modal.isConnected || current !== sequence || viewerId !== state.me?.id) return;
+        body.innerHTML = `<p>${esc(failure.message)}</p>${['handoff_expired','handoff_not_available','handoff_not_found','host_scope_changed'].includes(failure.code) ? '' : '<button type="button" class="btn btn-secondary" data-retry-host-review>Try again</button>'}`;
+      } finally {
+        if (modal.isConnected && current === sequence) {
+          body.removeAttribute('aria-busy'); body.querySelector('[data-retry-host-review]')?.addEventListener('click',()=>{error.classList.add('hidden');load(true);});
+        }
+      }
+    };
+    modal.querySelector('#hosting-review-back').addEventListener('click',()=>dismissModal(modal));
+    accept.addEventListener('click',async()=>{
+      if (!review || saving || accept.disabled) return;
+      const token = review.token;
+      saving = true; error.classList.add('hidden');
+      const reset = beginButtonAction(accept,'Accepting…',[modal.querySelector('#hosting-review-back')]);
+      body.setAttribute('inert','');
+      try {
+        const fresh = await api(`/games/${game.id}/host-handoff/${handoffId}/respond`,{method:'POST',body:JSON.stringify({accept:true,expected_host_review:token})});
+        saving = false; dismissModal(modal,()=>{onUpdated?.(fresh);toast('You’re hosting');});
+      } catch (failure) {
+        saving = false; body.removeAttribute('inert'); reset?.(); error.textContent=failure.message;error.classList.remove('hidden');error.focus();
+        if (['host_review_changed','host_review_required','host_scope_changed','future_session_full'].includes(failure.code)) load(true);
+      }
+    });
+    load();
+    return modal;
+  }
+
   function openHostHandoffModal(game, onUpdated) {
     const candidates = (game.players || []).filter(person => Number(person.user_id) !== Number(game.creator_id));
     const modal = openModal(`${modalHead('Ask a player to host', 'users')}
       <div class="host-transfer-plan"><b>${esc(game.title || (game.game_type === 'ranked' ? 'Ranked match' : 'Play session'))}</b><small>${esc(game.is_instant ? 'Playing now' : fmtDateTime(game.scheduled_at))}</small></div>
       ${candidates.length ? `<form id="hh-form" novalidate>
         ${recurrenceScopeChoicesHtml(game, 'hh', 'Host')}
+        <section id="hh-review" class="hidden" tabindex="-1" aria-label="Dates to host"></section>
         <fieldset class="host-transfer-options"><legend>Choose a player</legend>${candidates.map(person => `<label class="host-transfer-option"><input type="radio" name="hh-person" value="${person.user_id}" />${avatarHtml(person, 'sm', 'span')}<span>${esc(person.display_name)}</span></label>`).join('')}</fieldset>
         <label class="host-transfer-leave"><input type="checkbox" id="hh-leave" /><span>Leave after they accept</span></label>
         <p class="host-transfer-note">You stay host until they accept.</p>
@@ -37941,10 +38036,35 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     modal.querySelectorAll('.host-transfer-option .avatar').forEach(avatar => avatar.setAttribute('aria-hidden', 'true'));
     const send = modal.querySelector('#hh-send');
     const selectedPerson = () => candidates.find(person => Number(person.user_id) === Number(modal.querySelector('[name="hh-person"]:checked')?.value));
-    modal.querySelectorAll('[name="hh-person"]').forEach(input => input.addEventListener('change', () => {
+    const scope = () => modal.querySelector('[name="hh-scope"]:checked')?.value || 'this_date';
+    let hostingReview = null, reviewSequence = 0;
+    const reviewViewer = state.me?.id;
+    const syncSend = () => {
       const person = selectedPerson();
-      send.disabled = !person;
-      send.textContent = person ? `Ask ${person.display_name} to host` : 'Choose a player';
+      send.disabled = !person || (scope() === 'following_dates' && !hostingReview);
+      send.textContent = person ? `Ask ${person.display_name} to host${scope() === 'following_dates' && hostingReview ? ` ${hostingReview.dates.length} dates` : ''}` : 'Choose a player';
+    };
+    const loadReview = async (focus = false, notice = '') => {
+      const current = ++reviewSequence, panel = modal.querySelector('#hh-review');
+      hostingReview = null; syncSend(); panel.classList.remove('hidden'); panel.textContent = 'Loading dates…';panel.setAttribute('aria-busy','true');
+      if (focus) { panel.scrollIntoView({block:'start'});panel.focus({preventScroll:true}); }
+      const active = () => modal.isConnected && current === reviewSequence && state.me?.id === reviewViewer && scope() === 'following_dates';
+      try {
+        const data = await api(`/games/${game.id}/hosting-preview?edit_scope=following_dates`);
+        if (!active()) return;
+        if (!data.token || !Array.isArray(data.dates) || !data.dates.length) throw new Error('Couldn’t load the hosting plan.');
+        hostingReview = data; panel.innerHTML = (notice ? `<p class="form-error" role="alert">${esc(notice)}</p>` : '') + hostingReviewHtml(data); syncSend();
+      } catch (failure) {
+        if (!active()) return;
+        panel.innerHTML = `<p>${esc(failure.message)}</p>${['host_only','game_not_open','future_host_changed'].includes(failure.code) ? '' : '<button type="button" class="btn btn-secondary" data-retry-hosting>Try again</button>'}`;
+        panel.querySelector('[data-retry-hosting]')?.addEventListener('click',()=>loadReview(true));
+      } finally { if (active()) panel.removeAttribute('aria-busy'); }
+    };
+    modal._cleanupFns.push(()=>{reviewSequence += 1;});
+    modal.querySelectorAll('[name="hh-person"]').forEach(input => input.addEventListener('change', syncSend));
+    modal.querySelectorAll('[name="hh-scope"]').forEach(input => input.addEventListener('change',()=>{
+      reviewSequence += 1; hostingReview = null; modal.querySelector('#hh-review').classList.toggle('hidden',scope() !== 'following_dates');
+      syncSend(); if (scope() === 'following_dates') loadReview();
     }));
     const formUX = bindModalFormUX(modal, '#hh-send');
     let sending = false;
@@ -37952,11 +38072,12 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const person = selectedPerson();
-      if (!person || sending) return;
+      if (!person || sending || (scope() === 'following_dates' && !hostingReview)) return;
       const payload = {
         target_user_id:Number(person.user_id),
         edit_scope:modal.querySelector('[name="hh-scope"]:checked')?.value || 'this_date',
         leave_on_accept:modal.querySelector('#hh-leave').checked,
+        ...(scope() === 'following_dates' ? {expected_host_review:hostingReview.token} : {}),
       };
       const reset = formUX.startSubmitting('Sending request…');
       if (!reset) return;
@@ -37967,7 +38088,8 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         dismissModal(modal, () => { onUpdated?.(fresh); toast('Host request sent'); });
       } catch (error) {
         sending = false; form.removeAttribute('inert'); reset();
-        formUX.showError(error.message);
+        if (['host_review_changed','future_host_changed'].includes(error.code)) loadReview(true, error.message);
+        else formUX.showError(error.message);
       }
     });
     return modal;
@@ -38662,6 +38784,13 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       });
       box.querySelectorAll('[data-waitlist-reply], [data-host-reply], [data-attendance-correct]').forEach((button) => {
         button.addEventListener('click', async () => {
+          if (button.dataset.hostReply === 'accept' && game.host_handoff?.scope === 'following_dates') {
+            openChildModal(modal, () => openHostingAcceptanceReview(game, fresh => {
+              state.playGamesCache = null; render(fresh); refreshMe();
+              if (state.tab === 'play') renderPlay();
+            }));
+            return;
+          }
           const reset = beginButtonAction(button, 'Saving…');
           if (!reset) return;
           let endpoint, payload, method='POST';

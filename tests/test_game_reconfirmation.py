@@ -99,17 +99,26 @@ def test_host_handoff_cannot_accept_a_changed_plan_for_the_player(client, scope)
     rejected = client.post(reply_path, headers=auth(guest), json={'accept':True})
     assert rejected.status_code == 409, rejected.get_json()
     body = rejected.get_json()
-    assert body['error'] == 'host_plan_confirmation_required'
-    assert body['review_game_id'] == changed_id
-    assert body['game']['cost_cents'] == 1500
     assert db.session.get(Game, game['id']).creator_id == host['user']['id']
     row = GamePlayer.query.filter_by(game_id=changed_id, user_id=guest['user']['id']).one()
     assert row.attending_at is None and row.commitment_confirmation_due()
-    confirmed = client.post(f'/api/games/{changed_id}/attend', headers=auth(guest), json={
-        'expected_commitment_requested_at': body['game']['my_commitment_requested_at'],
-    })
-    assert confirmed.status_code == 200, confirmed.get_json()
-    accepted = client.post(reply_path, headers=auth(guest), json={'accept':True})
+    if scope == 'following_dates':
+        assert body['error'] == 'host_review_required'
+        review = client.get(reply_path.replace('/respond','/preview'), headers=auth(guest)).get_json()
+        assert next(date for date in review['dates'] if date['id'] == changed_id)['cost_cents'] == 1500
+        accepted = client.post(reply_path, headers=auth(guest), json={
+            'accept':True, 'expected_host_review':review['token'],
+        })
+        assert row.attending_at is not None and not row.commitment_confirmation_due()
+    else:
+        assert body['error'] == 'host_plan_confirmation_required'
+        assert body['review_game_id'] == changed_id
+        assert body['game']['cost_cents'] == 1500
+        confirmed = client.post(f'/api/games/{changed_id}/attend', headers=auth(guest), json={
+            'expected_commitment_requested_at': body['game']['my_commitment_requested_at'],
+        })
+        assert confirmed.status_code == 200, confirmed.get_json()
+        accepted = client.post(reply_path, headers=auth(guest), json={'accept':True})
     assert accepted.status_code == 200, accepted.get_json()
     assert accepted.get_json()['creator_id'] == guest['user']['id']
 

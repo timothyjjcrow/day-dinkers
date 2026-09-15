@@ -7125,6 +7125,85 @@ def leave_waitlist(game_id):
     return jsonify(game.to_dict(g.current_user.id))
 
 
+def _hosting_review(game, scope, proposal=None):
+    """Visible hosting terms and a fingerprint of the exact current review."""
+    rows = [game] + (_future_series_dates_query(game).all() if scope == 'following_dates' and game.recurrence_series_id else [])
+    fields = ('title', 'duration_minutes', 'cost_cents', 'max_players', 'game_type',
+              'play_style', 'court_access', 'court_number', 'court_count', 'visibility',
+              'preferred_level', 'level_min', 'level_max', 'notes', 'description')
+    def terms(source, court):
+        result = {key: source.get(key) if isinstance(source, dict) else getattr(source, key) for key in fields}
+        for key in ('level_min', 'level_max'):
+            if result[key] is not None:
+                result[key] = float(result[key])
+        result['court'] = {'id': court.id, 'name': court.name} if court else None
+        return result
+    dates = []
+    for row in rows:
+        item = terms(row, row.court)
+        item.update(id=row.id, scheduled_at=iso(row.scheduled_at),
+                    ends_at=iso(row.scheduled_at + timedelta(minutes=row.duration_minutes)) if row.duration_minutes else None,
+                    player_count=len(row.players),
+                    already_joined=any(p.user_id == proposal.target_user_id for p in row.players) if proposal else None,
+                    status=row.status)
+        dates.append(item)
+    root = _series_root(game)
+    template = json.loads(root.recurrence_template) if root.recurrence_template else _series_template(root)
+    rule = None
+    if scope == 'following_dates' and not root.recurrence_stopped_at:
+        rule = terms(template, db.session.get(Court, template['court_id']))
+        normalized = _rule_from_fields(template)
+        rule.update(recurrence_timezone=normalized.recurrence_timezone or 'UTC',
+                    recurrence_local_time=normalized.recurrence_local_time,
+                    recurrence_ends_on=normalized.recurrence_ends_on.isoformat() if normalized.recurrence_ends_on else None,
+                    recurrence_weekdays=_stored_recurrence_weekdays(normalized))
+    result = {'dates': dates, 'rule': rule, 'scope': scope,
+              'handoff_id': proposal.id if proposal else None,
+              'requested_by_name': proposal.requested_by.display_name if proposal else None,
+              'leave_on_accept': proposal.leave_on_accept if proposal else None}
+    stamp = [game.id, proposal.target_user_id if proposal else None, result]
+    result['token'] = hashlib.sha256(json.dumps(stamp, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return result
+
+
+@games_bp.get('/games/<int:game_id>/hosting-preview')
+@rate_limit(60, 60)
+@login_required
+def preview_hosting_request(game_id):
+    game = db.session.get(Game, game_id)
+    if not game:
+        return jsonify({'error':'game_not_found'}), 404
+    if game.creator_id != g.current_user.id:
+        return jsonify({'error':'host_only'}), 403
+    if game.status != 'upcoming':
+        return jsonify({'error':'game_not_open'}), 409
+    scope, error = _recurrence_scope(dict(request.args), game)
+    if error:
+        return jsonify(error[0]), error[1]
+    following = _future_series_dates_query(game).all() if game.recurrence_series_id else []
+    if scope == 'following_dates' and not _owns_future_series_scope(game, following, g.current_user.id):
+        return jsonify({'error':'future_host_changed'}), 409
+    return jsonify(_hosting_review(game, scope))
+
+
+@games_bp.get('/games/<int:game_id>/host-handoff/<int:handoff_id>/preview')
+@rate_limit(60, 60)
+@login_required
+def preview_hosting_acceptance(game_id, handoff_id):
+    game = db.session.get(Game, game_id)
+    proposal = db.session.get(GameHostHandoff, handoff_id)
+    if not game or not proposal or proposal.game_id != game.id or proposal.target_user_id != g.current_user.id:
+        return jsonify({'error':'handoff_not_found'}), 404
+    if proposal.status != 'pending' or proposal.expires_at <= utcnow() or game.status != 'upcoming' or game.creator_id != proposal.requested_by_id:
+        return jsonify({'error':'handoff_expired'}), 409
+    if not any(p.user_id == g.current_user.id for p in game.players) or _game_has_blocked_participant(game, g.current_user.id):
+        return jsonify({'error':'handoff_not_available'}), 409
+    following = _future_series_dates_query(game).all() if game.recurrence_series_id else []
+    if proposal.scope == 'following_dates' and not _owns_future_series_scope(game, following, proposal.requested_by_id):
+        return jsonify({'error':'host_scope_changed'}), 409
+    return jsonify(_hosting_review(game, proposal.scope, proposal))
+
+
 def _request_host_handoff(game, target_id, scope, leave_on_accept=False):
     if game.creator_id != g.current_user.id:
         return jsonify({'error': 'host_only'}), 403
@@ -7177,6 +7256,13 @@ def request_host_handoff(game_id):
         return jsonify(error[0]), error[1]
     if not isinstance(payload.get('leave_on_accept', False), bool):
         return jsonify({'error': 'invalid_payload'}), 400
+    if game.creator_id != g.current_user.id:
+        return jsonify({'error':'host_only'}), 403
+    if game.status != 'upcoming':
+        return jsonify({'error':'game_not_open'}), 409
+    if scope == 'following_dates' and 'expected_host_review' in payload:
+        if payload['expected_host_review'] != _hosting_review(game, scope)['token']:
+            return jsonify({'error':'host_review_changed'}), 409
     return _request_host_handoff(game, _strict_whole_number(payload.get('target_user_id')),
                                  scope, payload.get('leave_on_accept', False))
 
@@ -7216,12 +7302,16 @@ def respond_host_handoff(game_id, handoff_id):
         affected += _future_series_dates(game)
     if payload['accept'] and proposal.scope == 'following_dates' and not _owns_future_series_scope(game, affected[1:], proposal.requested_by_id):
         return jsonify({'error': 'host_scope_changed'}), 409
+    if payload['accept'] and proposal.scope == 'following_dates':
+        review = _hosting_review(game, proposal.scope, proposal)
+        if payload.get('expected_host_review') != review['token']:
+            return jsonify({'error':'host_review_changed' if payload.get('expected_host_review') else 'host_review_required'}), 409
     if payload['accept']:
         # Taking over hosting must not silently accept a changed playing plan.
         # Review each affected occurrence before changing any host or roster.
         for occurrence in affected:
             mine = next((p for p in occurrence.players if p.user_id == actor_id), None)
-            if mine and mine.commitment_confirmation_due():
+            if proposal.scope != 'following_dates' and mine and mine.commitment_confirmation_due():
                 return jsonify({'error': 'host_plan_confirmation_required',
                                 'review_game_id': occurrence.id,
                                 'game': _game_payload(occurrence, actor_id)}), 409
@@ -7236,6 +7326,7 @@ def respond_host_handoff(game_id, handoff_id):
                 if player.user_id == actor_id:
                     player.attending_at = now
                     player.recurrence_rsvp_automatic = False
+                    player.commitment_requested_at = None
             if not any(p.user_id == actor_id for p in occurrence.players):
                 db.session.add(GamePlayer(game=occurrence, user_id=actor_id, attending_at=now))
                 _participation_event(occurrence, actor_id, 'joined', actor_id=actor_id)

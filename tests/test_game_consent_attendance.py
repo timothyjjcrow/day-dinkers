@@ -124,7 +124,9 @@ def test_recurring_handoff_changes_only_accepted_scope_and_future_defaults(clien
     request=client.post(url+'/host-handoff',json={'target_user_id':player['user']['id'],
                         'edit_scope':'following_dates','leave_on_accept':True},headers=auth(host))
     assert request.status_code == 202, request.get_json()
-    result=client.post(url+f"/host-handoff/{request.get_json()['host_handoff']['id']}/respond",json={'accept':True},headers=auth(player))
+    handoff_url=url+f"/host-handoff/{request.get_json()['host_handoff']['id']}"
+    review=client.get(handoff_url+"/preview",headers=auth(player)).get_json()
+    result=client.post(handoff_url+"/respond",json={'accept':True,'expected_host_review':review['token']},headers=auth(player))
     assert result.status_code == 200, result.get_json()
     assert dates[0].creator_id == host['user']['id']
     assert all(row.creator_id == player['user']['id'] for row in dates[1:])
