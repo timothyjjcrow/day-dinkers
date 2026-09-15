@@ -240,7 +240,7 @@ def test_visible_play_feed_revalidates_live_cards_and_joins_from_fresh_state():
     assert 'const openSpots = Math.max(0, Number(game.spots_left) || 0);' in detail
 
     play = section("async function renderPlay", "function updatePlayHeader")
-    assert "g.status === 'upcoming' && (g.can_enter_score || g.can_complete_session)" in play
+    assert "(g.status === 'upcoming' || g.status === 'expired' && g.can_complete_session) && (g.can_enter_score || g.can_complete_session)" in play
     assert "? (instantRallyScorePending(g) || instantSessionWrapPending(g))" in play
     assert "!toScore.includes(g) && !toConfirm.includes(g) && !toReconfirm.includes(g) && !waiting.includes(g)" in play
     profile = section("// My upcoming games", "// Personal play stats")

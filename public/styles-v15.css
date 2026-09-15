@@ -7532,3 +7532,23 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .play-profile-setup-link > span { flex: 1; display: grid; gap: 4px; font-size: var(--text-sm); }
 .play-profile-setup-link small { color: var(--ink-soft); font-size: var(--text-xs); }
 .play-profile-setup-link > .ui-icon { flex: 0 0 auto; }
+
+/* Calendar subscription choices stay distinct from private-link maintenance. */
+.calendar-subscription-sheet .calendar-intro { margin: 0 0 18px; color: var(--ink-soft); font-size: var(--text-sm); line-height: 1.5; }
+.calendar-subscription-actions { display: grid; gap: 10px; }
+.calendar-provider { display: flex; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--ink); text-decoration: none; min-width: 0; }
+.calendar-provider > span:not(.calendar-provider-icon) { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.calendar-provider b { font-size: var(--text-sm); overflow-wrap: anywhere; }
+.calendar-provider small { color: var(--ink-soft); font-size: var(--text-xs); line-height: 1.4; overflow-wrap: anywhere; }
+.calendar-provider > .ui-icon, .calendar-provider-icon { flex: 0 0 auto; }
+.calendar-provider-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-xs); color: var(--green-accent); background: var(--green-50); }
+.calendar-provider[aria-disabled="true"] { opacity: .5; }
+.calendar-update-note { margin: 16px 0 20px; color: var(--ink-soft); font-size: var(--text-xs); line-height: 1.5; }
+.calendar-link-tools { border-top: 1px solid var(--line); }
+.calendar-link-tools > summary { min-height: 48px; padding: 12px 0; color: var(--ink); font-size: var(--text-sm); line-height: 1.5; cursor: pointer; }
+.calendar-link-tools-body { display: grid; gap: 10px; padding: 8px 0; }
+.calendar-link-tools .form-field { margin: 0; }
+.calendar-link-tools input { width: 100%; min-width: 0; box-sizing: border-box; }
+.calendar-link-tools .btn-link { margin: 0; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; }
+.calendar-subscription-sheet .calendar-copy-status { color: var(--ink); text-align: left; line-height: 1.5; font-weight: 500; }
+.calendar-subscription-sheet .calendar-copy-status:empty { display: none; }

@@ -32144,99 +32144,172 @@
     const button = event?.currentTarget || null;
     const resetAction = button ? beginButtonAction(button, 'Preparing calendar…') : () => {};
     if (!resetAction) return;
+    const ownerId = state.me?.id;
     const modalLoad = beginRoutedOverlayLoad(null);
     let token;
     try {
       ({ token } = await api('/calendar/token'));
     } catch (error) {
-      if (routedOverlayLoadIsCurrent(modalLoad)) toast(error.message);
+      if (routedOverlayLoadIsCurrent(modalLoad) && state.me?.id === ownerId) toast(error.message);
       resetAction();
       return;
     }
-    if (!routedOverlayLoadIsCurrent(modalLoad)) {
+    if (!routedOverlayLoadIsCurrent(modalLoad) || state.me?.id !== ownerId) {
       resetAction();
       return;
     }
     const openCalendarSubscription = () => {
       const sheet = openModal(`
-        ${modalHead('Play calendar', 'calendar')}
-        <p class="row-sub calendar-fallback-copy">Subscribe to sessions and matches. Your calendar provider controls refresh timing; check Third Shot for urgent changes or cancellations.</p>
+        ${modalHead('Add to calendar', 'calendar')}
+        <p class="calendar-intro">Your sessions and matches, in your calendar.</p>
         <div class="calendar-subscription-actions">
-          <a class="btn btn-primary btn-block" id="calendar-google-subscribe" target="_blank" rel="noopener">${uiIcon('external')} Add to Google Calendar</a>
-          <a class="btn btn-secondary btn-block" id="calendar-device-subscribe">${uiIcon('calendar')} Open in Apple or Outlook</a>
-          ${navigator.share ? `<button type="button" class="btn btn-secondary btn-block" id="calendar-share-link">${uiIcon('send')} Share private link</button>` : ''}
+          <a class="calendar-provider" id="calendar-google-subscribe" target="_blank" rel="noopener"><span class="calendar-provider-icon">${uiIcon('calendar')}</span><span><b>Google Calendar</b><small>Opens in your browser</small></span>${uiIcon('external')}</a>
+          <a class="calendar-provider" id="calendar-device-subscribe"><span class="calendar-provider-icon">${uiIcon('calendar')}</span><span><b>Open calendar app</b><small>On this device</small></span>${uiIcon('chevron-right')}</a>
         </div>
-        <div class="form-field">
-          <label for="calendar-feed-url">Your private calendar link</label>
-          <input type="text" id="calendar-feed-url" readonly aria-describedby="calendar-feed-help" />
-          <small class="field-help" id="calendar-feed-help">Anyone with this link can see your upcoming play. Don’t post it publicly.</small>
-        </div>
-        <button type="button" class="btn btn-secondary btn-block" id="calendar-copy-link">${uiIcon('copy')} Copy calendar link</button>
-        <button type="button" class="btn-link btn-block calendar-reset-link" id="calendar-reset-link">Reset private link</button>
+        <p class="calendar-update-note">Updates can take time. Check Third Shot before you play.</p>
+        <details class="calendar-link-tools">
+          <summary>Other calendars &amp; link settings</summary>
+          <div class="calendar-link-tools-body">
+            <div class="form-field">
+              <label for="calendar-feed-url">Your private calendar link</label>
+              <input type="text" id="calendar-feed-url" readonly aria-describedby="calendar-feed-help" />
+              <small class="field-help" id="calendar-feed-help">Anyone with this link can see your play schedule. Don’t post it publicly.</small>
+            </div>
+            <button type="button" class="btn btn-secondary btn-block" id="calendar-copy-link">${uiIcon('copy')} Copy calendar link</button>
+            ${navigator.share ? `<button type="button" class="btn-link btn-block" id="calendar-share-link">${uiIcon('send')} Share private link</button>` : ''}
+            <button type="button" class="btn-link btn-block calendar-reset-link" id="calendar-reset-link">Reset private link</button>
+          </div>
+        </details>
         <p class="calendar-copy-status" role="status" aria-live="polite" aria-atomic="true"></p>
         <p class="form-error inline-action-error" data-inline-action-error role="alert" tabindex="-1" hidden></p>
-      `, { label: 'Play calendar subscription link' });
+        <button type="button" class="btn btn-secondary btn-block" id="calendar-reload-link" hidden>Reload calendar link</button>
+      `, { label: 'Add to calendar', returnFocus:button });
+      sheet.querySelector('.modal').classList.add('calendar-subscription-sheet');
       const input = sheet.querySelector('#calendar-feed-url');
       const copyButton = sheet.querySelector('#calendar-copy-link');
+      const resetButton = sheet.querySelector('#calendar-reset-link');
+      const shareButton = sheet.querySelector('#calendar-share-link');
+      const reloadButton = sheet.querySelector('#calendar-reload-link');
       const status = sheet.querySelector('.calendar-copy-status');
+      const providers = [...sheet.querySelectorAll('.calendar-provider')];
+      const current = () => sheet.isConnected && state.me?.id === ownerId;
       let activeToken = token;
+      let busy = false;
+      let linkReady = true;
       let webcal = '';
       let httpsFeed = '';
+      const syncControls = () => {
+        [copyButton, resetButton, shareButton, input].filter(Boolean).forEach(control => { control.disabled = busy || !linkReady; });
+        reloadButton.disabled = busy;
+        reloadButton.hidden = linkReady;
+        providers.forEach(link => {
+          link.setAttribute('aria-disabled', String(busy || !linkReady));
+          link.tabIndex = busy || !linkReady ? -1 : 0;
+          if (busy || !linkReady) link.removeAttribute('href');
+          else link.href = link.id === 'calendar-device-subscribe' ? webcal
+            : `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(httpsFeed)}`;
+        });
+      };
       const syncLinks = () => {
         httpsFeed = `${location.origin}/api/calendar/${activeToken}.ics`;
         webcal = httpsFeed.replace(/^https?:\/\//, 'webcal://');
         input.value = webcal;
         sheet.querySelector('#calendar-device-subscribe').href = webcal;
         sheet.querySelector('#calendar-google-subscribe').href = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(httpsFeed)}`;
+        copyButton.innerHTML = `${uiIcon('copy')} Copy calendar link`;
       };
+      providers.forEach(link => link.addEventListener('click', event => {
+        if (!current() || busy || !linkReady) event.preventDefault();
+      }));
       syncLinks();
       input.addEventListener('focus', () => input.select());
       input.addEventListener('click', () => input.select());
       copyButton.addEventListener('click', async () => {
+        if (!current() || busy || !linkReady) return;
         clearInlineActionError(sheet);
+        status.textContent = '';
         const finish = beginButtonAction(copyButton, 'Copying…');
         if (!finish) return;
+        busy = true; syncControls();
         try {
           await navigator.clipboard.writeText(webcal);
-          finish();
+          finish(); busy = false; syncControls();
+          if (!current()) return;
           copyButton.innerHTML = `${uiIcon('check')} Copied`;
           status.textContent = 'Calendar link copied.';
         } catch (error) {
-          finish();
-          input.focus();
-          input.select();
+          finish(); busy = false; syncControls();
+          if (!current()) return;
           showInlineActionError(sheet, 'Copy was blocked. The link is selected so you can copy it manually.');
+          requestAnimationFrame(() => {
+            if (!current()) return;
+            input.focus();
+            input.select();
+          });
         }
       });
-      sheet.querySelector('#calendar-share-link')?.addEventListener('click', async () => {
+      shareButton?.addEventListener('click', async () => {
+        if (!current() || busy || !linkReady) return;
+        clearInlineActionError(sheet);
+        busy = true; syncControls();
         try { await navigator.share({ title: 'My Third Shot play', url: httpsFeed }); }
-        catch { /* closing the system share sheet is not an error */ }
+        catch (error) {
+          if (current() && error.name !== 'AbortError') showInlineActionError(sheet, 'Sharing was unavailable. Copy the private link instead.');
+        } finally { busy = false; syncControls(); }
       });
-      sheet.querySelector('#calendar-reset-link').addEventListener('click', async (event) => {
-        const resetButton = event.currentTarget;
+      resetButton.addEventListener('click', async () => {
+        if (!current() || busy || !linkReady) return;
         if (!await openActionConfirmation({
           eyebrow: 'Private calendar link',
           title: 'Reset your calendar link?',
-          message: 'Calendar apps using the old link will stop receiving your play schedule.',
-          detail: 'You will need to subscribe again with the new link.',
+          message: 'Calendar apps using the old link will stop updating.',
+          detail: 'Add the new link to your calendar to reconnect.',
           confirmLabel: 'Reset link',
           cancelLabel: 'Keep current link',
           icon: 'refresh',
           trigger: resetButton,
         })) return;
+        if (!current() || busy || !linkReady) return;
         const finish = beginButtonAction(resetButton, 'Resetting…');
         if (!finish) return;
         clearInlineActionError(sheet);
+        status.textContent = '';
+        busy = true; syncControls();
         try {
-          ({ token: activeToken } = await api('/calendar/token/reset', { method: 'POST' }));
-          syncLinks();
-          finish();
-          status.textContent = 'Private link reset. Subscribe again with the new link.';
-          input.focus({ preventScroll: true });
-          input.select();
+          const response = await api('/calendar/token/reset', { method: 'POST' });
+          if (!current()) return;
+          activeToken = response.token;
+          finish(); syncLinks();
+          status.textContent = 'Link reset. Add your calendar again using a choice above.';
         } catch (error) {
-          finish();
-          showInlineActionError(sheet, error.message || 'The calendar link could not be reset.');
+          if (!current()) return;
+          linkReady = false;
+          showInlineActionError(sheet, 'Reset could not be confirmed. Reload your link before using it.');
+        } finally {
+          finish(); busy = false; syncControls();
+          if (current()) {
+            if (linkReady) providers[0].focus();
+          }
+        }
+      });
+      reloadButton.addEventListener('click', async () => {
+        if (!current() || busy) return;
+        const finish = beginButtonAction(reloadButton, 'Reloading…');
+        if (!finish) return;
+        busy = true; syncControls();
+        clearInlineActionError(sheet);
+        try {
+          const response = await api('/calendar/token');
+          if (!current()) return;
+          activeToken = response.token;
+          linkReady = true;
+          syncLinks();
+          status.textContent = 'Link refreshed. Use a choice above to connect your calendar.';
+        } catch (error) {
+          if (current()) showInlineActionError(sheet, 'The link could not load. Try again.');
+        } finally {
+          finish(); busy = false; syncControls();
+          if (current() && linkReady) providers[0].focus();
         }
       });
       return sheet;

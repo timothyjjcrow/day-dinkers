@@ -212,3 +212,18 @@ def test_agenda_return_focus_finds_the_replaced_visible_row_and_respects_account
       console.log(JSON.stringify({initial,replaced,left,switched}));
     ''')
     assert result == {'initial':True,'replaced':True,'left':None,'switched':None}
+
+
+def test_agenda_wrap_up_includes_expired_eligible_sessions_without_premature_tasks():
+    source = functions_between('const toScore = mine.items.filter(', 'const toConfirm = mine.items.filter(')
+    result = run_js('''
+      const nowMs=Date.parse('2030-01-01T12:00:00Z');
+      const instantRallyScorePending=g=>g.pendingScore,instantSessionWrapPending=g=>g.pendingWrap;
+      const game=(id,status,time,options)=>({id,status,scheduled_at:`2030-01-01T${time}:00Z`,...options});
+      const mine={items:[game(1,'expired','09:00',{can_complete_session:true}),
+        game(2,'expired','09:00',{}),game(3,'upcoming','11:00',{can_enter_score:true}),
+        game(4,'upcoming','18:00',{can_complete_session:true}),
+        game(5,'cancelled','09:00',{can_complete_session:true}),
+        game(6,'upcoming','11:00',{is_instant:true,can_complete_session:true,pendingWrap:true})]};
+    ''' + source + 'console.log(JSON.stringify(toScore.map(game=>game.id)));')
+    assert result == [1,3,6]
