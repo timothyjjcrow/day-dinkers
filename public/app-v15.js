@@ -27681,8 +27681,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <span class="row-title" style="display:block">${esc(item.title)}${groupInfo ? '' : `<span class="inbox-kind">${kindLabel[item.kind]}</span>`}</span>
           <span class="row-sub" style="display:block">${esc(preview)}</span>
         </span>
-        ${item.unread ? `<span class="badge" style="position:static">${item.unread > 99 ? '99+' : item.unread}</span>`
-          : !groupInfo && item.lastMessage ? `<span class="row-sub inbox-time">${fmtInboxTimestamp(item.lastMessage.created_at)}</span>` : uiIcon('chevron-right', 'chev')}
+        <span class="inbox-meta">${!groupInfo && item.lastMessage ? `<span class="row-sub inbox-time">${fmtInboxTimestamp(item.lastMessage.created_at)}</span>` : ''}${item.unread ? `<span class="badge" style="position:static">${item.unread > 99 ? '99+' : item.unread}</span>`
+          : !groupInfo && item.lastMessage ? '' : uiIcon('chevron-right', 'chev')}</span>
       </button>`;
     };
 
@@ -27744,11 +27744,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       </div>`;
       if (crewItems.length) {
         html += '<div class="section-label" style="margin-top:4px">Private groups</div>';
-        html += crewItems.map((item) => rowHtml(item)).join('');
+        html += `<div class="inbox-list">${crewItems.map((item) => rowHtml(item)).join('')}</div>`;
       }
       if (clubItems.length) {
         html += '<div class="section-label">Your public groups</div>';
-        html += clubItems.map((item) => rowHtml(item)).join('');
+        html += `<div class="inbox-list">${clubItems.map((item) => rowHtml(item)).join('')}</div>`;
       }
       html += discoveryHtml;
       if (!crewItems.length && !clubItems.length && !invitations.length) {
@@ -27756,18 +27756,18 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       }
       if (!groupPage && conversationItems.length) {
         html += '<div class="section-label">Related conversations</div>';
-        html += conversationItems.map((item) => rowHtml(item)).join('');
+        html += `<div class="inbox-list">${conversationItems.map((item) => rowHtml(item)).join('')}</div>`;
       }
       return html;
     }
 
     if (recent.length) {
       html += '<div class="section-label" style="margin-top:4px">Recent chats</div>';
-      html += recent.map((item) => rowHtml(item)).join('');
+      html += `<div class="inbox-list">${recent.map((item) => rowHtml(item)).join('')}</div>`;
     }
     if (ready.length) {
       html += `<div class="section-label" style="margin-top:${recent.length ? '18px' : '4px'}">Everything else</div>`;
-      html += ready.map((item, index) => rowHtml(item, index >= 8 ? 'inbox-ready-extra hidden' : '')).join('');
+      html += `<div class="inbox-list">${ready.map((item, index) => rowHtml(item, index >= 8 ? 'inbox-ready-extra hidden' : '')).join('')}</div>`;
       if (ready.length > 8) {
         html += `<button type="button" class="btn btn-secondary btn-block" id="inbox-show-ready">Show ${ready.length - 8} more chats</button>`;
       }
@@ -28620,7 +28620,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       });
     }
     html += shownFriends.length
-      ? shownFriends.map((f) => `
+      ? `<div class="friend-list">${shownFriends.map((f) => `
           <div class="card row friend-person-row">
             <button type="button" class="player-profile-link" data-view-user="${f.id}" aria-label="View ${esc(f.display_name)}'s profile">
                 ${avatarHtml(f)}
@@ -28638,7 +28638,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
                 ${f.checked_in_court && f.checked_in_court.looking_for_game
                   ? `<button type="button" class="btn btn-secondary btn-sm" data-coming="${f.id}" aria-label="Tell ${esc(f.display_name)} you can be there soon">${uiIcon('pickleball')} On my way</button>` : ''}
               </div>
-          </div>`).join('')
+          </div>`).join('')}</div>`
       : (wantedSlots ? '' : emptyStateHtml({
           icon: 'users', title: 'Build your player circle',
           body: 'Find nearby players or share your invitation link.',
@@ -36668,14 +36668,15 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           <button type="button" class="profile-avatar-edit" id="profile-avatar-edit" aria-label="Change profile photo">${avatarHtml(me)}</button>
           <div class="profile-name">${esc(me.display_name)}</div>
           <div class="profile-sub">${playerSkillIdentityHtml(me)}${me.home_court_name ? ` · ${uiIcon('home', 'community-inline-icon')} ${esc(me.home_court_name)}` : ''}</div>
-          ${me.bio ? `<p class="profile-sub" style="margin-top:8px">${esc(me.bio)}</p>` : ''}
+          ${me.bio ? `<p class="profile-sub profile-bio">${esc(me.bio)}</p>` : ''}
         </div>
+        <dl class="profile-hero-stats" id="pf-hero-stats" hidden></dl>
+        <button type="button" class="profile-availability-summary" id="profile-availability-edit" aria-label="Edit when you usually play">
+          <span aria-hidden="true">${uiIcon('clock')}</span>
+          <span class="row-main"><b>Usually plays</b>${playerAwayLabel(me) ? `<small>${esc(playerAwayLabel(me))}</small>` : ''}<small>${availabilityLines.length ? availabilityLines.join(' · ') : 'Add your usual days and times'}</small></span>
+          ${uiIcon('chevron-right', 'chev')}
+        </button>
       </div>
-      <button type="button" class="profile-availability-summary" id="profile-availability-edit" aria-label="Edit when you usually play">
-        <span aria-hidden="true">${uiIcon('clock')}</span>
-        <span class="row-main"><b>Usually plays</b>${playerAwayLabel(me) ? `<small>${esc(playerAwayLabel(me))}</small>` : ''}<small>${availabilityLines.length ? availabilityLines.join(' · ') : 'Add your usual days and times'}</small></span>
-        ${uiIcon('chevron-right', 'chev')}
-      </button>
       <div class="profile-load-error hidden" id="pf-dashboard-error" role="alert">
         <span class="nav-row-leading" aria-hidden="true">${uiIcon('refresh')}</span>
         <span class="row-main"><b>Your latest play dashboard did not load</b><span>Your profile and settings still work. Check the connection and try the play sections again.</span></span>
@@ -36804,6 +36805,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     });
     const dashboardFailed = [mineResult, statsResult, favoritesResult, historyResult]
       .every((result) => result.status === 'rejected');
+    const heroCounts = {};
     const showProfileSectionUnavailable = (section, title, copy) => {
       section.innerHTML = `<div class="section-label">${esc(title)}</div><div class="profile-section-unavailable">
         <span class="profile-section-unavailable-icon" aria-hidden="true">${uiIcon('refresh')}</span>
@@ -36844,6 +36846,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           && !instantRallyClosed(game)
           && (instantRallyAssembly(game) || new Date(game.scheduled_at).getTime() > nowMs));
       const ordered = [...scorePending, ...wrapPending, ...up];
+      heroCounts.plans = ordered.length;
       const nextGame = ordered[0] || null;
       if (nextGame) {
         const nextLabel = scorePending.includes(nextGame) ? 'Add a score'
@@ -36883,6 +36886,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     try {
       const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
       if (!stats) throw statsResult.reason;
+      heroCounts.plays = stats.games_total;
+      heroCounts.streak = stats.week_streak;
       if (!total) {
         const headline = el.querySelector('#profile-headline-stats');
         if (headline) {
@@ -37007,6 +37012,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         seen.add(me.home_court_id);
       }
       (favs.items || []).forEach((c) => { if (!seen.has(c.id)) { rows.push({ ...c, is_home: false }); seen.add(c.id); } });
+      heroCounts.courts = rows.length;
       const savedCourtRowHtml = (c) => `
         <article class="card profile-saved-court"><button type="button" class="row nav-row-button" data-pfcourt="${c.id}" aria-label="Open ${esc(c.name)} court">
           <span class="nav-row-leading">${uiIcon(c.is_home ? 'home' : 'star')}</span>
@@ -37143,6 +37149,11 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         historyEl, 'Recent play', 'Recent play is unavailable right now.',
       );
     }
+    const heroStats = [['plays', 'Plays'], ['plans', 'Upcoming'], ['courts', 'Courts'], ['streak', 'Week streak']]
+      .filter(([key]) => heroCounts[key] != null);
+    const heroStatsEl = el.querySelector('#pf-hero-stats');
+    heroStatsEl.innerHTML = heroStats.map(([key, label]) => `<div><dt>${label}</dt><dd>${Number(heroCounts[key]) || 0}</dd></div>`).join('');
+    heroStatsEl.hidden = !heroStats.length;
     el.dataset.profileReady = String(me.id);
     markViewReady('profile');
     el.setAttribute('aria-busy', 'false');
