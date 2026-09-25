@@ -415,6 +415,19 @@ textarea[aria-invalid="true"]:focus-visible {
 .auth-court-result small { display: block; color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
 .auth-court-result > .ui-icon { flex-shrink: 0; }
 #auth-access-toggle { margin-top: 20px; }
+.auth-map-shell { position: relative; margin: 4px 0 10px; }
+#auth-map {
+  height: clamp(260px, 44dvh, 440px); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  overflow: hidden; background: var(--line); z-index: 0;
+}
+.auth-map-locate { position: absolute; z-index: 500; top: 10px; right: 10px; }
+.auth-map-status {
+  position: absolute; z-index: 500; left: 50%; bottom: 12px; transform: translateX(-50%);
+  max-width: calc(100% - 24px); margin: 0; padding: 7px 12px; border-radius: var(--radius-pill);
+  background: var(--card); color: var(--ink); box-shadow: var(--shadow); font-size: 12.5px; font-weight: 700; white-space: nowrap;
+}
+.auth-map-status:empty, .auth-map-status.hidden { display: none; }
+
 #auth-access-back { margin: 0 0 16px; }
 #auth-browse-back { min-height: 44px; margin: 0 0 12px; text-align: left; }
 .auth-explore:has(#auth-share-context:not(.hidden)) > h2,
@@ -2028,7 +2041,7 @@ textarea[aria-invalid="true"]:focus-visible {
 .court-peek-name, .court-peek-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .court-peek-name { font-size: 14px; font-weight: 850; }
 .court-peek-meta { color: var(--ink-soft); font-size: 12px; }
-.court-peek-browse { margin: 2px 0 0; }
+.court-peek-browse { display: block; width: 100%; min-height: 40px; margin: 0; text-align: center; }
 .court-peek-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 0 8px 8px; }
 .court-peek-actions .btn {
   min-height: var(--tap-min); display: inline-flex; align-items: center; justify-content: center;
@@ -3222,6 +3235,20 @@ button.tag, a.tag, .tag[role="button"] {
   flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px calc(28px + env(safe-area-inset-bottom));
   overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
 }
+.court-modal .cd-action-dock {
+  flex-shrink: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) 52px; gap: 8px;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line);
+  background: var(--card); box-shadow: 0 -8px 24px rgba(15, 23, 42, .06);
+}
+.court-modal .cd-action-dock .btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 10px 12px; gap: 7px; font-size: 15px; font-weight: 800; white-space: nowrap;
+}
+.court-modal .cd-action-dock .btn .ui-icon { width: 19px; height: 19px; flex: 0 0 19px; }
+.court-modal .cd-action-dock .cd-dock-icon { position: relative; padding: 0; }
+.court-modal .cd-action-dock .cd-dock-icon .badge { position: absolute; top: 5px; right: 5px; }
+.court-modal .cd-action-dock:has(> :nth-child(2):last-child) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); }
+.court-modal .cd-action-dock:has(> :only-child) { grid-template-columns: 1fr; }
+.court-modal .cd-scroll:has(+ .cd-action-dock) { padding-bottom: 18px; }
 .court-detail-load-shell {
   position: relative; display: grid; place-items: center; width: 100%; min-height: min(430px, 72dvh);
   padding: 72px 28px calc(42px + env(safe-area-inset-bottom)); text-align: center;
@@ -7908,3 +7935,10 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 .live-play-empty .btn { min-height: 44px; }
 
 #play-soon-rallies:focus { outline: 2px solid var(--green-accent); outline-offset: 3px; border-radius: var(--radius-sm); }
+
+/* Court booking and cost are optional details, not a required step. */
+details.planner-essentials { padding: 0 14px; }
+details.planner-essentials > summary { margin: 0 -14px; }
+details.planner-essentials[open] { padding-bottom: 14px; }
+.friend-row-actions .friend-row-icon { width: 40px; padding: 0; justify-content: center; }
+.friend-invite-link { margin-top: 10px; }

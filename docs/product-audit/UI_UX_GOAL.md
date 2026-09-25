@@ -1,5 +1,7 @@
 # Complete-app UI and UX review
 
+Resumed September 25, 2026 at Tim's request with a decisive map-first overhaul; see `release-r82.md`.
+
 User-requested stop checkpoint, September 15, 2026: finish and publish the current accumulated improvements, verify the release, then stop. Do not begin another UI pass unless the user resumes. The accumulated work is now deployed as r81; see `release-r81.md` for production verification and the additive migration that resolved the deployment hold without exporting records. The app-wide goal remains unfinished and further UI work is stopped. Its runtime was previously marked blocked; available goal tools cannot set a paused status.
 
 The UI/UX direction below was set September 14, 2026 and remains the scope for a future resumption.
