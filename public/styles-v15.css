@@ -611,7 +611,7 @@ textarea[aria-invalid="true"]:focus-visible {
 
 .tab-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .tab-title-row > h2 { margin-bottom: 0; }
-.play-header h2 { margin: 0; font-size: var(--text-display); line-height: 1.05; }
+.play-header h2 { margin: 0; font-size: clamp(24px, 7vw, var(--text-display)); line-height: 1.05; }
 .play-header { padding-bottom: 4px; }
 .play-header .play-segments { margin-top: 2px; }
 .tab-kicker {
@@ -8025,6 +8025,7 @@ html[data-theme="dark"] .empty-state-icon, html[data-theme="dark"] .empty-state 
 .modal-close:not(.btn):not(.btn-link) { background: var(--surface-2); color: var(--ink); }
 .toast-icon { background: color-mix(in srgb, var(--volt) 22%, transparent); color: var(--volt); }
 .badge { border-radius: var(--radius-pill); font-weight: 800; }
+.game-card-people > span { overflow-wrap: break-word; }
 .simple-disclosure { border: 0; background: var(--card); box-shadow: var(--shadow); }
 .modal .simple-disclosure { background: var(--surface-2); box-shadow: none; }
 .simple-disclosure > summary { font-weight: 750; }

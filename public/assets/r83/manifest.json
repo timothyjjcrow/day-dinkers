@@ -35,11 +35,11 @@
     },
     "styles-v15.min.css": {
       "source": "styles-v15.css",
-      "source_sha256": "26578cba6dbe45d24361ffa212c057e1aa87fd800870e345ed0ee1469e0b5e89",
-      "source_bytes": 650388,
-      "minified_bytes": 565090,
-      "gzip_bytes": 89057,
-      "brotli_bytes": 68635
+      "source_sha256": "4dbefd8b5328fc4c8c091938740b50dbb0d268c229c4eecfd9dc193ba64f860d",
+      "source_bytes": 650462,
+      "minified_bytes": 565154,
+      "gzip_bytes": 89083,
+      "brotli_bytes": 68595
     }
   }
 }
