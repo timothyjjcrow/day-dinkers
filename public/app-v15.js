@@ -7951,7 +7951,7 @@
       typeFact ? ['grid', typeFact, c.court_type] : null,
       surfaceFact ? ['pickleball', surfaceFact, c.surface_type] : null,
       openPlayFact ? ['calendar', `Open play: ${openPlayFact}`, openPlayRaw] : null,
-    ].filter(Boolean);
+    ].filter((fact) => fact && fact[1] !== 'Hours not listed').slice(0, 3);
     const factsHtml = decisionFacts.length ? `<span class="court-card-facts">${decisionFacts.map(([icon, label, raw, className = '']) => (
       `<span class="court-card-fact ${className}" title="${esc(raw)}">${uiIcon(icon)}<span>${esc(label)}</span></span>`
     )).join('')}</span>` : '';
@@ -8022,7 +8022,7 @@
             ${activityHtml}
             <span class="court-card-tags">
               <span class="tag">${c.num_courts} court${c.num_courts === 1 ? '' : 's'}</span>
-              ${tags.slice(0, quietNow ? 2 : 4).map((tag) => `<span class="tag">${tag}</span>`).join('')}
+              ${tags.slice(0, quietNow ? 2 : 3).map((tag) => `<span class="tag">${tag}</span>`).join('')}
             </span>
           </span>
         </span>
