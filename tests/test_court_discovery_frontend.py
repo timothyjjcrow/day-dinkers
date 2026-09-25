@@ -105,7 +105,7 @@ def test_compact_map_keeps_filters_reachable_and_peek_shows_actionable_nearby_ca
     assert "const peekResultLimit = 3" in listing
     assert "courtPeekCardHtml(court, index)" in listing
     assert 'class="court-peek-strip"' in listing
-    assert 'Browse all ${availableCourtCount} court' in listing
+    assert 'See all ${availableCourtCount} court' in listing
     assert "setCourtSheetSnap('full');" in listing
     peek = section("function courtPeekCardHtml", "function sortCourts")
     assert "? 'Selected court' : index === 0 ? 'Nearest result' : 'Nearby result'" in peek

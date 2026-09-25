@@ -18,16 +18,16 @@
     } catch { /* storage can be disabled; CSS media queries remain the fallback */ }
   </script>
   <title>Third Shot — Find courts, players & play</title>
-  <link rel="stylesheet" href="/release-assets/r81/styles-v15.min.css" />
+  <link rel="stylesheet" href="/release-assets/r82/styles-v15.min.css" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-512.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
   <!-- Start downloading the large application files early, but execute them
        with defer so the useful boot shell can paint before bundle parsing. -->
-  <link rel="preload" href="/release-assets/r81/crew-planner-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r81/tournament-bracket-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r81/venue-workspace-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r81/app-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r82/crew-planner-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r82/tournament-bracket-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r82/venue-workspace-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r82/app-v15.min.js" as="script" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -116,7 +116,7 @@
       <div class="auth-explore">
         <div class="auth-explore-brand"><img src="icon-512.png" alt="" /><span>Third Shot</span></div>
         <h2 id="auth-explore-title">Find your next place to play.</h2>
-        <p class="auth-explore-copy">Courts and public sessions. Browse before you join.</p>
+        <p class="auth-explore-copy">Tap a court on the map to see who plays there. Join free to play with friends.</p>
         <button type="button" class="btn-link hidden" id="auth-browse-back">Back to courts</button>
         <div id="auth-share-context" class="auth-share-context hidden" role="note"></div>
         <section id="auth-court-discovery" aria-label="Browse courts">
@@ -125,9 +125,14 @@
             <input type="search" id="auth-court-query" placeholder="Court or city" autocomplete="off" maxlength="120" required />
             <button type="submit" class="btn btn-primary">Search</button>
           </form>
+          <div class="auth-map-shell">
+            <div id="auth-map" role="region" aria-label="Map of pickleball courts. Select a court to see details"></div>
+            <button type="button" id="auth-map-locate" class="icon-btn auth-map-locate" aria-label="Show courts near my location"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-target" /></svg></button>
+            <p id="auth-map-status" class="auth-map-status" role="status" aria-live="polite"></p>
+          </div>
           <div id="auth-court-results" aria-live="polite"></div>
         </section>
-        <button type="button" class="btn btn-secondary btn-block" id="auth-access-toggle">Log in or create an account</button>
+        <button type="button" class="btn btn-primary btn-block" id="auth-access-toggle">Log in or sign up free</button>
       </div>
       <div class="auth-card hidden" id="auth-access">
         <button type="button" class="btn-link" id="auth-access-back">Back to browsing</button>
@@ -285,17 +290,17 @@
       <section id="tab-chat" class="tab-panel hidden">
         <header class="tab-header">
           <div class="tab-title-row">
-            <h2>Community</h2>
+            <h2>Friends</h2>
             <div class="tab-header-actions">
             <button id="chat-compose" class="header-icon-btn" type="button" aria-label="New message" title="New message">
               <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-edit" /></svg>
             </button>
           </div>
           </div>
-          <div class="segmented" id="chat-segments" role="tablist" aria-label="Community views">
-            <button type="button" role="tab" id="chat-tab-chats" aria-controls="chat-content" data-seg="chats" class="active" aria-selected="true">Messages <span id="chat-inbox-badge" class="segment-badge hidden"></span></button>
+          <div class="segmented" id="chat-segments" role="tablist" aria-label="Friends views">
+            <button type="button" role="tab" id="chat-tab-chats" aria-controls="chat-content" data-seg="chats" class="active" aria-selected="true">Chats <span id="chat-inbox-badge" class="segment-badge hidden"></span></button>
+            <button type="button" role="tab" id="chat-tab-friends" aria-controls="chat-content" data-seg="friends" aria-selected="false">Friends <span id="chat-friends-badge" class="segment-badge hidden"></span></button>
             <button type="button" role="tab" id="chat-tab-groups" aria-controls="chat-content" data-seg="groups" aria-selected="false">Groups <span id="chat-groups-badge" class="segment-badge hidden"></span></button>
-            <button type="button" role="tab" id="chat-tab-friends" aria-controls="chat-content" data-seg="friends" aria-selected="false">Players <span id="chat-friends-badge" class="segment-badge hidden"></span></button>
           </div>
           <button type="button" class="view-freshness hidden" data-refresh-view="chat" aria-label="Refresh Community" aria-controls="chat-content">
             <span data-view-age>Not updated yet</span><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-refresh" /></svg>
@@ -335,9 +340,9 @@
 
       <!-- Bottom navigation -->
       <nav id="bottom-nav" aria-label="Primary navigation">
-        <button type="button" data-tab="play" class="nav-btn active" aria-current="page"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-zap" /></svg></span>Play<span id="play-badge" class="badge hidden"></span></button>
-        <button type="button" data-tab="courts" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-map" /></svg></span>Courts</button>
-        <button type="button" data-tab="chat" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-message" /></svg></span>Community<span id="chat-badge" class="badge hidden"></span><span id="chat-request-dot" class="nav-request-dot hidden" aria-hidden="true"></span></button>
+        <button type="button" data-tab="courts" class="nav-btn active" aria-current="page"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-map" /></svg></span>Map</button>
+        <button type="button" data-tab="play" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-zap" /></svg></span>Play<span id="play-badge" class="badge hidden"></span></button>
+        <button type="button" data-tab="chat" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-users" /></svg></span>Friends<span id="chat-badge" class="badge hidden"></span><span id="chat-request-dot" class="nav-request-dot hidden" aria-hidden="true"></span></button>
         <button type="button" data-tab="profile" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-user" /></svg></span>Me</button>
       </nav>
     </main>
@@ -419,9 +424,9 @@
       syncBoot();
     })();
   </script>
-  <script defer src="/release-assets/r81/crew-planner-v15.min.js"></script>
-  <script defer src="/release-assets/r81/tournament-bracket-v15.min.js"></script>
-  <script defer src="/release-assets/r81/venue-workspace-v15.min.js"></script>
-  <script defer src="/release-assets/r81/app-v15.min.js"></script>
+  <script defer src="/release-assets/r82/crew-planner-v15.min.js"></script>
+  <script defer src="/release-assets/r82/tournament-bracket-v15.min.js"></script>
+  <script defer src="/release-assets/r82/venue-workspace-v15.min.js"></script>
+  <script defer src="/release-assets/r82/app-v15.min.js"></script>
 </body>
 </html>

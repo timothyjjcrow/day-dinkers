@@ -216,8 +216,7 @@ def test_play_launcher_is_intent_specific_while_map_and_court_keep_compatibility
     assert "openCreatePlaySheet();" in ctas
     create = section("function openCreatePlaySheet", "function rallyLauncherHtml")
     assert "openNewGameModal({" in create
-    assert "gameType: ranked ? 'ranked' : 'casual'" in create
-    assert "sessionMode: !ranked, rankedMatchMode: ranked" in create
+    assert "gameType: 'casual', maxPlayers: 6, lockGameType: true, sessionMode: true" in create
     assert "target === 'ranked-match' || target === 'new-ranked-game'" in ctas
     assert "openRankedMatchFlow();" in ctas
 

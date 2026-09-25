@@ -17,9 +17,9 @@ def section(start: str, end: str) -> str:
 def test_community_separates_messages_groups_and_players():
     setup = section("function configureCommunityLaneTabs", "function chatMessageActionHtml")
     for tab_id, label in (
-        ("#chat-tab-chats", "Messages"),
+        ("#chat-tab-chats", "Chats"),
+        ("#chat-tab-friends", "Friends"),
         ("#chat-tab-groups", "Groups"),
-        ("#chat-tab-friends", "Players"),
     ):
         assert tab_id in setup
         assert f"'{label}'" in setup
@@ -74,8 +74,8 @@ def test_community_unread_badges_route_attention_to_the_correct_lane():
     assert "const pendingCrewInviteCount = Number(state.pendingCrewInvites?.count) || 0;" in badges
     assert "const requestTotal = state.pendingRequests + pendingCrewInviteCount;" in badges
     assert "$('#chat-groups-badge')" in badges
-    assert "`Messages, ${messagesTotal} unread message" in badges
-    assert "`Community, ${communityParts.join(', ')}`" in badges
+    assert "`Chats, ${messagesTotal} unread message" in badges
+    assert "`Friends, ${communityParts.join(', ')}`" in badges
     assert "`Play, ${state.gamesToConfirm} game${state.gamesToConfirm === 1 ? '' : 's'} awaiting score confirmation`" in badges
     assert "`Activity and notifications, ${unread} unread notification${unread === 1 ? '' : 's'}`" in badges
     assert "$('#play-activity')?.setAttribute('aria-label', activityLabel);" in badges
@@ -108,9 +108,9 @@ def test_people_rows_use_disclosed_filters_and_one_contextual_action():
     friends = section("async function renderFriends", "async function openThread")
     assert 'data-coming="${f.id}"' in friends
     assert 'data-invite="${f.id}"' in friends
-    assert 'aria-label="Invite ${esc(f.display_name)} to a game"' in friends
-    assert 'aria-haspopup="menu" aria-expanded="false"' in friends
-    assert 'class="friend-row-menu" role="menu"' in friends
+    assert 'aria-label="Invite ${esc(f.display_name)} to play"' in friends
+    assert 'aria-label="Message ${esc(f.display_name)}"' in friends
+    assert 'data-share-invite' in friends
     assert 'bindDisclosureMenus(el)' in friends
     disclosure = section('function bindDisclosureMenus', 'async function renderFriends')
     assert "event.key === 'Escape'" in disclosure

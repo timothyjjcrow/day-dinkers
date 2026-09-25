@@ -36,7 +36,7 @@ def test_people_filters_expose_selection_and_use_the_app_picker():
 
     assert 'id="friend-slots" role="group" aria-label="Filter friends by usual play time"' in friends
     assert 'aria-pressed="${v === slotFilter}"' in friends
-    assert "uiIcon('send')} Invite" in friends
+    assert "uiIcon('plus')} Play" in friends
     assert "uiIcon('trophy')} Friend results" in friends
     assert "b.innerHTML = `${uiIcon('check-circle')} Sent`;" in friends
     assert "uiIcon('check-circle')} Friends" in friends

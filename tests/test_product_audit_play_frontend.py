@@ -59,28 +59,19 @@ def test_focus_identity_follows_the_same_action_not_its_position_or_attribute_or
     assert result['summary'] == 'summary:play-now'
 
 
-def test_create_choice_opens_the_correct_planner_without_immediate_side_effects():
+def test_create_game_opens_the_casual_planner_directly():
     source = functions_between('function openCreatePlaySheet()', 'function rallyLauncherHtml()')
     result = run_js('''
-      const clicks={}, calls=[];
-      const modal={querySelectorAll:()=>['casual','ranked','competition'].map(kind=>({
-        dataset:{createKind:kind},addEventListener:(_,fn)=>{clicks[kind]=fn;}
-      }))};
-      const modalHead=()=>'',uiIcon=()=>'',openModal=()=>modal;
-      const transitionModal=(_,fn)=>fn();
-      const openNewGameModal=opts=>calls.push(opts);
-      const openCompetitionCreateSheet=()=>calls.push({competition:true});
+      const calls=[];
+      const openNewGameModal=opts=>{calls.push(opts);return 'planner';};
     ''' + source + '''
-      openCreatePlaySheet(); const before=calls.length;
-      clicks.casual(); clicks.ranked(); clicks.competition();
-      console.log(JSON.stringify({before,calls}));
+      const modal=openCreatePlaySheet();
+      console.log(JSON.stringify({modal,calls}));
     ''')
-    assert result['before'] == 0
+    assert result['modal'] == 'planner'
+    assert len(result['calls']) == 1
     assert result['calls'][0]['sessionMode'] is True
     assert result['calls'][0]['gameType'] == 'casual'
-    assert result['calls'][1]['rankedMatchMode'] is True
-    assert result['calls'][1]['gameType'] == 'ranked'
-    assert result['calls'][2] == {'competition': True}
 
 
 def test_planner_sharing_uses_the_created_game_not_an_unrelated_cached_game():

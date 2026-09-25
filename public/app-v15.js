@@ -29,11 +29,11 @@
     pendingCrewInvites: { count: 0, items: [] },
     gamesToConfirm: 0,
     lastNotifId: null,
-    tab: 'play',
+    tab: 'courts',
     playSeg: 'games',
     chatSeg: 'chats',
     chatConversationFilter: 'all',
-    peopleMode: 'nearby',
+    peopleMode: 'friends',
     nearbySkill: '',
     nearbyRadius: 25,
     boardPeriod: 'all',
@@ -1807,8 +1807,9 @@
   // announced skeleton; later failures retain the last successful view with a
   // persistent retry rather than replacing everything with an error card.
   const VIEW_FRESH_MS = 20 * 1000;
+  const VIEW_STALE_HINT_MS = 5 * 60 * 1000;
   const VIEW_LABELS = {
-    courts: 'Courts', play: 'Play', chat: 'Community', profile: 'Profile',
+    courts: 'Map', play: 'Play', chat: 'Friends', profile: 'Profile',
   };
 
   function viewAgeLabel(savedAt) {
@@ -1836,7 +1837,9 @@
     const button = document.querySelector(`[data-refresh-view="${tab}"]`);
     if (!button) return;
     const stamp = Number(savedAt || 0);
-    button.classList.toggle('hidden', !stamp);
+    // Fresh views need no timestamp; the refresh chip only appears once the
+    // data is old enough that a player might want to pull new results.
+    button.classList.toggle('hidden', !stamp || Date.now() - stamp < VIEW_STALE_HINT_MS);
     const copy = button.querySelector('[data-view-age]');
     if (copy) copy.textContent = viewAgeLabel(stamp);
   }
@@ -3196,6 +3199,7 @@
       event.preventDefault();
       searchPublicCourts();
     });
+    setupPublicCourtMap();
     document.querySelectorAll('[data-auth-policy]').forEach((button) => {
       button.addEventListener('click', () => openAccountPolicy(button.dataset.authPolicy));
     });
@@ -3360,7 +3364,8 @@
     state.nearbyRadius = 25;
     clearLookingBanner();
     state.searchQ = '';
-    state.tab = 'play';
+    state.tab = 'courts';
+    state.playLane = null;
     state.tabScrollPositions = { play: 0, chat: 0, profile: 0 };
     setPlaySegment('games', { render: false });
     state.chatSeg = 'chats';
@@ -4149,7 +4154,7 @@
       requestTotal ? `${requestTotal} pending invitation${requestTotal === 1 ? '' : 's'} or request${requestTotal === 1 ? '' : 's'}` : '',
     ].filter(Boolean);
     document.querySelector('[data-tab="chat"]')?.setAttribute(
-      'aria-label', communityParts.length ? `Community, ${communityParts.join(', ')}` : 'Community',
+      'aria-label', communityParts.length ? `Friends, ${communityParts.join(', ')}` : 'Friends',
     );
 
     const inboxBadge = $('#chat-inbox-badge');
@@ -4157,7 +4162,7 @@
       inboxBadge.textContent = messagesTotal > 99 ? '99+' : String(messagesTotal);
       inboxBadge.classList.toggle('hidden', messagesTotal === 0);
       $('#chat-tab-chats')?.setAttribute('aria-label', messagesTotal
-        ? `Messages, ${messagesTotal} unread message${messagesTotal === 1 ? '' : 's'}` : 'Messages');
+        ? `Chats, ${messagesTotal} unread message${messagesTotal === 1 ? '' : 's'}` : 'Chats');
     }
     const friendsBadge = $('#chat-friends-badge');
     if (friendsBadge) {
@@ -4165,7 +4170,7 @@
       friendsBadge.textContent = count > 99 ? '99+' : String(count);
       friendsBadge.classList.toggle('hidden', count === 0);
       $('#chat-tab-friends')?.setAttribute('aria-label', count
-        ? `Players, ${count} friend request${count === 1 ? '' : 's'}` : 'Players');
+        ? `Friends, ${count} friend request${count === 1 ? '' : 's'}` : 'Friends');
     }
     const groupsBadge = $('#chat-groups-badge');
     if (groupsBadge) {
@@ -7707,7 +7712,7 @@
           (root.querySelector(returnFocus) || root.querySelector('h3'))?.focus({preventScroll:true});
         }
       });
-      if (!quiet) root.innerHTML='<h3>Play here</h3><p role="status">Loading this court’s schedule…</p>';
+      if (!quiet) root.innerHTML='<h3>Coming up here</h3><p role="status">Loading this court’s schedule…</p>';
       root.setAttribute('aria-busy','true');
       try {
         const data=await api(`/courts/${court.id}/play${courtTimelineQuery(from)}`);
@@ -7715,8 +7720,9 @@
         latest=data;
         const groups=new Map();for(const item of data.items || []){if(!groups.has(item.event_date))groups.set(item.event_date,[]);groups.get(item.event_date).push(item);}
         captureFocus();
-        const zoneLabel = data.timezone ? `Court time · ${courtTimelineZoneLabel(data.timezone)}` : `Player times · ${courtTimelineZoneLabel(data.player_timezone || 'UTC')}`;
-        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Play here</h3><button type="button" class="btn-link" data-timeline-create>Create game</button></div><p class="court-timeline-zone">${esc(zoneLabel)}</p><div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev aria-label="Previous week">${uiIcon('arrow-left')}</button><button type="button" class="court-timeline-dates" data-timeline-today aria-label="${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}. Back to today"><b>${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</b><small>${from ? 'Back to today' : 'Next 7 days'}</small></button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next aria-label="Next week">${uiIcon('arrow-right')}</button></div><span class="sr-only" role="status">${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}</span>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>`<section class="court-timeline-day"><h4>${esc(new Date(`${on}T12:00:00`).toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</h4>${items.map(item=>courtTimelineItemHtml(item)).join('')}</section>`).join('') : '<p class="court-timeline-empty">No play listed this week. Try another week or create a game.</p>'}${data.undated_count ? '<p class="simple-note">More venue programs below · dates not confirmed.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
+        const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const zoneLabel = data.timezone && data.timezone !== viewerZone ? `Court time · ${courtTimelineZoneLabel(data.timezone)}` : '';
+        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Coming up here</h3><button type="button" class="btn-link" data-timeline-create>Create game</button></div>${zoneLabel ? `<p class="court-timeline-zone">${esc(zoneLabel)}</p>` : ''}<div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev aria-label="Previous week">${uiIcon('arrow-left')}</button><button type="button" class="court-timeline-dates" data-timeline-today aria-label="${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}. Back to today"><b>${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</b><small>${from ? 'Back to today' : 'Next 7 days'}</small></button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next aria-label="Next week">${uiIcon('arrow-right')}</button></div><span class="sr-only" role="status">${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}</span>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>`<section class="court-timeline-day"><h4>${esc(new Date(`${on}T12:00:00`).toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</h4>${items.map(item=>courtTimelineItemHtml(item)).join('')}</section>`).join('') : '<p class="court-timeline-empty">Nothing scheduled this week. Tap Play here to start something.</p>'}${data.undated_count ? '<p class="simple-note">More venue programs below · dates not confirmed.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
         const shift=(days,focus)=>{const date=new Date(`${data.from}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+days);load(date.toISOString().slice(0,10),{focus});};
         root.querySelector('[data-timeline-prev]').addEventListener('click',()=>shift(-7,'[data-timeline-prev]'));
         root.querySelector('[data-timeline-next]').addEventListener('click',()=>shift(7,'[data-timeline-next]'));
@@ -7724,7 +7730,7 @@
         const create=root.querySelector('[data-timeline-create]');create.disabled=data.closed;create.addEventListener('click',()=>openChildModal(modal,()=>openNewGameModal({court})));
         bindCourtTimelineActions(root,court,data.items,modal);
         restoreFocus();
-      } catch(error){if(root.isConnected && seq===generation){captureFocus();root.innerHTML=`<h3 tabindex="-1">Play here</h3><p role="alert">${esc(error.message || 'The schedule could not load.')}</p><button type="button" class="btn btn-secondary" data-timeline-retry>Retry schedule</button>`;root.querySelector('[data-timeline-retry]').addEventListener('click',()=>load(from,{focus:'h3'}));restoreFocus();}}
+      } catch(error){if(root.isConnected && seq===generation){captureFocus();root.innerHTML=`<h3 tabindex="-1">Coming up here</h3><p role="alert">${esc(error.message || 'The schedule could not load.')}</p><button type="button" class="btn btn-secondary" data-timeline-retry>Retry schedule</button>`;root.querySelector('[data-timeline-retry]').addEventListener('click',()=>load(from,{focus:'h3'}));restoreFocus();}}
       finally{if(root.isConnected && seq===generation)root.removeAttribute('aria-busy');}
     };
     modal._onResume = () => {
@@ -8162,7 +8168,7 @@
       );
       html += `<div class="court-peek-strip" aria-label="Nearby court previews">${peekCourts
         .map((court, index) => courtPeekCardHtml(court, index)).join('')}</div>
-        <button type="button" class="btn btn-primary btn-block court-peek-browse" id="court-show-more">Browse all ${availableCourtCount} court${availableCourtCount === 1 ? '' : 's'}</button>`;
+        <button type="button" class="btn-link court-peek-browse" id="court-show-more">See all ${availableCourtCount} court${availableCourtCount === 1 ? '' : 's'} as a list</button>`;
     } else if (recoveryBeforePlaces) html += emptyResultHtml();
     if (state.courtSheetSnap !== 'peek' && visibleExact.length) {
       html += `<div class="section-label" style="margin-top:4px">${uiIcon('pickleball')} Exact court</div>`;
@@ -8742,6 +8748,128 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     (authMode === 'register' ? $('#auth-name') : $('#auth-email'))?.focus({ preventScroll: true });
   }
 
+  // Signed-out visitors start where the product starts: a map of courts.
+  // Pins open the same public court preview as search results, so browsing
+  // never requires an account and every court is one tap from its details.
+  let publicMap = null;
+  let publicMapLayer = null;
+  let publicMapSeq = 0;
+  let publicMapTimer = null;
+  function publicMapStatus(message) {
+    const status = $('#auth-map-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.classList.toggle('hidden', !message);
+  }
+  async function loadPublicMapCourts() {
+    if (!publicMap || state.token) return;
+    const seq = ++publicMapSeq;
+    if (publicMap.getZoom() < 9) {
+      publicMapLayer?.clearLayers();
+      publicMapStatus('Zoom in to see courts');
+      return;
+    }
+    const bounds = publicMap.getBounds();
+    const params = new URLSearchParams({
+      bbox: [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].map((value) => value.toFixed(4)).join(','),
+      limit: '150',
+    });
+    try {
+      const response = await fetch(`/api/courts?${params}`, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('unavailable');
+      const payload = await response.json();
+      if (seq !== publicMapSeq || !publicMapLayer) return;
+      const rows = (Array.isArray(payload.items) ? payload.items : [])
+        .filter((court) => Number.isFinite(Number(court.latitude)) && Number.isFinite(Number(court.longitude)));
+      publicMapLayer.clearLayers();
+      rows.forEach((court) => {
+        const marker = L.marker([Number(court.latitude), Number(court.longitude)], {
+          icon: L.divIcon({
+            className: 'court-marker-hit',
+            html: `<div class="court-marker court-marker-visual${court.players_here > 0 ? ' busy' : ''}" aria-hidden="true" style="width:28px;height:28px">${court.players_here > 0 ? Number(court.players_here) : uiIcon('pickleball', 'court-marker-icon court-marker-main-icon is-pickleball')}</div>`,
+            iconSize: [44, 44],
+            iconAnchor: [22, 22],
+          }),
+          keyboard: true,
+          title: court.name,
+          alt: `${court.name}, ${Number(court.num_courts || 0)} courts`,
+        });
+        marker.on('click', () => {
+          publicBrowseReturn = { button: $('#auth-map'), scrollTop: $('#auth-screen')?.scrollTop || 0 };
+          location.hash = `#court/${Number(court.id)}`;
+        });
+        publicMapLayer.addLayer(marker);
+      });
+      publicMapStatus(rows.length ? '' : 'No courts here yet. Try another area.');
+    } catch {
+      if (seq === publicMapSeq) publicMapStatus('Courts could not load. Move the map to try again.');
+    }
+  }
+  function fitPublicMapToCourts(rows) {
+    if (!publicMap || !rows?.length) return;
+    const points = rows
+      .map((court) => [Number(court.latitude), Number(court.longitude)])
+      .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
+    if (!points.length) return;
+    if (points.length === 1) publicMap.setView(points[0], 12);
+    else publicMap.fitBounds(points, { padding: [28, 28], maxZoom: 13 });
+  }
+  function locatePublicMap({ silent = false } = {}) {
+    if (!navigator.geolocation || !publicMap) return;
+    if (!silent) publicMapStatus('Finding courts near you…');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        publicMap?.setView([position.coords.latitude, position.coords.longitude], 12);
+      },
+      () => { if (!silent) publicMapStatus('Location is unavailable. Search a city instead.'); },
+      { enableHighAccuracy: false, maximumAge: 300000, timeout: 8000 },
+    );
+  }
+  async function setupPublicCourtMap() {
+    const el = $('#auth-map');
+    if (!el || publicMap || state.token) return;
+    try {
+      await ensureMapAssets();
+    } catch {
+      el.closest('.auth-map-shell')?.classList.add('hidden');
+      return;
+    }
+    if (publicMap || !el.isConnected) return;
+    publicMap = L.map(el, { zoomControl: true, attributionControl: true, scrollWheelZoom: false })
+      .setView(DEFAULT_CENTER, 11);
+    L.tileLayer(themeTileUrl(), {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(publicMap);
+    publicMapLayer = (typeof L.markerClusterGroup === 'function')
+      ? L.markerClusterGroup({
+          maxClusterRadius: 42,
+          showCoverageOnHover: false,
+          iconCreateFunction: (cluster) => {
+            const n = cluster.getChildCount();
+            const size = n >= 50 ? 44 : n >= 10 ? 38 : 32;
+            return L.divIcon({
+              className: 'court-marker-hit court-cluster-hit',
+              html: `<div class="cluster-icon" aria-hidden="true" style="width:${size}px;height:${size}px">${n}</div>`,
+              iconSize: [44, 44],
+              iconAnchor: [22, 22],
+            });
+          },
+        })
+      : L.layerGroup();
+    publicMapLayer.addTo(publicMap);
+    publicMap.on('moveend', () => {
+      clearTimeout(publicMapTimer);
+      publicMapTimer = setTimeout(loadPublicMapCourts, 250);
+    });
+    $('#auth-map-locate')?.addEventListener('click', () => locatePublicMap());
+    loadPublicMapCourts();
+    // Only use location the visitor already shared; never prompt on arrival.
+    navigator.permissions?.query?.({ name: 'geolocation' })
+      .then((status) => { if (status.state === 'granted') locatePublicMap({ silent: true }); })
+      .catch(() => {});
+  }
+
   let publicCourtSearchSeq = 0;
   let publicCourtSearchQuery = '';
   let publicCourtSearchCursor = null;
@@ -8763,6 +8891,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const payload = await response.json();
       if (seq !== publicCourtSearchSeq || state.token) return;
       const rows = Array.isArray(payload.items) ? payload.items : [];
+      if (!more) fitPublicMapToCourts(rows.slice(0, 1));
       results.querySelector('[data-public-court-more]')?.remove();
       results.querySelector('[data-public-court-error]')?.remove();
       const html = rows.map((court) => `<button type="button" class="auth-court-result" data-public-court="${Number(court.id)}"><span><b>${esc(court.name)}</b><small>${esc([court.city, `${Number(court.num_courts || 0)} courts`, court.indoor ? 'Indoor' : 'Outdoor'].filter(Boolean).join(' · '))}</small></span>${uiIcon('chevron-right')}</button>`).join('');
@@ -8816,12 +8945,12 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const photo = /^(https?:\/\/|\/(?!\/))/.test(String(court.photo_url || '')) ? court.photo_url : '';
     const amenities = [[court.indoor, 'Indoor'], [court.lighted, 'Lights'], [court.nets_provided, 'Nets provided'], [court.has_water, 'Water'], [court.has_restrooms, 'Restrooms']].filter(([present]) => present).map(([, label]) => label);
     const directions = courtDirectionsUrl(court);
-    return `${photo ? `<img class="auth-preview-photo" src="${esc(photo)}" alt="${esc(court.name)}" loading="lazy" />` : ''}<span class="auth-preview-kicker">${Number(court.num_courts)} courts · ${court.indoor ? 'Indoor' : 'Outdoor'}</span><h3 data-share-preview-title tabindex="-1">${esc(court.name)}</h3><p>${esc([court.address, court.city, court.state].filter(Boolean).join(', '))}</p>
+    return `${photo ? `<img class="auth-preview-photo" src="${esc(photo)}" alt="${esc(court.name)}" loading="lazy" data-remove-on-error />` : ''}<span class="auth-preview-kicker">${Number(court.num_courts)} courts · ${court.indoor ? 'Indoor' : 'Outdoor'}</span><h3 data-share-preview-title tabindex="-1">${esc(court.name)}</h3><p>${esc([court.address, court.city, court.state].filter(Boolean).join(', '))}</p>
       ${amenities.length ? `<div class="auth-preview-tags">${amenities.map((label) => `<span>${esc(label)}</span>`).join('')}</div>` : ''}
       <dl class="auth-preview-facts"><div><dt>Hours</dt><dd>${esc(data.hours?.open_status?.label || 'Hours not listed')}<small>${esc(data.hours?.hours || '')}</small></dd></div><div><dt>Cost</dt><dd>${esc(court.fees || (court.fee_type === 'free' ? 'Free' : court.fee_type ? court.fee_type.replaceAll('_', ' ') : 'Not listed'))}</dd></div></dl>
       ${directions ? `<a class="btn btn-secondary btn-block" href="${esc(directions)}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
       <h4>Next public sessions</h4>${data.sessions?.length ? data.sessions.map((game) => { const facts = publicSessionFacts(game); return `<button type="button" class="auth-court-result" data-public-route="#game/${Number(game.id)}"><span><b>${esc(game.title)}</b><small>${esc(fmtDateTime(game.scheduled_at))} · ${esc(facts.format)}</small><small>${esc(gameLevelRangeLabel(game))} · ${esc(facts.stateLabel)}</small></span>${uiIcon('chevron-right')}</button>`; }).join('') : '<p>No public sessions listed yet.</p>'}
-      <button type="button" class="btn btn-primary btn-block" data-public-auth>Open court</button><small class="auth-preview-footnote">Log in to save this court or plan a session.</small>`;
+      <button type="button" class="btn btn-primary btn-block" data-public-auth>Play here</button><small class="auth-preview-footnote">Sign up free to invite friends, start a game, or check in.</small>`;
   }
 
   function renderSignedOutShareContext() {
@@ -13277,7 +13406,26 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         ${court.recent_results.map(resultRowHtml).join('')}` : ''}
         </div>
       </details>
-      </div>`;
+      </div>
+      ${courtClosed ? '' : `<div class="cd-action-dock" role="group" aria-label="Play at ${esc(court.name)}">
+        <button type="button" class="btn btn-secondary cd-dock-here" data-cd-proxy="${checkedIn ? 'cd-play-now cd-open-game' : 'cd-play-now cd-checkin'}">
+          ${uiIcon(checkedIn ? 'users' : 'map-pin')}<span>${checkedIn ? (lookingForGame ? 'Players here' : 'Find players') : 'I’m here'}</span>
+        </button>
+        <button type="button" class="btn btn-primary cd-dock-play" data-cd-proxy="${myOpenGame ? 'cd-open-game' : 'cd-schedule'}">
+          ${uiIcon(myOpenGame ? 'calendar' : 'plus')}<span>${myOpenGame ? 'Your session' : 'Play here'}</span>
+        </button>
+        <button type="button" class="btn btn-secondary cd-dock-icon" data-cd-proxy="cd-chat" aria-label="Court chat${courtChatUnread ? `, ${courtChatUnread} unread` : ''}">
+          ${uiIcon('message')}${courtChatUnread ? `<span class="badge">${courtChatUnread > 9 ? '9+' : courtChatUnread}</span>` : ''}
+        </button>
+      </div>`}`;
+    // The dock keeps the two decisions people open a court to make, playing
+    // here later or being here now, in reach without scrolling. Each button
+    // reuses the matching in-page control so behavior stays identical.
+    modalBox.querySelectorAll('[data-cd-proxy]').forEach((button) => {
+      const target = button.dataset.cdProxy.split(' ').map((id) => modalBox.querySelector(`#${id}`)).find(Boolean);
+      if (!target) { button.remove(); return; }
+      button.addEventListener('click', () => target.click());
+    });
     modalBox.setAttribute('aria-busy', 'false');
     modalBox.classList.remove('court-detail-refreshing');
     setDialogLabel(modalBox, court.name || 'Court details');
@@ -18311,35 +18459,13 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     return result || null;
   }
 
+  // Creating a game is the common case, so it opens the casual planner
+  // directly. Ranked matches live under Play now, and tournaments/leagues
+  // under Events, instead of adding a type question to every new game.
   function openCreatePlaySheet() {
-    const modal = openModal(`
-      ${modalHead('What are you planning?', 'calendar')}
-      <div class="create-play-choices">
-        <button type="button" class="card row nav-row-button" data-create-kind="casual">
-          <span class="nav-row-leading" aria-hidden="true">${uiIcon('users')}</span>
-          <span class="row-main"><b>Casual session</b><small>Pick a time and invite people to play.</small></span>${uiIcon('chevron-right', 'chev')}
-        </button>
-        <button type="button" class="card row nav-row-button" data-create-kind="ranked">
-          <span class="nav-row-leading" aria-hidden="true">${uiIcon('target')}</span>
-          <span class="row-main"><b>Ranked match</b><small>Singles or doubles with a confirmed result.</small></span>${uiIcon('chevron-right', 'chev')}
-        </button>
-        <button type="button" class="card row nav-row-button" data-create-kind="competition">
-          <span class="nav-row-leading" aria-hidden="true">${uiIcon('trophy')}</span>
-          <span class="row-main"><b>Tournament or league</b><small>Organize several matches and standings.</small></span>${uiIcon('chevron-right', 'chev')}
-        </button>
-      </div>
-    `, { label: 'Choose a play activity' });
-    modal.querySelectorAll('[data-create-kind]').forEach((button) => button.addEventListener('click', () => {
-      transitionModal(modal, () => {
-        if (button.dataset.createKind === 'competition') return openCompetitionCreateSheet();
-        const ranked = button.dataset.createKind === 'ranked';
-        return openNewGameModal({
-          gameType: ranked ? 'ranked' : 'casual', maxPlayers: ranked ? 4 : 6,
-          lockGameType: true, sessionMode: !ranked, rankedMatchMode: ranked,
-        });
-      });
-    }));
-    return modal;
+    return openNewGameModal({
+      gameType: 'casual', maxPlayers: 6, lockGameType: true, sessionMode: true,
+    });
   }
 
   function rallyLauncherHtml() {
@@ -19162,7 +19288,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       };
       el.querySelectorAll('[data-play-lane]').forEach((button) => button.addEventListener('click', () => selectPlayLane(button.dataset.playLane)));
       el.querySelectorAll('[data-find-play]').forEach((button) => button.addEventListener('click', () => selectPlayLane('find', { focus: true })));
-      selectPlayLane(state.playLane);
+      // Open on the player's own games when they have something coming up or
+      // waiting on them; otherwise open on games they can join.
+      selectPlayLane(state.playLane || (attentionCount || planCount ? 'plans' : 'find'));
       setupTablistKeyboard(el.querySelector('.play-lanes'));
       el.querySelectorAll('[data-play-page]').forEach((button) => button.addEventListener('click', async () => {
         const key = button.dataset.playPage;
@@ -19279,7 +19407,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const context = $('#play-context');
     const avatar = $('#play-avatar-button');
     if (greeting) greeting.textContent = `${hello}, ${first}`;
-    if (context) context.textContent = state.areaLabel || me.home_area || 'Set your area for nearby play';
+    if (context) context.textContent = state.areaLabel || me.home_area || (state.userLoc ? 'Near you' : 'Pickleball near you');
     if (avatar) avatar.innerHTML = avatarHtml(me, 'sm');
   }
 
@@ -20169,7 +20297,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     }
     let initialVisibility = crewId ? (presetVisibility || 'private') : (restoredDraft
       ? restoredDraft.visibility
-      : (presetVisibility || (initialInviteIds.size ? 'private' : 'open')));
+      : (presetVisibility || (initialInviteIds.size ? 'private' : friends.length ? 'friends' : 'open')));
     if (!crewId && initialVisibility === 'friends' && friends.length === 0) {
       initialVisibility = 'open';
     }
@@ -20530,13 +20658,13 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
             ? 'Friends couldn’t load. You can still create a private session and share its invite link.'
             : 'Use Invite only to share a private link.'}
         </div>
-        <details class="flow-disclosure planner-invitations ${!invitePeople.length && !crewId ? 'hidden' : ''}" id="ng-invitations" ${crewId || initialVisibility === 'private' || hasPresetInvites ? 'open' : ''}>
-        <summary>${crewId ? 'Choose group players' : 'Invite specific players'} <span>${crewId ? 'Choose players' : 'Optional'}</span></summary>
+        <details class="flow-disclosure planner-invitations ${!invitePeople.length && !crewId ? 'hidden' : ''}" id="ng-invitations" ${crewId || invitePeople.length || hasPresetInvites ? 'open' : ''}>
+        <summary>${crewId ? 'Choose group players' : 'Invite friends'} <span>${crewId ? 'Choose players' : 'They get a ping'}</span></summary>
         <div id="ng-friends-wrap" style="margin-top:10px">
           ${invitePeople.length
-            ? `<label for="ng-invite-search">${crewId ? 'Group players' : 'Direct invitations'} <span class="row-sub">(${crewId ? 'choose at least one' : 'optional'})</span></label>
+            ? `<label for="ng-invite-search" class="${crewId ? '' : 'sr-only'}">${crewId ? 'Group players' : 'Direct invitations'} <span class="row-sub">(${crewId ? 'choose at least one' : 'optional'})</span></label>
                <input type="search" id="ng-invite-search" placeholder="${crewId ? 'Search group players…' : 'Search players…'}" autocomplete="off" />
-               <div class="planner-invite-toolbar"><span class="row-sub">Players who usually play then appear first.</span><button type="button" class="btn-link" id="ng-select-visible" aria-pressed="false">Select all visible</button></div>
+               <div class="planner-invite-toolbar"><span class="row-sub">People free at this time show first.</span><button type="button" class="btn-link" id="ng-select-visible" aria-pressed="false">Select all visible</button></div>
                <div class="invite-chips planner-invite-list" id="ng-invites">${friendChips}</div>`
             : `<div class="empty-state planner-invite-empty"><span>${plannerFeedErrors.friends
               ? 'Friends couldn’t load. Reload setup choices to invite someone.'
@@ -20568,8 +20696,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
       </section>
 
-      <section class="planner-essentials hidden" id="ng-essentials" aria-labelledby="ng-access-title">
-        <h4 id="ng-access-title">Court access &amp; cost</h4>
+      <details class="planner-essentials flow-disclosure hidden" id="ng-essentials" ${presetCourtAccess || presetCostCents != null ? 'open' : ''}>
+        <summary id="ng-access-title">Court booking &amp; cost <span>Optional</span></summary>
         <div id="ng-access-hours-warning" class="planner-hours-hint" role="status" tabindex="-1"></div>
         <div class="form-grid">
           <div class="form-field"><label for="ng-court-access">Court access</label><select id="ng-court-access"><option value="">Not confirmed yet</option>${[['host_reserved','Reserved by me'],['public_drop_in','Public drop-in'],['booking_needed','Booking still needed']].map(([value,label]) => `<option value="${value}"${value === presetCourtAccess ? ' selected' : ''}>${label}</option>`).join('')}</select></div>
@@ -20582,7 +20710,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           </div>
         </div>
         <p class="field-help">Court bookings happen outside Third Shot.</p>
-      </section>
+      </details>
 
       <details class="planner-advanced hidden" id="ng-advanced">
         <summary><span>More details</span><span class="planner-advanced-copy" id="ng-options-summary">${gameLevelRangeLabel({ levelMin: presetLevelMin, levelMax: presetLevelMax })}</span></summary>
@@ -21097,7 +21225,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           const source = result.hours_source === 'venue' ? 'Venue hours' : 'Court hours';
           setPlannerHoursHint(selectedRow?.hours_conflict
             ? `${source}: this time is outside listed hours. Confirm access before inviting players.`
-            : selectedRow ? `${source} · ${selectedRow.hours_label}${result.timezone && result.timezone !== detectedRecurrenceTimezone ? ` · ${plannerTimeZoneLabel(result.timezone)}` : ''}` : '', { warning: !!selectedRow?.hours_conflict });
+            : selectedRow && selectedRow.hours_label && selectedRow.hours_label !== 'Hours not listed' ? `${source} · ${selectedRow.hours_label}${result.timezone && result.timezone !== detectedRecurrenceTimezone ? ` · ${plannerTimeZoneLabel(result.timezone)}` : ''}` : '', { warning: !!selectedRow?.hours_conflict });
           const more = modal.querySelector('#ng-more-times');
           const count = modal.querySelectorAll('#ng-smart-times button').length;
           more.classList.toggle('hidden', count <= 3);
@@ -26980,9 +27108,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
   // ---------- Chat & Friends ----------
   function configureCommunityLaneTabs() {
     const labels = [
-      ['#chat-tab-chats', 'Messages'],
+      ['#chat-tab-chats', 'Chats'],
+      ['#chat-tab-friends', 'Friends'],
       ['#chat-tab-groups', 'Groups'],
-      ['#chat-tab-friends', 'Players'],
     ];
     labels.forEach(([selector, label]) => {
       const button = $(selector);
@@ -27845,9 +27973,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const mode = ['nearby', 'recent'].includes(state.peopleMode) ? state.peopleMode : 'friends';
     el.innerHTML = `
       <div class="segmented community-people-switch" id="people-mode" role="tablist" aria-label="People views" style="margin:2px 0 12px">
-        <button type="button" id="people-tab-nearby" role="tab" data-people-mode="nearby" aria-controls="people-content" aria-selected="${mode === 'nearby'}" class="${mode === 'nearby' ? 'active' : ''}">Nearby</button>
-        <button type="button" id="people-tab-friends" role="tab" data-people-mode="friends" aria-controls="people-content" aria-selected="${mode === 'friends'}" class="${mode === 'friends' ? 'active' : ''}">Friends</button>
+        <button type="button" id="people-tab-friends" role="tab" data-people-mode="friends" aria-controls="people-content" aria-selected="${mode === 'friends'}" class="${mode === 'friends' ? 'active' : ''}">My friends</button>
         <button type="button" id="people-tab-recent" role="tab" data-people-mode="recent" aria-controls="people-content" aria-selected="${mode === 'recent'}" class="${mode === 'recent' ? 'active' : ''}">Played together</button>
+        <button type="button" id="people-tab-nearby" role="tab" data-people-mode="nearby" aria-controls="people-content" aria-selected="${mode === 'nearby'}" class="${mode === 'nearby' ? 'active' : ''}">Nearby</button>
       </div>
       <div id="people-content" role="tabpanel" aria-labelledby="people-tab-${mode}"></div>`;
     const body = el.querySelector('#people-content');
@@ -28480,15 +28608,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
                 </span>
               </button>
               <div class="friend-row-actions">
-                <button type="button" class="btn btn-primary btn-sm" data-msg="${f.id}" aria-label="Message ${esc(f.display_name)}">${uiIcon('message')} Message</button>
-                <details class="friend-row-more">
-                  <summary class="btn btn-secondary btn-sm" aria-label="More actions for ${esc(f.display_name)}" aria-haspopup="menu" aria-expanded="false">${uiIcon('sliders')}<span class="sr-only">More actions</span></summary>
-                  <div class="friend-row-menu" role="menu" aria-label="Actions for ${esc(f.display_name)}">
-                    ${f.checked_in_court && f.checked_in_court.looking_for_game
-                      ? `<button type="button" class="btn btn-secondary btn-block" role="menuitem" data-coming="${f.id}">${uiIcon('pickleball')} I can be there soon</button>` : ''}
-                    <button type="button" class="btn btn-secondary btn-block" role="menuitem" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" aria-label="Invite ${esc(f.display_name)} to a game">${uiIcon('send')} Invite to play</button>
-                  </div>
-                </details>
+                <button type="button" class="btn btn-primary btn-sm" data-invite="${f.id}" data-invite-court="${f.checked_in_court ? f.checked_in_court.id : ''}" data-invite-court-name="${f.checked_in_court ? esc(f.checked_in_court.name) : ''}" aria-label="Invite ${esc(f.display_name)} to play">${uiIcon('plus')} Play</button>
+                <button type="button" class="btn btn-secondary btn-sm friend-row-icon" data-msg="${f.id}" aria-label="Message ${esc(f.display_name)}">${uiIcon('message')}</button>
+                ${f.checked_in_court && f.checked_in_court.looking_for_game
+                  ? `<button type="button" class="btn btn-secondary btn-sm" data-coming="${f.id}" aria-label="Tell ${esc(f.display_name)} you can be there soon">${uiIcon('pickleball')} On my way</button>` : ''}
               </div>
           </div>`).join('')
       : (wantedSlots ? '' : emptyStateHtml({
@@ -28498,6 +28621,13 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           secondary: { share: true, label: 'Invite friends', icon: 'send' },
         }));
 
+    if (shownFriends.length) {
+      html += `<button type="button" class="card row nav-row-button friend-invite-link" data-share-invite>
+        <span class="nav-row-leading" aria-hidden="true">${uiIcon('send')}</span>
+        <span class="row-main"><span class="row-title">Invite friends to Third Shot</span><span class="row-sub">Send a link. They can join your games right away.</span></span>
+        ${uiIcon('chevron-right', 'chev')}
+      </button>`;
+    }
     let friendSuggestionsHtml = friendDigestHtml;
     // People you've actually played with but haven't friended.
     if (suggestions && suggestions.items && suggestions.items.length) {
@@ -28598,6 +28728,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       state.friendSlotFilter = btn.dataset.slots;
       renderChat({ useCachedData: true });
     });
+    el.querySelector('[data-share-invite]')?.addEventListener('click', () => shareInviteLink());
     el.querySelector('#friend-clear-time')?.addEventListener('click', () => {
       state.friendSlotFilter = '';
       renderChat({ useCachedData: true });
@@ -40240,7 +40371,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     const el = $('#presence-banner');
     if (state.presence && state.presence.checked_in) {
       el.innerHTML = `<button type="button" class="presence-main" id="banner-court" aria-label="Open ${esc(state.presence.court_name)}">
-          ${uiIcon('map-pin')}<span><span class="presence-label">${esc(courtPresenceSourceText(state.presence))}</span><b>${esc(state.presence.court_name)}</b></span>${uiIcon('chevron-right')}
+          ${uiIcon('map-pin')}<span><span class="presence-label">You’re here</span><b>${esc(state.presence.court_name)}</b></span>${uiIcon('chevron-right')}
         </button>
         <button type="button" id="banner-checkout">Check out</button>`;
       el.classList.remove('hidden');
@@ -41134,7 +41265,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         if (Number(state.me?.id) !== accountId) return;
         localStorage.setItem(pauseKey, '1');
         pendingNewPlayerOnboardingAccountId = null;
-        switchTab('play', { preserveOverlayIntent: true });
+        switchTab('courts', { preserveOverlayIntent: true });
         resumePlayerInviteIntentAfterAuth();
       };
       if (state.me.home_lat != null || state.me.home_court_id) {
@@ -41207,7 +41338,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     $('#auth-screen').classList.add('hidden');
     $('#main-screen').classList.remove('hidden');
     updatePlayHeader();
-    switchTab(state.tab || 'play', { preserveOverlayIntent: true });
+    switchTab(state.tab || 'courts', { preserveOverlayIntent: true });
     startPlayLiveRefresh();
     if (state.connectionState !== 'offline') flushChatOutboxForAccount(state.me && state.me.id);
     if (autoCheckInEnabled()) startLocationWatch();

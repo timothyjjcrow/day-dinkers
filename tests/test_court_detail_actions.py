@@ -130,7 +130,7 @@ def test_empty_sessions_offer_a_context_preserving_action_and_detail_has_a_loadi
         "court = await api(`/courts/${normalizedCourtId}`)",
     )
     timeline = section(APP, "function loadCourtTimeline", "function courtConditionReportsHtml")
-    assert "No play listed this week" in timeline
+    assert "Nothing scheduled this week" in timeline
     assert "data-timeline-create" in timeline
     assert "openChildModal(modal,()=>openNewGameModal({court}))" in timeline
     assert "openChildModal(modal, () => openNewGameModal" in detail
