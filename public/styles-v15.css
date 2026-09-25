@@ -167,6 +167,8 @@ html[data-theme="dark"] {
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, .35), 0 18px 40px rgba(0, 0, 0, .5);
   --green-50: #16241b;
   --green-100: #1e3a28;
+  --green-300: #3f7652;
+  --card-soft: #16241b;
   --amber-50: #38290e;
   --amber-100: #6b4e12;
   --amber-700: #fbbf24;
@@ -7995,7 +7997,7 @@ details.planner-essentials[open] { padding-bottom: 14px; }
    sections after it refine each screen.
    ========================================================================== */
 h1, h2, h3, h4 { letter-spacing: -.02em; }
-.btn-link { color: var(--green-700); font-weight: 750; }
+.btn-link { color: var(--green-accent); font-weight: 750; }
 a.btn { text-decoration: none; }
 .fab {
   width: 60px; height: 60px; border-radius: var(--radius-lg); background: var(--volt); color: var(--on-volt);
@@ -8008,6 +8010,12 @@ a.btn { text-decoration: none; }
 }
 .active-game-banner.state-live { background: linear-gradient(100deg, var(--forest), var(--forest-2)); }
 .active-game-banner.state-live .agb-dot { background: var(--volt); }
+.active-game-banner.state-invited, .active-game-banner.state-upcoming { background: linear-gradient(100deg, var(--forest), var(--forest-2)); }
+.agb-join { background: var(--volt); color: var(--on-volt); }
+.active-game-banner .agb-open > .ui-icon { color: var(--volt); }
+@media (min-width: 900px) {
+  .active-game-banner { left: 136px; right: 24px; bottom: 16px; max-width: 760px; margin-inline: auto; }
+}
 .empty-state-icon, .empty-state .community-empty-icon { background: var(--volt-soft); color: var(--forest); border-radius: var(--radius-lg); }
 html[data-theme="dark"] .empty-state-icon, html[data-theme="dark"] .empty-state .community-empty-icon { color: var(--volt); }
 .nav-row-leading { background: var(--surface-2); color: var(--ink); border-radius: var(--radius-md); }
@@ -8091,7 +8099,7 @@ select:not([multiple]):not(.app-select-native) {
   background-color: var(--surface-2); color: var(--ink); font-size: 13.5px; font-weight: 750;
 }
 .court-location-status { border-bottom: 0; }
-.court-location-status.is-near { color: var(--green-700); }
+.court-location-status.is-near { color: var(--green-accent); }
 .court-peek-card { border: 0; border-radius: var(--radius-lg); box-shadow: 0 1px 2px rgba(15, 31, 23, .06), 0 6px 18px rgba(15, 31, 23, .08); }
 .court-peek-main { grid-template-columns: 52px minmax(0, 1fr) 22px; gap: 12px; padding: 10px 12px; min-height: 72px; }
 .court-peek-main .court-card-photo { width: 52px; height: 52px; border-radius: var(--radius-md); }
@@ -8135,7 +8143,7 @@ select:not([multiple]):not(.app-select-native) {
 .court-card-fact, .court-card-fact.is-open, .court-card-fact.is-closed {
   min-height: 0; padding: 0; background: transparent; color: var(--ink-soft); font-weight: 650;
 }
-.court-card-fact.is-open { color: var(--green-700); font-weight: 750; }
+.court-card-fact.is-open { color: var(--green-accent); font-weight: 750; }
 .court-card-fact.is-closed { color: var(--amber-800); }
 .court-card-quiet { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
 .court-card-quiet::before {
@@ -8149,7 +8157,7 @@ select:not([multiple]):not(.app-select-native) {
   min-height: var(--tap-min); padding: 6px 14px 6px 96px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   color: var(--ink-soft); font-size: 12.5px; font-weight: 700;
 }
-.court-card-map[aria-pressed="true"] { color: var(--green-700); }
+.court-card-map[aria-pressed="true"] { color: var(--green-accent); }
 .court-card-programs { border: 0; border-radius: var(--radius-md); background: var(--volt-soft); color: var(--ink); }
 .verified-venue-badge { border: 0; background: var(--volt-soft); color: var(--ink); }
 
@@ -8193,19 +8201,19 @@ select:not([multiple]):not(.app-select-native) {
   background: var(--card); color: var(--ink); padding: 20px; border-radius: var(--radius-xl); box-shadow: var(--shadow-lift);
 }
 .auth-explore:has(#auth-share-context:not(.hidden)) .auth-explore-brand { color: var(--ink); }
-.auth-explore:has(#auth-share-context:not(.hidden)) #auth-browse-back { color: var(--green-700); }
+.auth-explore:has(#auth-share-context:not(.hidden)) #auth-browse-back { color: var(--green-accent); }
 .auth-share-context { border: 0; background: var(--volt-soft); color: var(--ink); }
 .auth-preview-photo { border-radius: var(--radius-lg); }
 .auth-preview-tags span { border: 0; border-radius: var(--radius-pill); background: var(--surface-2); padding: 6px 11px; font-weight: 650; }
 .auth-preview-status { border: 0; border-radius: var(--radius-pill); background: var(--surface-2); }
 .auth-card { border: 0; box-shadow: 0 24px 60px rgba(0, 0, 0, .35); color: var(--ink); }
 .auth-card h1 { color: var(--ink); font-size: 28px; font-weight: 800; letter-spacing: -.035em; }
-.auth-eyebrow { color: var(--green-700); letter-spacing: .08em; }
+.auth-eyebrow { color: var(--green-accent); letter-spacing: .08em; }
 .auth-logo-img { border: 0; border-radius: var(--radius-lg); box-shadow: 0 10px 26px rgba(15, 58, 38, .22); }
 .auth-control > input { border-radius: var(--radius-md); background: var(--bg); border-color: transparent; }
 .auth-control > input:focus { background: var(--card); }
 #auth-submit { min-height: 56px; font-size: 17px; }
-.auth-card > .btn-link, #auth-access-back { color: var(--green-700); }
+.auth-card > .btn-link, #auth-access-back { color: var(--green-accent); }
 @media (max-width: 720px) {
   #auth-screen { padding: calc(18px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom)); }
   .auth-explore { padding: 6px 2px 8px; }
@@ -8230,13 +8238,12 @@ html[data-theme="dark"] #auth-screen { background: radial-gradient(120% 60% at 1
   width: 64px; height: 64px; border-radius: var(--radius-lg); background: var(--forest); color: var(--volt);
   box-shadow: 0 10px 24px rgba(15, 58, 38, .22);
 }
-.onboarding-kicker { color: var(--green-700); letter-spacing: .08em; }
-html[data-theme="dark"] .onboarding-kicker { color: var(--volt); }
+.onboarding-kicker { color: var(--green-accent); letter-spacing: .08em; }
 .onboarding-sheet h3, .checkin-sheet h3 { font-size: 26px; font-weight: 800; letter-spacing: -.035em; line-height: 1.1; }
 .onboarding-copy { font-size: 14.5px; line-height: 1.5; }
 .tour-dot { width: 8px; transition: width .2s ease, background-color .2s ease; }
 .tour-dot.on { width: 22px; background: var(--forest); }
-.home-area-heading > .ui-icon { color: var(--green-700); }
+.home-area-heading > .ui-icon { color: var(--green-accent); }
 .home-area-search-field input { border-radius: var(--radius-pill); padding-left: 18px; }
 
 

@@ -3,11 +3,11 @@
   "files": {
     "app-v15.min.js": {
       "source": "app-v15.js",
-      "source_sha256": "db28cfa76f947e925b9edd7269b3db3795eba8127e5faceca4168a159154934a",
-      "source_bytes": 2457556,
-      "minified_bytes": 1553242,
-      "gzip_bytes": 417233,
-      "brotli_bytes": 306174
+      "source_sha256": "224c9a18fa16b082c26d66e9879fb6f8753a160a93a43cecfa09fddee43fa39f",
+      "source_bytes": 2461054,
+      "minified_bytes": 1555373,
+      "gzip_bytes": 417725,
+      "brotli_bytes": 306741
     },
     "crew-planner-v15.min.js": {
       "source": "crew-planner-v15.js",
@@ -35,11 +35,11 @@
     },
     "styles-v15.min.css": {
       "source": "styles-v15.css",
-      "source_sha256": "6ad17a97b71e34866ce484758b3b33da25b5e2eb72cb6aaab76640409b7acc8b",
-      "source_bytes": 604270,
-      "minified_bytes": 525175,
-      "gzip_bytes": 83200,
-      "brotli_bytes": 64621
+      "source_sha256": "26578cba6dbe45d24361ffa212c057e1aa87fd800870e345ed0ee1469e0b5e89",
+      "source_bytes": 650388,
+      "minified_bytes": 565090,
+      "gzip_bytes": 89057,
+      "brotli_bytes": 68635
     }
   }
 }
