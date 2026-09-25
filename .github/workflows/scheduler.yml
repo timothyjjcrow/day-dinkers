@@ -1,0 +1,32 @@
+name: Scheduler
+
+# Vercel Hobby runs the /api/cron/* jobs once a day, which is too slow for
+# "game in an hour" reminders. This calls the public /api/tick heartbeat,
+# which runs time-sensitive work at most once per 5-minute window however
+# often it is called. It only runs during U.S. playing hours (about 5 AM
+# Eastern to 10 PM Pacific) so the free Neon database can still scale to
+# zero overnight.
+on:
+  schedule:
+    - cron: '7,37 0-5,10-23 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: scheduler-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Run the maintenance tick
+        env:
+          APP_URL: https://third-shot.vercel.app
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --max-time 60 --retry 2 --retry-delay 15 \
+            -X POST -H 'Content-Type: application/json' --data '{}' \
+            "$APP_URL/api/tick"

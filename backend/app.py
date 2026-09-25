@@ -2522,6 +2522,9 @@ def create_app(config_name=None):
         resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
         return resp
 
+    from backend.services.push import register_inline_delivery
+    register_inline_delivery(app)
+
     with app.app_context():
         if app.config.get('SCHEMA_MANAGEMENT_ENABLED'):
             _ensure_pg_schema(app)
