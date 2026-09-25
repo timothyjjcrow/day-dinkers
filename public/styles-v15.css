@@ -8208,6 +8208,13 @@ html[data-theme="dark"] #auth-screen { background: radial-gradient(120% 60% at 1
 }
 .boot-screen { background: radial-gradient(120% 70% at 100% 0%, var(--forest-2) 0%, transparent 60%), var(--forest); }
 .boot-progress span { background: var(--volt); }
+@media (min-width: 900px) {
+  #bottom-nav::before {
+    content: ''; position: absolute; top: 24px; left: 50%; width: 48px; height: 48px; transform: translateX(-50%);
+    border-radius: var(--radius-md); background: url("/icon-512.png") center / cover; box-shadow: 0 6px 16px rgba(15, 58, 38, .2);
+  }
+  .nav-btn.active { background: transparent; }
+}
 
 /* Onboarding and check-in sheets: one bold icon tile, a big headline. */
 .checkin-sheet-icon, .onboarding-sheet .checkin-sheet-icon {
