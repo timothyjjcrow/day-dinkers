@@ -60,7 +60,7 @@ def test_focus_identity_follows_the_same_action_not_its_position_or_attribute_or
 
 
 def test_create_game_opens_the_casual_planner_directly():
-    source = functions_between('function openCreatePlaySheet()', 'function rallyLauncherHtml()')
+    source = functions_between('function openCreatePlaySheet()', 'function rallyLauncherHtml(')
     result = run_js('''
       const calls=[];
       const openNewGameModal=opts=>{calls.push(opts);return 'planner';};
