@@ -55,9 +55,9 @@
   --selected-fill: var(--solid);
   --selected-ink: var(--on-solid);
   --selected-border: var(--solid);
-  --choice-selected-fill: var(--green-50);
-  --choice-selected-ink: var(--green-ink);
-  --choice-selected-border: var(--green-600);
+  --choice-selected-fill: var(--volt-soft);
+  --choice-selected-ink: var(--ink);
+  --choice-selected-border: var(--forest);
   --green-200: #c5e6cc;
   --green-300: #93cfa2;
   --card-soft: #f0f7ef;
@@ -151,6 +151,7 @@ html[data-theme="dark"] {
   --surface-2: #1c241f;
   --segment-selected-fill: #2a352e;
   --nav-surface: rgba(21, 28, 24, .9);
+  --choice-selected-border: var(--volt);
   --shimmer: rgba(255, 255, 255, 0.08);
 }
 @media (prefers-color-scheme: dark) {
@@ -191,6 +192,7 @@ html[data-theme="dark"] {
   --surface-2: #1c241f;
   --segment-selected-fill: #2a352e;
   --nav-surface: rgba(21, 28, 24, .9);
+  --choice-selected-border: var(--volt);
   --shimmer: rgba(255, 255, 255, 0.08);
   }
 }
@@ -8012,9 +8014,13 @@ html[data-theme="dark"] .empty-state-icon, html[data-theme="dark"] .empty-state 
 .flow-disclosure { border: 0; box-shadow: var(--shadow); border-radius: var(--radius-lg); }
 .avatar { font-weight: 800; letter-spacing: -.02em; }
 .modal-head h3 { font-size: 21px; font-weight: 800; letter-spacing: -.03em; }
-.modal-close { border-radius: var(--radius-pill); background: var(--surface-2); }
+.modal-close:not(.btn):not(.btn-link) { background: var(--surface-2); color: var(--ink); }
 .toast-icon { background: color-mix(in srgb, var(--volt) 22%, transparent); color: var(--volt); }
 .badge { border-radius: var(--radius-pill); font-weight: 800; }
+.choice-card, .court-filter-option { border-color: transparent; background: var(--surface-2); }
+.court-filter-option.active .court-filter-option-state { border-color: var(--forest); background: var(--forest); color: var(--volt); }
+.court-filter-intro, .court-contribution-intro { border: 0; background: var(--volt-soft); }
+.court-filter-intro > span, .court-contribution-intro > span { color: var(--forest); }
 select:not([multiple]):not(.app-select-native) {
   -webkit-appearance: none; appearance: none; padding-right: 40px; font-weight: 650;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2356645b' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");

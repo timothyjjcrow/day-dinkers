@@ -40550,7 +40550,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
           <div id="ha-results" aria-live="polite"></div>
         </div>
         ${primaryCourtId ? `<button type="button" class="btn btn-secondary btn-block home-area-primary-court" id="ha-primary-court">${uiIcon('home')} <span><b>Use my primary court’s area</b><small>${esc(state.me.home_court_name || 'My primary court')}</small></span></button>` : ''}
-        <button type="button" class="btn btn-secondary btn-block onboarding-primary-action" id="ha-loc">${uiIcon('target')} <span>Use current location</span></button>
+        <button type="button" class="btn btn-primary btn-block onboarding-primary-action" id="ha-loc">${uiIcon('target')} <span>Use current location</span></button>
         <div id="ha-save-status" class="city-search-feedback hidden" role="status" aria-live="polite" tabindex="-1"></div>
         <p class="onboarding-privacy-note home-area-note">${uiIcon('shield')} <span>Optional. Change it in Privacy &amp; safety.</span></p>
         <button type="button" class="btn-link modal-close btn-block">${esc(dismissLabel)}</button>
