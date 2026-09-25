@@ -1,17 +1,28 @@
-"""Authenticated scheduled maintenance for lifecycle and notification work."""
+"""Scheduled maintenance for lifecycle and notification work.
+
+The daily ``/cron/*`` routes need the cron secret. ``/tick`` is the frequent
+heartbeat for time-sensitive work (hour-before reminders, stale presence,
+queued phone alerts). It is public on purpose: anything may call it (the
+GitHub scheduler, open apps), but a shared lease lets at most one caller per
+window run the bounded, idempotent jobs; everyone else gets a no-op.
+"""
 from __future__ import annotations
 
 import hmac
 import os
 import time
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 from backend.app import db
 from backend.models import User
+from backend.security import rate_limit
 
 
 maintenance_bp = Blueprint('maintenance', __name__)
+
+TICK_INTERVAL_SECONDS = 300
+TICK_BUDGET_SECONDS = 25
 
 
 def _cron_authorized():
@@ -58,6 +69,80 @@ def _maintenance_jobs():
         ('league_advancement', advance_due_league_rounds),
         ('club_digests', send_club_digests),
     ]
+
+
+def _tick_jobs():
+    """Time-sensitive work that cannot wait for the daily maintenance run."""
+    from backend.routes.courts import cleanup_stale_presence
+    from backend.routes.games import (
+        expire_abandoned_instant_rallies,
+        send_game_reminders,
+    )
+    from backend.routes.leagues import send_league_schedule_reminders
+    from backend.routes.tournaments import send_tournament_reminders
+    return [
+        ('presence_cleanup', cleanup_stale_presence),
+        ('instant_game_expiry', expire_abandoned_instant_rallies),
+        ('game_reminders', send_game_reminders),
+        ('tournament_reminders', send_tournament_reminders),
+        ('league_schedule_reminders', send_league_schedule_reminders),
+    ]
+
+
+def _run_jobs(jobs, deadline):
+    """Run each job in isolation, deferring the rest once time runs out."""
+    outcomes = {}
+    for name, job in jobs:
+        if time.monotonic() >= deadline:
+            outcomes[name] = 'deferred'
+            continue
+        try:
+            job()
+            outcomes[name] = 'ok'
+        except Exception:
+            db.session.rollback()
+            outcomes[name] = 'failed'
+            current_app.logger.exception('Scheduled maintenance job failed: %s', name)
+    return outcomes
+
+
+def _claim_tick_window(now):
+    """True for exactly one caller per tick window, across every instance."""
+    from backend.security import _increment_bucket
+
+    window = int(now // TICK_INTERVAL_SECONDS)
+    backend = current_app.config.get('RATE_LIMIT_BACKEND', 'memory')
+    return _increment_bucket(
+        'maintenance:tick', window, now, TICK_INTERVAL_SECONDS, backend,
+    ) == 1
+
+
+@maintenance_bp.post('/tick')
+@rate_limit(20, 60)
+def tick():
+    try:
+        claimed = _claim_tick_window(time.time())
+    except Exception:
+        current_app.logger.exception('Maintenance tick lease unavailable')
+        return jsonify({'ok': False, 'ran': False}), 503
+    if not claimed:
+        return jsonify({'ok': True, 'ran': False})
+
+    deadline = time.monotonic() + TICK_BUDGET_SECONDS
+    outcomes = _run_jobs(_tick_jobs(), deadline)
+    push_ok = True
+    try:
+        from backend.services.push import deliver_due_push_now
+
+        deliver_due_push_now(limit=100, deadline=deadline)
+    except Exception:
+        db.session.rollback()
+        push_ok = False
+        current_app.logger.exception('Tick push delivery failed')
+    # This tick already delivered what its reminders queued.
+    g.pop('push_outbox_pending', None)
+    failed = any(outcome == 'failed' for outcome in outcomes.values())
+    return jsonify({'ok': push_ok and not failed, 'ran': True})
 
 
 @maintenance_bp.get('/cron/push')
@@ -111,18 +196,7 @@ def run_maintenance():
     started = time.monotonic()
     budget = min(max(int(os.getenv('MAINTENANCE_CRON_BUDGET_SECONDS', '50')), 5), 55)
     deadline = started + budget
-    outcomes = {}
-    for name, job in _maintenance_jobs():
-        if time.monotonic() >= deadline:
-            outcomes[name] = 'deferred'
-            continue
-        try:
-            job()
-            outcomes[name] = 'ok'
-        except Exception:
-            db.session.rollback()
-            outcomes[name] = 'failed'
-            current_app.logger.exception('Scheduled maintenance job failed: %s', name)
+    outcomes = _run_jobs(_maintenance_jobs(), deadline)
 
     nudges = {'processed': 0, 'remaining': 0}
     if time.monotonic() < deadline:

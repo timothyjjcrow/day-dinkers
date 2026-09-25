@@ -169,6 +169,9 @@ class BaseConfig:
     PUSH_DELIVERY_ENABLED = _get_bool(
         'PUSH_DELIVERY_ENABLED', default=True,
     )
+    # Deliver alerts before the request that queued them responds, instead
+    # of waiting for a scheduled drain.
+    PUSH_INLINE_DELIVERY = _get_bool('PUSH_INLINE_DELIVERY', default=True)
 
 
 class DevelopmentConfig(BaseConfig):
@@ -203,6 +206,8 @@ class TestingConfig(BaseConfig):
     RATE_LIMIT_ENABLED = False
     RATE_LIMIT_BACKEND = 'memory'
     PUSH_DELIVERY_ENABLED = True
+    # Tests that exercise inline delivery enable it with a stubbed webpush.
+    PUSH_INLINE_DELIVERY = False
     INSTANT_RALLY_PROXIMITY_REQUIRED = False
     MFA_ENCRYPTION_KEY = os.getenv(
         'MFA_ENCRYPTION_KEY',

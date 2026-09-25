@@ -340,9 +340,25 @@ competition-result, recurrence, reminder, and digest lifecycle work;
 refresh. Vercel Hobby provides hour-level rather than exact-minute scheduling,
 so these are target hours. All three require `Authorization: Bearer
 $CRON_SECRET`. The push run is a safe no-op while phone delivery is disabled.
-Before promising timely phone alerts, attach a frequent external scheduler or
-upgrade Vercel and restore a minute-level push schedule; a daily push drain can
-deliver time-sensitive alerts nearly 24 hours late.
+
+Time-sensitive work does not wait for those daily runs:
+
+- **Phone alerts go out immediately.** A request that queues alerts (an
+  invite, a message, a friend at the court) delivers them in parallel before
+  it responds, bounded to 25 rows and about five seconds
+  (`PUSH_INLINE_DELIVERY`, default `true`). Anything it cannot finish stays in
+  the outbox for the next tick or the daily drain.
+- **`POST /api/tick`** runs hour-before and day-before reminders, stale
+  presence cleanup, instant-game expiry, and the push outbox. It is public but
+  lease-guarded: whatever calls it, the jobs run at most once per five-minute
+  window (a shared `rate_limit_bucket` row), and every job is idempotent.
+- **`.github/workflows/scheduler.yml`** calls the tick at :07 and :37 during
+  U.S. playing hours (10:00–05:59 UTC), so a reminder lands 30–65 minutes
+  before a game. Overnight gaps let the Neon Free compute scale to zero; each
+  tick keeps it awake about five minutes, roughly 25–30 CU-hours a month at
+  the 0.25 CU minimum. GitHub pauses scheduled workflows after 60 days
+  without repository activity; re-enable it from the Actions tab if that
+  happens.
 Court presence uses a visible-client heartbeat and becomes stale after
 `PRESENCE_STALE_AFTER_SECONDS` (default `1800`, or 30 minutes); the maintenance
 job then checks out the stale row and closes any abandoned instant assembly.
