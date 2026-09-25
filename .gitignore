@@ -9,7 +9,8 @@ venv/
 .venv/
 output/
 tmp/
-.claude/
+.claude/*
+!.claude/settings.json
 .vercel
 .env*
 node_modules/
