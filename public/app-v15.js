@@ -5055,7 +5055,7 @@
     else document.documentElement.dataset.theme = pref;
     const dark = themeIsDark();
     document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', dark ? 'dark' : 'light');
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111614' : '#14532d');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0b100d' : '#f5f5f0');
     syncMapTileTheme();
   }
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
