@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#14532d" />
+  <meta name="theme-color" content="#f5f5f0" />
   <!-- Native controls follow the app's explicit and automatic theme modes. -->
   <meta name="color-scheme" content="light dark" />
   <script>
@@ -18,16 +18,17 @@
     } catch { /* storage can be disabled; CSS media queries remain the fallback */ }
   </script>
   <title>Third Shot — Find courts, players & play</title>
-  <link rel="stylesheet" href="/release-assets/r82/styles-v15.min.css" />
+  <link rel="stylesheet" href="/release-assets/r83/styles-v15.min.css" />
+  <link rel="preload" href="/vendor/plus-jakarta-sans/plus-jakarta-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-512.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-512.png" />
   <!-- Start downloading the large application files early, but execute them
        with defer so the useful boot shell can paint before bundle parsing. -->
-  <link rel="preload" href="/release-assets/r82/crew-planner-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r82/tournament-bracket-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r82/venue-workspace-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r82/app-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r83/crew-planner-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r83/tournament-bracket-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r83/venue-workspace-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r83/app-v15.min.js" as="script" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -115,7 +116,7 @@
       <div class="auth-layout">
       <div class="auth-explore">
         <div class="auth-explore-brand"><img src="icon-512.png" alt="" /><span>Third Shot</span></div>
-        <h2 id="auth-explore-title">Find your next place to play.</h2>
+        <h2 id="auth-explore-title">Find your next place to <span class="auth-volt">play.</span></h2>
         <p class="auth-explore-copy">Tap a court on the map to see who plays there. Join free to play with friends.</p>
         <button type="button" class="btn-link hidden" id="auth-browse-back">Back to courts</button>
         <div id="auth-share-context" class="auth-share-context hidden" role="note"></div>
@@ -424,9 +425,9 @@
       syncBoot();
     })();
   </script>
-  <script defer src="/release-assets/r82/crew-planner-v15.min.js"></script>
-  <script defer src="/release-assets/r82/tournament-bracket-v15.min.js"></script>
-  <script defer src="/release-assets/r82/venue-workspace-v15.min.js"></script>
-  <script defer src="/release-assets/r82/app-v15.min.js"></script>
+  <script defer src="/release-assets/r83/crew-planner-v15.min.js"></script>
+  <script defer src="/release-assets/r83/tournament-bracket-v15.min.js"></script>
+  <script defer src="/release-assets/r83/venue-workspace-v15.min.js"></script>
+  <script defer src="/release-assets/r83/app-v15.min.js"></script>
 </body>
 </html>

@@ -5055,7 +5055,7 @@
     else document.documentElement.dataset.theme = pref;
     const dark = themeIsDark();
     document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', dark ? 'dark' : 'light');
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111614' : '#14532d');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0b100d' : '#f5f5f0');
     syncMapTileTheme();
   }
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -7608,7 +7608,7 @@
       const availability = item.source === 'player' ? (game.is_joined ? 'Joined' : game.spots_left > 0 ? `${game.spots_left} spot${game.spots_left===1 ? '' : 's'} left` : 'Full') : status;
       const details = item.source === 'player' ? facts.filter((_,index)=>index!==2) : facts;
       const names = (game.players || []).slice(0,3).map(player=>player.display_name).filter(Boolean);
-      return `<article class="court-timeline-item court-timeline-card is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-card-top"><time class="court-timeline-time"${item.starts_at ? ` datetime="${esc(item.starts_at)}"` : ''}>${esc(courtTimelineTime(item))}</time>${availability ? `<span class="court-timeline-availability${item.source==='player' && (game.is_joined || game.spots_left>0) ? ' has-space' : ''}">${esc(availability)}</span>` : ''}</div><div class="court-timeline-content"><h4>${esc(item.title)}</h4><span class="court-timeline-source">${esc(sourceLabel)}</span><p>${details.filter(Boolean).map(esc).join(' · ')}</p>${names.length ? `<p>${esc(names.join(', '))}${game.players.length>names.length ? ` +${game.players.length-names.length}` : ''}</p>` : ''}${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${item.source==='community' ? '<small>Player plan only. Venue registration is separate.</small>' : ''}${action}</div></article>`;
+      return `<article class="court-timeline-item court-timeline-card is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-card-top"><time class="court-timeline-time"${item.starts_at ? ` datetime="${esc(item.starts_at)}"` : ''}>${esc(courtTimelineTime(item))}</time>${availability ? `<span class="court-timeline-availability${item.source==='player' && (game.is_joined || game.spots_left>0) ? ' has-space' : ''}${item.source==='player' && game.is_joined ? ' is-joined' : ''}">${esc(availability)}</span>` : ''}</div><div class="court-timeline-content"><h4>${esc(item.title)}</h4><span class="court-timeline-source">${esc(sourceLabel)}</span><p>${details.filter(Boolean).map(esc).join(' · ')}</p>${names.length ? `<p>${esc(names.join(', '))}${game.players.length>names.length ? ` +${game.players.length-names.length}` : ''}</p>` : ''}${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${item.source==='community' ? '<small>Player plan only. Venue registration is separate.</small>' : ''}${action}</div></article>`;
     }
     return `<article class="court-timeline-item is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-time">${esc(courtTimelineTime(item))}<small>${esc(courtTimelineDay(item))}</small></div><div class="court-timeline-content"><span class="court-timeline-source">${esc(sourceLabel)}</span><h4>${esc(item.title)}</h4><p>${facts.filter(Boolean).map(esc).join(' · ')}</p>${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${action}</div></article>`;
   }
@@ -7723,7 +7723,7 @@
         captureFocus();
         const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const zoneLabel = data.timezone && data.timezone !== viewerZone ? `Court time · ${courtTimelineZoneLabel(data.timezone)}` : '';
-        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Coming up here</h3><button type="button" class="btn-link" data-timeline-create>Create game</button></div>${zoneLabel ? `<p class="court-timeline-zone">${esc(zoneLabel)}</p>` : ''}<div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev aria-label="Previous week">${uiIcon('arrow-left')}</button><button type="button" class="court-timeline-dates" data-timeline-today aria-label="${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}. Back to today"><b>${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</b><small>${from ? 'Back to today' : 'Next 7 days'}</small></button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next aria-label="Next week">${uiIcon('arrow-right')}</button></div><span class="sr-only" role="status">${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}</span>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>`<section class="court-timeline-day"><h4>${esc(new Date(`${on}T12:00:00`).toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</h4>${items.map(item=>courtTimelineItemHtml(item)).join('')}</section>`).join('') : '<p class="court-timeline-empty">Nothing scheduled this week. Tap Play here to start something.</p>'}${data.undated_count ? '<p class="simple-note">More venue programs below · dates not confirmed.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
+        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Coming up here</h3><button type="button" class="btn-link" data-timeline-create>${uiIcon('plus')}Create game</button></div>${zoneLabel ? `<p class="court-timeline-zone">${esc(zoneLabel)}</p>` : ''}<div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev aria-label="Previous week">${uiIcon('arrow-left')}</button><button type="button" class="court-timeline-dates" data-timeline-today aria-label="${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}. Back to today"><b>${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</b><small>${from ? 'Back to today' : 'Next 7 days'}</small></button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next aria-label="Next week">${uiIcon('arrow-right')}</button></div><span class="sr-only" role="status">${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}</span>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>{const day=new Date(`${on}T12:00:00`);return `<section class="court-timeline-day${courtTimelineDay(items[0])==='Today' ? ' is-today' : ''}"><h4><span aria-hidden="true">${esc(day.toLocaleDateString([],{weekday:'short'}))}<b>${day.getDate()}</b></span><span class="sr-only">${esc(day.toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</span></h4><div>${items.map(item=>courtTimelineItemHtml(item)).join('')}</div></section>`;}).join('') : '<p class="court-timeline-empty">Nothing scheduled this week. Tap Play here to start something.</p>'}${data.undated_count ? '<p class="simple-note">More venue programs below · dates not confirmed.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
         const shift=(days,focus)=>{const date=new Date(`${data.from}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+days);load(date.toISOString().slice(0,10),{focus});};
         root.querySelector('[data-timeline-prev]').addEventListener('click',()=>shift(-7,'[data-timeline-prev]'));
         root.querySelector('[data-timeline-next]').addEventListener('click',()=>shift(7,'[data-timeline-next]'));
@@ -7951,7 +7951,7 @@
       typeFact ? ['grid', typeFact, c.court_type] : null,
       surfaceFact ? ['pickleball', surfaceFact, c.surface_type] : null,
       openPlayFact ? ['calendar', `Open play: ${openPlayFact}`, openPlayRaw] : null,
-    ].filter(Boolean);
+    ].filter((fact) => fact && fact[1] !== 'Hours not listed').slice(0, 3);
     const factsHtml = decisionFacts.length ? `<span class="court-card-facts">${decisionFacts.map(([icon, label, raw, className = '']) => (
       `<span class="court-card-fact ${className}" title="${esc(raw)}">${uiIcon(icon)}<span>${esc(label)}</span></span>`
     )).join('')}</span>` : '';
@@ -8022,7 +8022,7 @@
             ${activityHtml}
             <span class="court-card-tags">
               <span class="tag">${c.num_courts} court${c.num_courts === 1 ? '' : 's'}</span>
-              ${tags.slice(0, quietNow ? 2 : 4).map((tag) => `<span class="tag">${tag}</span>`).join('')}
+              ${tags.slice(0, quietNow ? 2 : 3).map((tag) => `<span class="tag">${tag}</span>`).join('')}
             </span>
           </span>
         </span>
@@ -8955,12 +8955,14 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const photo = /^(https?:\/\/|\/(?!\/))/.test(String(court.photo_url || '')) ? court.photo_url : '';
     const amenities = [[court.indoor, 'Indoor'], [court.lighted, 'Lights'], [court.nets_provided, 'Nets provided'], [court.has_water, 'Water'], [court.has_restrooms, 'Restrooms']].filter(([present]) => present).map(([, label]) => label);
     const directions = courtDirectionsUrl(court);
-    return `${photo ? `<img class="auth-preview-photo" src="${esc(photo)}" alt="${esc(court.name)}" loading="lazy" data-remove-on-error />` : ''}<span class="auth-preview-kicker">${Number(court.num_courts)} courts · ${court.indoor ? 'Indoor' : 'Outdoor'}</span><h3 data-share-preview-title tabindex="-1">${esc(court.name)}</h3><p>${esc([court.address, court.city, court.state].filter(Boolean).join(', '))}</p>
-      ${amenities.length ? `<div class="auth-preview-tags">${amenities.map((label) => `<span>${esc(label)}</span>`).join('')}</div>` : ''}
-      <dl class="auth-preview-facts"><div><dt>Hours</dt><dd>${esc(data.hours?.open_status?.label || 'Hours not listed')}<small>${esc(data.hours?.hours || '')}</small></dd></div><div><dt>Cost</dt><dd>${esc(court.fees || (court.fee_type === 'free' ? 'Free' : court.fee_type ? court.fee_type.replaceAll('_', ' ') : 'Not listed'))}</dd></div></dl>
-      ${directions ? `<a class="btn btn-secondary btn-block" href="${esc(directions)}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
+    // Same hero language as the signed-in court page: photo under a scrim, or
+    // a forest surface with a drawn court when no photo is available.
+    return `<div class="auth-court-preview"><div class="auth-preview-hero">${photo ? `<img class="auth-preview-photo" src="${esc(photo)}" alt="${esc(court.name)}" loading="lazy" data-remove-on-error />` : ''}<span class="auth-preview-kicker">${Number(court.num_courts)} courts · ${court.indoor ? 'Indoor' : 'Outdoor'}</span><h3 data-share-preview-title tabindex="-1">${esc(court.name)}</h3><p>${uiIcon('map-pin')}${esc([court.address, court.city, court.state].filter(Boolean).join(', '))}</p>
+      ${amenities.length ? `<div class="auth-preview-tags">${amenities.map((label) => `<span>${esc(label)}</span>`).join('')}</div>` : ''}</div>
+      <dl class="auth-preview-facts"><div><dt>${uiIcon('clock')}Hours</dt><dd>${esc(data.hours?.open_status?.label || 'Hours not listed')}<small>${esc(data.hours?.hours || '')}</small></dd></div><div><dt>${uiIcon('ticket')}Cost</dt><dd>${esc(court.fees || (court.fee_type === 'free' ? 'Free' : court.fee_type ? court.fee_type.replaceAll('_', ' ') : 'Not listed'))}</dd></div></dl>
+      ${directions ? `<a class="btn btn-secondary btn-block" href="${esc(directions)}" target="_blank" rel="noopener noreferrer">${uiIcon('map-pin')}Directions</a>` : ''}
       <h4>Next public sessions</h4>${data.sessions?.length ? data.sessions.map((game) => { const facts = publicSessionFacts(game); return `<button type="button" class="auth-court-result" data-public-route="#game/${Number(game.id)}"><span><b>${esc(game.title)}</b><small>${esc(fmtDateTime(game.scheduled_at))} · ${esc(facts.format)}</small><small>${esc(gameLevelRangeLabel(game))} · ${esc(facts.stateLabel)}</small></span>${uiIcon('chevron-right')}</button>`; }).join('') : '<p>No public sessions listed yet.</p>'}
-      <button type="button" class="btn btn-primary btn-block" data-public-auth>Play here</button><small class="auth-preview-footnote">Sign up free to invite friends, start a game, or check in.</small>`;
+      <div class="auth-preview-cta"><button type="button" class="btn btn-primary btn-block" data-public-auth>${uiIcon('plus')}Play here</button><small class="auth-preview-footnote">Sign up free to invite friends, start a game, or check in.</small></div></div>`;
   }
 
   function renderSignedOutShareContext() {
@@ -13069,8 +13071,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         modalBox.setAttribute('aria-busy', 'false');
         modalBox.classList.remove('court-detail-refreshing');
         modal.querySelector('.court-detail-refresh-error')?.remove();
-        const scroller = modal.querySelector('.cd-scroll');
-        scroller?.insertAdjacentHTML('afterbegin', `
+        modal.querySelector('.cd-hero')?.insertAdjacentHTML('afterend', `
           <div class="court-detail-refresh-error" role="alert">
             <span>${uiIcon('alert-triangle')} Couldn’t refresh this court. The previous details are still shown.</span>
             <button type="button" class="btn btn-secondary btn-sm" data-retry-court-refresh>Try again</button>
@@ -13178,22 +13179,27 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const chipsHtml = tags.map((t) => t.startsWith('<span') ? t : `<span class="tag">${t}</span>`).join('');
     const heroFactsHtml = `
       <div class="cd-hero-facts" role="list" aria-label="Court facts">
+        ${nHere && !court.closed ? `<span role="listitem" class="is-live">${nHere} here now</span>` : ''}
         <span role="listitem">${uiIcon('grid')} ${court.num_courts} court${court.num_courts === 1 ? '' : 's'}</span>
         <span role="listitem">${uiIcon(court.indoor ? 'home' : 'sun')} ${court.indoor ? 'Indoor' : 'Outdoor'}</span>
         ${court.lighted ? `<span role="listitem">${uiIcon('lightbulb')} Lights</span>` : ''}
+        ${court.surface_type ? `<span role="listitem">${esc(compactCourtFact(court.surface_type, 22))}</span>` : ''}
       </div>`;
     const todayHours = openStatusFact?.label || compactCourtFact(court.hours, 44) || 'Hours not listed';
     const structuredOpenPlay = courtOpenPlayTodayFact(court, 54);
     const openPlayFact = structuredOpenPlay?.label || (court.open_play_schedule
-      ? compactCourtFact(court.open_play_schedule, 54)
+      ? compactCourtFact(court.open_play_schedule, 96)
       : venueBusiness?.schedule?.some((item) => item && item.active !== false)
         ? 'See venue schedule below' : 'No schedule listed');
     const structuredOpenPlayHtml = courtOpenPlayScheduleHtml(court);
+    // Visit facts read as rows (icon tile, label, value) so long hours or
+    // open-play notes wrap to two lines instead of overflowing narrow boxes.
     const visitFactsHtml = `
       <dl class="cd-visit-facts" aria-label="Today at this court">
-        <div><dt>${uiIcon('clock')} Today</dt><dd><button type="button" data-court-visit="hours" aria-label="View full court hours: ${esc(todayHours)}">${esc(todayHours)}${uiIcon('chevron-right')}</button></dd></div>
-        <div><dt>${uiIcon('ticket')} Access</dt><dd><button type="button" data-court-visit="fees" aria-label="View full fees and access details: ${esc(feeFact || 'Not listed')}">${esc(feeFact || 'Not listed')}${uiIcon('chevron-right')}</button></dd></div>
-        <div><dt>${uiIcon('calendar')} Open play</dt><dd><button type="button" data-court-visit="openplay" aria-label="View full open-play schedule: ${esc(openPlayFact)}">${esc(openPlayFact)}${uiIcon('chevron-right')}</button></dd></div>
+        ${[['hours', 'clock', 'Hours', todayHours, 'View full court hours', openStatusFact?.state],
+          ['fees', 'ticket', 'Access', feeFact || 'Not listed', 'View full fees and access details'],
+          ['openplay', 'calendar', 'Open play', openPlayFact, 'View full open-play schedule'],
+        ].map(([topic, icon, label, value, action, tone]) => `<div${tone ? ` data-state="${esc(tone)}"` : ''}><dt><span class="cd-fact-icon" aria-hidden="true">${uiIcon(icon)}</span>${label}</dt><dd><button type="button" data-court-visit="${topic}" aria-label="${action}: ${esc(value)}"><span>${esc(value)}</span>${uiIcon('chevron-right')}</button></dd></div>`).join('')}
       </dl>`;
     const linkParts = [];
     if (court.website && (!venueBusiness || !venueBusiness.website_url)) linkParts.push(`<a href="${esc(court.website)}" target="_blank" rel="noopener" aria-label="Community website for ${esc(court.name)} (opens new tab)">${uiIcon('external')} Community website link</a>`);
@@ -13291,28 +13297,28 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     if (pendingCourtDetailOpen?.modal === modal) pendingCourtDetailOpen = null;
     modalBox.innerHTML = `
       <p class="sr-only" role="status" aria-live="polite">Court details loaded for ${esc(court.name)}</p>
+      <div class="cd-hero-actions">
+        <span class="cd-topbar-title" aria-hidden="true">${esc(court.name)}</span>
+        <button type="button" class="glass-btn cd-hero-save" id="cd-favorite" aria-pressed="${isFavorite}" aria-label="${isFavorite ? 'Remove court from saved courts' : 'Save court'}">${uiIcon('star')}<span>${isFavorite ? 'Saved' : 'Save'}</span></button>
+        <button type="button" class="glass-btn modal-close" aria-label="Close">${uiIcon('x')}</button>
+      </div>
+      <div class="cd-scroll">
       <div class="cd-hero">
         ${heroImg}
         <div class="cd-hero-shade"></div>
-        <div class="cd-hero-actions">
-          <button type="button" class="glass-btn cd-hero-save" id="cd-favorite" aria-pressed="${isFavorite}" aria-label="${isFavorite ? 'Remove court from saved courts' : 'Save court'}">${uiIcon('star')}<span>${isFavorite ? 'Saved' : 'Save'}</span></button>
-          <button type="button" class="glass-btn modal-close" aria-label="Close">${uiIcon('x')}</button>
-        </div>
         <div class="cd-hero-title">
           <h2>${esc(court.name)}${venueBusiness ? `<span class="cd-verified-venue">${uiIcon('check-circle')} Verified venue</span>` : ''}</h2>
           <a id="cd-address" class="cd-address-copy" href="${mapsUrl}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name)} (opens Maps)">
-            ${esc(courtAddressDisplay)}
-            ${uiIcon('external')}
+            ${uiIcon('map-pin')}<span>${esc(courtAddressDisplay)}</span>${uiIcon('external')}
           </a>
+          ${heroFactsHtml}
         </div>
       </div>
-      <div class="cd-scroll">
       ${court.closed ? `<div class="cd-closed-banner" role="status">${uiIcon('alert-triangle')}<span>This court is reported permanently closed</span><button type="button" class="btn-link" data-cd-suggest>Fix listing</button></div>` : ''}
-      ${heroFactsHtml}
-      ${visitFactsHtml}
       ${quickActions}
+      ${visitFactsHtml}
       <section id="cd-play-here" class="court-play-timeline" aria-label="Dated play at this court"></section>
-      <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary>${courtClosed ? 'Court status' : checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</summary>
+      <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon(courtClosed ? 'alert-triangle' : checkedIn ? 'check-circle' : 'map-pin')}</span><span>${courtClosed ? 'Court status' : checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</span></summary>
       <section class="card cd-now-card" aria-labelledby="cd-now-heading">
         <div class="cd-now-heading">
           <div>
@@ -13339,8 +13345,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <span class="row-main"><span class="row-title">Find communities at this court</span><span class="row-sub">Meet local groups that play at ${esc(court.name)}</span></span>
           ${uiIcon('chevron-right', 'chev')}
         </button>`}
+      <div class="section-label cd-about-label">About this court</div>
       <details class="card cd-progressive cd-court-details">
-        <summary>${venueBusiness ? 'Community court details' : 'Court details'}</summary>
+        <summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon('grid')}</span>${venueBusiness ? 'Community court details' : 'Court details'}</summary>
         <div class="cd-progressive-body">
           <div>${chipsHtml}</div>
           ${courtCheckinHistoryHtml(court.checkin_history)}
@@ -13368,7 +13375,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         </div>
       </details>
       <details class="card cd-progressive cd-community-details">
-        <summary><span>More at this court</span><small id="cd-more-preview">${esc(morePreviewParts.slice(0, 2).join(' · ') || 'Communities, leagues, and court history')}</small></summary>
+        <summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon('trophy')}</span><span>More at this court</span><small id="cd-more-preview">${esc(morePreviewParts.slice(0, 2).join(' · ') || 'Communities, leagues, and court history')}</small></summary>
         <div class="cd-progressive-body">
       ${(court.regulars || []).length ? `
         <div class="section-label">Court regulars</div>
@@ -13440,11 +13447,19 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modalBox.classList.remove('court-detail-refreshing');
     setDialogLabel(modalBox, court.name || 'Court details');
     modal.querySelector('.cd-scroll')?.setAttribute('data-scroll', '');
+    // The hero scrolls away with the page; once it has, the floating top bar
+    // turns solid and names the court so context and Close stay in view.
+    const cdScroller = modal.querySelector('.cd-scroll');
+    const cdHero = modal.querySelector('.cd-hero');
+    modalBox.classList.remove('cd-condensed');
+    cdScroller?.addEventListener('scroll', () => {
+      modalBox.classList.toggle('cd-condensed', cdScroller.scrollTop > cdHero.offsetHeight - 72);
+    }, { passive: true });
     enhanceAppSelects(modalBox);
 
     if (venuePreview || court.pending_submission) {
       modalBox.dataset.venuePreview = 'true';
-      modal.querySelector('.cd-scroll')?.insertAdjacentHTML('afterbegin', `<div class="business-preview-note" role="status"><span>${uiIcon('eye')}</span><p><b>${venuePreview ? 'Manager draft · full court preview' : 'Private location · awaiting review'}</b><br />${venuePreview ? 'Your saved venue details appear in their court context.' : 'Only the submitting venue team and reviewers can see this location.'} Player actions and booking links are disabled in this preview.</p></div>`);
+      modal.querySelector('.cd-hero')?.insertAdjacentHTML('afterend', `<div class="business-preview-note" role="status"><span>${uiIcon('eye')}</span><p><b>${venuePreview ? 'Manager draft · full court preview' : 'Private location · awaiting review'}</b><br />${venuePreview ? 'Your saved venue details appear in their court context.' : 'Only the submitting venue team and reviewers can see this location.'} Player actions and booking links are disabled in this preview.</p></div>`);
       const slot = modal.querySelector('#cd-business');
       slot.innerHTML = court.business ? courtBusinessHtml({...court.business, community_fallback: {hours: court.hours || '', phone: court.phone || '', website_url: court.website || '', open_play_schedule: court.open_play_schedule || ''}}) : '<p class="simple-note">This venue has not been approved for public discovery.</p>';
       bindBusinessLogoFallback(slot);
@@ -16883,11 +16898,14 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     return `
       <article class="card game-card" style="${cardStyle}">
         <button type="button" class="game-card-main" data-open-game="${game.id}" aria-label="Open ${esc(customTitle || defaultGameTitle)} at ${esc(courtSummary)}">
+          ${planDateTileHtml(game.scheduled_at)}
+          <span class="game-card-body">
           <span class="game-card-context">${typeTag}${joinedState || inviteTag || chatTag}</span>
           <span class="row-title game-card-title">${gameTitle}</span>
           ${customTitle && !game.is_instant ? `<span class="game-card-when">${uiIcon('calendar')} ${esc(scheduledLabel)}</span>` : ''}
           <span class="game-card-place">${uiIcon('map-pin')} <span>${esc(court.name || 'Court')}${game.court_number ? ` · ${esc(game.court_number)}` : ''}</span></span>
           ${visTag || recurTag || levelRangeLabel !== 'Any level' || costLabel ? `<span class="game-card-tags">${visTag}${recurTag}${levelRangeLabel !== 'Any level' ? `<span class="game-card-level">Level ${esc(levelRangeLabel)}</span>` : ''}${costLabel ? `<span class="game-card-level">${esc(costLabel)}</span>` : ''}</span>` : ''}
+          </span>
           ${banner}
         </button>
         <div class="row game-card-footer">
@@ -18478,28 +18496,42 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     });
   }
 
-  function rallyLauncherHtml() {
+  // Play home hero: where the player stands now, their next plan when they
+  // have one, one volt Create action, then the four play-now shortcuts.
+  function rallyLauncherHtml(nextPlan = null) {
     const here = state.presence && state.presence.checked_in;
     const pulse = here ? null : normalizeActivePlayPulse(state.activePlayPulse);
     if (!here && state.activePlayPulse && !pulse) state.activePlayPulse = null;
-    const status = here ? `At ${esc(state.presence.court_name)}`
-      : pulse ? `Free this hour at ${esc(pulse.courtName)}`
-        : esc(state.areaLabel || state.me?.home_area || 'Choose how you can play');
     return `
-      <section class="play-action-bar" aria-label="Create or start a game">
-        <button type="button" class="btn btn-primary" data-goto="new-game">${uiIcon('plus')} Create game</button>
-        <details class="play-now-options" data-view-state-key="play-now">
-          <summary>${uiIcon('zap')} Play now</summary>
-          <div class="play-now-quick-actions">
-            <p class="row-sub">${status}</p>
-            <button type="button" data-goto="instant-rally"><span aria-hidden="true">${uiIcon('map-pin')}</span><b>${here ? 'Play here' : 'I’m at a court'}</b></button>
-            <button type="button" data-goto="on-my-way"><span aria-hidden="true">${uiIcon('clock')}</span><b>I’m on my way</b></button>
-            <button type="button" data-goto="play-pulse"><span aria-hidden="true">${uiIcon('activity')}</span><b>I’m free this hour</b></button>
-            <button type="button" data-goto="ranked-match"><span aria-hidden="true">${uiIcon('trophy')}</span><b>Start a ranked match</b></button>
-          </div>
-        </details>
-      </section>
-      ${pulse ? activePlayPulseBannerHtml(pulse) : ''}`;
+      <section class="play-hero${here ? ' is-live' : ''}" aria-label="Create or start a game">
+        ${here ? `<p class="play-hero-status"><span class="play-hero-dot" aria-hidden="true"></span><span>Checked in at ${esc(state.presence.court_name)}</span></p>` : ''}
+        ${nextPlan ? playHeroNextHtml(nextPlan) : `<h3 class="play-hero-title">${here ? 'You’re at the court' : 'Ready to play?'}</h3>
+        <p class="play-hero-copy">${here ? 'Start a game here or plan one for later.' : 'Plan a game with friends or jump in now.'}</p>`}
+        <div class="play-action-bar">
+          <button type="button" class="btn btn-primary" data-goto="new-game">${uiIcon('plus')} Create game</button>
+        </div>
+        <div class="play-now-quick-actions" role="group" aria-label="Play now">
+          <button type="button" data-goto="instant-rally"><span aria-hidden="true">${uiIcon('map-pin')}</span><b>${here ? 'Play here' : 'I’m at a court'}</b></button>
+          <button type="button" data-goto="on-my-way"><span aria-hidden="true">${uiIcon('clock')}</span><b>I’m on my way</b></button>
+          <button type="button" data-goto="play-pulse"><span aria-hidden="true">${uiIcon('activity')}</span><b>I’m free this hour</b></button>
+          <button type="button" data-goto="ranked-match"><span aria-hidden="true">${uiIcon('trophy')}</span><b>Start a ranked match</b></button>
+        </div>
+        ${pulse ? activePlayPulseBannerHtml(pulse) : ''}
+      </section>`;
+  }
+
+  function playHeroNextHtml(game) {
+    const court = game.court || {};
+    const players = game.players || [];
+    const open = Math.max(0, Number(game.spots_left) || 0);
+    const when = `${fmtTimeShort(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
+    const going = `${players.length} going${open ? ` · ${open} open` : ''}`;
+    return `<button type="button" class="play-hero-next" data-open-game="${game.id}" aria-label="Open your next plan: ${esc(game.title || gameActivityLabel(game))}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(going)}">
+      <span class="play-hero-next-kicker">Up next · ${esc(upcomingDayLabel(game.scheduled_at))}<span class="play-hero-next-role">${esc(playPlanStatus(game).label)}</span></span>
+      <b class="play-hero-next-time">${esc(when)}</b>
+      <span class="play-hero-next-place">${esc(game.title ? `${game.title} · ${court.name || 'Court'}` : court.name || 'Court')}</span>
+      <span class="play-hero-next-people"><span class="avatar-stack">${players.slice(0, 4).map((player) => avatarHtml(player, 'sm', 'span')).join('')}</span><span>${esc(gameActivityLabel(game))} · ${esc(going)}</span>${uiIcon('chevron-right', 'chev')}</span>
+    </button>`;
   }
 
   function playProgressCardHtml(progress) {
@@ -18541,13 +18573,26 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       : game.is_joined ? { label:'Joined', tone:'live' } : { label:'Not joined', tone:'' };
   }
 
+  // Decorative calendar tile for agenda rows and game cards; the row text or
+  // accessible name always carries the full date and time. `time` shows the
+  // weekday and clock (agenda), otherwise month, day and weekday (cards).
+  function planDateTileHtml(iso, { time = false } = {}) {
+    const date = new Date(iso || '');
+    if (!Number.isFinite(date.getTime())) return '<span class="plan-date-tile is-tba" aria-hidden="true"><b>TBA</b></span>';
+    const startOf = (value) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+    const today = startOf(date) === startOf(new Date());
+    const weekday = today ? 'Today' : date.toLocaleDateString([], { weekday: 'short' });
+    const [clock, meridiem = ''] = String(fmtTimeShort(iso)).split(/\s+/);
+    return `<span class="plan-date-tile${today ? ' is-today' : ''}" aria-hidden="true"><small>${esc(time ? weekday : date.toLocaleDateString([], { month: 'short' }))}</small><b>${esc(time ? clock : date.getDate())}</b><small>${esc(time ? meridiem : weekday)}</small></span>`;
+  }
+
   function playPlanRowHtml(game, { showDate = false } = {}) {
     const court = game.court || {};
     const status = playPlanStatus(game);
     const format = game.game_type === 'ranked' ? `Ranked ${Number(game.max_players) === 2 ? 'singles' : 'doubles'}` : 'Pickup session';
     return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(status.label)}">
-      <span class="play-schedule-time">${esc(showDate ? fmtDateTime(game.scheduled_at) : fmtTimeShort(game.scheduled_at))}</span>
-      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
+      ${planDateTileHtml(game.scheduled_at, { time: true })}
+      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${showDate ? `${esc(fmtDateTime(game.scheduled_at).split(' · ')[0])} · ` : ''}${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
       <span class="tag ${status.tone}">${esc(status.label)}</span>
     </button>`;
   }
@@ -18619,7 +18664,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
               : tournament.partner_status === 'pending' ? 'Partner pending'
                 : tournament.is_organizer ? 'Organizer' : tournament.is_entered ? 'Entered' : 'Reply to invite';
       return `<button type="button" class="play-schedule-row" data-open-tournament="${tournament.id}" aria-label="Open ${esc(tournament.name)} tournament, ${esc(hasTime ? fmtDateTime(startsAt) : 'Time to be announced')}${court.name ? ` at ${esc(court.name)}` : ''}, ${esc(role)}">
-        <span class="play-schedule-time">${hasTime ? esc(fmtTimeShort(startsAt)) : '—'}</span>
+        ${planDateTileHtml(hasTime ? startsAt : '', { time: true })}
         <span class="row-main"><b>${esc(tournament.name)}</b><small>Tournament${court.name ? ` · ${esc(court.name)}` : ''}${waiting?.status === 'offered' && waiting.expires_at ? ` · Reply by ${esc(fmtDateTime(waiting.expires_at))}` : ''}</small></span>
         <span class="tag">${esc(role)}</span>
       </button>`;
@@ -18628,7 +18673,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const opponent = isLeague ? competition.opponent?.display_name || 'Opponent' : competition.opponent_name || 'Opponent to be decided';
     const name = isLeague ? competition.league_name : competition.name;
     return `<button type="button" class="play-schedule-row" data-play-competition="${isLeague ? 'league' : 'tournament'}" data-competition-id="${isLeague ? competition.league_id : competition.tournament_id}" data-match-id="${competition.id}" aria-label="${esc(name)}, match against ${esc(opponent)}, ${esc(status)}${hasTime ? `, ${esc(fmtDateTime(startsAt))}` : ''}">
-      <span class="play-schedule-time">${hasTime ? esc(fmtTimeShort(startsAt)) : '—'}</span>
+      ${planDateTileHtml(hasTime ? startsAt : '', { time: true })}
       <span class="row-main"><b>vs ${esc(opponent)}</b><small>${esc(name)} · ${isLeague ? 'League' : 'Tournament'}${court.name ? ` · ${esc(court.name)}` : ''}${competition.court_number ? ` · Court ${esc(competition.court_number)}` : ''}${playCompetitionNeedsAction(competition) && hasTime ? ` · ${esc(fmtDateTime(startsAt))}` : ''}</small></span>
       <span class="tag">${esc(status)}</span>
     </button>`;
@@ -19129,7 +19174,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         })
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
 
-      let html = rallyLauncherHtml();
+      const nextPlan = mine.items.filter((game) => game.status === 'upcoming' && game.is_joined
+        && !game.is_instant && Date.parse(game.scheduled_at) > nowMs)
+        .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at))[0] || null;
+      let html = rallyLauncherHtml(nextPlan);
       const competitionActions = competitions.filter(playCompetitionNeedsAction);
       const planCount = mine.items.filter((game) => !instantRallyClosed(game)).length + competitions.length;
       const competitionDecisionCount = competitions.filter((item) => item.awaiting_your_confirmation
@@ -23370,7 +23418,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           icon: 'trophy',
           title: 'No competitions around yet',
           body: 'Try a wider area or come back as local events open.',
-
+          primary: { label: 'Create tournament or league', id: 'competition-create-empty' },
         });
       }
 
@@ -27666,8 +27714,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <span class="row-title" style="display:block">${esc(item.title)}${groupInfo ? '' : `<span class="inbox-kind">${kindLabel[item.kind]}</span>`}</span>
           <span class="row-sub" style="display:block">${esc(preview)}</span>
         </span>
-        ${item.unread ? `<span class="badge" style="position:static">${item.unread > 99 ? '99+' : item.unread}</span>`
-          : !groupInfo && item.lastMessage ? `<span class="row-sub inbox-time">${fmtInboxTimestamp(item.lastMessage.created_at)}</span>` : uiIcon('chevron-right', 'chev')}
+        <span class="inbox-meta">${!groupInfo && item.lastMessage ? `<span class="row-sub inbox-time">${fmtInboxTimestamp(item.lastMessage.created_at)}</span>` : ''}${item.unread ? `<span class="badge" style="position:static">${item.unread > 99 ? '99+' : item.unread}</span>`
+          : !groupInfo && item.lastMessage ? '' : uiIcon('chevron-right', 'chev')}</span>
       </button>`;
     };
 
@@ -27729,11 +27777,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       </div>`;
       if (crewItems.length) {
         html += '<div class="section-label" style="margin-top:4px">Private groups</div>';
-        html += crewItems.map((item) => rowHtml(item)).join('');
+        html += `<div class="inbox-list">${crewItems.map((item) => rowHtml(item)).join('')}</div>`;
       }
       if (clubItems.length) {
         html += '<div class="section-label">Your public groups</div>';
-        html += clubItems.map((item) => rowHtml(item)).join('');
+        html += `<div class="inbox-list">${clubItems.map((item) => rowHtml(item)).join('')}</div>`;
       }
       html += discoveryHtml;
       if (!crewItems.length && !clubItems.length && !invitations.length) {
@@ -27741,18 +27789,18 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       }
       if (!groupPage && conversationItems.length) {
         html += '<div class="section-label">Related conversations</div>';
-        html += conversationItems.map((item) => rowHtml(item)).join('');
+        html += `<div class="inbox-list">${conversationItems.map((item) => rowHtml(item)).join('')}</div>`;
       }
       return html;
     }
 
     if (recent.length) {
       html += '<div class="section-label" style="margin-top:4px">Recent chats</div>';
-      html += recent.map((item) => rowHtml(item)).join('');
+      html += `<div class="inbox-list">${recent.map((item) => rowHtml(item)).join('')}</div>`;
     }
     if (ready.length) {
       html += `<div class="section-label" style="margin-top:${recent.length ? '18px' : '4px'}">Everything else</div>`;
-      html += ready.map((item, index) => rowHtml(item, index >= 8 ? 'inbox-ready-extra hidden' : '')).join('');
+      html += `<div class="inbox-list">${ready.map((item, index) => rowHtml(item, index >= 8 ? 'inbox-ready-extra hidden' : '')).join('')}</div>`;
       if (ready.length > 8) {
         html += `<button type="button" class="btn btn-secondary btn-block" id="inbox-show-ready">Show ${ready.length - 8} more chats</button>`;
       }
@@ -28605,7 +28653,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       });
     }
     html += shownFriends.length
-      ? shownFriends.map((f) => `
+      ? `<div class="friend-list">${shownFriends.map((f) => `
           <div class="card row friend-person-row">
             <button type="button" class="player-profile-link" data-view-user="${f.id}" aria-label="View ${esc(f.display_name)}'s profile">
                 ${avatarHtml(f)}
@@ -28623,7 +28671,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
                 ${f.checked_in_court && f.checked_in_court.looking_for_game
                   ? `<button type="button" class="btn btn-secondary btn-sm" data-coming="${f.id}" aria-label="Tell ${esc(f.display_name)} you can be there soon">${uiIcon('pickleball')} On my way</button>` : ''}
               </div>
-          </div>`).join('')
+          </div>`).join('')}</div>`
       : (wantedSlots ? '' : emptyStateHtml({
           icon: 'users', title: 'Build your player circle',
           body: 'Find nearby players or share your invitation link.',
@@ -36653,14 +36701,15 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           <button type="button" class="profile-avatar-edit" id="profile-avatar-edit" aria-label="Change profile photo">${avatarHtml(me)}</button>
           <div class="profile-name">${esc(me.display_name)}</div>
           <div class="profile-sub">${playerSkillIdentityHtml(me)}${me.home_court_name ? ` · ${uiIcon('home', 'community-inline-icon')} ${esc(me.home_court_name)}` : ''}</div>
-          ${me.bio ? `<p class="profile-sub" style="margin-top:8px">${esc(me.bio)}</p>` : ''}
+          ${me.bio ? `<p class="profile-sub profile-bio">${esc(me.bio)}</p>` : ''}
         </div>
+        <dl class="profile-hero-stats" id="pf-hero-stats" hidden></dl>
+        <button type="button" class="profile-availability-summary" id="profile-availability-edit" aria-label="Edit when you usually play">
+          <span aria-hidden="true">${uiIcon('clock')}</span>
+          <span class="row-main"><b>Usually plays</b>${playerAwayLabel(me) ? `<small>${esc(playerAwayLabel(me))}</small>` : ''}<small>${availabilityLines.length ? availabilityLines.join(' · ') : 'Add your usual days and times'}</small></span>
+          ${uiIcon('chevron-right', 'chev')}
+        </button>
       </div>
-      <button type="button" class="profile-availability-summary" id="profile-availability-edit" aria-label="Edit when you usually play">
-        <span aria-hidden="true">${uiIcon('clock')}</span>
-        <span class="row-main"><b>Usually plays</b>${playerAwayLabel(me) ? `<small>${esc(playerAwayLabel(me))}</small>` : ''}<small>${availabilityLines.length ? availabilityLines.join(' · ') : 'Add your usual days and times'}</small></span>
-        ${uiIcon('chevron-right', 'chev')}
-      </button>
       <div class="profile-load-error hidden" id="pf-dashboard-error" role="alert">
         <span class="nav-row-leading" aria-hidden="true">${uiIcon('refresh')}</span>
         <span class="row-main"><b>Your latest play dashboard did not load</b><span>Your profile and settings still work. Check the connection and try the play sections again.</span></span>
@@ -36789,6 +36838,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     });
     const dashboardFailed = [mineResult, statsResult, favoritesResult, historyResult]
       .every((result) => result.status === 'rejected');
+    const heroCounts = {};
     const showProfileSectionUnavailable = (section, title, copy) => {
       section.innerHTML = `<div class="section-label">${esc(title)}</div><div class="profile-section-unavailable">
         <span class="profile-section-unavailable-icon" aria-hidden="true">${uiIcon('refresh')}</span>
@@ -36829,6 +36879,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
           && !instantRallyClosed(game)
           && (instantRallyAssembly(game) || new Date(game.scheduled_at).getTime() > nowMs));
       const ordered = [...scorePending, ...wrapPending, ...up];
+      heroCounts.plans = ordered.length;
       const nextGame = ordered[0] || null;
       if (nextGame) {
         const nextLabel = scorePending.includes(nextGame) ? 'Add a score'
@@ -36868,6 +36919,8 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     try {
       const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
       if (!stats) throw statsResult.reason;
+      heroCounts.plays = stats.games_total;
+      heroCounts.streak = stats.week_streak;
       if (!total) {
         const headline = el.querySelector('#profile-headline-stats');
         if (headline) {
@@ -36992,6 +37045,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         seen.add(me.home_court_id);
       }
       (favs.items || []).forEach((c) => { if (!seen.has(c.id)) { rows.push({ ...c, is_home: false }); seen.add(c.id); } });
+      heroCounts.courts = rows.length;
       const savedCourtRowHtml = (c) => `
         <article class="card profile-saved-court"><button type="button" class="row nav-row-button" data-pfcourt="${c.id}" aria-label="Open ${esc(c.name)} court">
           <span class="nav-row-leading">${uiIcon(c.is_home ? 'home' : 'star')}</span>
@@ -37128,6 +37182,11 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         historyEl, 'Recent play', 'Recent play is unavailable right now.',
       );
     }
+    const heroStats = [['plays', 'Plays'], ['plans', 'Upcoming'], ['courts', 'Courts'], ['streak', 'Week streak']]
+      .filter(([key]) => heroCounts[key] != null);
+    const heroStatsEl = el.querySelector('#pf-hero-stats');
+    heroStatsEl.innerHTML = heroStats.map(([key, label]) => `<div><dt>${label}</dt><dd>${Number(heroCounts[key]) || 0}</dd></div>`).join('');
+    heroStatsEl.hidden = !heroStats.length;
     el.dataset.profileReady = String(me.id);
     markViewReady('profile');
     el.setAttribute('aria-busy', 'false');
@@ -38755,12 +38814,20 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       : '';
     const joinedState = game.is_joined && game.status === 'upcoming' && !closedRally
       ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${uiIcon(game.attendance_confirmation_due && !game.is_creator ? 'clock' : 'check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}</span>${joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>' : ''}</div>` : '';
+    const [whenDay, whenTime] = fmtDateTime(game.scheduled_at).split(' · ');
     const when = !game.is_instant && game.scheduled_at
-      ? `<div class="session-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
+      ? `<div class="session-when">${uiIcon('calendar')}<span class="session-when-day">${esc(whenDay)}</span><b>${esc(whenTime)}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
     const openSpots = Math.max(0, Number(game.spots_left) || 0);
     const heldSpots = Math.max(0, Number(game.reserved_offer_count) || 0);
     const rosterAvailability = openSpots ? `${openSpots} spot${openSpots === 1 ? '' : 's'} left`
       : heldSpots ? `${heldSpots} spot${heldSpots === 1 ? '' : 's'} on hold` : 'Full';
+    // Players see chat first; anyone deciding whether to join sees the join
+    // action before share and help.
+    const toolbar = `<div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
+        ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' && !actions.includes('btn-primary') ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
+        <button type="button" class="btn btn-ghost" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
+        <button type="button" class="btn btn-ghost" id="gs-help" aria-label="Help with this ${playNoun}">${uiIcon('lightbulb')} Help</button>
+      </div>`;
     return `
       <div class="modal-head game-detail-header${(game.status === 'upcoming' || endedPlan) && !game.is_instant ? ' is-planned' : ''}">
         <div class="session-heading-copy">
@@ -38769,7 +38836,6 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         </div>
         <button class="modal-close" aria-label="Close">${uiIcon('x')}</button>
       </div>
-      ${joinedState}
       <div class="game-detail-summary">
         ${endedPlan ? `<span class="session-ended-state" data-status="${game.status}">${uiIcon(game.status === 'cancelled' ? 'x' : 'clock')} ${game.status === 'cancelled' ? 'Cancelled' : 'Ended'}</span>` : ''}
         ${resultState ? `<span class="match-result-state${game.status === 'awaiting_confirmation' ? ' is-pending' : ''}">${uiIcon(game.status === 'awaiting_confirmation' ? 'clock' : 'check-circle')} ${resultState}</span>` : ''}
@@ -38777,7 +38843,8 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         ${detailMeta}
       </div>
       ${hasScore ? playersHtml : ''}
-      <section class="session-plan-card" aria-label="Time, court and cost">
+      <section class="session-plan-card${game.status === 'upcoming' && !closedRally ? ' is-hero' : ''}" aria-label="Time, court and cost">
+      ${joinedState}
       ${when}
       <div class="session-place-wrap">
         <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
@@ -38801,13 +38868,10 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       </section>` : ''}
       ${waitlistHtml}${arrivalsHtml}${gameConsentHtml(game)}
       ${ratingChanges}
-      <div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
-        ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
-        <button type="button" class="btn btn-ghost" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
-        <button type="button" class="btn btn-ghost" id="gs-help" aria-label="Help with this ${playNoun}">Help</button>
-      </div>
+      ${game.is_joined ? toolbar : ''}
       ${chatPreview}
       <div class="session-main-actions">${actions}</div>
+      ${game.is_joined ? '' : toolbar}
       ${scoreHistoryHtml(game)}
       ${closedRally ? '' : sessionReturnToolsHtml(game)}
       ${infoStrip}${planningDetails}`;
@@ -40550,7 +40614,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
           <div id="ha-results" aria-live="polite"></div>
         </div>
         ${primaryCourtId ? `<button type="button" class="btn btn-secondary btn-block home-area-primary-court" id="ha-primary-court">${uiIcon('home')} <span><b>Use my primary court’s area</b><small>${esc(state.me.home_court_name || 'My primary court')}</small></span></button>` : ''}
-        <button type="button" class="btn btn-secondary btn-block onboarding-primary-action" id="ha-loc">${uiIcon('target')} <span>Use current location</span></button>
+        <button type="button" class="btn btn-primary btn-block onboarding-primary-action" id="ha-loc">${uiIcon('target')} <span>Use current location</span></button>
         <div id="ha-save-status" class="city-search-feedback hidden" role="status" aria-live="polite" tabindex="-1"></div>
         <p class="onboarding-privacy-note home-area-note">${uiIcon('shield')} <span>Optional. Change it in Privacy &amp; safety.</span></p>
         <button type="button" class="btn-link modal-close btn-block">${esc(dismissLabel)}</button>

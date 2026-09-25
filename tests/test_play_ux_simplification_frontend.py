@@ -234,7 +234,7 @@ def test_play_launcher_survives_independent_feed_failures_with_honest_retry_stat
     assert "const mineFeed = feedResult(settled[0]" in play
     assert "const friendsFeed = feedResult(settled[1]" in play
     assert "const nearbyFeed = feedResult(settled[2]" in play
-    assert "let html = rallyLauncherHtml();" in play
+    assert "let html = rallyLauncherHtml(nextPlan);" in play
     assert "if (feedErrors.mine)" in play
     assert "Finding, starting, and scheduling play still work." in play
     # Friend sessions have their own rail and error state; only the nearby
