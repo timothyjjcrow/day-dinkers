@@ -7608,7 +7608,7 @@
       const availability = item.source === 'player' ? (game.is_joined ? 'Joined' : game.spots_left > 0 ? `${game.spots_left} spot${game.spots_left===1 ? '' : 's'} left` : 'Full') : status;
       const details = item.source === 'player' ? facts.filter((_,index)=>index!==2) : facts;
       const names = (game.players || []).slice(0,3).map(player=>player.display_name).filter(Boolean);
-      return `<article class="court-timeline-item court-timeline-card is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-card-top"><time class="court-timeline-time"${item.starts_at ? ` datetime="${esc(item.starts_at)}"` : ''}>${esc(courtTimelineTime(item))}</time>${availability ? `<span class="court-timeline-availability${item.source==='player' && (game.is_joined || game.spots_left>0) ? ' has-space' : ''}">${esc(availability)}</span>` : ''}</div><div class="court-timeline-content"><h4>${esc(item.title)}</h4><span class="court-timeline-source">${esc(sourceLabel)}</span><p>${details.filter(Boolean).map(esc).join(' · ')}</p>${names.length ? `<p>${esc(names.join(', '))}${game.players.length>names.length ? ` +${game.players.length-names.length}` : ''}</p>` : ''}${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${item.source==='community' ? '<small>Player plan only. Venue registration is separate.</small>' : ''}${action}</div></article>`;
+      return `<article class="court-timeline-item court-timeline-card is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-card-top"><time class="court-timeline-time"${item.starts_at ? ` datetime="${esc(item.starts_at)}"` : ''}>${esc(courtTimelineTime(item))}</time>${availability ? `<span class="court-timeline-availability${item.source==='player' && (game.is_joined || game.spots_left>0) ? ' has-space' : ''}${item.source==='player' && game.is_joined ? ' is-joined' : ''}">${esc(availability)}</span>` : ''}</div><div class="court-timeline-content"><h4>${esc(item.title)}</h4><span class="court-timeline-source">${esc(sourceLabel)}</span><p>${details.filter(Boolean).map(esc).join(' · ')}</p>${names.length ? `<p>${esc(names.join(', '))}${game.players.length>names.length ? ` +${game.players.length-names.length}` : ''}</p>` : ''}${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${item.source==='community' ? '<small>Player plan only. Venue registration is separate.</small>' : ''}${action}</div></article>`;
     }
     return `<article class="court-timeline-item is-${esc(item.source)}${status ? ' is-unavailable' : ''}"><div class="court-timeline-time">${esc(courtTimelineTime(item))}<small>${esc(courtTimelineDay(item))}</small></div><div class="court-timeline-content"><span class="court-timeline-source">${esc(sourceLabel)}</span><h4>${esc(item.title)}</h4><p>${facts.filter(Boolean).map(esc).join(' · ')}</p>${item.hours_warning ? `<p class="court-timeline-warning">${uiIcon('alert-triangle')}${esc(item.hours_warning)}</p>` : ''}${action}</div></article>`;
   }
@@ -7723,7 +7723,7 @@
         captureFocus();
         const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const zoneLabel = data.timezone && data.timezone !== viewerZone ? `Court time · ${courtTimelineZoneLabel(data.timezone)}` : '';
-        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Coming up here</h3><button type="button" class="btn-link" data-timeline-create>Create game</button></div>${zoneLabel ? `<p class="court-timeline-zone">${esc(zoneLabel)}</p>` : ''}<div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev aria-label="Previous week">${uiIcon('arrow-left')}</button><button type="button" class="court-timeline-dates" data-timeline-today aria-label="${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}. Back to today"><b>${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</b><small>${from ? 'Back to today' : 'Next 7 days'}</small></button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next aria-label="Next week">${uiIcon('arrow-right')}</button></div><span class="sr-only" role="status">${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}</span>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>`<section class="court-timeline-day"><h4>${esc(new Date(`${on}T12:00:00`).toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</h4>${items.map(item=>courtTimelineItemHtml(item)).join('')}</section>`).join('') : '<p class="court-timeline-empty">Nothing scheduled this week. Tap Play here to start something.</p>'}${data.undated_count ? '<p class="simple-note">More venue programs below · dates not confirmed.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
+        root.innerHTML=`<div class="court-timeline-heading"><h3 tabindex="-1">Coming up here</h3><button type="button" class="btn-link" data-timeline-create>${uiIcon('plus')}Create game</button></div>${zoneLabel ? `<p class="court-timeline-zone">${esc(zoneLabel)}</p>` : ''}<div class="court-timeline-range"><button type="button" class="btn btn-secondary btn-sm" data-timeline-prev aria-label="Previous week">${uiIcon('arrow-left')}</button><button type="button" class="court-timeline-dates" data-timeline-today aria-label="${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}. Back to today"><b>${esc(courtTimelineDate(data.from))} – ${esc(courtTimelineDate(data.to))}</b><small>${from ? 'Back to today' : 'Next 7 days'}</small></button><button type="button" class="btn btn-secondary btn-sm" data-timeline-next aria-label="Next week">${uiIcon('arrow-right')}</button></div><span class="sr-only" role="status">${esc(courtTimelineDate(data.from))} to ${esc(courtTimelineDate(data.to))}</span>${data.closed ? '<p class="simple-note">New play is paused while this court is marked closed. Existing plans remain in My plans.</p>' : groups.size ? [...groups].map(([on,items])=>{const day=new Date(`${on}T12:00:00`);return `<section class="court-timeline-day${courtTimelineDay(items[0])==='Today' ? ' is-today' : ''}"><h4><span aria-hidden="true">${esc(day.toLocaleDateString([],{weekday:'short'}))}<b>${day.getDate()}</b></span><span class="sr-only">${esc(day.toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}))}</span></h4><div>${items.map(item=>courtTimelineItemHtml(item)).join('')}</div></section>`;}).join('') : '<p class="court-timeline-empty">Nothing scheduled this week. Tap Play here to start something.</p>'}${data.undated_count ? '<p class="simple-note">More venue programs below · dates not confirmed.</p>' : ''}${data.has_more ? '<p class="simple-note">Showing the first 200 opportunities in this range.</p>' : ''}`;
         const shift=(days,focus)=>{const date=new Date(`${data.from}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+days);load(date.toISOString().slice(0,10),{focus});};
         root.querySelector('[data-timeline-prev]').addEventListener('click',()=>shift(-7,'[data-timeline-prev]'));
         root.querySelector('[data-timeline-next]').addEventListener('click',()=>shift(7,'[data-timeline-next]'));
@@ -8955,12 +8955,14 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const photo = /^(https?:\/\/|\/(?!\/))/.test(String(court.photo_url || '')) ? court.photo_url : '';
     const amenities = [[court.indoor, 'Indoor'], [court.lighted, 'Lights'], [court.nets_provided, 'Nets provided'], [court.has_water, 'Water'], [court.has_restrooms, 'Restrooms']].filter(([present]) => present).map(([, label]) => label);
     const directions = courtDirectionsUrl(court);
-    return `${photo ? `<img class="auth-preview-photo" src="${esc(photo)}" alt="${esc(court.name)}" loading="lazy" data-remove-on-error />` : ''}<span class="auth-preview-kicker">${Number(court.num_courts)} courts · ${court.indoor ? 'Indoor' : 'Outdoor'}</span><h3 data-share-preview-title tabindex="-1">${esc(court.name)}</h3><p>${esc([court.address, court.city, court.state].filter(Boolean).join(', '))}</p>
-      ${amenities.length ? `<div class="auth-preview-tags">${amenities.map((label) => `<span>${esc(label)}</span>`).join('')}</div>` : ''}
-      <dl class="auth-preview-facts"><div><dt>Hours</dt><dd>${esc(data.hours?.open_status?.label || 'Hours not listed')}<small>${esc(data.hours?.hours || '')}</small></dd></div><div><dt>Cost</dt><dd>${esc(court.fees || (court.fee_type === 'free' ? 'Free' : court.fee_type ? court.fee_type.replaceAll('_', ' ') : 'Not listed'))}</dd></div></dl>
-      ${directions ? `<a class="btn btn-secondary btn-block" href="${esc(directions)}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
+    // Same hero language as the signed-in court page: photo under a scrim, or
+    // a forest surface with a drawn court when no photo is available.
+    return `<div class="auth-court-preview"><div class="auth-preview-hero">${photo ? `<img class="auth-preview-photo" src="${esc(photo)}" alt="${esc(court.name)}" loading="lazy" data-remove-on-error />` : ''}<span class="auth-preview-kicker">${Number(court.num_courts)} courts · ${court.indoor ? 'Indoor' : 'Outdoor'}</span><h3 data-share-preview-title tabindex="-1">${esc(court.name)}</h3><p>${uiIcon('map-pin')}${esc([court.address, court.city, court.state].filter(Boolean).join(', '))}</p>
+      ${amenities.length ? `<div class="auth-preview-tags">${amenities.map((label) => `<span>${esc(label)}</span>`).join('')}</div>` : ''}</div>
+      <dl class="auth-preview-facts"><div><dt>${uiIcon('clock')}Hours</dt><dd>${esc(data.hours?.open_status?.label || 'Hours not listed')}<small>${esc(data.hours?.hours || '')}</small></dd></div><div><dt>${uiIcon('ticket')}Cost</dt><dd>${esc(court.fees || (court.fee_type === 'free' ? 'Free' : court.fee_type ? court.fee_type.replaceAll('_', ' ') : 'Not listed'))}</dd></div></dl>
+      ${directions ? `<a class="btn btn-secondary btn-block" href="${esc(directions)}" target="_blank" rel="noopener noreferrer">${uiIcon('map-pin')}Directions</a>` : ''}
       <h4>Next public sessions</h4>${data.sessions?.length ? data.sessions.map((game) => { const facts = publicSessionFacts(game); return `<button type="button" class="auth-court-result" data-public-route="#game/${Number(game.id)}"><span><b>${esc(game.title)}</b><small>${esc(fmtDateTime(game.scheduled_at))} · ${esc(facts.format)}</small><small>${esc(gameLevelRangeLabel(game))} · ${esc(facts.stateLabel)}</small></span>${uiIcon('chevron-right')}</button>`; }).join('') : '<p>No public sessions listed yet.</p>'}
-      <button type="button" class="btn btn-primary btn-block" data-public-auth>Play here</button><small class="auth-preview-footnote">Sign up free to invite friends, start a game, or check in.</small>`;
+      <div class="auth-preview-cta"><button type="button" class="btn btn-primary btn-block" data-public-auth>${uiIcon('plus')}Play here</button><small class="auth-preview-footnote">Sign up free to invite friends, start a game, or check in.</small></div></div>`;
   }
 
   function renderSignedOutShareContext() {
@@ -13069,8 +13071,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         modalBox.setAttribute('aria-busy', 'false');
         modalBox.classList.remove('court-detail-refreshing');
         modal.querySelector('.court-detail-refresh-error')?.remove();
-        const scroller = modal.querySelector('.cd-scroll');
-        scroller?.insertAdjacentHTML('afterbegin', `
+        modal.querySelector('.cd-hero')?.insertAdjacentHTML('afterend', `
           <div class="court-detail-refresh-error" role="alert">
             <span>${uiIcon('alert-triangle')} Couldn’t refresh this court. The previous details are still shown.</span>
             <button type="button" class="btn btn-secondary btn-sm" data-retry-court-refresh>Try again</button>
@@ -13178,22 +13179,27 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const chipsHtml = tags.map((t) => t.startsWith('<span') ? t : `<span class="tag">${t}</span>`).join('');
     const heroFactsHtml = `
       <div class="cd-hero-facts" role="list" aria-label="Court facts">
+        ${nHere && !court.closed ? `<span role="listitem" class="is-live">${nHere} here now</span>` : ''}
         <span role="listitem">${uiIcon('grid')} ${court.num_courts} court${court.num_courts === 1 ? '' : 's'}</span>
         <span role="listitem">${uiIcon(court.indoor ? 'home' : 'sun')} ${court.indoor ? 'Indoor' : 'Outdoor'}</span>
         ${court.lighted ? `<span role="listitem">${uiIcon('lightbulb')} Lights</span>` : ''}
+        ${court.surface_type ? `<span role="listitem">${esc(compactCourtFact(court.surface_type, 22))}</span>` : ''}
       </div>`;
     const todayHours = openStatusFact?.label || compactCourtFact(court.hours, 44) || 'Hours not listed';
     const structuredOpenPlay = courtOpenPlayTodayFact(court, 54);
     const openPlayFact = structuredOpenPlay?.label || (court.open_play_schedule
-      ? compactCourtFact(court.open_play_schedule, 54)
+      ? compactCourtFact(court.open_play_schedule, 96)
       : venueBusiness?.schedule?.some((item) => item && item.active !== false)
         ? 'See venue schedule below' : 'No schedule listed');
     const structuredOpenPlayHtml = courtOpenPlayScheduleHtml(court);
+    // Visit facts read as rows (icon tile, label, value) so long hours or
+    // open-play notes wrap to two lines instead of overflowing narrow boxes.
     const visitFactsHtml = `
       <dl class="cd-visit-facts" aria-label="Today at this court">
-        <div><dt>${uiIcon('clock')} Today</dt><dd><button type="button" data-court-visit="hours" aria-label="View full court hours: ${esc(todayHours)}">${esc(todayHours)}${uiIcon('chevron-right')}</button></dd></div>
-        <div><dt>${uiIcon('ticket')} Access</dt><dd><button type="button" data-court-visit="fees" aria-label="View full fees and access details: ${esc(feeFact || 'Not listed')}">${esc(feeFact || 'Not listed')}${uiIcon('chevron-right')}</button></dd></div>
-        <div><dt>${uiIcon('calendar')} Open play</dt><dd><button type="button" data-court-visit="openplay" aria-label="View full open-play schedule: ${esc(openPlayFact)}">${esc(openPlayFact)}${uiIcon('chevron-right')}</button></dd></div>
+        ${[['hours', 'clock', 'Hours', todayHours, 'View full court hours', openStatusFact?.state],
+          ['fees', 'ticket', 'Access', feeFact || 'Not listed', 'View full fees and access details'],
+          ['openplay', 'calendar', 'Open play', openPlayFact, 'View full open-play schedule'],
+        ].map(([topic, icon, label, value, action, tone]) => `<div${tone ? ` data-state="${esc(tone)}"` : ''}><dt><span class="cd-fact-icon" aria-hidden="true">${uiIcon(icon)}</span>${label}</dt><dd><button type="button" data-court-visit="${topic}" aria-label="${action}: ${esc(value)}"><span>${esc(value)}</span>${uiIcon('chevron-right')}</button></dd></div>`).join('')}
       </dl>`;
     const linkParts = [];
     if (court.website && (!venueBusiness || !venueBusiness.website_url)) linkParts.push(`<a href="${esc(court.website)}" target="_blank" rel="noopener" aria-label="Community website for ${esc(court.name)} (opens new tab)">${uiIcon('external')} Community website link</a>`);
@@ -13291,28 +13297,28 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     if (pendingCourtDetailOpen?.modal === modal) pendingCourtDetailOpen = null;
     modalBox.innerHTML = `
       <p class="sr-only" role="status" aria-live="polite">Court details loaded for ${esc(court.name)}</p>
+      <div class="cd-hero-actions">
+        <span class="cd-topbar-title" aria-hidden="true">${esc(court.name)}</span>
+        <button type="button" class="glass-btn cd-hero-save" id="cd-favorite" aria-pressed="${isFavorite}" aria-label="${isFavorite ? 'Remove court from saved courts' : 'Save court'}">${uiIcon('star')}<span>${isFavorite ? 'Saved' : 'Save'}</span></button>
+        <button type="button" class="glass-btn modal-close" aria-label="Close">${uiIcon('x')}</button>
+      </div>
+      <div class="cd-scroll">
       <div class="cd-hero">
         ${heroImg}
         <div class="cd-hero-shade"></div>
-        <div class="cd-hero-actions">
-          <button type="button" class="glass-btn cd-hero-save" id="cd-favorite" aria-pressed="${isFavorite}" aria-label="${isFavorite ? 'Remove court from saved courts' : 'Save court'}">${uiIcon('star')}<span>${isFavorite ? 'Saved' : 'Save'}</span></button>
-          <button type="button" class="glass-btn modal-close" aria-label="Close">${uiIcon('x')}</button>
-        </div>
         <div class="cd-hero-title">
           <h2>${esc(court.name)}${venueBusiness ? `<span class="cd-verified-venue">${uiIcon('check-circle')} Verified venue</span>` : ''}</h2>
           <a id="cd-address" class="cd-address-copy" href="${mapsUrl}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name)} (opens Maps)">
-            ${esc(courtAddressDisplay)}
-            ${uiIcon('external')}
+            ${uiIcon('map-pin')}<span>${esc(courtAddressDisplay)}</span>${uiIcon('external')}
           </a>
+          ${heroFactsHtml}
         </div>
       </div>
-      <div class="cd-scroll">
       ${court.closed ? `<div class="cd-closed-banner" role="status">${uiIcon('alert-triangle')}<span>This court is reported permanently closed</span><button type="button" class="btn-link" data-cd-suggest>Fix listing</button></div>` : ''}
-      ${heroFactsHtml}
-      ${visitFactsHtml}
       ${quickActions}
+      ${visitFactsHtml}
       <section id="cd-play-here" class="court-play-timeline" aria-label="Dated play at this court"></section>
-      <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary>${courtClosed ? 'Court status' : checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</summary>
+      <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon(courtClosed ? 'alert-triangle' : checkedIn ? 'check-circle' : 'map-pin')}</span><span>${courtClosed ? 'Court status' : checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</span></summary>
       <section class="card cd-now-card" aria-labelledby="cd-now-heading">
         <div class="cd-now-heading">
           <div>
@@ -13339,8 +13345,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <span class="row-main"><span class="row-title">Find communities at this court</span><span class="row-sub">Meet local groups that play at ${esc(court.name)}</span></span>
           ${uiIcon('chevron-right', 'chev')}
         </button>`}
+      <div class="section-label cd-about-label">About this court</div>
       <details class="card cd-progressive cd-court-details">
-        <summary>${venueBusiness ? 'Community court details' : 'Court details'}</summary>
+        <summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon('grid')}</span>${venueBusiness ? 'Community court details' : 'Court details'}</summary>
         <div class="cd-progressive-body">
           <div>${chipsHtml}</div>
           ${courtCheckinHistoryHtml(court.checkin_history)}
@@ -13368,7 +13375,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         </div>
       </details>
       <details class="card cd-progressive cd-community-details">
-        <summary><span>More at this court</span><small id="cd-more-preview">${esc(morePreviewParts.slice(0, 2).join(' · ') || 'Communities, leagues, and court history')}</small></summary>
+        <summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon('trophy')}</span><span>More at this court</span><small id="cd-more-preview">${esc(morePreviewParts.slice(0, 2).join(' · ') || 'Communities, leagues, and court history')}</small></summary>
         <div class="cd-progressive-body">
       ${(court.regulars || []).length ? `
         <div class="section-label">Court regulars</div>
@@ -13440,11 +13447,19 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modalBox.classList.remove('court-detail-refreshing');
     setDialogLabel(modalBox, court.name || 'Court details');
     modal.querySelector('.cd-scroll')?.setAttribute('data-scroll', '');
+    // The hero scrolls away with the page; once it has, the floating top bar
+    // turns solid and names the court so context and Close stay in view.
+    const cdScroller = modal.querySelector('.cd-scroll');
+    const cdHero = modal.querySelector('.cd-hero');
+    modalBox.classList.remove('cd-condensed');
+    cdScroller?.addEventListener('scroll', () => {
+      modalBox.classList.toggle('cd-condensed', cdScroller.scrollTop > cdHero.offsetHeight - 72);
+    }, { passive: true });
     enhanceAppSelects(modalBox);
 
     if (venuePreview || court.pending_submission) {
       modalBox.dataset.venuePreview = 'true';
-      modal.querySelector('.cd-scroll')?.insertAdjacentHTML('afterbegin', `<div class="business-preview-note" role="status"><span>${uiIcon('eye')}</span><p><b>${venuePreview ? 'Manager draft · full court preview' : 'Private location · awaiting review'}</b><br />${venuePreview ? 'Your saved venue details appear in their court context.' : 'Only the submitting venue team and reviewers can see this location.'} Player actions and booking links are disabled in this preview.</p></div>`);
+      modal.querySelector('.cd-hero')?.insertAdjacentHTML('afterend', `<div class="business-preview-note" role="status"><span>${uiIcon('eye')}</span><p><b>${venuePreview ? 'Manager draft · full court preview' : 'Private location · awaiting review'}</b><br />${venuePreview ? 'Your saved venue details appear in their court context.' : 'Only the submitting venue team and reviewers can see this location.'} Player actions and booking links are disabled in this preview.</p></div>`);
       const slot = modal.querySelector('#cd-business');
       slot.innerHTML = court.business ? courtBusinessHtml({...court.business, community_fallback: {hours: court.hours || '', phone: court.phone || '', website_url: court.website || '', open_play_schedule: court.open_play_schedule || ''}}) : '<p class="simple-note">This venue has not been approved for public discovery.</p>';
       bindBusinessLogoFallback(slot);
