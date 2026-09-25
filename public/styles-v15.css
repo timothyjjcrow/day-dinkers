@@ -8429,7 +8429,7 @@ html[data-theme="dark"] .empty-state-icon, html[data-theme="dark"] .empty-state 
   border-top: 1px solid color-mix(in srgb, var(--on-forest) 14%, transparent);
 }
 .profile-hero-stats[hidden] { display: none; }
-.profile-hero-stats > div { min-width: 0; display: flex; flex-direction: column-reverse; align-items: center; gap: 1px; padding: 0 2px; }
+.profile-hero-stats > div { min-width: 0; display: flex; flex-direction: column-reverse; justify-content: flex-end; align-items: center; gap: 1px; padding: 0 2px; }
 .profile-hero-stats > div + div { border-left: 1px solid color-mix(in srgb, var(--on-forest) 12%, transparent); }
 .profile-hero-stats dd { margin: 0; color: var(--volt); font-size: 23px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; }
 .profile-hero-stats dt {
