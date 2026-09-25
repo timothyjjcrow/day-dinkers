@@ -16883,11 +16883,14 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     return `
       <article class="card game-card" style="${cardStyle}">
         <button type="button" class="game-card-main" data-open-game="${game.id}" aria-label="Open ${esc(customTitle || defaultGameTitle)} at ${esc(courtSummary)}">
+          ${planDateTileHtml(game.scheduled_at)}
+          <span class="game-card-body">
           <span class="game-card-context">${typeTag}${joinedState || inviteTag || chatTag}</span>
           <span class="row-title game-card-title">${gameTitle}</span>
           ${customTitle && !game.is_instant ? `<span class="game-card-when">${uiIcon('calendar')} ${esc(scheduledLabel)}</span>` : ''}
           <span class="game-card-place">${uiIcon('map-pin')} <span>${esc(court.name || 'Court')}${game.court_number ? ` · ${esc(game.court_number)}` : ''}</span></span>
           ${visTag || recurTag || levelRangeLabel !== 'Any level' || costLabel ? `<span class="game-card-tags">${visTag}${recurTag}${levelRangeLabel !== 'Any level' ? `<span class="game-card-level">Level ${esc(levelRangeLabel)}</span>` : ''}${costLabel ? `<span class="game-card-level">${esc(costLabel)}</span>` : ''}</span>` : ''}
+          </span>
           ${banner}
         </button>
         <div class="row game-card-footer">
@@ -18478,28 +18481,42 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     });
   }
 
-  function rallyLauncherHtml() {
+  // Play home hero: where the player stands now, their next plan when they
+  // have one, one volt Create action, then the four play-now shortcuts.
+  function rallyLauncherHtml(nextPlan = null) {
     const here = state.presence && state.presence.checked_in;
     const pulse = here ? null : normalizeActivePlayPulse(state.activePlayPulse);
     if (!here && state.activePlayPulse && !pulse) state.activePlayPulse = null;
-    const status = here ? `At ${esc(state.presence.court_name)}`
-      : pulse ? `Free this hour at ${esc(pulse.courtName)}`
-        : esc(state.areaLabel || state.me?.home_area || 'Choose how you can play');
     return `
-      <section class="play-action-bar" aria-label="Create or start a game">
-        <button type="button" class="btn btn-primary" data-goto="new-game">${uiIcon('plus')} Create game</button>
-        <details class="play-now-options" data-view-state-key="play-now">
-          <summary>${uiIcon('zap')} Play now</summary>
-          <div class="play-now-quick-actions">
-            <p class="row-sub">${status}</p>
-            <button type="button" data-goto="instant-rally"><span aria-hidden="true">${uiIcon('map-pin')}</span><b>${here ? 'Play here' : 'I’m at a court'}</b></button>
-            <button type="button" data-goto="on-my-way"><span aria-hidden="true">${uiIcon('clock')}</span><b>I’m on my way</b></button>
-            <button type="button" data-goto="play-pulse"><span aria-hidden="true">${uiIcon('activity')}</span><b>I’m free this hour</b></button>
-            <button type="button" data-goto="ranked-match"><span aria-hidden="true">${uiIcon('trophy')}</span><b>Start a ranked match</b></button>
-          </div>
-        </details>
-      </section>
-      ${pulse ? activePlayPulseBannerHtml(pulse) : ''}`;
+      <section class="play-hero${here ? ' is-live' : ''}" aria-label="Create or start a game">
+        ${here ? `<p class="play-hero-status"><span class="play-hero-dot" aria-hidden="true"></span><span>Checked in at ${esc(state.presence.court_name)}</span></p>` : ''}
+        ${nextPlan ? playHeroNextHtml(nextPlan) : `<h3 class="play-hero-title">${here ? 'You’re at the court' : 'Ready to play?'}</h3>
+        <p class="play-hero-copy">${here ? 'Start a game here or plan one for later.' : 'Plan a game with friends or jump in now.'}</p>`}
+        <div class="play-action-bar">
+          <button type="button" class="btn btn-primary" data-goto="new-game">${uiIcon('plus')} Create game</button>
+        </div>
+        <div class="play-now-quick-actions" role="group" aria-label="Play now">
+          <button type="button" data-goto="instant-rally"><span aria-hidden="true">${uiIcon('map-pin')}</span><b>${here ? 'Play here' : 'I’m at a court'}</b></button>
+          <button type="button" data-goto="on-my-way"><span aria-hidden="true">${uiIcon('clock')}</span><b>I’m on my way</b></button>
+          <button type="button" data-goto="play-pulse"><span aria-hidden="true">${uiIcon('activity')}</span><b>I’m free this hour</b></button>
+          <button type="button" data-goto="ranked-match"><span aria-hidden="true">${uiIcon('trophy')}</span><b>Start a ranked match</b></button>
+        </div>
+        ${pulse ? activePlayPulseBannerHtml(pulse) : ''}
+      </section>`;
+  }
+
+  function playHeroNextHtml(game) {
+    const court = game.court || {};
+    const players = game.players || [];
+    const open = Math.max(0, Number(game.spots_left) || 0);
+    const when = `${fmtTimeShort(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
+    const going = `${players.length} going${open ? ` · ${open} open` : ''}`;
+    return `<button type="button" class="play-hero-next" data-open-game="${game.id}" aria-label="Open your next plan: ${esc(game.title || gameActivityLabel(game))}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(going)}">
+      <span class="play-hero-next-kicker">Up next · ${esc(upcomingDayLabel(game.scheduled_at))}<span class="play-hero-next-role">${esc(playPlanStatus(game).label)}</span></span>
+      <b class="play-hero-next-time">${esc(when)}</b>
+      <span class="play-hero-next-place">${esc(game.title ? `${game.title} · ${court.name || 'Court'}` : court.name || 'Court')}</span>
+      <span class="play-hero-next-people"><span class="avatar-stack">${players.slice(0, 4).map((player) => avatarHtml(player, 'sm', 'span')).join('')}</span><span>${esc(gameActivityLabel(game))} · ${esc(going)}</span>${uiIcon('chevron-right', 'chev')}</span>
+    </button>`;
   }
 
   function playProgressCardHtml(progress) {
@@ -18541,13 +18558,26 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       : game.is_joined ? { label:'Joined', tone:'live' } : { label:'Not joined', tone:'' };
   }
 
+  // Decorative calendar tile for agenda rows and game cards; the row text or
+  // accessible name always carries the full date and time. `time` shows the
+  // weekday and clock (agenda), otherwise month, day and weekday (cards).
+  function planDateTileHtml(iso, { time = false } = {}) {
+    const date = new Date(iso || '');
+    if (!Number.isFinite(date.getTime())) return '<span class="plan-date-tile is-tba" aria-hidden="true"><b>TBA</b></span>';
+    const startOf = (value) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+    const today = startOf(date) === startOf(new Date());
+    const weekday = today ? 'Today' : date.toLocaleDateString([], { weekday: 'short' });
+    const [clock, meridiem = ''] = String(fmtTimeShort(iso)).split(/\s+/);
+    return `<span class="plan-date-tile${today ? ' is-today' : ''}" aria-hidden="true"><small>${esc(time ? weekday : date.toLocaleDateString([], { month: 'short' }))}</small><b>${esc(time ? clock : date.getDate())}</b><small>${esc(time ? meridiem : weekday)}</small></span>`;
+  }
+
   function playPlanRowHtml(game, { showDate = false } = {}) {
     const court = game.court || {};
     const status = playPlanStatus(game);
     const format = game.game_type === 'ranked' ? `Ranked ${Number(game.max_players) === 2 ? 'singles' : 'doubles'}` : 'Pickup session';
     return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(status.label)}">
-      <span class="play-schedule-time">${esc(showDate ? fmtDateTime(game.scheduled_at) : fmtTimeShort(game.scheduled_at))}</span>
-      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
+      ${planDateTileHtml(game.scheduled_at, { time: true })}
+      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${showDate ? `${esc(fmtDateTime(game.scheduled_at).split(' · ')[0])} · ` : ''}${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
       <span class="tag ${status.tone}">${esc(status.label)}</span>
     </button>`;
   }
@@ -18619,7 +18649,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
               : tournament.partner_status === 'pending' ? 'Partner pending'
                 : tournament.is_organizer ? 'Organizer' : tournament.is_entered ? 'Entered' : 'Reply to invite';
       return `<button type="button" class="play-schedule-row" data-open-tournament="${tournament.id}" aria-label="Open ${esc(tournament.name)} tournament, ${esc(hasTime ? fmtDateTime(startsAt) : 'Time to be announced')}${court.name ? ` at ${esc(court.name)}` : ''}, ${esc(role)}">
-        <span class="play-schedule-time">${hasTime ? esc(fmtTimeShort(startsAt)) : '—'}</span>
+        ${planDateTileHtml(hasTime ? startsAt : '', { time: true })}
         <span class="row-main"><b>${esc(tournament.name)}</b><small>Tournament${court.name ? ` · ${esc(court.name)}` : ''}${waiting?.status === 'offered' && waiting.expires_at ? ` · Reply by ${esc(fmtDateTime(waiting.expires_at))}` : ''}</small></span>
         <span class="tag">${esc(role)}</span>
       </button>`;
@@ -18628,7 +18658,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const opponent = isLeague ? competition.opponent?.display_name || 'Opponent' : competition.opponent_name || 'Opponent to be decided';
     const name = isLeague ? competition.league_name : competition.name;
     return `<button type="button" class="play-schedule-row" data-play-competition="${isLeague ? 'league' : 'tournament'}" data-competition-id="${isLeague ? competition.league_id : competition.tournament_id}" data-match-id="${competition.id}" aria-label="${esc(name)}, match against ${esc(opponent)}, ${esc(status)}${hasTime ? `, ${esc(fmtDateTime(startsAt))}` : ''}">
-      <span class="play-schedule-time">${hasTime ? esc(fmtTimeShort(startsAt)) : '—'}</span>
+      ${planDateTileHtml(hasTime ? startsAt : '', { time: true })}
       <span class="row-main"><b>vs ${esc(opponent)}</b><small>${esc(name)} · ${isLeague ? 'League' : 'Tournament'}${court.name ? ` · ${esc(court.name)}` : ''}${competition.court_number ? ` · Court ${esc(competition.court_number)}` : ''}${playCompetitionNeedsAction(competition) && hasTime ? ` · ${esc(fmtDateTime(startsAt))}` : ''}</small></span>
       <span class="tag">${esc(status)}</span>
     </button>`;
@@ -19129,7 +19159,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         })
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
 
-      let html = rallyLauncherHtml();
+      const nextPlan = mine.items.filter((game) => game.status === 'upcoming' && game.is_joined
+        && !game.is_instant && Date.parse(game.scheduled_at) > nowMs)
+        .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at))[0] || null;
+      let html = rallyLauncherHtml(nextPlan);
       const competitionActions = competitions.filter(playCompetitionNeedsAction);
       const planCount = mine.items.filter((game) => !instantRallyClosed(game)).length + competitions.length;
       const competitionDecisionCount = competitions.filter((item) => item.awaiting_your_confirmation
@@ -23370,7 +23403,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           icon: 'trophy',
           title: 'No competitions around yet',
           body: 'Try a wider area or come back as local events open.',
-
+          primary: { label: 'Create tournament or league', id: 'competition-create-empty' },
         });
       }
 
@@ -38755,12 +38788,20 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       : '';
     const joinedState = game.is_joined && game.status === 'upcoming' && !closedRally
       ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${uiIcon(game.attendance_confirmation_due && !game.is_creator ? 'clock' : 'check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}</span>${joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>' : ''}</div>` : '';
+    const [whenDay, whenTime] = fmtDateTime(game.scheduled_at).split(' · ');
     const when = !game.is_instant && game.scheduled_at
-      ? `<div class="session-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
+      ? `<div class="session-when">${uiIcon('calendar')}<span class="session-when-day">${esc(whenDay)}</span><b>${esc(whenTime)}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
     const openSpots = Math.max(0, Number(game.spots_left) || 0);
     const heldSpots = Math.max(0, Number(game.reserved_offer_count) || 0);
     const rosterAvailability = openSpots ? `${openSpots} spot${openSpots === 1 ? '' : 's'} left`
       : heldSpots ? `${heldSpots} spot${heldSpots === 1 ? '' : 's'} on hold` : 'Full';
+    // Players see chat first; anyone deciding whether to join sees the join
+    // action before share and help.
+    const toolbar = `<div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
+        ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' && !actions.includes('btn-primary') ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
+        <button type="button" class="btn btn-ghost" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
+        <button type="button" class="btn btn-ghost" id="gs-help" aria-label="Help with this ${playNoun}">${uiIcon('lightbulb')} Help</button>
+      </div>`;
     return `
       <div class="modal-head game-detail-header${(game.status === 'upcoming' || endedPlan) && !game.is_instant ? ' is-planned' : ''}">
         <div class="session-heading-copy">
@@ -38769,7 +38810,6 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         </div>
         <button class="modal-close" aria-label="Close">${uiIcon('x')}</button>
       </div>
-      ${joinedState}
       <div class="game-detail-summary">
         ${endedPlan ? `<span class="session-ended-state" data-status="${game.status}">${uiIcon(game.status === 'cancelled' ? 'x' : 'clock')} ${game.status === 'cancelled' ? 'Cancelled' : 'Ended'}</span>` : ''}
         ${resultState ? `<span class="match-result-state${game.status === 'awaiting_confirmation' ? ' is-pending' : ''}">${uiIcon(game.status === 'awaiting_confirmation' ? 'clock' : 'check-circle')} ${resultState}</span>` : ''}
@@ -38777,7 +38817,8 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         ${detailMeta}
       </div>
       ${hasScore ? playersHtml : ''}
-      <section class="session-plan-card" aria-label="Time, court and cost">
+      <section class="session-plan-card${game.status === 'upcoming' && !closedRally ? ' is-hero' : ''}" aria-label="Time, court and cost">
+      ${joinedState}
       ${when}
       <div class="session-place-wrap">
         <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
@@ -38801,13 +38842,10 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       </section>` : ''}
       ${waitlistHtml}${arrivalsHtml}${gameConsentHtml(game)}
       ${ratingChanges}
-      <div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
-        ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
-        <button type="button" class="btn btn-ghost" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
-        <button type="button" class="btn btn-ghost" id="gs-help" aria-label="Help with this ${playNoun}">Help</button>
-      </div>
+      ${game.is_joined ? toolbar : ''}
       ${chatPreview}
       <div class="session-main-actions">${actions}</div>
+      ${game.is_joined ? '' : toolbar}
       ${scoreHistoryHtml(game)}
       ${closedRally ? '' : sessionReturnToolsHtml(game)}
       ${infoStrip}${planningDetails}`;
