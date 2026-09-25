@@ -8017,7 +8017,8 @@ html[data-theme="dark"] .empty-state-icon, html[data-theme="dark"] .empty-state 
 .modal-close:not(.btn):not(.btn-link) { background: var(--surface-2); color: var(--ink); }
 .toast-icon { background: color-mix(in srgb, var(--volt) 22%, transparent); color: var(--volt); }
 .badge { border-radius: var(--radius-pill); font-weight: 800; }
-.simple-disclosure { border: 0; background: var(--surface-2); }
+.simple-disclosure { border: 0; background: var(--card); box-shadow: var(--shadow); }
+.modal .simple-disclosure { background: var(--surface-2); box-shadow: none; }
 .simple-disclosure > summary { font-weight: 750; }
 .simple-disclosure > summary::after {
   content: ''; width: 8px; height: 8px; flex: 0 0 8px; margin: -4px 4px 0 auto;
