@@ -8055,6 +8055,394 @@ html[data-theme="dark"] .empty-state-icon, html[data-theme="dark"] .empty-state 
 
 /* ---------- r83 · Court page ---------- */
 /* (court detail and public court preview refinements) */
+/* The court page sits on the warm page tone so its white section cards read
+   as groups. The hero scrolls with the page; a floating top bar keeps Save and
+   Close in reach and names the court once the hero has scrolled away. */
+.court-modal .modal { position: relative; background: var(--bg); }
+.court-modal .modal,
+.auth-court-preview { --cd-tile: var(--volt-soft); --cd-tile-ink: var(--green-ink); --cd-glass: rgba(255, 255, 255, .13); --cd-glass-line: rgba(255, 255, 255, .18); }
+/* In-card actions use a forest pill so volt stays with the dock's Play here. */
+.court-modal .modal { --cd-solid: var(--forest); }
+html[data-theme="dark"] .court-modal .modal { --cd-solid: var(--forest-2); }
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .court-modal .modal { --cd-solid: var(--forest-2); }
+}
+.court-modal .cd-scroll {
+  padding: 0 18px calc(28px + env(safe-area-inset-bottom)); scroll-padding-top: 80px;
+}
+.court-modal .cd-scroll:has(+ .cd-action-dock) { padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
+
+/* Floating top bar: transparent over the hero, solid glass once condensed. */
+.court-modal .cd-hero-actions {
+  position: absolute; z-index: 5; top: 0; right: 0; left: 0; min-height: 68px;
+  display: flex; align-items: center; gap: var(--space-2); padding: 12px 12px 12px 20px;
+  pointer-events: none; transition: background-color .2s ease, box-shadow .2s ease;
+}
+.court-modal .cd-hero-actions > * { pointer-events: auto; }
+.court-modal .cd-hero-actions > .flow-back { order: -1; }
+.court-modal .cd-hero-actions:has(> .flow-back) { padding-left: 12px; }
+.cd-topbar-title {
+  flex: 1; min-width: 0; overflow: hidden; color: var(--ink); font-size: 16px; font-weight: 800;
+  letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap;
+  opacity: 0; transform: translateY(6px); transition: opacity .18s ease, transform .18s ease;
+  pointer-events: none;
+}
+.court-modal .cd-condensed .cd-hero-actions {
+  background: color-mix(in srgb, var(--card) 94%, transparent); box-shadow: 0 1px 0 var(--line), 0 10px 24px rgba(15, 31, 23, .07);
+  -webkit-backdrop-filter: saturate(1.6) blur(18px); backdrop-filter: saturate(1.6) blur(18px);
+}
+.court-modal .cd-condensed .cd-topbar-title { opacity: 1; transform: none; }
+.court-modal .cd-hero-actions .glass-btn {
+  width: var(--tap-min); height: var(--tap-min); min-width: 0; flex: 0 0 var(--tap-min); padding: 0;
+  border: 1px solid var(--cd-glass-line); border-radius: var(--radius-pill);
+  background: rgba(8, 22, 14, .4); color: #fff; box-shadow: 0 4px 16px rgba(0, 0, 0, .16);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4); backdrop-filter: blur(12px) saturate(1.4);
+  transition: background-color .2s ease, color .2s ease, border-color .2s ease;
+}
+.court-modal .cd-hero-actions .glass-btn .ui-icon { width: 20px; height: 20px; flex-basis: 20px; }
+.court-modal .cd-hero-save > span {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.court-modal .cd-hero-save[aria-pressed="true"] { border-color: transparent; background: var(--volt); color: var(--on-volt); }
+.court-modal .cd-hero-save[aria-pressed="true"] .ui-icon { fill: currentColor; }
+.court-modal .cd-condensed .cd-hero-actions .glass-btn:not([aria-pressed="true"]) {
+  border-color: transparent; background: var(--surface-2); color: var(--ink); box-shadow: none;
+}
+
+/* Hero: court photo under a scrim, or a forest surface with a drawn court. */
+.court-modal .cd-hero {
+  position: relative; isolation: isolate; overflow: hidden; min-height: 252px;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  margin: 0 -18px 16px; padding: 84px 20px 22px; background: var(--forest); color: var(--on-forest);
+}
+.court-modal .cd-hero-img { border-radius: 0; }
+.court-modal .cd-hero-img.placeholder,
+.auth-court-preview .auth-preview-hero {
+  overflow: hidden;
+  background:
+    radial-gradient(90% 80% at 100% 0%, color-mix(in srgb, var(--forest-2) 90%, transparent), transparent 70%),
+    linear-gradient(165deg, var(--forest-2), var(--forest) 62%);
+}
+.court-modal .cd-hero-img.placeholder::before,
+.auth-court-preview .auth-preview-hero::before {
+  content: ''; position: absolute; z-index: -1; top: -18px; right: -150px; width: 460px; height: 209px;
+  --cd-line: var(--court-lines);
+  border: 2px solid var(--cd-line);
+  background:
+    linear-gradient(var(--cd-line), var(--cd-line)) 50% 0 / 4px 100% no-repeat,
+    linear-gradient(var(--cd-line), var(--cd-line)) 34.1% 0 / 2px 100% no-repeat,
+    linear-gradient(var(--cd-line), var(--cd-line)) 65.9% 0 / 2px 100% no-repeat,
+    linear-gradient(var(--cd-line), var(--cd-line)) 0 50% / 34.1% 2px no-repeat,
+    linear-gradient(var(--cd-line), var(--cd-line)) 100% 50% / 34.1% 2px no-repeat;
+  transform: perspective(800px) rotateX(38deg) rotateZ(-24deg);
+  pointer-events: none;
+}
+.court-modal .cd-hero-img.placeholder::before { z-index: 0; }
+.court-modal .cd-hero-shade {
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(4, 16, 9, .45) 0%, rgba(4, 16, 9, .05) 28%, rgba(4, 16, 9, .5) 52%, rgba(4, 16, 9, .9) 100%);
+}
+.court-modal .cd-hero:has(.cd-hero-photo) .cd-hero-title { text-shadow: 0 1px 10px rgba(0, 0, 0, .45); }
+.court-modal .cd-hero:not(:has(.cd-hero-photo)) .cd-hero-shade {
+  background: linear-gradient(180deg, transparent 45%, rgba(4, 16, 9, .32));
+}
+.court-modal .cd-hero-title h2 {
+  color: var(--on-forest); font-size: 29px; line-height: 1.06; letter-spacing: -.035em;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, .28); overflow-wrap: anywhere;
+}
+.court-modal .cd-verified-venue {
+  border-color: var(--cd-glass-line); background: var(--cd-glass); vertical-align: 5px;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.court-modal .cd-address-copy {
+  max-width: 100%; min-height: var(--tap-min); display: inline-flex; align-items: center; gap: 6px;
+  margin: 2px 0 4px; padding: 0; color: var(--on-forest-soft); opacity: 1;
+  font-size: 14px; font-weight: 650; text-shadow: none;
+}
+.court-modal .cd-address-copy > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.court-modal .cd-address-copy .ui-icon { width: 16px; height: 16px; flex: 0 0 16px; }
+.court-modal .cd-address-copy .ui-icon:last-child { width: 13px; height: 13px; flex-basis: 13px; opacity: .75; }
+.court-modal .cd-address-copy:hover > span { color: var(--on-forest); text-decoration: underline; text-underline-offset: 3px; }
+.court-modal .cd-hero-facts { flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; overflow: visible; }
+.court-modal .cd-hero-facts > span {
+  min-height: 30px; gap: 6px; padding: 4px 12px; border: 1px solid var(--cd-glass-line);
+  border-radius: var(--radius-pill); background: var(--cd-glass); color: var(--on-forest);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  font-size: 12.5px; font-weight: 700;
+}
+.court-modal .cd-hero-facts .ui-icon { width: 14px; height: 14px; flex-basis: 14px; opacity: .85; }
+.court-modal .cd-hero-facts > .is-live { border-color: transparent; background: var(--volt); color: var(--on-volt); font-weight: 800; }
+.court-modal .cd-hero-facts > .is-live::before {
+  content: ''; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--forest);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--forest) 22%, transparent);
+}
+
+/* Photos / Reviews / Share: a light row of pill buttons. */
+.court-modal .cd-quick-actions { display: flex; gap: var(--space-2); margin: 0 0 12px; }
+.court-modal .cd-quick-actions button {
+  flex: 1 1 0; min-width: 0; min-height: var(--tap-min); flex-direction: row; gap: 7px; padding: 0 12px;
+  border: 0; border-radius: var(--radius-pill); background: var(--card); box-shadow: var(--shadow);
+  color: var(--ink); font-size: 13.5px; font-weight: 750; white-space: nowrap;
+}
+.court-modal .cd-quick-actions button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.court-modal .cd-quick-actions button .ui-icon { width: 17px; height: 17px; flex-basis: 17px; color: var(--ink); }
+.court-modal .cd-quick-actions button:hover { background: var(--card); box-shadow: var(--shadow-lift); }
+
+/* Visit facts: grouped rows with an icon tile, a label and a short value. */
+.court-modal .cd-visit-facts {
+  display: block; margin: 0 0 8px; padding: 4px 0; border-radius: var(--radius-lg);
+  background: var(--card); box-shadow: var(--shadow);
+}
+.court-modal .cd-visit-facts > div {
+  position: relative; min-height: 66px; display: flex; flex-direction: column; justify-content: center;
+  padding: 11px 44px 11px 70px; border: 0; border-radius: 0; background: none;
+}
+.court-modal .cd-visit-facts > div + div::before {
+  content: ''; position: absolute; top: 0; right: 16px; left: 70px; height: 1px; background: var(--line);
+}
+.court-modal .cd-visit-facts dt {
+  display: block; color: var(--ink-soft); font-size: 12px; font-weight: 700;
+  letter-spacing: 0; text-transform: none;
+}
+.cd-fact-icon, .cd-sum-icon {
+  width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center;
+  border-radius: var(--radius-md); background: var(--cd-tile); color: var(--cd-tile-ink);
+}
+.court-modal .cd-fact-icon { position: absolute; top: 50%; left: 16px; transform: translateY(-50%); }
+.court-modal .cd-visit-facts .cd-fact-icon .ui-icon,
+.cd-sum-icon .ui-icon { width: 20px; height: 20px; flex-basis: 20px; color: inherit; }
+.court-modal .cd-visit-facts [data-state="open"] .cd-fact-icon { background: var(--green-100); color: var(--green-ink); }
+.court-modal .cd-visit-facts [data-state="closed"] .cd-fact-icon { background: var(--amber-50); color: var(--amber-800); }
+.court-modal .cd-visit-facts dd {
+  margin: 2px 0 0; color: var(--ink); font-size: 15px; font-weight: 700; line-height: 1.3; letter-spacing: -.01em;
+}
+.court-modal .cd-visit-facts dd button { display: block; width: 100%; color: inherit; }
+.court-modal .cd-visit-facts dd button > span {
+  display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere;
+}
+.court-modal .cd-visit-facts dd .ui-icon {
+  position: absolute; top: 50%; right: 16px; width: 18px; height: 18px; transform: translateY(-50%); color: var(--ink-soft);
+}
+.court-modal .cd-visit-facts dd button:focus-visible { outline: none; }
+.court-modal .cd-visit-facts dd button:focus-visible::after { outline: 3px solid var(--green-accent); outline-offset: -3px; border-radius: var(--radius-md); }
+.court-modal .cd-visit-facts dd button:active::after { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+
+/* Coming up here: a date rail beside session cards. */
+.court-modal .court-play-timeline { margin: 30px 0 8px; padding: 0; border: 0; }
+.court-modal .court-play-timeline > h3,
+.court-modal .court-timeline-heading h3 { font-size: 22px; font-weight: 800; letter-spacing: -.03em; }
+.court-modal .court-timeline-heading { flex-wrap: nowrap; }
+.court-modal .court-timeline-heading .btn-link {
+  min-height: var(--tap-min); display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  margin: 0; padding: 0 16px; border-radius: var(--radius-pill); background: var(--card); box-shadow: var(--shadow);
+  color: var(--ink); font-size: 14px; font-weight: 750; text-decoration: none;
+}
+.court-modal .court-timeline-heading .btn-link .ui-icon { width: 17px; height: 17px; flex-basis: 17px; }
+.court-modal .court-timeline-heading .btn-link:disabled { box-shadow: none; opacity: .55; }
+.court-modal .court-timeline-range {
+  grid-template-columns: var(--tap-min) minmax(0, 1fr) var(--tap-min); gap: var(--space-1);
+  margin: 14px 0 6px; padding: var(--space-1); border-radius: var(--radius-pill); background: var(--track);
+}
+.court-modal .court-timeline-range .btn {
+  width: var(--tap-min); min-height: var(--tap-min); padding: 0; border-radius: var(--radius-pill);
+  background: var(--card); box-shadow: 0 1px 2px rgba(15, 31, 23, .08), 0 3px 10px rgba(15, 31, 23, .06); color: var(--ink);
+}
+.court-modal .court-timeline-range .btn .ui-icon { width: 18px; height: 18px; }
+.court-modal .court-timeline-range .court-timeline-dates { min-height: var(--tap-min); gap: 0; padding: 2px 6px; border-radius: var(--radius-pill); }
+.court-modal .court-timeline-dates b { font-size: 14px; font-weight: 800; letter-spacing: -.01em; }
+.court-modal .court-timeline-zone { margin: 6px 0 0; }
+.court-modal .court-timeline-day {
+  display: grid; grid-template-columns: 50px minmax(0, 1fr); align-items: start; gap: 12px; margin-top: 16px;
+}
+.court-modal .court-timeline-day > h4 { position: sticky; top: 80px; z-index: 1; margin: 0; }
+.court-modal .court-timeline-day > h4 > span[aria-hidden] {
+  display: grid; justify-items: center; padding: 8px 0 9px; border-radius: var(--radius-md);
+  background: var(--card); box-shadow: var(--shadow); color: var(--ink-soft);
+  font-size: 12px; font-weight: 750; letter-spacing: .06em; line-height: 1.2; text-transform: uppercase;
+}
+.court-modal .court-timeline-day > h4 b { color: var(--ink); font-size: 21px; font-weight: 800; letter-spacing: -.03em; }
+.court-modal .court-timeline-day.is-today > h4 > span[aria-hidden],
+.court-modal .court-timeline-day.is-today > h4 b { background: var(--volt); color: var(--on-volt); }
+.court-modal .court-timeline-item.court-timeline-card {
+  margin: 0 0 10px; padding: 16px; border: 0; border-radius: var(--radius-lg);
+  background: var(--card); box-shadow: var(--shadow);
+}
+.court-modal .court-timeline-card-top { margin-bottom: 6px; }
+.court-modal .court-timeline-card .court-timeline-time { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+.court-modal .court-timeline-availability {
+  padding: 4px 10px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink-soft);
+  font-size: 12px; font-weight: 750;
+}
+.court-modal .court-timeline-availability.has-space { background: var(--cd-tile); color: var(--cd-tile-ink); }
+.court-modal .court-timeline-availability.is-joined { background: var(--forest); color: var(--volt); }
+.court-modal .court-timeline-card .court-timeline-content h4 { margin: 0 0 3px; font-size: 18px; font-weight: 800; letter-spacing: -.02em; }
+.court-modal .court-timeline-card .court-timeline-content p { margin: 3px 0; font-size: 13px; }
+.court-modal .court-timeline-card .court-timeline-content .btn { min-height: var(--tap-min); margin-top: 12px; padding-inline: 18px; }
+.court-modal .court-timeline-card .court-timeline-content .btn-primary { background: var(--cd-solid); color: var(--on-forest); box-shadow: none; }
+.court-modal .court-timeline-card .court-timeline-status { border: 0; border-radius: var(--radius-pill); background: var(--surface-2); }
+.court-modal .court-timeline-empty {
+  margin: 14px 0 0; padding: 18px; border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow);
+  color: var(--ink-soft); font-size: 14px; line-height: 1.5; text-align: center;
+}
+
+/* Arrival, players and communities: white cards, icon tiles, no borders. */
+.court-modal .court-arrival-disclosure {
+  margin: 26px 0 0; overflow: hidden; border: 0; border-radius: var(--radius-lg);
+  background: var(--card); box-shadow: var(--shadow);
+}
+.court-modal .court-arrival-disclosure > summary,
+.court-modal .cd-progressive > summary {
+  min-height: 68px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 20px; align-items: center;
+  column-gap: 12px; padding: 12px 16px; list-style: none; cursor: pointer;
+  color: var(--ink); font-size: 15px; font-weight: 750; line-height: 1.3;
+}
+.court-modal .cd-progressive > summary { padding-inline: 0; }
+.court-modal .court-arrival-disclosure > summary::-webkit-details-marker { display: none; }
+.court-modal .cd-progressive > summary:has(> small) > .cd-sum-icon { grid-row: 1 / span 2; }
+.court-modal .cd-progressive > summary > small { grid-column: 2; grid-row: 2; margin: 2px 0 0; }
+.court-modal .court-arrival-disclosure > summary::after,
+.court-modal .cd-progressive > summary::after {
+  content: ''; grid-column: 3; grid-row: 1; justify-self: center; width: 8px; height: 8px; margin: 0;
+  border-right: 2px solid var(--ink-soft); border-bottom: 2px solid var(--ink-soft);
+  transform: rotate(45deg) translate(-2px, -2px); transition: transform .15s ease;
+}
+.court-modal .cd-progressive > summary:has(> small)::after { grid-row: 1 / span 2; }
+.court-modal .court-arrival-disclosure[open] > summary::after,
+.court-modal .cd-progressive[open] > summary::after { transform: rotate(225deg) translate(-2px, -2px); }
+.court-modal .court-arrival-disclosure .cd-now-card { margin: 0; padding: 4px 16px 16px; border: 0; box-shadow: none; }
+.court-modal .cd-now-signal { border: 0; background: var(--surface-2); }
+.court-modal .cd-now-signal.hot { background: var(--cd-tile); }
+.court-modal .cd-now-signal b { color: var(--ink); font-size: 20px; }
+.court-modal .cd-now-quiet { background: var(--surface-2); }
+.court-modal .cd-now-card .cd-primary-action { background: var(--cd-solid); color: var(--on-forest); box-shadow: none; }
+.court-modal .cd-presence-control { border: 0; border-radius: var(--radius-lg); background: var(--green-50); }
+.court-modal .cd-scroll a.btn { text-decoration: none; }
+.court-modal .court-more-actions { border: 0; border-radius: var(--radius-md); background: var(--surface-2); }
+.court-modal .court-more-actions .btn-secondary { background: var(--card); }
+.court-modal .cd-hours .row-title { white-space: normal; }
+.court-modal .cd-closed-banner { border: 0; border-radius: var(--radius-lg); }
+.court-modal .court-condition-reports { border: 0; border-radius: var(--radius-md); background: var(--surface-2); }
+.court-modal #cd-sec-players { margin-top: 30px; }
+.court-modal #cd-sec-players .ui-icon { width: 18px; height: 18px; }
+.court-modal .court-detail-empty {
+  justify-content: flex-start; gap: 12px; margin-bottom: 10px; padding: 14px 16px; border: 0;
+  border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow);
+}
+.court-modal .court-detail-empty > span { width: 40px; height: 40px; flex-basis: 40px; border-radius: var(--radius-md); background: var(--surface-2); color: var(--ink); }
+.court-modal .court-detail-empty p { font-size: 13px; line-height: 1.45; }
+.court-modal .cd-scroll > .card.row { border: 0; border-radius: var(--radius-lg); }
+.court-modal .cd-community-finder-action {
+  min-height: 68px; margin: 0 0 8px; padding: 12px 16px; border: 0; border-radius: var(--radius-lg);
+  background: var(--card); box-shadow: var(--shadow);
+}
+.court-modal .cd-community-finder-action .nav-row-leading {
+  width: 40px; height: 40px; flex-basis: 40px; border-radius: var(--radius-md); background: var(--cd-tile); color: var(--cd-tile-ink);
+}
+.court-modal .cd-community-finder-action .row-title { font-size: 15px; }
+.court-modal .cd-community-finder-action .row-sub { font-size: 12.5px; }
+.court-modal .cd-about-label { margin-top: 30px; }
+.court-modal .cd-progressive { margin-bottom: 10px; padding: 0 16px; border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.court-modal .cd-progressive > summary > .cd-sum-icon { background: var(--surface-2); color: var(--ink); }
+.court-modal .cd-progressive-body { padding-top: 14px; }
+
+/* Action dock: a floating glass bar; the scroller keeps room beneath it. */
+.court-modal .cd-action-dock {
+  position: absolute; z-index: 5; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); left: 12px;
+  grid-template-columns: auto minmax(0, 1fr) 52px; gap: 6px; padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--radius-pill);
+  background: var(--nav-surface); box-shadow: var(--shadow-lift);
+  -webkit-backdrop-filter: saturate(1.6) blur(18px); backdrop-filter: saturate(1.6) blur(18px);
+}
+.court-modal .cd-action-dock .btn { min-height: 52px; padding: 0 14px; border-radius: var(--radius-pill); font-size: 15px; }
+.court-modal .cd-action-dock .btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.court-modal .cd-action-dock .cd-dock-here,
+.court-modal .cd-action-dock .cd-dock-icon { background: color-mix(in srgb, var(--surface-2) 85%, transparent); color: var(--ink); }
+.court-modal .cd-action-dock .cd-dock-play { font-size: 16px; font-weight: 800; }
+.court-modal .cd-action-dock .cd-dock-icon { padding: 0; }
+.court-modal .cd-action-dock .cd-dock-icon .badge { top: 6px; right: 8px; }
+
+@media (min-width: 900px) {
+  .court-modal .cd-hero { min-height: 280px; padding-inline: 28px; }
+  .court-modal .cd-scroll { padding-inline: 24px; }
+  .court-modal .cd-hero { margin-inline: -24px; }
+  .court-modal .cd-hero-title h2 { font-size: 32px; }
+  .court-modal .cd-hero-img.placeholder::before { right: -60px; }
+}
+@media (max-width: 360px) {
+  .court-modal .cd-hero-title h2 { font-size: 26px; }
+  .court-modal .cd-quick-actions button { flex: 1 1 auto; gap: 5px; padding: 0 10px; font-size: 13px; }
+  .court-modal .cd-action-dock { grid-template-columns: auto minmax(0, 1fr) 48px; }
+  .court-modal .cd-action-dock .btn { padding: 0 12px; font-size: 14px; }
+  .court-modal .cd-action-dock .cd-dock-here .ui-icon { display: none; }
+  .court-modal .court-timeline-heading h3 { font-size: 20px; }
+  .court-modal .court-timeline-day { grid-template-columns: 44px minmax(0, 1fr); gap: 10px; }
+  .auth-court-preview h3 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cd-topbar-title, .court-modal .cd-hero-actions, .court-modal .cd-hero-actions .glass-btn { transition: none; }
+}
+
+/* Signed-out court preview: the same hero, fact rows and a volt Play here. */
+.auth-court-preview .auth-preview-hero {
+  position: relative; isolation: isolate; min-height: 236px; display: flex; flex-direction: column; justify-content: flex-end;
+  margin: 12px 0 14px; padding: 72px 20px 20px; border-radius: var(--radius-xl); color: var(--on-forest);
+}
+.auth-court-preview .auth-preview-photo {
+  position: absolute; z-index: -1; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; border-radius: 0;
+}
+.auth-court-preview .auth-preview-hero:has(.auth-preview-photo)::after {
+  content: ''; position: absolute; z-index: -1; inset: 0;
+  background: linear-gradient(180deg, rgba(4, 16, 9, .15) 10%, rgba(4, 16, 9, .5) 45%, rgba(4, 16, 9, .9));
+}
+.auth-court-preview .auth-preview-kicker {
+  align-self: flex-start; margin: 0 0 10px; padding: 5px 12px; border: 1px solid var(--cd-glass-line);
+  border-radius: var(--radius-pill); background: var(--cd-glass); color: var(--on-forest);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font-size: 12.5px; font-weight: 700;
+}
+.auth-court-preview h3 { margin: 0; color: var(--on-forest); font-size: 28px; font-weight: 800; line-height: 1.08; letter-spacing: -.035em; }
+.auth-court-preview .auth-preview-hero > p {
+  display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--on-forest-soft); font-size: 14px; font-weight: 650;
+}
+.auth-court-preview .auth-preview-hero > p .ui-icon { width: 16px; height: 16px; flex: 0 0 16px; }
+.auth-court-preview .auth-preview-tags { gap: 6px; margin: 12px 0 0; }
+.auth-court-preview .auth-preview-tags span {
+  padding: 4px 11px; border: 1px solid var(--cd-glass-line); border-radius: var(--radius-pill);
+  background: var(--cd-glass); color: var(--on-forest); font-size: 12.5px; font-weight: 700;
+}
+.auth-court-preview .auth-preview-facts {
+  display: grid; gap: 0; margin: 0 0 12px; padding: 4px 0; border-radius: var(--radius-lg); background: var(--surface-2);
+}
+.auth-court-preview .auth-preview-facts > div { position: relative; min-width: 0; padding: 12px 16px 12px 70px; }
+.auth-court-preview .auth-preview-facts > div + div::before {
+  content: ''; position: absolute; top: 0; right: 16px; left: 70px; height: 1px; background: var(--line);
+}
+.auth-court-preview .auth-preview-facts dt { margin: 0 0 2px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.auth-court-preview .auth-preview-facts dt .ui-icon {
+  position: absolute; top: 50%; left: 16px; width: 40px; height: 40px; padding: 10px; box-sizing: border-box;
+  border-radius: var(--radius-md); background: var(--cd-tile); color: var(--cd-tile-ink); transform: translateY(-50%);
+}
+.auth-court-preview .auth-preview-facts dd { font-size: 15px; font-weight: 700; }
+.auth-court-preview .auth-preview-facts dd small:empty { display: none; }
+.auth-court-preview > .btn-secondary {
+  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--control-min); text-decoration: none;
+}
+.auth-court-preview > .btn-secondary .ui-icon { width: 18px; height: 18px; }
+.auth-court-preview h4 { margin: 24px 0 8px; font-size: 17px; font-weight: 800; letter-spacing: -.02em; }
+.auth-court-preview .auth-court-result {
+  min-height: 64px; margin-bottom: 8px; padding: 12px 14px 12px 16px; border: 0;
+  border-radius: var(--radius-lg); background: var(--surface-2);
+}
+.auth-court-preview .auth-court-result b { font-size: 15px; font-weight: 800; }
+.auth-court-preview > p { margin: 0; padding: 16px; border-radius: var(--radius-lg); background: var(--surface-2); color: var(--ink-soft); }
+.auth-court-preview .auth-preview-cta {
+  position: sticky; bottom: 0; z-index: 2; margin: 18px -4px 0; padding: 12px 4px 0;
+  background: linear-gradient(180deg, transparent, var(--card) 22%);
+}
+.auth-court-preview .auth-preview-cta .btn-primary {
+  min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 17px; font-weight: 800;
+}
+.auth-court-preview .auth-preview-cta .btn-primary .ui-icon { width: 20px; height: 20px; }
+.auth-court-preview .auth-preview-footnote { margin: 8px 0 0; text-align: center; font-size: 12.5px; }
 
 
 /* ---------- r83 · Play, planner & game page ---------- */
