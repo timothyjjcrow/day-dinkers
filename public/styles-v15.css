@@ -8321,7 +8321,11 @@ html[data-theme="dark"] .empty-state-icon, html[data-theme="dark"] .empty-state 
 .chat-modal .thread-more-actions > summary { border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); }
 .chat-modal .thread-more-actions[open] > summary { background: var(--selected-fill); color: var(--selected-ink); }
 .chat-modal .thread-more-menu { padding: 6px; border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-lift); }
-.chat-modal .thread-more-menu .btn { justify-content: flex-start; gap: 10px; min-height: var(--tap-min); background: transparent; font-size: 14.5px; }
+.chat-modal .thread-more-menu .btn {
+  display: flex; align-items: center; justify-content: flex-start; gap: 10px; min-height: var(--tap-min);
+  padding: 0 14px; background: transparent; font-size: 14.5px; text-align: left;
+}
+.chat-modal .thread-more-menu .btn .ui-icon { width: 18px; height: 18px; color: var(--ink-soft); }
 .chat-modal .thread-more-menu .btn:hover { background: var(--surface-2); }
 .chat-modal .thread-plan-game {
   align-self: center; min-height: var(--tap-min); display: inline-flex; align-items: center; gap: 7px;
@@ -8510,6 +8514,58 @@ html[data-theme="dark"] .empty-state-icon, html[data-theme="dark"] .empty-state 
   content: ''; position: absolute; top: 0; right: 0; left: 58px; height: 1px; background: var(--line);
 }
 .modal [data-profile-edit-section] .nav-row-leading { background: var(--forest); color: var(--volt); border-radius: var(--radius-sm); }
+
+.modal [data-profile-preview] .row-main > b, .modal [data-profile-preview] .row-main > .row-sub { display: block; }
+.modal [data-profile-preview] .row-main > b { font-size: 16px; font-weight: 800; letter-spacing: -.015em; }
+
+/* Settings leaves keep the hub's grouped look: warm background, rows joined
+   into one rounded card per group, and matching icon squircles. */
+.modal:has(> .settings-leaf-intro),
+.modal:has(> .settings-leaf-intro) > .modal-head { background: var(--bg); }
+.modal > .settings-leaf-intro { border: 0; border-radius: var(--radius-lg); background: var(--card); }
+.modal > .settings-leaf-intro > span { background: var(--volt-soft); color: var(--green-ink); }
+.settings-device-push { border: 0; border-radius: var(--radius-lg); }
+.settings-device-push .row-title, .settings-device-push .row-sub { display: block; white-space: normal; overflow-wrap: normal; }
+.settings-preference-group { gap: 0; }
+.settings-preference-group > .section-label { margin: 16px 6px 8px; color: var(--ink-soft); font-size: 13.5px; font-weight: 750; letter-spacing: 0; }
+.settings-preference-group > .settings-notification-row {
+  position: relative; margin: 0; border: 0; border-radius: 0; box-shadow: none; padding: 10px 12px 10px 14px; gap: 13px;
+}
+.settings-preference-group > .section-label + .settings-notification-row { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.settings-preference-group > .settings-notification-row:last-child { border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.settings-preference-group > .section-label + .settings-notification-row:last-child { border-radius: var(--radius-lg); }
+.settings-preference-group > .settings-notification-row + .settings-notification-row::before {
+  content: ''; position: absolute; top: 0; right: 0; left: 64px; height: 1px; background: var(--line);
+}
+.settings-preference-group .settings-notification-row .row-title { font-size: 14.5px; font-weight: 750; }
+.settings-preference-group .settings-notification-row .row-sub { font-weight: 600; line-height: 1.35; }
+.modal .settings-preference-icon { width: 37px; height: 37px; flex-basis: 37px; background: var(--forest); color: var(--volt); }
+
+/* Another player's profile shares the Me hero: forest card, ringed avatar. */
+.modal > .profile-hero {
+  position: relative; isolation: isolate; overflow: hidden; margin: 0 0 14px; padding: 24px 18px 20px;
+  border-radius: var(--radius-xl); background: radial-gradient(120% 130% at 100% 0%, var(--forest-2) 0%, var(--forest) 62%);
+  color: var(--on-forest); box-shadow: var(--shadow-lift);
+}
+.modal > .profile-hero::before {
+  content: ''; position: absolute; z-index: -1; top: 50%; right: -36px; width: 260px; aspect-ratio: 44 / 20;
+  transform: translateY(-50%) rotate(-8deg); pointer-events: none;
+  border-radius: var(--radius-xxs); box-shadow: inset 0 0 0 2px var(--court-lines);
+  background:
+    linear-gradient(var(--court-lines), var(--court-lines)) 0 50% / 34% 2px no-repeat,
+    linear-gradient(var(--court-lines), var(--court-lines)) 100% 50% / 34% 2px no-repeat,
+    linear-gradient(90deg, transparent calc(34% - 1px), var(--court-lines) 0, var(--court-lines) calc(34% + 1px), transparent 0,
+      transparent calc(50% - 1.5px), var(--court-lines) 0, var(--court-lines) calc(50% + 1.5px), transparent 0,
+      transparent calc(66% - 1px), var(--court-lines) 0, var(--court-lines) calc(66% + 1px), transparent 0);
+}
+.modal > .profile-hero > .avatar {
+  width: 80px; height: 80px; margin: 0 auto 12px; font-size: 28px; box-shadow: 0 0 0 3px var(--forest), 0 0 0 5.5px var(--volt);
+}
+.modal > .profile-hero .profile-name { color: var(--on-forest); font-size: 24px; font-weight: 800; letter-spacing: -.03em; line-height: 1.15; }
+.modal > .profile-hero .profile-sub { color: var(--on-forest-soft); font-size: 13px; line-height: 1.5; }
+.modal > .profile-hero .profile-sub .ui-icon, .modal > .profile-hero .community-presence-status { color: var(--volt); }
+.modal > .profile-hero .community-presence-dot { background: var(--volt); box-shadow: 0 0 0 3px color-mix(in srgb, var(--volt) 22%, transparent); }
+.modal > .profile-hero .profile-sub[style] { color: var(--on-forest); font-size: 14px; }
 
 @media (max-width: 360px) {
   #chat-content { --social-gutter: 12px; }
