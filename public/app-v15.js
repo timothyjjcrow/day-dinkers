@@ -3460,6 +3460,7 @@
     $('#boot-screen')?.classList.add('hidden');
     $('#main-screen').classList.add('hidden');
     $('#auth-screen').classList.remove('hidden');
+    setupPublicCourtMap();
     $('#auth-email').value = rememberedEmail;
     $('#auth-password').value = '';
     $('#auth-name').value = '';
@@ -8827,7 +8828,16 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
   }
   async function setupPublicCourtMap() {
     const el = $('#auth-map');
-    if (!el || publicMap || state.token) return;
+    if (!el || state.token) return;
+    if (publicMap) {
+      // The auth screen can be revealed again after logout or an expired
+      // session; Leaflet needs its size re-measured once visible.
+      requestAnimationFrame(() => {
+        publicMap?.invalidateSize();
+        loadPublicMapCourts();
+      });
+      return;
+    }
     try {
       await ensureMapAssets();
     } catch {
@@ -38754,7 +38764,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     return `
       <div class="modal-head game-detail-header${(game.status === 'upcoming' || endedPlan) && !game.is_instant ? ' is-planned' : ''}">
         <div class="session-heading-copy">
-          <span class="session-eyebrow">${hasScore ? 'Match result' : esc(gameActivityLabel(game))}</span>
+          ${!hasScore && headline === esc(gameActivityLabel(game)) ? '' : `<span class="session-eyebrow">${hasScore ? 'Match result' : esc(gameActivityLabel(game))}</span>`}
           <h3 class="game-detail-title" data-status="${esc(game.status)}"><span class="game-detail-status-icon" aria-hidden="true">${statusIcon}</span><span class="game-detail-headline">${headline}</span></h3>
         </div>
         <button class="modal-close" aria-label="Close">${uiIcon('x')}</button>
@@ -38791,15 +38801,16 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       </section>` : ''}
       ${waitlistHtml}${arrivalsHtml}${gameConsentHtml(game)}
       ${ratingChanges}
-      <div class="session-main-actions">${actions}</div>
-      ${scoreHistoryHtml(game)}
       <div class="game-detail-toolbar" role="group" aria-label="${playNounTitle} actions">
         ${game.is_joined ? `<button type="button" class="btn ${game.status === 'upcoming' ? 'btn-primary' : 'btn-secondary'}" id="gs-chat" aria-label="${playNounTitle} chat — current players only${game.chat_unread ? `, ${game.chat_unread} unread` : ''}">${uiIcon('message')} ${hasScore ? 'Match chat' : 'Session chat'}${game.chat_unread ? `<span class="game-chat-unread">${game.chat_unread > 9 ? '9+' : game.chat_unread}</span>` : ''}</button>` : ''}
         <button type="button" class="btn btn-ghost" id="gs-share-header" aria-label="Share ${playNoun}">${uiIcon('send')} Share</button>
         <button type="button" class="btn btn-ghost" id="gs-help" aria-label="Help with this ${playNoun}">Help</button>
       </div>
+      ${chatPreview}
+      <div class="session-main-actions">${actions}</div>
+      ${scoreHistoryHtml(game)}
       ${closedRally ? '' : sessionReturnToolsHtml(game)}
-      ${chatPreview}${infoStrip}${planningDetails}`;
+      ${infoStrip}${planningDetails}`;
   }
 
   function focusGameControl(modal, box, selector) {
@@ -42429,6 +42440,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     }
     $('#boot-screen')?.classList.add('hidden');
     $('#auth-screen').classList.remove('hidden');
+    setupPublicCourtMap();
     renderSignedOutShareContext();
     openAccountActionDeepLink();
   }

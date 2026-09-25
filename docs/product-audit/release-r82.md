@@ -46,6 +46,11 @@ than as incremental passes.
 - Play opens on My plans when the player has plans or pending decisions.
 - Freshness chips appear only when a view is more than five minutes old; the
   court timeline shows a time zone only when it differs from the player's.
+- Game page: session chat and its latest message sit right under the roster
+  instead of below the host tools; an untitled session no longer repeats
+  "Casual session" as both eyebrow and title.
+- The signed-out map re-measures and reloads after logout or an expired
+  session, not only on first load.
 - Map peek sheet: "See all N courts as a list" is a quiet link instead of a
   full-width primary button; the check-in strip reads "You're here".
 
