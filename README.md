@@ -303,8 +303,9 @@ Required environment variables:
 | `DATABASE_URL` | Neon pooled runtime URL; required in production and normalized to psycopg automatically |
 | `MFA_ENCRYPTION_KEY` | a Fernet key used only for encrypted TOTP seeds; required in production |
 | `MFA_ISSUER` | authenticator-app issuer label, normally `Third Shot` |
-| `RESEND_API_KEY` | server-side transactional-email key for verification and team invitations |
-| `TRANSACTIONAL_EMAIL_FROM` | a verified Resend sender identity |
+| `RESEND_API_KEY` | server-side transactional-email key for sign-in codes, verification, password resets and team invitations |
+| `TRANSACTIONAL_EMAIL_FROM` | a verified Resend sender identity (with SMTP it defaults to `Third Shot <SMTP_USERNAME>`) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` | used instead of Resend when `RESEND_API_KEY` is unset, e.g. `smtp.gmail.com`, `587`, a Gmail address and its app password |
 | `PUBLIC_APP_URL` | canonical HTTPS origin used in one-time email links |
 | `CRON_SECRET` | independent high-entropy Bearer secret for every `/api/cron/*` route, including push, lifecycle maintenance, and business integrations |
 | `BUSINESS_CREDENTIAL_VAULT` | `encrypted_sql` to enable encrypted provider-secret writes; defaults to disabled |
