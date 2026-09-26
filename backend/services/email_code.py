@@ -27,13 +27,12 @@ _NONCE_RE = re.compile(r'^[A-Za-z0-9_-]{16,32}$')
 
 def is_available(app=None):
     """Codes need working transactional email; tests capture messages."""
+    from backend.email_delivery import delivery_configured
+
     app = app or current_app
     if app.config.get('TESTING'):
         return True
-    return bool(
-        str(app.config.get('RESEND_API_KEY') or '').strip()
-        and str(app.config.get('TRANSACTIONAL_EMAIL_FROM') or '').strip()
-    )
+    return delivery_configured(app)
 
 
 def _key():

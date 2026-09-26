@@ -114,6 +114,11 @@ class BaseConfig:
     )
     RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
     TRANSACTIONAL_EMAIL_FROM = os.getenv('TRANSACTIONAL_EMAIL_FROM', '')
+    # SMTP (for example a Gmail app password) is used when Resend is not set.
+    SMTP_HOST = os.getenv('SMTP_HOST', '').strip()
+    SMTP_PORT = _get_int('SMTP_PORT', 587)
+    SMTP_USERNAME = os.getenv('SMTP_USERNAME', '').strip()
+    SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
     PUBLIC_APP_URL = os.getenv('PUBLIC_APP_URL', 'https://third-shot.vercel.app')
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
     PORT = _get_int('PORT', 8000)

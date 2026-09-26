@@ -176,4 +176,7 @@ def test_availability_follows_email_configuration(app):
     app.config['RESEND_API_KEY'] = 're_test'
     app.config['TRANSACTIONAL_EMAIL_FROM'] = 'Third Shot <hello@example.com>'
     assert email_code.is_available(app) is True
+    app.config.update(RESEND_API_KEY='', TRANSACTIONAL_EMAIL_FROM='')
+    app.config.update(SMTP_HOST='smtp.gmail.com', SMTP_USERNAME='courts@gmail.com', SMTP_PASSWORD='app-password')
+    assert email_code.is_available(app) is True
     app.config['TESTING'] = True
