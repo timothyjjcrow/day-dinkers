@@ -1006,6 +1006,150 @@ def forgot_password():
     }), 202
 
 
+@auth_bp.get('/auth/options')
+def auth_options():
+    """Sign-in methods this deployment can offer right now."""
+    from backend.services import email_code
+
+    return jsonify({'email_code': email_code.is_available()})
+
+
+def _email_code_identity():
+    """Rate-limit key for one address, whatever else the request carries."""
+    return _login_rate_identity()
+
+
+@auth_bp.post('/auth/email-code')
+@rate_limit(5, 3600, key_func=_email_code_identity)
+@rate_limit(30, 3600)
+def request_email_code():
+    """Email a six-digit sign-in code. Works for new and existing players.
+
+    The response is the same whether or not an account exists; the signed
+    challenge it returns is useless without the emailed code.
+    """
+    from backend.email_delivery import EmailDeliveryError, EmailDeliveryUnavailable
+    from backend.services import email_code
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_request'}), 400
+    email = str(payload.get('email') or '').strip().lower()
+    if not _EMAIL_RE.fullmatch(email) or len(email) > 255:
+        return jsonify({'error': 'invalid_email'}), 400
+    if not email_code.is_available():
+        return jsonify({'error': 'email_code_unavailable'}), 503
+    challenge, code, nonce = email_code.issue(email)
+    try:
+        email_code.send(email, code, nonce)
+    except (EmailDeliveryUnavailable, EmailDeliveryError, ValueError):
+        current_app.logger.exception('Sign-in code delivery failed')
+        return jsonify({'error': 'email_code_unavailable'}), 503
+    return jsonify({
+        'ok': True,
+        'challenge': challenge,
+        'expires_in': email_code.CODE_LIFETIME_SECONDS,
+    }), 202
+
+
+@auth_bp.post('/auth/email-code/verify')
+@rate_limit(6, 900, key_func=_email_code_identity)
+@rate_limit(20, 86400, key_func=_email_code_identity)
+@rate_limit(60, 900)
+def verify_email_code():
+    """Sign in, or create the account, for whoever holds the emailed code.
+
+    A new address also needs a display name; the client asks for one and
+    resubmits the same code. MFA accounts still need their second factor.
+    The challenge is consumed only when a token is actually issued.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from backend.services import email_code
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_request'}), 400
+    email = str(payload.get('email') or '').strip().lower()
+    claims, problem = email_code.verify(
+        payload.get('challenge'), payload.get('code'), email,
+    )
+    if problem == 'expired':
+        return jsonify({'error': 'email_code_expired'}), 400
+    if problem:
+        return jsonify({'error': 'invalid_email_code'}), 400
+
+    user = (
+        User.query.filter_by(email=email)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if user is not None and user.deleted_at is not None:
+        return jsonify({'error': 'invalid_email_code'}), 400
+    if user is not None and user.suspended_at is not None:
+        return jsonify({'error': 'account_suspended'}), 403
+
+    now = utcnow()
+    if user is None:
+        display_name = str(payload.get('display_name') or '').strip()
+        if not display_name:
+            return jsonify({'error': 'display_name_required', 'new_account': True}), 400
+        if not email_code.consume(claims):
+            return jsonify({'error': 'email_code_used'}), 400
+        user = User(email=email, display_name=display_name[:120])
+        invited_by_user_id = payload.get('invited_by_user_id')
+        if invited_by_user_id not in (None, '', 0):
+            try:
+                inviter = db.session.get(User, int(invited_by_user_id))
+            except (TypeError, ValueError):
+                inviter = None
+            if inviter and inviter.deleted_at is None:
+                user.invited_by_user_id = inviter.id
+        # Codes replace the password; an unguessable one keeps the column's
+        # contract. The player can set a real password later in Settings.
+        user.set_password(secrets.token_urlsafe(32))
+        user.email_verified_at = now
+        db.session.add(user)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Another request created this address first; sign in to it.
+            db.session.rollback()
+            return jsonify({'error': 'email_code_retry'}), 409
+        return jsonify({
+            'token': _issue_token(user),
+            'created': True,
+            **_me_payload(user),
+        }), 201
+
+    if user.mfa_enabled:
+        from backend.services.mfa import MFAError, verify_user_mfa
+        mfa_code = str(payload.get('mfa_code') or '').strip()
+        if not mfa_code:
+            return jsonify({'error': 'mfa_required'}), 401
+        try:
+            valid, used_recovery = verify_user_mfa(user, mfa_code)
+        except MFAError:
+            current_app.logger.exception('MFA secret unavailable for user %s', user.id)
+            return jsonify({'error': 'mfa_unavailable'}), 503
+        if not valid:
+            return jsonify({'error': 'invalid_mfa_code'}), 401
+        if used_recovery:
+            user.auth_version = int(user.auth_version or 1) + 1
+    if not email_code.consume(claims):
+        db.session.rollback()
+        return jsonify({'error': 'email_code_used'}), 400
+    if user.email_verified_at is None:
+        user.email_verified_at = now
+    db.session.commit()
+    return jsonify({
+        'token': _issue_token(user),
+        'created': False,
+        **_me_payload(user),
+    })
+
+
 @auth_bp.post('/auth/reset-password')
 @rate_limit(10, 900)
 def reset_password():

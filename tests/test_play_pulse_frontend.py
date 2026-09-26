@@ -38,7 +38,7 @@ def test_remote_hero_exposes_play_now_intents_without_claiming_presence():
     assert 'data-goto="play-pulse"' in hero
     assert '<b>I’m free this hour</b>' in hero
     assert 'data-goto="new-game"' in hero
-    assert 'data-goto="ranked-match"' in hero
+    assert 'data-goto="ranked-match"' not in hero[:hero.index("function playHeroNextHtml")]
     assert 'data-goto="play-now"' not in hero
     assert "activePlayPulseBannerHtml(pulse)" in hero
     assert "Only the court is shared, not your location." in APP
@@ -207,4 +207,4 @@ def test_errors_mobile_targets_and_shell_revision_are_explicit():
     assert "grid-template-columns: auto minmax(0, 1fr)" in STYLES
     assert ".play-pulse-nearby-card [data-play-pulse-accept]" in STYLES
     assert "min-width: 0" in STYLES
-    assert "thirdshot-v15-r85" in SW
+    assert "thirdshot-v15-r86" in SW

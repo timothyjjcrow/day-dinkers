@@ -958,6 +958,8 @@
     '/auth/reset-password',
     '/auth/verify-email',
     '/auth/confirm-email-change',
+    '/auth/email-code',
+    '/auth/email-code/verify',
   ]);
 
   async function api(path, options = {}) {
@@ -1189,6 +1191,11 @@
     display_name_required: 'Please enter a display name.',
     email_taken: 'That email is already registered.',
     invalid_credentials: 'Wrong email or password.',
+    invalid_email_code: 'That code doesn’t match. Check the newest email from Third Shot and try again.',
+    email_code_expired: 'That code expired. Send a new one to keep going.',
+    email_code_used: 'That code was already used. Send a new one to keep going.',
+    email_code_retry: 'That code was already used. Send a new one to keep going.',
+    email_code_unavailable: 'We couldn’t email a code right now. Use your password instead, or try again soon.',
     mfa_required: 'Enter the code from your authenticator app or a recovery code.',
     invalid_mfa_code: 'That authentication code is not valid. Check the current code and try again.',
     mfa_setup_required: 'Start MFA setup before entering a code.',
@@ -2762,6 +2769,18 @@
   let authMode = localStorage.getItem('pp_has_account') === '1' ? 'login' : 'register';
   let pendingInviteName = '';
   let syncAuthModeUi = () => {};
+  let focusAuthEntryField = () => {};
+  // When this deployment can send email, one emailed code signs people in or
+  // creates their account, so nobody has to invent or remember a password.
+  // The last answer from /auth/options is cached so the right form shows
+  // instantly; choosing a password sticks on this browser.
+  const AUTH_OPTIONS_KEY = 'pp_auth_options';
+  const AUTH_METHOD_KEY = 'pp_auth_method';
+  let emailCodeAvailable = (() => {
+    try { return JSON.parse(localStorage.getItem(AUTH_OPTIONS_KEY) || '{}')?.email_code === true; } catch { return false; }
+  })();
+  let passwordChosen = localStorage.getItem(AUTH_METHOD_KEY) === 'password';
+  const usingEmailCode = () => emailCodeAvailable && !passwordChosen;
   const PLAYER_INVITE_INTENT_KEY = 'pp_player_invite_intent';
   let playerInviteResumePromise = null;
 
@@ -3058,10 +3077,25 @@
     const emailInput = $('#auth-email');
     const passwordInput = $('#auth-password');
     const mfaInput = $('#auth-mfa-code');
+    const codeInput = $('#auth-code');
+    const resendButton = $('#auth-code-resend');
+    const methodButton = $('#auth-method');
     let rateLimitTimer = null;
     let rateLimitEndsAt = 0;
-    const submitLabel = () => ($('#auth-mfa-field')?.classList.contains('hidden')
-      ? (authMode === 'login' ? 'Log in' : 'Create account') : 'Verify & log in');
+    // Code sign-in runs email -> code -> name, and only new players see name.
+    let codeStep = 'email';
+    let codeChallenge = null;
+    let resendTimer = null;
+    let resending = false;
+    let autoSubmittedCode = '';
+    const mfaShown = () => !$('#auth-mfa-field')?.classList.contains('hidden');
+    const submitLabel = () => {
+      if (mfaShown()) return 'Verify & log in';
+      if (usingEmailCode()) {
+        return codeStep === 'email' ? 'Email me a code' : codeStep === 'name' ? 'Create account' : 'Continue';
+      }
+      return authMode === 'login' ? 'Log in' : 'Create account';
+    };
     const syncSubmitLabel = () => { submitButton.textContent = submitLabel(); };
     const clearAuthError = () => {
       errorCopy.textContent = '';
@@ -3069,7 +3103,7 @@
       errorAction.dataset.authDestination = '';
       errorAction.classList.add('hidden');
       error.classList.add('hidden');
-      [nameInput, emailInput, passwordInput, mfaInput].forEach((input) => {
+      [nameInput, emailInput, passwordInput, mfaInput, codeInput].forEach((input) => {
         input?.removeAttribute('aria-invalid');
         const describedBy = (input?.getAttribute('aria-describedby') || '')
           .split(/\s+/).filter((id) => id && id !== 'auth-error');
@@ -3124,29 +3158,157 @@
       tick();
       rateLimitTimer = setInterval(tick, 1000);
     };
+    const withAuthBusy = async (label, task) => {
+      submitButton.disabled = true;
+      submitButton.setAttribute('aria-busy', 'true');
+      form.setAttribute('aria-busy', 'true');
+      submitButton.textContent = label;
+      try {
+        await task();
+      } finally {
+        submitButton.disabled = !!rateLimitTimer;
+        submitButton.removeAttribute('aria-busy');
+        form.removeAttribute('aria-busy');
+        if (!rateLimitTimer) syncSubmitLabel();
+      }
+    };
     const syncAuthMode = () => {
       const registering = authMode === 'register';
-      nameField.classList.toggle('hidden', !registering);
-      nameInput.required = registering;
+      const byCode = usingEmailCode();
+      const namingNewPlayer = byCode && codeStep === 'name';
+      nameField.classList.toggle('hidden', byCode ? !namingNewPlayer : !registering);
+      nameInput.required = byCode ? namingNewPlayer : registering;
       passwordInput.autocomplete = registering ? 'new-password' : 'current-password';
       passwordInput.minLength = registering ? 8 : 1;
       $('#auth-password-help').classList.toggle('hidden', !registering);
       $('#auth-forgot-password').classList.toggle('hidden', registering);
-      $('#auth-eyebrow').textContent = registering ? 'Join the local game' : 'Welcome back';
-      $('#auth-title').textContent = registering ? 'Create your account' : 'Log in to Third Shot';
-      $('#auth-support').textContent = registering
-        ? (pendingInviteName
-          ? `${pendingInviteName} invited you. Create an account to join them on court.`
-          : 'Save courts and join games.')
-        : 'Find courts, meet players, and get on the court.';
+      $('#auth-password-field').classList.toggle('hidden', byCode);
+      $('#auth-email-field').classList.toggle('hidden', byCode && codeStep !== 'email');
+      $('#auth-code-field').classList.toggle('hidden', !byCode || codeStep !== 'code');
+      if (byCode) {
+        $('#auth-eyebrow').textContent = registering || namingNewPlayer ? 'Join the local game' : 'Welcome back';
+        $('#auth-title').textContent = codeStep === 'code' ? 'Check your email'
+          : namingNewPlayer ? 'Welcome to Third Shot'
+            : registering ? 'Log in or sign up' : 'Log in to Third Shot';
+        $('#auth-support').textContent = codeStep === 'code'
+          ? `Enter the 6-digit code we sent to ${codeChallenge?.email || 'your email'}.`
+          : namingNewPlayer ? 'Last step: add the name other players will see.'
+            : pendingInviteName
+              ? `${pendingInviteName} invited you. Enter your email to join them on court.`
+              : 'Enter your email and we’ll send you a 6-digit code. No password needed.';
+      } else {
+        $('#auth-eyebrow').textContent = registering ? 'Join the local game' : 'Welcome back';
+        $('#auth-title').textContent = registering ? 'Create your account' : 'Log in to Third Shot';
+        $('#auth-support').textContent = registering
+          ? (pendingInviteName
+            ? `${pendingInviteName} invited you. Create an account to join them on court.`
+            : 'Save courts and join games.')
+          : 'Find courts, meet players, and get on the court.';
+      }
       $('#auth-toggle').textContent = registering
         ? 'Already have an account? Log in' : 'New here? Create an account';
-      form.dataset.mode = authMode;
+      $('#auth-toggle').classList.toggle('hidden', byCode);
+      methodButton.classList.toggle('hidden', !emailCodeAvailable || namingNewPlayer);
+      methodButton.textContent = byCode ? 'Use a password instead' : 'Email me a code instead';
+      form.dataset.mode = byCode ? `code-${codeStep}` : authMode;
       syncSubmitLabel();
+    };
+    const focusFirstAuthField = () => {
+      form.querySelector('.auth-field:not(.hidden) input')?.focus({ preventScroll: true });
+    };
+    const stopResendCooldown = () => {
+      clearInterval(resendTimer);
+      resendTimer = null;
+      resendButton.disabled = false;
+      resendButton.textContent = 'Send a new code';
+    };
+    const startResendCooldown = (seconds = 30) => {
+      clearInterval(resendTimer);
+      const endsAt = Date.now() + seconds * 1000;
+      const tick = () => {
+        const remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+        if (!remaining) {
+          stopResendCooldown();
+          return;
+        }
+        resendButton.disabled = true;
+        resendButton.textContent = `Send a new code in ${remaining}s`;
+      };
+      tick();
+      resendTimer = setInterval(tick, 1000);
+    };
+    const resetCodeFlow = () => {
+      codeStep = 'email';
+      codeChallenge = null;
+      autoSubmittedCode = '';
+      codeInput.value = '';
+      stopResendCooldown();
+    };
+    const requestEmailCode = async (email) => {
+      const data = await api('/auth/email-code', { method: 'POST', body: JSON.stringify({ email }) });
+      const sameAddress = codeChallenge?.email?.toLowerCase() === email.toLowerCase();
+      codeChallenge = {
+        email,
+        challenge: data.challenge,
+        newAccount: sameAddress && !!codeChallenge?.newAccount,
+      };
+      codeStep = 'code';
+      autoSubmittedCode = '';
+      codeInput.value = '';
+      setMfaChallengeVisible(false);
+      syncAuthMode();
+      startResendCooldown();
+      codeInput.focus({ preventScroll: true });
+    };
+    const showCodeProblem = (err) => {
+      if (['email_code_expired', 'email_code_used', 'email_code_retry'].includes(err.code)) {
+        showAuthError(err.message, null, { label: 'Send a new code', destination: 'resend-code' });
+      } else if (err.code === 'email_code_unavailable') {
+        showAuthError(err.message, null, { label: 'Use a password', destination: 'password' });
+      } else if (err.code === 'invalid_email_code') {
+        showAuthError(err.message, codeInput);
+        codeInput.select();
+      } else {
+        showAuthError(err.message);
+        if (err.code === 'rate_limited') startRateLimitCountdown(err.data?.retry_after);
+      }
+    };
+    const resendCode = async () => {
+      const email = codeChallenge?.email || emailInput.value.trim();
+      if (!email || resending) return;
+      resending = true;
+      clearAuthError();
+      resendButton.disabled = true;
+      try {
+        await requestEmailCode(email);
+        toast('We sent a new code.');
+      } catch (err) {
+        stopResendCooldown();
+        showCodeProblem(err);
+      } finally {
+        resending = false;
+      }
+    };
+    const chooseSignInMethod = (password) => {
+      passwordChosen = password;
+      try { localStorage.setItem(AUTH_METHOD_KEY, password ? 'password' : 'code'); } catch { /* storage unavailable */ }
+      resetCodeFlow();
+      setMfaChallengeVisible(false);
+      clearAuthError();
+      syncAuthMode();
+      focusFirstAuthField();
     };
     const moveToAuthDestination = (destination) => {
       if (destination === 'forgot-password') {
         openForgotPassword();
+        return;
+      }
+      if (destination === 'resend-code') {
+        resendCode();
+        return;
+      }
+      if (destination === 'password') {
+        chooseSignInMethod(true);
         return;
       }
       if (!['login', 'register'].includes(destination)) return;
@@ -3157,11 +3319,31 @@
       (authMode === 'register' ? nameInput : emailInput).focus({ preventScroll: true });
     };
     syncAuthModeUi = syncAuthMode;
-    [nameInput, emailInput, passwordInput, mfaInput].forEach((input) => {
+    focusAuthEntryField = focusFirstAuthField;
+    [nameInput, emailInput, passwordInput, mfaInput, codeInput].forEach((input) => {
       input?.addEventListener('input', () => {
         if (!error.classList.contains('hidden')) clearAuthError();
       });
     });
+    // Autofilled or pasted codes go straight through; nobody hunts for a button.
+    codeInput.addEventListener('input', () => {
+      const digits = codeInput.value.replace(/\D/g, '').slice(0, 6);
+      if (digits !== codeInput.value) codeInput.value = digits;
+      if (digits.length === 6 && digits !== autoSubmittedCode && !submitButton.disabled && !mfaShown()) {
+        autoSubmittedCode = digits;
+        form.requestSubmit();
+      }
+    });
+    resendButton.addEventListener('click', resendCode);
+    $('#auth-code-change').addEventListener('click', () => {
+      resetCodeFlow();
+      setMfaChallengeVisible(false);
+      clearAuthError();
+      syncAuthMode();
+      emailInput.focus({ preventScroll: true });
+      emailInput.select();
+    });
+    methodButton.addEventListener('click', () => chooseSignInMethod(usingEmailCode()));
     $('#auth-password-toggle').addEventListener('click', (event) => {
       const button = event.currentTarget;
       const showing = passwordInput.type === 'text';
@@ -3204,10 +3386,102 @@
       button.addEventListener('click', () => openAccountPolicy(button.dataset.authPolicy));
     });
 
+    // Password and code sign-in finish the same way: open the app, then the
+    // invite, shared link, or first-run setup that brought the person here.
+    const completeAuthentication = async (data, registering) => {
+      persistReplacementToken(data);
+      localStorage.setItem('pp_has_account', '1');
+      setMfaChallengeVisible(false);
+      applyMe(data);
+      await showMain();
+      const openedLinkedDestination = await resumePlayerInviteIntentAfterAuth()
+        || rebuildReloadedMatchRouteIfNeeded()
+        || openDeepLink();
+      if (registering) {
+        if (openedLinkedDestination) pendingNewPlayerOnboardingAccountId = state.me.id;
+        else runNewPlayerOnboarding();
+      } else if (openedLinkedDestination && state.me?.onboarding_complete === false) {
+        pendingNewPlayerOnboardingAccountId = state.me.id;
+      } else if (!openedLinkedDestination) {
+        if (state.me?.onboarding_complete === false) runNewPlayerOnboarding();
+        else maybeOnboardHomeArea();
+      }
+      syncPushSubscription();
+    };
+
+    const submitEmailCode = async () => {
+      if (codeStep === 'email' || !codeChallenge) {
+        if (!emailInput.value.trim()) {
+          showAuthError('Enter your email address.', emailInput);
+          return;
+        }
+        if (emailInput.validity.typeMismatch) {
+          showAuthError('Enter a complete email address.', emailInput);
+          return;
+        }
+        await withAuthBusy('Sending code…', async () => {
+          try {
+            await requestEmailCode(emailInput.value.trim());
+          } catch (err) {
+            showCodeProblem(err);
+          }
+        });
+        return;
+      }
+      const code = codeInput.value.replace(/\D/g, '');
+      if (code.length !== 6) {
+        codeStep = 'code';
+        syncAuthMode();
+        showAuthError('Enter the 6-digit code from your email.', codeInput);
+        return;
+      }
+      if (codeStep === 'name' && !nameInput.value.trim()) {
+        showAuthError('Enter the name players should see.', nameInput);
+        return;
+      }
+      if (mfaShown() && !mfaInput.value.trim()) {
+        showAuthError('Enter your authenticator or recovery code.', mfaInput);
+        return;
+      }
+      await withAuthBusy(mfaShown() ? 'Verifying…'
+        : codeStep === 'name' ? 'Creating account…' : 'Checking code…', async () => {
+        try {
+          const body = { email: codeChallenge.email, challenge: codeChallenge.challenge, code };
+          const mfaCode = mfaInput?.value.trim();
+          if (mfaCode) body.mfa_code = mfaCode;
+          if (codeChallenge.newAccount && nameInput.value.trim()) {
+            body.display_name = nameInput.value.trim();
+            const inviteRef = readPlayerInviteIntent()?.inviter_id;
+            if (inviteRef) body.invited_by_user_id = inviteRef;
+          }
+          const data = await api('/auth/email-code/verify', { method: 'POST', body: JSON.stringify(body) });
+          resetCodeFlow();
+          authMode = 'login';
+          await completeAuthentication(data, data.created === true);
+        } catch (err) {
+          if (err.code === 'display_name_required') {
+            codeChallenge.newAccount = true;
+            codeStep = 'name';
+            syncAuthMode();
+            nameInput.focus({ preventScroll: true });
+          } else if (err.code === 'mfa_required') {
+            setMfaChallengeVisible(true);
+            showAuthError(err.message, mfaInput);
+          } else {
+            showCodeProblem(err);
+          }
+        }
+      });
+    };
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (submitButton.disabled) return; // double-tap = duplicate register attempt
       clearAuthError();
+      if (usingEmailCode()) {
+        await submitEmailCode();
+        return;
+      }
       if (authMode === 'register' && !nameInput.value.trim()) {
         showAuthError('Enter the name players should see.', nameInput);
         return;
@@ -3224,68 +3498,62 @@
         showAuthError(authMode === 'register' ? 'Password must be at least 8 characters.' : 'Enter your password.', passwordInput);
         return;
       }
-      const mfaVisible = !$('#auth-mfa-field').classList.contains('hidden');
+      const mfaVisible = mfaShown();
       if (mfaVisible && !mfaInput.value.trim()) {
         showAuthError('Enter your authenticator or recovery code.', mfaInput);
         return;
       }
-      submitButton.disabled = true;
-      submitButton.setAttribute('aria-busy', 'true');
-      form.setAttribute('aria-busy', 'true');
-      submitButton.textContent = mfaVisible ? 'Verifying…'
-        : authMode === 'register' ? 'Creating account…' : 'Logging in…';
-      try {
-        const body = {
-          email: emailInput.value.trim(),
-          password: passwordInput.value,
-        };
-        const mfaCode = mfaInput?.value.trim();
-        if (authMode === 'login' && mfaCode) body.mfa_code = mfaCode;
-        if (authMode === 'register') {
-          body.display_name = nameInput.value.trim();
-          const inviteRef = readPlayerInviteIntent()?.inviter_id;
-          if (inviteRef) body.invited_by_user_id = inviteRef;
+      const registering = authMode === 'register';
+      await withAuthBusy(mfaVisible ? 'Verifying…'
+        : registering ? 'Creating account…' : 'Logging in…', async () => {
+        try {
+          const body = {
+            email: emailInput.value.trim(),
+            password: passwordInput.value,
+          };
+          const mfaCode = mfaInput?.value.trim();
+          if (!registering && mfaCode) body.mfa_code = mfaCode;
+          if (registering) {
+            body.display_name = nameInput.value.trim();
+            const inviteRef = readPlayerInviteIntent()?.inviter_id;
+            if (inviteRef) body.invited_by_user_id = inviteRef;
+          }
+          const data = await api(`/auth/${authMode}`, { method: 'POST', body: JSON.stringify(body) });
+          await completeAuthentication(data, registering);
+        } catch (err) {
+          if (!registering && err.code === 'mfa_required') {
+            setMfaChallengeVisible(true);
+            showAuthError(err.message, mfaInput);
+            return;
+          }
+          const crossPath = err.code === 'email_taken'
+            ? { label: 'Log in instead', destination: 'login' }
+            : err.code === 'invalid_credentials'
+              ? { label: 'Create an account instead', destination: 'register' }
+              : null;
+          showAuthError(err.message, null, crossPath);
+          if (err.code === 'rate_limited') startRateLimitCountdown(err.data?.retry_after);
         }
-        const data = await api(`/auth/${authMode}`, { method: 'POST', body: JSON.stringify(body) });
-        persistReplacementToken(data);
-        localStorage.setItem('pp_has_account', '1');
-        setMfaChallengeVisible(false);
-        applyMe(data);
-        await showMain();
-        const openedLinkedDestination = await resumePlayerInviteIntentAfterAuth()
-          || rebuildReloadedMatchRouteIfNeeded()
-          || openDeepLink();
-        if (authMode === 'register') {
-          if (openedLinkedDestination) pendingNewPlayerOnboardingAccountId = state.me.id;
-          else runNewPlayerOnboarding();
-        } else if (openedLinkedDestination && state.me?.onboarding_complete === false) {
-          pendingNewPlayerOnboardingAccountId = state.me.id;
-        } else if (!openedLinkedDestination) {
-          if (state.me?.onboarding_complete === false) runNewPlayerOnboarding();
-          else maybeOnboardHomeArea();
-        }
-        syncPushSubscription();
-      } catch (err) {
-        if (authMode === 'login' && err.code === 'mfa_required') {
-          setMfaChallengeVisible(true);
-          showAuthError(err.message, mfaInput);
-          return;
-        }
-        const crossPath = err.code === 'email_taken'
-          ? { label: 'Log in instead', destination: 'login' }
-          : err.code === 'invalid_credentials'
-            ? { label: 'Create an account instead', destination: 'register' }
-            : null;
-        showAuthError(err.message, null, crossPath);
-        if (err.code === 'rate_limited') startRateLimitCountdown(err.data?.retry_after);
-      } finally {
-        submitButton.disabled = !!rateLimitTimer;
-        submitButton.removeAttribute('aria-busy');
-        form.removeAttribute('aria-busy');
-        if (!rateLimitTimer) syncSubmitLabel();
-      }
+      });
     });
     syncAuthMode();
+
+    // Ask the server which methods work today. A cached answer already drew
+    // the form, so this only switches it when nobody has started typing.
+    if (!state.token) {
+      fetch('/api/auth/options', { headers: { Accept: 'application/json' } })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((options) => {
+          if (!options) return;
+          const available = options.email_code === true;
+          try { localStorage.setItem(AUTH_OPTIONS_KEY, JSON.stringify({ email_code: available })); } catch { /* storage unavailable */ }
+          if (available === emailCodeAvailable || passwordInput.value || codeStep !== 'email') return;
+          emailCodeAvailable = available;
+          setMfaChallengeVisible(false);
+          syncAuthMode();
+        })
+        .catch(() => { /* offline: keep the cached answer */ });
+    }
   }
 
   function purgeAccountChatDrafts(accountId) {
@@ -3693,7 +3961,7 @@
             && Notification.permission === 'granted' && document.hidden) {
           try {
             const notification = new Notification('Third Shot', {
-              body: latest.title, icon: '/icon-512.png', tag: `pp-${latest.id}`,
+              body: latest.title, icon: '/icon-192.png', tag: `pp-${latest.id}`,
             });
             pageNotifications.add(notification);
             notification.addEventListener('click', () => {
@@ -4188,16 +4456,25 @@
       ? `Play, ${state.gamesToConfirm} game${state.gamesToConfirm === 1 ? '' : 's'} awaiting score confirmation`
       : 'Play');
 
+    // Competition actions live with Compete on Me, so Me carries the count.
+    const actionCount = Number(state.competitionActionCount) || 0;
+    const actionText = actionCount > 99 ? '99+' : String(actionCount);
+    const profileBadge = $('#profile-badge');
+    if (profileBadge) {
+      profileBadge.textContent = actionText;
+      profileBadge.classList.toggle('hidden', actionCount === 0);
+    }
+    document.querySelector('[data-tab="profile"]')?.setAttribute('aria-label', actionCount
+      ? `Me, ${actionCount} competition action${actionCount === 1 ? '' : 's'} needed` : 'Me');
     const competitionBadge = $('#competition-action-badge');
     if (competitionBadge) {
-      const actionCount = Number(state.competitionActionCount) || 0;
-      competitionBadge.textContent = actionCount > 99 ? '99+' : String(actionCount);
+      competitionBadge.textContent = actionText;
       competitionBadge.classList.toggle('hidden', actionCount === 0);
-      $('#play-tab-brackets')?.setAttribute(
+      $('#pf-compete-events')?.setAttribute(
         'aria-label',
         actionCount
-          ? `Events, ${actionCount} action${actionCount === 1 ? '' : 's'} needed`
-          : 'Events',
+          ? `Tournaments and leagues, ${actionCount} action${actionCount === 1 ? '' : 's'} needed`
+          : 'Tournaments and leagues',
       );
     }
 
@@ -4308,11 +4585,14 @@
     document.querySelectorAll('.nav-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const tab = btn.dataset.tab;
+        // Play always opens on your games; rankings and events open from Me.
+        if (tab === 'play' && state.playSeg !== 'games') {
+          setPlaySegment('games', { render: state.tab === 'play' });
+        }
         if (state.tab === tab) scrollTabToTop(tab);
         else switchTab(tab);
       });
     });
-    setupTablistKeyboard($('#play-segments'));
     setupTablistKeyboard($('#chat-segments'));
     $('#profile-edit')?.addEventListener('click', openProfileEditorHub);
     $('#profile-activity')?.addEventListener('click', openActivity);
@@ -5316,22 +5596,47 @@
     fetchCourtsInView({ surfaceError: true });
   }
 
-  async function loadFavIds() {
+  // Boot and the first map load both ask for saved courts; while one request
+  // for this session is in flight, later callers share it.
+  let favIdsRequest = null;
+  function loadFavIds() {
     if (!state.token) {
       state.favIds = new Set();
       state.favoriteCourts = [];
-      return;
+      return Promise.resolve();
     }
-    try {
-      const favs = await api('/courts/favorites');
-      state.favoriteCourts = favs.items || [];
-      state.favIds = new Set(state.favoriteCourts.map((c) => c.id));
-    } catch (err) {
-      if (!err.isStaleSession) {
-        state.favIds = new Set();
-        state.favoriteCourts = [];
+    if (favIdsRequest?.token === state.token) return favIdsRequest.promise;
+    const request = { token: state.token, promise: null };
+    request.promise = (async () => {
+      try {
+        const favs = await api('/courts/favorites');
+        state.favoriteCourts = favs.items || [];
+        state.favIds = new Set(state.favoriteCourts.map((c) => c.id));
+      } catch (err) {
+        if (!err.isStaleSession) {
+          state.favIds = new Set();
+          state.favoriteCourts = [];
+        }
+      } finally {
+        if (favIdsRequest === request) favIdsRequest = null;
       }
+    })();
+    favIdsRequest = request;
+    return request.promise;
+  }
+
+  // A map move and a location fix can ask for the same view at once; the
+  // second caller shares the first download instead of repeating it.
+  let courtsViewRequest = null;
+  function requestCourtsView(url) {
+    if (courtsViewRequest?.url !== url || courtsViewRequest.token !== state.token) {
+      const request = { url, token: state.token, promise: null };
+      request.promise = api(url).finally(() => {
+        if (courtsViewRequest === request) courtsViewRequest = null;
+      });
+      courtsViewRequest = request;
     }
+    return courtsViewRequest.promise;
   }
 
   const COURT_AMENITY_FILTERS = ['indoor', 'lighted', 'nets', 'restrooms', 'water'];
@@ -5546,7 +5851,8 @@
     }
 
     const seq = ++state.courtFetchSeq;
-    if (state.favIds === null && !state.courtFilters.saved) await loadFavIds();
+    // Saved courts only mark pins, so fetch them alongside the courts in view.
+    const favoritesReady = state.favIds === null && !state.courtFilters.saved ? loadFavIds() : null;
     const reference = courtDistanceOrigin();
 
     // Saved composes with activity and amenity filters, and ignores the bbox —
@@ -5582,7 +5888,8 @@
     let url = `/courts?bbox=${bbox}&limit=250&sort=${state.listSort}`;
     url += `&lat=${reference.lat}&lng=${reference.lng}${courtAmenityQuery()}`;
     try {
-      const data = await api(url);
+      const data = await requestCourtsView(url);
+      await favoritesReady;
       if (seq !== state.courtFetchSeq || state.searchQ) return;
       const items = applyCourtFilters(data.items);
       state.courtResultTotal = Math.max(items.length, Number(data.total) || 0);
@@ -7753,6 +8060,30 @@
     return `<section class="court-condition-reports"><h4>${mixed ? 'Recent reports differ' : 'Latest player report'}</h4><ul>${line(reports[0])}</ul>${reports.length > 1 ? `<details><summary>${reports.length - 1} other recent report${reports.length === 2 ? '' : 's'}</summary><ul>${reports.slice(1).map(line).join('')}</ul></details>` : ''}<p>Player reports from the last 3 hours. Conditions may change.</p></section>`;
   }
 
+  // How the courts are right now sits at the top of the court page: the
+  // latest report helps people decide whether to head over, and sharing one
+  // is a single tap instead of a sheet behind the check-in disclosure.
+  const COURT_CONDITION_CHIP_LABELS = {
+    good: 'All good', busy: 'Busy', wet: 'Wet', nets_down: 'Nets down', closed: 'Closed',
+  };
+  function courtConditionSummaryHtml(report) {
+    const known = report && COURT_CONDITION_LABELS[report.condition];
+    if (!known) return '<span>No reports in the last 3 hours.</span>';
+    const age = snapshotAgeLabel(Date.parse(report.reported_at)) || 'recently';
+    return `${courtConditionIcon(report.condition)}<span><b>${esc(known[1])}</b> · ${esc(report.user_name || 'Player')}, ${esc(age)}</span>`;
+  }
+  function courtConditionNowHtml(court) {
+    const latest = (court.condition_reports || [])[0] || court.latest_condition || null;
+    return `<section class="cd-conditions" aria-labelledby="cd-conditions-heading">
+      <h3 id="cd-conditions-heading">Courts right now</h3>
+      <p class="cd-conditions-summary" id="cd-conditions-summary">${courtConditionSummaryHtml(latest)}</p>
+      ${state.token ? `<div class="cd-condition-chips" role="group" aria-label="Tap to report how the courts are right now">
+        ${Object.entries(COURT_CONDITION_CHIP_LABELS).map(([key, label]) => `<button type="button" class="cd-condition-chip" data-cd-cond="${key}" aria-pressed="false">${courtConditionIcon(key)}<span>${label}</span></button>`).join('')}
+      </div>
+      <p class="cd-conditions-status" role="status" aria-live="polite"></p>` : ''}
+    </section>`;
+  }
+
   function courtCheckinHistoryHtml(history) {
     if (!history) return '';
     const count = Number(history.sample_size) || 0;
@@ -8746,7 +9077,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     screen?.setAttribute('aria-labelledby', 'auth-title');
     syncAuthModeUi();
     access.scrollIntoView({ block: 'start', behavior: 'auto' });
-    (authMode === 'register' ? $('#auth-name') : $('#auth-email'))?.focus({ preventScroll: true });
+    focusAuthEntryField();
   }
 
   // Signed-out visitors start where the product starts: a map of courts.
@@ -11156,6 +11487,16 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
             </button>
           </div>
         </div>
+        <div class="auth-field hidden" id="session-reauth-code-field">
+          <label for="session-reauth-code">Code from your email</label>
+          <div class="auth-control">
+            ${uiIcon('key')}
+            <input type="text" id="session-reauth-code" class="auth-code-input" autocomplete="one-time-code"
+              inputmode="numeric" pattern="[0-9]*" spellcheck="false" placeholder="6-digit code" />
+          </div>
+          <small>It expires in 10 minutes. Check spam if you don’t see it.</small>
+        </div>
+        ${emailCodeAvailable ? '<button type="button" class="auth-inline-link" id="session-reauth-code-toggle">Email me a code instead</button>' : ''}
         <div class="auth-mfa-field hidden" id="session-reauth-mfa-field">
           <label for="session-reauth-mfa">Authenticator or recovery code</label>
           <input type="text" id="session-reauth-mfa" autocomplete="one-time-code"
@@ -11177,6 +11518,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const mfa = modal.querySelector('#session-reauth-mfa');
     const submit = modal.querySelector('#session-reauth-submit');
     const status = modal.querySelector('.session-reauth-status');
+    const codeField = modal.querySelector('#session-reauth-code-field');
+    const code = modal.querySelector('#session-reauth-code');
+    const codeToggle = modal.querySelector('#session-reauth-code-toggle');
+    let codeChallenge = null;
     const formUX = bindModalFormUX(modal, '#session-reauth-submit');
     const setMfaVisible = (visible) => {
       mfaField.classList.toggle('hidden', !visible);
@@ -11201,7 +11546,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modal._dismissBlocked = () => true;
     modal._onDismissBlocked = () => {
       status.textContent = 'Sign in to continue, or choose “Sign out instead” to leave this work.';
-      (mfaField.classList.contains('hidden') ? password : mfa).focus({ preventScroll: true });
+      (!mfaField.classList.contains('hidden') ? mfa : codeChallenge ? code : password).focus({ preventScroll: true });
     };
     modal._cleanupFns?.push(() => {
       delete modal._dismissBlocked;
@@ -11220,6 +11565,33 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       passwordToggle.querySelector('span').textContent = revealing ? 'Hide' : 'Show';
       password.focus({ preventScroll: true });
     });
+    // Players who joined with an emailed code may never have set a password.
+    codeToggle?.addEventListener('click', async () => {
+      formUX.clearError();
+      const normalizedEmail = email.value.trim();
+      if (!normalizedEmail || email.validity.typeMismatch) {
+        formUX.showError('Enter a complete email address.', email);
+        return;
+      }
+      codeToggle.disabled = true;
+      try {
+        const data = await api('/auth/email-code', {
+          method: 'POST',
+          body: JSON.stringify({ email: normalizedEmail }),
+        });
+        codeChallenge = { email: normalizedEmail, challenge: data.challenge };
+        password.closest('.auth-field').classList.add('hidden');
+        codeField.classList.remove('hidden');
+        codeToggle.textContent = 'Send a new code';
+        status.textContent = `We sent a 6-digit code to ${normalizedEmail}.`;
+        code.value = '';
+        code.focus({ preventScroll: true });
+      } catch (error) {
+        formUX.showError(error.message, null);
+      } finally {
+        codeToggle.disabled = false;
+      }
+    });
     modal.querySelector('#session-reauth-signout').addEventListener('click', () => {
       const cancelled = sessionAuthenticationError(
         'You signed out before the action could finish.',
@@ -11237,8 +11609,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         formUX.showError('Enter a complete email address.', email);
         return;
       }
-      if (password.value.length < 6) {
-        formUX.showError('Enter your password.', password);
+      const emailedCode = code.value.replace(/\D/g, '');
+      if (codeChallenge ? emailedCode.length !== 6 : password.value.length < 6) {
+        if (codeChallenge) formUX.showError('Enter the 6-digit code from your email.', code);
+        else formUX.showError('Enter your password.', password);
         return;
       }
       if (!mfaField.classList.contains('hidden') && !mfa.value.trim()) {
@@ -11250,9 +11624,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       );
       if (!finish) return;
       try {
-        const body = { email: normalizedEmail, password: password.value };
+        const body = codeChallenge
+          ? { email: codeChallenge.email, challenge: codeChallenge.challenge, code: emailedCode }
+          : { email: normalizedEmail, password: password.value };
         if (!mfaField.classList.contains('hidden')) body.mfa_code = mfa.value.trim();
-        const data = await api('/auth/login', {
+        const data = await api(codeChallenge ? '/auth/email-code/verify' : '/auth/login', {
           method: 'POST',
           body: JSON.stringify(body),
         });
@@ -11278,9 +11654,12 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         if (error.code === 'mfa_required') {
           setMfaVisible(true);
           formUX.showError(error.message, mfa);
+        } else if (error.code === 'display_name_required') {
+          formUX.showError('No account uses that email. Enter the address for the account that was open.', email);
         } else {
           const target = error.code === 'invalid_credentials' ? password
-            : error.code === 'invalid_mfa_code' ? mfa : null;
+            : error.code === 'invalid_email_code' ? code
+              : error.code === 'invalid_mfa_code' ? mfa : null;
           formUX.showError(error.message, target);
         }
       } finally {
@@ -13316,6 +13695,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       </div>
       ${court.closed ? `<div class="cd-closed-banner" role="status">${uiIcon('alert-triangle')}<span>This court is reported permanently closed</span><button type="button" class="btn-link" data-cd-suggest>Fix listing</button></div>` : ''}
       ${quickActions}
+      ${courtClosed ? '' : courtConditionNowHtml(court)}
       ${visitFactsHtml}
       <section id="cd-play-here" class="court-play-timeline" aria-label="Dated play at this court"></section>
       <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon(courtClosed ? 'alert-triangle' : checkedIn ? 'check-circle' : 'map-pin')}</span><span>${courtClosed ? 'Court status' : checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</span></summary>
@@ -13334,7 +13714,6 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         ${secondaryActions}
         <div id="cd-weather"></div>
         ${courtConditionReportsHtml(court)}
-        ${courtClosed ? '' : '<button type="button" class="btn-link" id="cd-condition">Report conditions</button>'}
       </section></details>
       <div id="cd-business" class="cd-business-slot" aria-live="polite"></div>
       <div class="section-label section-label-icon" id="cd-sec-players">${uiIcon('users')} Checked-in players (${nHere})${court.friends_here ? ` · ${court.friends_here} friend${court.friends_here === 1 ? '' : 's'} here` : ''}</div>
@@ -13596,11 +13975,25 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modal.querySelector('#cd-report-closure')?.addEventListener('click', () => {
       openChildModal(modal, () => openCourtClosureReport(court, () => refreshCourtDetailPreservingContext(modal, court.id)));
     });
-    modal.querySelector('#cd-condition')?.addEventListener('click', () => {
-      openChildModal(modal, () => openConditionSheet(
-        court, () => refreshCourtDetailPreservingContext(modal, court.id),
-      ));
-    });
+    const conditionChips = [...modal.querySelectorAll('[data-cd-cond]')];
+    conditionChips.forEach((chip) => chip.addEventListener('click', async () => {
+      const status = modal.querySelector('.cd-conditions-status');
+      const condition = chip.dataset.cdCond;
+      const resetAction = beginButtonAction(chip, 'Sharing…', conditionChips);
+      if (!resetAction) return;
+      try {
+        await api(`/courts/${court.id}/condition`, { method: 'POST', body: JSON.stringify({ condition }) });
+        resetAction();
+        conditionChips.forEach((other) => other.setAttribute('aria-pressed', String(other === chip)));
+        const summary = modal.querySelector('#cd-conditions-summary');
+        if (summary) summary.innerHTML = courtConditionSummaryHtml({ condition, user_name: 'You', reported_at: new Date().toISOString() });
+        if (status) status.textContent = 'Thanks! Players nearby can see it.';
+        fetchCourtsInView();
+      } catch (e) {
+        resetAction();
+        if (status) status.textContent = e.message;
+      }
+    }));
     modal.querySelector('#cd-manage-business')?.addEventListener('click', () => {
       openChildModal(modal, () => openBusinessHub({ court }));
     });
@@ -18497,7 +18890,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
   }
 
   // Play home hero: where the player stands now, their next plan when they
-  // have one, one volt Create action, then the four play-now shortcuts.
+  // have one, one volt Create action, then the three play-now shortcuts.
   function rallyLauncherHtml(nextPlan = null) {
     const here = state.presence && state.presence.checked_in;
     const pulse = here ? null : normalizeActivePlayPulse(state.activePlayPulse);
@@ -18514,7 +18907,6 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <button type="button" data-goto="instant-rally"><span aria-hidden="true">${uiIcon('map-pin')}</span><b>${here ? 'Play here' : 'I’m at a court'}</b></button>
           <button type="button" data-goto="on-my-way"><span aria-hidden="true">${uiIcon('clock')}</span><b>I’m on my way</b></button>
           <button type="button" data-goto="play-pulse"><span aria-hidden="true">${uiIcon('activity')}</span><b>I’m free this hour</b></button>
-          <button type="button" data-goto="ranked-match"><span aria-hidden="true">${uiIcon('trophy')}</span><b>Start a ranked match</b></button>
         </div>
         ${pulse ? activePlayPulseBannerHtml(pulse) : ''}
       </section>`;
@@ -18797,7 +19189,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const seg = state.playSeg;
     const discoveryKey = `${state.playWhen}:${state.playRadius}:${state.playLevelFilter}:${JSON.stringify(state.playFilters || {})}`;
     const liveEl = $('#play-content');
-    if (document.getElementById(`play-tab-${seg}`)) liveEl.setAttribute('aria-labelledby', `play-tab-${seg}`);
+    if (seg !== 'games') liveEl.setAttribute('aria-labelledby', 'play-subview-title');
     else {
       liveEl.removeAttribute('aria-labelledby');
       liveEl.setAttribute('aria-label', 'Play');
@@ -19470,11 +19862,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
   }
 
   function setupPlay() {
-    $('#play-segments')?.addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      const changed = state.playSeg !== btn.dataset.seg;
-      setPlaySegment(btn.dataset.seg, { reuseFresh: !changed });
+    $('#play-subview-back')?.addEventListener('click', () => {
+      setPlaySegment('games', { render: false });
+      switchTab('profile');
     });
     $('#new-game-fab')?.addEventListener('click', () => {
       if (state.playSeg === 'scores') openRankedMatchFlow();
@@ -19486,16 +19876,16 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     $('#play-avatar-button')?.addEventListener('click', () => switchTab('profile', { scrollToTop: true }));
   }
 
+  // Play itself is your games. Rankings and tournaments open from Me as
+  // sub-views of Play, with a way back instead of a row of section tabs.
+  const PLAY_SUBVIEW_TITLES = { scores: 'Rankings', brackets: 'Tournaments & leagues' };
   function setPlaySegment(segment, { render = true, reuseFresh = false } = {}) {
     if (!['games', 'scores', 'brackets'].includes(segment)) return false;
     state.playSeg = segment;
-    document.querySelectorAll('#play-segments button').forEach((button) => {
-      const active = button.dataset.seg === segment;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-selected', String(active));
-      button.tabIndex = active ? 0 : -1;
-    });
-    $('#play-content')?.setAttribute('aria-labelledby', `play-tab-${segment}`);
+    const subview = PLAY_SUBVIEW_TITLES[segment] || '';
+    $('#tab-play')?.classList.toggle('is-subview', !!subview);
+    $('#play-subview')?.classList.toggle('hidden', !subview);
+    if (subview) $('#play-subview-title').textContent = subview;
     syncPlayFab();
     if (render) renderPlay({ reuseFresh });
     return true;
@@ -36726,12 +37116,32 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
         <button type="button" class="btn btn-secondary" id="pf-invite">${uiIcon('send')} Invite friends</button>
         <button type="button" class="btn btn-secondary" id="pf-feedback">${uiIcon('message')} Send feedback</button>
       </div>
+      <section class="profile-compete" aria-labelledby="pf-compete-title">
+        <div class="section-label" id="pf-compete-title">Compete</div>
+        <div class="profile-compete-list">
+          <button type="button" class="profile-compete-row" id="pf-compete-rankings">
+            <span class="profile-compete-icon" aria-hidden="true">${uiIcon('chart')}</span>
+            <span class="row-main"><b>Rankings</b><small>${total ? `${me.ranked_wins}–${me.ranked_losses} ranked · see where you stand` : 'Top players near you and among friends'}</small></span>
+            ${uiIcon('chevron-right', 'chev')}
+          </button>
+          <button type="button" class="profile-compete-row" id="pf-compete-events">
+            <span class="profile-compete-icon" aria-hidden="true">${uiIcon('trophy')}</span>
+            <span class="row-main"><b>Tournaments &amp; leagues</b><small>Join an event or run your own</small></span>
+            <span id="competition-action-badge" class="segment-badge${Number(state.competitionActionCount) ? '' : ' hidden'}" aria-hidden="true">${Number(state.competitionActionCount) > 99 ? '99+' : Number(state.competitionActionCount) || 0}</span>
+            ${uiIcon('chevron-right', 'chev')}
+          </button>
+          <button type="button" class="profile-compete-row" id="pf-compete-ranked">
+            <span class="profile-compete-icon" aria-hidden="true">${uiIcon('zap')}</span>
+            <span class="row-main"><b>Start a ranked match</b><small>Play a friend and the result counts toward your rating</small></span>
+            ${uiIcon('chevron-right', 'chev')}
+          </button>
+        </div>
+      </section>
       <details class="profile-dashboard-more simple-disclosure" aria-label="Play stats and history">
         <summary>Your progress &amp; history</summary>
       <div class="stat-grid" id="profile-headline-stats" ${total ? '' : 'aria-busy="true"'}>
         ${headlineStats}
       </div>
-      ${total ? `<button type="button" class="btn btn-secondary btn-block profile-rankings-link" id="pf-rankings">${uiIcon('trophy')} See rankings</button>` : ''}
       <div id="pf-new-player-progress" aria-live="polite"></div>
       <div id="pf-history" aria-busy="true" style="min-height:166px">
         <div class="section-label">Recent play</div>${skeletonHtml(2)}
@@ -36810,10 +37220,15 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     });
     el.querySelector('#pf-invite').addEventListener('click', shareInviteLink);
     el.querySelector('#pf-business-hub').addEventListener('click', () => openBusinessHub());
-    el.querySelector('#pf-rankings')?.addEventListener('click', () => {
+    el.querySelector('#pf-compete-rankings').addEventListener('click', () => {
       setPlaySegment('scores', { render: false });
-      switchTab('play');
+      switchTab('play', { scrollToTop: true });
     });
+    el.querySelector('#pf-compete-events').addEventListener('click', () => {
+      setPlaySegment('brackets', { render: false });
+      switchTab('play', { scrollToTop: true });
+    });
+    el.querySelector('#pf-compete-ranked').addEventListener('click', openRankedMatchFlow);
     el.querySelector('#pf-dashboard-retry').addEventListener('click', (event) => {
       event.currentTarget.disabled = true;
       event.currentTarget.textContent = 'Trying…';
@@ -41561,6 +41976,14 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     });
     window.addEventListener('focus', refreshForegroundState);
     setConnectionState(navigator.onLine ? 'online' : 'offline');
+    // While someone has the app open, nudge the server's job tick so game
+    // reminders go out within minutes between the scheduled runs. The server
+    // runs the jobs at most once per five-minute window however many ping.
+    setInterval(() => {
+      if (document.hidden || !state.token || state.connectionState !== 'online') return;
+      fetch('/api/tick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .catch(() => { /* the scheduled runs cover it */ });
+    }, 5 * 60 * 1000);
   }
 
   function setupServiceWorkerRouteMessages() {

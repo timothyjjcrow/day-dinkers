@@ -7,7 +7,7 @@ APP = (ROOT / "public" / "app-v15.js").read_text()
 
 
 def test_play_feed_is_not_one_large_live_region():
-    assert '<div id="play-content" class="tab-scroll" role="tabpanel"' in INDEX
+    assert '<div id="play-content" class="tab-scroll" role="region" aria-label="Play"' in INDEX
     assert 'id="play-content" class="tab-scroll" aria-live=' not in INDEX
 
 

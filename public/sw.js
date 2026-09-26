@@ -4,14 +4,14 @@
 // installs refresh session, competition, profile, and venue layouts
 // instead of retaining old executable bytes.
 const SHELL_CACHE_PREFIX = 'thirdshot-v15-r';
-const CACHE = 'thirdshot-v15-r85';
+const CACHE = 'thirdshot-v15-r86';
 const CORE_SHELL = [
   '/',
-  '/release-assets/r83/styles-v15.min.css',
-  '/release-assets/r83/crew-planner-v15.min.js',
-  '/release-assets/r83/tournament-bracket-v15.min.js',
-  '/release-assets/r83/venue-workspace-v15.min.js',
-  '/release-assets/r83/app-v15.min.js',
+  '/release-assets/r84/styles-v15.min.css',
+  '/release-assets/r84/crew-planner-v15.min.js',
+  '/release-assets/r84/tournament-bracket-v15.min.js',
+  '/release-assets/r84/venue-workspace-v15.min.js',
+  '/release-assets/r84/app-v15.min.js',
   '/vendor/leaflet/leaflet.css?v=1.9.4',
   '/vendor/leaflet/leaflet.js?v=1.9.4',
   '/vendor/leaflet-markercluster/MarkerCluster.css?v=1.5.3',
@@ -22,7 +22,7 @@ const CORE_SHELL = [
   '/vendor/leaflet/images/marker-icon-2x.png',
   '/vendor/leaflet/images/marker-shadow.png',
 ];
-const OPTIONAL_SHELL = ['/manifest.webmanifest', '/icon-512.png', '/icon-maskable.png', '/logo.jpg', '/vendor/plus-jakarta-sans/plus-jakarta-sans-latin-wght-normal.woff2'];
+const OPTIONAL_SHELL = ['/manifest.webmanifest', '/icon-192.png', '/logo.jpg', '/vendor/plus-jakarta-sans/plus-jakarta-sans-latin-wght-normal.woff2'];
 const LEAFLET_SHELL = [
   '/vendor/leaflet/leaflet.css?v=1.9.4',
   '/vendor/leaflet/leaflet.js?v=1.9.4',
@@ -218,8 +218,8 @@ self.addEventListener('push', (event) => {
   } catch { /* malformed destinations fall back to the app home */ }
   event.waitUntil(self.registration.showNotification(title, {
     body: data.body || '',
-    icon: '/icon-512.png',
-    badge: '/icon-512.png',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     data: { url: destination },
   }));
 });

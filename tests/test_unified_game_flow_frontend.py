@@ -205,7 +205,7 @@ def test_play_launcher_is_intent_specific_while_map_and_court_keep_compatibility
     assert 'data-goto="on-my-way"' in launcher
     assert 'data-goto="play-pulse"' in launcher
     assert 'data-goto="new-game"' in launcher
-    assert 'data-goto="ranked-match"' in launcher
+    assert 'data-goto="ranked-match"' not in launcher[:launcher.index("function playHeroNextHtml")]
     assert "I’m at a court" in launcher
     assert "I’m free this hour" in launcher
 

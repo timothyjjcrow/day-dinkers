@@ -185,7 +185,7 @@ def test_game_poll_preserves_sheet_state_and_score_conflicts_remain_actionable()
 
 
 def test_compact_status_regions_replace_whole_feed_announcements_and_notifications_open():
-    assert 'id="play-content" class="tab-scroll" role="tabpanel"' in INDEX
+    assert 'id="play-content" class="tab-scroll" role="region"' in INDEX
     assert 'id="play-content" class="tab-scroll" aria-live' not in INDEX
     assert 'id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"' in INDEX
     apply_me = section("function applyMe", "function dismissedInvites")

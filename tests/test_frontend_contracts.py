@@ -11,10 +11,24 @@ STYLES = (ROOT / "public" / "styles-v15.css").read_text()
 MANIFEST = (ROOT / "public" / "manifest.webmanifest").read_text()
 
 
-def test_map_assets_are_lazy_loaded():
-    """The default Play route should not pay the Leaflet startup cost."""
+def test_map_assets_preload_but_attach_lazily():
+    """The map is the first screen, so its files download alongside the app,
+    but they are attached only when the map opens and never block paint."""
     assert "leaflet@" not in INDEX
-    assert "markercluster" not in INDEX.lower()
+    assert '<script src="/vendor/leaflet' not in INDEX
+    assert 'rel="stylesheet" href="/vendor/leaflet' not in INDEX
+    for href, kind in (
+        ("/vendor/leaflet/leaflet.js?v=1.9.4", "script"),
+        ("/vendor/leaflet-markercluster/leaflet.markercluster.js?v=1.5.3", "script"),
+        ("/vendor/leaflet/leaflet.css?v=1.9.4", "style"),
+        ("/vendor/leaflet-markercluster/MarkerCluster.css?v=1.5.3", "style"),
+    ):
+        # crossorigin matches how the app attaches these files, so the
+        # browser reuses the preloaded copy instead of fetching it twice.
+        assert f'<link rel="preload" href="{href}" as="{kind}" crossorigin />' in INDEX
+        assert f"['{href}', '']" in APP
+    assert "script.crossOrigin = '';" in APP
+    assert "link.crossOrigin = '';" in APP
     assert "function ensureMapAssets()" in APP
     assert "function ensureMapReady()" in APP
     assert "existing?.remove();" in APP
@@ -30,21 +44,19 @@ def test_map_tiles_work_without_a_provider_api_key():
 
 
 def test_primary_mobile_views_keep_accessible_navigation_contracts():
-    assert 'id="play-segments" role="tablist"' in INDEX
-    for segment, label in (
-        ('games', 'Games'), ('scores', 'Rankings'), ('brackets', 'Events'),
-    ):
-        assert f'id="play-tab-{segment}"' in INDEX
-        assert f'data-seg="{segment}"' in INDEX
-        assert f'>{label}' in INDEX
+    assert 'id="play-segments"' not in INDEX
+    assert 'id="play-subview"' in INDEX and 'id="play-subview-back"' in INDEX
+    assert '<h2 id="play-subview-title" tabindex="-1">' in INDEX
+    assert "const PLAY_SUBVIEW_TITLES = { scores: 'Rankings', brackets: 'Tournaments & leagues' };" in APP
     assert 'id="new-game-fab" class="fab"' in INDEX
     assert 'id="chat-segments" role="tablist"' in INDEX
     assert 'id="play-view-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"' in INDEX
-    assert 'id="play-content" class="tab-scroll" role="tabpanel"' in INDEX
+    assert 'id="play-content" class="tab-scroll" role="region" aria-label="Play"' in INDEX
     assert 'id="play-content" class="tab-scroll" aria-live=' not in INDEX
     assert "#play-content { padding-bottom: 96px; }" in STYLES
     assert 'id="chat-content" class="tab-scroll" role="tabpanel"' in INDEX
-    assert "setupTablistKeyboard($('#play-segments'))" in APP
+    assert "setupTablistKeyboard($('#play-segments'))" not in APP
+    assert "liveEl.setAttribute('aria-labelledby', 'play-subview-title');" in APP
     assert "setupTablistKeyboard($('#chat-segments'))" in APP
     assert "liveEl.setAttribute('aria-label', 'Play');" in APP
     assert "liveEl.setAttribute('aria-labelledby', `chat-tab-${seg}`);" in APP
@@ -168,18 +180,18 @@ def test_court_chat_renders_live_joinable_game_cards():
 
 
 def test_offline_shell_and_signed_in_snapshot_contracts():
-    assert "const CACHE = 'thirdshot-v15-r85';" in SERVICE_WORKER
+    assert "const CACHE = 'thirdshot-v15-r86';" in SERVICE_WORKER
     for asset in (
-        "/release-assets/r83/styles-v15.min.css",
-        "/release-assets/r83/crew-planner-v15.min.js",
-        "/release-assets/r83/tournament-bracket-v15.min.js",
-        "/release-assets/r83/venue-workspace-v15.min.js",
-        "/release-assets/r83/app-v15.min.js",
+        "/release-assets/r84/styles-v15.min.css",
+        "/release-assets/r84/crew-planner-v15.min.js",
+        "/release-assets/r84/tournament-bracket-v15.min.js",
+        "/release-assets/r84/venue-workspace-v15.min.js",
+        "/release-assets/r84/app-v15.min.js",
     ):
         assert asset in SERVICE_WORKER
-    assert 'href="/release-assets/r83/styles-v15.min.css"' in INDEX
-    assert 'src="/release-assets/r83/crew-planner-v15.min.js"' in INDEX
-    assert 'src="/release-assets/r83/app-v15.min.js"' in INDEX
+    assert 'href="/release-assets/r84/styles-v15.min.css"' in INDEX
+    assert 'src="/release-assets/r84/crew-planner-v15.min.js"' in INDEX
+    assert 'src="/release-assets/r84/app-v15.min.js"' in INDEX
     assert "const NAVIGATION_TIMEOUT_MS = 1200;" in SERVICE_WORKER
     assert "url.pathname.startsWith('/api')" in SERVICE_WORKER
     assert "caches.match('/')" in SERVICE_WORKER
@@ -440,7 +452,7 @@ def test_logout_is_a_hard_account_privacy_boundary():
     assert "_reauthAttempted: true" in APP
     assert "stale.isStaleSession = true;" in APP
     assert APP.count("assertCurrentSession();") >= 3
-    load_favorites = APP[APP.index("async function loadFavIds()"):APP.index("const COURT_AMENITY_FILTERS")]
+    load_favorites = APP[APP.index("function loadFavIds()"):APP.index("const COURT_AMENITY_FILTERS")]
     assert "if (!err.isStaleSession)" in load_favorites
     assert "state.favIds = new Set();" in load_favorites
     assert "state.favoriteCourts = [];" in load_favorites

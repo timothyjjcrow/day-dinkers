@@ -20,10 +20,11 @@ def test_play_launcher_exposes_the_three_plain_play_now_intents_and_planner():
     assert launcher.count('data-goto="on-my-way"') == 1
     assert launcher.count('data-goto="play-pulse"') == 1
     assert launcher.count('data-goto="new-game"') == 1
-    assert launcher.count('data-goto="ranked-match"') == 1
+    assert launcher.count('data-goto="ranked-match"') == 0
     assert 'data-goto="game-flow"' not in launcher
-    for label in ("I’m at a court", "I’m on my way", "I’m free this hour", "Create game", "Start a ranked match"):
+    for label in ("I’m at a court", "I’m on my way", "I’m free this hour", "Create game"):
         assert label in launcher
+    assert "Start a ranked match" not in launcher
 
     flow = section("function openGameFlow", "async function checkInAndStartRally")
     for label in ("Find", "Start now"):
@@ -211,15 +212,23 @@ def test_community_group_search_has_an_accessible_name():
     assert '<label class="sr-only" for="fc-search">Search public groups</label>' in sheet
 
 
-def test_play_shell_has_primary_segments_and_one_contextual_create_action():
+def test_play_is_games_and_competition_views_open_from_me():
     setup = section("function setupPlay", "function openCompetitionCreateSheet")
-    assert "$('#play-segments')?.addEventListener" in setup
+    assert "$('#play-subview-back')?.addEventListener" in setup
+    assert "switchTab('profile');" in setup
     assert "$('#new-game-fab')?.addEventListener" in setup
     assert "function setPlaySegment" in setup
     assert "['games', 'scores', 'brackets'].includes(segment)" in setup
+    assert "$('#tab-play')?.classList.toggle('is-subview', !!subview);" in setup
     assert "fab.classList.toggle('hidden', state.playSeg === 'games')" in setup
     for segment in ('games', 'scores', 'brackets'):
-        assert f'data-seg="{segment}"' in INDEX
+        assert f'data-seg="{segment}"' not in INDEX
+    assert "if (tab === 'play' && state.playSeg !== 'games')" in APP
+    profile = APP[APP.index('class="profile-compete"'):APP.index("el.querySelector('#pf-compete-ranked')")]
+    for control in ('pf-compete-rankings', 'pf-compete-events', 'pf-compete-ranked'):
+        assert f'id="{control}"' in profile
+    assert "setPlaySegment('scores', { render: false });" in profile
+    assert "setPlaySegment('brackets', { render: false });" in profile
     assert 'id="new-game-fab" class="fab"' in INDEX
     assert "function playMoreRoutesHtml" not in APP
     assert 'data-play-route=' not in APP

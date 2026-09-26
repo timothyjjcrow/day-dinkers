@@ -490,7 +490,7 @@ def test_closed_court_replaces_live_actions_and_favorite_writes_are_idempotent()
     assert 'create.disabled=data.closed' in timeline
     assert 'data-cd-suggest>Fix listing</button>' in detail
     assert "p.is_me || court.closed ? ''" in detail
-    assert 'id="cd-condition">Report conditions</button>' in detail
+    assert "${courtClosed ? '' : courtConditionNowHtml(court)}" in detail
     assert "uiIcon('activity')" in detail
     assert "courtClosed || venueBusiness ? ''" in detail
     assert "${checkedIn ? '' : `<button type=\"button\" class=\"btn btn-secondary\" id=\"cd-checkin\"" in detail
@@ -543,7 +543,7 @@ def test_map_browsing_and_saved_area_changes_have_separate_explicit_controls():
         "async function searchCourts", "function courtMarkerIcon",
     )
 
-    jump = section("function jumpToPlace", "async function loadFavIds")
+    jump = section("function jumpToPlace", "function loadFavIds()")
     assert "state.areaLoc" not in jump
     assert "state.areaLabel" not in jump
     assert "state.playGamesCache" not in jump
