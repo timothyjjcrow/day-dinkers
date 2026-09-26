@@ -8084,11 +8084,34 @@
     </section>`;
   }
 
-  function courtCheckinHistoryHtml(history) {
-    if (!history) return '';
-    const count = Number(history.sample_size) || 0;
-    const range = [history.range_start,history.range_end].filter(Boolean).map(resultDayLabel).join(' – ');
-    return `<div class="cd-detail-note court-checkin-history">${uiIcon('chart')}<div><b>Recent Third Shot check-ins</b><p>${count} shared check-in${count === 1 ? '' : 's'}${range ? ` · ${esc(range)}` : ''}</p>${history.sufficient_sample && history.windows?.length ? `<ul>${history.windows.map(row => `<li>${esc(row.label)} <span>${row.count} check-ins</span></li>`).join('')}</ul>${history.timezone_source === 'approximate' ? '<p>Times are approximate; this court has no confirmed time zone.</p>' : ''}` : '<p>Too little app activity to show a useful pattern.</p>'}<p>This reflects app check-ins, not how busy the court will be.</p></div></div>`;
+  // Busy hours come from 90 days of check-ins and played games. The court
+  // page gets one line only when there is a real pattern; the bars live in
+  // Before you go › Hours.
+  function courtBusyHintHtml(history) {
+    return history?.peak ? `<button type="button" class="cd-busy-hint" data-court-visit="hours">${uiIcon('chart')}<span>Usually busiest ${esc(history.peak)}</span>${uiIcon('chevron-right')}</button>` : '';
+  }
+
+  function courtBusyBarsHtml(history) {
+    if (history?.hours?.length !== 7) return '';
+    const {weekday: today, hour} = history.local_now || {}, days = Object.values(COURT_WEEKDAY_LABELS);
+    return `<div class="court-busy"><b>Busy times</b>
+      <div class="segmented" role="group" aria-label="Day">${days.map((day, i) => `<button type="button" data-busy-day="${i}" aria-label="${day}" aria-pressed="${i === today}"${i === today ? ' class="active"' : ''}>${day[0]}</button>`).join('')}</div>
+      ${history.hours.map((levels, i) => {
+        const top = Math.max(...levels), at = courtClockLabel(`${levels.indexOf(top) + 5}:00`);
+        return `<div class="court-busy-bars" data-busy-bars="${i}" role="img" aria-label="${days[i]}: ${top ? `busiest around ${at.face} ${at.suffix}` : 'no recent activity'}"${i === today ? '' : ' hidden'}>${levels.map((level, h) => `<i style="--lvl:${Number(level) || 0}"${i === today && h + 5 === hour ? ' class="is-now"' : ''}></i>`).join('')}</div>`;
+      }).join('')}
+      <p class="court-busy-axis" aria-hidden="true"><span>6 AM</span><span>12 PM</span><span>6 PM</span></p>
+      <p class="court-visit-source">From ${Number(history.sample_size) || 0} Third Shot check-ins and games · last 90 days</p>
+      ${history.timezone_source === 'approximate' ? '<p class="court-visit-source">Times are approximate; this court has no confirmed time zone.</p>' : ''}
+    </div>`;
+  }
+
+  function bindCourtBusyDays(root) {
+    const buttons = [...root.querySelectorAll('[data-busy-day]')];
+    buttons.forEach((button) => button.addEventListener('click', () => {
+      buttons.forEach((day) => { day.classList.toggle('active', day === button); day.setAttribute('aria-pressed', String(day === button)); });
+      root.querySelectorAll('[data-busy-bars]').forEach((row) => { row.hidden = row.dataset.busyBars !== button.dataset.busyDay; });
+    }));
   }
 
   function courtVisitingInfoHtml(court) {
@@ -8124,7 +8147,7 @@
     ].filter(([listed])=>listed);
     const reservation = businessActionHref(court.reservation_url);
     return {
-      hours: `<h4 id="court-visit-hours-title" tabindex="-1">Hours</h4><p class="court-visit-source">${court.hours_source === 'venue' ? 'From the venue' : 'Community information'}</p>${courtVisitHoursHtml(court)}${courtVisitManagementHtml(court,'hours')}`,
+      hours: `<h4 id="court-visit-hours-title" tabindex="-1">Hours</h4><p class="court-visit-source">${court.hours_source === 'venue' ? 'From the venue' : 'Community information'}</p>${courtVisitHoursHtml(court)}${courtBusyBarsHtml(!court.closed && court.checkin_history)}${courtVisitManagementHtml(court,'hours')}`,
       fees: `<h4 id="court-visit-fees-title" tabindex="-1">Fees &amp; access</h4><p class="court-visit-fee">${esc(court.fees || courtFeeTypeFact(court) || 'Fees not listed.')}</p>${reservation ? `<a class="btn btn-secondary btn-block" href="${esc(reservation)}" target="_blank" rel="noopener">${uiIcon('external')} View reservation details</a>` : ''}${courtVisitingInfoHtml(court)}${courtVisitManagementHtml(court)}${state.me && !court.business?.preview_only ? '<button type="button" class="btn-link court-visit-correction" id="court-visit-correction">Update community details</button>' : ''}`,
       facilities: `<h4 id="court-visit-facilities-title" tabindex="-1">Facilities</h4><ul class="court-visit-facilities">${facilities.map(([,icon,label])=>`<li>${uiIcon(icon)}<span>${esc(label)}</span></li>`).join('')}</ul>${court.surface_type ? `<p>${esc(court.surface_type)} surface</p>` : ''}<p class="court-visit-source">Unlisted facilities are not confirmed.</p>`,
       openplay: `<h4 id="court-visit-openplay-title" tabindex="-1">Open play</h4>${rows.length ? `<div class="court-visit-openplay">${rows.map(row=>`<div><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start,row.end)}`)}</b>${row.level || row.cost ? `<p class="row-sub">${esc([row.level,row.cost].filter(Boolean).join(' · '))}</p>` : ''}${row.notes ? `<p>${esc(row.notes)}</p>` : ''}</div>`).join('')}</div>` : ''}${court.open_play_schedule ? `<p>${esc(court.open_play_schedule)}</p>` : !rows.length ? '<p>No open-play schedule listed.</p>' : ''}${rows.length ? '<p class="court-visit-source">Community-listed times · venue entry is separate.</p>' : ''}`,
@@ -8214,6 +8237,7 @@
         const workspace=currentOverlayEntry();
         if (workspace?.el!==modal) workspace?.afterClose.push(()=>{if(current()){listingChanged=true;refreshVisit();}});
       }));
+      bindCourtBusyDays(modal);
     };
     bindActions();
     modal.querySelector('.modal')?.classList.add('court-visit-dialog');
@@ -13697,6 +13721,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       ${quickActions}
       ${courtClosed ? '' : courtConditionNowHtml(court)}
       ${visitFactsHtml}
+      ${courtClosed ? '' : courtBusyHintHtml(court.checkin_history)}
       <section id="cd-play-here" class="court-play-timeline" aria-label="Dated play at this court"></section>
       <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon(courtClosed ? 'alert-triangle' : checkedIn ? 'check-circle' : 'map-pin')}</span><span>${courtClosed ? 'Court status' : checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</span></summary>
       <section class="card cd-now-card" aria-labelledby="cd-now-heading">
@@ -13729,7 +13754,6 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         <summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon('grid')}</span>${venueBusiness ? 'Community court details' : 'Court details'}</summary>
         <div class="cd-progressive-body">
           <div>${chipsHtml}</div>
-          ${courtCheckinHistoryHtml(court.checkin_history)}
           ${structuredOpenPlayHtml}
           ${!structuredOpenPlayHtml && court.open_play_schedule && (!venueBusiness || !venueBusiness.schedule.some((item) => item && item.active !== false)) ? `
             <div class="cd-hours">

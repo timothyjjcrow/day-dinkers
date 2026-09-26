@@ -3668,11 +3668,10 @@ button.tag, a.tag, .tag[role="button"] {
 .cd-community-finder-action .row-sub { margin-top: 2px; font-size: var(--text-xs); }
 .cd-review-inline { min-height: 58px; margin: 0 0 14px; padding: 9px 12px; }
 .cd-review-inline .nav-row-leading { background: var(--amber-50); color: var(--amber-800); }
-.cd-detail-note, .cd-weather-summary {
+.cd-weather-summary {
   display: flex; align-items: center; gap: 7px; color: var(--ink-soft); font-size: 12px; line-height: 1.4;
 }
-.cd-detail-note { margin-top: 10px; }
-.cd-detail-note .ui-icon, .cd-weather-summary .ui-icon { width: 16px; height: 16px; flex: 0 0 16px; color: var(--green-accent); }
+.cd-weather-summary .ui-icon { width: 16px; height: 16px; flex: 0 0 16px; color: var(--green-accent); }
 .cd-weather-summary { justify-content: center; margin-top: 10px; text-align: center; }
 .cd-stat {
   background: var(--green-50); border: 1px solid var(--green-100); border-radius: var(--radius-md);
@@ -7409,12 +7408,11 @@ input.settings-notification-toggle:focus-visible { outline: 3px solid var(--gree
 
 .court-condition-reports { border:1px solid var(--line); border-radius: var(--radius-md); padding:14px; margin-top:14px; }
 .court-condition-reports h4 { margin:0 0 10px; }
-.court-condition-reports ul,.court-checkin-history ul { list-style:none; margin:0; padding:0; }
+.court-condition-reports ul { list-style:none; margin:0; padding:0; }
 .court-condition-reports li { display:grid; gap:5px; padding:6px 0; }
 .court-condition-reports li span { display:flex; align-items:center; gap:8px; }
-.court-condition-reports p,.court-condition-reports small,.court-checkin-history p { color:var(--ink-soft); font-size:var(--text-xs); margin:6px 0 0; }
+.court-condition-reports p,.court-condition-reports small { color:var(--ink-soft); font-size:var(--text-xs); margin:6px 0 0; }
 .court-condition-reports summary { padding:12px 0; cursor:pointer; }
-.court-checkin-history li { display:flex; gap:12px; justify-content:space-between; margin-top:8px; }
 
 .chat-search-button { flex:none; display:grid; place-items:center; min-width:44px; min-height:44px; padding:8px; border:0; border-radius: var(--radius-sm); background:transparent; color:var(--ink-soft); }
 .chat-search-button:hover,.chat-search-button:focus-visible { background:var(--bg); color:var(--ink); }
@@ -8424,6 +8422,32 @@ html[data-theme="dark"] .court-modal .modal { --cd-solid: var(--forest-2); }
 .court-modal .cd-visit-facts dd button:focus-visible { outline: none; }
 .court-modal .cd-visit-facts dd button:focus-visible::after { outline: 3px solid var(--green-accent); outline-offset: -3px; border-radius: var(--radius-md); }
 .court-modal .cd-visit-facts dd button:active::after { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+
+/* r85 · Busy hours */
+/* One quiet line under the visit facts; the bars sit in Before you go › Hours. */
+.court-modal .cd-busy-hint {
+  width: 100%; min-height: var(--tap-min); display: flex; align-items: center; gap: var(--space-2);
+  margin: 0 0 8px; padding: 0 16px; color: var(--ink-soft); font-size: var(--text-sm); font-weight: 700; text-align: left;
+}
+.court-modal .cd-busy-hint > span { flex: 1; min-width: 0; }
+.court-modal .cd-busy-hint .ui-icon { width: 16px; height: 16px; flex: 0 0 16px; color: var(--green-accent); }
+.court-modal .cd-busy-hint .ui-icon:last-child { color: var(--ink-soft); }
+.court-busy { margin-top: 16px; }
+.court-busy .segmented { margin: 8px 0 12px; }
+.court-busy-bars { display: flex; align-items: flex-end; gap: 3px; height: 48px; }
+.court-busy-bars[hidden] { display: none; }
+.court-busy-bars i {
+  --lvl: 0; flex: 1 1 0; height: calc(10% + var(--lvl) * 22.5%);
+  border-radius: var(--radius-xxs) var(--radius-xxs) 0 0; background: var(--green-300);
+}
+.court-busy-bars i.is-now { background: var(--green-accent); }
+.court-visit-section .court-busy-axis {
+  display: grid; grid-template-columns: repeat(18, minmax(0, 1fr)); column-gap: 3px;
+  margin: 4px 0 0; color: var(--ink-soft); font-size: var(--text-xs); white-space: nowrap;
+}
+.court-busy-axis span:nth-child(1) { grid-column: 2; }
+.court-busy-axis span:nth-child(2) { grid-column: 8; }
+.court-busy-axis span:nth-child(3) { grid-column: 14; }
 
 /* Courts right now: the latest report plus one-tap chips to share your own. */
 .cd-conditions {
