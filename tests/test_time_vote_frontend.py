@@ -105,7 +105,7 @@ def test_open_votes_hide_fixed_time_tools_everywhere():
     # Rare race codes (time_vote_open/closed/forbidden) use the generic 409/403 copy.
     errors = section('  const ERROR_TEXT = {', '  };')
     assert "    time_vote_needs_invitees: 'Invite at least one friend to vote.'," in errors
-    assert "    invalid_time_options: 'Pick 2–3 different upcoming times.'," in errors
+    assert "    invalid_time_options: 'Pick 2–3 different times at least 2 hours away.'," in errors
     assert "Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${gameWhenText(game)}" in APP
     assert "detail: `${game.time_vote ? 'Time TBD' : fmtDateTime(game.scheduled_at)}" in APP
 
@@ -120,3 +120,34 @@ def test_time_vote_styles_live_in_the_game_page_section_on_shared_tokens():
     assert not re.search(r'font-size:\s*\d', block)
     assert 'border-radius' not in block and not re.search(r'#[0-9a-fA-F]{3}', block)
     assert 'var(--control-min)' in block and 'var(--text-xs)' in block
+
+
+def test_votes_only_offer_times_friends_can_still_answer():
+    sync = section('    const syncPlannerTimeChoices = () => {', '    const selectPlannerPreset = ')
+    assert "const voteReady = (iso) => new Date(iso).getTime() > Date.now() + 2 * 3600e3;" in sync
+    assert "shown.includes(iso) && voteReady(iso)" in sync
+    # No dead end: the vote link hides until two times qualify.
+    assert "classList.toggle('hidden', !voteTimes && shown.filter(voteReady).length < 2)" in sync
+    assert "|| (!!voteTimes && !voteReady(button.dataset.smartTime))" in sync
+
+
+def test_saved_plans_keep_vote_mode():
+    assert "timeOptions: voteTimes ? [...voteTimes].sort() : null," in APP
+    assert "timeOptions: Array.isArray(raw.timeOptions)" in APP
+    assert "let voteTimes = restoredDraft?.timeOptions?.length ? new Set(restoredDraft.timeOptions) : null;" in APP
+    assert "    syncAudienceChoices();\n    if (voteTimes) syncVoteMode();\n" in APP
+
+
+def test_voting_games_never_show_a_fixed_time_or_its_weather():
+    schedule = section('  function playScheduleHtml(', '  function gameRainAlertHtml(')
+    assert "const day = event.item.time_vote ? 'Time TBD' : upcomingDayLabel(event.startsAt);" in schedule
+    assert "!!a.item.time_vote - !!b.item.time_vote" in schedule
+    assert "|| game.time_vote || game.court?.indoor" in section('  function gameRainAlertHtml(', '  function sessionVisitFactsHtml(')
+    assert "game.status === 'upcoming' && court.id && !game.time_vote" in APP
+    assert "${esc(gameWhenText(plan))} · ${esc(plan.court?.name || '')}" in APP
+    assert "[game.time_vote ? 'Time TBD · voting' : timing, chosenCourtId" in APP
+
+
+def test_vote_taps_keep_focus_on_the_chip():
+    assert 'id="gs-time-vote-${esc(option.id)}" data-time-vote=' in APP
+    assert "render(fresh, { preserve: !locking });" in APP

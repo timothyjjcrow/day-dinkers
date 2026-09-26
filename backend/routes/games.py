@@ -414,7 +414,7 @@ SCORE_CONFIRM_REMINDER_HOURS = 12
 SCORE_LATE_DISPUTE_DAYS = GAME_SCORE_LATE_DISPUTE_DAYS
 CASUAL_MAX_PLAYERS = 100
 REMINDER_LEAD_MINUTES = 65
-TIME_VOTE_MIN_LEAD_MINUTES = 50
+TIME_VOTE_MIN_LEAD_MINUTES = 120
 UNSCORED_EXPIRY_DAYS = 7
 INSTANT_RALLY_ASSEMBLY_MINUTES = 90
 RALLY_ARRIVAL_ETA_MINUTES = (5, 10, 15)
@@ -2758,6 +2758,8 @@ def _lock_time_vote(game, option, actor_id=None, now=None):
     now = now or utcnow()
     game.scheduled_at = option['starts_at']
     game.time_options = '[]'
+    if option['starts_at'] <= now:
+        return  # Settled too late to plan around: no confirmations or pushes.
     needs_confirmation = set()
     for player in game.players:
         player.reminded_at = None
@@ -2777,8 +2779,27 @@ def _lock_time_vote(game, option, actor_id=None, now=None):
         )
 
 
+def _drop_passed_time_options(game, now):
+    """Move a vote's placeholder start off options that already passed."""
+    raw = json.loads(game.time_options)
+    keep = [
+        item for item in raw
+        if datetime.fromisoformat(str(item['starts_at']).replace('Z', '+00:00'))
+        .replace(tzinfo=None) > now
+    ]
+    game.time_options = json.dumps(keep)
+    game.scheduled_at = min(
+        datetime.fromisoformat(str(item['starts_at']).replace('Z', '+00:00')).replace(tzinfo=None)
+        for item in keep
+    )
+
+
 def settle_game_time_votes(now=None):
-    """Auto-lock votes once every voter answered or 3h before the earliest option."""
+    """Auto-lock votes once every voter answered or 3h before the earliest option.
+
+    A missed deadline (no tick ran) leaves the placeholder on a passed option:
+    the vote then moves on to the remaining times, or locks the last one left.
+    """
     now = now or utcnow()
     # The placeholder start is the earliest option, so deadline-due votes sort first.
     candidates = db.session.query(Game.id, Game.creator_id).filter(
@@ -2788,12 +2809,14 @@ def settle_game_time_votes(now=None):
         try:
             game = db.session.get(Game, game_id)
             vote = game.time_vote_state(now) if game else None
-            if not vote or not vote['due']:
+            if not vote or not (vote['due'] or game.scheduled_at <= now):
                 continue
             _, game = _lock_stable_game_roster_users(game_id, creator_id, include_invitees=True)
             vote = game.time_vote_state(now) if game else None
-            if vote and vote['due']:
+            if vote and (vote['due'] or len(vote['options']) == 1):
                 _lock_time_vote(game, vote['leader'], now=now)
+            elif vote and game.scheduled_at <= now:
+                _drop_passed_time_options(game, now)
             db.session.commit()
         except Exception:  # One stuck vote must not hold back the others.
             db.session.rollback()
@@ -7328,7 +7351,7 @@ def respond_waitlist_offer(game_id):
         review = _entry_plan_review_needed(game, payload, g.current_user.id)
         if review:
             return jsonify(review), 409
-        conflict = schedule_review_needed(
+        conflict = None if game.time_vote_open else schedule_review_needed(
             [g.current_user.id], game.scheduled_at, game.duration_minutes, payload,
             scope=f'accept_place:{game.id}', viewer_id=g.current_user.id, exclude_game_id=game.id,
         )

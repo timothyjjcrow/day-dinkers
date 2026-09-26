@@ -855,6 +855,8 @@
       )],
       recurrenceEndsOn: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.recurrenceEndsOn || ''))
         ? String(raw.recurrenceEndsOn) : null,
+      timeOptions: Array.isArray(raw.timeOptions)
+        ? raw.timeOptions.filter((iso) => typeof iso === 'string' && Number.isFinite(Date.parse(iso))).slice(0, 3) : null,
       title: String(raw.title || '').slice(0, 120),
       description: String(raw.description || '').slice(0, 1000),
       durationMinutes: Number.isInteger(Number(raw.durationMinutes))
@@ -1375,7 +1377,7 @@
     community_session_must_be_open: 'Public group sessions must be open so every member can view and join them.',
     no_friends: 'Add a friend before making a friends-only game, or choose Anyone nearby.',
     time_vote_needs_invitees: 'Invite at least one friend to vote.',
-    invalid_time_options: 'Pick 2–3 different upcoming times.',
+    invalid_time_options: 'Pick 2–3 different times at least 2 hours away.',
     court_id_required: 'Choose a club or court.',
     role_required: 'Choose the role you have at this venue.',
     claim_already_pending: 'Your claim is already submitted for review.',
@@ -19176,12 +19178,13 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     }).map((item) => ({ kind: 'game', item, startsAt: item.scheduled_at }));
     const competitionEvents = (competitions || []).filter((item) => !playCompetitionNeedsAction(item))
       .map((item) => ({ kind: item.kind, item, startsAt: item.starts_at || item.scheduled_at }));
+    // Games still voting on a time sit in their own group after dated plans.
     const upcoming = [...upcomingGames, ...competitionEvents]
-      .sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+      .sort((a, b) => !!a.item.time_vote - !!b.item.time_vote || new Date(a.startsAt) - new Date(b.startsAt));
     if (!upcoming.length) return '';
     const groups = [];
     upcoming.forEach((event) => {
-      const day = upcomingDayLabel(event.startsAt);
+      const day = event.item.time_vote ? 'Time TBD' : upcomingDayLabel(event.startsAt);
       let group = groups[groups.length - 1];
       if (!group || group.day !== day) {
         group = { day, events: [] };
@@ -21028,7 +21031,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     }
     const selectedPlannerPeople = () => [state.me, ...invitePeople.filter((person) => inviteIds.has(person.id))].filter(Boolean);
     // "When works?": null for one fixed time, else the 2–3 chip times friends vote on.
-    let voteTimes = null;
+    let voteTimes = restoredDraft?.timeOptions?.length ? new Set(restoredDraft.timeOptions) : null;
     const smartTimeChipsHtml = (selected) => plannerSuggestedTimes(selectedPlannerPeople(), selected).map((date, index) => {
       const midnight = new Date(date); midnight.setHours(0, 0, 0, 0);
       const dayIdx = Math.round((midnight.getTime() - days[0].getTime()) / 86400000);
@@ -21438,6 +21441,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       recurrenceTimezone,
       recurrenceWeekdays: [...recurrenceWeekdays],
       recurrenceEndsOn: recurrenceEndsOn,
+      timeOptions: voteTimes ? [...voteTimes].sort() : null,
       title: modal.querySelector('#ng-title').value.trim(),
       description: modal.querySelector('#ng-description').value.trim(),
       durationMinutes: modal.querySelector('#ng-duration').value.trim()
@@ -21751,11 +21755,15 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       }
       const expanded = modal.querySelector('#ng-more-times')?.getAttribute('aria-expanded') === 'true';
       // A vote only offers times still shown as chips (hours- and away-checked).
+      // Voting needs times at least two hours out, so friends have time to answer.
       const shown = [...modal.querySelectorAll('#ng-smart-times button')].map((button) => button.dataset.smartTime);
-      if (voteTimes) voteTimes = new Set([...voteTimes].filter((iso) => shown.includes(iso)));
+      const voteReady = (iso) => new Date(iso).getTime() > Date.now() + 2 * 3600e3;
+      if (voteTimes) voteTimes = new Set([...voteTimes].filter((iso) => shown.includes(iso) && voteReady(iso)));
+      modal.querySelector('#ng-vote-toggle')?.classList.toggle('hidden', !voteTimes && shown.filter(voteReady).length < 2);
       modal.querySelectorAll('#ng-smart-times button').forEach((button) => {
         const active = voteTimes ? voteTimes.has(button.dataset.smartTime) : button.dataset.smartTime === plannerScheduledIso();
-        button.disabled = !plannerHoursChecked || new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000;
+        button.disabled = !plannerHoursChecked || new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000
+          || (!!voteTimes && !voteReady(button.dataset.smartTime));
         button.classList.toggle('hidden', button.hasAttribute('data-extra-time') && !expanded);
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
@@ -22217,6 +22225,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       markPlannerDirty();
     });
     syncAudienceChoices();
+    if (voteTimes) syncVoteMode();
     const invitesEl = modal.querySelector('#ng-invites');
     const inviteSearch = modal.querySelector('#ng-invite-search');
     const selectVisibleButton = modal.querySelector('#ng-select-visible');
@@ -29609,7 +29618,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const nextKey = JSON.stringify(plan || null);
       if (nextKey === sharedPlanKey) return;
       sharedPlanKey = nextKey;
-      panel.innerHTML = plan ? `<button type="button" class="card row nav-row-button" data-thread-shared-plan="${Number(plan.id)}"><span class="nav-row-leading">${uiIcon('calendar')}</span><span class="row-main"><span class="row-title">${esc(plan.title || 'Play session')}</span><span class="row-sub">${esc(fmtDateTime(plan.scheduled_at))} · ${esc(plan.court?.name || '')}</span><span class="row-sub">You: ${esc(plan.viewer_status)} · ${esc(data.user.display_name.split(' ')[0])}: ${esc(plan.partner_status)}</span></span>${uiIcon('chevron-right', 'chev')}</button>` : '';
+      panel.innerHTML = plan ? `<button type="button" class="card row nav-row-button" data-thread-shared-plan="${Number(plan.id)}"><span class="nav-row-leading">${uiIcon('calendar')}</span><span class="row-main"><span class="row-title">${esc(plan.title || 'Play session')}</span><span class="row-sub">${esc(gameWhenText(plan))} · ${esc(plan.court?.name || '')}</span><span class="row-sub">You: ${esc(plan.viewer_status)} · ${esc(data.user.display_name.split(' ')[0])}: ${esc(plan.partner_status)}</span></span>${uiIcon('chevron-right', 'chev')}</button>` : '';
       panel.querySelector('[data-thread-shared-plan]')?.addEventListener('click', () => openChildModal(modal, () => openGameScreen(Number(plan.id))));
     };
     renderSharedPlan(data.shared_plan);
@@ -36651,7 +36660,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
   // Rain during an upcoming outdoor plan. The host's buttons open the same
   // edit and cancel sheets as Manage (data-rain-proxy names that control).
   function gameRainAlertHtml(game, rain) {
-    if (!(rain?.chance >= 50) || game.court?.indoor || game.is_instant || !game.is_joined
+    if (!(rain?.chance >= 50) || game.time_vote || game.court?.indoor || game.is_instant || !game.is_joined
         || game.status !== 'upcoming' || !(Date.parse(game.scheduled_at) > Date.now())) return '';
     return `<section class="attendance-confirmation rain-alert" aria-label="Rain forecast">
       <div><b>${uiIcon('water')} Rain likely around ${esc(rain.label)} · ${Number(rain.chance)}% chance</b>
@@ -36684,7 +36693,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const leader = vote.options.find((option) => option.id === vote.leader_id);
     return `<div class="session-time-vote" role="group" aria-labelledby="gs-time-vote-title">
       <b id="gs-time-vote-title">When works?</b>
-      <div class="schedule-suggestions">${vote.options.map((option) => `<button type="button" data-time-vote="${esc(option.id)}" class="${mine.has(option.id) ? 'active' : ''}" aria-pressed="${mine.has(option.id)}" ${vote.can_vote ? '' : 'disabled'}><b>${esc(fmtVoteTime(option.starts_at))}</b><small>${Number(option.count) || 0} can</small></button>`).join('')}</div>
+      <div class="schedule-suggestions">${vote.options.map((option) => `<button type="button" id="gs-time-vote-${esc(option.id)}" data-time-vote="${esc(option.id)}" class="${mine.has(option.id) ? 'active' : ''}" aria-pressed="${mine.has(option.id)}" ${vote.can_vote ? '' : 'disabled'}><b>${esc(fmtVoteTime(option.starts_at))}</b><small>${Number(option.count) || 0} can</small></button>`).join('')}</div>
       ${vote.can_vote ? '<p class="simple-note">Tap every time that works for you.</p>' : ''}
       ${vote.can_lock && leader ? `<button type="button" class="btn btn-primary btn-block" id="gs-time-lock" data-option-id="${esc(leader.id)}">Lock ${esc(fmtVoteTime(leader.starts_at))}</button>
       <p class="simple-note">Locks automatically ${esc(fmtVoteTime(vote.locks_at))}</p>` : ''}
@@ -38499,7 +38508,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       const duration = Number(value('eg-duration'));
       const end = Number.isFinite(when.getTime()) && Number.isInteger(duration) && duration >= 15 && duration <= 720 ? new Date(when.getTime() + duration * 60000) : null;
       const timing = Number.isFinite(when.getTime()) ? `${fmtDateTime(when.toISOString())}${end ? `–${end.toDateString() === when.toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ''}` : 'Choose a time';
-      sheet.querySelector('#eg-summary-time').textContent = [timing, chosenCourtId ? chosenCourtName : 'Choose a court', datedSeries && editScope() === 'this_date' ? '' : selected('eg-recurrence')].filter(Boolean).join(' · ');
+      sheet.querySelector('#eg-summary-time').textContent = [game.time_vote ? 'Time TBD · voting' : timing, chosenCourtId ? chosenCourtName : 'Choose a court', datedSeries && editScope() === 'this_date' ? '' : selected('eg-recurrence')].filter(Boolean).join(' · ');
       sheet.querySelector('#eg-summary-players').textContent = [game.game_type === 'ranked' ? selected('eg-capacity') : `${value('eg-capacity')} places`, selected('eg-visibility'), sessionPlayStyleLabel({play_style: sheet.querySelector('#eg-play-style')?.value}), gameLevelRangeLabel({level_min:normalizedGameLevel(value('eg-level-min')),level_max:normalizedGameLevel(value('eg-level-max'))})].filter(Boolean).join(' · ');
       const price = value('eg-cost').trim();
       const amount = Number(price);
@@ -39906,7 +39915,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
           const fresh = await api(`/games/${game.id}/time-vote${locking ? '/lock' : ''}`, { method: 'POST',
             body: JSON.stringify(locking ? { option_id: button.dataset.optionId } : { option_ids: [...picks] }) });
           state.playGamesCache = null;
-          render(fresh);
+          render(fresh, { preserve: !locking });
           if (state.tab === 'play') renderPlay();
         } catch (e) {
           resetAction();

@@ -2801,8 +2801,16 @@ class Game(TimestampMixin, db.Model):
         # Most votes wins; ties go to the earliest time. Passed options drop out.
         leader = min(future or options, key=lambda option: (-len(option['votes']), option['starts_at']))
         voted = set().union(*(option['votes'] for option in options))
-        locks_at = (min(option['starts_at'] for option in future) - timedelta(hours=3)
-                    if future else now)
+        if future:
+            # Normally three hours before the earliest time. A vote on sooner
+            # times still gets an hour to answer, closing by 50 minutes before.
+            earliest = min(option['starts_at'] for option in future)
+            locks_at = max(earliest - timedelta(hours=3), min(
+                (self.created_at or now) + timedelta(hours=1),
+                earliest - timedelta(minutes=50),
+            ))
+        else:
+            locks_at = now
         return {'options': future, 'leader': leader, 'voters': voters, 'locks_at': locks_at,
                 'due': now >= locks_at or bool(voters) and voters <= voted}
 

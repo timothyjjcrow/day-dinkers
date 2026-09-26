@@ -104,6 +104,7 @@ def test_create_uses_earliest_option_as_placeholder(client):
     ({'time_options': times(30, 30)}, 'invalid_time_options'),
     ({'time_options': ['soon', 'later'], 'scheduled_at': times(30)[0]}, 'invalid_time_options'),
     ({'time_options': [stamp(utcnow() + timedelta(minutes=20))] + times(30)}, 'invalid_time_options'),
+    ({'time_options': [stamp(utcnow() + timedelta(minutes=110))] + times(30)}, 'invalid_time_options'),
     ({'visibility': 'open'}, 'time_vote_not_available'),
     ({'recurrence': 'weekly'}, 'time_vote_not_available'),
     ({'visibility': 'friends', 'invite_user_ids': []}, 'time_vote_needs_invitees'),
@@ -211,7 +212,7 @@ def test_open_vote_owns_the_time(client):
 
 def test_vote_stays_out_of_calendars_reminders_and_conflicts(client, app):
     host, ana = register(client, 'host'), register(client, 'ana')
-    game = create_vote(client, host, [ana], times(2, 30))
+    game = create_vote(client, host, [ana], times(3, 30))
     token = client.get('/api/calendar/token', headers=headers(host)).get_json()['token']
     feed = client.get(f'/api/calendar/{token}.ics').get_data(as_text=True)
     assert 'Vote Court' not in feed
@@ -270,3 +271,60 @@ def test_tick_waits_until_three_hours_before_the_earliest_time(client):
     row = db.session.get(Game, game['id'])
     assert not row.time_vote_open
     assert row.scheduled_at == base + timedelta(hours=30)
+
+
+def test_a_vote_on_soon_times_still_gets_an_hour_to_answer(client):
+    host, ana = register(client, 'host'), register(client, 'ana')
+    game = create_vote(client, host, [ana], [stamp(utcnow() + timedelta(hours=2, minutes=10))] + times(30))
+    created = db.session.get(Game, game['id']).created_at
+    settle_game_time_votes(now=created + timedelta(minutes=59))
+    assert db.session.get(Game, game['id']).time_vote_open
+    settle_game_time_votes(now=created + timedelta(hours=1))
+    db.session.expire_all()
+    assert not db.session.get(Game, game['id']).time_vote_open
+
+
+def test_a_missed_deadline_moves_the_vote_past_passed_times(client):
+    host, ana = register(client, 'host'), register(client, 'ana')
+    game = create_vote(client, host, [ana])
+    base = utcnow().replace(minute=0, second=0, microsecond=0)
+    settle_game_time_votes(now=base + timedelta(hours=31))
+    db.session.expire_all()
+    row = db.session.get(Game, game['id'])
+    # "a" passed with no tick: friends keep voting on "b" and "c".
+    assert row.time_vote_open
+    assert row.scheduled_at == base + timedelta(hours=54)
+    assert [option['id'] for option in row.time_vote_state(base + timedelta(hours=31))['options']] == ['b', 'c']
+    assert Notification.query.filter_by(kind='game_updated').count() == 0
+
+    # With one time left, that time is the plan.
+    settle_game_time_votes(now=base + timedelta(hours=55))
+    db.session.expire_all()
+    row = db.session.get(Game, game['id'])
+    assert not row.time_vote_open and row.scheduled_at == base + timedelta(hours=78)
+    assert Notification.query.filter_by(kind='game_updated', user_id=ana['user']['id']).count() == 1
+
+
+def test_a_vote_settled_after_every_time_passed_stays_quiet(client):
+    host, ana = register(client, 'host'), register(client, 'ana')
+    game = create_vote(client, host, [ana], times(30, 54))
+    base = utcnow().replace(minute=0, second=0, microsecond=0)
+    settle_game_time_votes(now=base + timedelta(hours=55))
+    db.session.expire_all()
+    assert not db.session.get(Game, game['id']).time_vote_open
+    assert Notification.query.filter_by(kind='game_updated').count() == 0
+
+
+def test_dm_plan_and_court_cards_know_the_time_is_open(client):
+    from backend.models import User
+    from backend.routes.chat import _shared_direct_plan
+    from backend.routes.courts import _active_counts_for
+
+    host, ana = register(client, 'host'), register(client, 'ana')
+    create_vote(client, host, [ana])
+    plan = _shared_direct_plan(ana['user']['id'], host['user']['id'])
+    assert plan['time_vote'] is True
+
+    court_id = Court.query.one().id
+    _, games, _ = _active_counts_for([court_id], db.session.get(User, ana['user']['id']))
+    assert games.get(court_id, 0) == 0

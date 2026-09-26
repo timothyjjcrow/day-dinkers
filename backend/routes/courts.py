@@ -447,6 +447,7 @@ def _active_counts_for(court_ids, current_user=None, *, presence_summaries=None)
         .filter(
             Game.court_id.in_(court_ids),
             Game.status == 'upcoming',
+            Game.time_options == '[]',  # like court detail: no time yet
             # Match the discovery/detail window; live rallies scheduled a few
             # minutes ago remain joinable while their assembly is active.
             Game.scheduled_at >= now - timedelta(hours=2),

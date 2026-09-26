@@ -1676,6 +1676,7 @@ def _shared_direct_plan(viewer_id, partner_id):
         roster = {row.user_id for row in game.players}
         return {'id': game.id, 'title': game.title or ('Ranked match' if game.game_type == 'ranked' else 'Play session'),
             'scheduled_at': iso(game.scheduled_at), 'ends_at': iso(end),
+            'time_vote': True if game.time_vote_open else None,
             'court': game.court.to_summary_dict(), 'viewer_status': 'going' if viewer_id in roster else 'invited',
             'partner_status': 'going' if partner_id in roster else 'invited'}
     return None
