@@ -749,6 +749,8 @@
       expected_crew_version: Number.isSafeInteger(crewVersion) && crewVersion >= 0
         ? crewVersion : null,
       client_attempt_id: attemptId,
+      // The server validates each proposed time; keep the exact list for retries.
+      ...(Array.isArray(value.time_options) ? { time_options: value.time_options.slice(0, 3) } : {}),
     };
   }
   function availableStorage(name) {
@@ -1369,6 +1371,8 @@
     not_your_suggestion: 'Only your own pending updates can be withdrawn.',
     community_session_must_be_open: 'Public group sessions must be open so every member can view and join them.',
     no_friends: 'Add a friend before making a friends-only game, or choose Anyone nearby.',
+    time_vote_needs_invitees: 'Invite at least one friend to vote.',
+    invalid_time_options: 'Pick 2–3 different upcoming times.',
     court_id_required: 'Choose a club or court.',
     role_required: 'Choose the role you have at this venue.',
     claim_already_pending: 'Your claim is already submitted for review.',
@@ -2508,6 +2512,10 @@
   function fmtTimeShort(isoStr) {
     const d = new Date(isoStr);
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(' ', ' ');
+  }
+  // "Sat 9 AM": one proposed time in a "When works?" vote.
+  function fmtVoteTime(isoStr) {
+    return `${new Date(isoStr).toLocaleDateString([], { weekday: 'short' })} ${fmtTimeShort(isoStr).replace(/:00(?=\s)/, '')}`;
   }
   function scoreAutoConfirmCopy(game) {
     if (game?.score_correction_pending) return game.ranked_correction_expired
@@ -4211,7 +4219,7 @@
         title: `${esc((game.players.find((p) => p.user_id === game.creator_id) || {}).display_name || 'A friend')} invited you to play`,
         sub: game.is_instant
           ? `${esc(court.name || '')} · ${esc(rallyCountsText(rallySummaryFromValue(game)))}`
-        : `${fmtDateTime(game.scheduled_at)} · ${esc(court.name || '')} · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left`,
+        : `${gameWhenText(game)} · ${esc(court.name || '')} · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left`,
       },
       live: {
         icon: '<span class="agb-dot"></span>',
@@ -4236,7 +4244,7 @@
       },
       upcoming: {
         icon: uiIcon('calendar'),
-        title: `Next play: ${fmtDateTime(game.scheduled_at)}`,
+        title: `Next play: ${gameWhenText(game)}`,
         sub: `${esc(court.name || '')} · ${game.players.length}/${game.max_players} players`,
       },
     }[game.banner_state] || null;
@@ -11682,7 +11690,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       <section class="entry-plan-review" aria-labelledby="entry-plan-title">
         <span class="action-confirm-eyebrow">${game.game_type === 'ranked' ? 'Ranked match' : 'Casual'}${sessionPlayStyleLabel(game) ? ` · ${esc(sessionPlayStyleLabel(game))}` : ''}</span>
         <h2 id="entry-plan-title">${esc(game.title || 'Play at ' + (game.court?.name || 'the court'))}</h2>
-        <div class="entry-plan-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>
+        <div class="entry-plan-when">${uiIcon('calendar')}<b>${game.time_vote ? 'Time TBD · voting' : `${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}`}</b></div>
         <div class="entry-plan-court">${uiIcon('map-pin')}<span><b>${esc(game.court?.name || 'Court')}</b>${game.court_number ? `<small>${esc(game.court_number)}</small>` : ''}</span></div>
         ${sessionVisitFactsHtml(game)}
         <div class="entry-plan-players"><b>${people.length} signed up · ${Number(game.max_players) || 0} places</b>
@@ -16750,7 +16758,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       : Number(game.max_players) === 4 ? 'Doubles' : `${Number(game.max_players) || 4} players`;
     const type = game.game_type === 'ranked' ? 'Ranked' : 'Casual';
     const when = (variant === 'instant' || game.is_instant) ? 'Live now'
-      : game.scheduled_at ? fmtDateTime(game.scheduled_at) : 'Time not listed';
+      : game.time_vote ? 'Time TBD' : game.scheduled_at ? fmtDateTime(game.scheduled_at) : 'Time not listed';
     const playerCount = Array.isArray(game.players) ? game.players.length : Number(game.player_count) || 0;
     const roster = playerCount ? `${playerCount} player${playerCount === 1 ? '' : 's'} joined` : '';
     const sheet = openModal(`
@@ -17077,6 +17085,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     if (game.is_joined && game.host_handoff?.can_respond && hostDeadline > now) return {
       kind: 'host', label: 'Host request', action: 'Review host request', deadline: hostDeadline,
     };
+    const vote = game.time_vote;
+    if (vote?.can_vote && !vote.my_votes.length) return {
+      kind: 'vote', label: 'Pick times', action: 'Pick times', deadline: Date.parse(vote.locks_at),
+    };
     return null;
   }
 
@@ -17218,8 +17230,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
               : `${isRankedMatch ? 'Match time! Enter the score when it ends.' : 'Pickup game time! Finish with no score or add one.'}`)
             : `Live — waiting for ${isRankedMatch ? 'an opponent' : 'players'} to join.`}</span>`;
         } else {
-          action = `<button type="button" class="btn btn-primary btn-sm" data-open-game="${game.id}">Open ${playNoun}</button>
-            <button type="button" class="btn btn-secondary btn-sm" data-game-quick-calendar="${game.id}" aria-label="Add this ${playNoun} to calendar">${uiIcon('calendar')} Calendar</button>`;
+          action = `<button type="button" class="btn btn-primary btn-sm" data-open-game="${game.id}">Open ${playNoun}</button>${game.time_vote ? '' : `
+            <button type="button" class="btn btn-secondary btn-sm" data-game-quick-calendar="${game.id}" aria-label="Add this ${playNoun} to calendar">${uiIcon('calendar')} Calendar</button>`}`;
         }
       } else if (game.spots_left > 0) {
         action = `<button class="btn btn-primary btn-sm" data-game-join="${game.id}" data-play-noun="${playNoun}">${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}</button>`;
@@ -17268,11 +17280,12 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
     const decision = playGameDecision(game);
     if (decision) {
-      banner = `<span class="status-banner confirm-banner game-decision-banner">${uiIcon('clock')}<span>${decision.kind === 'offer' ? 'A spot is held for you' : 'You’ve been asked to host'}<small>Reply by ${esc(fmtDateTime(new Date(decision.deadline).toISOString()))}</small></span></span>`;
+      banner = `<span class="status-banner confirm-banner game-decision-banner">${uiIcon('clock')}<span>${decision.kind === 'offer' ? 'A spot is held for you' : decision.kind === 'vote' ? 'When works for you?' : 'You’ve been asked to host'}<small>Reply by ${esc(fmtDateTime(new Date(decision.deadline).toISOString()))}</small></span></span>`;
       action = `<button type="button" class="btn btn-primary btn-sm" data-open-game="${game.id}">${esc(decision.action)}</button>`;
     }
 
-    const scheduledLabel = `${fmtDateTime(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
+    const scheduledLabel = game.time_vote ? 'Time TBD · voting'
+      : `${fmtDateTime(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
     const defaultGameTitle = game.is_instant
       ? `${fmtDateTime(game.scheduled_at)}${assembly ? ' · Live' : ''}`
       : scheduledLabel;
@@ -17291,7 +17304,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     return `
       <article class="card game-card" style="${cardStyle}">
         <button type="button" class="game-card-main" data-open-game="${game.id}" aria-label="Open ${esc(customTitle || defaultGameTitle)} at ${esc(courtSummary)}">
-          ${planDateTileHtml(game.scheduled_at)}
+          ${planDateTileHtml(game.time_vote ? '' : game.scheduled_at)}
           <span class="game-card-body">
           <span class="game-card-context">${typeTag}${joinedState || inviteTag || chatTag}</span>
           <span class="row-title game-card-title">${gameTitle}</span>
@@ -17578,7 +17591,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     if (game.is_instant) {
       return `Join our pickup game${courtName ? ` at ${courtName}` : ''} — we're finding players now`;
     }
-    return `Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${fmtDateTime(game.scheduled_at)}`;
+    return `Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${gameWhenText(game)}`;
   }
 
   function canManageGameInviteLink(game) {
@@ -17738,7 +17751,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         if (!navigator.share) { await copy(); return; }
         try {
           await navigator.share({ title: game.title || 'Private pickleball session',
-            text: `Join me ${fmtDateTime(game.scheduled_at)} at ${game.court?.name || 'the court'}.`, url: link.url });
+            text: `Join me ${game.time_vote ? '' : `${fmtDateTime(game.scheduled_at)} `}at ${game.court?.name || 'the court'}.`, url: link.url });
           if (isCurrent()) status.textContent = 'Invitation shared.';
         } catch (error) {
           if (isCurrent() && error?.name !== 'AbortError') status.textContent = 'Sharing did not open. You can copy the link instead.';
@@ -17823,7 +17836,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         <div class="roster-boost-count"><b>${full ? 'Roster full' : spotsLeft === 1
           ? '1 spot left. The first person to join gets it.'
           : `${spotsLeft} spots left. The next ${spotsLeft} players to join get them.`}</b>
-          <span>${players.length}/${game.max_players} players · ${esc(fmtDateTime(game.scheduled_at))}</span>
+          <span>${players.length}/${game.max_players} players · ${esc(gameWhenText(game))}</span>
         </div>
         <div class="roster-boost-people">${roster}</div>
       </div>`;
@@ -18916,10 +18929,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const court = game.court || {};
     const players = game.players || [];
     const open = Math.max(0, Number(game.spots_left) || 0);
-    const when = `${fmtTimeShort(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
+    const when = game.time_vote ? 'Time TBD' : `${fmtTimeShort(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
     const going = `${players.length} going${open ? ` · ${open} open` : ''}`;
-    return `<button type="button" class="play-hero-next" data-open-game="${game.id}" aria-label="Open your next plan: ${esc(game.title || gameActivityLabel(game))}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(going)}">
-      <span class="play-hero-next-kicker">Up next · ${esc(upcomingDayLabel(game.scheduled_at))}<span class="play-hero-next-role">${esc(playPlanStatus(game).label)}</span></span>
+    return `<button type="button" class="play-hero-next" data-open-game="${game.id}" aria-label="Open your next plan: ${esc(game.title || gameActivityLabel(game))}, ${esc(gameWhenText(game))} at ${esc(court.name || 'court')}, ${esc(going)}">
+      <span class="play-hero-next-kicker">Up next${game.time_vote ? '' : ` · ${esc(upcomingDayLabel(game.scheduled_at))}`}<span class="play-hero-next-role">${esc(playPlanStatus(game).label)}</span></span>
       <b class="play-hero-next-time">${esc(when)}</b>
       <span class="play-hero-next-place">${esc(game.title ? `${game.title} · ${court.name || 'Court'}` : court.name || 'Court')}</span>
       <span class="play-hero-next-people"><span class="avatar-stack">${players.slice(0, 4).map((player) => avatarHtml(player, 'sm', 'span')).join('')}</span><span>${esc(gameActivityLabel(game))} · ${esc(going)}</span>${uiIcon('chevron-right', 'chev')}</span>
@@ -18965,6 +18978,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       : game.is_joined ? { label:'Joined', tone:'live' } : { label:'Not joined', tone:'' };
   }
 
+  // Every surface that prints a game's start says "Time TBD" while friends vote.
+  function gameWhenText(game) {
+    return game?.time_vote ? 'Time TBD' : fmtDateTime(game?.scheduled_at);
+  }
+
   // Decorative calendar tile for agenda rows and game cards; the row text or
   // accessible name always carries the full date and time. `time` shows the
   // weekday and clock (agenda), otherwise month, day and weekday (cards).
@@ -18982,9 +19000,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const court = game.court || {};
     const status = playPlanStatus(game);
     const format = game.game_type === 'ranked' ? `Ranked ${Number(game.max_players) === 2 ? 'singles' : 'doubles'}` : 'Pickup session';
-    return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(status.label)}">
-      ${planDateTileHtml(game.scheduled_at, { time: true })}
-      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${showDate ? `${esc(fmtDateTime(game.scheduled_at).split(' · ')[0])} · ` : ''}${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
+    return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(gameWhenText(game))} at ${esc(court.name || 'court')}, ${esc(status.label)}">
+      ${planDateTileHtml(game.time_vote ? '' : game.scheduled_at, { time: true })}
+      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${showDate ? `${esc(gameWhenText(game).split(' · ')[0])} · ` : ''}${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
       <span class="tag ${status.tone}">${esc(status.label)}</span>
     </button>`;
   }
@@ -20849,6 +20867,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       } catch { /* The submit validator explains an unavailable time zone. */ }
     }
     const selectedPlannerPeople = () => [state.me, ...invitePeople.filter((person) => inviteIds.has(person.id))].filter(Boolean);
+    // "When works?": null for one fixed time, else the 2–3 chip times friends vote on.
+    let voteTimes = null;
     const smartTimeChipsHtml = (selected) => plannerSuggestedTimes(selectedPlannerPeople(), selected).map((date, index) => {
       const midnight = new Date(date); midnight.setHours(0, 0, 0, 0);
       const dayIdx = Math.round((midnight.getTime() - days[0].getTime()) / 86400000);
@@ -21034,6 +21054,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <div class="schedule-suggestions-heading"><b>Suggested times</b><button type="button" class="btn-link" id="ng-more-times" aria-expanded="false" aria-controls="ng-smart-times">More common times</button></div>
           ${smartTimeChoicesHtml}
           <p id="ng-smart-empty" class="field-help hidden">No suggested times fit the listed hours.</p>
+          <button type="button" class="btn-link planner-vote-toggle" id="ng-vote-toggle" aria-pressed="false">Not sure? Let friends vote</button>
           ${scheduleDateTimePickerHtml('ng-when', initialTimeUnavailable ? '' : scheduleDateTimeValue(initialExactTime), plannerTimeZoneLabel(detectedRecurrenceTimezone))}
           <div id="ng-hours-hint" class="planner-hours-hint" role="status" tabindex="-1"></div>
           <div id="ng-busy-hint" class="row-sub" style="margin-bottom:4px"></div>
@@ -21399,7 +21420,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const end = scheduledIso && Number.isInteger(duration) && duration >= 15 && duration <= 720 ? new Date(new Date(scheduledIso).getTime() + duration * 60000) : null;
       const repeats = modal.querySelector('#ng-recurring').checked ? plannerRepeatText({ includeTime: false }) : '';
       modal.querySelector('#ng-repeat-preview').textContent = repeats ? plannerRepeatText() : '';
-      const whenText = scheduledIso ? `${fmtDateTime(scheduledIso)}${end ? `–${end.toDateString() === new Date(scheduledIso).toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ' · No end time'}${repeats ? ` · ${repeats}` : ''}` : 'Choose a time';
+      const whenText = voteTimes ? (voteTimes.size ? `${[...voteTimes].sort().map(fmtVoteTime).join(' · ')} · vote` : 'Pick 2–3 times')
+        : scheduledIso ? `${fmtDateTime(scheduledIso)}${end ? `–${end.toDateString() === new Date(scheduledIso).toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ' · No end time'}${repeats ? ` · ${repeats}` : ''}` : 'Choose a time';
       if (summary) {
         const costText = modal.querySelector('#ng-cost').value.trim();
         const costValue = Number(costText);
@@ -21568,8 +21590,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         queuePlannerHours();
       }
       const expanded = modal.querySelector('#ng-more-times')?.getAttribute('aria-expanded') === 'true';
+      // A vote only offers times still shown as chips (hours- and away-checked).
+      const shown = [...modal.querySelectorAll('#ng-smart-times button')].map((button) => button.dataset.smartTime);
+      if (voteTimes) voteTimes = new Set([...voteTimes].filter((iso) => shown.includes(iso)));
       modal.querySelectorAll('#ng-smart-times button').forEach((button) => {
-        const active = button.dataset.smartTime === plannerScheduledIso();
+        const active = voteTimes ? voteTimes.has(button.dataset.smartTime) : button.dataset.smartTime === plannerScheduledIso();
         button.disabled = !plannerHoursChecked || new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000;
         button.classList.toggle('hidden', button.hasAttribute('data-extra-time') && !expanded);
         button.classList.toggle('active', active);
@@ -21595,7 +21620,30 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modal.querySelector('#ng-smart-times').addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-smart-time]');
       if (!btn) return;
-      selectPlannerPreset(btn.dataset.smartTime);
+      if (!voteTimes) return selectPlannerPreset(btn.dataset.smartTime);
+      const iso = btn.dataset.smartTime;
+      if (voteTimes.has(iso)) voteTimes.delete(iso);
+      else if (voteTimes.size < 3) voteTimes.add(iso);
+      modal.querySelector('#ng-time-warning')?.remove();
+      // Keep the picked time as the chips' anchor while it is still voted, so
+      // a custom time stays on screen; the server starts at the earliest pick.
+      const anchor = voteTimes.has(plannerScheduledIso()) ? null : [...voteTimes].sort()[0];
+      if (anchor) return selectPlannerPreset(anchor);
+      syncPlannerTimeChoices(); updatePlannerSummary(); markPlannerDirty();
+    });
+    const syncVoteMode = () => {
+      const toggle = modal.querySelector('#ng-vote-toggle');
+      toggle.textContent = voteTimes ? 'Pick one time instead' : 'Not sure? Let friends vote';
+      toggle.setAttribute('aria-pressed', String(!!voteTimes));
+      modal.querySelector('.schedule-suggestions-heading b').textContent = voteTimes ? 'Pick 2–3 times' : 'Suggested times';
+      modal.querySelector('#ng-when-editor').classList.toggle('hidden', !!voteTimes);
+      // Votes are for invited friends: never a community post or a weekly plan.
+      if (voteTimes && clubId) modal.querySelector('#ng-club [data-club-id=""]')?.click();
+      syncRecurring(); syncAudienceChoices(); syncPlannerTimeChoices(); updatePlannerSummary();
+    };
+    modal.querySelector('#ng-vote-toggle').addEventListener('click', () => {
+      voteTimes = voteTimes ? null : new Set([plannerScheduledIso()].filter(Boolean));
+      syncVoteMode(); markPlannerDirty();
     });
     modal.querySelector('#ng-more-times').addEventListener('click', (event) => {
       const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
@@ -21782,7 +21830,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const syncRecurring = () => {
       // Casual sessions can repeat, including a group-linked weekly habit.
       const isRanked = gameType === 'ranked';
-      const recurringAllowed = !isRanked;
+      const recurringAllowed = !isRanked && !voteTimes;
       recurringRow.classList.toggle('hidden', !recurringAllowed);
       recurringBox.disabled = !recurringAllowed;
       if (!recurringAllowed) recurringBox.checked = false;
@@ -21940,6 +21988,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     };
     const syncAudienceChoices = () => {
       if (clubId) visibility = 'open';
+      else if (voteTimes && visibility === 'open') visibility = 'private';
+      modal.querySelector('.planner-club-options')?.classList.toggle('hidden', !!voteTimes);
       modal.querySelector('#planner-who-title').textContent = crewId
         ? 'Which group players are joining?'
         : clubId ? 'Who can join this community session?' : 'Who can join?';
@@ -21954,7 +22004,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         const missingAudience = !crewId && button.dataset.vis === 'friends' && friends.length === 0;
         const unavailable = (!!clubId && button.dataset.vis !== 'open') || missingAudience;
         button.classList.toggle('active', active);
-        button.disabled = unavailable;
+        button.disabled = unavailable || (!!voteTimes && button.dataset.vis === 'open');
         button.classList.toggle('hidden', missingAudience && !plannerFeedErrors.friends);
         button.setAttribute('aria-pressed', String(active));
         if (missingAudience) button.title = button.dataset.vis === 'friends'
@@ -22368,6 +22418,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       syncPlannerStep({ focus: true });
     });
     modal.querySelector('#ng-next-who')?.addEventListener('click', () => {
+      if (voteTimes && voteTimes.size < 2) {
+        setPlannerWarning('ng-time-warning', 'Pick 2–3 times.');
+        return;
+      }
       const selectedTime = chosenPlannerTime();
       if (!selectedTime || !Number.isFinite(selectedTime.getTime()) || selectedTime.getTime() <= Date.now()) {
         setPlannerWarning('ng-time-warning', 'Choose a future time.');
@@ -22634,6 +22688,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         );
         return;
       }
+      if (!exactRetry && voteTimes && !inviteIds.size) {
+        showPlannerSubmitError('Invite at least one friend to vote.', friendsWrap);
+        return;
+      }
       if (!exactRetry && clubId && visibility !== 'open') {
         showPlannerSubmitError('Public community sessions must be open so every member can view and join them.', modal.querySelector('#ng-vis button[data-vis="open"]'));
         return;
@@ -22708,6 +22766,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           recurrence_weekdays: [...recurrenceWeekdays],
           recurrence_ends_on: recurrenceEndsOn,
         } : {}),
+        ...(voteTimes ? { time_options: [...voteTimes].sort(), recurrence_timezone: recurrenceTimezone } : {}),
         max_players: Number(modal.querySelector('#ng-max').value),
         preferred_level: preferredLevel,
         level_min: levelMin,
@@ -30819,7 +30878,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       return {
         gameId: Number(game.id), eyebrow: 'Next session',
         title: game.title || gameActivityLabel(game),
-        detail: `${fmtDateTime(game.scheduled_at)} · ${game.court?.name || 'View court details'}`,
+        detail: `${game.time_vote ? 'Time TBD' : fmtDateTime(game.scheduled_at)} · ${game.court?.name || 'View court details'}`,
         action: `${attendance} · ${game.is_joined || Number(game.waitlist_position) > 0 ? 'View session' : 'View & RSVP'}`,
       };
     }
@@ -36434,11 +36493,22 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
   }
 
   function sessionReturnToolsHtml(game) {
-    if (!game.is_joined || game.status !== 'upcoming' || game.is_instant
+    if (!game.is_joined || game.status !== 'upcoming' || game.is_instant || game.time_vote
         || !(new Date(game.scheduled_at).getTime() > Date.now())) return '';
     return `<div class="session-return-tools" role="group" aria-label="Keep this plan handy">
       <button type="button" class="btn btn-secondary" id="gs-calendar">${uiIcon('calendar')} Add to calendar</button>
       ${appRunsStandalone() ? '' : `<button type="button" class="btn btn-secondary" id="gs-install" aria-label="Add Third Shot to your Home Screen">${uiIcon('home')} Home Screen</button>`}
+    </div>`;
+  }
+  // "When works?" replaces the time in the plan card until one time locks.
+  function sessionTimeVoteHtml(game) {
+    const vote = game.time_vote, mine = new Set(vote.my_votes);
+    const leader = vote.options.find((option) => option.id === vote.leader_id);
+    return `<div class="session-time-vote" role="group" aria-labelledby="gs-time-vote-title">
+      <b id="gs-time-vote-title">When works?</b>
+      <div class="schedule-suggestions">${vote.options.map((option) => `<button type="button" data-time-vote="${esc(option.id)}" class="${mine.has(option.id) ? 'active' : ''}" aria-pressed="${mine.has(option.id)}" ${vote.can_vote ? '' : 'disabled'}><b>${esc(fmtVoteTime(option.starts_at))}</b><small>${Number(option.count) || 0} can</small></button>`).join('')}</div>
+      ${vote.can_lock && leader ? `<button type="button" class="btn btn-primary btn-block" id="gs-time-lock" data-option-id="${esc(leader.id)}">Lock ${esc(fmtVoteTime(leader.starts_at))}</button>
+      <p class="simple-note">Locks automatically ${esc(fmtVoteTime(vote.locks_at))}</p>` : ''}
     </div>`;
   }
 
@@ -38026,7 +38096,9 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const visibilityLabels = {
       private: 'Invite only', friends: 'Friends', open: 'Nearby players',
     };
-    const visibilityOptions = exposure.slice(exposure.indexOf(game.visibility));
+    // While friends vote, the vote owns the time: no time field, repeat or open audience.
+    const visibilityOptions = exposure.slice(exposure.indexOf(game.visibility))
+      .filter((value) => !game.time_vote || value !== 'open');
     const currentRosterSize = Array.isArray(game.players) ? game.players.length : 0;
     const minimumCapacity = Math.max(2, currentRosterSize);
     const rankedCapacities = [2, 4].filter((value) => value >= minimumCapacity);
@@ -38083,6 +38155,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       </form>
     `, { label: `Edit ${playNoun}` });
     sheet.querySelector('.modal').classList.add('session-editor-modal');
+    if (game.time_vote) sheet.querySelectorAll('#eg-when-editor, #eg-repeat-controls').forEach((el) => el.classList.add('hidden'));
     enhanceAppSelects(sheet);
     bindScheduleDateTimePicker(sheet, 'eg-when');
     const formUX = bindModalFormUX(sheet, '#eg-save');
@@ -38730,6 +38803,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       game.attendance_confirmed_count, game.attendance_unconfirmed_count,
       game.attendance_confirmation_due,
       game.commitment_confirmation_due, game.my_commitment_requested_at, game.rsvp_counts,
+      game.time_vote,
       game.my_arrival && [game.my_arrival.id, game.my_arrival.active, game.my_arrival.arrives_at,
         game.my_arrival.expires_at, game.my_arrival.end_reason],
       (game.arrivals || []).map((arrival) => [arrival.id, arrival.user_id,
@@ -39260,7 +39334,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       ${hasScore ? playersHtml : ''}
       <section class="session-plan-card${game.status === 'upcoming' && !closedRally ? ' is-hero' : ''}" aria-label="Time, court and cost">
       ${joinedState}
-      ${when}
+      ${game.time_vote ? sessionTimeVoteHtml(game) : when}
       <div class="session-place-wrap">
         <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
           <span class="nav-row-leading">${uiIcon('map-pin')}</span>
@@ -39614,6 +39688,25 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
           toast(e.message);
         }
       });
+      // "When works?" chips save on tap; the host's Lock settles the vote early.
+      const timeVoteControls = [...box.querySelectorAll('[data-time-vote], #gs-time-lock')];
+      timeVoteControls.forEach((button) => button.addEventListener('click', async () => {
+        const locking = button.id === 'gs-time-lock';
+        const picks = new Set(game.time_vote?.my_votes);
+        if (!locking && !picks.delete(button.dataset.timeVote)) picks.add(button.dataset.timeVote);
+        const resetAction = beginButtonAction(button, locking ? 'Locking…' : 'Saving…', timeVoteControls);
+        if (!resetAction) return;
+        try {
+          const fresh = await api(`/games/${game.id}/time-vote${locking ? '/lock' : ''}`, { method: 'POST',
+            body: JSON.stringify(locking ? { option_id: button.dataset.optionId } : { option_ids: [...picks] }) });
+          state.playGamesCache = null;
+          render(fresh);
+          if (state.tab === 'play') renderPlay();
+        } catch (e) {
+          resetAction();
+          toast(e.message);
+        }
+      }));
       box.querySelector('#gs-standing-rsvp')?.addEventListener('click', async (event) => {
         const standing = game.my_recurrence_rsvp?.standing_rsvp === true;
         const resetAction = beginButtonAction(event.currentTarget, 'Saving…');

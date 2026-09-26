@@ -46,7 +46,8 @@ def court_play_payload(court, viewer, start=None, end=None, viewer_timezone=None
     lower = datetime.combine(start, time.min, player_zone).astimezone(UTC).replace(tzinfo=None)
     upper = datetime.combine(end+timedelta(days=1), time.min, player_zone).astimezone(UTC).replace(tzinfo=None)
     now = utcnow()
-    games = Game.query.filter(Game.court_id == court.id, Game.status == 'upcoming',
+    # A game still voting on its time has no slot on the court timeline yet.
+    games = Game.query.filter(Game.court_id == court.id, Game.status == 'upcoming', Game.time_options == '[]',
         Game.scheduled_at >= max(lower, now-timedelta(hours=2)), Game.scheduled_at < upper).order_by(Game.scheduled_at, Game.id).limit(1000).all()
     for game in games:
         player_ids = {player.user_id for player in game.players} | {game.creator_id}

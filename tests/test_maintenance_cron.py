@@ -163,8 +163,8 @@ def test_tick_covers_time_sensitive_jobs(app):
 
     names = [name for name, _job in maintenance._tick_jobs()]
     assert names == [
-        'presence_cleanup', 'instant_game_expiry', 'game_reminders',
-        'tournament_reminders', 'league_schedule_reminders',
+        'presence_cleanup', 'instant_game_expiry', 'game_time_votes',
+        'game_reminders', 'tournament_reminders', 'league_schedule_reminders',
     ]
 
 

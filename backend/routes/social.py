@@ -637,6 +637,7 @@ def players_looking():
                 GamePlayer.user_id.in_(sorted(pulse_windows)),
                 Game.status == 'upcoming',
                 Game.is_instant.is_(False),
+                Game.time_options == '[]',
                 Game.scheduled_at >= earliest,
                 Game.scheduled_at <= latest,
             )

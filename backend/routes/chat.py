@@ -1261,7 +1261,7 @@ def _competition_rooms_payload(me):
         )
         add_room(
             'game', game, (game.title or '').strip() or f'{play_title} at {court_name}', game.status,
-            game.scheduled_at, court_name, game_unread.get(game.id),
+            None if game.time_vote_open else game.scheduled_at, court_name, game_unread.get(game.id),
         )
     for tournament in tournaments.values():
         add_room(
