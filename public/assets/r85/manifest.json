@@ -3,11 +3,11 @@
   "files": {
     "app-v15.min.js": {
       "source": "app-v15.js",
-      "source_sha256": "9b0cab0e0bbdb49422f92b7aeaeb311156c9a0f61ec61e4d4fb208eeba4927d2",
-      "source_bytes": 2501773,
-      "minified_bytes": 1577705,
-      "gzip_bytes": 424279,
-      "brotli_bytes": 311787
+      "source_sha256": "f7f3d4c48fd63e8fb8012a77965e0f9ae5f421e31448986bc1b490278783805a",
+      "source_bytes": 2507257,
+      "minified_bytes": 1580656,
+      "gzip_bytes": 425169,
+      "brotli_bytes": 312462
     },
     "crew-planner-v15.min.js": {
       "source": "crew-planner-v15.js",
