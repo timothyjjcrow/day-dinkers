@@ -4,14 +4,14 @@
 // installs refresh session, competition, profile, and venue layouts
 // instead of retaining old executable bytes.
 const SHELL_CACHE_PREFIX = 'thirdshot-v15-r';
-const CACHE = 'thirdshot-v15-r86';
+const CACHE = 'thirdshot-v15-r87';
 const CORE_SHELL = [
   '/',
-  '/release-assets/r84/styles-v15.min.css',
-  '/release-assets/r84/crew-planner-v15.min.js',
-  '/release-assets/r84/tournament-bracket-v15.min.js',
-  '/release-assets/r84/venue-workspace-v15.min.js',
-  '/release-assets/r84/app-v15.min.js',
+  '/release-assets/r85/styles-v15.min.css',
+  '/release-assets/r85/crew-planner-v15.min.js',
+  '/release-assets/r85/tournament-bracket-v15.min.js',
+  '/release-assets/r85/venue-workspace-v15.min.js',
+  '/release-assets/r85/app-v15.min.js',
   '/vendor/leaflet/leaflet.css?v=1.9.4',
   '/vendor/leaflet/leaflet.js?v=1.9.4',
   '/vendor/leaflet-markercluster/MarkerCluster.css?v=1.5.3',
