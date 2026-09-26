@@ -7,7 +7,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, Response, current_app, g, jsonify, request
@@ -86,16 +86,24 @@ def _court_page_args():
     return limit, offset, None
 
 
-def _lock_open_instant_games_for_user(user_id):
-    """Lock this member's live assembly rows in canonical id order."""
+def _lock_open_instant_games_for_user(user_id, scheduled_game_id=None):
+    """Lock this member's live assembly rows in canonical id order.
+
+    ``scheduled_game_id`` (a scheduled game the member is on the way to) joins
+    the same sorted lock; callers split it back out by ``is_instant``.
+    """
+    live = and_(
+        Game.is_instant.is_(True),
+        Game.status == 'upcoming',
+        Game.assembly_closed_at.is_(None),
+    )
+    if scheduled_game_id:
+        live = or_(live, and_(
+            Game.id == scheduled_game_id, Game.is_instant.is_(False),
+        ))
     games = (
         Game.query.join(GamePlayer)
-        .filter(
-            GamePlayer.user_id == user_id,
-            Game.is_instant.is_(True),
-            Game.status == 'upcoming',
-            Game.assembly_closed_at.is_(None),
-        )
+        .filter(GamePlayer.user_id == user_id, live)
         .order_by(Game.id.asc())
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -439,6 +447,7 @@ def _active_counts_for(court_ids, current_user=None, *, presence_summaries=None)
         .filter(
             Game.court_id.in_(court_ids),
             Game.status == 'upcoming',
+            Game.time_options == '[]',  # like court detail: no time yet
             # Match the discovery/detail window; live rallies scheduled a few
             # minutes ago remain joinable while their assembly is active.
             Game.scheduled_at >= now - timedelta(hours=2),
@@ -1005,6 +1014,7 @@ def court_detail(court_id):
         Game.query.filter(
             Game.court_id == court.id,
             Game.status == 'upcoming',
+            Game.time_options == '[]',
             Game.scheduled_at >= utcnow() - timedelta(hours=2),
         )
         .order_by(Game.scheduled_at.asc())
@@ -1087,7 +1097,9 @@ def court_detail(court_id):
                 user, current_user.id, viewer_friends,
             )
         ]
-    payload['checkin_history'] = _busy_times(court, timezone_name=(payload.get('structured_hours') or {}).get('timezone'), detailed=True, hidden_ids=hidden_ids)
+    payload['checkin_history'] = _busy_times(court, timezone_name=(
+        (payload.get('structured_hours') or {}).get('timezone') or (payload.get('business') or {}).get('timezone')
+    ), detailed=True, hidden_ids=hidden_ids)
     payload['busy_times'] = payload['checkin_history']['windows']
     payload['court_leaders'] = (
         _court_leaders(court, hidden_ids) if current_user else []
@@ -1114,6 +1126,9 @@ def court_detail(court_id):
             payload['chat_unread'] = summary['unread']
     payload['players_here'] = players_here
     payload['players_here_count'] = visible_player_count
+    payload['paddle_queue'] = _paddle_queue_payload(
+        court, active, current_user, viewer_friends, hidden_ids,
+    )
     # Aggregate freshness is safe for anonymous venue discovery and lets
     # clients qualify a live count (for example, "last confirmed 8m ago")
     # without exposing any additional player identity.
@@ -1244,6 +1259,273 @@ def court_detail(court_id):
     )
     payload['my_review'] = my_review.to_dict() if my_review else None
     return jsonify(payload)
+
+
+# Paddle line: a first-come rotation stored on the fresh check-ins at a court.
+PADDLE_LINE_MAX_COURTS = 12
+
+
+def _paddle_court_count(court):
+    return min(max(int(court.num_courts or 1), 1), PADDLE_LINE_MAX_COURTS)
+
+
+def _whole(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _fresh_court_checkins(court_id):
+    return CheckIn.query.filter(
+        CheckIn.court_id == court_id,
+        CheckIn.checked_out_at.is_(None),
+        CheckIn.checked_in_at >= presence_absolute_cutoff(),
+        CheckIn.last_presence_ping_at >= presence_stale_cutoff(),
+    )
+
+
+def _paddle_line(checkins):
+    return sorted(
+        (row for row in checkins if row.queued_at),
+        key=lambda row: (row.queued_at, row.id),
+    )
+
+
+def _paddle_line_back(line, now):
+    """A stamp after everyone in line, even across small clock skews."""
+    return max([now, *(row.queued_at for row in line)]) + timedelta(microseconds=1)
+
+
+def _paddle_person(checkin, viewer_id=None, friends=(), hidden_ids=()):
+    """First name under the players_here rule, else 'Another player'."""
+    user = checkin.user
+    if (
+        checkin.user_id in hidden_ids
+        or not nearby_visibility_allows(user, viewer_id, friends)
+        or not (
+            checkin.looking_for_game
+            or checkin.user_id == viewer_id or checkin.user_id in friends
+        )
+    ):
+        return {'id': None, 'name': 'Another player'}
+    return {
+        'id': user.id,
+        'name': next(iter((user.display_name or '').split()), 'Player'),
+    }
+
+
+def _paddle_teams(people):
+    """Line order p1..p4 plays p1+p4 against p2+p3; two players is singles.
+
+    Anyone past the fourth joins the second side, so every player on the
+    court is shown and "Game done" always sees the same set as the server.
+    """
+    return [people[0:1] + people[3:4], people[1:3] + people[4:]]
+
+
+def _paddle_queue_payload(court, checkins, viewer=None, friends=(), hidden_ids=()):
+    """The court's line. Signed-out viewers get counts only."""
+    line = _paddle_line(checkins)
+    waiting = [row for row in line if row.queue_court is None]
+    on_court = {}
+    for row in line:
+        if row.queue_court is not None:
+            on_court.setdefault(row.queue_court, []).append(row)
+    payload = {
+        'court_count': _paddle_court_count(court),
+        'waiting_count': len(waiting),
+        'courts': [],
+    }
+    viewer_id = viewer.id if viewer else None
+    for number, rows in sorted(on_court.items()):
+        if not viewer:
+            payload['courts'].append({'court': number, 'player_count': len(rows)})
+            continue
+        people = [
+            _paddle_person(row, viewer_id, friends, hidden_ids) for row in rows
+        ]
+        payload['courts'].append({'court': number, 'teams': _paddle_teams(people)})
+    if viewer:
+        mine = next((row for row in line if row.user_id == viewer_id), None)
+        payload.update(
+            in_line=mine is not None,
+            my_court=mine.queue_court if mine else None,
+            my_position=waiting.index(mine) + 1 if mine in waiting else None,
+        )
+    return payload
+
+
+def _viewer_paddle_queue(court, checkins):
+    viewer = g.current_user
+    return _paddle_queue_payload(
+        court, checkins, viewer, friend_ids(viewer.id),
+        blocked_pair_ids(viewer.id),
+    )
+
+
+def _locked_paddle_line(court_id, *, allow_closed=False):
+    """Lock the Court row, then its fresh check-ins in user_id order."""
+    court = (
+        Court.query.filter(Court.id == court_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if not court:
+        return None, [], (jsonify({'error': 'court_not_found'}), 404)
+    if court.closed and not allow_closed:
+        return None, [], (jsonify({'error': 'court_closed'}), 409)
+    rows = (
+        _fresh_court_checkins(court.id)
+        .order_by(CheckIn.user_id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .all()
+    )
+    return court, rows, None
+
+
+def _post_paddle_score(court, sender_id, number, players, score, now, hidden_ids=()):
+    """One unrated court-chat line; names follow the public discovery rule.
+
+    Names appear only when every player's first name is public (and none is
+    blocked with the sender); otherwise the line carries just the score.
+    """
+    from backend.models import Message
+    from backend.services.conversations import conversation_ref
+    people = [_paddle_person(row, hidden_ids=hidden_ids) for row in players]
+    if any(person['id'] is None for person in people):
+        body = f"Court {number} · Game finished {score[0]}–{score[1]}"
+    else:
+        first, second = _paddle_teams([person['name'] for person in people])
+        body = (
+            f"Court {number} · {' & '.join(first)} "
+            f"{score[0]}–{score[1]} {' & '.join(second)}"
+        )
+    if Message.query.filter(
+        Message.court_id == court.id,
+        Message.body == body,
+        Message.created_at >= now - timedelta(minutes=2),
+    ).first():
+        return  # a second phone already posted this result
+    conversation = conversation_ref('court', court.id).ensure_persisted()
+    db.session.add(Message(
+        sender_id=sender_id, court_id=court.id,
+        conversation_id=conversation.id, body=body,
+    ))
+
+
+@courts_bp.get('/courts/<int:court_id>/queue')
+@rate_limit(60, 60)
+@login_required
+def paddle_queue(court_id):
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+    rows = _fresh_court_checkins(court.id).filter(
+        CheckIn.queued_at.isnot(None),
+    ).all()
+    return jsonify(_viewer_paddle_queue(court, rows))
+
+
+@courts_bp.post('/courts/<int:court_id>/queue')
+@rate_limit(30, 60)
+@login_required
+def update_paddle_queue(court_id):
+    payload = request.get_json(silent=True)
+    action = payload.get('action') if isinstance(payload, dict) else None
+    if action not in {'join', 'leave'}:
+        return jsonify({'error': 'invalid_payload'}), 400
+    court, rows, error = _locked_paddle_line(
+        court_id, allow_closed=action == 'leave',
+    )
+    if error:
+        return error
+    mine = next((row for row in rows if row.user_id == g.current_user.id), None)
+    if not mine and action == 'join':
+        return jsonify({'error': 'checkin_required'}), 409
+    if mine:
+        now = utcnow()
+        mine.last_presence_ping_at = now
+        if action == 'leave':
+            mine.queued_at = mine.queue_court = None
+        elif mine.queued_at is None:
+            mine.queued_at = _paddle_line_back(_paddle_line(rows), now)
+    result = _viewer_paddle_queue(court, rows)
+    db.session.commit()
+    return jsonify(result)
+
+
+@courts_bp.post('/courts/<int:court_id>/queue/next')
+@rate_limit(30, 60)
+@login_required
+def call_paddle_queue_next(court_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    number = payload.get('court')
+    expected = payload.get('expected')
+    score = payload.get('score')
+    if (
+        not _whole(number) or not 1 <= number <= PADDLE_LINE_MAX_COURTS
+        or not isinstance(expected, list) or len(expected) > 8
+        or not all(value is None or _whole(value) for value in expected)
+    ):
+        return jsonify({'error': 'invalid_payload'}), 400
+    if score is not None and not (
+        isinstance(score, list) and len(score) == 2
+        and all(_whole(value) and 0 <= value <= 99 for value in score)
+        and score[0] != score[1]
+    ):
+        return jsonify({'error': 'invalid_scores'}), 400
+    court, rows, error = _locked_paddle_line(court_id)
+    if error:
+        return error
+    viewer = g.current_user
+    actor = next((row for row in rows if row.user_id == viewer.id), None)
+    if not actor:
+        return jsonify({'error': 'checkin_required'}), 409
+    line = _paddle_line(rows)
+    playing = [row for row in line if row.queue_court == number]
+    if number > _paddle_court_count(court) and not playing:
+        return jsonify({'error': 'invalid_payload'}), 400
+    now = utcnow()
+    actor.last_presence_ping_at = now
+    friends, hidden_ids = friend_ids(viewer.id), blocked_pair_ids(viewer.id)
+    # `expected` is the on-court set as this viewer saw it (hidden people are
+    # null), so a second tap on the same "Game done" converges instead of
+    # rotating twice.
+    seen = sorted(
+        _paddle_person(row, viewer.id, friends, hidden_ids)['id'] or 0
+        for row in playing
+    )
+    if seen != sorted(value or 0 for value in expected):
+        result = _paddle_queue_payload(court, rows, viewer, friends, hidden_ids)
+        db.session.commit()
+        return jsonify({'error': 'queue_changed', 'paddle_queue': result}), 409
+    # Finished players go to the back in their order, then the first four
+    # waiting (two when only two or three wait) are called onto the court.
+    back = _paddle_line_back(line, now)
+    for offset, row in enumerate(playing):
+        row.queued_at = back + timedelta(microseconds=offset)
+        row.queue_court = None
+        # A checked-in player here just saw them finish, which confirms their
+        # presence while their phones sit in pockets.
+        row.last_presence_ping_at = now
+    waiting = _paddle_line(row for row in line if row.queue_court is None)
+    called = waiting[:4] if len(waiting) >= 4 else waiting[:2] if len(waiting) >= 2 else []
+    for row in called:
+        row.queue_court = number
+        row.last_presence_ping_at = now
+        if row.user_id != viewer.id and row not in playing:
+            notify(
+                row.user_id, 'court_up', f'You’re up on Court {number}',
+                court.name, action_url=f'/#court/{court.id}',
+                unread_dedupe_key=f'court-up:{row.id}:{row.queued_at.isoformat()}',
+            )
+    if score is not None and len(playing) >= 2:
+        _post_paddle_score(court, viewer.id, number, playing, score, now, hidden_ids)
+    result = _paddle_queue_payload(court, rows, viewer, friends, hidden_ids)
+    db.session.commit()
+    return jsonify(result)
 
 
 @courts_bp.post('/courts/<int:court_id>/planning-times')
@@ -1882,25 +2164,76 @@ _NWS_HEADERS = {
 }
 
 
-def _nws_fetch(lat, lng):
+def _nws_fetch(lat, lng, timeout=8):
     """Hourly forecast summary via api.weather.gov. Isolated for test mocks."""
+    if current_app.config.get('TESTING'):
+        # Tests never reach the network; they monkeypatch this function.
+        raise RuntimeError('weather lookups are off in tests')
     req = urllib.request.Request(
         f'https://api.weather.gov/points/{lat:.3f},{lng:.3f}', headers=_NWS_HEADERS,
     )
-    with urllib.request.urlopen(req, timeout=8) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         hourly_url = json.loads(resp.read())['properties']['forecastHourly']
     req = urllib.request.Request(hourly_url, headers=_NWS_HEADERS)
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        periods = json.loads(resp.read())['properties']['periods'][:6]
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return _nws_summary(json.loads(resp.read())['properties']['periods'][:24])
+
+
+def _nws_summary(periods):
     now = periods[0]
-    rain_odds = max(
-        (p.get('probabilityOfPrecipitation') or {}).get('value') or 0 for p in periods
-    )
+    chances = [
+        round((p.get('probabilityOfPrecipitation') or {}).get('value') or 0) for p in periods
+    ]
     return {
         'temp_f': round(float(now['temperature'])),
         'short': str(now.get('shortForecast') or '')[:60],
-        'rain_soon': rain_odds >= 40,
+        'rain_soon': max(chances[:6]) >= 40,
+        # Each hour's local start (with its UTC offset) and rain chance, so a
+        # game's hours can be read later without another upstream call.
+        'hourly': [[str(p.get('startTime') or ''), chance] for p, chance in zip(periods, chances)],
     }
+
+
+def court_forecast(court, timeout=8, fetch=True):
+    """Forecast for the court's rounded location, cached and shared with
+    nearby courts. Raises when the lookup fails; None when it is not cached
+    and ``fetch`` is off."""
+    key = (round(court.latitude, 2), round(court.longitude, 2))
+    cached = _WEATHER_CACHE.get(key)
+    if cached and cached['expires_at'] > time.time():
+        return cached['data']
+    if not fetch:
+        return None
+    data = _nws_fetch(court.latitude, court.longitude, timeout=timeout)
+    if len(_WEATHER_CACHE) > _WEATHER_MAX_CACHE:
+        _WEATHER_CACHE.clear()
+    _WEATHER_CACHE[key] = {'data': data, 'expires_at': time.time() + _WEATHER_CACHE_TTL}
+    return data
+
+
+def rain_chance_at(court, when, minutes=None, timeout=8):
+    """Highest rain chance while a game starting at ``when`` (naive UTC) runs,
+    with the local hour of that peak: {'chance': 70, 'label': '6 PM',
+    'starts_at': '...Z'}. None
+    when the forecast does not reach those hours."""
+    end = when + timedelta(minutes=minutes or 120)
+    best = None
+    for starts_at, chance in court_forecast(court, timeout=timeout).get('hourly') or []:
+        try:
+            local = datetime.fromisoformat(starts_at)
+        except ValueError:
+            continue
+        if local.tzinfo is None:
+            continue
+        begins = local.astimezone(UTC).replace(tzinfo=None)
+        if begins < end and begins + timedelta(hours=1) > when and (best is None or chance > best[0]):
+            best = (chance, local.hour, begins)
+    if best is None:
+        return None
+    chance, hour, begins = best
+    # `label` is court-local (for pushes); pages format `starts_at` themselves.
+    return {'chance': chance, 'label': f"{hour % 12 or 12} {'AM' if hour < 12 else 'PM'}",
+            'starts_at': begins.isoformat() + 'Z'}
 
 
 @courts_bp.get('/courts/<int:court_id>/weather')
@@ -1914,19 +2247,23 @@ def court_weather(court_id):
     condition = _latest_condition_for(
         court.id, include_identity=optional_current_user() is not None,
     )
-    key = (round(court.latitude, 2), round(court.longitude, 2))
-    cached = _WEATHER_CACHE.get(key)
-    if cached and cached['expires_at'] > time.time():
-        return jsonify({**cached['data'], 'latest_condition': condition})
     try:
-        data = _nws_fetch(court.latitude, court.longitude)
+        data = court_forecast(court)
     except Exception:
         current_app.logger.warning('Weather lookup failed for court %s', court_id, exc_info=True)
         return jsonify({'error': 'weather_unavailable', 'latest_condition': condition})
-    if len(_WEATHER_CACHE) > _WEATHER_MAX_CACHE:
-        _WEATHER_CACHE.clear()
-    _WEATHER_CACHE[key] = {'data': data, 'expires_at': time.time() + _WEATHER_CACHE_TTL}
-    return jsonify({**data, 'latest_condition': condition})
+    payload = {key: value for key, value in data.items() if key != 'hourly'}
+    if request.args.get('at'):
+        # A game screen asks for the chance during the game itself.
+        minutes = min(max(request.args.get('minutes', type=int) or 120, 15), 720)
+        try:
+            when = datetime.fromisoformat(request.args['at'].strip().replace('Z', '+00:00'))
+            if when.tzinfo:
+                when = when.astimezone(UTC).replace(tzinfo=None)
+            payload['rain_at_game'] = rain_chance_at(court, when, minutes)
+        except (ValueError, OverflowError):
+            payload['rain_at_game'] = None
+    return jsonify({**payload, 'latest_condition': condition})
 
 
 @courts_bp.post('/courts/<int:court_id>/condition')
@@ -2293,22 +2630,66 @@ def _court_leaders(court, hidden_ids=None):
     ]
 
 
-def _busy_times(court, *, timezone_name=None, detailed=False, hidden_ids=()):
-    """Top two-hour visit windows from the last 90 days of check-ins.
+# Busy hours read 90 days of visits on every court view; the raw rows are
+# shared by all viewers, so cache them briefly and filter per viewer after.
+_BUSY_CACHE = {}
+_BUSY_CACHE_TTL = 60 * 10
+_BUSY_MAX_CACHE = 200
+_BUSY_ROW_LIMIT = 5000
+_BUSY_PLAYED_STATUSES = ('completed', 'awaiting_confirmation', 'unresolved')
 
-    Prefer the court's structured-hours timezone so the result remains correct
-    across DST. Legacy courts without one retain the longitude approximation
-    instead of presenting UTC as local time.
-    """
+
+def _busy_visit_rows(court_id):
+    """(user_id, UTC time) for check-ins and played games in the last 90 days."""
+    cached = _BUSY_CACHE.get(court_id)
+    if cached and cached['expires_at'] > time.time() and not current_app.testing:
+        return cached
     until = utcnow()
     since = until - timedelta(days=90)
-    query = CheckIn.query.join(User, User.id == CheckIn.user_id).filter(
-        CheckIn.court_id == court.id, CheckIn.checked_in_at >= since,
-        CheckIn.checked_in_at <= until, User.deleted_at.is_(None),
+    checkins = (
+        db.session.query(CheckIn.user_id, CheckIn.checked_in_at)
+        .join(User, User.id == CheckIn.user_id)
+        .filter(CheckIn.court_id == court_id, CheckIn.checked_in_at.between(since, until),
+                User.deleted_at.is_(None))
+        .order_by(CheckIn.checked_in_at.desc()).limit(_BUSY_ROW_LIMIT).all()
     )
-    if hidden_ids:
-        query = query.filter(~CheckIn.user_id.in_(hidden_ids))
-    rows = query.all()
+    played = (
+        db.session.query(GamePlayer.user_id, Game.scheduled_at)
+        .join(Game, Game.id == GamePlayer.game_id)
+        .join(User, User.id == GamePlayer.user_id)
+        .filter(Game.court_id == court_id, Game.scheduled_at.between(since, until),
+                Game.status.in_(_BUSY_PLAYED_STATUSES), User.deleted_at.is_(None))
+        .order_by(Game.scheduled_at.desc()).limit(_BUSY_ROW_LIMIT).all()
+    )
+    # A game counts only for players who didn't check in within an hour of
+    # it, so checking in at 8:50 for a 9:00 game is one visit, not two.
+    checked_in = {}
+    for user_id, at in checkins:
+        checked_in.setdefault(user_id, []).append(at)
+    played = [
+        (user_id, at) for user_id, at in played
+        if not any(abs((at - seen).total_seconds()) <= 3600 for seen in checked_in.get(user_id, ()))
+    ]
+    entry = {
+        'since': since, 'until': until, 'expires_at': time.time() + _BUSY_CACHE_TTL,
+        'rows': [(user_id, at) for user_id, at in (*checkins, *played)],
+    }
+    if len(_BUSY_CACHE) >= _BUSY_MAX_CACHE:
+        _BUSY_CACHE.clear()
+    _BUSY_CACHE[court_id] = entry
+    return entry
+
+
+def _busy_times(court, *, timezone_name=None, detailed=False, hidden_ids=()):
+    """Top two-hour windows and hourly busy levels from the last 90 days.
+
+    Check-ins and played games both count, once per player per local hour.
+    Hours and windows only show when at least three different people made
+    them, so no one's routine stands out. Prefer the court's
+    timezone so the result remains correct across DST. Legacy courts without
+    one retain the longitude approximation instead of presenting UTC as local.
+    """
+    cached = _busy_visit_rows(court.id)
     timezone_name = str(timezone_name or court.structured_hours_dict().get('timezone') or '').strip()
     timezone = None
     if timezone_name:
@@ -2317,20 +2698,30 @@ def _busy_times(court, *, timezone_name=None, detailed=False, hidden_ids=()):
         except (ZoneInfoNotFoundError, ValueError):
             timezone = None
     tz_offset = round(court.longitude / 15) if court.longitude is not None else 0
+
+    def to_local(at):
+        return at.replace(tzinfo=UTC).astimezone(timezone) if timezone else at + timedelta(hours=tz_offset)
+
+    visits = set()
+    for user_id, at in cached['rows']:
+        if user_id not in hidden_ids:
+            local = to_local(at)
+            visits.add((user_id, local.date(), local.hour))
     days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    buckets = {}
-    for checkin in rows:
-        local = (
-            checkin.checked_in_at.replace(tzinfo=UTC).astimezone(timezone)
-            if timezone else checkin.checked_in_at + timedelta(hours=tz_offset)
-        )
-        hour = local.hour
+    buckets, bucket_dates, bucket_players, hour_players = {}, {}, {}, {}
+    hourly = [[0] * 18 for _ in days]  # 5 AM through the 10 PM hour
+    charted = []
+    for user_id, on, hour in visits:
         if not 5 <= hour < 23:
             continue
+        charted.append((user_id, on, hour))
+        hourly[on.weekday()][hour - 5] += 1
+        hour_players.setdefault((on.weekday(), hour), set()).add(user_id)
         # Anchor at 5 AM to produce player-friendly windows such as 9–11 AM.
-        start_hour = 5 + ((hour - 5) // 2) * 2
-        key = (local.weekday(), start_hour)
+        key = (on.weekday(), 5 + ((hour - 5) // 2) * 2)
         buckets[key] = buckets.get(key, 0) + 1
+        bucket_dates.setdefault(key, set()).add(on)
+        bucket_players.setdefault(key, set()).add(user_id)
     ranked = sorted(buckets.items(), key=lambda kv: (-kv[1], kv[0]))
 
     def clock(hour):
@@ -2356,11 +2747,29 @@ def _busy_times(court, *, timezone_name=None, detailed=False, hidden_ids=()):
 
     if not detailed:
         return windows
-    sufficient = len(rows) >= 10 and len({row.user_id for row in rows}) >= 3
-    return {'sample_size':len(rows), 'unique_players':len({row.user_id for row in rows}),
-            'range_start':iso(since), 'range_end':iso(until), 'timezone':timezone_name if timezone else None,
+    # Only the charted hours count toward the sample the bars are drawn from.
+    players = {visit[0] for visit in charted}
+    # Several dates keep one big event from reading as a weekly pattern.
+    sufficient = len(charted) >= 10 and len(players) >= 3 and len({visit[1] for visit in charted}) >= 3
+    for weekday, day in enumerate(hourly):
+        for index in range(len(day)):
+            if len(hour_players.get((weekday, index + 5), ())) < 3:
+                day[index] = 0
+    top = max(map(max, hourly))
+    # The hint names the busiest window the bars show, and only when it recurs.
+    shown = [(key, count) for key, count in ranked if len(bucket_players[key]) >= 3]
+    peak_key, peak_count = shown[0] if shown else (None, 0)
+    peak = peak_key if peak_count >= 3 and len(bucket_dates[peak_key]) >= 2 else None
+    now = to_local(utcnow())
+    return {'sample_size':len(charted), 'unique_players':len(players),
+            'range_start':iso(cached['since']), 'range_end':iso(cached['until']), 'timezone':timezone_name if timezone else None,
             'timezone_source':'venue_local' if timezone else 'approximate',
-            'sufficient_sample':sufficient, 'windows':windows if sufficient else []}
+            'sufficient_sample':sufficient, 'windows':windows if sufficient else [],
+            # Relative 0–4 levels (Mon first) rather than counts, so bars never
+            # reveal how often any one person plays.
+            'hours':[[math.ceil(4 * count / top) for count in day] for day in hourly] if sufficient and top else [],
+            'peak':window_label(*peak) if sufficient and peak else None,
+            'local_now':{'weekday':now.weekday(), 'hour':now.hour}}
 
 
 def _notify_friends_looking(court):
@@ -2426,7 +2835,13 @@ def check_in(court_id):
         return jsonify({'error': 'authentication_required'}), 401
     g.current_user = user
     now = utcnow()
-    instant_games = _lock_open_instant_games_for_user(g.current_user.id)
+    from backend.routes.games import (
+        _end_game_arrivals, _scheduled_arrival_game_id,
+    )
+    locked_games = _lock_open_instant_games_for_user(
+        g.current_user.id, _scheduled_arrival_game_id(g.current_user.id, court.id),
+    )
+    instant_games = [game for game in locked_games if game.is_instant]
     existing = active_checkin_for(g.current_user.id, for_update=True)
     existing_was_fresh = checkin_is_fresh(existing, now)
     # Only a fresh "wants a game" (not a re-ping of an existing one) pings friends.
@@ -2442,6 +2857,8 @@ def check_in(court_id):
             )
             existing.checked_in_at = now
             existing.location_verified_at = None
+            # A revived visit starts at the back, never at an old place in line.
+            existing.queued_at = existing.queue_court = None
         if verified_location:
             existing.location_verified_at = now
         existing.looking_for_game = looking
@@ -2463,8 +2880,12 @@ def check_in(court_id):
             last_presence_ping_at=now,
             location_verified_at=now if verified_location else None,
         ))
+    # Arriving at a scheduled game's court ends that "On my way" quietly.
+    for game in locked_games:
+        if not game.is_instant and game.court_id == court.id:
+            _end_game_arrivals(game, 'arrived', now, user_id=g.current_user.id)
     # Physical presence supersedes the separate remote "available this hour"
-    # signal. User -> Game -> CheckIn -> pulse is the shared lock order.
+    # signal. User -> Game -> CheckIn -> intent -> pulse is the shared lock order.
     from backend.routes.games import _end_active_play_pulse_for_user
     _end_active_play_pulse_for_user(g.current_user.id, 'checked_in', now)
     if started_looking:

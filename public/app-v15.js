@@ -749,6 +749,8 @@
       expected_crew_version: Number.isSafeInteger(crewVersion) && crewVersion >= 0
         ? crewVersion : null,
       client_attempt_id: attemptId,
+      // The server validates each proposed time; keep the exact list for retries.
+      ...(Array.isArray(value.time_options) ? { time_options: value.time_options.slice(0, 3) } : {}),
     };
   }
   function availableStorage(name) {
@@ -853,6 +855,8 @@
       )],
       recurrenceEndsOn: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.recurrenceEndsOn || ''))
         ? String(raw.recurrenceEndsOn) : null,
+      timeOptions: Array.isArray(raw.timeOptions)
+        ? raw.timeOptions.filter((iso) => typeof iso === 'string' && Number.isFinite(Date.parse(iso))).slice(0, 3) : null,
       title: String(raw.title || '').slice(0, 120),
       description: String(raw.description || '').slice(0, 1000),
       durationMinutes: Number.isInteger(Number(raw.durationMinutes))
@@ -1230,12 +1234,15 @@
     arrival_slot_taken: 'That game filled before your ETA was shared.',
     active_arrival_elsewhere: 'You’re already on your way to another game.',
     arrival_already_active: 'You’re already on your way to this game.',
+    arrival_window_closed: 'On my way opens an hour before start and closes 30 minutes after.',
     already_at_court: 'You’re already checked in at this court. Joining the game instead.',
     active_checkin_elsewhere: 'You’re checked in at another court. Confirm this court before joining.',
     invalid_payload: 'That request could not be read. Refresh and try again.',
     invalid_court_id: 'Choose a valid court.',
     court_not_found: 'That court is no longer available.',
     court_closed: 'That court is marked closed right now. Choose another destination.',
+    checkin_required: 'Check in at this court first.',
+    queue_changed: 'The paddle line just changed. Here’s the latest.',
     court_location_unavailable: 'That court needs a map location before it can be used as a destination.',
     invalid_presence_location: 'Your device did not return a usable location. Try again with location access on.',
     invalid_presence_intent: 'That check-in action expired. Close it and try again.',
@@ -1369,6 +1376,8 @@
     not_your_suggestion: 'Only your own pending updates can be withdrawn.',
     community_session_must_be_open: 'Public group sessions must be open so every member can view and join them.',
     no_friends: 'Add a friend before making a friends-only game, or choose Anyone nearby.',
+    time_vote_needs_invitees: 'Invite at least one friend to vote.',
+    invalid_time_options: 'Pick 2–3 different times at least 2 hours away.',
     court_id_required: 'Choose a club or court.',
     role_required: 'Choose the role you have at this venue.',
     claim_already_pending: 'Your claim is already submitted for review.',
@@ -2508,6 +2517,10 @@
   function fmtTimeShort(isoStr) {
     const d = new Date(isoStr);
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(' ', ' ');
+  }
+  // "Sat 9 AM": one proposed time in a "When works?" vote.
+  function fmtVoteTime(isoStr) {
+    return `${new Date(isoStr).toLocaleDateString([], { weekday: 'short' })} ${fmtTimeShort(isoStr).replace(/:00(?=\s)/, '')}`;
   }
   function scoreAutoConfirmCopy(game) {
     if (game?.score_correction_pending) return game.ranked_correction_expired
@@ -4211,7 +4224,7 @@
         title: `${esc((game.players.find((p) => p.user_id === game.creator_id) || {}).display_name || 'A friend')} invited you to play`,
         sub: game.is_instant
           ? `${esc(court.name || '')} · ${esc(rallyCountsText(rallySummaryFromValue(game)))}`
-        : `${fmtDateTime(game.scheduled_at)} · ${esc(court.name || '')} · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left`,
+        : `${gameWhenText(game)} · ${esc(court.name || '')} · ${game.spots_left} spot${game.spots_left === 1 ? '' : 's'} left`,
       },
       live: {
         icon: '<span class="agb-dot"></span>',
@@ -4236,7 +4249,7 @@
       },
       upcoming: {
         icon: uiIcon('calendar'),
-        title: `Next play: ${fmtDateTime(game.scheduled_at)}`,
+        title: `Next play: ${gameWhenText(game)}`,
         sub: `${esc(court.name || '')} · ${game.players.length}/${game.max_players} players`,
       },
     }[game.banner_state] || null;
@@ -8084,11 +8097,34 @@
     </section>`;
   }
 
-  function courtCheckinHistoryHtml(history) {
-    if (!history) return '';
-    const count = Number(history.sample_size) || 0;
-    const range = [history.range_start,history.range_end].filter(Boolean).map(resultDayLabel).join(' – ');
-    return `<div class="cd-detail-note court-checkin-history">${uiIcon('chart')}<div><b>Recent Third Shot check-ins</b><p>${count} shared check-in${count === 1 ? '' : 's'}${range ? ` · ${esc(range)}` : ''}</p>${history.sufficient_sample && history.windows?.length ? `<ul>${history.windows.map(row => `<li>${esc(row.label)} <span>${row.count} check-ins</span></li>`).join('')}</ul>${history.timezone_source === 'approximate' ? '<p>Times are approximate; this court has no confirmed time zone.</p>' : ''}` : '<p>Too little app activity to show a useful pattern.</p>'}<p>This reflects app check-ins, not how busy the court will be.</p></div></div>`;
+  // Busy hours come from 90 days of check-ins and played games. The court
+  // page gets one line only when there is a real pattern; the bars live in
+  // Before you go › Hours.
+  function courtBusyHintHtml(history) {
+    return history?.peak ? `<button type="button" class="cd-busy-hint" data-court-visit="hours">${uiIcon('chart')}<span>Usually busiest ${esc(history.peak)}</span>${uiIcon('chevron-right')}</button>` : '';
+  }
+
+  function courtBusyBarsHtml(history) {
+    if (history?.hours?.length !== 7) return '';
+    const {weekday: today, hour} = history.local_now || {}, days = Object.values(COURT_WEEKDAY_LABELS);
+    return `<div class="court-busy"><b>Busy times</b>
+      <div class="segmented" role="group" aria-label="Day">${days.map((day, i) => `<button type="button" data-busy-day="${i}" aria-label="${day}" aria-pressed="${i === today}"${i === today ? ' class="active"' : ''}>${day[0]}</button>`).join('')}</div>
+      ${history.hours.map((levels, i) => {
+        const top = Math.max(...levels), at = courtClockLabel(`${levels.indexOf(top) + 5}:00`);
+        return `<div class="court-busy-bars" data-busy-bars="${i}" role="img" aria-label="${days[i]}: ${top ? `busiest around ${at.face} ${at.suffix}` : 'no recent activity'}"${i === today ? '' : ' hidden'}>${levels.map((level, h) => `<i style="--lvl:${Number(level) || 0}"${i === today && h + 5 === hour ? ' class="is-now"' : ''}></i>`).join('')}</div>`;
+      }).join('')}
+      <p class="court-busy-axis" aria-hidden="true"><span>6 AM</span><span>12 PM</span><span>6 PM</span></p>
+      <p class="court-visit-source">From ${Number(history.sample_size) || 0} Third Shot check-ins and games · last 90 days</p>
+      ${history.timezone_source === 'approximate' ? '<p class="court-visit-source">Times are approximate; this court has no confirmed time zone.</p>' : ''}
+    </div>`;
+  }
+
+  function bindCourtBusyDays(root) {
+    const buttons = [...root.querySelectorAll('[data-busy-day]')];
+    buttons.forEach((button) => button.addEventListener('click', () => {
+      buttons.forEach((day) => { day.classList.toggle('active', day === button); day.setAttribute('aria-pressed', String(day === button)); });
+      root.querySelectorAll('[data-busy-bars]').forEach((row) => { row.hidden = row.dataset.busyBars !== button.dataset.busyDay; });
+    }));
   }
 
   function courtVisitingInfoHtml(court) {
@@ -8124,7 +8160,7 @@
     ].filter(([listed])=>listed);
     const reservation = businessActionHref(court.reservation_url);
     return {
-      hours: `<h4 id="court-visit-hours-title" tabindex="-1">Hours</h4><p class="court-visit-source">${court.hours_source === 'venue' ? 'From the venue' : 'Community information'}</p>${courtVisitHoursHtml(court)}${courtVisitManagementHtml(court,'hours')}`,
+      hours: `<h4 id="court-visit-hours-title" tabindex="-1">Hours</h4><p class="court-visit-source">${court.hours_source === 'venue' ? 'From the venue' : 'Community information'}</p>${courtVisitHoursHtml(court)}${courtBusyBarsHtml(!court.closed && court.checkin_history)}${courtVisitManagementHtml(court,'hours')}`,
       fees: `<h4 id="court-visit-fees-title" tabindex="-1">Fees &amp; access</h4><p class="court-visit-fee">${esc(court.fees || courtFeeTypeFact(court) || 'Fees not listed.')}</p>${reservation ? `<a class="btn btn-secondary btn-block" href="${esc(reservation)}" target="_blank" rel="noopener">${uiIcon('external')} View reservation details</a>` : ''}${courtVisitingInfoHtml(court)}${courtVisitManagementHtml(court)}${state.me && !court.business?.preview_only ? '<button type="button" class="btn-link court-visit-correction" id="court-visit-correction">Update community details</button>' : ''}`,
       facilities: `<h4 id="court-visit-facilities-title" tabindex="-1">Facilities</h4><ul class="court-visit-facilities">${facilities.map(([,icon,label])=>`<li>${uiIcon(icon)}<span>${esc(label)}</span></li>`).join('')}</ul>${court.surface_type ? `<p>${esc(court.surface_type)} surface</p>` : ''}<p class="court-visit-source">Unlisted facilities are not confirmed.</p>`,
       openplay: `<h4 id="court-visit-openplay-title" tabindex="-1">Open play</h4>${rows.length ? `<div class="court-visit-openplay">${rows.map(row=>`<div><b>${esc(`${COURT_WEEKDAY_LABELS[row.weekday]} · ${courtTimeRangeLabel(row.start,row.end)}`)}</b>${row.level || row.cost ? `<p class="row-sub">${esc([row.level,row.cost].filter(Boolean).join(' · '))}</p>` : ''}${row.notes ? `<p>${esc(row.notes)}</p>` : ''}</div>`).join('')}</div>` : ''}${court.open_play_schedule ? `<p>${esc(court.open_play_schedule)}</p>` : !rows.length ? '<p>No open-play schedule listed.</p>' : ''}${rows.length ? '<p class="court-visit-source">Community-listed times · venue entry is separate.</p>' : ''}`,
@@ -8156,7 +8192,7 @@
     requestAnimationFrame(()=>{if(modal.isConnected && !modal.closest('[inert]'))activate(selected,{focus:true});});
   }
 
-  function openCourtVisitSheet(court, section = 'hours', {onUpdated=null} = {}) {
+  function openCourtVisitSheet(court, section = 'hours', {onUpdated=null, focusBusy=false} = {}) {
     const ownerId=state.me?.id;
     let listingChanged=false, refreshSeq=0;
     const panels=courtVisitPanelsHtml(court);
@@ -8214,10 +8250,13 @@
         const workspace=currentOverlayEntry();
         if (workspace?.el!==modal) workspace?.afterClose.push(()=>{if(current()){listingChanged=true;refreshVisit();}});
       }));
+      bindCourtBusyDays(modal);
     };
     bindActions();
     modal.querySelector('.modal')?.classList.add('court-visit-dialog');
     bindCourtVisitTabs(modal,selected);
+    // From "Usually busiest …": bring the busy bars into view below the hours.
+    if (focusBusy) requestAnimationFrame(()=>modal.querySelector('.court-busy')?.scrollIntoView({block:'nearest'}));
     return modal;
   }
 
@@ -11682,7 +11721,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       <section class="entry-plan-review" aria-labelledby="entry-plan-title">
         <span class="action-confirm-eyebrow">${game.game_type === 'ranked' ? 'Ranked match' : 'Casual'}${sessionPlayStyleLabel(game) ? ` · ${esc(sessionPlayStyleLabel(game))}` : ''}</span>
         <h2 id="entry-plan-title">${esc(game.title || 'Play at ' + (game.court?.name || 'the court'))}</h2>
-        <div class="entry-plan-when">${uiIcon('calendar')}<b>${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>
+        <div class="entry-plan-when">${uiIcon('calendar')}<b>${game.time_vote ? 'Time TBD · voting' : `${esc(fmtDateTime(game.scheduled_at))}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}`}</b></div>
         <div class="entry-plan-court">${uiIcon('map-pin')}<span><b>${esc(game.court?.name || 'Court')}</b>${game.court_number ? `<small>${esc(game.court_number)}</small>` : ''}</span></div>
         ${sessionVisitFactsHtml(game)}
         <div class="entry-plan-players"><b>${people.length} signed up · ${Number(game.max_players) || 0} places</b>
@@ -13374,6 +13413,28 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     });
   }
 
+  // Paddle line on the court page: only while a line exists or the court is full.
+  const paddleTeamsText = (teams) => teams.filter((team) => team.length)
+    .map((team) => team.map((p) => esc(p.name)).join(' &amp; ')).join(' vs ');
+  function paddleQueueHtml(q, { checkedIn, crowded, rotation }) {
+    const courts = q?.courts || [];
+    if (!q || !(q.waiting_count || courts.length || (checkedIn && crowded))) return '';
+    const inUse = new Set(courts.map((c) => c.court));
+    const open = q.waiting_count >= 2
+      && Array.from({ length: q.court_count }, (_, i) => i + 1).find((n) => !inUse.has(n));
+    const mine = q.my_court ? ` · You’re on Court ${q.my_court}` : q.my_position ? ` · You’re #${q.my_position}` : '';
+    const row = (label, button) => `<div class="cd-queue-row"><span>${label}</span>${checkedIn ? button : ''}</div>`;
+    return `<div class="cd-queue" role="region" aria-label="Paddle line">
+      ${row(`<b>Paddle line</b><small>${q.waiting_count || 'No one'} waiting${mine}</small>`,
+        `<button type="button" class="btn btn-secondary btn-sm" id="cd-queue-toggle">${q.in_line ? 'Leave line' : 'Join the line'}</button>`)}
+      ${courts.map((c) => row(`Court ${c.court} · ${c.teams ? paddleTeamsText(c.teams) : `${c.player_count} playing`}`,
+        `<button type="button" class="btn btn-secondary btn-sm" aria-label="Game done on Court ${c.court}" data-queue-done="${c.court}">Game done</button>`)).join('')}
+      ${open ? row(`Court ${open} is open`,
+        `<button type="button" class="btn btn-secondary btn-sm" data-queue-call="${open}">Call next ${q.waiting_count >= 4 ? 4 : 2}</button>`) : ''}
+      ${rotation ? `<small>${esc(rotation)}</small>` : ''}
+    </div>`;
+  }
+
   let pendingCourtDetailOpen = null;
 
   async function openCourtDetail(courtId, {
@@ -13636,6 +13697,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <button type="button" class="btn btn-danger btn-sm" id="cd-checkout">Check out</button>
         </span>
       </div>` : '';
+    const paddleQueueBlock = (q) => (courtClosed ? '' : paddleQueueHtml(q, {
+      checkedIn, crowded: nHere > (q?.court_count || 1) * 4, rotation: court.visitor_info?.rotation,
+    }));
     const directionsAction = mapsUrl ? `
       <a class="btn btn-secondary" href="${mapsUrl}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name)} (opens Maps)">${uiIcon('external')} Directions</a>` : '';
     const reservationHref = businessActionHref(court.reservation_url);
@@ -13697,6 +13761,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       ${quickActions}
       ${courtClosed ? '' : courtConditionNowHtml(court)}
       ${visitFactsHtml}
+      ${courtClosed ? '' : courtBusyHintHtml(court.checkin_history)}
       <section id="cd-play-here" class="court-play-timeline" aria-label="Dated play at this court"></section>
       <details class="court-arrival-disclosure" ${checkedIn ? 'open' : ''}><summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon(courtClosed ? 'alert-triangle' : checkedIn ? 'check-circle' : 'map-pin')}</span><span>${courtClosed ? 'Court status' : checkedIn ? 'Your check-in & nearby players' : 'At the court now? Check in or find players'}</span></summary>
       <section class="card cd-now-card" aria-labelledby="cd-now-heading">
@@ -13710,6 +13775,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         ${nowSummary}
         ${nHere ? `<p class="simple-note">${esc(courtPresenceSummaryText(court.presence_summary))}. Shared check-ins do not reserve a place.</p>` : ''}
         ${presenceControl}
+        <div id="cd-queue">${paddleQueueBlock(court.paddle_queue)}</div>
         ${primaryAction}
         ${secondaryActions}
         <div id="cd-weather"></div>
@@ -13729,7 +13795,6 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         <summary><span class="cd-sum-icon" aria-hidden="true">${uiIcon('grid')}</span>${venueBusiness ? 'Community court details' : 'Court details'}</summary>
         <div class="cd-progressive-body">
           <div>${chipsHtml}</div>
-          ${courtCheckinHistoryHtml(court.checkin_history)}
           ${structuredOpenPlayHtml}
           ${!structuredOpenPlayHtml && court.open_play_schedule && (!venueBusiness || !venueBusiness.schedule.some((item) => item && item.active !== false)) ? `
             <div class="cd-hours">
@@ -14096,7 +14161,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     };
     modal.querySelectorAll('[data-court-visit]').forEach((button) => {
       button.addEventListener('click', () => {
-        openChildModal(modal, () => openCourtVisitSheet(court, button.dataset.courtVisit,{onUpdated:()=>refreshCourtDetailPreservingContext(modal,court.id,{focusFallbackSelector:`[data-court-visit="${button.dataset.courtVisit}"]`})}));
+        openChildModal(modal, () => openCourtVisitSheet(court, button.dataset.courtVisit,{focusBusy:button.classList.contains('cd-busy-hint'),onUpdated:()=>refreshCourtDetailPreservingContext(modal,court.id,{focusFallbackSelector:`[data-court-visit="${button.dataset.courtVisit}"]`})}));
       });
     });
     const commitLookingIntent = async (button, desiredLooking) => {
@@ -14128,6 +14193,109 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modal.querySelector('#cd-looking-toggle')?.addEventListener('click', (event) => {
       commitLookingIntent(event.currentTarget, !lookingForGame);
     });
+    // Paddle line: join/leave, call players onto a court, and poll only while
+    // the viewer is in the line (waiting or on a court).
+    let paddleQueue = court.paddle_queue;
+    let paddleVersion = 0;
+    const renderPaddleQueue = (next) => {
+      const slot = modal.querySelector('#cd-queue');
+      if (!slot || !next) return false;
+      const up = !!next.my_court && next.my_court !== paddleQueue?.my_court;
+      if (up) toast(`You’re up on Court ${next.my_court}`, { tone: 'success' });
+      paddleQueue = next;
+      // Keep keyboard and screen-reader focus on the same control across redraws.
+      const focused = slot.contains(document.activeElement) ? document.activeElement : null;
+      const focusKey = focused && (focused.dataset.queueDone ? `[data-queue-done="${focused.dataset.queueDone}"]`
+        : focused.dataset.queueCall ? `[data-queue-call="${focused.dataset.queueCall}"]` : '#cd-queue-toggle');
+      slot.innerHTML = paddleQueueBlock(next);
+      bindPaddleQueue(slot);
+      if (focused) (slot.querySelector(focusKey) || slot.querySelector('#cd-queue-toggle'))?.focus({ preventScroll: true });
+      syncPaddlePoll();
+      return up;
+    };
+    const setPaddleLine = async (button, join) => {
+      const resetAction = beginButtonAction(button, join ? 'Joining…' : 'Leaving…');
+      if (button && !resetAction) return;
+      paddleVersion += 1;
+      try {
+        const next = await api(`/courts/${court.id}/queue`, { method: 'POST', body: JSON.stringify({ action: join ? 'join' : 'leave' }) });
+        renderPaddleQueue(next);
+        if (join) {
+          toast(`You’re #${next.my_position || next.waiting_count} in line`, {
+            tone: 'success', duration: 6500, action: { label: 'Undo', onClick: () => setPaddleLine(null, false) },
+          });
+        }
+      } catch (error) {
+        resetAction?.();
+        errorToast(error);
+      }
+    };
+    const callPaddleNext = async (button, number, expected, score = null, sheet = null) => {
+      const resetAction = beginButtonAction(button, 'Calling…');
+      if (!resetAction) return;
+      paddleVersion += 1;
+      try {
+        const next = await api(`/courts/${court.id}/queue/next`, { method: 'POST', body: JSON.stringify({ court: number, expected, score }) });
+        if (sheet) closeModal(sheet);
+        if (!renderPaddleQueue(next)) {
+          toast(next.courts.some((c) => c.court === number) ? `Next players called to Court ${number}` : `Court ${number} is open`, { tone: 'success' });
+        }
+      } catch (error) {
+        resetAction();
+        if (error.data?.paddle_queue) {
+          if (sheet) closeModal(sheet);
+          renderPaddleQueue(error.data.paddle_queue);
+        }
+        errorToast(error);
+      }
+    };
+    const openPaddleGameDone = (number) => {
+      const entry = (paddleQueue?.courts || []).find((c) => c.court === number);
+      if (!entry?.teams) return null;
+      const teams = entry.teams.filter((team) => team.length);
+      const sheet = openModal(`
+        ${modalHead(`Court ${number} · Game done`)}
+        ${teams.length === 2 ? `<p class="simple-note">Score is optional. It goes in court chat, not ratings.</p>
+        <div class="score-grid cd-queue-score">${teams.map((team) => `<label class="score-panel"><span class="score-team-label">${paddleTeamsText([team])}</span>
+          <input type="number" min="0" max="99" inputmode="numeric" data-queue-score></label>`).join('<span class="score-vs">vs</span>')}</div>` : ''}
+        <button type="button" class="btn btn-primary btn-block" id="cd-queue-next">Call next players</button>
+      `, { label: `Game done on Court ${number}` });
+      sheet.querySelector('#cd-queue-next').addEventListener('click', (event) => {
+        const score = [...sheet.querySelectorAll('[data-queue-score]')].map((input) => input.value.trim());
+        if (score.some(Boolean) && !score.every(Boolean)) { toast('Enter both scores, or leave both empty.'); return; }
+        callPaddleNext(event.currentTarget, number, entry.teams.flat().map((p) => p.id),
+          score.length === 2 && score.every(Boolean) ? score.map(Number) : null, sheet);
+      });
+      return sheet;
+    };
+    const bindPaddleQueue = (slot) => {
+      slot.querySelector('#cd-queue-toggle')?.addEventListener('click', (event) => setPaddleLine(event.currentTarget, !paddleQueue.in_line));
+      slot.querySelectorAll('[data-queue-call]').forEach((button) => button.addEventListener('click', () => {
+        callPaddleNext(button, Number(button.dataset.queueCall), []);
+      }));
+      slot.querySelectorAll('[data-queue-done]').forEach((button) => button.addEventListener('click', () => {
+        openChildModal(modal, () => openPaddleGameDone(Number(button.dataset.queueDone)));
+      }));
+    };
+    const syncPaddlePoll = () => {
+      const wanted = !courtClosed && !!paddleQueue?.in_line;
+      if (wanted === !!modal._paddlePoll) return;
+      clearInterval(modal._paddlePoll);
+      modal._paddlePoll = wanted && setInterval(async () => {
+        if (!modal.isConnected) { clearInterval(modal._paddlePoll); return; }
+        if (document.hidden || state.connectionState === 'offline' || currentOverlayEntry()?.el !== modal) return;
+        const version = paddleVersion;
+        try {
+          const next = await api(`/courts/${court.id}/queue`);
+          if (version === paddleVersion && JSON.stringify(next) !== JSON.stringify(paddleQueue)) renderPaddleQueue(next);
+        } catch { /* retry on the next live interval */ }
+      }, LIVE_DETAIL_POLL_INTERVAL_MS);
+    };
+    clearInterval(modal._paddlePoll);
+    modal._paddlePoll = 0;
+    if (!reuseModal) modal._cleanupFns.push(() => clearInterval(modal._paddlePoll));
+    bindPaddleQueue(modal.querySelector('#cd-queue'));
+    syncPaddlePoll();
     modal.querySelector('#cd-play-now')?.addEventListener('click', (event) => {
       if (checkedIn && lookingForGame) {
         const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
@@ -16750,7 +16918,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       : Number(game.max_players) === 4 ? 'Doubles' : `${Number(game.max_players) || 4} players`;
     const type = game.game_type === 'ranked' ? 'Ranked' : 'Casual';
     const when = (variant === 'instant' || game.is_instant) ? 'Live now'
-      : game.scheduled_at ? fmtDateTime(game.scheduled_at) : 'Time not listed';
+      : game.time_vote ? 'Time TBD' : game.scheduled_at ? fmtDateTime(game.scheduled_at) : 'Time not listed';
     const playerCount = Array.isArray(game.players) ? game.players.length : Number(game.player_count) || 0;
     const roster = playerCount ? `${playerCount} player${playerCount === 1 ? '' : 's'} joined` : '';
     const sheet = openModal(`
@@ -17077,6 +17245,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     if (game.is_joined && game.host_handoff?.can_respond && hostDeadline > now) return {
       kind: 'host', label: 'Host request', action: 'Review host request', deadline: hostDeadline,
     };
+    const vote = game.time_vote;
+    if (vote?.can_vote && !vote.my_votes.length) return {
+      kind: 'vote', label: 'Pick times', action: 'Pick times', deadline: Date.parse(vote.locks_at),
+    };
     return null;
   }
 
@@ -17095,16 +17267,18 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const open = Math.max(0, Number.isFinite(supplied) ? supplied : capacity - joined - held);
     const needsReply = Math.max(0, Number(game.rsvp_counts?.needs_confirmation) || 0);
     const reserved = Math.max(0, Number(game.rsvp_counts?.reserved) || 0);
+    const maybe = Math.max(0, Number(game.rsvp_counts?.maybe) || 0);
+    const withMaybe = (detail) => (maybe ? `${maybe} maybe · ${detail}` : detail);
     if (needsReply || reserved) return { tone: 'forming', label: `${confirmed} confirmed`,
       detail: [needsReply ? `${needsReply} to confirm` : '', reserved ? `${reserved} reserved` : '',
-        open ? `${open} spots left` : 'Full'].filter(Boolean).join(' · ') };
+        withMaybe(open ? `${open} spots left` : 'Full')].filter(Boolean).join(' · ') };
     if (open) return { tone: 'forming', label: `${joined} joined`,
-      detail: `${open} spot${open === 1 ? '' : 's'} left${held ? ` · ${held} held` : ''}` };
+      detail: withMaybe(`${open} spot${open === 1 ? '' : 's'} left${held ? ` · ${held} held` : ''}`) };
     if (held) return { tone: 'forming', label: `${joined} joined`,
-      detail: `${held} spot${held === 1 ? '' : 's'} held` };
+      detail: withMaybe(`${held} spot${held === 1 ? '' : 's'} held`) };
     if (game.attendance_confirmation_due && confirmed < joined) return { tone: 'forming', label: 'Full',
       detail: `${joined - confirmed} still need${joined - confirmed === 1 ? 's' : ''} to confirm` };
-    return joined ? { tone: 'ready', label: `${joined} joined`, detail: 'Full' } : null;
+    return joined ? { tone: 'ready', label: `${joined} joined`, detail: withMaybe('Full') } : null;
   }
 
   function gameRosterStatusHtml(game) {
@@ -17218,8 +17392,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
               : `${isRankedMatch ? 'Match time! Enter the score when it ends.' : 'Pickup game time! Finish with no score or add one.'}`)
             : `Live — waiting for ${isRankedMatch ? 'an opponent' : 'players'} to join.`}</span>`;
         } else {
-          action = `<button type="button" class="btn btn-primary btn-sm" data-open-game="${game.id}">Open ${playNoun}</button>
-            <button type="button" class="btn btn-secondary btn-sm" data-game-quick-calendar="${game.id}" aria-label="Add this ${playNoun} to calendar">${uiIcon('calendar')} Calendar</button>`;
+          action = `<button type="button" class="btn btn-primary btn-sm" data-open-game="${game.id}">Open ${playNoun}</button>${game.time_vote ? '' : `
+            <button type="button" class="btn btn-secondary btn-sm" data-game-quick-calendar="${game.id}" aria-label="Add this ${playNoun} to calendar">${uiIcon('calendar')} Calendar</button>`}`;
         }
       } else if (game.spots_left > 0) {
         action = `<button class="btn btn-primary btn-sm" data-game-join="${game.id}" data-play-noun="${playNoun}">${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}</button>`;
@@ -17268,11 +17442,12 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
     const decision = playGameDecision(game);
     if (decision) {
-      banner = `<span class="status-banner confirm-banner game-decision-banner">${uiIcon('clock')}<span>${decision.kind === 'offer' ? 'A spot is held for you' : 'You’ve been asked to host'}<small>Reply by ${esc(fmtDateTime(new Date(decision.deadline).toISOString()))}</small></span></span>`;
+      banner = `<span class="status-banner confirm-banner game-decision-banner">${uiIcon('clock')}<span>${decision.kind === 'offer' ? 'A spot is held for you' : decision.kind === 'vote' ? 'When works for you?' : 'You’ve been asked to host'}<small>Reply by ${esc(fmtDateTime(new Date(decision.deadline).toISOString()))}</small></span></span>`;
       action = `<button type="button" class="btn btn-primary btn-sm" data-open-game="${game.id}">${esc(decision.action)}</button>`;
     }
 
-    const scheduledLabel = `${fmtDateTime(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
+    const scheduledLabel = game.time_vote ? 'Time TBD · voting'
+      : `${fmtDateTime(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
     const defaultGameTitle = game.is_instant
       ? `${fmtDateTime(game.scheduled_at)}${assembly ? ' · Live' : ''}`
       : scheduledLabel;
@@ -17291,7 +17466,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     return `
       <article class="card game-card" style="${cardStyle}">
         <button type="button" class="game-card-main" data-open-game="${game.id}" aria-label="Open ${esc(customTitle || defaultGameTitle)} at ${esc(courtSummary)}">
-          ${planDateTileHtml(game.scheduled_at)}
+          ${planDateTileHtml(game.time_vote ? '' : game.scheduled_at)}
           <span class="game-card-body">
           <span class="game-card-context">${typeTag}${joinedState || inviteTag || chatTag}</span>
           <span class="row-title game-card-title">${gameTitle}</span>
@@ -17578,7 +17753,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     if (game.is_instant) {
       return `Join our pickup game${courtName ? ` at ${courtName}` : ''} — we're finding players now`;
     }
-    return `Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${fmtDateTime(game.scheduled_at)}`;
+    return `Join my pickleball game${courtName ? ` at ${courtName}` : ''} — ${gameWhenText(game)}`;
   }
 
   function canManageGameInviteLink(game) {
@@ -17599,7 +17774,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       <h3>${esc(plan.title || gameActivityLabel(plan))}</h3>
       <p class="game-invitation-host">Hosted by ${esc(plan.host_name || 'the session host')}</p>
       <dl class="auth-preview-facts">
-        <div><dt>When</dt><dd>${esc(fmtDateTime(plan.scheduled_at))}<small>Your local time${plan.duration_minutes ? ` · ${Number(plan.duration_minutes)} minutes` : ''}</small></dd></div>
+        <div><dt>When</dt><dd>${esc(gameWhenText(plan))}<small>${plan.time_vote ? 'Friends are voting on the time' : 'Your local time'}${plan.duration_minutes ? ` · ${Number(plan.duration_minutes)} minutes` : ''}</small></dd></div>
         <div><dt>Where</dt><dd>${esc(plan.court?.name || 'Court not listed')}<small>${esc([plan.court?.address, plan.court?.city].filter(Boolean).join(', '))}</small></dd></div>
         <div><dt>Cost</dt><dd>${esc(cost)}</dd></div>
         <div><dt>Court access</dt><dd>${esc(sessionCourtAccessLabel(plan))}${plan.court_number ? `<small>${esc(plan.court_number)}</small>` : ''}</dd></div>
@@ -17738,7 +17913,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         if (!navigator.share) { await copy(); return; }
         try {
           await navigator.share({ title: game.title || 'Private pickleball session',
-            text: `Join me ${fmtDateTime(game.scheduled_at)} at ${game.court?.name || 'the court'}.`, url: link.url });
+            text: `Join me ${game.time_vote ? '' : `${fmtDateTime(game.scheduled_at)} `}at ${game.court?.name || 'the court'}.`, url: link.url });
           if (isCurrent()) status.textContent = 'Invitation shared.';
         } catch (error) {
           if (isCurrent() && error?.name !== 'AbortError') status.textContent = 'Sharing did not open. You can copy the link instead.';
@@ -17823,7 +17998,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         <div class="roster-boost-count"><b>${full ? 'Roster full' : spotsLeft === 1
           ? '1 spot left. The first person to join gets it.'
           : `${spotsLeft} spots left. The next ${spotsLeft} players to join get them.`}</b>
-          <span>${players.length}/${game.max_players} players · ${esc(fmtDateTime(game.scheduled_at))}</span>
+          <span>${players.length}/${game.max_players} players · ${esc(gameWhenText(game))}</span>
         </div>
         <div class="roster-boost-people">${roster}</div>
       </div>`;
@@ -17840,10 +18015,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
   function rosterBoostLauncherHtml(game, { primary = false } = {}) {
     const spotsLeft = Math.max(0, Number(game?.spots_left) || 0);
+    const maybe = Math.max(0, Number(game?.rsvp_counts?.maybe) || 0);
     return `<section class="roster-boost-launch${primary ? ' is-primary' : ''}" id="gs-fill-roster" aria-labelledby="gs-invite-title">
       <div class="roster-boost-launch-copy">
         <b id="gs-invite-title">Invite</b>
-        <span>${spotsLeft} open spot${spotsLeft === 1 ? '' : 's'} · choose how to reach players</span>
+        <span>${maybe ? `${maybe} maybe · ` : ''}${spotsLeft} open spot${spotsLeft === 1 ? '' : 's'}${maybe ? '' : ' · choose how to reach players'}</span>
       </div>
       <div class="roster-boost-launch-actions" role="group" aria-label="Invite players">
         <button type="button" data-roster-boost-channel="friends"><span aria-hidden="true">${uiIcon('users')}</span><b>Friends</b></button>
@@ -18916,10 +19092,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const court = game.court || {};
     const players = game.players || [];
     const open = Math.max(0, Number(game.spots_left) || 0);
-    const when = `${fmtTimeShort(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
+    const when = game.time_vote ? 'Time TBD' : `${fmtTimeShort(game.scheduled_at)}${game.ends_at ? ` – ${fmtTimeShort(game.ends_at)}` : ''}`;
     const going = `${players.length} going${open ? ` · ${open} open` : ''}`;
-    return `<button type="button" class="play-hero-next" data-open-game="${game.id}" aria-label="Open your next plan: ${esc(game.title || gameActivityLabel(game))}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(going)}">
-      <span class="play-hero-next-kicker">Up next · ${esc(upcomingDayLabel(game.scheduled_at))}<span class="play-hero-next-role">${esc(playPlanStatus(game).label)}</span></span>
+    return `<button type="button" class="play-hero-next" data-open-game="${game.id}" aria-label="Open your next plan: ${esc(game.title || gameActivityLabel(game))}, ${esc(gameWhenText(game))} at ${esc(court.name || 'court')}, ${esc(going)}">
+      <span class="play-hero-next-kicker">Up next${game.time_vote ? '' : ` · ${esc(upcomingDayLabel(game.scheduled_at))}`}<span class="play-hero-next-role">${esc(playPlanStatus(game).label)}</span></span>
       <b class="play-hero-next-time">${esc(when)}</b>
       <span class="play-hero-next-place">${esc(game.title ? `${game.title} · ${court.name || 'Court'}` : court.name || 'Court')}</span>
       <span class="play-hero-next-people"><span class="avatar-stack">${players.slice(0, 4).map((player) => avatarHtml(player, 'sm', 'span')).join('')}</span><span>${esc(gameActivityLabel(game))} · ${esc(going)}</span>${uiIcon('chevron-right', 'chev')}</span>
@@ -18956,6 +19132,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       return { label:game.commitment_confirmation_due ? 'Review changes' : 'Confirm spot', tone:'warn' };
     }
     if (!game.is_joined && game.my_invite_status === 'pending' && Date.parse(game.scheduled_at) > Date.now()) return { label:'Reply to invite', tone:'warn' };
+    if (!game.is_joined && game.my_invite_status === 'maybe' && Date.parse(game.scheduled_at) > Date.now()) return { label:'Maybe', tone:'' };
     if (Date.parse(game.scheduled_at) <= Date.now()) {
       if (game.can_enter_score) return { label:'Enter score', tone:'warn' };
       if (game.can_complete_session) return { label:'Wrap up session', tone:'warn' };
@@ -18963,6 +19140,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     }
     return game.is_creator ? { label:'Hosting', tone:'live' }
       : game.is_joined ? { label:'Joined', tone:'live' } : { label:'Not joined', tone:'' };
+  }
+
+  // Every surface that prints a game's start says "Time TBD" while friends vote.
+  function gameWhenText(game) {
+    return game?.time_vote ? 'Time TBD' : fmtDateTime(game?.scheduled_at);
   }
 
   // Decorative calendar tile for agenda rows and game cards; the row text or
@@ -18982,9 +19164,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const court = game.court || {};
     const status = playPlanStatus(game);
     const format = game.game_type === 'ranked' ? `Ranked ${Number(game.max_players) === 2 ? 'singles' : 'doubles'}` : 'Pickup session';
-    return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(fmtDateTime(game.scheduled_at))} at ${esc(court.name || 'court')}, ${esc(status.label)}">
-      ${planDateTileHtml(game.scheduled_at, { time: true })}
-      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${showDate ? `${esc(fmtDateTime(game.scheduled_at).split(' · ')[0])} · ` : ''}${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
+    return `<button type="button" class="play-schedule-row" data-open-game="${game.id}" aria-label="Open ${esc(game.title || 'session')}, ${esc(gameWhenText(game))} at ${esc(court.name || 'court')}, ${esc(status.label)}">
+      ${planDateTileHtml(game.time_vote ? '' : game.scheduled_at, { time: true })}
+      <span class="row-main"><b>${esc(game.title || court.name || 'Pickleball')}</b><small>${showDate ? `${esc(gameWhenText(game).split(' · ')[0])} · ` : ''}${format}${game.recurrence === 'weekly' || game.recurrence_series_id ? ' · Weekly' : ''}${game.title && court.name ? ` · ${esc(court.name)}` : ''}</small></span>
       <span class="tag ${status.tone}">${esc(status.label)}</span>
     </button>`;
   }
@@ -18998,12 +19180,13 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     }).map((item) => ({ kind: 'game', item, startsAt: item.scheduled_at }));
     const competitionEvents = (competitions || []).filter((item) => !playCompetitionNeedsAction(item))
       .map((item) => ({ kind: item.kind, item, startsAt: item.starts_at || item.scheduled_at }));
+    // Games still voting on a time sit in their own group after dated plans.
     const upcoming = [...upcomingGames, ...competitionEvents]
-      .sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+      .sort((a, b) => !!a.item.time_vote - !!b.item.time_vote || new Date(a.startsAt) - new Date(b.startsAt));
     if (!upcoming.length) return '';
     const groups = [];
     upcoming.forEach((event) => {
-      const day = upcomingDayLabel(event.startsAt);
+      const day = event.item.time_vote ? 'Time TBD' : upcomingDayLabel(event.startsAt);
       let group = groups[groups.length - 1];
       if (!group || group.day !== day) {
         group = { day, events: [] };
@@ -20849,6 +21032,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       } catch { /* The submit validator explains an unavailable time zone. */ }
     }
     const selectedPlannerPeople = () => [state.me, ...invitePeople.filter((person) => inviteIds.has(person.id))].filter(Boolean);
+    // "When works?": null for one fixed time, else the 2–3 chip times friends vote on.
+    let voteTimes = restoredDraft?.timeOptions?.length ? new Set(restoredDraft.timeOptions) : null;
     const smartTimeChipsHtml = (selected) => plannerSuggestedTimes(selectedPlannerPeople(), selected).map((date, index) => {
       const midnight = new Date(date); midnight.setHours(0, 0, 0, 0);
       const dayIdx = Math.round((midnight.getTime() - days[0].getTime()) / 86400000);
@@ -21034,6 +21219,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <div class="schedule-suggestions-heading"><b>Suggested times</b><button type="button" class="btn-link" id="ng-more-times" aria-expanded="false" aria-controls="ng-smart-times">More common times</button></div>
           ${smartTimeChoicesHtml}
           <p id="ng-smart-empty" class="field-help hidden">No suggested times fit the listed hours.</p>
+          <button type="button" class="btn-link planner-vote-toggle" id="ng-vote-toggle" aria-pressed="false">Not sure? Let friends vote</button>
           ${scheduleDateTimePickerHtml('ng-when', initialTimeUnavailable ? '' : scheduleDateTimeValue(initialExactTime), plannerTimeZoneLabel(detectedRecurrenceTimezone))}
           <div id="ng-hours-hint" class="planner-hours-hint" role="status" tabindex="-1"></div>
           <div id="ng-busy-hint" class="row-sub" style="margin-bottom:4px"></div>
@@ -21257,6 +21443,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       recurrenceTimezone,
       recurrenceWeekdays: [...recurrenceWeekdays],
       recurrenceEndsOn: recurrenceEndsOn,
+      timeOptions: voteTimes ? [...voteTimes].sort() : null,
       title: modal.querySelector('#ng-title').value.trim(),
       description: modal.querySelector('#ng-description').value.trim(),
       durationMinutes: modal.querySelector('#ng-duration').value.trim()
@@ -21399,7 +21586,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const end = scheduledIso && Number.isInteger(duration) && duration >= 15 && duration <= 720 ? new Date(new Date(scheduledIso).getTime() + duration * 60000) : null;
       const repeats = modal.querySelector('#ng-recurring').checked ? plannerRepeatText({ includeTime: false }) : '';
       modal.querySelector('#ng-repeat-preview').textContent = repeats ? plannerRepeatText() : '';
-      const whenText = scheduledIso ? `${fmtDateTime(scheduledIso)}${end ? `–${end.toDateString() === new Date(scheduledIso).toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ' · No end time'}${repeats ? ` · ${repeats}` : ''}` : 'Choose a time';
+      const whenText = voteTimes ? (voteTimes.size ? `${[...voteTimes].sort().map(fmtVoteTime).join(' · ')} · vote` : 'Pick 2–3 times')
+        : scheduledIso ? `${fmtDateTime(scheduledIso)}${end ? `–${end.toDateString() === new Date(scheduledIso).toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ' · No end time'}${repeats ? ` · ${repeats}` : ''}` : 'Choose a time';
       if (summary) {
         const costText = modal.querySelector('#ng-cost').value.trim();
         const costValue = Number(costText);
@@ -21568,9 +21756,18 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         queuePlannerHours();
       }
       const expanded = modal.querySelector('#ng-more-times')?.getAttribute('aria-expanded') === 'true';
+      // A vote only offers times still shown as chips (hours- and away-checked).
+      // Voting needs times at least two hours out, so friends have time to answer.
+      const shown = [...modal.querySelectorAll('#ng-smart-times button')].map((button) => button.dataset.smartTime);
+      const voteReady = (iso) => new Date(iso).getTime() > Date.now() + 2 * 3600e3;
+      if (voteTimes) voteTimes = new Set([...voteTimes].filter((iso) => shown.includes(iso) && voteReady(iso)));
+      // Votes need two qualifying times and a friend to ask.
+      modal.querySelector('#ng-vote-toggle')?.classList.toggle('hidden', !voteTimes
+        && (shown.filter(voteReady).length < 2 || !invitePeople.length));
       modal.querySelectorAll('#ng-smart-times button').forEach((button) => {
-        const active = button.dataset.smartTime === plannerScheduledIso();
-        button.disabled = !plannerHoursChecked || new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000;
+        const active = voteTimes ? voteTimes.has(button.dataset.smartTime) : button.dataset.smartTime === plannerScheduledIso();
+        button.disabled = !plannerHoursChecked || new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000
+          || (!!voteTimes && !voteReady(button.dataset.smartTime));
         button.classList.toggle('hidden', button.hasAttribute('data-extra-time') && !expanded);
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
@@ -21595,7 +21792,30 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modal.querySelector('#ng-smart-times').addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-smart-time]');
       if (!btn) return;
-      selectPlannerPreset(btn.dataset.smartTime);
+      if (!voteTimes) return selectPlannerPreset(btn.dataset.smartTime);
+      const iso = btn.dataset.smartTime;
+      if (voteTimes.has(iso)) voteTimes.delete(iso);
+      else if (voteTimes.size < 3) voteTimes.add(iso);
+      modal.querySelector('#ng-time-warning')?.remove();
+      // Keep the picked time as the chips' anchor while it is still voted, so
+      // a custom time stays on screen; the server starts at the earliest pick.
+      const anchor = voteTimes.has(plannerScheduledIso()) ? null : [...voteTimes].sort()[0];
+      if (anchor) return selectPlannerPreset(anchor);
+      syncPlannerTimeChoices(); updatePlannerSummary(); markPlannerDirty();
+    });
+    const syncVoteMode = () => {
+      const toggle = modal.querySelector('#ng-vote-toggle');
+      toggle.textContent = voteTimes ? 'Pick one time instead' : 'Not sure? Let friends vote';
+      toggle.setAttribute('aria-pressed', String(!!voteTimes));
+      modal.querySelector('.schedule-suggestions-heading b').textContent = voteTimes ? 'Pick 2–3 times' : 'Suggested times';
+      modal.querySelector('#ng-when-editor').classList.toggle('hidden', !!voteTimes);
+      // Votes are for invited friends: never a community post or a weekly plan.
+      if (voteTimes && clubId) modal.querySelector('#ng-club [data-club-id=""]')?.click();
+      syncRecurring(); syncAudienceChoices(); syncPlannerTimeChoices(); updatePlannerSummary();
+    };
+    modal.querySelector('#ng-vote-toggle').addEventListener('click', () => {
+      voteTimes = voteTimes ? null : new Set([plannerScheduledIso()].filter(Boolean));
+      syncVoteMode(); markPlannerDirty();
     });
     modal.querySelector('#ng-more-times').addEventListener('click', (event) => {
       const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
@@ -21782,7 +22002,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const syncRecurring = () => {
       // Casual sessions can repeat, including a group-linked weekly habit.
       const isRanked = gameType === 'ranked';
-      const recurringAllowed = !isRanked;
+      const recurringAllowed = !isRanked && !voteTimes;
       recurringRow.classList.toggle('hidden', !recurringAllowed);
       recurringBox.disabled = !recurringAllowed;
       if (!recurringAllowed) recurringBox.checked = false;
@@ -21940,6 +22160,8 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     };
     const syncAudienceChoices = () => {
       if (clubId) visibility = 'open';
+      else if (voteTimes && visibility === 'open') visibility = 'private';
+      modal.querySelector('.planner-club-options')?.classList.toggle('hidden', !!voteTimes);
       modal.querySelector('#planner-who-title').textContent = crewId
         ? 'Which group players are joining?'
         : clubId ? 'Who can join this community session?' : 'Who can join?';
@@ -21954,7 +22176,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         const missingAudience = !crewId && button.dataset.vis === 'friends' && friends.length === 0;
         const unavailable = (!!clubId && button.dataset.vis !== 'open') || missingAudience;
         button.classList.toggle('active', active);
-        button.disabled = unavailable;
+        button.disabled = unavailable || (!!voteTimes && button.dataset.vis === 'open');
         button.classList.toggle('hidden', missingAudience && !plannerFeedErrors.friends);
         button.setAttribute('aria-pressed', String(active));
         if (missingAudience) button.title = button.dataset.vis === 'friends'
@@ -22007,6 +22229,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       markPlannerDirty();
     });
     syncAudienceChoices();
+    if (voteTimes) syncVoteMode();
     const invitesEl = modal.querySelector('#ng-invites');
     const inviteSearch = modal.querySelector('#ng-invite-search');
     const selectVisibleButton = modal.querySelector('#ng-select-visible');
@@ -22368,6 +22591,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       syncPlannerStep({ focus: true });
     });
     modal.querySelector('#ng-next-who')?.addEventListener('click', () => {
+      if (voteTimes && voteTimes.size < 2) {
+        setPlannerWarning('ng-time-warning', 'Pick 2–3 times.');
+        return;
+      }
       const selectedTime = chosenPlannerTime();
       if (!selectedTime || !Number.isFinite(selectedTime.getTime()) || selectedTime.getTime() <= Date.now()) {
         setPlannerWarning('ng-time-warning', 'Choose a future time.');
@@ -22634,6 +22861,10 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         );
         return;
       }
+      if (!exactRetry && voteTimes && !inviteIds.size) {
+        showPlannerSubmitError('Invite at least one friend to vote.', friendsWrap);
+        return;
+      }
       if (!exactRetry && clubId && visibility !== 'open') {
         showPlannerSubmitError('Public community sessions must be open so every member can view and join them.', modal.querySelector('#ng-vis button[data-vis="open"]'));
         return;
@@ -22708,6 +22939,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           recurrence_weekdays: [...recurrenceWeekdays],
           recurrence_ends_on: recurrenceEndsOn,
         } : {}),
+        ...(voteTimes ? { time_options: [...voteTimes].sort(), recurrence_timezone: recurrenceTimezone } : {}),
         max_players: Number(modal.querySelector('#ng-max').value),
         preferred_level: preferredLevel,
         level_min: levelMin,
@@ -29390,7 +29622,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const nextKey = JSON.stringify(plan || null);
       if (nextKey === sharedPlanKey) return;
       sharedPlanKey = nextKey;
-      panel.innerHTML = plan ? `<button type="button" class="card row nav-row-button" data-thread-shared-plan="${Number(plan.id)}"><span class="nav-row-leading">${uiIcon('calendar')}</span><span class="row-main"><span class="row-title">${esc(plan.title || 'Play session')}</span><span class="row-sub">${esc(fmtDateTime(plan.scheduled_at))} · ${esc(plan.court?.name || '')}</span><span class="row-sub">You: ${esc(plan.viewer_status)} · ${esc(data.user.display_name.split(' ')[0])}: ${esc(plan.partner_status)}</span></span>${uiIcon('chevron-right', 'chev')}</button>` : '';
+      panel.innerHTML = plan ? `<button type="button" class="card row nav-row-button" data-thread-shared-plan="${Number(plan.id)}"><span class="nav-row-leading">${uiIcon('calendar')}</span><span class="row-main"><span class="row-title">${esc(plan.title || 'Play session')}</span><span class="row-sub">${esc(gameWhenText(plan))} · ${esc(plan.court?.name || '')}</span><span class="row-sub">You: ${esc(plan.viewer_status)} · ${esc(data.user.display_name.split(' ')[0])}: ${esc(plan.partner_status)}</span></span>${uiIcon('chevron-right', 'chev')}</button>` : '';
       panel.querySelector('[data-thread-shared-plan]')?.addEventListener('click', () => openChildModal(modal, () => openGameScreen(Number(plan.id))));
     };
     renderSharedPlan(data.shared_plan);
@@ -30819,7 +31051,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       return {
         gameId: Number(game.id), eyebrow: 'Next session',
         title: game.title || gameActivityLabel(game),
-        detail: `${fmtDateTime(game.scheduled_at)} · ${game.court?.name || 'View court details'}`,
+        detail: `${game.time_vote ? 'Time TBD' : fmtDateTime(game.scheduled_at)} · ${game.court?.name || 'View court details'}`,
         action: `${attendance} · ${game.is_joined || Number(game.waitlist_position) > 0 ? 'View session' : 'View & RSVP'}`,
       };
     }
@@ -36411,6 +36643,12 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       }).join('');
   }
 
+  // Invitees who answered "Maybe": no spot held, so no RSVP state or Remove.
+  function sessionMaybeGroupHtml(game) {
+    const people = game.status === 'upcoming' && Array.isArray(game.maybe_people) ? game.maybe_people : [];
+    return people.length ? `<div class="session-roster-group" data-rsvp-state="maybe"><h5>Maybe <span>${people.length}</span></h5>${people.map((person) => `<div class="game-player-row"><button type="button" class="player-profile-link" data-view-user="${Number(person.user_id)}" aria-label="View ${esc(person.display_name)}'s profile">${avatarHtml(person, 'sm', 'span')}<span class="row-main"><span class="row-title">${esc(person.display_name)}</span></span></button></div>`).join('')}</div>` : '';
+  }
+
   function sessionConfirmationHtml(game) {
     if (!game.attendance_confirmation_due || !game.is_joined || game.is_creator
         || game.is_instant || game.status !== 'upcoming'
@@ -36420,6 +36658,23 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       <div><b id="attendance-confirmation-title" tabindex="-1">${changed ? 'The plan changed' : 'Still coming?'}</b>
         <span>${changed ? 'Check the current time, court and cost.' : 'Confirm your place for this date.'}</span></div>
       <div class="attendance-confirmation-actions"><button class="btn btn-primary" id="gs-attend">${changed ? 'Confirm this plan' : 'Yes, I’m coming'}</button><button class="btn btn-secondary" id="gs-not-coming">Can’t make it</button></div>
+    </section>`;
+  }
+
+  // Rain during an upcoming outdoor plan. The host's buttons open the same
+  // edit and cancel sheets as Manage (data-rain-proxy names that control).
+  // The peak rain hour in this device's time, like every other time on the page.
+  function rainHourText(rain) {
+    return rain.starts_at ? fmtTimeShort(rain.starts_at).replace(/:00(?=\s)/, '') : rain.label;
+  }
+
+  function gameRainAlertHtml(game, rain) {
+    if (!(rain?.chance >= 50) || game.time_vote || game.court?.indoor || game.is_instant || !game.is_joined
+        || game.status !== 'upcoming' || !(Date.parse(game.scheduled_at) > Date.now())) return '';
+    return `<section class="attendance-confirmation rain-alert" aria-label="Rain forecast">
+      <div><b>${uiIcon('water')} Rain likely around ${esc(rainHourText(rain))} · ${Number(rain.chance)}% chance</b>
+        ${game.is_creator ? '' : '<span>Your host can move or cancel it.</span>'}</div>
+      ${game.is_creator ? '<div class="attendance-confirmation-actions"><button type="button" class="btn btn-primary" data-rain-proxy="gs-edit">Move it</button><button type="button" class="btn btn-secondary" data-rain-proxy="gs-cancel">Cancel game</button></div>' : ''}
     </section>`;
   }
 
@@ -36434,11 +36689,23 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
   }
 
   function sessionReturnToolsHtml(game) {
-    if (!game.is_joined || game.status !== 'upcoming' || game.is_instant
+    if (!game.is_joined || game.status !== 'upcoming' || game.is_instant || game.time_vote
         || !(new Date(game.scheduled_at).getTime() > Date.now())) return '';
     return `<div class="session-return-tools" role="group" aria-label="Keep this plan handy">
       <button type="button" class="btn btn-secondary" id="gs-calendar">${uiIcon('calendar')} Add to calendar</button>
       ${appRunsStandalone() ? '' : `<button type="button" class="btn btn-secondary" id="gs-install" aria-label="Add Third Shot to your Home Screen">${uiIcon('home')} Home Screen</button>`}
+    </div>`;
+  }
+  // "When works?" replaces the time in the plan card until one time locks.
+  function sessionTimeVoteHtml(game) {
+    const vote = game.time_vote, mine = new Set(vote.my_votes);
+    const leader = vote.options.find((option) => option.id === vote.leader_id);
+    return `<div class="session-time-vote" role="group" aria-labelledby="gs-time-vote-title">
+      <b id="gs-time-vote-title">When works?</b>
+      <div class="schedule-suggestions">${vote.options.map((option) => `<button type="button" id="gs-time-vote-${esc(option.id)}" data-time-vote="${esc(option.id)}" class="${mine.has(option.id) ? 'active' : ''}" aria-pressed="${mine.has(option.id)}" ${vote.can_vote ? '' : 'disabled'}><b>${esc(fmtVoteTime(option.starts_at))}</b><small>${Number(option.count) || 0} can</small></button>`).join('')}</div>
+      ${vote.can_vote ? '<p class="simple-note">Tap every time that works for you.</p>' : ''}
+      ${vote.can_lock && leader ? `<button type="button" class="btn btn-primary btn-block" id="gs-time-lock" data-option-id="${esc(leader.id)}">Lock ${esc(fmtVoteTime(leader.starts_at))}</button>
+      <p class="simple-note">Locks automatically ${esc(fmtVoteTime(vote.locks_at))}</p>` : ''}
     </div>`;
   }
 
@@ -38026,7 +38293,9 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     const visibilityLabels = {
       private: 'Invite only', friends: 'Friends', open: 'Nearby players',
     };
-    const visibilityOptions = exposure.slice(exposure.indexOf(game.visibility));
+    // While friends vote, the vote owns the time: no time field, repeat or open audience.
+    const visibilityOptions = exposure.slice(exposure.indexOf(game.visibility))
+      .filter((value) => !game.time_vote || value !== 'open');
     const currentRosterSize = Array.isArray(game.players) ? game.players.length : 0;
     const minimumCapacity = Math.max(2, currentRosterSize);
     const rankedCapacities = [2, 4].filter((value) => value >= minimumCapacity);
@@ -38083,6 +38352,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       </form>
     `, { label: `Edit ${playNoun}` });
     sheet.querySelector('.modal').classList.add('session-editor-modal');
+    if (game.time_vote) sheet.querySelectorAll('#eg-when-editor, #eg-repeat-controls').forEach((el) => el.classList.add('hidden'));
     enhanceAppSelects(sheet);
     bindScheduleDateTimePicker(sheet, 'eg-when');
     const formUX = bindModalFormUX(sheet, '#eg-save');
@@ -38247,7 +38517,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       const duration = Number(value('eg-duration'));
       const end = Number.isFinite(when.getTime()) && Number.isInteger(duration) && duration >= 15 && duration <= 720 ? new Date(when.getTime() + duration * 60000) : null;
       const timing = Number.isFinite(when.getTime()) ? `${fmtDateTime(when.toISOString())}${end ? `–${end.toDateString() === when.toDateString() ? fmtTimeShort(end.toISOString()) : fmtDateTime(end.toISOString())}` : ''}` : 'Choose a time';
-      sheet.querySelector('#eg-summary-time').textContent = [timing, chosenCourtId ? chosenCourtName : 'Choose a court', datedSeries && editScope() === 'this_date' ? '' : selected('eg-recurrence')].filter(Boolean).join(' · ');
+      sheet.querySelector('#eg-summary-time').textContent = [game.time_vote ? 'Time TBD · voting' : timing, chosenCourtId ? chosenCourtName : 'Choose a court', datedSeries && editScope() === 'this_date' ? '' : selected('eg-recurrence')].filter(Boolean).join(' · ');
       sheet.querySelector('#eg-summary-players').textContent = [game.game_type === 'ranked' ? selected('eg-capacity') : `${value('eg-capacity')} places`, selected('eg-visibility'), sessionPlayStyleLabel({play_style: sheet.querySelector('#eg-play-style')?.value}), gameLevelRangeLabel({level_min:normalizedGameLevel(value('eg-level-min')),level_max:normalizedGameLevel(value('eg-level-max'))})].filter(Boolean).join(' · ');
       const price = value('eg-cost').trim();
       const amount = Number(price);
@@ -38730,12 +39000,14 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       game.attendance_confirmed_count, game.attendance_unconfirmed_count,
       game.attendance_confirmation_due,
       game.commitment_confirmation_due, game.my_commitment_requested_at, game.rsvp_counts,
+      game.time_vote,
       game.my_arrival && [game.my_arrival.id, game.my_arrival.active, game.my_arrival.arrives_at,
         game.my_arrival.expires_at, game.my_arrival.end_reason],
-      (game.arrivals || []).map((arrival) => [arrival.id, arrival.user_id,
+      Array.isArray(game.arrivals), (game.arrivals || []).map((arrival) => [arrival.id, arrival.user_id,
         arrival.arrives_at, arrival.expires_at, arrival.active]),
       game.waitlist_count, game.waitlist_position, game.auto_fill_waitlist,
       (game.waitlist_people || []).map((person) => [person.user_id, person.position]),
+      (game.maybe_people || []).map((person) => person.user_id),
       game.my_invite_status, game.invited_by && (game.invited_by.user_id || game.invited_by.id),
       game.chat_unread, game.chat_preview && [
         game.chat_preview.id, game.chat_preview.sender_id, game.chat_preview.body,
@@ -38942,9 +39214,10 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       statusIcon = uiIcon('clock');
       headline = 'Game didn’t fill up';
       subline = 'This pickup game didn’t fill up.';
-    } else if (game.my_invite_status === 'pending' && !game.is_joined && !game.my_recurrence_rsvp?.is_skipped) {
+    } else if (game.my_invite_status && !game.is_joined && !game.my_recurrence_rsvp?.is_skipped) {
       statusIcon = uiIcon('send');
-      subline = `${esc((game.invited_by || {}).display_name || 'The host')} invited you`;
+      subline = game.my_invite_status === 'maybe' ? 'You said maybe'
+        : `${esc((game.invited_by || {}).display_name || 'The host')} invited you`;
     } else if (isChallenge && !game.is_joined && game.spots_left > 0) {
       statusIcon = uiIcon('trophy'); headline = "You've been challenged!";
       subline = `Ranked singles vs ${esc((game.players[0] || {}).display_name || 'a player')}`;
@@ -38971,13 +39244,20 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     // Host can remove other players from an upcoming game (no-show swap).
     const canRemove = (p) => game.is_creator && game.status === 'upcoming'
       && !closedRally && p.user_id !== game.creator_id;
+    // Scheduled games: players get `arrivals` only from an hour before the
+    // start until 30 minutes after it, which is when “On my way” is offered.
+    const etaWindow = !game.is_instant && Array.isArray(game.arrivals);
+    const etaText = new Map(etaWindow ? game.arrivals.map((eta) => {
+      const away = arrivalEtaLabel({ arrivesAt: eta.arrives_at, etaMinutes: eta.eta_minutes });
+      return [eta.user_id, live ? `Running late · ${away.toLowerCase()}` : away];
+    }) : []);
     const playerRow = (p, showRsvp = false) => `
       <div class="game-player-row">
         <button type="button" class="player-profile-link" id="session-player-${p.user_id}" data-view-user="${p.user_id}" aria-label="View ${esc(p.display_name)}'s profile">
           ${avatarHtml(p, 'sm', 'span')}
           <span class="row-main">
             <span class="row-title">${esc(p.display_name)}${p.user_id === state.me?.id ? ' <span class="game-player-role">You</span>' : ''}${p.user_id === game.creator_id ? ' <span class="game-player-role">Host</span>' : ''}</span>
-            ${showRsvp === true ? `<span class="row-sub session-player-rsvp" data-rsvp-state="${sessionRsvpStatus(p)}">${sessionRsvpStatus(p) === 'confirmed' ? 'Confirmed' : sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : game.status === 'upcoming' && !game.is_instant && team1.length && team2.length && sessionRsvpStatus(p) !== 'confirmed' ? `<span class="row-sub game-attendance-pending">${sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : ''}
+            ${etaText.has(p.user_id) ? `<span class="row-sub">${esc(etaText.get(p.user_id))}</span>` : showRsvp === true ? `<span class="row-sub session-player-rsvp" data-rsvp-state="${sessionRsvpStatus(p)}">${sessionRsvpStatus(p) === 'confirmed' ? 'Confirmed' : sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : game.status === 'upcoming' && !game.is_instant && team1.length && team2.length && sessionRsvpStatus(p) !== 'confirmed' ? `<span class="row-sub game-attendance-pending">${sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : ''}
           </span>
         </button>
         ${canRemove(p) ? `<button type="button" class="game-player-overflow" id="session-player-actions-${p.user_id}" data-remove-player="${p.user_id}" title="Player actions" aria-label="Actions for ${esc(p.display_name)}"><span aria-hidden="true">•••</span></button>` : ''}
@@ -39052,17 +39332,19 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         }
       } else if (!game.is_joined && game.spots_left > 0) {
         const skipped = game.recurrence === 'weekly' && game.my_recurrence_rsvp?.is_skipped;
-        actions = `${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
+        actions = `${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : game.my_invite_status === 'maybe' ? `${uiIcon('check')} I’m in` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
-        } else if (!skipped && game.my_invite_status === 'pending') {
-          actions += '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
+        } else if (!skipped && game.my_invite_status) {
+          actions += game.my_invite_status === 'pending' && !isChallenge && Date.parse(game.scheduled_at) > Date.now()
+            ? '<div class="session-invite-replies"><button class="btn btn-secondary" id="gs-maybe-invite">Maybe</button><button class="btn btn-secondary" id="gs-decline-invite">Can’t make it</button></div>'
+            : '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
         }
       } else if (!game.is_joined) {
         actions = game.waitlist_position
             ? `<section class="game-consent-card" aria-label="Your waitlist place"><b id="gs-waitlist-state" tabindex="-1">#${game.waitlist_position} on the waitlist</b><p>Accept an offer when a spot opens.</p><button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button></section>`
             : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">${uiIcon('clock')} Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
-        if (game.my_invite_status === 'pending' && !game.waitlist_position && !game.waitlist_offer) {
+        if (game.my_invite_status && !game.waitlist_position && !game.waitlist_offer) {
           actions += '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
         }
       } else if (game.is_joined) {
@@ -39202,7 +39484,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
           ${game.players.filter((player) => player.rating_delta != null).map((player) => `<div><span>${esc(player.display_name)}</span><b class="${player.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${player.rating_delta >= 0 ? '+' : ''}${esc(player.rating_delta)}</b></div>`).join('')}
         </details>` : '';
     const startMs = new Date(game.scheduled_at).getTime();
-    const conditionsExpected = game.status === 'upcoming' && court.id
+    const conditionsExpected = game.status === 'upcoming' && court.id && !game.time_vote
       && startMs - Date.now() < 6 * 3600e3 && startMs - Date.now() > -3600e3;
     const stakesExpected = game.game_type === 'ranked' && game.status === 'upcoming'
       && game.is_joined && game.players.length >= 2;
@@ -39227,8 +39509,12 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       ? game.status === 'awaiting_confirmation' ? game.score_correction_pending ? 'Correction needs agreement' : 'Awaiting confirmation'
         : isRankedMatch ? 'Confirmed result' : 'Final score'
       : '';
+    const myEta = etaWindow && game.my_arrival?.active ? game.my_arrival : null;
+    const canShareEta = etaWindow && !myEta && game.players.length > 1 && !isCheckedInAtCourt(court.id);
     const joinedState = game.is_joined && game.status === 'upcoming' && !closedRally
-      ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${uiIcon(game.attendance_confirmation_due && !game.is_creator ? 'clock' : 'check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}</span>${joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>' : ''}</div>` : '';
+      ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${myEta ? `${uiIcon('map-pin')} On the way · ${esc(myEta.eta_minutes)} min` : `${uiIcon(game.attendance_confirmation_due && !game.is_creator ? 'clock' : 'check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}`}</span>${myEta ? '<button type="button" id="gs-eta-undo">Undo</button>'
+        : joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>'
+          : canShareEta ? '<button type="button" id="gs-on-my-way">On my way</button>' : ''}</div>` : '';
     const [whenDay, whenTime] = fmtDateTime(game.scheduled_at).split(' · ');
     const when = !game.is_instant && game.scheduled_at
       ? `<div class="session-when">${uiIcon('calendar')}<span class="session-when-day">${esc(whenDay)}</span><b>${esc(whenTime)}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
@@ -39260,7 +39546,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       ${hasScore ? playersHtml : ''}
       <section class="session-plan-card${game.status === 'upcoming' && !closedRally ? ' is-hero' : ''}" aria-label="Time, court and cost">
       ${joinedState}
-      ${when}
+      ${game.time_vote ? sessionTimeVoteHtml(game) : when}
       <div class="session-place-wrap">
         <button type="button" class="card row nav-row-button" id="gs-court" aria-label="Open ${esc(court.name || 'court')} court details">
           <span class="nav-row-leading">${uiIcon('map-pin')}</span>
@@ -39275,11 +39561,12 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       </section>
       ${gameHasDatedSeries(game) ? '<section class="series-date-card" id="gs-series-dates" aria-label="Session dates" aria-busy="true"><span class="row-sub">Loading session dates…</span></section>' : ''}
       ${courtEntryNoticeHtml(game)}
+      ${conditionsExpected ? '<div id="gs-rain-alert" hidden></div>' : ''}
       ${sessionConfirmationHtml(game)}
       ${gameHostRequestHtml(game)}
       ${!hasScore ? `<section class="session-roster" aria-label="Players">
         <div class="session-roster-head"><h4>${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Players' : 'Signed up'} <span>${readyCount}</span></h4><span>${game.status === 'upcoming' && !closedRally ? rosterAvailability : ''}</span></div>
-        ${playersHtml}
+        ${playersHtml}${sessionMaybeGroupHtml(game)}
       </section>` : ''}
       ${waitlistHtml}${arrivalsHtml}${gameConsentHtml(game)}
       ${ratingChanges}
@@ -39373,8 +39660,20 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       }
     };
 
+    let lastRain = null; // redraws repaint the rain card at once, then refresh it
     const reopenFresh = async ({ preserve = false, announce = false } = {}) => {
       try { render(await api(`/games/${gameId}`), { preserve, announce }); } catch (e) { toast(e.message); }
+    };
+    // Scheduled games: stop sharing “On my way” from the pill or the toast.
+    const stopEta = async (button = null) => {
+      const reset = button ? beginButtonAction(button, 'Undoing…') : () => {};
+      if (!reset) return;
+      try {
+        await api(`/games/${gameId}/arrival`, { method: 'DELETE' });
+        if (!modal.isConnected) return;
+        await reopenFresh({ preserve: true });
+        box.querySelector('#gs-joined-state')?.focus({ preventScroll: true });
+      } catch (error) { reset(); toast(error.message); }
     };
     // Arrival is collected in a child sheet. Paint the confirmed local state
     // into the still-mounted game detail before dismissing that child, then
@@ -39614,6 +39913,25 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
           toast(e.message);
         }
       });
+      // "When works?" chips save on tap; the host's Lock settles the vote early.
+      const timeVoteControls = [...box.querySelectorAll('[data-time-vote], #gs-time-lock')];
+      timeVoteControls.forEach((button) => button.addEventListener('click', async () => {
+        const locking = button.id === 'gs-time-lock';
+        const picks = new Set(game.time_vote?.my_votes);
+        if (!locking && !picks.delete(button.dataset.timeVote)) picks.add(button.dataset.timeVote);
+        const resetAction = beginButtonAction(button, locking ? 'Locking…' : 'Saving…', timeVoteControls);
+        if (!resetAction) return;
+        try {
+          const fresh = await api(`/games/${game.id}/time-vote${locking ? '/lock' : ''}`, { method: 'POST',
+            body: JSON.stringify(locking ? { option_id: button.dataset.optionId } : { option_ids: [...picks] }) });
+          state.playGamesCache = null;
+          render(fresh, { preserve: !locking });
+          if (state.tab === 'play') renderPlay();
+        } catch (e) {
+          resetAction();
+          toast(e.message);
+        }
+      }));
       box.querySelector('#gs-standing-rsvp')?.addEventListener('click', async (event) => {
         const standing = game.my_recurrence_rsvp?.standing_rsvp === true;
         const resetAction = beginButtonAction(event.currentTarget, 'Saving…');
@@ -39712,14 +40030,31 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       }
       // Playability heads-up for games starting soon (NWS summary covers ~6h).
       const startMs = new Date(game.scheduled_at).getTime();
-      if (game.status === 'upcoming' && court.id
+      if (game.status === 'upcoming' && court.id && !game.time_vote
           && startMs - Date.now() < 6 * 3600e3 && startMs - Date.now() > -3600e3) {
-        api(`/courts/${court.id}/weather`).then((w) => {
+        const rainSlot = box.querySelector('#gs-rain-alert');
+        const showRain = (rain) => {
+          const rainCard = gameRainAlertHtml(game, rain);
+          if (!rainSlot) return rainCard;
+          rainSlot.innerHTML = rainCard;
+          rainSlot.hidden = !rainCard;
+          rainSlot.querySelectorAll('[data-rain-proxy]').forEach((button) => button.addEventListener('click', () => {
+            box.querySelector(`#${button.dataset.rainProxy}`)?.click();
+            const sheet = currentOverlayEntry()?.el;
+            if (sheet && sheet !== modal) sheet._returnFocus = button;
+          }));
+          return rainCard;
+        };
+        if (lastRain) showRain(lastRain);
+        api(`/courts/${court.id}/weather?at=${encodeURIComponent(game.scheduled_at)}${game.duration_minutes ? `&minutes=${game.duration_minutes}` : ''}`).then((w) => {
           const el = box.querySelector('#gs-weather');
-          if (!el) return;
+          if (!el || !rainSlot?.isConnected) return; // a newer render asked again
+          const rain = w.rain_at_game;
+          lastRain = rain || null;
+          const rainCard = showRain(rain);
           const bits = [];
           if (!w.error && w.temp_f != null) {
-            bits.push(`${weatherIcon(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${w.rain_soon ? ` · ${uiIcon('water')} rain likely around game time` : ''}`);
+            bits.push(`${weatherIcon(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${rain?.chance >= 50 && !rainCard && !court.indoor ? ` · ${uiIcon('water')} rain likely around ${esc(rainHourText(rain))}` : ''}`);
           }
           const cond = w.latest_condition;
           if (cond && COURT_CONDITION_LABELS[cond.condition]) {
@@ -39868,6 +40203,27 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         if (arrival) openChildModal(modal, () => openArrivalDetails(arrival));
         else reopenFresh();
       });
+      box.querySelector('#gs-on-my-way')?.addEventListener('click', async (event) => {
+        const reset = beginButtonAction(event.currentTarget, 'Sharing…');
+        if (!reset) return;
+        try {
+          const shared = await api(`/games/${gameId}/arrival`, { method: 'PUT',
+            body: JSON.stringify({ eta_minutes: 10, client_attempt_id: `arrival-${newGameAttemptId()}` }) });
+          if (modal.isConnected && shared.game) {
+            render(shared.game, { preserve: true });
+            box.querySelector('#gs-joined-state')?.focus({ preventScroll: true });
+          }
+          refreshMe();
+          toast('Players know you’re about 10 min away', { tone: 'success', duration: 6500,
+            action: { label: 'Undo', onClick: () => stopEta() } });
+        } catch (error) {
+          reset();
+          toast(error.code === 'already_at_court' ? 'You’re already checked in at this court.' : error.message);
+          // Presence or the start time changed under the page: show the fresh state.
+          if (error.status === 409) refreshMe().then(() => modal.isConnected && reopenFresh({ preserve: true }));
+        }
+      });
+      box.querySelector('#gs-eta-undo')?.addEventListener('click', (event) => stopEta(event.currentTarget));
       box.querySelector('#gs-join')?.addEventListener('click', async (event) => {
         const button = event.currentTarget;
         const accountId = Number(state.me?.id);
@@ -39954,6 +40310,26 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       });
       box.querySelector('#gs-complete-no-score')?.addEventListener('click', () => {
         openChildModal(modal, () => openSessionWrapUpModal(game, (updated) => render(updated)));
+      });
+      box.querySelector('#gs-maybe-invite')?.addEventListener('click', async (event) => {
+        const resetAction = beginButtonAction(event.currentTarget, 'Saving…', [...box.querySelectorAll('#gs-join, #gs-decline-invite')]);
+        if (!resetAction) return;
+        const answer = async (method) => {
+          const fresh = await api(`/games/${gameId}/invites/maybe`, { method });
+          state.playGamesCache = null;
+          if (modal.isConnected) render(fresh);
+          refreshMe();
+          if (state.tab === 'play') renderPlay();
+        };
+        try {
+          await answer('POST');
+          focusGameControl(modal, box, '#gs-join');
+          toast('Marked as maybe', { tone: 'success', duration: 6500, action: { label: 'Undo',
+            onClick: () => answer('DELETE').catch((error) => toast(error.message, { tone: 'warning' })) } });
+        } catch (error) {
+          resetAction();
+          showInlineActionError(box, error.message);
+        }
       });
       box.querySelectorAll('#gs-score, #gs-wrap-session').forEach((button) => button.addEventListener('click', async (event) => {
         const scoreButton = event.currentTarget;
@@ -40343,10 +40719,11 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       if (['score_submitted', 'score_confirmed', 'score_disputed', 'session_completed', 'weekly_recap', 'game_logged'].includes(kind)) return 'activity';
       if (['game_reminder', 'game_updated', 'tournament_reminder', 'tournament_update', 'session_rsvp'].includes(kind)) return 'clock';
       if (['friend_checkin', 'court_game', 'player_coming', 'player_left', 'rally_arrival', 'rally_arrival_ended',
-        'rally_arrival_cancelled', 'rally_arrival_expired', 'player_arriving', 'arrival_cancelled', 'nearby_games'].includes(kind)) return 'map-pin';
+        'rally_arrival_cancelled', 'rally_arrival_expired', 'player_arriving', 'arrival_cancelled', 'nearby_games', 'court_up'].includes(kind)) return 'map-pin';
       if (['tournament_join', 'tournament_withdraw', 'tournament_cancelled', 'league_update'].includes(kind)) return 'grid';
+      if (kind === 'game_weather') return 'water';
       if (['business_claim', 'business_integration'].includes(kind)) return 'building';
-      if (['game_join', 'game_cancelled', 'invite_declined'].includes(kind)) return 'pickleball';
+      if (['game_join', 'game_cancelled', 'invite_declined', 'invite_maybe'].includes(kind)) return 'pickleball';
       return kind === 'streak_nag' ? 'activity' : 'bell';
     };
     const notificationAccessibleText = (notification, {

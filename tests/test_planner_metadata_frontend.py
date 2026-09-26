@@ -41,6 +41,7 @@ def test_saved_draft_and_frozen_retry_keep_independent_choices():
 def test_private_invitation_discloses_cost_access_and_style_without_roster():
     result = run_js('''const esc=x=>String(x).replaceAll('<','&lt;').replaceAll('>','&gt;');
         const fmtDateTime=()=> 'Sunday',gameActivityLabel=()=> 'Casual session';
+        const gameWhenText=(game)=>game?.time_vote ? 'Time TBD' : fmtDateTime(game?.scheduled_at);
         ''' + LABELS + section('function gameInvitationPreviewHtml(', 'function invitationErrorMessage(') + '''
         const base={title:'<script>plan</script>',cost_cents:1250,court_access:'booking_needed',
           play_style:'mixed',court_number:'Court <4>',joined_count:1,spots_left:4};

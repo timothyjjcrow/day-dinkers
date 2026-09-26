@@ -160,6 +160,17 @@ def test_court_chat_subscription_schema_is_part_of_the_production_contract():
     assert 'missing table court_chat_subscription' in gaps
 
 
+def test_paddle_line_columns_are_part_of_the_production_contract():
+    inspector = FakeInspector()
+    inspector.columns['check_in'].remove('queued_at')
+    inspector.columns['check_in'].remove('queue_court')
+
+    assert (
+        "check_in missing columns ['queue_court', 'queued_at']"
+        in _schema_gaps(inspector)
+    )
+
+
 def test_competition_completion_schema_is_part_of_the_production_contract():
     inspector = FakeInspector()
     inspector.columns['tournament_match'].remove('review_reminded_at')
@@ -470,6 +481,13 @@ def test_release_schema_verifier_requires_game_planning_columns():
     )
 
 
+def test_release_schema_verifier_requires_game_time_vote_options():
+    inspector = FakeInspector()
+    inspector.columns['game'].remove('time_options')
+
+    assert "game missing columns ['time_options']" in _schema_gaps(inspector)
+
+
 def test_release_schema_verifier_requires_game_manage_lifecycle_columns():
     inspector = FakeInspector()
     inspector.columns['game'].remove('auto_fill_waitlist')
@@ -513,6 +531,15 @@ def test_release_schema_verifier_requires_local_recurrence_and_rsvp_state():
         'game_recurrence_rsvp missing foreign key '
         'game_recurrence_rsvp_game_id_fkey'
     ) in gaps
+
+
+def test_release_schema_verifier_requires_maybe_invite_answers():
+    inspector = FakeInspector()
+    inspector.columns['game_invite'].remove('response')
+
+    assert (
+        "game_invite missing columns ['response']" in _schema_gaps(inspector)
+    )
 
 
 def test_release_schema_verifier_requires_arrival_history_and_active_user_slot():

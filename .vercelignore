@@ -1,7 +1,14 @@
 # Upload only the production source. This allowlist makes it impossible for a
-# local recovery database, environment file, test fixture, or migration helper
-# to enter a Vercel source upload.
+# local recovery database, environment file, test fixture, or operator helper
+# to enter a Vercel source upload. The build step and the two migration
+# scripts it runs are the only scripts uploaded; vercel.json keeps all of
+# scripts/ out of the serverless function bundle.
 /*
+!scripts
+scripts/*
+!scripts/vercel_build.py
+!scripts/migrate_production_schema.py
+!scripts/migrate_business_integration_foundation.py
 !.python-version
 !.vercelignore
 !app.py

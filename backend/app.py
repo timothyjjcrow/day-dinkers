@@ -17,8 +17,8 @@ BUNDLED_COURTS_FILE = os.path.join(PROJECT_ROOT, 'data', 'courts.json.gz')
 # Immutable frontend URLs are part of the executable shell contract. Keep the
 # prior release readable while an already-open service-worker client reloads
 # onto the current release.
-FRONTEND_RELEASE = 'r84'
-FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', 'r76', 'r77', 'r78', 'r79', 'r80', 'r81', 'r82', 'r83', FRONTEND_RELEASE})
+FRONTEND_RELEASE = 'r85'
+FRONTEND_SUPPORTED_RELEASES = frozenset({'r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', 'r76', 'r77', 'r78', 'r79', 'r80', 'r81', 'r82', 'r83', 'r84', FRONTEND_RELEASE})
 FRONTEND_RELEASE_FILES = frozenset({
     'app-v15.min.js',
     'app-v15.min.js.map',
@@ -346,6 +346,11 @@ def _upgrade_schema(app):
             if 'location_verified_at' not in checkin_cols:
                 statements.append('ALTER TABLE check_in ADD COLUMN location_verified_at '
                                   + ('TIMESTAMP' if is_postgres else 'DATETIME'))
+            if 'queued_at' not in checkin_cols:
+                statements.append('ALTER TABLE check_in ADD COLUMN queued_at '
+                                  + ('TIMESTAMP' if is_postgres else 'DATETIME'))
+            if 'queue_court' not in checkin_cols:
+                statements.append('ALTER TABLE check_in ADD COLUMN queue_court INTEGER')
 
         if 'court_edit_suggestion' in tables:
             suggestion_cols = {c['name'] for c in inspector.get_columns('court_edit_suggestion')}
@@ -409,6 +414,7 @@ def _upgrade_schema(app):
                 ('recurrence_occurrence_on', 'DATE'),
                 ('recurrence_template', 'TEXT'),
                 ('recurrence_stopped_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+                ('time_options', "TEXT NOT NULL DEFAULT '[]'"),
             ):
                 if column not in game_cols:
                     statements.append(f'ALTER TABLE game ADD COLUMN {column} {ddl}')
@@ -1153,6 +1159,15 @@ def _upgrade_schema(app):
                 statements.append(
                     "ALTER TABLE crew_chat_read ADD COLUMN notification_level "
                     "VARCHAR(16) NOT NULL DEFAULT 'all'"
+                )
+
+        if 'game_invite' in tables:
+            game_invite_cols = {
+                c['name'] for c in inspector.get_columns('game_invite')
+            }
+            if 'response' not in game_invite_cols:
+                statements.append(
+                    'ALTER TABLE game_invite ADD COLUMN response VARCHAR(16)'
                 )
 
         if 'game_player' in tables:

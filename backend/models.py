@@ -1682,6 +1682,11 @@ class CheckIn(TimestampMixin, db.Model):
     checked_out_at = db.Column(db.DateTime)
     last_presence_ping_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     location_verified_at = db.Column(db.DateTime)
+    # Paddle line: queued_at is the first-come order key; queue_court is the
+    # court number while on it (NULL + queued_at = waiting). Ending the
+    # check-in ends the place in line because every read is fresh-only.
+    queued_at = db.Column(db.DateTime)
+    queue_court = db.Column(db.Integer)
 
     user = db.relationship('User', back_populates='checkins', foreign_keys=[user_id])
     court = db.relationship('Court', back_populates='checkins')
@@ -2632,6 +2637,12 @@ class Game(TimestampMixin, db.Model):
     # Future defaults live separately from the first date's historical fields.
     recurrence_template = db.Column(db.Text)
     recurrence_stopped_at = db.Column(db.DateTime)
+    # "When works?" vote: [{"id", "starts_at", "votes": [user_id]}] while
+    # friends vote; '[]' once a time is locked. scheduled_at holds the
+    # earliest option meanwhile so every NOT NULL/ordering contract holds.
+    time_options = db.Column(
+        db.Text, nullable=False, default='[]', server_default='[]',
+    )
 
     max_players = db.Column(db.Integer, nullable=False, default=4)
     # Optional planning details for scheduled sessions. Empty/null defaults keep
@@ -2755,6 +2766,67 @@ class Game(TimestampMixin, db.Model):
 
     def invited_user_ids(self):
         return {inv.user_id for inv in self.invites}
+
+    @property
+    def time_vote_open(self):
+        return self.status == 'upcoming' and (self.time_options or '[]') != '[]'
+
+    def time_vote_state(self, now=None):
+        """Current votes per future option, the leader and the auto-lock time.
+
+        Only current invitees and joined players (never the host) count, so a
+        decline or a departure quietly withdraws that person's votes.
+        """
+        if not self.time_vote_open:
+            return None
+        try:
+            raw = json.loads(self.time_options)
+        except (TypeError, ValueError):
+            return None
+        now = now or utcnow()
+        voters = ({p.user_id for p in self.players} | self.invited_user_ids()) - {self.creator_id}
+        options = []
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                start = datetime.fromisoformat(
+                    str(item['starts_at']).replace('Z', '+00:00'),
+                ).replace(tzinfo=None)
+            except (KeyError, TypeError, ValueError):
+                continue
+            options.append({'id': str(item.get('id')), 'starts_at': start,
+                            'votes': {uid for uid in item.get('votes') or () if uid in voters}})
+        if not options:
+            return None
+        future = [option for option in options if option['starts_at'] > now]
+        # Most votes wins; ties go to the earliest time. Passed options drop out.
+        leader = min(future or options, key=lambda option: (-len(option['votes']), option['starts_at']))
+        voted = set().union(*(option['votes'] for option in options))
+        if future:
+            # Normally three hours before the earliest time. A vote on sooner
+            # times still gets an hour to answer, closing by 50 minutes before.
+            earliest = min(option['starts_at'] for option in future)
+            locks_at = max(earliest - timedelta(hours=3), min(
+                (self.created_at or now) + timedelta(hours=1),
+                earliest - timedelta(minutes=50),
+            ))
+        else:
+            locks_at = now
+        return {'options': future, 'leader': leader, 'voters': voters, 'locks_at': locks_at,
+                'due': now >= locks_at or bool(voters) and voters <= voted}
+
+    def _time_vote_payload(self, viewer_id, now):
+        vote = self.time_vote_state(now)
+        if not vote:
+            return None
+        return {
+            'options': [{'id': option['id'], 'starts_at': iso(option['starts_at']),
+                         'count': len(option['votes'])} for option in vote['options']],
+            'my_votes': [option['id'] for option in vote['options'] if viewer_id in option['votes']],
+            'leader_id': vote['leader']['id'],
+            'locks_at': iso(vote['locks_at']),
+            'can_vote': viewer_id in vote['voters'],
+            'can_lock': bool(viewer_id) and viewer_id == self.creator_id,
+        }
 
     def active_open_call(self):
         """The one durable court call currently attached to this game.
@@ -3085,6 +3157,22 @@ class Game(TimestampMixin, db.Model):
                 for index, row in enumerate(active_queue)
                 if row.user and not row.user.deleted_at
             ]
+        # "Maybe" answers help the host and joined players plan. Everyone else
+        # gets a zero count and no names.
+        maybe_people = []
+        if (
+            self.status == 'upcoming' and not self.is_instant and viewer_id
+            and (viewer or self.creator_id == viewer_id)
+            and any(invite.response == 'maybe' for invite in self.invites)
+        ):
+            # Someone waiting for a spot is on the waitlist, not a maybe.
+            hidden_ids = blocked_pair_ids(viewer_id) | {row.user_id for row in active_queue}
+            maybe_people = [
+                invite.user.to_summary_dict()
+                for invite in sorted(self.invites, key=lambda row: row.id)
+                if invite.response == 'maybe' and invite.user
+                and not invite.user.deleted_at and invite.user_id not in hidden_ids
+            ]
         my_offer = next((r for r in active_offers if r.user_id == viewer_id), None)
         handoff = next((r for r in reversed(self.host_handoffs)
                         if r.status == 'pending' and r.expires_at > now), None)
@@ -3101,6 +3189,7 @@ class Game(TimestampMixin, db.Model):
             'crew_name': self.crew.name if visible_crew else None,
             'crew_roster_version': self.crew_roster_version if visible_crew else None,
             'scheduled_at': iso(self.scheduled_at),
+            'time_vote': self._time_vote_payload(viewer_id, now),
             'game_type': self.game_type,
             'visibility': self.visibility,
             'recurrence': self.recurrence,
@@ -3212,14 +3301,16 @@ class Game(TimestampMixin, db.Model):
             'attendance_confirmation_due': attendance_confirmation_due,
             'commitment_confirmation_due': bool(attendance_confirmation_due and viewer.commitment_confirmation_due()),
             'my_commitment_requested_at': iso(viewer.commitment_requested_at) if viewer else None,
-            'rsvp_counts': {key: sum(p.rsvp_status() == key for p in players)
-                            for key in ('confirmed', 'needs_confirmation', 'reserved')},
+            'rsvp_counts': {**{key: sum(p.rsvp_status() == key for p in players)
+                               for key in ('confirmed', 'needs_confirmation', 'reserved')},
+                            'maybe': len(maybe_people)},
             'spots_left': spots_left,
             'is_joined': viewer is not None,
             'is_creator': self.creator_id == viewer_id,
             'waitlist_count': len(active_queue),
             'waitlist_position': waitlist_position,
             'waitlist_people': waitlist_people,
+            'maybe_people': maybe_people,
             'waitlist_offer': {'expires_at': iso(my_offer.offer_expires_at)} if my_offer else None,
             'reserved_offer_count': len(active_offers),
             'host_handoff': handoff.to_dict(viewer_id) if handoff and viewer_id in (
@@ -3236,7 +3327,10 @@ class Game(TimestampMixin, db.Model):
                            not is_blocked_between(viewer_id, r.user_id)],
             } if attendance_rows and can_view_attendance else None,
             'is_invited': personal_invite is not None,
-            'my_invite_status': 'pending' if personal_invite else None,
+            'my_invite_status': (
+                ('maybe' if personal_invite.response == 'maybe' else 'pending')
+                if personal_invite else None
+            ),
             'invited_by': (
                 (
                     self.creator.to_summary_dict()
@@ -3551,6 +3645,9 @@ class GameInvite(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # NULL = no answer yet; 'maybe' keeps the row (and private visibility)
+    # without holding a spot. Joining or declining deletes the row.
+    response = db.Column(db.String(16))
 
     game = db.relationship('Game', back_populates='invites')
     user = db.relationship('User')

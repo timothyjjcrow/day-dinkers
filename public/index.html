@@ -18,17 +18,17 @@
     } catch { /* storage can be disabled; CSS media queries remain the fallback */ }
   </script>
   <title>Third Shot — Find courts, players & play</title>
-  <link rel="stylesheet" href="/release-assets/r84/styles-v15.min.css" />
+  <link rel="stylesheet" href="/release-assets/r85/styles-v15.min.css" />
   <link rel="preload" href="/vendor/plus-jakarta-sans/plus-jakarta-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" type="image/png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <!-- Start downloading the large application files early, but execute them
        with defer so the useful boot shell can paint before bundle parsing. -->
-  <link rel="preload" href="/release-assets/r84/crew-planner-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r84/tournament-bracket-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r84/venue-workspace-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r84/app-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r85/crew-planner-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r85/tournament-bracket-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r85/venue-workspace-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r85/app-v15.min.js" as="script" />
   <!-- The court map is the first screen, so its library downloads alongside
        the app instead of waiting for the app to request it. crossorigin
        matches how the app attaches these files, so the preloads are reused. -->
@@ -444,9 +444,9 @@
       syncBoot();
     })();
   </script>
-  <script defer src="/release-assets/r84/crew-planner-v15.min.js"></script>
-  <script defer src="/release-assets/r84/tournament-bracket-v15.min.js"></script>
-  <script defer src="/release-assets/r84/venue-workspace-v15.min.js"></script>
-  <script defer src="/release-assets/r84/app-v15.min.js"></script>
+  <script defer src="/release-assets/r85/crew-planner-v15.min.js"></script>
+  <script defer src="/release-assets/r85/tournament-bracket-v15.min.js"></script>
+  <script defer src="/release-assets/r85/venue-workspace-v15.min.js"></script>
+  <script defer src="/release-assets/r85/app-v15.min.js"></script>
 </body>
 </html>

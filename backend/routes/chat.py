@@ -1261,7 +1261,7 @@ def _competition_rooms_payload(me):
         )
         add_room(
             'game', game, (game.title or '').strip() or f'{play_title} at {court_name}', game.status,
-            game.scheduled_at, court_name, game_unread.get(game.id),
+            None if game.time_vote_open else game.scheduled_at, court_name, game_unread.get(game.id),
         )
     for tournament in tournaments.values():
         add_room(
@@ -1676,6 +1676,7 @@ def _shared_direct_plan(viewer_id, partner_id):
         roster = {row.user_id for row in game.players}
         return {'id': game.id, 'title': game.title or ('Ranked match' if game.game_type == 'ranked' else 'Play session'),
             'scheduled_at': iso(game.scheduled_at), 'ends_at': iso(end),
+            'time_vote': True if game.time_vote_open else None,
             'court': game.court.to_summary_dict(), 'viewer_status': 'going' if viewer_id in roster else 'invited',
             'partner_status': 'going' if partner_id in roster else 'invited'}
     return None

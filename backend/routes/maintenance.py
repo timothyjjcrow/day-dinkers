@@ -42,6 +42,7 @@ def _maintenance_jobs():
         roll_forward_recurring,
         maintain_game_consent,
         send_game_reminders,
+        settle_game_time_votes,
     )
     from backend.routes.leagues import (
         advance_due_league_rounds,
@@ -60,6 +61,7 @@ def _maintenance_jobs():
         ('game_consent', maintain_game_consent),
         ('instant_game_expiry', expire_abandoned_instant_rallies),
         ('unscored_game_expiry', expire_stale_unscored),
+        ('game_time_votes', settle_game_time_votes),
         ('game_reminders', send_game_reminders),
         ('tournament_reminders', send_tournament_reminders),
         ('tournament_waitlists', maintain_tournament_waitlists),
@@ -77,15 +79,21 @@ def _tick_jobs():
     from backend.routes.games import (
         expire_abandoned_instant_rallies,
         send_game_reminders,
+        send_rain_alerts,
+        settle_game_time_votes,
     )
     from backend.routes.leagues import send_league_schedule_reminders
     from backend.routes.tournaments import send_tournament_reminders
     return [
         ('presence_cleanup', cleanup_stale_presence),
         ('instant_game_expiry', expire_abandoned_instant_rallies),
+        # Before reminders, so a just-locked time gets its reminders.
+        ('game_time_votes', settle_game_time_votes),
         ('game_reminders', send_game_reminders),
         ('tournament_reminders', send_tournament_reminders),
         ('league_schedule_reminders', send_league_schedule_reminders),
+        # Last: it may wait on the weather service.
+        ('rain_alerts', send_rain_alerts),
     ]
 
 
@@ -129,6 +137,7 @@ def tick():
         return jsonify({'ok': True, 'ran': False})
 
     deadline = time.monotonic() + TICK_BUDGET_SECONDS
+    g.tick_deadline = deadline  # jobs that call out stop in time for push delivery
     outcomes = _run_jobs(_tick_jobs(), deadline)
     push_ok = True
     try:

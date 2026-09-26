@@ -175,9 +175,10 @@ REQUIRED_COLUMNS = {
         'recurrence_weekdays', 'recurrence_ends_on',
         'recurrence_series_id', 'recurrence_occurrence_on',
         'recurrence_template', 'recurrence_stopped_at',
-        'level_min', 'level_max',
+        'level_min', 'level_max', 'time_options',
     },
     'game_player': {'recurrence_rsvp_automatic', 'commitment_requested_at'},
+    'game_invite': {'response'},
     'game_waitlist': {'id', 'game_id', 'user_id', 'offered_at', 'offer_expires_at', 'offer_status'},
     'game_host_handoff': {
         'id', 'game_id', 'requested_by_id', 'target_user_id', 'scope', 'status',
@@ -199,6 +200,7 @@ REQUIRED_COLUMNS = {
     'check_in': {
         'user_id', 'court_id', 'looking_for_game', 'checked_in_at',
         'checked_out_at', 'last_presence_ping_at', 'location_verified_at',
+        'queued_at', 'queue_court',
     },
     'court_edit_suggestion': {
         'id', 'court_id', 'user_id', 'reviewed_by_id', 'reviewed_at', 'review_note',
@@ -1188,6 +1190,27 @@ def _configure_runtime_role_search_path(connection) -> None:
     ))
 
 
+LOCK_TIMEOUT = '5s'
+
+
+def _limit_lock_waits() -> None:
+    """Give up on a busy table instead of queueing live queries behind DDL.
+
+    ``ALTER TABLE`` waits for an exclusive lock, and every later read of that
+    table waits behind it. With a short lock_timeout the migration fails fast
+    (the build retries, then fails) while the previous deployment keeps serving.
+    """
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    @event.listens_for(Engine, 'connect')
+    def _set_lock_timeout(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute(f"SET lock_timeout = '{LOCK_TIMEOUT}'")
+        cursor.close()
+        dbapi_connection.commit()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description='Apply verified additive schema upgrades to Third Shot PostgreSQL.',
@@ -1225,6 +1248,7 @@ def main() -> int:
     # Import only after the target has passed read-only identity checks. App
     # startup then runs the same idempotent additive migration path exercised by
     # local recovery tests, without creating unrelated missing application data.
+    _limit_lock_waits()
     os.environ.update({
         'APP_ENV': 'production',
         'MFA_ENCRYPTION_KEY': 'cptEwcGPWoQwTRpx7LZH3BaiGR5MbnTsyqs1PjdFGgA=',

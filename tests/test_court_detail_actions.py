@@ -80,7 +80,7 @@ def test_closed_detail_replaces_every_new_play_surface_but_keeps_exit_and_correc
 
 def test_browsing_actions_are_direct_and_conditions_are_one_tap():
     detail = section(APP, "async function openCourtDetail", "function openCheckInSheet")
-    now = section(APP, "function courtConditionNowHtml", "function courtCheckinHistoryHtml")
+    now = section(APP, "function courtConditionNowHtml", "function courtBusyHintHtml")
 
     assert 'class="cd-quick-actions" role="group" aria-label="Court actions"' in detail
     for control in ('id="cd-favorite"', 'id="cd-share"', 'id="cd-gallery"',
@@ -112,7 +112,8 @@ def test_court_facts_reviews_and_reservations_are_visible_without_disclosures():
     assert "openCourtReviews" in detail
     assert "const reservationHref = businessActionHref(court.reservation_url);" in detail
     assert "Reserve a court" in detail
-    assert "courtCheckinHistoryHtml(court.checkin_history)" in detail
+    assert "${courtClosed ? '' : courtBusyHintHtml(court.checkin_history)}" in detail
+    assert "courtCheckinHistoryHtml" not in APP
     assert "courtOpenStatusFact(c)" in card
     assert "c.reservation_url ? 'Online reservations available'" in card
     assert ".cd-hero-facts" in STYLES
