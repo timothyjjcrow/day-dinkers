@@ -1880,7 +1880,7 @@ def test_court_busy_times(client, app):
 
     data = client.get(f'/api/courts/{court_id}').get_json()
     assert data['busy_times'] == []  # Seven visits by one player cannot indicate a crowd pattern.
-    assert data['checkin_history']['sample_size'] == 7
+    assert data['checkin_history']['sample_size'] == 6  # the 3 AM visit is outside the charted hours
     assert data['checkin_history']['unique_players'] == 1
     assert data['checkin_history']['sufficient_sample'] is False
     # The time conversion remains available internally without promoting tiny samples.

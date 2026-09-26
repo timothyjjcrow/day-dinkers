@@ -80,8 +80,9 @@ def test_check_ins_and_played_games_count_once_per_player_hour(app, client):
     # Relative levels: the busiest hour is 4, everything else scales to it.
     assert hours[SAT][9 - 5] == 4
     assert hours[WED][18 - 5] == 3
-    assert hours[MON][7 - 5] == 1
-    assert sum(map(sum, hours)) == 8
+    # Monday 7 AM is one person's hour, so it never shows.
+    assert hours[MON][7 - 5] == 0
+    assert sum(map(sum, hours)) == 7
     assert all(0 <= level <= 4 for day in hours for level in day)
     # The planner keeps its label list.
     assert client.get('/api/courts/1').get_json()['busy_times'] == data['windows']
@@ -127,7 +128,13 @@ def test_one_big_day_is_not_a_pattern_and_the_hint_needs_repeat_visits(app, clie
     with app.app_context():
         add_checkin(crowd[1], at_local(3, TUE, 20))
         db.session.commit()
-    assert history(client)['peak'] == 'Tue 7–9 PM'
+    # The hint only names the busiest window, and Saturday is still one day.
+    assert history(client)['peak'] is None
+
+    with app.app_context():
+        add_checkin(crowd[2], at_local(2, SAT, 9))
+        db.session.commit()
+    assert history(client)['peak'] == 'Sat 9–11 AM'
 
 
 def test_signed_out_viewers_get_aggregates_only(app, client):
@@ -185,3 +192,29 @@ def test_raw_visits_are_cached_briefly_and_filtered_per_viewer_after(app, client
     finally:
         app.config['TESTING'] = True
         courts_module._BUSY_CACHE.clear()
+
+
+def test_one_regular_never_shows_through_the_bars_or_the_hint(app, client):
+    a, b, c = (register(client, f'routine-{name}@example.test') for name in 'abc')
+    set_court_timezone(app)
+    with app.app_context():
+        for week in range(1, 9):
+            add_checkin(a, at_local(week, TUE, 19, 10))
+        add_checkin(b, at_local(1, SAT, 9))
+        add_checkin(c, at_local(2, WED, 12))
+        db.session.commit()
+    data = history(client)
+    assert data['sufficient_sample'] is True
+    assert data['peak'] is None
+    assert data['hours'] == [] or sum(map(sum, data['hours'])) == 0
+
+
+def test_checking_in_just_before_a_game_is_one_visit(app, client):
+    a, b, c = (register(client, f'early-{name}@example.test') for name in 'abc')
+    set_court_timezone(app)
+    with app.app_context():
+        for player in (a, b, c):
+            add_checkin(player, at_local(1, SAT, 8, 50))
+        add_game([a, b, c], at_local(1, SAT, 9))
+        db.session.commit()
+    assert history(client)['sample_size'] == 3

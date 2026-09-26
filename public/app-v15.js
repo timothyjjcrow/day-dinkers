@@ -8192,7 +8192,7 @@
     requestAnimationFrame(()=>{if(modal.isConnected && !modal.closest('[inert]'))activate(selected,{focus:true});});
   }
 
-  function openCourtVisitSheet(court, section = 'hours', {onUpdated=null} = {}) {
+  function openCourtVisitSheet(court, section = 'hours', {onUpdated=null, focusBusy=false} = {}) {
     const ownerId=state.me?.id;
     let listingChanged=false, refreshSeq=0;
     const panels=courtVisitPanelsHtml(court);
@@ -8255,6 +8255,8 @@
     bindActions();
     modal.querySelector('.modal')?.classList.add('court-visit-dialog');
     bindCourtVisitTabs(modal,selected);
+    // From "Usually busiest …": bring the busy bars into view below the hours.
+    if (focusBusy) requestAnimationFrame(()=>modal.querySelector('.court-busy')?.scrollIntoView({block:'nearest'}));
     return modal;
   }
 
@@ -14159,7 +14161,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     };
     modal.querySelectorAll('[data-court-visit]').forEach((button) => {
       button.addEventListener('click', () => {
-        openChildModal(modal, () => openCourtVisitSheet(court, button.dataset.courtVisit,{onUpdated:()=>refreshCourtDetailPreservingContext(modal,court.id,{focusFallbackSelector:`[data-court-visit="${button.dataset.courtVisit}"]`})}));
+        openChildModal(modal, () => openCourtVisitSheet(court, button.dataset.courtVisit,{focusBusy:button.classList.contains('cd-busy-hint'),onUpdated:()=>refreshCourtDetailPreservingContext(modal,court.id,{focusFallbackSelector:`[data-court-visit="${button.dataset.courtVisit}"]`})}));
       });
     });
     const commitLookingIntent = async (button, desiredLooking) => {

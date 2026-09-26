@@ -2661,6 +2661,15 @@ def _busy_visit_rows(court_id):
                 Game.status.in_(_BUSY_PLAYED_STATUSES), User.deleted_at.is_(None))
         .order_by(Game.scheduled_at.desc()).limit(_BUSY_ROW_LIMIT).all()
     )
+    # A game counts only for players who didn't check in within an hour of
+    # it, so checking in at 8:50 for a 9:00 game is one visit, not two.
+    checked_in = {}
+    for user_id, at in checkins:
+        checked_in.setdefault(user_id, []).append(at)
+    played = [
+        (user_id, at) for user_id, at in played
+        if not any(abs((at - seen).total_seconds()) <= 3600 for seen in checked_in.get(user_id, ()))
+    ]
     entry = {
         'since': since, 'until': until, 'expires_at': time.time() + _BUSY_CACHE_TTL,
         'rows': [(user_id, at) for user_id, at in (*checkins, *played)],
@@ -2674,8 +2683,9 @@ def _busy_visit_rows(court_id):
 def _busy_times(court, *, timezone_name=None, detailed=False, hidden_ids=()):
     """Top two-hour windows and hourly busy levels from the last 90 days.
 
-    Check-ins and played games both count, once per player per local hour, so
-    a game and its players' check-ins are not counted twice. Prefer the court's
+    Check-ins and played games both count, once per player per local hour.
+    Hours and windows only show when at least three different people made
+    them, so no one's routine stands out. Prefer the court's
     timezone so the result remains correct across DST. Legacy courts without
     one retain the longitude approximation instead of presenting UTC as local.
     """
@@ -2698,16 +2708,20 @@ def _busy_times(court, *, timezone_name=None, detailed=False, hidden_ids=()):
             local = to_local(at)
             visits.add((user_id, local.date(), local.hour))
     days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    buckets, bucket_dates = {}, {}
+    buckets, bucket_dates, bucket_players, hour_players = {}, {}, {}, {}
     hourly = [[0] * 18 for _ in days]  # 5 AM through the 10 PM hour
-    for _, on, hour in visits:
+    charted = []
+    for user_id, on, hour in visits:
         if not 5 <= hour < 23:
             continue
+        charted.append((user_id, on, hour))
         hourly[on.weekday()][hour - 5] += 1
+        hour_players.setdefault((on.weekday(), hour), set()).add(user_id)
         # Anchor at 5 AM to produce player-friendly windows such as 9–11 AM.
         key = (on.weekday(), 5 + ((hour - 5) // 2) * 2)
         buckets[key] = buckets.get(key, 0) + 1
         bucket_dates.setdefault(key, set()).add(on)
+        bucket_players.setdefault(key, set()).add(user_id)
     ranked = sorted(buckets.items(), key=lambda kv: (-kv[1], kv[0]))
 
     def clock(hour):
@@ -2733,13 +2747,21 @@ def _busy_times(court, *, timezone_name=None, detailed=False, hidden_ids=()):
 
     if not detailed:
         return windows
-    players = {visit[0] for visit in visits}
+    # Only the charted hours count toward the sample the bars are drawn from.
+    players = {visit[0] for visit in charted}
     # Several dates keep one big event from reading as a weekly pattern.
-    sufficient = len(visits) >= 10 and len(players) >= 3 and len({visit[1] for visit in visits}) >= 3
+    sufficient = len(charted) >= 10 and len(players) >= 3 and len({visit[1] for visit in charted}) >= 3
+    for weekday, day in enumerate(hourly):
+        for index in range(len(day)):
+            if len(hour_players.get((weekday, index + 5), ())) < 3:
+                day[index] = 0
     top = max(map(max, hourly))
-    peak = next((key for key, count in ranked if count >= 3 and len(bucket_dates[key]) >= 2), None)
+    # The hint names the busiest window the bars show, and only when it recurs.
+    shown = [(key, count) for key, count in ranked if len(bucket_players[key]) >= 3]
+    peak_key, peak_count = shown[0] if shown else (None, 0)
+    peak = peak_key if peak_count >= 3 and len(bucket_dates[peak_key]) >= 2 else None
     now = to_local(utcnow())
-    return {'sample_size':len(visits), 'unique_players':len(players),
+    return {'sample_size':len(charted), 'unique_players':len(players),
             'range_start':iso(cached['since']), 'range_end':iso(cached['until']), 'timezone':timezone_name if timezone else None,
             'timezone_source':'venue_local' if timezone else 'approximate',
             'sufficient_sample':sufficient, 'windows':windows if sufficient else [],

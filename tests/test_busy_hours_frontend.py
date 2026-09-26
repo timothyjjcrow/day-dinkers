@@ -103,3 +103,10 @@ def test_busy_hours_styles_use_tokens_inside_the_court_section():
     assert '.court-busy-bars[hidden] { display: none; }' in block
     assert 'var(--green-300)' in block and '.court-busy-bars i.is-now { background: var(--green-accent); }' in block
     assert 'repeat(18, minmax(0, 1fr))' in block
+
+
+def test_the_hint_opens_hours_scrolled_to_the_busy_bars():
+    source = (Path(__file__).resolve().parents[1] / 'public' / 'app-v15.js').read_text()
+    assert "function openCourtVisitSheet(court, section = 'hours', {onUpdated=null, focusBusy=false} = {})" in source
+    assert "if (focusBusy) requestAnimationFrame(()=>modal.querySelector('.court-busy')?.scrollIntoView({block:'nearest'}));" in source
+    assert "{focusBusy:button.classList.contains('cd-busy-hint'),onUpdated:" in source
