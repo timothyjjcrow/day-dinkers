@@ -199,6 +199,7 @@ REQUIRED_COLUMNS = {
     'check_in': {
         'user_id', 'court_id', 'looking_for_game', 'checked_in_at',
         'checked_out_at', 'last_presence_ping_at', 'location_verified_at',
+        'queued_at', 'queue_court',
     },
     'court_edit_suggestion': {
         'id', 'court_id', 'user_id', 'reviewed_by_id', 'reviewed_at', 'review_note',

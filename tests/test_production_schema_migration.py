@@ -160,6 +160,17 @@ def test_court_chat_subscription_schema_is_part_of_the_production_contract():
     assert 'missing table court_chat_subscription' in gaps
 
 
+def test_paddle_line_columns_are_part_of_the_production_contract():
+    inspector = FakeInspector()
+    inspector.columns['check_in'].remove('queued_at')
+    inspector.columns['check_in'].remove('queue_court')
+
+    assert (
+        "check_in missing columns ['queue_court', 'queued_at']"
+        in _schema_gaps(inspector)
+    )
+
+
 def test_competition_completion_schema_is_part_of_the_production_contract():
     inspector = FakeInspector()
     inspector.columns['tournament_match'].remove('review_reminded_at')

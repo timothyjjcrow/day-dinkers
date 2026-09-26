@@ -66,7 +66,7 @@ def test_all_chat_rooms_share_adaptive_visible_only_polling():
 def test_other_recurring_server_polls_have_bounded_cadences():
     assert "const LIVE_DETAIL_POLL_INTERVAL_MS = 15_000;" in APP
     assert "const COMPETITION_POLL_INTERVAL_MS = 20_000;" in APP
-    assert APP.count("}, LIVE_DETAIL_POLL_INTERVAL_MS);") == 4
+    assert APP.count("}, LIVE_DETAIL_POLL_INTERVAL_MS);") == 5
     assert APP.count("}, COMPETITION_POLL_INTERVAL_MS);") == 2
     assert APP.count("}, PRESENCE_HEARTBEAT_INTERVAL_MS);") == 1
     assert "ME_POLL_INTERVAL_MS" not in APP

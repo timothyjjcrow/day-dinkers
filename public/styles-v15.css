@@ -8563,6 +8563,19 @@ html[data-theme="dark"] .court-modal .modal { --cd-solid: var(--forest-2); }
 .court-modal .cd-now-quiet { background: var(--surface-2); }
 .court-modal .cd-now-card .cd-primary-action { background: var(--cd-solid); color: var(--on-forest); box-shadow: none; }
 .court-modal .cd-presence-control { border: 0; border-radius: var(--radius-lg); background: var(--green-50); }
+/* r85 · Paddle line */
+.court-modal .cd-queue {
+  display: grid; gap: var(--space-2); margin: 0 0 10px; padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg); background: var(--surface-2); font-size: var(--text-sm);
+}
+.cd-queue-row { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.cd-queue-row > span { min-width: 0; overflow-wrap: anywhere; }
+.cd-queue-row + .cd-queue-row { padding-top: var(--space-2); border-top: 1px solid var(--line); }
+.cd-queue b, .cd-queue small { display: block; }
+.cd-queue small { color: var(--ink-soft); font-size: var(--text-xs); }
+.cd-queue .btn { flex: none; min-height: var(--tap-min); white-space: nowrap; }
+.cd-queue .btn-secondary { background: var(--card); }
+.cd-queue-score .score-team-label { display: block; }
 .court-modal .cd-scroll a.btn { text-decoration: none; }
 .court-modal .court-more-actions { border: 0; border-radius: var(--radius-md); background: var(--surface-2); }
 .court-modal .court-more-actions .btn-secondary { background: var(--card); }
