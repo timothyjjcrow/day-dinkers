@@ -125,9 +125,13 @@ def test_rain_chance_covers_the_games_hours_and_names_the_peak_hour(app, monkeyp
     start = hour_start() + timedelta(hours=2)
 
     # Default two hours: 2 and 3 o'clock periods, peak at +3.
-    assert courts_module.rain_chance_at(court, start) == {'chance': 70, 'label': local_label(3)}
+    peak = (hour_start() + timedelta(hours=3)).isoformat() + 'Z'
+    assert courts_module.rain_chance_at(court, start) == {
+        'chance': 70, 'label': local_label(3), 'starts_at': peak}
     # A 60 minute game only overlaps its first hour.
-    assert courts_module.rain_chance_at(court, start, 60) == {'chance': 30, 'label': local_label(2)}
+    assert courts_module.rain_chance_at(court, start, 60) == {
+        'chance': 30, 'label': local_label(2),
+        'starts_at': (hour_start() + timedelta(hours=2)).isoformat() + 'Z'}
     # Starting mid-hour still counts the hour it starts in.
     assert courts_module.rain_chance_at(court, start + timedelta(minutes=90), 60)['chance'] == 90
     # Past the forecast: unknown, not dry.
@@ -145,13 +149,13 @@ def test_weather_endpoint_adds_game_time_rain_only_when_asked(client, app, monke
     assert set(plain) == {'temp_f', 'short', 'rain_soon', 'latest_condition'}
 
     data = client.get(f'/api/courts/{court.id}/weather?at={at}').get_json()
-    assert data['rain_at_game'] == {'chance': 80, 'label': local_label(3)}
+    assert data['rain_at_game'] == {'chance': 80, 'label': local_label(3), 'starts_at': at}
     assert 'hourly' not in data
     assert len(calls) == 1  # the second call used the cache
 
     later = (hour_start() + timedelta(hours=5)).isoformat() + 'Z'
     assert client.get(f'/api/courts/{court.id}/weather?at={later}&minutes=60').get_json()['rain_at_game'] == {
-        'chance': 0, 'label': local_label(5),
+        'chance': 0, 'label': local_label(5), 'starts_at': later,
     }
     for bad in ('soon', '9999-12-31T23:59:59', '0001-01-01T00:00:00%2B05:00'):
         response = client.get(f'/api/courts/{court.id}/weather?at={bad}')
@@ -220,7 +224,7 @@ def test_no_alert_outside_the_rules(app, monkeypatch, case):
     )
     starts_at = {
         'too_soon': utcnow() + timedelta(minutes=20),
-        'too_far': utcnow() + timedelta(hours=5),
+        'too_far': utcnow() + timedelta(hours=6),
     }.get(case, hour_start() + timedelta(hours=2))
     extra = {'is_instant': True} if case == 'instant' else {}
     if case == 'cancelled':
@@ -321,3 +325,36 @@ def test_tick_sends_rain_alerts(client, app, monkeypatch):
 
     alert = Notification.query.filter_by(kind='game_weather').one()
     assert alert.user_id == host.id and alert.related_game_id == game.id
+
+
+def test_places_take_turns_under_the_lookup_cap(app, monkeypatch):
+    from backend.routes import games as games_module
+
+    calls = []
+    fake_forecast(monkeypatch, {}, calls)
+    host = person('host@example.com', 'Hana')
+    for index in range(6):
+        court = outdoor_court(name=f'Park {index}', lat=30 + index, lng=-97)
+        game_at(court, host, hour_start() + timedelta(hours=2))
+    seen = set()
+    for tick in range(6):
+        courts_module._WEATHER_CACHE.clear()
+        monkeypatch.setattr(games_module, 'utcnow', lambda tick=tick: utcnow() + timedelta(minutes=5 * tick))
+        send()
+        seen |= {lat for lat, _, _ in calls}
+    assert seen == {float(30 + index) for index in range(6)}
+
+
+def test_a_moved_game_can_be_warned_again_before_the_old_alert_is_read(app, monkeypatch):
+    fake_forecast(monkeypatch, {index: 90 for index in range(24)})
+    host = person('host@example.com', 'Hana')
+    court = outdoor_court()
+    game = game_at(court, host, hour_start() + timedelta(hours=2))
+    send()
+    old = weather_alerts()
+    assert len(old) == 1 and not old[0].read
+    old[0].created_at = utcnow() - timedelta(hours=7)
+    game.scheduled_at = hour_start() + timedelta(hours=3)
+    db.session.commit()
+    send()
+    assert len(weather_alerts()) == 2

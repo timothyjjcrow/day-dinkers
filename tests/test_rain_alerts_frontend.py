@@ -18,12 +18,13 @@ def section(start, end, source=APP):
     return source[begin:source.index(end, begin)]
 
 
-RAIN_CARD = section("function gameRainAlertHtml", "function sessionVisitFactsHtml")
+RAIN_CARD = section("function rainHourText", "function sessionVisitFactsHtml")
 
 
 def rain_card(game, rain):
     script = f"""
       const uiIcon = (name) => `<i data-icon="${{name}}"></i>`;
+      const fmtTimeShort = (iso) => new Date(iso).toLocaleTimeString('en-US', {{ hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' }});
       {section("const esc =", "const UI_ICON_NAMES")}
       {RAIN_CARD}
       const game = {{
@@ -97,7 +98,7 @@ def test_info_strip_uses_the_game_time_chance_once():
     screen = section("async function openGameScreen", "function safeNotificationOverlayRoute")
     assert "rain likely around game time" not in APP
     assert "w.rain_soon ?" not in screen
-    assert "rain?.chance >= 50 && !rainCard ? ` · ${uiIcon('water')} rain likely around ${esc(rain.label)}`" in screen
+    assert "rain?.chance >= 50 && !rainCard && !court.indoor ? ` · ${uiIcon('water')} rain likely around ${esc(rainHourText(rain))}`" in screen
 
 
 def test_activity_uses_the_water_icon_for_rain_alerts():
@@ -111,3 +112,17 @@ def test_rain_card_styles_live_in_the_game_page_section():
     block = section("/* r85 · Rain alerts */", "\n/*", game_page)
     assert ".rain-alert b .ui-icon" in block
     assert "var(--green-accent)" in block
+
+
+def test_the_peak_hour_shows_in_device_time_when_the_server_sends_it():
+    html = rain_card({}, {"chance": 70, "label": "7 PM", "starts_at": "2026-09-26T23:00:00Z"})
+    assert "Rain likely around 6 PM · 70% chance" in html
+
+
+def test_redraws_repaint_the_last_rain_card_without_waiting():
+    screen = section("async function openGameScreen", "function safeNotificationOverlayRoute")
+    assert "let lastRain = null;" in screen
+    assert "if (lastRain) showRain(lastRain);" in screen
+    assert "lastRain = rain || null;" in screen
+    assert "rainSlot.hidden = !rainCard;" in screen
+    assert "if (game.status === 'upcoming' && court.id && !game.time_vote" in screen

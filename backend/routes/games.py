@@ -2910,10 +2910,13 @@ def send_game_reminders():
 RAIN_ALERT_MIN_CHANCE = 50
 RAIN_ALERT_MAX_LOOKUPS = 4
 RAIN_ALERT_TIMEOUT_SECONDS = 3
+# Five hours ahead so the last tick before the overnight scheduler gap still
+# reaches early-morning games.
+RAIN_ALERT_LEAD_HOURS = 5
 
 
 def send_rain_alerts():
-    """Tell everyone in an outdoor game starting in 30 minutes to 4 hours,
+    """Tell everyone in an outdoor game starting in 30 minutes to 5 hours,
     once, when rain looks likely while it runs. It is the last tick job:
     forecasts are shared per rounded location, few upstream lookups run per
     tick, and each must finish before the tick has to deliver its alerts."""
@@ -2927,7 +2930,7 @@ def send_rain_alerts():
         Game.is_instant.is_(False),
         Game.time_options == '[]',  # an open vote has no start time yet
         Game.scheduled_at > now + timedelta(minutes=30),
-        Game.scheduled_at <= now + timedelta(hours=4),
+        Game.scheduled_at <= now + timedelta(hours=RAIN_ALERT_LEAD_HOURS),
         Court.indoor.is_(False),
         Court.latitude.isnot(None),
         Court.longitude.isnot(None),
@@ -2955,7 +2958,14 @@ def send_rain_alerts():
         stop_at = min(stop_at, g.tick_deadline - 5)
     lookups = 0
     sent = False
-    for place_games in places.values():
+    # Places with a cached forecast cost nothing; the rest take turns across
+    # ticks so the lookup cap never starves the same places.
+    order = list(places.values())
+    if order:
+        turn = int(now.timestamp() // 300) % len(order)
+        order = order[turn:] + order[:turn]
+    order.sort(key=lambda place_games: court_forecast(place_games[0].court, fetch=False) is None)
+    for place_games in order:
         court = place_games[0].court
         if court_forecast(court, fetch=False) is None:
             # A lookup is two upstream calls; start one only if it can finish.
@@ -2985,7 +2995,8 @@ def send_rain_alerts():
                     else 'Your host may move it. Check the game page.',
                     related_game_id=game.id,
                     action_url=f'/#game/{game.id}',
-                    unread_dedupe_key=f'rain:{game.id}',
+                    # Per start time, so a moved game can be warned again.
+                    unread_dedupe_key=f'rain:{game.id}:{game.scheduled_at:%Y%m%d%H%M}',
                 )
             sent = True
     if sent:

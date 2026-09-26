@@ -36659,11 +36659,16 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
 
   // Rain during an upcoming outdoor plan. The host's buttons open the same
   // edit and cancel sheets as Manage (data-rain-proxy names that control).
+  // The peak rain hour in this device's time, like every other time on the page.
+  function rainHourText(rain) {
+    return rain.starts_at ? fmtTimeShort(rain.starts_at).replace(/:00(?=\s)/, '') : rain.label;
+  }
+
   function gameRainAlertHtml(game, rain) {
     if (!(rain?.chance >= 50) || game.time_vote || game.court?.indoor || game.is_instant || !game.is_joined
         || game.status !== 'upcoming' || !(Date.parse(game.scheduled_at) > Date.now())) return '';
     return `<section class="attendance-confirmation rain-alert" aria-label="Rain forecast">
-      <div><b>${uiIcon('water')} Rain likely around ${esc(rain.label)} · ${Number(rain.chance)}% chance</b>
+      <div><b>${uiIcon('water')} Rain likely around ${esc(rainHourText(rain))} · ${Number(rain.chance)}% chance</b>
         ${game.is_creator ? '' : '<span>Your host can move or cancel it.</span>'}</div>
       ${game.is_creator ? '<div class="attendance-confirmation-actions"><button type="button" class="btn btn-primary" data-rain-proxy="gs-edit">Move it</button><button type="button" class="btn btn-secondary" data-rain-proxy="gs-cancel">Cancel game</button></div>' : ''}
     </section>`;
@@ -39651,6 +39656,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       }
     };
 
+    let lastRain = null; // redraws repaint the rain card at once, then refresh it
     const reopenFresh = async ({ preserve = false, announce = false } = {}) => {
       try { render(await api(`/games/${gameId}`), { preserve, announce }); } catch (e) { toast(e.message); }
     };
@@ -40020,26 +40026,31 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       }
       // Playability heads-up for games starting soon (NWS summary covers ~6h).
       const startMs = new Date(game.scheduled_at).getTime();
-      if (game.status === 'upcoming' && court.id
+      if (game.status === 'upcoming' && court.id && !game.time_vote
           && startMs - Date.now() < 6 * 3600e3 && startMs - Date.now() > -3600e3) {
         const rainSlot = box.querySelector('#gs-rain-alert');
+        const showRain = (rain) => {
+          const rainCard = gameRainAlertHtml(game, rain);
+          if (!rainSlot) return rainCard;
+          rainSlot.innerHTML = rainCard;
+          rainSlot.hidden = !rainCard;
+          rainSlot.querySelectorAll('[data-rain-proxy]').forEach((button) => button.addEventListener('click', () => {
+            box.querySelector(`#${button.dataset.rainProxy}`)?.click();
+            const sheet = currentOverlayEntry()?.el;
+            if (sheet && sheet !== modal) sheet._returnFocus = button;
+          }));
+          return rainCard;
+        };
+        if (lastRain) showRain(lastRain);
         api(`/courts/${court.id}/weather?at=${encodeURIComponent(game.scheduled_at)}${game.duration_minutes ? `&minutes=${game.duration_minutes}` : ''}`).then((w) => {
           const el = box.querySelector('#gs-weather');
           if (!el || !rainSlot?.isConnected) return; // a newer render asked again
           const rain = w.rain_at_game;
-          const rainCard = gameRainAlertHtml(game, rain);
-          if (rainCard) {
-            rainSlot.innerHTML = rainCard;
-            rainSlot.hidden = false;
-            rainSlot.querySelectorAll('[data-rain-proxy]').forEach((button) => button.addEventListener('click', () => {
-              box.querySelector(`#${button.dataset.rainProxy}`)?.click();
-              const sheet = currentOverlayEntry()?.el;
-              if (sheet && sheet !== modal) sheet._returnFocus = button;
-            }));
-          }
+          lastRain = rain || null;
+          const rainCard = showRain(rain);
           const bits = [];
           if (!w.error && w.temp_f != null) {
-            bits.push(`${weatherIcon(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${rain?.chance >= 50 && !rainCard ? ` · ${uiIcon('water')} rain likely around ${esc(rain.label)}` : ''}`);
+            bits.push(`${weatherIcon(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${rain?.chance >= 50 && !rainCard && !court.indoor ? ` · ${uiIcon('water')} rain likely around ${esc(rainHourText(rain))}` : ''}`);
           }
           const cond = w.latest_condition;
           if (cond && COURT_CONDITION_LABELS[cond.condition]) {

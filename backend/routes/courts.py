@@ -2213,7 +2213,8 @@ def court_forecast(court, timeout=8, fetch=True):
 
 def rain_chance_at(court, when, minutes=None, timeout=8):
     """Highest rain chance while a game starting at ``when`` (naive UTC) runs,
-    with the local hour of that peak: {'chance': 70, 'label': '6 PM'}. None
+    with the local hour of that peak: {'chance': 70, 'label': '6 PM',
+    'starts_at': '...Z'}. None
     when the forecast does not reach those hours."""
     end = when + timedelta(minutes=minutes or 120)
     best = None
@@ -2226,11 +2227,13 @@ def rain_chance_at(court, when, minutes=None, timeout=8):
             continue
         begins = local.astimezone(UTC).replace(tzinfo=None)
         if begins < end and begins + timedelta(hours=1) > when and (best is None or chance > best[0]):
-            best = (chance, local.hour)
+            best = (chance, local.hour, begins)
     if best is None:
         return None
-    chance, hour = best
-    return {'chance': chance, 'label': f"{hour % 12 or 12} {'AM' if hour < 12 else 'PM'}"}
+    chance, hour, begins = best
+    # `label` is court-local (for pushes); pages format `starts_at` themselves.
+    return {'chance': chance, 'label': f"{hour % 12 or 12} {'AM' if hour < 12 else 'PM'}",
+            'starts_at': begins.isoformat() + 'Z'}
 
 
 @courts_bp.get('/courts/<int:court_id>/weather')
