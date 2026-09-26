@@ -57,7 +57,8 @@ def player_schedule_conflicts(user_ids, start, duration_minutes, *, viewer_id=No
         *([] if end is None else [Game.scheduled_at < end]),
     ).distinct().all()
     for game in games:
-        if game.id in excluded_games:
+        # Proposed vote times are not appointments until one is locked.
+        if game.id in excluded_games or game.time_vote_open:
             continue
         append('game', game.id, {p.user_id for p in game.players}, game.scheduled_at,
                game.duration_minutes or 90, game.title or 'Pickleball session',

@@ -2637,6 +2637,12 @@ class Game(TimestampMixin, db.Model):
     # Future defaults live separately from the first date's historical fields.
     recurrence_template = db.Column(db.Text)
     recurrence_stopped_at = db.Column(db.DateTime)
+    # "When works?" vote: [{"id", "starts_at", "votes": [user_id]}] while
+    # friends vote; '[]' once a time is locked. scheduled_at holds the
+    # earliest option meanwhile so every NOT NULL/ordering contract holds.
+    time_options = db.Column(
+        db.Text, nullable=False, default='[]', server_default='[]',
+    )
 
     max_players = db.Column(db.Integer, nullable=False, default=4)
     # Optional planning details for scheduled sessions. Empty/null defaults keep
@@ -2760,6 +2766,59 @@ class Game(TimestampMixin, db.Model):
 
     def invited_user_ids(self):
         return {inv.user_id for inv in self.invites}
+
+    @property
+    def time_vote_open(self):
+        return self.status == 'upcoming' and (self.time_options or '[]') != '[]'
+
+    def time_vote_state(self, now=None):
+        """Current votes per future option, the leader and the auto-lock time.
+
+        Only current invitees and joined players (never the host) count, so a
+        decline or a departure quietly withdraws that person's votes.
+        """
+        if not self.time_vote_open:
+            return None
+        try:
+            raw = json.loads(self.time_options)
+        except (TypeError, ValueError):
+            return None
+        now = now or utcnow()
+        voters = ({p.user_id for p in self.players} | self.invited_user_ids()) - {self.creator_id}
+        options = []
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                start = datetime.fromisoformat(
+                    str(item['starts_at']).replace('Z', '+00:00'),
+                ).replace(tzinfo=None)
+            except (KeyError, TypeError, ValueError):
+                continue
+            options.append({'id': str(item.get('id')), 'starts_at': start,
+                            'votes': {uid for uid in item.get('votes') or () if uid in voters}})
+        if not options:
+            return None
+        future = [option for option in options if option['starts_at'] > now]
+        # Most votes wins; ties go to the earliest time. Passed options drop out.
+        leader = min(future or options, key=lambda option: (-len(option['votes']), option['starts_at']))
+        voted = set().union(*(option['votes'] for option in options))
+        locks_at = (min(option['starts_at'] for option in future) - timedelta(hours=3)
+                    if future else now)
+        return {'options': future, 'leader': leader, 'voters': voters, 'locks_at': locks_at,
+                'due': now >= locks_at or bool(voters) and voters <= voted}
+
+    def _time_vote_payload(self, viewer_id, now):
+        vote = self.time_vote_state(now)
+        if not vote:
+            return None
+        return {
+            'options': [{'id': option['id'], 'starts_at': iso(option['starts_at']),
+                         'count': len(option['votes'])} for option in vote['options']],
+            'my_votes': [option['id'] for option in vote['options'] if viewer_id in option['votes']],
+            'leader_id': vote['leader']['id'],
+            'locks_at': iso(vote['locks_at']),
+            'can_vote': viewer_id in vote['voters'],
+            'can_lock': bool(viewer_id) and viewer_id == self.creator_id,
+        }
 
     def active_open_call(self):
         """The one durable court call currently attached to this game.
@@ -3106,6 +3165,7 @@ class Game(TimestampMixin, db.Model):
             'crew_name': self.crew.name if visible_crew else None,
             'crew_roster_version': self.crew_roster_version if visible_crew else None,
             'scheduled_at': iso(self.scheduled_at),
+            'time_vote': self._time_vote_payload(viewer_id, now),
             'game_type': self.game_type,
             'visibility': self.visibility,
             'recurrence': self.recurrence,

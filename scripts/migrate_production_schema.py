@@ -175,7 +175,7 @@ REQUIRED_COLUMNS = {
         'recurrence_weekdays', 'recurrence_ends_on',
         'recurrence_series_id', 'recurrence_occurrence_on',
         'recurrence_template', 'recurrence_stopped_at',
-        'level_min', 'level_max',
+        'level_min', 'level_max', 'time_options',
     },
     'game_player': {'recurrence_rsvp_automatic', 'commitment_requested_at'},
     'game_waitlist': {'id', 'game_id', 'user_id', 'offered_at', 'offer_expires_at', 'offer_status'},

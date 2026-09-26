@@ -481,6 +481,13 @@ def test_release_schema_verifier_requires_game_planning_columns():
     )
 
 
+def test_release_schema_verifier_requires_game_time_vote_options():
+    inspector = FakeInspector()
+    inspector.columns['game'].remove('time_options')
+
+    assert "game missing columns ['time_options']" in _schema_gaps(inspector)
+
+
 def test_release_schema_verifier_requires_game_manage_lifecycle_columns():
     inspector = FakeInspector()
     inspector.columns['game'].remove('auto_fill_waitlist')

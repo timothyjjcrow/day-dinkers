@@ -47,7 +47,7 @@ def test_attached_crew_planner_selects_members_and_offers_safe_audiences():
     assert 'const plannedPlayerCount = inviteIds.size + 1;' in APP
     assert "recurrence: recurringBox.checked ? 'weekly' : 'none'" in APP
     assert '...(recurringBox.checked ? {' in APP
-    assert 'const recurringAllowed = !isRanked;' in APP
+    assert 'const recurringAllowed = !isRanked && !voteTimes;' in APP
     assert 'const crewMinimum = crewId ? inviteIds.size + 1 : 1;' in APP
     assert 'capacity < crewMinimum' in APP
     assert "friendsWrap.classList.remove('hidden');" in APP

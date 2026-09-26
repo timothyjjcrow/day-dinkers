@@ -1005,6 +1005,7 @@ def court_detail(court_id):
         Game.query.filter(
             Game.court_id == court.id,
             Game.status == 'upcoming',
+            Game.time_options == '[]',
             Game.scheduled_at >= utcnow() - timedelta(hours=2),
         )
         .order_by(Game.scheduled_at.asc())

@@ -414,6 +414,7 @@ def _upgrade_schema(app):
                 ('recurrence_occurrence_on', 'DATE'),
                 ('recurrence_template', 'TEXT'),
                 ('recurrence_stopped_at', 'TIMESTAMP' if is_postgres else 'DATETIME'),
+                ('time_options', "TEXT NOT NULL DEFAULT '[]'"),
             ):
                 if column not in game_cols:
                     statements.append(f'ALTER TABLE game ADD COLUMN {column} {ddl}')

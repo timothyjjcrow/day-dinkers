@@ -219,6 +219,8 @@ def calendar_feed(token):
              'X-WR-CALNAME:Third Shot play', 'CALSCALE:GREGORIAN']
     now_stamp = _ics_stamp(now)
     for game in games:
+        if game.time_vote_open:
+            continue  # Proposed times are not an appointment yet.
         start = game.scheduled_at
         end = start + timedelta(minutes=game.duration_minutes or 90)
         court = game.court
@@ -412,6 +414,7 @@ SCORE_CONFIRM_REMINDER_HOURS = 12
 SCORE_LATE_DISPUTE_DAYS = GAME_SCORE_LATE_DISPUTE_DAYS
 CASUAL_MAX_PLAYERS = 100
 REMINDER_LEAD_MINUTES = 65
+TIME_VOTE_MIN_LEAD_MINUTES = 50
 UNSCORED_EXPIRY_DAYS = 7
 INSTANT_RALLY_ASSEMBLY_MINUTES = 90
 RALLY_ARRIVAL_ETA_MINUTES = (5, 10, 15)
@@ -1235,6 +1238,18 @@ def _normalized_game_attempt(payload, creator_id):
         court_id = 0
 
     scheduled_at = _parse_scheduled_at(payload.get('scheduled_at'))
+    # A time vote starts at its earliest option. Unparseable entries normalize
+    # to an empty list, which create_game rejects as invalid_time_options.
+    time_options = None
+    if 'time_options' in payload:
+        raw_times = payload.get('time_options')
+        parsed = [
+            _parse_scheduled_at(value) if isinstance(value, str) else None
+            for value in (raw_times if isinstance(raw_times, list) else [None])[:4]
+        ]
+        time_options = [iso(value) for value in sorted(parsed)] if all(parsed) else []
+        if time_options:
+            scheduled_at = min(parsed)
     game_type = str(payload.get('game_type') or 'casual').strip().lower()
 
     try:
@@ -1324,6 +1339,8 @@ def _normalized_game_attempt(payload, creator_id):
         'crew_id': crew_id,
         'expected_crew_version': expected_crew_version,
         'notes': str(payload.get('notes') or '').strip()[:500],
+        # Absent for ordinary games so earlier retry fingerprints never change.
+        **({'time_options': time_options} if time_options is not None else {}),
     }
 
 
@@ -2647,14 +2664,75 @@ def expire_abandoned_instant_rallies(now=None):
     return expired
 
 
+def _time_vote_label(game, when):
+    """'Sat 9 AM' in the host's planner zone (stored with the vote)."""
+    zone = _recurrence_zone(game.recurrence_timezone or 'UTC') or ZoneInfo('UTC')
+    local = when.replace(tzinfo=UTC).astimezone(zone)
+    clock = local.strftime('%-I:%M %p').replace(':00 ', ' ')
+    return f"{local.strftime('%a')} {clock}{' UTC' if zone.key == 'UTC' else ''}"
+
+
+def _lock_time_vote(game, option, actor_id=None, now=None):
+    """Fix the winning time. Callers hold the roster, invitee and Game locks.
+
+    Reminders re-arm for the real time, and joined players who did not pick
+    the winner get the existing "The plan changed" confirmation.
+    """
+    now = now or utcnow()
+    game.scheduled_at = option['starts_at']
+    game.time_options = '[]'
+    needs_confirmation = set()
+    for player in game.players:
+        player.reminded_at = None
+        player.day_reminded_at = None
+        if player.user_id != game.creator_id and player.user_id not in option['votes']:
+            player.commitment_requested_at = now
+            needs_confirmation.add(player.user_id)
+    player_ids = {player.user_id for player in game.players}
+    title = f"It's {_time_vote_label(game, game.scheduled_at)} at {game.court.name if game.court else 'the court'}"
+    for user_id in sorted((player_ids | game.invited_user_ids()) - {actor_id}):
+        notify(
+            user_id, 'game_updated', title,
+            'Confirm you can still make it.' if user_id in needs_confirmation
+            else '' if user_id in player_ids else 'Join if it works for you.',
+            related_game_id=game.id,
+            unread_dedupe_key=f'time-vote:{game.id}',
+        )
+
+
+def settle_game_time_votes(now=None):
+    """Auto-lock votes once every voter answered or 3h before the earliest option."""
+    now = now or utcnow()
+    # The placeholder start is the earliest option, so deadline-due votes sort first.
+    candidates = db.session.query(Game.id, Game.creator_id).filter(
+        Game.status == 'upcoming', Game.time_options != '[]',
+    ).order_by(Game.scheduled_at.asc(), Game.id.asc()).limit(200).all()
+    for game_id, creator_id in candidates:
+        try:
+            game = db.session.get(Game, game_id)
+            vote = game.time_vote_state(now) if game else None
+            if not vote or not vote['due']:
+                continue
+            _, game = _lock_stable_game_roster_users(game_id, creator_id, include_invitees=True)
+            vote = game.time_vote_state(now) if game else None
+            if vote and vote['due']:
+                _lock_time_vote(game, vote['leader'], now=now)
+            db.session.commit()
+        except Exception:  # One stuck vote must not hold back the others.
+            db.session.rollback()
+            current_app.logger.exception('Time vote %s could not settle', game_id)
+
+
 def send_game_reminders():
     """Notify each player about an hour before their game starts. Lazy sweep
     (like auto_confirm_stale_scores) — runs on feed/me reads; reminded_at on
     game_player guarantees at most one reminder per player per occurrence."""
     now = utcnow()
+    # A game still voting on its time has only a placeholder start.
     due = Game.query.filter(
         Game.status == 'upcoming',
         Game.is_instant.is_(False),
+        Game.time_options == '[]',
         Game.scheduled_at > now,
         Game.scheduled_at <= now + timedelta(minutes=REMINDER_LEAD_MINUTES),
     ).all()
@@ -2692,6 +2770,7 @@ def send_game_reminders():
     # Day-before nudge for games ~20–28h out (plan-ahead reminder), once each.
     day_due = Game.query.filter(
         Game.status == 'upcoming',
+        Game.time_options == '[]',
         Game.scheduled_at > now + timedelta(hours=20),
         Game.scheduled_at <= now + timedelta(hours=28),
     ).all()
@@ -5487,7 +5566,21 @@ def create_game():
         if visibility != 'open':
             return jsonify({'error': 'community_session_must_be_open'}), 400
 
-    conflict = schedule_review_needed(
+    # "When works?" votes are for invited friends only: never a public, club,
+    # or repeating plan, because those surfaces promise a fixed time.
+    time_options = normalized_attempt.get('time_options')
+    if time_options is not None:
+        earliest_allowed = utcnow() + timedelta(minutes=TIME_VOTE_MIN_LEAD_MINUTES)
+        if recurrence != 'none' or club or visibility not in ('friends', 'private'):
+            return jsonify({'error': 'time_vote_not_available'}), 400
+        if (not 2 <= len(time_options) <= 3 or len(set(time_options)) != len(time_options)
+                or _parse_scheduled_at(time_options[0]) < earliest_allowed):
+            return jsonify({'error': 'invalid_time_options'}), 400
+        if not invited_ids:
+            return jsonify({'error': 'time_vote_needs_invitees'}), 400
+
+    # Proposed times are not appointments yet, so a vote skips conflict review.
+    conflict = None if time_options is not None else schedule_review_needed(
         [g.current_user.id], scheduled_at, normalized_attempt['duration_minutes'], payload,
         scope=f'create_game:{attempt_fingerprint}', viewer_id=g.current_user.id,
     )
@@ -5526,6 +5619,10 @@ def create_game():
         level_min=normalized_attempt['level_min'],
         level_max=normalized_attempt['level_max'],
         notes=normalized_attempt['notes'],
+        time_options=json.dumps([
+            {'id': 'abc'[index], 'starts_at': value, 'votes': []}
+            for index, value in enumerate(time_options or [])
+        ], separators=(',', ':')),
     )
     db.session.add(game)
     try:
@@ -5598,6 +5695,7 @@ def create_game():
             uid,
             'game_invite_direct',
             f'{g.current_user.display_name} invited you to a {label} at {court.name}',
+            'Pick the times that work for you.' if time_options else '',
             related_user_id=g.current_user.id,
             related_game_id=game.id,
         )
@@ -5793,6 +5891,7 @@ def create_game_open_call(game_id):
     if (
         game.status != 'upcoming'
         or game.visibility != 'open'
+        or game.time_vote_open
         or game.is_instant
         or game.recurrence != 'none'
         # Public recruiting is valid for an explicitly open casual Crew
@@ -6412,7 +6511,7 @@ def join_game(game_id):
     review = _entry_plan_review_needed(game, payload, g.current_user.id)
     if review:
         return jsonify(review), 409
-    conflict = schedule_review_needed(
+    conflict = None if game.time_vote_open else schedule_review_needed(
         [g.current_user.id], game.scheduled_at, game.duration_minutes, payload,
         scope=f'join_game:{game.id}', viewer_id=g.current_user.id, exclude_game_id=game.id,
     )
@@ -6846,7 +6945,7 @@ def _lock_users_and_game_for_waitlist_mutation(game_id, actor_id):
     raise RuntimeError('waitlist promotion lock closure kept changing')
 
 
-def _lock_stable_game_roster_users(game_id, actor_id):
+def _lock_stable_game_roster_users(game_id, actor_id, *, include_invitees=False):
     """Lock every roster User before Game, retrying if the snapshot expands."""
     for _attempt in range(3):
         roster_ids = {
@@ -6855,6 +6954,8 @@ def _lock_stable_game_roster_users(game_id, actor_id):
             ).all()
         }
         roster_ids.update(row[0] for row in db.session.query(GameSessionAttendance.user_id).filter_by(game_id=game_id).all())
+        if include_invitees:
+            roster_ids.update(row[0] for row in db.session.query(GameInvite.user_id).filter_by(game_id=game_id).all())
         roster_ids.add(actor_id)
         users = (
             User.query.filter(User.id.in_(sorted(roster_ids)))
@@ -6872,8 +6973,10 @@ def _lock_stable_game_roster_users(game_id, actor_id):
         )
         if not game:
             return users, None
-        db.session.expire(game, ['players'])
+        db.session.expire(game, ['players', 'invites'])
         actual_ids = {player.user_id for player in game.players}
+        if include_invitees:
+            actual_ids |= game.invited_user_ids()
         if actual_ids <= {user.id for user in users}:
             return users, game
         db.session.rollback()
@@ -7912,9 +8015,16 @@ def edit_game(game_id):
             ),
         })
 
+    # The vote owns the time until it locks; public or weekly plans need one.
+    if game.time_vote_open and (
+        proposed.get('scheduled_at', game.scheduled_at) != game.scheduled_at
+        or proposed.get('recurrence', 'none') != 'none'
+        or proposed.get('visibility') == 'open'
+    ):
+        return jsonify({'error': 'time_vote_open'}), 409
     schedule_changes = [key for key in proposed if key in SERIES_TEMPLATE_FIELDS
                         and proposed[key] != getattr(game, key)]
-    if set(schedule_changes) & (SERIES_SCHEDULE_FIELDS | {'duration_minutes'}):
+    if set(schedule_changes) & (SERIES_SCHEDULE_FIELDS | {'duration_minutes'}) and not game.time_vote_open:
         if edit_scope == 'following_dates' and game.recurrence_series_id:
             conflict = schedule_batch_review_needed(
                 _series_edit_schedule_plans(game, following, proposed, schedule_changes), payload,
@@ -8155,6 +8265,8 @@ def reschedule_game(game_id):
         return jsonify({'error': 'instant_rally_not_reschedulable'}), 409
     if game.recurrence != 'none':
         return jsonify({'error': 'recurring_open_play'}), 400
+    if game.time_vote_open:
+        return jsonify({'error': 'time_vote_open'}), 409
 
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
@@ -8194,6 +8306,74 @@ def reschedule_game(game_id):
             )
     db.session.commit()
     return jsonify(game.to_dict(g.current_user.id))
+
+
+@games_bp.post('/games/<int:game_id>/time-vote')
+@rate_limit(60, 60)
+@login_required
+def vote_game_time(game_id):
+    """Replace the viewer's picks. Voting never joins; Accept stays separate."""
+    payload = request.get_json(silent=True)
+    option_ids = payload.get('option_ids') if isinstance(payload, dict) else None
+    if not isinstance(option_ids, list) or not all(isinstance(value, str) for value in option_ids):
+        return jsonify({'error': 'invalid_time_vote'}), 400
+    game = (
+        Game.query.filter(Game.id == game_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if game:
+        db.session.expire(game, ['players', 'invites'])
+    if (not game or _game_has_blocked_participant(game, g.current_user.id)
+            or not game.visible_to(g.current_user.id, friend_ids(g.current_user.id))):
+        return jsonify({'error': 'game_not_found'}), 404
+    vote = game.time_vote_state()
+    if not vote:
+        return jsonify({'error': 'time_vote_closed'}), 409
+    if g.current_user.id not in vote['voters']:
+        return jsonify({'error': 'time_vote_forbidden'}), 403
+    chosen = set(option_ids)
+    if not chosen <= {option['id'] for option in vote['options']}:
+        return jsonify({'error': 'invalid_time_vote'}), 400
+    options = json.loads(game.time_options)
+    for option in options:
+        votes = [user_id for user_id in option.get('votes') or [] if user_id != g.current_user.id]
+        option['votes'] = votes + ([g.current_user.id] if option.get('id') in chosen else [])
+    game.time_options = json.dumps(options, separators=(',', ':'))
+    db.session.commit()
+    return jsonify(_game_payload(game, g.current_user.id))
+
+
+@games_bp.post('/games/<int:game_id>/time-vote/lock')
+@rate_limit(20, 60)
+@login_required
+def lock_game_time(game_id):
+    """Host settles the vote early on one future option."""
+    payload = request.get_json(silent=True)
+    option_id = payload.get('option_id') if isinstance(payload, dict) else None
+    try:
+        locked_users, game = _lock_stable_game_roster_users(
+            game_id, g.current_user.id, include_invitees=True,
+        )
+    except RuntimeError:
+        return jsonify({'error': 'game_changed_retry'}), 409
+    actor = next((user for user in locked_users if user.id == g.current_user.id), None)
+    if not actor or actor.deleted_at:
+        return jsonify({'error': 'authentication_required'}), 401
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    if game.creator_id != actor.id:
+        return jsonify({'error': 'forbidden'}), 403
+    vote = game.time_vote_state()
+    if not vote:
+        return jsonify({'error': 'time_vote_closed'}), 409
+    option = next((row for row in vote['options'] if row['id'] == option_id), None)
+    if not option:
+        return jsonify({'error': 'invalid_time_vote'}), 400
+    _lock_time_vote(game, option, actor.id)
+    db.session.commit()
+    return jsonify(_game_payload(game, actor.id))
 
 
 def _expected_score(rating_a, rating_b):
