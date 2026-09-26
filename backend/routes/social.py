@@ -1655,7 +1655,7 @@ def _notification_needs_action_expression(user_id):
     club_member = exists(ClubMember, ClubMember.club_id == Notification.related_club_id,
                          ClubMember.user_id == user_id)
     game_invite = exists(GameInvite, GameInvite.game_id == Notification.related_game_id,
-                         GameInvite.user_id == user_id)
+                         GameInvite.user_id == user_id, GameInvite.response.is_(None))
     game_player = exists(GamePlayer, GamePlayer.game_id == Notification.related_game_id,
                          GamePlayer.user_id == user_id)
     future_game = exists(Game, Game.id == Notification.related_game_id,

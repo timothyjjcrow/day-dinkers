@@ -3149,6 +3149,21 @@ class Game(TimestampMixin, db.Model):
                 for index, row in enumerate(active_queue)
                 if row.user and not row.user.deleted_at
             ]
+        # "Maybe" answers help the host and joined players plan. Everyone else
+        # gets a zero count and no names.
+        maybe_people = []
+        if (
+            self.status == 'upcoming' and not self.is_instant and viewer_id
+            and (viewer or self.creator_id == viewer_id)
+            and any(invite.response == 'maybe' for invite in self.invites)
+        ):
+            hidden_ids = blocked_pair_ids(viewer_id)
+            maybe_people = [
+                invite.user.to_summary_dict()
+                for invite in sorted(self.invites, key=lambda row: row.id)
+                if invite.response == 'maybe' and invite.user
+                and not invite.user.deleted_at and invite.user_id not in hidden_ids
+            ]
         my_offer = next((r for r in active_offers if r.user_id == viewer_id), None)
         handoff = next((r for r in reversed(self.host_handoffs)
                         if r.status == 'pending' and r.expires_at > now), None)
@@ -3277,14 +3292,16 @@ class Game(TimestampMixin, db.Model):
             'attendance_confirmation_due': attendance_confirmation_due,
             'commitment_confirmation_due': bool(attendance_confirmation_due and viewer.commitment_confirmation_due()),
             'my_commitment_requested_at': iso(viewer.commitment_requested_at) if viewer else None,
-            'rsvp_counts': {key: sum(p.rsvp_status() == key for p in players)
-                            for key in ('confirmed', 'needs_confirmation', 'reserved')},
+            'rsvp_counts': {**{key: sum(p.rsvp_status() == key for p in players)
+                               for key in ('confirmed', 'needs_confirmation', 'reserved')},
+                            'maybe': len(maybe_people)},
             'spots_left': spots_left,
             'is_joined': viewer is not None,
             'is_creator': self.creator_id == viewer_id,
             'waitlist_count': len(active_queue),
             'waitlist_position': waitlist_position,
             'waitlist_people': waitlist_people,
+            'maybe_people': maybe_people,
             'waitlist_offer': {'expires_at': iso(my_offer.offer_expires_at)} if my_offer else None,
             'reserved_offer_count': len(active_offers),
             'host_handoff': handoff.to_dict(viewer_id) if handoff and viewer_id in (
@@ -3301,7 +3318,10 @@ class Game(TimestampMixin, db.Model):
                            not is_blocked_between(viewer_id, r.user_id)],
             } if attendance_rows and can_view_attendance else None,
             'is_invited': personal_invite is not None,
-            'my_invite_status': 'pending' if personal_invite else None,
+            'my_invite_status': (
+                ('maybe' if personal_invite.response == 'maybe' else 'pending')
+                if personal_invite else None
+            ),
             'invited_by': (
                 (
                     self.creator.to_summary_dict()
@@ -3616,6 +3636,9 @@ class GameInvite(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # NULL = no answer yet; 'maybe' keeps the row (and private visibility)
+    # without holding a spot. Joining or declining deletes the row.
+    response = db.Column(db.String(16))
 
     game = db.relationship('Game', back_populates='invites')
     user = db.relationship('User')

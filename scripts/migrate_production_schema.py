@@ -178,6 +178,7 @@ REQUIRED_COLUMNS = {
         'level_min', 'level_max', 'time_options',
     },
     'game_player': {'recurrence_rsvp_automatic', 'commitment_requested_at'},
+    'game_invite': {'response'},
     'game_waitlist': {'id', 'game_id', 'user_id', 'offered_at', 'offer_expires_at', 'offer_status'},
     'game_host_handoff': {
         'id', 'game_id', 'requested_by_id', 'target_user_id', 'scope', 'status',
