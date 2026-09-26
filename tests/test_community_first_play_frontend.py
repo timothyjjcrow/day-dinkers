@@ -22,7 +22,7 @@ def test_play_launcher_has_explicit_now_arrival_availability_and_planning_paths(
     assert 'data-goto="play-pulse"' in launcher
     assert '<b>I’m free this hour</b>' in launcher
     assert 'data-goto="new-game"' in launcher
-    assert 'data-goto="ranked-match"' in launcher
+    assert 'data-goto="ranked-match"' not in launcher[:launcher.index("function playHeroNextHtml")]
     assert 'data-goto="game-flow"' not in launcher
 
 

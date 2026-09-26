@@ -78,15 +78,23 @@ def test_closed_detail_replaces_every_new_play_surface_but_keeps_exit_and_correc
     assert 'data-cd-suggest>Fix listing</button>' in detail
 
 
-def test_browsing_actions_are_direct_and_conditions_stay_with_arrival():
+def test_browsing_actions_are_direct_and_conditions_are_one_tap():
     detail = section(APP, "async function openCourtDetail", "function openCheckInSheet")
+    now = section(APP, "function courtConditionNowHtml", "function courtCheckinHistoryHtml")
 
     assert 'class="cd-quick-actions" role="group" aria-label="Court actions"' in detail
     for control in ('id="cd-favorite"', 'id="cd-share"', 'id="cd-gallery"',
-                    'id="cd-review-inline"', 'id="cd-condition"'):
+                    'id="cd-review-inline"'):
         assert control in detail
-    assert "Report conditions" in detail
-    assert detail.index('id="cd-condition"') > detail.index('id="cd-now-heading"')
+    assert 'id="cd-condition"' not in detail
+    assert "Courts right now" in now
+    assert 'data-cd-cond="${key}" aria-pressed="false"' in now
+    assert "state.token ?" in now
+    assert detail.index("${quickActions}") < detail.index("courtConditionNowHtml(court)")
+    assert detail.index("courtConditionNowHtml(court)") < detail.index('class="card cd-now-card"')
+    assert "api(`/courts/${court.id}/condition`" in detail
+    assert "Thanks! Players nearby can see it." in detail
+    assert "min-height: var(--tap-min)" in STYLES.split(".cd-condition-chip {", 1)[1].split("}", 1)[0]
     assert detail.index("${quickActions}") < detail.index('class="card cd-now-card"')
     assert 'aria-label="More court actions"' not in detail
     assert ".cd-quick-actions" in STYLES
@@ -134,7 +142,7 @@ def test_empty_sessions_offer_a_context_preserving_action_and_detail_has_a_loadi
     assert "data-timeline-create" in timeline
     assert "openChildModal(modal,()=>openNewGameModal({court}))" in timeline
     assert "openChildModal(modal, () => openNewGameModal" in detail
-    assert "openChildModal(modal, () => openConditionSheet" in detail
+    assert "beginButtonAction(chip, 'Sharing…', conditionChips)" in detail
     assert "openChildModal(modal, () => openCourtGallery" in detail
     assert "openChildModal(modal, () => openCourtChat" in detail
     assert 'id="cd-find-communities"' in detail

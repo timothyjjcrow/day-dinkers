@@ -13,7 +13,7 @@ from backend.app import create_app
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC = ROOT / 'public'
-RELEASE = PUBLIC / 'assets' / 'r83'
+RELEASE = PUBLIC / 'assets' / 'r84'
 CI_WORKFLOW = (ROOT / '.github' / 'workflows' / 'backend-ci.yml').read_text()
 RUNTIME_FILES = {
     'app-v15.min.js': 'application/javascript; charset=utf-8',
@@ -24,9 +24,9 @@ RUNTIME_FILES = {
 }
 
 
-def test_r83_manifest_matches_readable_sources_and_reduces_transfer_size():
+def test_r84_manifest_matches_readable_sources_and_reduces_transfer_size():
     manifest = json.loads((RELEASE / 'manifest.json').read_text())
-    assert manifest['release'] == 'r83'
+    assert manifest['release'] == 'r84'
     assert set(manifest['files']) == set(RUNTIME_FILES)
     for output_name, metadata in manifest['files'].items():
         source = (PUBLIC / metadata['source']).read_bytes()
@@ -51,12 +51,10 @@ def test_r83_manifest_matches_readable_sources_and_reduces_transfer_size():
         )
         assert source_map['sourcesContent'][source_index] == source.decode()
 
-    # r83 is a full visual redesign (new design system plus restyled map,
-    # court, Play, planner, game, Friends, chat and Me pages). Measured: app
-    # 299.6 KiB, stylesheet 67.0 KiB, aggregate 386.1 KiB. The app cap moves
-    # from 300 to 305 KiB and the aggregate cap from 375 to 395 KiB to leave
-    # room for follow-up fixes. The self-hosted brand font (27 KiB latin woff2)
-    # is a separate, cached vendor file and is not part of this manifest.
+    # r84 adds emailed sign-in codes, one-tap court conditions and Compete on
+    # Me within the caps r83 set (app 305 KiB, aggregate 395 KiB). The
+    # self-hosted brand font (27 KiB latin woff2) is a separate, cached vendor
+    # file and is not part of this manifest.
     assert manifest['files']['app-v15.min.js']['brotli_bytes'] < 305 * 1024
     assert sum(item['brotli_bytes'] for item in manifest['files'].values()) < 395 * 1024
 
@@ -65,16 +63,16 @@ def test_r83_manifest_matches_readable_sources_and_reduces_transfer_size():
 def test_release_route_negotiates_precompressed_immutable_assets(filename):
     app = create_app('testing')
     client = app.test_client()
-    plain = client.get(f'/assets/r83/{filename}')
+    plain = client.get(f'/assets/r84/{filename}')
     gzip_response = client.get(
-        f'/assets/r83/{filename}', headers={'Accept-Encoding': 'gzip'},
+        f'/assets/r84/{filename}', headers={'Accept-Encoding': 'gzip'},
     )
     brotli_response = client.get(
-        f'/release-assets/r83/{filename}',
+        f'/release-assets/r84/{filename}',
         headers={'Accept-Encoding': 'br, gzip;q=0.8'},
     )
     brotli_refused = client.get(
-        f'/release-assets/r83/{filename}',
+        f'/release-assets/r84/{filename}',
         headers={'Accept-Encoding': 'gzip, br;q=0'},
     )
 
@@ -100,11 +98,11 @@ def test_release_route_negotiates_precompressed_immutable_assets(filename):
         assert response.headers['Vary'] == 'Accept-Encoding'
 
     assert client.get('/assets/r57/app-v15.min.js').status_code == 404
-    assert client.get('/assets/r83/not-generated.js').status_code == 404
+    assert client.get('/assets/r84/not-generated.js').status_code == 404
     assert client.get('/release-assets/r57/app-v15.min.js').status_code == 404
-    assert client.get('/release-assets/r83/app-v15.min.js.map').status_code == 404
+    assert client.get('/release-assets/r84/app-v15.min.js.map').status_code == 404
     # Older releases remain available to already-open service-worker clients
-    # while the document moves them to the new immutable r83 URLs.
+    # while the document moves them to the new immutable r84 URLs.
     assert client.get('/release-assets/r58/app-v15.min.js').status_code == 200
     assert client.get('/release-assets/r59/app-v15.min.js').status_code == 200
     assert client.get('/release-assets/r70/app-v15.min.js').status_code == 200
@@ -123,14 +121,14 @@ def test_release_route_negotiates_precompressed_immutable_assets(filename):
 def test_feature_helpers_are_loaded_before_app_and_available_offline():
     index = (PUBLIC / 'index.html').read_text()
     service_worker = (PUBLIC / 'sw.js').read_text()
-    app_script = '<script defer src="/release-assets/r83/app-v15.min.js"></script>'
+    app_script = '<script defer src="/release-assets/r84/app-v15.min.js"></script>'
     for helper in ('crew-planner-v15', 'tournament-bracket-v15', 'venue-workspace-v15'):
-        source = f'/release-assets/r83/{helper}.min.js'
+        source = f'/release-assets/r84/{helper}.min.js'
         script = f'<script defer src="{source}"></script>'
         assert index.index(script) < index.index(app_script)
         assert f'<link rel="preload" href="{source}" as="script" />' in index
         assert source in service_worker
-    assert "const CACHE = 'thirdshot-v15-r85';" in service_worker
+    assert "const CACHE = 'thirdshot-v15-r86';" in service_worker
     assert '(?:app|crew-planner|tournament-bracket|venue-workspace)-v15' in index
 
 
@@ -178,7 +176,7 @@ def test_vercel_negotiates_committed_brotli_release_assets():
         r'\s*(,.*|$)'
     )
 
-    for release in ('r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', 'r76', 'r77', 'r78', 'r79', 'r80', 'r81', 'r82', 'r83'):
+    for release in ('r58', 'r59', 'r60', 'r61', 'r62', 'r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69', 'r70', 'r71', 'r72', 'r73', 'r74', 'r75', 'r76', 'r77', 'r78', 'r79', 'r80', 'r81', 'r82', 'r83', 'r84'):
         for filename, content_type in RUNTIME_FILES.items():
             first_release = {
                 'tournament-bracket-v15.min.js': 72,
@@ -253,7 +251,7 @@ def test_ci_rebuilds_assets_for_every_release_affecting_change():
     )
 
 
-@pytest.mark.parametrize('previous_release', ['r80', 'r81', 'r82'])
+@pytest.mark.parametrize('previous_release', ['r81', 'r82', 'r83'])
 @pytest.mark.parametrize('filename', RUNTIME_FILES)
 def test_previous_release_still_serves_committed_assets_for_existing_tabs(filename, previous_release):
     client = create_app('testing').test_client()

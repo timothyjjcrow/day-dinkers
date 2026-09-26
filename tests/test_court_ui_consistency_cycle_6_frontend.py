@@ -141,7 +141,7 @@ def test_court_detail_uses_product_icons_and_closed_courts_bind_only_live_contro
     assert 'class="court-claim-action"' in detail
     assert "Claim its profile to add booking, schedules, lessons, and programs." in detail
     assert 'class="cd-weather-summary"' in detail
-    assert "modal.querySelector('#cd-condition')?.addEventListener" in detail
+    assert "modal.querySelectorAll('[data-cd-cond]')" in detail
     assert "modal.querySelector('#cd-schedule')?.addEventListener" in detail
     assert "modal.querySelector('#cd-ranked')?.addEventListener" in detail
     assert "modal.querySelector('#cd-chat')?.addEventListener" in detail

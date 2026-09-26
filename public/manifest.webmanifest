@@ -9,6 +9,7 @@
   "background_color": "#ffffff",
   "theme_color": "#14532d",
   "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
@@ -17,22 +18,22 @@
     {
       "name": "Courts",
       "url": "/?tab=courts",
-      "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Play",
       "url": "/?tab=play",
-      "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Community",
       "url": "/?tab=chat",
-      "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Me",
       "url": "/?tab=profile",
-      "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ],
   "screenshots": [

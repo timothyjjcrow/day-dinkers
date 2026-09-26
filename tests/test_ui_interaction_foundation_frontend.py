@@ -1078,7 +1078,7 @@ def test_court_contribution_flows_use_back_navigation_and_shared_form_feedback()
     challenge = js_function("openChallengeSheet")
     hours = js_function("maybeAskHours")
     assert "openChildModal(modal, () => openSuggestEditSheet(" in court
-    assert "openChildModal(modal, () => openConditionSheet(" in court
+    assert "modal.querySelectorAll('[data-cd-cond]')" in court
     assert "openChildModal(modal, () => openCourtPlayerActions" in court
     assert 'id="ch-form" novalidate' in challenge
     assert "bindModalFormUX(modal, '#ch-send')" in challenge

@@ -18,17 +18,24 @@
     } catch { /* storage can be disabled; CSS media queries remain the fallback */ }
   </script>
   <title>Third Shot — Find courts, players & play</title>
-  <link rel="stylesheet" href="/release-assets/r83/styles-v15.min.css" />
+  <link rel="stylesheet" href="/release-assets/r84/styles-v15.min.css" />
   <link rel="preload" href="/vendor/plus-jakarta-sans/plus-jakarta-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="icon" href="icon-512.png" type="image/png" />
-  <link rel="apple-touch-icon" href="icon-512.png" />
+  <link rel="icon" href="icon-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <!-- Start downloading the large application files early, but execute them
        with defer so the useful boot shell can paint before bundle parsing. -->
-  <link rel="preload" href="/release-assets/r83/crew-planner-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r83/tournament-bracket-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r83/venue-workspace-v15.min.js" as="script" />
-  <link rel="preload" href="/release-assets/r83/app-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r84/crew-planner-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r84/tournament-bracket-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r84/venue-workspace-v15.min.js" as="script" />
+  <link rel="preload" href="/release-assets/r84/app-v15.min.js" as="script" />
+  <!-- The court map is the first screen, so its library downloads alongside
+       the app instead of waiting for the app to request it. crossorigin
+       matches how the app attaches these files, so the preloads are reused. -->
+  <link rel="preload" href="/vendor/leaflet/leaflet.js?v=1.9.4" as="script" crossorigin />
+  <link rel="preload" href="/vendor/leaflet-markercluster/leaflet.markercluster.js?v=1.5.3" as="script" crossorigin />
+  <link rel="preload" href="/vendor/leaflet/leaflet.css?v=1.9.4" as="style" crossorigin />
+  <link rel="preload" href="/vendor/leaflet-markercluster/MarkerCluster.css?v=1.5.3" as="style" crossorigin />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -115,7 +122,7 @@
     <section id="auth-screen" class="screen hidden" aria-labelledby="auth-explore-title">
       <div class="auth-layout">
       <div class="auth-explore">
-        <div class="auth-explore-brand"><img src="icon-512.png" alt="" /><span>Third Shot</span></div>
+        <div class="auth-explore-brand"><img src="icon-192.png" alt="" /><span>Third Shot</span></div>
         <h2 id="auth-explore-title">Find your next place to <span class="auth-volt">play.</span></h2>
         <p class="auth-explore-copy">Tap a court on the map to see who plays there. Join free to play with friends.</p>
         <button type="button" class="btn-link hidden" id="auth-browse-back">Back to courts</button>
@@ -137,7 +144,7 @@
       </div>
       <div class="auth-card hidden" id="auth-access">
         <button type="button" class="btn-link" id="auth-access-back">Back to browsing</button>
-        <img src="icon-512.png" alt="" class="auth-logo-img" />
+        <img src="icon-192.png" alt="" class="auth-logo-img" />
         <div class="auth-intro">
           <span class="auth-eyebrow" id="auth-eyebrow">Welcome back</span>
           <h1 id="auth-title">Log in to Third Shot</h1>
@@ -151,14 +158,26 @@
               <input type="text" id="auth-name" placeholder="How players will know you" autocomplete="name" maxlength="60" />
             </div>
           </div>
-          <div class="auth-field">
+          <div class="auth-field" id="auth-email-field">
             <label for="auth-email">Email</label>
             <div class="auth-control">
               <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-mail" /></svg>
               <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email" inputmode="email" required />
             </div>
           </div>
-          <div class="auth-field">
+          <div class="auth-field hidden" id="auth-code-field">
+            <label for="auth-code">Code from your email</label>
+            <div class="auth-control">
+              <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-key" /></svg>
+              <input type="text" id="auth-code" class="auth-code-input" placeholder="6-digit code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" spellcheck="false" aria-describedby="auth-code-help" />
+            </div>
+            <small id="auth-code-help" class="auth-field-help">It expires in 10 minutes. Check spam if you don’t see it.</small>
+            <div class="auth-code-actions">
+              <button type="button" class="auth-inline-link" id="auth-code-change">Use a different email</button>
+              <button type="button" class="auth-inline-link" id="auth-code-resend">Send a new code</button>
+            </div>
+          </div>
+          <div class="auth-field" id="auth-password-field">
             <label for="auth-password">Password</label>
             <div class="auth-control auth-password-control">
               <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-lock" /></svg>
@@ -182,6 +201,7 @@
           </div>
           <button type="submit" class="btn btn-primary btn-block" id="auth-submit">Log in</button>
         </form>
+        <button type="button" class="btn-link hidden" id="auth-method">Use a password instead</button>
         <button type="button" class="btn-link" id="auth-toggle">New here? Create an account</button>
         <p class="auth-legal">By continuing, you agree to our
           <button type="button" data-auth-policy="terms">Terms</button> and
@@ -271,17 +291,16 @@
               <button id="play-avatar-button" class="header-avatar-button" type="button" aria-label="Open my profile"></button>
             </div>
           </div>
-          <div class="segmented play-segments" id="play-segments" role="tablist" aria-label="Play views">
-            <button type="button" role="tab" id="play-tab-games" aria-controls="play-content" data-seg="games" class="active" aria-selected="true">Games</button>
-            <button type="button" role="tab" id="play-tab-scores" aria-controls="play-content" data-seg="scores" aria-selected="false">Rankings</button>
-            <button type="button" role="tab" id="play-tab-brackets" aria-controls="play-content" data-seg="brackets" aria-selected="false">Events <span id="competition-action-badge" class="segment-badge hidden" aria-hidden="true"></span></button>
+          <div class="play-subview hidden" id="play-subview">
+            <button type="button" class="play-subview-back" id="play-subview-back"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-arrow-left" /></svg><span>Me</span></button>
+            <h2 id="play-subview-title" tabindex="-1">Rankings</h2>
           </div>
           <button type="button" class="view-freshness hidden" data-refresh-view="play" aria-label="Refresh Play" aria-controls="play-content">
             <span data-view-age>Not updated yet</span><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-refresh" /></svg>
           </button>
         </header>
         <div id="play-view-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
-        <div id="play-content" class="tab-scroll" role="tabpanel" aria-labelledby="play-tab-games"></div>
+        <div id="play-content" class="tab-scroll" role="region" aria-label="Play"></div>
         <button type="button" id="new-game-fab" class="fab" aria-label="Plan a play session" title="Plan a play session">
           <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-plus" /></svg>
         </button>
@@ -344,7 +363,7 @@
         <button type="button" data-tab="courts" class="nav-btn active" aria-current="page"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-map" /></svg></span>Map</button>
         <button type="button" data-tab="play" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-zap" /></svg></span>Play<span id="play-badge" class="badge hidden"></span></button>
         <button type="button" data-tab="chat" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-users" /></svg></span>Friends<span id="chat-badge" class="badge hidden"></span><span id="chat-request-dot" class="nav-request-dot hidden" aria-hidden="true"></span></button>
-        <button type="button" data-tab="profile" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-user" /></svg></span>Me</button>
+        <button type="button" data-tab="profile" class="nav-btn"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-user" /></svg></span>Me<span id="profile-badge" class="badge hidden"></span></button>
       </nav>
     </main>
 
@@ -425,9 +444,9 @@
       syncBoot();
     })();
   </script>
-  <script defer src="/release-assets/r83/crew-planner-v15.min.js"></script>
-  <script defer src="/release-assets/r83/tournament-bracket-v15.min.js"></script>
-  <script defer src="/release-assets/r83/venue-workspace-v15.min.js"></script>
-  <script defer src="/release-assets/r83/app-v15.min.js"></script>
+  <script defer src="/release-assets/r84/crew-planner-v15.min.js"></script>
+  <script defer src="/release-assets/r84/tournament-bracket-v15.min.js"></script>
+  <script defer src="/release-assets/r84/venue-workspace-v15.min.js"></script>
+  <script defer src="/release-assets/r84/app-v15.min.js"></script>
 </body>
 </html>

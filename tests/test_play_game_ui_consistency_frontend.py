@@ -146,8 +146,8 @@ def test_ranked_empty_planner_group_and_mvp_choices_have_semantic_icons_and_stat
     detail = section("function gameScreenHtml", "async function openGameScreen")
 
     launcher = section("function rallyLauncherHtml", "function playProgressCardHtml")
-    assert launcher.count('data-goto="ranked-match"') == 1
-    assert "<span aria-hidden=\"true\">${uiIcon('trophy')}</span><b>Start a ranked match</b>" in launcher
+    assert launcher.count('data-goto="ranked-match"') == 0
+    assert "<b>Start a ranked match</b>" in APP[APP.index('class="profile-compete"'):APP.index('id="pf-new-player-progress"')]
     assert "⚔️ Start a ranked match" not in APP
     assert planner.count("${uiIcon('users')} Starts with") >= 2
     assert "👥 Starts with" not in planner

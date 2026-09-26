@@ -194,7 +194,8 @@ def test_me_exposes_account_wide_competition_action_badge_count(client, app):
 def test_compete_ui_exposes_action_badge_and_progressive_pages():
     app_source = (ROOT / 'public' / 'app-v15.js').read_text()
     index = (ROOT / 'public' / 'index.html').read_text()
-    assert 'id="competition-action-badge"' in index
+    assert 'id="competition-action-badge"' in app_source
+    assert 'id="profile-badge" class="badge hidden"' in index
     for source in (
         'mine-tournaments', 'nearby-tournaments',
         'mine-leagues', 'nearby-leagues',
@@ -202,7 +203,8 @@ def test_compete_ui_exposes_action_badge_and_progressive_pages():
         assert f'data-competition-page="{source}"' in app_source
     assert "api(`${baseUrl}&cursor=${encodeURIComponent(cursor)}`)" in app_source
     assert "state.competitionActionCount" in app_source
-    assert "Events, ${actionCount} action" in app_source
+    assert "Tournaments and leagues, ${actionCount} action" in app_source
+    assert "Me, ${actionCount} competition action" in app_source
 
 
 def test_play_home_schedule_includes_owned_tournaments_beyond_the_next_week(client, app):
