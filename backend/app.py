@@ -1155,6 +1155,15 @@ def _upgrade_schema(app):
                     "VARCHAR(16) NOT NULL DEFAULT 'all'"
                 )
 
+        if 'game_invite' in tables:
+            game_invite_cols = {
+                c['name'] for c in inspector.get_columns('game_invite')
+            }
+            if 'response' not in game_invite_cols:
+                statements.append(
+                    'ALTER TABLE game_invite ADD COLUMN response VARCHAR(16)'
+                )
+
         if 'game_player' in tables:
             gp_cols = {c['name'] for c in inspector.get_columns('game_player')}
             if 'commitment_requested_at' not in gp_cols:

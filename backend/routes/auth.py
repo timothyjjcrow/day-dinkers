@@ -453,10 +453,11 @@ def _active_game_payload(user):
         candidates.append((rank, data))
 
     # Private games you've been invited to (challenges + personal invites) and
-    # haven't joined yet. The invite list is the source of truth, not notifications.
+    # haven't answered yet. The invite list is the source of truth, not notifications.
     invited_games = (
         Game.query.join(GameInvite)
-        .filter(GameInvite.user_id == user.id, Game.status == 'upcoming')
+        .filter(GameInvite.user_id == user.id, GameInvite.response.is_(None),
+                Game.status == 'upcoming')
         .order_by(Game.scheduled_at.asc())
         .limit(15)
         .all()

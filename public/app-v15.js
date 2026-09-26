@@ -17095,16 +17095,18 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     const open = Math.max(0, Number.isFinite(supplied) ? supplied : capacity - joined - held);
     const needsReply = Math.max(0, Number(game.rsvp_counts?.needs_confirmation) || 0);
     const reserved = Math.max(0, Number(game.rsvp_counts?.reserved) || 0);
+    const maybe = Math.max(0, Number(game.rsvp_counts?.maybe) || 0);
+    const withMaybe = (detail) => (maybe ? `${maybe} maybe · ${detail}` : detail);
     if (needsReply || reserved) return { tone: 'forming', label: `${confirmed} confirmed`,
       detail: [needsReply ? `${needsReply} to confirm` : '', reserved ? `${reserved} reserved` : '',
-        open ? `${open} spots left` : 'Full'].filter(Boolean).join(' · ') };
+        withMaybe(open ? `${open} spots left` : 'Full')].filter(Boolean).join(' · ') };
     if (open) return { tone: 'forming', label: `${joined} joined`,
-      detail: `${open} spot${open === 1 ? '' : 's'} left${held ? ` · ${held} held` : ''}` };
+      detail: withMaybe(`${open} spot${open === 1 ? '' : 's'} left${held ? ` · ${held} held` : ''}`) };
     if (held) return { tone: 'forming', label: `${joined} joined`,
-      detail: `${held} spot${held === 1 ? '' : 's'} held` };
+      detail: withMaybe(`${held} spot${held === 1 ? '' : 's'} held`) };
     if (game.attendance_confirmation_due && confirmed < joined) return { tone: 'forming', label: 'Full',
       detail: `${joined - confirmed} still need${joined - confirmed === 1 ? 's' : ''} to confirm` };
-    return joined ? { tone: 'ready', label: `${joined} joined`, detail: 'Full' } : null;
+    return joined ? { tone: 'ready', label: `${joined} joined`, detail: withMaybe('Full') } : null;
   }
 
   function gameRosterStatusHtml(game) {
@@ -17840,10 +17842,11 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
 
   function rosterBoostLauncherHtml(game, { primary = false } = {}) {
     const spotsLeft = Math.max(0, Number(game?.spots_left) || 0);
+    const maybe = Math.max(0, Number(game?.rsvp_counts?.maybe) || 0);
     return `<section class="roster-boost-launch${primary ? ' is-primary' : ''}" id="gs-fill-roster" aria-labelledby="gs-invite-title">
       <div class="roster-boost-launch-copy">
         <b id="gs-invite-title">Invite</b>
-        <span>${spotsLeft} open spot${spotsLeft === 1 ? '' : 's'} · choose how to reach players</span>
+        <span>${maybe ? `${maybe} maybe · ` : ''}${spotsLeft} open spot${spotsLeft === 1 ? '' : 's'}${maybe ? '' : ' · choose how to reach players'}</span>
       </div>
       <div class="roster-boost-launch-actions" role="group" aria-label="Invite players">
         <button type="button" data-roster-boost-channel="friends"><span aria-hidden="true">${uiIcon('users')}</span><b>Friends</b></button>
@@ -18956,6 +18959,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       return { label:game.commitment_confirmation_due ? 'Review changes' : 'Confirm spot', tone:'warn' };
     }
     if (!game.is_joined && game.my_invite_status === 'pending' && Date.parse(game.scheduled_at) > Date.now()) return { label:'Reply to invite', tone:'warn' };
+    if (!game.is_joined && game.my_invite_status === 'maybe' && Date.parse(game.scheduled_at) > Date.now()) return { label:'Maybe', tone:'' };
     if (Date.parse(game.scheduled_at) <= Date.now()) {
       if (game.can_enter_score) return { label:'Enter score', tone:'warn' };
       if (game.can_complete_session) return { label:'Wrap up session', tone:'warn' };
@@ -36411,6 +36415,12 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
       }).join('');
   }
 
+  // Invitees who answered "Maybe": no spot held, so no RSVP state or Remove.
+  function sessionMaybeGroupHtml(game) {
+    const people = game.status === 'upcoming' && Array.isArray(game.maybe_people) ? game.maybe_people : [];
+    return people.length ? `<div class="session-roster-group" data-rsvp-state="maybe"><h5>Maybe <span>${people.length}</span></h5>${people.map((person) => `<div class="game-player-row"><button type="button" class="player-profile-link" data-view-user="${Number(person.user_id)}" aria-label="View ${esc(person.display_name)}'s profile">${avatarHtml(person, 'sm', 'span')}<span class="row-main"><span class="row-title">${esc(person.display_name)}</span></span></button></div>`).join('')}</div>` : '';
+  }
+
   function sessionConfirmationHtml(game) {
     if (!game.attendance_confirmation_due || !game.is_joined || game.is_creator
         || game.is_instant || game.status !== 'upcoming'
@@ -38736,6 +38746,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         arrival.arrives_at, arrival.expires_at, arrival.active]),
       game.waitlist_count, game.waitlist_position, game.auto_fill_waitlist,
       (game.waitlist_people || []).map((person) => [person.user_id, person.position]),
+      (game.maybe_people || []).map((person) => person.user_id),
       game.my_invite_status, game.invited_by && (game.invited_by.user_id || game.invited_by.id),
       game.chat_unread, game.chat_preview && [
         game.chat_preview.id, game.chat_preview.sender_id, game.chat_preview.body,
@@ -38942,9 +38953,10 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       statusIcon = uiIcon('clock');
       headline = 'Game didn’t fill up';
       subline = 'This pickup game didn’t fill up.';
-    } else if (game.my_invite_status === 'pending' && !game.is_joined && !game.my_recurrence_rsvp?.is_skipped) {
+    } else if (game.my_invite_status && !game.is_joined && !game.my_recurrence_rsvp?.is_skipped) {
       statusIcon = uiIcon('send');
-      subline = `${esc((game.invited_by || {}).display_name || 'The host')} invited you`;
+      subline = game.my_invite_status === 'maybe' ? 'You said maybe'
+        : `${esc((game.invited_by || {}).display_name || 'The host')} invited you`;
     } else if (isChallenge && !game.is_joined && game.spots_left > 0) {
       statusIcon = uiIcon('trophy'); headline = "You've been challenged!";
       subline = `Ranked singles vs ${esc((game.players[0] || {}).display_name || 'a player')}`;
@@ -39052,17 +39064,19 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         }
       } else if (!game.is_joined && game.spots_left > 0) {
         const skipped = game.recurrence === 'weekly' && game.my_recurrence_rsvp?.is_skipped;
-        actions = `${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
+        actions = `${skipped ? '<div class="recurrence-skip-state"><b>This date is skipped</b><span>Your series preference is saved. Rejoin only if your plans changed.</span></div>' : ''}<button class="btn btn-primary btn-block" id="gs-join" style="padding:16px">${skipped ? `${uiIcon('refresh')} Rejoin this date` : isChallenge ? `${uiIcon('trophy')} Accept challenge` : game.my_invite_status === 'pending' ? `${uiIcon('check')} Accept invitation` : game.my_invite_status === 'maybe' ? `${uiIcon('check')} I’m in` : `${uiIcon('pickleball')} ${game.recurrence === 'weekly' ? 'Join this date' : `Join ${playNoun}`}`}</button>`;
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
-        } else if (!skipped && game.my_invite_status === 'pending') {
-          actions += '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
+        } else if (!skipped && game.my_invite_status) {
+          actions += game.my_invite_status === 'pending' && !isChallenge
+            ? '<div class="session-invite-replies"><button class="btn btn-secondary" id="gs-maybe-invite">Maybe</button><button class="btn btn-secondary" id="gs-decline-invite">Can’t make it</button></div>'
+            : '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
         }
       } else if (!game.is_joined) {
         actions = game.waitlist_position
             ? `<section class="game-consent-card" aria-label="Your waitlist place"><b id="gs-waitlist-state" tabindex="-1">#${game.waitlist_position} on the waitlist</b><p>Accept an offer when a spot opens.</p><button class="btn btn-secondary btn-block" id="gs-waitlist-leave">Leave waitlist</button></section>`
             : `<button class="btn btn-primary btn-block" id="gs-waitlist" style="padding:16px">${uiIcon('clock')} Join waitlist${game.waitlist_count ? ` · ${game.waitlist_count} waiting` : ''}</button>`;
-        if (game.my_invite_status === 'pending' && !game.waitlist_position && !game.waitlist_offer) {
+        if (game.my_invite_status && !game.waitlist_position && !game.waitlist_offer) {
           actions += '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
         }
       } else if (game.is_joined) {
@@ -39279,7 +39293,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       ${gameHostRequestHtml(game)}
       ${!hasScore ? `<section class="session-roster" aria-label="Players">
         <div class="session-roster-head"><h4>${assembly ? 'At the court' : game.status === 'completed' ? 'Played' : game.status === 'upcoming' ? 'Players' : 'Signed up'} <span>${readyCount}</span></h4><span>${game.status === 'upcoming' && !closedRally ? rosterAvailability : ''}</span></div>
-        ${playersHtml}
+        ${playersHtml}${sessionMaybeGroupHtml(game)}
       </section>` : ''}
       ${waitlistHtml}${arrivalsHtml}${gameConsentHtml(game)}
       ${ratingChanges}
@@ -39955,6 +39969,26 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       box.querySelector('#gs-complete-no-score')?.addEventListener('click', () => {
         openChildModal(modal, () => openSessionWrapUpModal(game, (updated) => render(updated)));
       });
+      box.querySelector('#gs-maybe-invite')?.addEventListener('click', async (event) => {
+        const resetAction = beginButtonAction(event.currentTarget, 'Saving…', [...box.querySelectorAll('#gs-join, #gs-decline-invite')]);
+        if (!resetAction) return;
+        const answer = async (method) => {
+          const fresh = await api(`/games/${gameId}/invites/maybe`, { method });
+          state.playGamesCache = null;
+          if (modal.isConnected) render(fresh);
+          refreshMe();
+          if (state.tab === 'play') renderPlay();
+        };
+        try {
+          await answer('POST');
+          focusGameControl(modal, box, '#gs-join');
+          toast('Marked as maybe', { tone: 'success', duration: 6500, action: { label: 'Undo',
+            onClick: () => answer('DELETE').catch((error) => toast(error.message, { tone: 'warning' })) } });
+        } catch (error) {
+          resetAction();
+          showInlineActionError(box, error.message);
+        }
+      });
       box.querySelectorAll('#gs-score, #gs-wrap-session').forEach((button) => button.addEventListener('click', async (event) => {
         const scoreButton = event.currentTarget;
         const resetAction = beginButtonAction(
@@ -40346,7 +40380,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         'rally_arrival_cancelled', 'rally_arrival_expired', 'player_arriving', 'arrival_cancelled', 'nearby_games'].includes(kind)) return 'map-pin';
       if (['tournament_join', 'tournament_withdraw', 'tournament_cancelled', 'league_update'].includes(kind)) return 'grid';
       if (['business_claim', 'business_integration'].includes(kind)) return 'building';
-      if (['game_join', 'game_cancelled', 'invite_declined'].includes(kind)) return 'pickleball';
+      if (['game_join', 'game_cancelled', 'invite_declined', 'invite_maybe'].includes(kind)) return 'pickleball';
       return kind === 'streak_nag' ? 'activity' : 'bell';
     };
     const notificationAccessibleText = (notification, {

@@ -2697,6 +2697,8 @@ def send_game_reminders():
     ).all()
     for game in day_due:
         court_name = game.court.name if game.court else 'the court'
+        maybe_ids = {invite.user_id for invite in game.invites if invite.response == 'maybe'}
+        maybe_count = len(maybe_ids - blocked_pair_ids(game.creator_id)) if maybe_ids else 0
         for player in game.players:
             if player.day_reminded_at is not None:
                 continue
@@ -2709,7 +2711,11 @@ def send_game_reminders():
                     if is_host else f'Still coming tomorrow at {court_name}?'
                 ),
                 (
-                    f'{len(game.players)} players are signed up.'
+                    (
+                        f'{len(game.players)} joined · {maybe_count} maybe — nudge them or invite more.'
+                        if maybe_count
+                        else f'{len(game.players)} players are signed up.'
+                    )
                     if is_host
                     else 'Confirm your spot, or open it for another player if plans changed.'
                 ),
@@ -2910,6 +2916,7 @@ def _slim_game_payload(data):
         value['invited_by'] = _slim_player_payload(value['invited_by'])
     # Full queued identities are available on game detail to the host.
     value.pop('waitlist_people', None)
+    value.pop('maybe_people', None)
     return value
 
 
@@ -6716,6 +6723,67 @@ def decline_invite(game_id):
         )
     db.session.commit()
     return jsonify({'declined': True})
+
+
+@games_bp.route('/games/<int:game_id>/invites/maybe', methods=['POST', 'DELETE'])
+@rate_limit(60, 3600)
+@login_required
+def maybe_invite(game_id):
+    """Answer a personal invite with "maybe" (POST) or take it back (DELETE).
+
+    The invite row stays, so a private game stays visible and the answer
+    belongs to this date only. A maybe never holds a spot.
+    """
+    user = (
+        User.query.filter(User.id == g.current_user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if not user or user.deleted_at:
+        return jsonify({'error': 'authentication_required'}), 401
+    g.current_user = user
+    game = (
+        Game.query.filter(Game.id == game_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if not game or _game_has_blocked_participant(game, user.id):
+        return jsonify({'error': 'game_not_found'}), 404
+    if any(p.user_id == user.id for p in game.players):
+        return jsonify({'error': 'already_joined'}), 400
+    invite = (
+        GameInvite.query.filter_by(game_id=game.id, user_id=user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if not invite:
+        return jsonify({'error': 'not_invited'}), 404
+    if game.status != 'upcoming' or game.is_instant or game.is_direct_challenge:
+        return jsonify({'error': 'game_not_open'}), 409
+
+    answer = 'maybe' if request.method == 'POST' else None
+    if invite.response != answer:
+        invite.response = answer
+        # One unread item per game for the host, and never a second ping
+        # from the same person toggling their answer.
+        if answer and game.creator_id != user.id and not Notification.query.filter_by(
+            user_id=game.creator_id, kind='invite_maybe',
+            related_game_id=game.id, related_user_id=user.id,
+        ).first():
+            court_name = game.court.name if game.court else 'the court'
+            notify(
+                game.creator_id,
+                'invite_maybe',
+                f'{user.display_name} might make your {_play_noun(game)} at {court_name}',
+                related_user_id=user.id,
+                related_game_id=game.id,
+                unread_dedupe_key=f'game-maybe:{game.id}',
+            )
+        db.session.commit()
+    return jsonify(_game_payload(game, user.id))
 
 
 def _lock_users_and_game_for_waitlist_mutation(game_id, actor_id):

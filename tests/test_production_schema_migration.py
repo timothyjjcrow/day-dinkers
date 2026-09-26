@@ -515,6 +515,15 @@ def test_release_schema_verifier_requires_local_recurrence_and_rsvp_state():
     ) in gaps
 
 
+def test_release_schema_verifier_requires_maybe_invite_answers():
+    inspector = FakeInspector()
+    inspector.columns['game_invite'].remove('response')
+
+    assert (
+        "game_invite missing columns ['response']" in _schema_gaps(inspector)
+    )
+
+
 def test_release_schema_verifier_requires_arrival_history_and_active_user_slot():
     inspector = FakeInspector()
     inspector.columns['game_arrival_intent'].remove('last_announced_at')

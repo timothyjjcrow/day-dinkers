@@ -23,7 +23,7 @@ def test_changed_commitment_requires_review_on_attend_and_repeated_join(client,c
         detail=client.get(path,headers=auth(who)).get_json()
         by_id={p['user_id']:p for p in detail['players']}
         assert by_id[guest['user']['id']]['rsvp_status']=='needs_confirmation'
-        assert detail['rsvp_counts']=={'confirmed':1,'needs_confirmation':1,'reserved':0}
+        assert detail['rsvp_counts']=={'confirmed':1,'needs_confirmation':1,'reserved':0,'maybe':0}
     detail=client.get(path,headers=auth(guest)).get_json()
     assert detail['is_joined'] and detail['commitment_confirmation_due'] and detail['attendance_confirmation_due']
     assert detail['spots_left']==6

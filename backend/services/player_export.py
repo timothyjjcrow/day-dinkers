@@ -108,7 +108,7 @@ def player_data_export(user):
         ('check_ins', CheckIn, 'user_id', ('court_id', 'checked_in_at', 'checked_out_at',
                                          'looking_for_game', 'location_verified_at')),
         ('session_places', GamePlayer, 'user_id', ('game_id', 'team', 'rating_delta', 'created_at')),
-        ('session_invitations', GameInvite, 'user_id', ('game_id', 'created_at')),
+        ('session_invitations', GameInvite, 'user_id', ('game_id', 'response', 'created_at')),
         ('attendance', GameSessionAttendance, 'user_id', ('game_id', 'rsvp_status', 'rsvp_joined_at',
             'rsvp_left_at', 'attended', 'recorded_at', 'history')),
         ('public_group_memberships', ClubMember, 'user_id', ('club_id', 'role', 'notification_level', 'created_at')),
