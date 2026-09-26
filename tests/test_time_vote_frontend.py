@@ -127,7 +127,7 @@ def test_votes_only_offer_times_friends_can_still_answer():
     assert "const voteReady = (iso) => new Date(iso).getTime() > Date.now() + 2 * 3600e3;" in sync
     assert "shown.includes(iso) && voteReady(iso)" in sync
     # No dead end: the vote link hides until two times qualify.
-    assert "classList.toggle('hidden', !voteTimes && shown.filter(voteReady).length < 2)" in sync
+    assert "&& (shown.filter(voteReady).length < 2 || !invitePeople.length));" in sync
     assert "|| (!!voteTimes && !voteReady(button.dataset.smartTime))" in sync
 
 
@@ -151,3 +151,7 @@ def test_voting_games_never_show_a_fixed_time_or_its_weather():
 def test_vote_taps_keep_focus_on_the_chip():
     assert 'id="gs-time-vote-${esc(option.id)}" data-time-vote=' in APP
     assert "render(fresh, { preserve: !locking });" in APP
+
+
+def test_invite_link_previews_say_time_tbd_while_voting():
+    assert "<div><dt>When</dt><dd>${esc(gameWhenText(plan))}<small>${plan.time_vote ? 'Friends are voting on the time' : 'Your local time'}" in APP

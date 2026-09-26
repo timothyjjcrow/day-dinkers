@@ -66,13 +66,68 @@ def test_production_build_runs_the_verified_migration(monkeypatch):
     assert kwargs['cwd'] == ROOT
 
 
-def test_failed_migration_fails_the_build(monkeypatch):
+def test_failed_migration_fails_the_build_after_retries(monkeypatch):
     build = load_build_script()
     monkeypatch.setenv('VERCEL_ENV', 'production')
     monkeypatch.setenv('DATABASE_URL_UNPOOLED', 'postgresql://user:pw@ep-direct.neon.tech/db')
+    calls, sleeps = [], []
+    monkeypatch.setattr(build.time, 'sleep', sleeps.append)
     monkeypatch.setattr(
         build.subprocess, 'run',
-        lambda args, **kwargs: subprocess.CompletedProcess(args, 1),
+        lambda args, **kwargs: calls.append(args) or subprocess.CompletedProcess(args, 1),
     )
 
     assert build.main() == 1
+    assert len(calls) == build.MIGRATION_ATTEMPTS
+    assert sleeps == [build.RETRY_DELAY_SECONDS] * (build.MIGRATION_ATTEMPTS - 1)
+
+
+def test_a_busy_moment_is_retried(monkeypatch):
+    build = load_build_script()
+    monkeypatch.setenv('VERCEL_ENV', 'production')
+    monkeypatch.setenv('DATABASE_URL_UNPOOLED', 'postgresql://user:pw@ep-direct.neon.tech/db')
+    results = [1, 0]
+    monkeypatch.setattr(build.time, 'sleep', lambda seconds: None)
+    monkeypatch.setattr(
+        build.subprocess, 'run',
+        lambda args, **kwargs: subprocess.CompletedProcess(args, results.pop(0)),
+    )
+
+    assert build.main() == 0
+    assert results == []
+
+
+def test_a_vercel_build_without_vercel_env_fails(monkeypatch):
+    build = load_build_script()
+    monkeypatch.setenv('VERCEL', '1')
+    monkeypatch.delenv('VERCEL_ENV', raising=False)
+    monkeypatch.setenv('DATABASE_URL_UNPOOLED', 'postgresql://user:pw@ep-direct.neon.tech/db')
+    calls = []
+    monkeypatch.setattr(build.subprocess, 'run', lambda *a, **k: calls.append((a, k)))
+
+    assert build.main() == 1
+    assert calls == []
+
+
+def test_vercel_uploads_the_build_scripts_and_no_other_helpers():
+    def ignored(path):
+        result = subprocess.run(
+            ['git', '-c', 'core.excludesFile=.vercelignore', 'check-ignore', '--no-index', '-q', path],
+            cwd=ROOT,
+        )
+        return result.returncode == 0
+
+    for needed in ('scripts/vercel_build.py', 'scripts/migrate_production_schema.py',
+                   'scripts/migrate_business_integration_foundation.py', 'backend/app.py',
+                   'pyproject.toml', 'app.py'):
+        assert not ignored(needed), needed
+    for private in ('scripts/migrate_sqlite_recovery.py', 'scripts/manage_business_operators.py',
+                    'tests/test_api.py', 'instance/app.db', '.env'):
+        assert ignored(private), private
+
+
+def test_the_migration_gives_up_on_a_busy_table_quickly():
+    source = (ROOT / 'scripts' / 'migrate_production_schema.py').read_text()
+    assert "LOCK_TIMEOUT = '5s'" in source
+    assert "cursor.execute(f\"SET lock_timeout = '{LOCK_TIMEOUT}'\")" in source
+    assert source.index('    _limit_lock_waits()') < source.index('    from backend.app import app, db')

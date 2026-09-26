@@ -6817,6 +6817,7 @@ def preview_game_invite_link(game_id):
         'id': game.id, 'title': game.title, 'visibility': game.visibility,
         'game_type': game.game_type, 'max_players': game.max_players,
         'scheduled_at': iso(game.scheduled_at), 'duration_minutes': game.duration_minutes,
+        'time_vote': True if game.time_vote_open else None,
         'expires_at': iso(game.invite_link_expires_at), 'cost_cents': game.cost_cents,
         'play_style': game.play_style, 'court_access': game.court_access,
         'court_count': game.court_count, 'court_number': game.court_number,

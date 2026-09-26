@@ -17774,7 +17774,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       <h3>${esc(plan.title || gameActivityLabel(plan))}</h3>
       <p class="game-invitation-host">Hosted by ${esc(plan.host_name || 'the session host')}</p>
       <dl class="auth-preview-facts">
-        <div><dt>When</dt><dd>${esc(fmtDateTime(plan.scheduled_at))}<small>Your local time${plan.duration_minutes ? ` · ${Number(plan.duration_minutes)} minutes` : ''}</small></dd></div>
+        <div><dt>When</dt><dd>${esc(gameWhenText(plan))}<small>${plan.time_vote ? 'Friends are voting on the time' : 'Your local time'}${plan.duration_minutes ? ` · ${Number(plan.duration_minutes)} minutes` : ''}</small></dd></div>
         <div><dt>Where</dt><dd>${esc(plan.court?.name || 'Court not listed')}<small>${esc([plan.court?.address, plan.court?.city].filter(Boolean).join(', '))}</small></dd></div>
         <div><dt>Cost</dt><dd>${esc(cost)}</dd></div>
         <div><dt>Court access</dt><dd>${esc(sessionCourtAccessLabel(plan))}${plan.court_number ? `<small>${esc(plan.court_number)}</small>` : ''}</dd></div>
@@ -21761,7 +21761,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const shown = [...modal.querySelectorAll('#ng-smart-times button')].map((button) => button.dataset.smartTime);
       const voteReady = (iso) => new Date(iso).getTime() > Date.now() + 2 * 3600e3;
       if (voteTimes) voteTimes = new Set([...voteTimes].filter((iso) => shown.includes(iso) && voteReady(iso)));
-      modal.querySelector('#ng-vote-toggle')?.classList.toggle('hidden', !voteTimes && shown.filter(voteReady).length < 2);
+      // Votes need two qualifying times and a friend to ask.
+      modal.querySelector('#ng-vote-toggle')?.classList.toggle('hidden', !voteTimes
+        && (shown.filter(voteReady).length < 2 || !invitePeople.length));
       modal.querySelectorAll('#ng-smart-times button').forEach((button) => {
         const active = voteTimes ? voteTimes.has(button.dataset.smartTime) : button.dataset.smartTime === plannerScheduledIso();
         button.disabled = !plannerHoursChecked || new Date(button.dataset.smartTime).getTime() <= Date.now() + 5 * 60000
