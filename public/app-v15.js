@@ -36573,6 +36573,18 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     </section>`;
   }
 
+  // Rain during an upcoming outdoor plan. The host's buttons open the same
+  // edit and cancel sheets as Manage (data-rain-proxy names that control).
+  function gameRainAlertHtml(game, rain) {
+    if (!(rain?.chance >= 50) || game.court?.indoor || game.is_instant || !game.is_joined
+        || game.status !== 'upcoming' || !(Date.parse(game.scheduled_at) > Date.now())) return '';
+    return `<section class="attendance-confirmation rain-alert" aria-label="Rain forecast">
+      <div><b>${uiIcon('water')} Rain likely around ${esc(rain.label)} · ${Number(rain.chance)}% chance</b>
+        ${game.is_creator ? '' : '<span>Your host can move or cancel it.</span>'}</div>
+      ${game.is_creator ? '<div class="attendance-confirmation-actions"><button type="button" class="btn btn-primary" data-rain-proxy="gs-edit">Move it</button><button type="button" class="btn btn-secondary" data-rain-proxy="gs-cancel">Cancel game</button></div>' : ''}
+    </section>`;
+  }
+
   function sessionVisitFactsHtml(game) {
     const cost = game.cost_cents == null ? 'Cost not listed'
       : Number(game.cost_cents) === 0 ? 'Free session'
@@ -39425,6 +39437,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       </section>
       ${gameHasDatedSeries(game) ? '<section class="series-date-card" id="gs-series-dates" aria-label="Session dates" aria-busy="true"><span class="row-sub">Loading session dates…</span></section>' : ''}
       ${courtEntryNoticeHtml(game)}
+      ${conditionsExpected ? '<div id="gs-rain-alert" hidden></div>' : ''}
       ${sessionConfirmationHtml(game)}
       ${gameHostRequestHtml(game)}
       ${!hasScore ? `<section class="session-roster" aria-label="Players">
@@ -39864,12 +39877,24 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       const startMs = new Date(game.scheduled_at).getTime();
       if (game.status === 'upcoming' && court.id
           && startMs - Date.now() < 6 * 3600e3 && startMs - Date.now() > -3600e3) {
-        api(`/courts/${court.id}/weather`).then((w) => {
+        const rainSlot = box.querySelector('#gs-rain-alert');
+        api(`/courts/${court.id}/weather?at=${encodeURIComponent(game.scheduled_at)}${game.duration_minutes ? `&minutes=${game.duration_minutes}` : ''}`).then((w) => {
           const el = box.querySelector('#gs-weather');
-          if (!el) return;
+          if (!el || !rainSlot?.isConnected) return; // a newer render asked again
+          const rain = w.rain_at_game;
+          const rainCard = gameRainAlertHtml(game, rain);
+          if (rainCard) {
+            rainSlot.innerHTML = rainCard;
+            rainSlot.hidden = false;
+            rainSlot.querySelectorAll('[data-rain-proxy]').forEach((button) => button.addEventListener('click', () => {
+              box.querySelector(`#${button.dataset.rainProxy}`)?.click();
+              const sheet = currentOverlayEntry()?.el;
+              if (sheet && sheet !== modal) sheet._returnFocus = button;
+            }));
+          }
           const bits = [];
           if (!w.error && w.temp_f != null) {
-            bits.push(`${weatherIcon(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${w.rain_soon ? ` · ${uiIcon('water')} rain likely around game time` : ''}`);
+            bits.push(`${weatherIcon(w.short)} ${w.temp_f}°F${w.short ? ` · ${esc(w.short)}` : ''}${rain?.chance >= 50 && !rainCard ? ` · ${uiIcon('water')} rain likely around ${esc(rain.label)}` : ''}`);
           }
           const cond = w.latest_condition;
           if (cond && COURT_CONDITION_LABELS[cond.condition]) {
@@ -40495,6 +40520,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       if (['friend_checkin', 'court_game', 'player_coming', 'player_left', 'rally_arrival', 'rally_arrival_ended',
         'rally_arrival_cancelled', 'rally_arrival_expired', 'player_arriving', 'arrival_cancelled', 'nearby_games', 'court_up'].includes(kind)) return 'map-pin';
       if (['tournament_join', 'tournament_withdraw', 'tournament_cancelled', 'league_update'].includes(kind)) return 'grid';
+      if (kind === 'game_weather') return 'water';
       if (['business_claim', 'business_integration'].includes(kind)) return 'building';
       if (['game_join', 'game_cancelled', 'invite_declined'].includes(kind)) return 'pickleball';
       return kind === 'streak_nag' ? 'activity' : 'bell';

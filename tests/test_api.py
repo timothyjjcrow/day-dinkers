@@ -1568,7 +1568,7 @@ def test_court_weather(client, monkeypatch):
     courts_module._WEATHER_CACHE.clear()
     calls = {'n': 0}
 
-    def fake_fetch(lat, lng):
+    def fake_fetch(lat, lng, timeout=8):
         calls['n'] += 1
         return {'temp_f': 82, 'short': 'Partly Cloudy', 'rain_soon': True}
 
@@ -1593,7 +1593,7 @@ def test_court_weather(client, monkeypatch):
     # Upstream failure degrades gracefully.
     courts_module._WEATHER_CACHE.clear()
     monkeypatch.setattr(courts_module, '_nws_fetch',
-                        lambda lat, lng: (_ for _ in ()).throw(OSError('down')))
+                        lambda lat, lng, timeout=8: (_ for _ in ()).throw(OSError('down')))
     assert client.get(f'/api/courts/{court_id}/weather').get_json()['error'] == 'weather_unavailable'
     assert client.get('/api/courts/999999/weather').status_code == 404
 
