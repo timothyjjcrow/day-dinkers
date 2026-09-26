@@ -77,6 +77,7 @@ def _tick_jobs():
     from backend.routes.games import (
         expire_abandoned_instant_rallies,
         send_game_reminders,
+        send_rain_alerts,
     )
     from backend.routes.leagues import send_league_schedule_reminders
     from backend.routes.tournaments import send_tournament_reminders
@@ -86,6 +87,8 @@ def _tick_jobs():
         ('game_reminders', send_game_reminders),
         ('tournament_reminders', send_tournament_reminders),
         ('league_schedule_reminders', send_league_schedule_reminders),
+        # Last: it may wait on the weather service.
+        ('rain_alerts', send_rain_alerts),
     ]
 
 
@@ -129,6 +132,7 @@ def tick():
         return jsonify({'ok': True, 'ran': False})
 
     deadline = time.monotonic() + TICK_BUDGET_SECONDS
+    g.tick_deadline = deadline  # jobs that call out stop in time for push delivery
     outcomes = _run_jobs(_tick_jobs(), deadline)
     push_ok = True
     try:

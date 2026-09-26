@@ -9233,6 +9233,8 @@ html[data-theme="dark"] .court-modal .modal { --cd-solid: var(--forest-2); }
 .game-host-toolbar.simple-disclosure > summary > .ui-icon { width: 18px; height: 18px; color: var(--green-accent); }
 .game-player-options > summary { color: var(--ink); font-weight: 750; }
 .modal:has(> .game-detail-header) .game-info-strip { border: 0; border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow); }
+/* r85 · Rain alerts */
+.rain-alert b .ui-icon { margin-right: var(--space-1); color: var(--green-accent); }
 .modal:has(> .game-detail-header) .rating-stakes-copy strong { color: var(--green-accent); }
 #play-content .rating-help-link { color: var(--green-accent); }
 #play-content .actionable-empty-state .empty-state-icon, #play-content .rankings-empty .empty-state-icon.is-ranked { background: var(--volt-soft); color: var(--green-ink); }

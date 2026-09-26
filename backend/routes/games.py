@@ -2722,6 +2722,90 @@ def send_game_reminders():
         db.session.commit()
 
 
+RAIN_ALERT_MIN_CHANCE = 50
+RAIN_ALERT_MAX_LOOKUPS = 4
+RAIN_ALERT_TIMEOUT_SECONDS = 3
+
+
+def send_rain_alerts():
+    """Tell everyone in an outdoor game starting in 30 minutes to 4 hours,
+    once, when rain looks likely while it runs. It is the last tick job:
+    forecasts are shared per rounded location, few upstream lookups run per
+    tick, and each must finish before the tick has to deliver its alerts."""
+    from time import monotonic
+
+    from backend.routes.courts import court_forecast, rain_chance_at
+
+    now = utcnow()
+    games = Game.query.join(Court, Game.court_id == Court.id).filter(
+        Game.status == 'upcoming',
+        Game.is_instant.is_(False),
+        Game.scheduled_at > now + timedelta(minutes=30),
+        Game.scheduled_at <= now + timedelta(hours=4),
+        Court.indoor.is_(False),
+        Court.latitude.isnot(None),
+        Court.longitude.isnot(None),
+    ).order_by(Game.scheduled_at.asc()).limit(200).all()
+    if not games:
+        return
+    recipients = {
+        game.id: {player.user_id for player in game.players} | {game.creator_id}
+        for game in games
+    }
+    alerted = {row[0] for row in db.session.query(Notification.related_game_id).filter(
+        Notification.user_id.in_(sorted(set().union(*recipients.values()))),
+        Notification.kind == 'game_weather',
+        Notification.related_game_id.in_(list(recipients)),
+        Notification.created_at >= now - timedelta(hours=6),
+    ).distinct()}
+    places = {}
+    for game in games:
+        if game.id not in alerted:
+            key = (round(game.court.latitude, 2), round(game.court.longitude, 2))
+            places.setdefault(key, []).append(game)
+
+    stop_at = monotonic() + 10
+    if g.get('tick_deadline'):
+        stop_at = min(stop_at, g.tick_deadline - 5)
+    lookups = 0
+    sent = False
+    for place_games in places.values():
+        court = place_games[0].court
+        if court_forecast(court, fetch=False) is None:
+            # A lookup is two upstream calls; start one only if it can finish.
+            if (lookups >= RAIN_ALERT_MAX_LOOKUPS
+                    or monotonic() + 2 * RAIN_ALERT_TIMEOUT_SECONDS > stop_at):
+                continue
+            lookups += 1
+        for game in place_games:
+            try:
+                rain = rain_chance_at(
+                    court, game.scheduled_at, game.duration_minutes,
+                    timeout=RAIN_ALERT_TIMEOUT_SECONDS,
+                )
+            except Exception:
+                current_app.logger.info('Rain check skipped near game %s', game.id, exc_info=True)
+                break
+            if not rain or rain['chance'] < RAIN_ALERT_MIN_CHANCE:
+                continue
+            title = f"Rain likely around {rain['label']} at {game.court.name}"
+            for user_id in sorted(recipients[game.id]):
+                notify(
+                    user_id,
+                    'game_weather',
+                    title,
+                    'Keep it, move it or cancel it from the game page.'
+                    if user_id == game.creator_id
+                    else 'Your host may move it. Check the game page.',
+                    related_game_id=game.id,
+                    action_url=f'/#game/{game.id}',
+                    unread_dedupe_key=f'rain:{game.id}',
+                )
+            sent = True
+    if sent:
+        db.session.commit()
+
+
 def roll_forward_recurring():
     """Maintain dated sessions; never rewrite a date's URL or roster."""
     now = utcnow()

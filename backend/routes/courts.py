@@ -7,7 +7,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, Response, current_app, g, jsonify, request
@@ -1882,25 +1882,73 @@ _NWS_HEADERS = {
 }
 
 
-def _nws_fetch(lat, lng):
+def _nws_fetch(lat, lng, timeout=8):
     """Hourly forecast summary via api.weather.gov. Isolated for test mocks."""
+    if current_app.config.get('TESTING'):
+        # Tests never reach the network; they monkeypatch this function.
+        raise RuntimeError('weather lookups are off in tests')
     req = urllib.request.Request(
         f'https://api.weather.gov/points/{lat:.3f},{lng:.3f}', headers=_NWS_HEADERS,
     )
-    with urllib.request.urlopen(req, timeout=8) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         hourly_url = json.loads(resp.read())['properties']['forecastHourly']
     req = urllib.request.Request(hourly_url, headers=_NWS_HEADERS)
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        periods = json.loads(resp.read())['properties']['periods'][:6]
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return _nws_summary(json.loads(resp.read())['properties']['periods'][:24])
+
+
+def _nws_summary(periods):
     now = periods[0]
-    rain_odds = max(
-        (p.get('probabilityOfPrecipitation') or {}).get('value') or 0 for p in periods
-    )
+    chances = [
+        round((p.get('probabilityOfPrecipitation') or {}).get('value') or 0) for p in periods
+    ]
     return {
         'temp_f': round(float(now['temperature'])),
         'short': str(now.get('shortForecast') or '')[:60],
-        'rain_soon': rain_odds >= 40,
+        'rain_soon': max(chances[:6]) >= 40,
+        # Each hour's local start (with its UTC offset) and rain chance, so a
+        # game's hours can be read later without another upstream call.
+        'hourly': [[str(p.get('startTime') or ''), chance] for p, chance in zip(periods, chances)],
     }
+
+
+def court_forecast(court, timeout=8, fetch=True):
+    """Forecast for the court's rounded location, cached and shared with
+    nearby courts. Raises when the lookup fails; None when it is not cached
+    and ``fetch`` is off."""
+    key = (round(court.latitude, 2), round(court.longitude, 2))
+    cached = _WEATHER_CACHE.get(key)
+    if cached and cached['expires_at'] > time.time():
+        return cached['data']
+    if not fetch:
+        return None
+    data = _nws_fetch(court.latitude, court.longitude, timeout=timeout)
+    if len(_WEATHER_CACHE) > _WEATHER_MAX_CACHE:
+        _WEATHER_CACHE.clear()
+    _WEATHER_CACHE[key] = {'data': data, 'expires_at': time.time() + _WEATHER_CACHE_TTL}
+    return data
+
+
+def rain_chance_at(court, when, minutes=None, timeout=8):
+    """Highest rain chance while a game starting at ``when`` (naive UTC) runs,
+    with the local hour of that peak: {'chance': 70, 'label': '6 PM'}. None
+    when the forecast does not reach those hours."""
+    end = when + timedelta(minutes=minutes or 120)
+    best = None
+    for starts_at, chance in court_forecast(court, timeout=timeout).get('hourly') or []:
+        try:
+            local = datetime.fromisoformat(starts_at)
+        except ValueError:
+            continue
+        if local.tzinfo is None:
+            continue
+        begins = local.astimezone(UTC).replace(tzinfo=None)
+        if begins < end and begins + timedelta(hours=1) > when and (best is None or chance > best[0]):
+            best = (chance, local.hour)
+    if best is None:
+        return None
+    chance, hour = best
+    return {'chance': chance, 'label': f"{hour % 12 or 12} {'AM' if hour < 12 else 'PM'}"}
 
 
 @courts_bp.get('/courts/<int:court_id>/weather')
@@ -1914,19 +1962,23 @@ def court_weather(court_id):
     condition = _latest_condition_for(
         court.id, include_identity=optional_current_user() is not None,
     )
-    key = (round(court.latitude, 2), round(court.longitude, 2))
-    cached = _WEATHER_CACHE.get(key)
-    if cached and cached['expires_at'] > time.time():
-        return jsonify({**cached['data'], 'latest_condition': condition})
     try:
-        data = _nws_fetch(court.latitude, court.longitude)
+        data = court_forecast(court)
     except Exception:
         current_app.logger.warning('Weather lookup failed for court %s', court_id, exc_info=True)
         return jsonify({'error': 'weather_unavailable', 'latest_condition': condition})
-    if len(_WEATHER_CACHE) > _WEATHER_MAX_CACHE:
-        _WEATHER_CACHE.clear()
-    _WEATHER_CACHE[key] = {'data': data, 'expires_at': time.time() + _WEATHER_CACHE_TTL}
-    return jsonify({**data, 'latest_condition': condition})
+    payload = {key: value for key, value in data.items() if key != 'hourly'}
+    if request.args.get('at'):
+        # A game screen asks for the chance during the game itself.
+        minutes = min(max(request.args.get('minutes', type=int) or 120, 15), 720)
+        try:
+            when = datetime.fromisoformat(request.args['at'].strip().replace('Z', '+00:00'))
+            if when.tzinfo:
+                when = when.astimezone(UTC).replace(tzinfo=None)
+            payload['rain_at_game'] = rain_chance_at(court, when, minutes)
+        except (ValueError, OverflowError):
+            payload['rain_at_game'] = None
+    return jsonify({**payload, 'latest_condition': condition})
 
 
 @courts_bp.post('/courts/<int:court_id>/condition')
