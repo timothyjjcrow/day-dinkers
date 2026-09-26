@@ -1236,6 +1236,8 @@
     invalid_court_id: 'Choose a valid court.',
     court_not_found: 'That court is no longer available.',
     court_closed: 'That court is marked closed right now. Choose another destination.',
+    checkin_required: 'Check in at this court first.',
+    queue_changed: 'The paddle line just changed. Here’s the latest.',
     court_location_unavailable: 'That court needs a map location before it can be used as a destination.',
     invalid_presence_location: 'Your device did not return a usable location. Try again with location access on.',
     invalid_presence_intent: 'That check-in action expired. Close it and try again.',
@@ -13374,6 +13376,28 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     });
   }
 
+  // Paddle line on the court page: only while a line exists or the court is full.
+  const paddleTeamsText = (teams) => teams.filter((team) => team.length)
+    .map((team) => team.map((p) => esc(p.name)).join(' &amp; ')).join(' vs ');
+  function paddleQueueHtml(q, { checkedIn, crowded, rotation }) {
+    const courts = q?.courts || [];
+    if (!q || !(q.waiting_count || courts.length || (checkedIn && crowded))) return '';
+    const inUse = new Set(courts.map((c) => c.court));
+    const open = q.waiting_count >= 2
+      && Array.from({ length: q.court_count }, (_, i) => i + 1).find((n) => !inUse.has(n));
+    const mine = q.my_court ? ` · You’re on Court ${q.my_court}` : q.my_position ? ` · You’re #${q.my_position}` : '';
+    const row = (label, button) => `<div class="cd-queue-row"><span>${label}</span>${checkedIn ? button : ''}</div>`;
+    return `<div class="cd-queue" role="region" aria-label="Paddle line">
+      ${row(`<b>Paddle line</b><small>${q.waiting_count || 'No one'} waiting${mine}</small>`,
+        `<button type="button" class="btn btn-secondary btn-sm" id="cd-queue-toggle">${q.in_line ? 'Leave line' : 'Join the line'}</button>`)}
+      ${courts.map((c) => row(`Court ${c.court} · ${c.teams ? paddleTeamsText(c.teams) : `${c.player_count} playing`}`,
+        `<button type="button" class="btn btn-secondary btn-sm" aria-label="Game done on Court ${c.court}" data-queue-done="${c.court}">Game done</button>`)).join('')}
+      ${open ? row(`Court ${open} is open`,
+        `<button type="button" class="btn btn-secondary btn-sm" data-queue-call="${open}">Call next ${q.waiting_count >= 4 ? 4 : 2}</button>`) : ''}
+      ${rotation ? `<small>${esc(rotation)}</small>` : ''}
+    </div>`;
+  }
+
   let pendingCourtDetailOpen = null;
 
   async function openCourtDetail(courtId, {
@@ -13636,6 +13660,9 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
           <button type="button" class="btn btn-danger btn-sm" id="cd-checkout">Check out</button>
         </span>
       </div>` : '';
+    const paddleQueueBlock = (q) => (courtClosed ? '' : paddleQueueHtml(q, {
+      checkedIn, crowded: nHere > (q?.court_count || 1) * 4, rotation: court.visitor_info?.rotation,
+    }));
     const directionsAction = mapsUrl ? `
       <a class="btn btn-secondary" href="${mapsUrl}" target="_blank" rel="noopener" aria-label="Directions to ${esc(court.name)} (opens Maps)">${uiIcon('external')} Directions</a>` : '';
     const reservationHref = businessActionHref(court.reservation_url);
@@ -13710,6 +13737,7 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
         ${nowSummary}
         ${nHere ? `<p class="simple-note">${esc(courtPresenceSummaryText(court.presence_summary))}. Shared check-ins do not reserve a place.</p>` : ''}
         ${presenceControl}
+        <div id="cd-queue">${paddleQueueBlock(court.paddle_queue)}</div>
         ${primaryAction}
         ${secondaryActions}
         <div id="cd-weather"></div>
@@ -14128,6 +14156,104 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
     modal.querySelector('#cd-looking-toggle')?.addEventListener('click', (event) => {
       commitLookingIntent(event.currentTarget, !lookingForGame);
     });
+    // Paddle line: join/leave, call players onto a court, and poll only while
+    // the viewer is in the line (waiting or on a court).
+    let paddleQueue = court.paddle_queue;
+    let paddleVersion = 0;
+    const renderPaddleQueue = (next) => {
+      const slot = modal.querySelector('#cd-queue');
+      if (!slot || !next) return false;
+      const up = !!next.my_court && next.my_court !== paddleQueue?.my_court;
+      if (up) toast(`You’re up on Court ${next.my_court}`, { tone: 'success' });
+      paddleQueue = next;
+      slot.innerHTML = paddleQueueBlock(next);
+      bindPaddleQueue(slot);
+      syncPaddlePoll();
+      return up;
+    };
+    const setPaddleLine = async (button, join) => {
+      const resetAction = beginButtonAction(button, join ? 'Joining…' : 'Leaving…');
+      if (button && !resetAction) return;
+      paddleVersion += 1;
+      try {
+        const next = await api(`/courts/${court.id}/queue`, { method: 'POST', body: JSON.stringify({ action: join ? 'join' : 'leave' }) });
+        renderPaddleQueue(next);
+        if (join) {
+          toast(`You’re #${next.my_position || next.waiting_count} in line`, {
+            tone: 'success', duration: 6500, action: { label: 'Undo', onClick: () => setPaddleLine(null, false) },
+          });
+        }
+      } catch (error) {
+        resetAction?.();
+        errorToast(error);
+      }
+    };
+    const callPaddleNext = async (button, number, expected, score = null, sheet = null) => {
+      const resetAction = beginButtonAction(button, 'Calling…');
+      if (!resetAction) return;
+      paddleVersion += 1;
+      try {
+        const next = await api(`/courts/${court.id}/queue/next`, { method: 'POST', body: JSON.stringify({ court: number, expected, score }) });
+        if (sheet) closeModal(sheet);
+        if (!renderPaddleQueue(next)) {
+          toast(next.courts.some((c) => c.court === number) ? `Next players called to Court ${number}` : `Court ${number} is open`, { tone: 'success' });
+        }
+      } catch (error) {
+        resetAction();
+        if (error.data?.paddle_queue) {
+          if (sheet) closeModal(sheet);
+          renderPaddleQueue(error.data.paddle_queue);
+        }
+        errorToast(error);
+      }
+    };
+    const openPaddleGameDone = (number) => {
+      const entry = (paddleQueue?.courts || []).find((c) => c.court === number);
+      if (!entry?.teams) return null;
+      const teams = entry.teams.filter((team) => team.length);
+      const sheet = openModal(`
+        ${modalHead(`Court ${number} · Game done`)}
+        ${teams.length === 2 ? `<p class="simple-note">Score is optional. It goes in court chat, not ratings.</p>
+        <div class="score-grid cd-queue-score">${teams.map((team) => `<label class="score-panel"><span class="score-team-label">${paddleTeamsText([team])}</span>
+          <input type="number" min="0" max="99" inputmode="numeric" data-queue-score></label>`).join('<span class="score-vs">vs</span>')}</div>` : ''}
+        <button type="button" class="btn btn-primary btn-block" id="cd-queue-next">Call next players</button>
+      `, { label: `Game done on Court ${number}` });
+      sheet.querySelector('#cd-queue-next').addEventListener('click', (event) => {
+        const score = [...sheet.querySelectorAll('[data-queue-score]')].map((input) => input.value.trim());
+        if (score.some(Boolean) && !score.every(Boolean)) { toast('Enter both scores, or leave both empty.'); return; }
+        callPaddleNext(event.currentTarget, number, entry.teams.flat().map((p) => p.id),
+          score.length === 2 && score.every(Boolean) ? score.map(Number) : null, sheet);
+      });
+      return sheet;
+    };
+    const bindPaddleQueue = (slot) => {
+      slot.querySelector('#cd-queue-toggle')?.addEventListener('click', (event) => setPaddleLine(event.currentTarget, !paddleQueue.in_line));
+      slot.querySelectorAll('[data-queue-call]').forEach((button) => button.addEventListener('click', () => {
+        callPaddleNext(button, Number(button.dataset.queueCall), []);
+      }));
+      slot.querySelectorAll('[data-queue-done]').forEach((button) => button.addEventListener('click', () => {
+        openChildModal(modal, () => openPaddleGameDone(Number(button.dataset.queueDone)));
+      }));
+    };
+    const syncPaddlePoll = () => {
+      const wanted = !courtClosed && !!paddleQueue?.in_line;
+      if (wanted === !!modal._paddlePoll) return;
+      clearInterval(modal._paddlePoll);
+      modal._paddlePoll = wanted && setInterval(async () => {
+        if (!modal.isConnected) { clearInterval(modal._paddlePoll); return; }
+        if (document.hidden || state.connectionState === 'offline' || currentOverlayEntry()?.el !== modal) return;
+        const version = paddleVersion;
+        try {
+          const next = await api(`/courts/${court.id}/queue`);
+          if (version === paddleVersion && JSON.stringify(next) !== JSON.stringify(paddleQueue)) renderPaddleQueue(next);
+        } catch { /* retry on the next live interval */ }
+      }, LIVE_DETAIL_POLL_INTERVAL_MS);
+    };
+    clearInterval(modal._paddlePoll);
+    modal._paddlePoll = 0;
+    if (!reuseModal) modal._cleanupFns.push(() => clearInterval(modal._paddlePoll));
+    bindPaddleQueue(modal.querySelector('#cd-queue'));
+    syncPaddlePoll();
     modal.querySelector('#cd-play-now')?.addEventListener('click', (event) => {
       if (checkedIn && lookingForGame) {
         const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
@@ -40343,7 +40469,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       if (['score_submitted', 'score_confirmed', 'score_disputed', 'session_completed', 'weekly_recap', 'game_logged'].includes(kind)) return 'activity';
       if (['game_reminder', 'game_updated', 'tournament_reminder', 'tournament_update', 'session_rsvp'].includes(kind)) return 'clock';
       if (['friend_checkin', 'court_game', 'player_coming', 'player_left', 'rally_arrival', 'rally_arrival_ended',
-        'rally_arrival_cancelled', 'rally_arrival_expired', 'player_arriving', 'arrival_cancelled', 'nearby_games'].includes(kind)) return 'map-pin';
+        'rally_arrival_cancelled', 'rally_arrival_expired', 'player_arriving', 'arrival_cancelled', 'nearby_games', 'court_up'].includes(kind)) return 'map-pin';
       if (['tournament_join', 'tournament_withdraw', 'tournament_cancelled', 'league_update'].includes(kind)) return 'grid';
       if (['business_claim', 'business_integration'].includes(kind)) return 'building';
       if (['game_join', 'game_cancelled', 'invite_declined'].includes(kind)) return 'pickleball';

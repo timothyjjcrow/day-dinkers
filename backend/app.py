@@ -346,6 +346,11 @@ def _upgrade_schema(app):
             if 'location_verified_at' not in checkin_cols:
                 statements.append('ALTER TABLE check_in ADD COLUMN location_verified_at '
                                   + ('TIMESTAMP' if is_postgres else 'DATETIME'))
+            if 'queued_at' not in checkin_cols:
+                statements.append('ALTER TABLE check_in ADD COLUMN queued_at '
+                                  + ('TIMESTAMP' if is_postgres else 'DATETIME'))
+            if 'queue_court' not in checkin_cols:
+                statements.append('ALTER TABLE check_in ADD COLUMN queue_court INTEGER')
 
         if 'court_edit_suggestion' in tables:
             suggestion_cols = {c['name'] for c in inspector.get_columns('court_edit_suggestion')}

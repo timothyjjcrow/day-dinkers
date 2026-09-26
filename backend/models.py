@@ -1682,6 +1682,11 @@ class CheckIn(TimestampMixin, db.Model):
     checked_out_at = db.Column(db.DateTime)
     last_presence_ping_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     location_verified_at = db.Column(db.DateTime)
+    # Paddle line: queued_at is the first-come order key; queue_court is the
+    # court number while on it (NULL + queued_at = waiting). Ending the
+    # check-in ends the place in line because every read is fresh-only.
+    queued_at = db.Column(db.DateTime)
+    queue_court = db.Column(db.Integer)
 
     user = db.relationship('User', back_populates='checkins', foreign_keys=[user_id])
     court = db.relationship('Court', back_populates='checkins')

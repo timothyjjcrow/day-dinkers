@@ -1114,6 +1114,9 @@ def court_detail(court_id):
             payload['chat_unread'] = summary['unread']
     payload['players_here'] = players_here
     payload['players_here_count'] = visible_player_count
+    payload['paddle_queue'] = _paddle_queue_payload(
+        court, active, current_user, viewer_friends, hidden_ids,
+    )
     # Aggregate freshness is safe for anonymous venue discovery and lets
     # clients qualify a live count (for example, "last confirmed 8m ago")
     # without exposing any additional player identity.
@@ -1244,6 +1247,255 @@ def court_detail(court_id):
     )
     payload['my_review'] = my_review.to_dict() if my_review else None
     return jsonify(payload)
+
+
+# Paddle line: a first-come rotation stored on the fresh check-ins at a court.
+PADDLE_LINE_MAX_COURTS = 12
+
+
+def _paddle_court_count(court):
+    return min(max(int(court.num_courts or 1), 1), PADDLE_LINE_MAX_COURTS)
+
+
+def _whole(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _fresh_court_checkins(court_id):
+    return CheckIn.query.filter(
+        CheckIn.court_id == court_id,
+        CheckIn.checked_out_at.is_(None),
+        CheckIn.checked_in_at >= presence_absolute_cutoff(),
+        CheckIn.last_presence_ping_at >= presence_stale_cutoff(),
+    )
+
+
+def _paddle_line(checkins):
+    return sorted(
+        (row for row in checkins if row.queued_at),
+        key=lambda row: (row.queued_at, row.id),
+    )
+
+
+def _paddle_line_back(line, now):
+    """A stamp after everyone in line, even across small clock skews."""
+    return max([now, *(row.queued_at for row in line)]) + timedelta(microseconds=1)
+
+
+def _paddle_person(checkin, viewer_id=None, friends=(), hidden_ids=()):
+    """First name under the players_here rule, else 'Another player'."""
+    user = checkin.user
+    if (
+        checkin.user_id in hidden_ids
+        or not nearby_visibility_allows(user, viewer_id, friends)
+        or not (
+            checkin.looking_for_game
+            or checkin.user_id == viewer_id or checkin.user_id in friends
+        )
+    ):
+        return {'id': None, 'name': 'Another player'}
+    return {
+        'id': user.id,
+        'name': next(iter((user.display_name or '').split()), 'Player'),
+    }
+
+
+def _paddle_queue_payload(court, checkins, viewer=None, friends=(), hidden_ids=()):
+    """The court's line. Signed-out viewers get counts only."""
+    line = _paddle_line(checkins)
+    waiting = [row for row in line if row.queue_court is None]
+    on_court = {}
+    for row in line:
+        if row.queue_court is not None:
+            on_court.setdefault(row.queue_court, []).append(row)
+    payload = {
+        'court_count': _paddle_court_count(court),
+        'waiting_count': len(waiting),
+        'courts': [],
+    }
+    viewer_id = viewer.id if viewer else None
+    for number, rows in sorted(on_court.items()):
+        if not viewer:
+            payload['courts'].append({'court': number, 'player_count': len(rows)})
+            continue
+        people = [
+            _paddle_person(row, viewer_id, friends, hidden_ids) for row in rows
+        ]
+        # Line order p1..p4 plays p1+p4 against p2+p3; two players is singles.
+        payload['courts'].append({
+            'court': number, 'teams': [people[0::3], people[1:3]],
+        })
+    if viewer:
+        mine = next((row for row in line if row.user_id == viewer_id), None)
+        payload.update(
+            in_line=mine is not None,
+            my_court=mine.queue_court if mine else None,
+            my_position=waiting.index(mine) + 1 if mine in waiting else None,
+        )
+    return payload
+
+
+def _viewer_paddle_queue(court, checkins):
+    viewer = g.current_user
+    return _paddle_queue_payload(
+        court, checkins, viewer, friend_ids(viewer.id),
+        blocked_pair_ids(viewer.id),
+    )
+
+
+def _locked_paddle_line(court_id, *, allow_closed=False):
+    """Lock the Court row, then its fresh check-ins in user_id order."""
+    court = (
+        Court.query.filter(Court.id == court_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .first()
+    )
+    if not court:
+        return None, [], (jsonify({'error': 'court_not_found'}), 404)
+    if court.closed and not allow_closed:
+        return None, [], (jsonify({'error': 'court_closed'}), 409)
+    rows = (
+        _fresh_court_checkins(court.id)
+        .order_by(CheckIn.user_id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+        .all()
+    )
+    return court, rows, None
+
+
+def _post_paddle_score(court, sender_id, number, players, score, now):
+    """One unrated court-chat line; names follow the public discovery rule."""
+    from backend.models import Message
+    from backend.services.conversations import conversation_ref
+    names = [_paddle_person(row)['name'] for row in players]
+    body = (
+        f"Court {number} · {' & '.join(names[0::3])} "
+        f"{score[0]}–{score[1]} {' & '.join(names[1:3])}"
+    )
+    if Message.query.filter(
+        Message.court_id == court.id,
+        Message.body == body,
+        Message.created_at >= now - timedelta(minutes=2),
+    ).first():
+        return  # a second phone already posted this result
+    conversation = conversation_ref('court', court.id).ensure_persisted()
+    db.session.add(Message(
+        sender_id=sender_id, court_id=court.id,
+        conversation_id=conversation.id, body=body,
+    ))
+
+
+@courts_bp.get('/courts/<int:court_id>/queue')
+@rate_limit(60, 60)
+@login_required
+def paddle_queue(court_id):
+    court = db.session.get(Court, court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+    rows = _fresh_court_checkins(court.id).filter(
+        CheckIn.queued_at.isnot(None),
+    ).all()
+    return jsonify(_viewer_paddle_queue(court, rows))
+
+
+@courts_bp.post('/courts/<int:court_id>/queue')
+@rate_limit(30, 60)
+@login_required
+def update_paddle_queue(court_id):
+    payload = request.get_json(silent=True)
+    action = payload.get('action') if isinstance(payload, dict) else None
+    if action not in {'join', 'leave'}:
+        return jsonify({'error': 'invalid_payload'}), 400
+    court, rows, error = _locked_paddle_line(
+        court_id, allow_closed=action == 'leave',
+    )
+    if error:
+        return error
+    mine = next((row for row in rows if row.user_id == g.current_user.id), None)
+    if not mine and action == 'join':
+        return jsonify({'error': 'checkin_required'}), 409
+    if mine:
+        now = utcnow()
+        mine.last_presence_ping_at = now
+        if action == 'leave':
+            mine.queued_at = mine.queue_court = None
+        elif mine.queued_at is None:
+            mine.queued_at = _paddle_line_back(_paddle_line(rows), now)
+    result = _viewer_paddle_queue(court, rows)
+    db.session.commit()
+    return jsonify(result)
+
+
+@courts_bp.post('/courts/<int:court_id>/queue/next')
+@rate_limit(30, 60)
+@login_required
+def call_paddle_queue_next(court_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'invalid_payload'}), 400
+    number = payload.get('court')
+    expected = payload.get('expected')
+    score = payload.get('score')
+    if (
+        not _whole(number) or not 1 <= number <= PADDLE_LINE_MAX_COURTS
+        or not isinstance(expected, list) or len(expected) > 4
+        or not all(value is None or _whole(value) for value in expected)
+    ):
+        return jsonify({'error': 'invalid_payload'}), 400
+    if score is not None and not (
+        isinstance(score, list) and len(score) == 2
+        and all(_whole(value) and 0 <= value <= 99 for value in score)
+        and score[0] != score[1]
+    ):
+        return jsonify({'error': 'invalid_scores'}), 400
+    court, rows, error = _locked_paddle_line(court_id)
+    if error:
+        return error
+    viewer = g.current_user
+    actor = next((row for row in rows if row.user_id == viewer.id), None)
+    if not actor:
+        return jsonify({'error': 'checkin_required'}), 409
+    line = _paddle_line(rows)
+    playing = [row for row in line if row.queue_court == number]
+    if number > _paddle_court_count(court) and not playing:
+        return jsonify({'error': 'invalid_payload'}), 400
+    now = utcnow()
+    actor.last_presence_ping_at = now
+    friends, hidden_ids = friend_ids(viewer.id), blocked_pair_ids(viewer.id)
+    # `expected` is the on-court set as this viewer saw it (hidden people are
+    # null), so a second tap on the same "Game done" converges instead of
+    # rotating twice.
+    seen = sorted(
+        _paddle_person(row, viewer.id, friends, hidden_ids)['id'] or 0
+        for row in playing
+    )
+    if seen != sorted(value or 0 for value in expected):
+        result = _paddle_queue_payload(court, rows, viewer, friends, hidden_ids)
+        db.session.commit()
+        return jsonify({'error': 'queue_changed', 'paddle_queue': result}), 409
+    # Finished players go to the back in their order, then the first four
+    # waiting (two when only two or three wait) are called onto the court.
+    back = _paddle_line_back(line, now)
+    for offset, row in enumerate(playing):
+        row.queued_at = back + timedelta(microseconds=offset)
+        row.queue_court = None
+    waiting = _paddle_line(row for row in line if row.queue_court is None)
+    called = waiting[:4] if len(waiting) >= 4 else waiting[:2] if len(waiting) >= 2 else []
+    for row in called:
+        row.queue_court = number
+        if row.user_id != viewer.id and row not in playing:
+            notify(
+                row.user_id, 'court_up', f'You’re up on Court {number}',
+                court.name, action_url=f'/#court/{court.id}',
+                unread_dedupe_key=f'court-up:{row.id}:{row.queued_at.isoformat()}',
+            )
+    if score is not None and len(playing) >= 2:
+        _post_paddle_score(court, viewer.id, number, playing, score, now)
+    result = _paddle_queue_payload(court, rows, viewer, friends, hidden_ids)
+    db.session.commit()
+    return jsonify(result)
 
 
 @courts_bp.post('/courts/<int:court_id>/planning-times')
@@ -2442,6 +2694,8 @@ def check_in(court_id):
             )
             existing.checked_in_at = now
             existing.location_verified_at = None
+            # A revived visit starts at the back, never at an old place in line.
+            existing.queued_at = existing.queue_court = None
         if verified_location:
             existing.location_verified_at = now
         existing.looking_for_game = looking
