@@ -1140,6 +1140,8 @@ def _edit_following_series_dates(game, following, proposed, changed, actor_id):
         commitment_changed = schedule_changed or bool(
             {'court_id', 'duration_minutes', 'cost_cents', 'court_access', 'court_count', 'court_number', 'play_style'} & set(changed)
         )
+        if schedule_changed or 'court_id' in changed:
+            _reset_maybe_answers(occurrence)
         for player in occurrence.players:
             if commitment_changed:
                 player.reminded_at = None
@@ -2749,6 +2751,12 @@ def _time_vote_label(game, when):
     return f"{local.strftime('%a')} {clock}{' UTC' if zone.key == 'UTC' else ''}"
 
 
+def _reset_maybe_answers(game):
+    """A maybe answered one time and place; a new one asks again."""
+    for invite in game.invites:
+        invite.response = None
+
+
 def _lock_time_vote(game, option, actor_id=None, now=None):
     """Fix the winning time. Callers hold the roster, invitee and Game locks.
 
@@ -2758,6 +2766,7 @@ def _lock_time_vote(game, option, actor_id=None, now=None):
     now = now or utcnow()
     game.scheduled_at = option['starts_at']
     game.time_options = '[]'
+    _reset_maybe_answers(game)
     if option['starts_at'] <= now:
         return  # Settled too late to plan around: no confirmations or pushes.
     needs_confirmation = set()
@@ -2877,6 +2886,7 @@ def send_game_reminders():
     for game in day_due:
         court_name = game.court.name if game.court else 'the court'
         maybe_ids = {invite.user_id for invite in game.invites if invite.response == 'maybe'}
+        maybe_ids -= {row.user_id for row in game.waitlist if row.offer_status in ('queued', 'offered')}
         maybe_count = len(maybe_ids - blocked_pair_ids(game.creator_id)) if maybe_ids else 0
         for player in game.players:
             if player.day_reminded_at is not None:
@@ -2891,7 +2901,7 @@ def send_game_reminders():
                 ),
                 (
                     (
-                        f'{len(game.players)} joined · {maybe_count} maybe — nudge them or invite more.'
+                        f'{len(game.players)} joined · {maybe_count} maybe.'
                         if maybe_count
                         else f'{len(game.players)} players are signed up.'
                     )
@@ -7077,6 +7087,8 @@ def maybe_invite(game_id):
         return jsonify({'error': 'not_invited'}), 404
     if game.status != 'upcoming' or game.is_instant or game.is_direct_challenge:
         return jsonify({'error': 'game_not_open'}), 409
+    if request.method == 'POST' and game.scheduled_at <= utcnow():
+        return jsonify({'error': 'game_not_open'}), 409
 
     answer = 'maybe' if request.method == 'POST' else None
     if invite.response != answer:
@@ -7096,6 +7108,14 @@ def maybe_invite(game_id):
                 related_game_id=game.id,
                 unread_dedupe_key=f'game-maybe:{game.id}',
             )
+        if not answer:
+            # Taking it back settles the host's unread "might make it" item
+            # (and frees its slot for someone else's maybe). It stays in the
+            # host's history, so redoing the answer never pings twice.
+            Notification.query.filter_by(
+                user_id=game.creator_id, kind='invite_maybe', related_game_id=game.id,
+                related_user_id=user.id, read=False,
+            ).update({'read': True, 'unread_dedupe_key': None}, synchronize_session=False)
         db.session.commit()
     return jsonify(_game_payload(game, user.id))
 
@@ -8300,6 +8320,7 @@ def edit_game(game_id):
     )
     if {'court_id', 'scheduled_at'} & set(changed):
         _end_game_arrivals(game, 'rescheduled', now)
+        _reset_maybe_answers(game)
     if commitment_changed:
         for player in sorted(game.players, key=lambda row: row.user_id):
             player.reminded_at = None
@@ -8490,6 +8511,7 @@ def reschedule_game(game_id):
         return jsonify(conflict), 409
     game.scheduled_at = when
     _end_game_arrivals(game, 'rescheduled')
+    _reset_maybe_answers(game)
     court_name = game.court.name if game.court else 'the court'
     for player in sorted(game.players, key=lambda row: row.user_id):
         player.reminded_at = None      # re-remind for the new time

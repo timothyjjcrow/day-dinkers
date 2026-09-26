@@ -111,10 +111,10 @@ def test_maybe_keeps_the_invite_and_tells_the_host_once(client):
     assert undone.status_code == 200
     assert undone.get_json()['my_invite_status'] == 'pending'
     assert GameInvite.query.filter_by(game_id=game['id'], user_id=uid(alex)).one().response is None
-    for notification in maybe_notes(host, game):
-        notification.read = True
-        notification.unread_dedupe_key = None
-    db.session.commit()
+    # Undo settles the host's unread "might make it" item and frees its key.
+    db.session.expire_all()
+    (note,) = maybe_notes(host, game)
+    assert note.read is True and note.unread_dedupe_key is None
     assert maybe(client, game, alex).status_code == 200
     assert len(maybe_notes(host, game)) == 1
 
@@ -276,7 +276,7 @@ def test_day_before_host_reminder_mentions_maybes_only_when_there_are_some(app, 
             user_id=uid(host), kind='game_reminder',
         )
     }
-    assert bodies[with_maybes['id']] == '1 joined · 2 maybe — nudge them or invite more.'
+    assert bodies[with_maybes['id']] == '1 joined · 2 maybe.'
     assert bodies[without['id']] == '1 players are signed up.'
     assert GamePlayer.query.filter_by(user_id=uid(host)).filter(
         GamePlayer.day_reminded_at.isnot(None),
@@ -300,3 +300,35 @@ def test_legacy_invites_gain_the_answer_column_as_pending(app, client):
     }
     assert detail(client, game, alex).get_json()['my_invite_status'] == 'pending'
     assert maybe(client, game, alex).get_json()['my_invite_status'] == 'maybe'
+
+
+def test_moving_the_game_asks_maybes_again(client):
+    host = register(client, 'move-host', 'Host')
+    alex = register(client, 'move-alex', 'Alex')
+    game = create_game(client, host, [alex])
+    assert maybe(client, game, alex).status_code == 200
+    moved = client.post(f"/api/games/{game['id']}/reschedule", headers=auth(host),
+                        json={'scheduled_at': (utcnow() + timedelta(days=2)).isoformat() + 'Z'})
+    assert moved.status_code == 200, moved.get_json()
+    assert detail(client, game, alex).get_json()['my_invite_status'] == 'pending'
+
+
+def test_no_maybe_once_the_game_started_and_waitlisted_maybes_count_once(client):
+    host = register(client, 'late-host', 'Host')
+    alex = register(client, 'late-alex', 'Alex')
+    game = create_game(client, host, [alex])
+    row = db.session.get(Game, game['id'])
+    row.scheduled_at = utcnow() - timedelta(minutes=5)
+    db.session.commit()
+    late = maybe(client, game, alex)
+    assert late.status_code == 409 and late.get_json() == {'error': 'game_not_open'}
+
+    from backend.models import GameWaitlist
+    row.scheduled_at = utcnow() + timedelta(hours=3)
+    db.session.commit()
+    assert maybe(client, game, alex).status_code == 200
+    db.session.add(GameWaitlist(game_id=row.id, user_id=uid(alex)))
+    db.session.commit()
+    db.session.expire_all()
+    seen = detail(client, game, host).get_json()
+    assert seen['maybe_people'] == [] and seen['rsvp_counts']['maybe'] == 0

@@ -59,7 +59,7 @@ def test_invitee_sees_accept_then_maybe_and_cant_make_it():
     assert '${uiIcon(\'check\')} I’m in' in detail
     assert ('<div class="session-invite-replies"><button class="btn btn-secondary" id="gs-maybe-invite">Maybe</button>'
             '<button class="btn btn-secondary" id="gs-decline-invite">Can’t make it</button></div>') in detail
-    assert "game.my_invite_status === 'pending' && !isChallenge" in detail
+    assert "game.my_invite_status === 'pending' && !isChallenge && Date.parse(game.scheduled_at) > Date.now()" in detail
     assert "subline = game.my_invite_status === 'maybe' ? 'You said maybe'" in detail
     assert '${playersHtml}${sessionMaybeGroupHtml(game)}' in detail
     # A full game still lets a Maybe invitee say they can't make it.

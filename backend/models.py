@@ -3165,7 +3165,8 @@ class Game(TimestampMixin, db.Model):
             and (viewer or self.creator_id == viewer_id)
             and any(invite.response == 'maybe' for invite in self.invites)
         ):
-            hidden_ids = blocked_pair_ids(viewer_id)
+            # Someone waiting for a spot is on the waitlist, not a maybe.
+            hidden_ids = blocked_pair_ids(viewer_id) | {row.user_id for row in active_queue}
             maybe_people = [
                 invite.user.to_summary_dict()
                 for invite in sorted(self.invites, key=lambda row: row.id)

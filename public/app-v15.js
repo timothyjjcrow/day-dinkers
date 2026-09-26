@@ -39334,7 +39334,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         if (isChallenge && game.players.length === 1) {
           actions += '<button class="btn btn-danger btn-block" id="gs-decline" style="margin-top:10px">Decline</button>';
         } else if (!skipped && game.my_invite_status) {
-          actions += game.my_invite_status === 'pending' && !isChallenge
+          actions += game.my_invite_status === 'pending' && !isChallenge && Date.parse(game.scheduled_at) > Date.now()
             ? '<div class="session-invite-replies"><button class="btn btn-secondary" id="gs-maybe-invite">Maybe</button><button class="btn btn-secondary" id="gs-decline-invite">Can’t make it</button></div>'
             : '<button class="btn btn-secondary btn-block" id="gs-decline-invite" style="margin-top:10px">Can’t make it</button>';
         }
