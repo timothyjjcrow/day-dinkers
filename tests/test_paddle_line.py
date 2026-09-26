@@ -319,3 +319,80 @@ def test_closed_courts_refuse_joining_but_allow_leaving(client, court_id):
         f'/api/courts/{court_id}/queue', json={'action': 'leave'}, headers=auth(ana),
     )
     assert left.status_code == 200 and left.get_json()['in_line'] is False
+
+
+def test_score_line_keeps_only_the_score_when_a_name_is_hidden(client, court_id):
+    ana, ben, cy, dee, eve = line_of(
+        client, court_id, ['Ana Lopez', 'Ben Wu', 'Cy Park', 'Dee Ross', 'Eve Hart'],
+    )
+    assert client.post(
+        f"/api/users/{uid(eve)}/block", headers=auth(ben),
+    ).status_code in (200, 201)
+    call_next(client, eve, court_id, 1, [])
+    done = call_next(
+        client, eve, court_id, 1, [uid(ana), None, uid(cy), uid(dee)], score=[11, 5],
+    )
+    assert done.status_code == 200, done.get_json()
+    # Eve can't see Ben, so court chat doesn't name anyone.
+    assert Message.query.filter_by(court_id=court_id).one().body == (
+        'Court 1 · Game finished 11–5'
+    )
+
+
+def test_game_done_confirms_everyone_rotating_is_still_here(client, court_id):
+    players = line_of(
+        client, court_id,
+        ['Ana Lopez', 'Ben Wu', 'Cy Park', 'Dee Ross', 'Eve Hart', 'Finn Cole', 'Gus Lee', 'Hal Moss'],
+    )
+    call_next(client, players[0], court_id, 1, [])
+    earlier = utcnow() - timedelta(minutes=25)
+    for row in CheckIn.query.filter_by(court_id=court_id, checked_out_at=None):
+        row.last_presence_ping_at = earlier
+    db.session.commit()
+
+    done = call_next(client, players[0], court_id, 1, [uid(p) for p in players[:4]])
+    assert done.status_code == 200, done.get_json()
+    db.session.expire_all()
+    pings = {
+        row.user_id: row.last_presence_ping_at
+        for row in CheckIn.query.filter_by(court_id=court_id, checked_out_at=None)
+    }
+    # The four who finished and the four called on are all fresh again.
+    assert all(pings[uid(player)] > earlier for player in players)
+
+
+def test_joining_a_game_on_a_stale_check_in_starts_over_in_line(client, court_id):
+    from backend.models import Game, GamePlayer
+
+    ana, ben = line_of(client, court_id, ['Ana Lopez', 'Ben Wu'])
+    host = register(client, 'Hana Bell')
+    game = Game(
+        court_id=court_id, creator_id=uid(host), scheduled_at=utcnow() + timedelta(hours=2),
+        max_players=4, game_type='casual', visibility='open',
+    )
+    db.session.add(game)
+    db.session.flush()
+    db.session.add(GamePlayer(game_id=game.id, user_id=uid(host)))
+    row = CheckIn.query.filter_by(user_id=uid(ana), checked_out_at=None).one()
+    row.last_presence_ping_at = utcnow() - timedelta(minutes=45)
+    db.session.commit()
+
+    joined = client.post(
+        f'/api/games/{game.id}/join', headers=auth(ana),
+        json={'expected_plan_token': db.session.get(Game, game.id).plan_review_token()},
+    )
+    assert joined.status_code in (200, 201), joined.get_json()
+    db.session.expire_all()
+    revived = db.session.get(CheckIn, row.id)
+    assert revived.queued_at is None and revived.queue_court is None
+    queue = client.get(f'/api/courts/{court_id}/queue', headers=auth(ben)).get_json()
+    assert queue['waiting_count'] == 1 and queue['my_position'] == 1
+
+
+def test_an_overfull_court_still_shows_everyone():
+    from backend.routes.courts import _paddle_teams
+
+    assert _paddle_teams(['A']) == [['A'], []]
+    assert _paddle_teams(['A', 'B']) == [['A'], ['B']]
+    assert _paddle_teams(['A', 'B', 'C', 'D']) == [['A', 'D'], ['B', 'C']]
+    assert _paddle_teams(['A', 'B', 'C', 'D', 'E']) == [['A', 'D'], ['B', 'C', 'E']]

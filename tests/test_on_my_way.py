@@ -354,3 +354,18 @@ def test_live_rally_paths_keep_a_scheduled_eta_instead_of_closing_it(client):
     intent = GameArrivalIntent.query.filter_by(user_id=tim['user']['id']).one()
     assert intent.active is True
     assert _notices('rally_arrival_ended') == []
+
+
+def test_no_eta_while_friends_are_still_voting_on_the_time(client):
+    host = _register(client, 'omw-vote-host', 'Hana')
+    tim = _register(client, 'omw-vote-tim', 'Tim')
+    game_id = _game(client, host, tim, starts_in=timedelta(minutes=20))
+    row = db.session.get(Game, game_id)
+    row.time_options = '[{"id": "a", "starts_at": "%sZ", "votes": []}]' % (
+        row.scheduled_at.isoformat())
+    db.session.commit()
+
+    refused = _on_my_way(client, tim, game_id, 'omw-vote')
+    assert refused.status_code == 409
+    assert refused.get_json() == {'error': 'arrival_window_closed'}
+    assert 'arrivals' not in _detail(client, tim, game_id)

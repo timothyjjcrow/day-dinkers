@@ -208,6 +208,7 @@ def test_rain_alert_reaches_the_activity_feed(client, app, monkeypatch):
 
 @pytest.mark.parametrize('case', [
     'dry', 'indoor', 'too_soon', 'too_far', 'instant', 'cancelled', 'no_location',
+    'time_vote',
 ])
 def test_no_alert_outside_the_rules(app, monkeypatch, case):
     calls = []
@@ -224,6 +225,10 @@ def test_no_alert_outside_the_rules(app, monkeypatch, case):
     extra = {'is_instant': True} if case == 'instant' else {}
     if case == 'cancelled':
         extra['status'] = 'cancelled'
+    if case == 'time_vote':
+        # Friends are still voting, so the earliest option isn't the start.
+        extra['time_options'] = '[{"id": "a", "starts_at": "%sZ", "votes": []}]' % (
+            starts_at.isoformat())
     game_at(court, host, starts_at, **extra)
 
     send()

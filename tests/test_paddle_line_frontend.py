@@ -135,7 +135,7 @@ def test_join_undo_poll_and_game_done_flows_run_end_to_end():
       };
       const beginButtonAction=target=>target?()=>{}:null;
       const button=(dataset={})=>({dataset,handlers:{},addEventListener(name,fn){this.handlers[name]=fn;}});
-      const slot={html:'',set innerHTML(value){this.html=value;},get innerHTML(){return this.html;},
+      const slot={html:'',contains:()=>false,set innerHTML(value){this.html=value;},get innerHTML(){return this.html;},
         querySelector(selector){return selector==='#cd-queue-toggle'&&this.html.includes('cd-queue-toggle')?(this.toggle=button()):null;},
         querySelectorAll(selector){const key=selector==='[data-queue-call]'?'queueCall':'queueDone';
           return [...this.html.matchAll(new RegExp(selector.slice(1,-1)+'="(\\\\d+)"','g'))].map(m=>(this[key]=button({[key]:m[1]})));}};
@@ -204,3 +204,12 @@ def test_join_undo_poll_and_game_done_flows_run_end_to_end():
         assert.ok(slot.innerHTML.includes('Join the line'));
       })().catch(error=>{console.error(error);process.exit(1);});
     ''')
+
+
+def test_redrawing_the_line_keeps_focus_on_the_same_control():
+    source = (ROOT / 'public' / 'app-v15.js').read_text()
+    start = source.index('const renderPaddleQueue = (next) => {')
+    block = source[start:source.index('const setPaddleLine', start)]
+    assert "const focused = slot.contains(document.activeElement) ? document.activeElement : null;" in block
+    assert "[data-queue-done=\"${focused.dataset.queueDone}\"]" in block
+    assert "?.focus({ preventScroll: true });" in block

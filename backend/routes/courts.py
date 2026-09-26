@@ -1311,6 +1311,15 @@ def _paddle_person(checkin, viewer_id=None, friends=(), hidden_ids=()):
     }
 
 
+def _paddle_teams(people):
+    """Line order p1..p4 plays p1+p4 against p2+p3; two players is singles.
+
+    Anyone past the fourth joins the second side, so every player on the
+    court is shown and "Game done" always sees the same set as the server.
+    """
+    return [people[0:1] + people[3:4], people[1:3] + people[4:]]
+
+
 def _paddle_queue_payload(court, checkins, viewer=None, friends=(), hidden_ids=()):
     """The court's line. Signed-out viewers get counts only."""
     line = _paddle_line(checkins)
@@ -1332,10 +1341,7 @@ def _paddle_queue_payload(court, checkins, viewer=None, friends=(), hidden_ids=(
         people = [
             _paddle_person(row, viewer_id, friends, hidden_ids) for row in rows
         ]
-        # Line order p1..p4 plays p1+p4 against p2+p3; two players is singles.
-        payload['courts'].append({
-            'court': number, 'teams': [people[0::3], people[1:3]],
-        })
+        payload['courts'].append({'court': number, 'teams': _paddle_teams(people)})
     if viewer:
         mine = next((row for row in line if row.user_id == viewer_id), None)
         payload.update(
@@ -1376,15 +1382,23 @@ def _locked_paddle_line(court_id, *, allow_closed=False):
     return court, rows, None
 
 
-def _post_paddle_score(court, sender_id, number, players, score, now):
-    """One unrated court-chat line; names follow the public discovery rule."""
+def _post_paddle_score(court, sender_id, number, players, score, now, hidden_ids=()):
+    """One unrated court-chat line; names follow the public discovery rule.
+
+    Names appear only when every player's first name is public (and none is
+    blocked with the sender); otherwise the line carries just the score.
+    """
     from backend.models import Message
     from backend.services.conversations import conversation_ref
-    names = [_paddle_person(row)['name'] for row in players]
-    body = (
-        f"Court {number} · {' & '.join(names[0::3])} "
-        f"{score[0]}–{score[1]} {' & '.join(names[1:3])}"
-    )
+    people = [_paddle_person(row, hidden_ids=hidden_ids) for row in players]
+    if any(person['id'] is None for person in people):
+        body = f"Court {number} · Game finished {score[0]}–{score[1]}"
+    else:
+        first, second = _paddle_teams([person['name'] for person in people])
+        body = (
+            f"Court {number} · {' & '.join(first)} "
+            f"{score[0]}–{score[1]} {' & '.join(second)}"
+        )
     if Message.query.filter(
         Message.court_id == court.id,
         Message.body == body,
@@ -1451,7 +1465,7 @@ def call_paddle_queue_next(court_id):
     score = payload.get('score')
     if (
         not _whole(number) or not 1 <= number <= PADDLE_LINE_MAX_COURTS
-        or not isinstance(expected, list) or len(expected) > 4
+        or not isinstance(expected, list) or len(expected) > 8
         or not all(value is None or _whole(value) for value in expected)
     ):
         return jsonify({'error': 'invalid_payload'}), 400
@@ -1492,10 +1506,14 @@ def call_paddle_queue_next(court_id):
     for offset, row in enumerate(playing):
         row.queued_at = back + timedelta(microseconds=offset)
         row.queue_court = None
+        # A checked-in player here just saw them finish, which confirms their
+        # presence while their phones sit in pockets.
+        row.last_presence_ping_at = now
     waiting = _paddle_line(row for row in line if row.queue_court is None)
     called = waiting[:4] if len(waiting) >= 4 else waiting[:2] if len(waiting) >= 2 else []
     for row in called:
         row.queue_court = number
+        row.last_presence_ping_at = now
         if row.user_id != viewer.id and row not in playing:
             notify(
                 row.user_id, 'court_up', f'You’re up on Court {number}',
@@ -1503,7 +1521,7 @@ def call_paddle_queue_next(court_id):
                 unread_dedupe_key=f'court-up:{row.id}:{row.queued_at.isoformat()}',
             )
     if score is not None and len(playing) >= 2:
-        _post_paddle_score(court, viewer.id, number, playing, score, now)
+        _post_paddle_score(court, viewer.id, number, playing, score, now, hidden_ids)
     result = _paddle_queue_payload(court, rows, viewer, friends, hidden_ids)
     db.session.commit()
     return jsonify(result)

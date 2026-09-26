@@ -2211,6 +2211,7 @@ def _scheduled_arrival_window_open(game, now=None):
         game
         and not game.is_instant
         and game.status == 'upcoming'
+        and not game.time_vote_open
         and game.scheduled_at
         and game.scheduled_at - timedelta(minutes=SCHEDULED_ARRIVAL_LEAD_MINUTES)
         <= now
@@ -2901,6 +2902,7 @@ def send_rain_alerts():
     games = Game.query.join(Court, Game.court_id == Court.id).filter(
         Game.status == 'upcoming',
         Game.is_instant.is_(False),
+        Game.time_options == '[]',  # an open vote has no start time yet
         Game.scheduled_at > now + timedelta(minutes=30),
         Game.scheduled_at <= now + timedelta(hours=4),
         Court.indoor.is_(False),
@@ -6641,6 +6643,9 @@ def join_game(game_id):
         # Joining the game resolves the separate "looking" signal, preventing
         # the player from receiving more same-court rally invitations.
         checkin.looking_for_game = False
+        if not checkin_is_fresh(checkin):
+            # A revived stale check-in starts over at the back of any paddle line.
+            checkin.queued_at = checkin.queue_court = None
         checkin.last_presence_ping_at = utcnow()
     if game.creator_id != g.current_user.id:
         notify(

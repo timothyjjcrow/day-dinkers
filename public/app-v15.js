@@ -14199,8 +14199,13 @@ ${window.VenueWorkspace.visitingForm(court.community_visitor_info || {}, 'commun
       const up = !!next.my_court && next.my_court !== paddleQueue?.my_court;
       if (up) toast(`You’re up on Court ${next.my_court}`, { tone: 'success' });
       paddleQueue = next;
+      // Keep keyboard and screen-reader focus on the same control across redraws.
+      const focused = slot.contains(document.activeElement) ? document.activeElement : null;
+      const focusKey = focused && (focused.dataset.queueDone ? `[data-queue-done="${focused.dataset.queueDone}"]`
+        : focused.dataset.queueCall ? `[data-queue-call="${focused.dataset.queueCall}"]` : '#cd-queue-toggle');
       slot.innerHTML = paddleQueueBlock(next);
       bindPaddleQueue(slot);
+      if (focused) (slot.querySelector(focusKey) || slot.querySelector('#cd-queue-toggle'))?.focus({ preventScroll: true });
       syncPaddlePoll();
       return up;
     };
@@ -39461,7 +39466,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
           ${game.players.filter((player) => player.rating_delta != null).map((player) => `<div><span>${esc(player.display_name)}</span><b class="${player.rating_delta >= 0 ? 'delta-up' : 'delta-down'}">${player.rating_delta >= 0 ? '+' : ''}${esc(player.rating_delta)}</b></div>`).join('')}
         </details>` : '';
     const startMs = new Date(game.scheduled_at).getTime();
-    const conditionsExpected = game.status === 'upcoming' && court.id
+    const conditionsExpected = game.status === 'upcoming' && court.id && !game.time_vote
       && startMs - Date.now() < 6 * 3600e3 && startMs - Date.now() > -3600e3;
     const stakesExpected = game.game_type === 'ranked' && game.status === 'upcoming'
       && game.is_joined && game.players.length >= 2;
