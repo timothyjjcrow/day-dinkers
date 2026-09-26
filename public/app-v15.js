@@ -36679,6 +36679,7 @@ ${businessUnavailableHtml('Verification', error)}${![404, 501].includes(error.st
     return `<div class="session-time-vote" role="group" aria-labelledby="gs-time-vote-title">
       <b id="gs-time-vote-title">When works?</b>
       <div class="schedule-suggestions">${vote.options.map((option) => `<button type="button" data-time-vote="${esc(option.id)}" class="${mine.has(option.id) ? 'active' : ''}" aria-pressed="${mine.has(option.id)}" ${vote.can_vote ? '' : 'disabled'}><b>${esc(fmtVoteTime(option.starts_at))}</b><small>${Number(option.count) || 0} can</small></button>`).join('')}</div>
+      ${vote.can_vote ? '<p class="simple-note">Tap every time that works for you.</p>' : ''}
       ${vote.can_lock && leader ? `<button type="button" class="btn btn-primary btn-block" id="gs-time-lock" data-option-id="${esc(leader.id)}">Lock ${esc(fmtVoteTime(leader.starts_at))}</button>
       <p class="simple-note">Locks automatically ${esc(fmtVoteTime(vote.locks_at))}</p>` : ''}
     </div>`;
