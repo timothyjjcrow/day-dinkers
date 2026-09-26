@@ -13,3 +13,9 @@ dependencies = [
   "pywebpush>=2.0,<3.0",
   "cryptography>=43.0,<51.0",
 ]
+
+# Vercel runs this after installing dependencies and before a deployment goes
+# live. Production builds apply and verify additive schema upgrades; preview
+# builds never touch a database. See scripts/vercel_build.py.
+[tool.vercel.scripts]
+build = "python scripts/vercel_build.py"

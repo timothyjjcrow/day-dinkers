@@ -247,6 +247,15 @@ URL in a tracked file, command argument, chat message, or screenshot. Leave the
 deployed `DATABASE_URL` on the pooled endpoint and keep runtime schema
 management disabled.
 
+Production deploys also run this migration automatically. `pyproject.toml`
+sets Vercel's build script to `scripts/vercel_build.py`, which runs after the
+Python dependencies install and before the deployment goes live. On production
+builds it passes Neon's direct URL (`DATABASE_URL_UNPOOLED`, from the Vercel
+integration) to `migrate_production_schema.py`, so every additive table,
+column and index a release needs is in place before its code serves traffic.
+A failed migration fails the build and the previous deployment keeps serving.
+Preview builds never connect to a database.
+
 Business reviews normally happen in the in-app operator queue. Operator roles
 are separate from venue-team roles and may be provisioned only from a trusted
 machine using the direct database URL. The target account must enable MFA before
