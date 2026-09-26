@@ -1230,6 +1230,7 @@
     arrival_slot_taken: 'That game filled before your ETA was shared.',
     active_arrival_elsewhere: 'You’re already on your way to another game.',
     arrival_already_active: 'You’re already on your way to this game.',
+    arrival_window_closed: 'On my way opens an hour before start and closes 30 minutes after.',
     already_at_court: 'You’re already checked in at this court. Joining the game instead.',
     active_checkin_elsewhere: 'You’re checked in at another court. Confirm this court before joining.',
     invalid_payload: 'That request could not be read. Refresh and try again.',
@@ -38732,7 +38733,7 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       game.commitment_confirmation_due, game.my_commitment_requested_at, game.rsvp_counts,
       game.my_arrival && [game.my_arrival.id, game.my_arrival.active, game.my_arrival.arrives_at,
         game.my_arrival.expires_at, game.my_arrival.end_reason],
-      (game.arrivals || []).map((arrival) => [arrival.id, arrival.user_id,
+      Array.isArray(game.arrivals), (game.arrivals || []).map((arrival) => [arrival.id, arrival.user_id,
         arrival.arrives_at, arrival.expires_at, arrival.active]),
       game.waitlist_count, game.waitlist_position, game.auto_fill_waitlist,
       (game.waitlist_people || []).map((person) => [person.user_id, person.position]),
@@ -38971,13 +38972,20 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
     // Host can remove other players from an upcoming game (no-show swap).
     const canRemove = (p) => game.is_creator && game.status === 'upcoming'
       && !closedRally && p.user_id !== game.creator_id;
+    // Scheduled games: players get `arrivals` only from an hour before the
+    // start until 30 minutes after it, which is when “On my way” is offered.
+    const etaWindow = !game.is_instant && Array.isArray(game.arrivals);
+    const etaText = new Map(etaWindow ? game.arrivals.map((eta) => {
+      const away = arrivalEtaLabel({ arrivesAt: eta.arrives_at, etaMinutes: eta.eta_minutes });
+      return [eta.user_id, live ? `Running late · ${away.toLowerCase()}` : away];
+    }) : []);
     const playerRow = (p, showRsvp = false) => `
       <div class="game-player-row">
         <button type="button" class="player-profile-link" id="session-player-${p.user_id}" data-view-user="${p.user_id}" aria-label="View ${esc(p.display_name)}'s profile">
           ${avatarHtml(p, 'sm', 'span')}
           <span class="row-main">
             <span class="row-title">${esc(p.display_name)}${p.user_id === state.me?.id ? ' <span class="game-player-role">You</span>' : ''}${p.user_id === game.creator_id ? ' <span class="game-player-role">Host</span>' : ''}</span>
-            ${showRsvp === true ? `<span class="row-sub session-player-rsvp" data-rsvp-state="${sessionRsvpStatus(p)}">${sessionRsvpStatus(p) === 'confirmed' ? 'Confirmed' : sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : game.status === 'upcoming' && !game.is_instant && team1.length && team2.length && sessionRsvpStatus(p) !== 'confirmed' ? `<span class="row-sub game-attendance-pending">${sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : ''}
+            ${etaText.has(p.user_id) ? `<span class="row-sub">${esc(etaText.get(p.user_id))}</span>` : showRsvp === true ? `<span class="row-sub session-player-rsvp" data-rsvp-state="${sessionRsvpStatus(p)}">${sessionRsvpStatus(p) === 'confirmed' ? 'Confirmed' : sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : game.status === 'upcoming' && !game.is_instant && team1.length && team2.length && sessionRsvpStatus(p) !== 'confirmed' ? `<span class="row-sub game-attendance-pending">${sessionRsvpStatus(p) === 'needs_confirmation' ? 'Needs confirmation' : 'Place reserved'}</span>` : ''}
           </span>
         </button>
         ${canRemove(p) ? `<button type="button" class="game-player-overflow" id="session-player-actions-${p.user_id}" data-remove-player="${p.user_id}" title="Player actions" aria-label="Actions for ${esc(p.display_name)}"><span aria-hidden="true">•••</span></button>` : ''}
@@ -39227,8 +39235,12 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
       ? game.status === 'awaiting_confirmation' ? game.score_correction_pending ? 'Correction needs agreement' : 'Awaiting confirmation'
         : isRankedMatch ? 'Confirmed result' : 'Final score'
       : '';
+    const myEta = etaWindow && game.my_arrival?.active ? game.my_arrival : null;
+    const canShareEta = etaWindow && !myEta && game.players.length > 1 && !isCheckedInAtCourt(court.id);
     const joinedState = game.is_joined && game.status === 'upcoming' && !closedRally
-      ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${uiIcon(game.attendance_confirmation_due && !game.is_creator ? 'clock' : 'check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}</span>${joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>' : ''}</div>` : '';
+      ? `<div class="session-joined-state" id="gs-joined-state" role="status" tabindex="-1"><span>${myEta ? `${uiIcon('map-pin')} On the way · ${esc(myEta.eta_minutes)} min` : `${uiIcon(game.attendance_confirmation_due && !game.is_creator ? 'clock' : 'check-circle')} ${game.is_creator ? 'You’re hosting' : game.attendance_confirmation_due ? 'Your place is held' : 'You’re in'}`}</span>${myEta ? '<button type="button" id="gs-eta-undo">Undo</button>'
+        : joinedNow ? '<button type="button" id="gs-undo-join">Undo</button>'
+          : canShareEta ? '<button type="button" id="gs-on-my-way">On my way</button>' : ''}</div>` : '';
     const [whenDay, whenTime] = fmtDateTime(game.scheduled_at).split(' · ');
     const when = !game.is_instant && game.scheduled_at
       ? `<div class="session-when">${uiIcon('calendar')}<span class="session-when-day">${esc(whenDay)}</span><b>${esc(whenTime)}${game.ends_at ? ` – ${esc(fmtTimeShort(game.ends_at))}` : ''}</b></div>` : '';
@@ -39375,6 +39387,17 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
 
     const reopenFresh = async ({ preserve = false, announce = false } = {}) => {
       try { render(await api(`/games/${gameId}`), { preserve, announce }); } catch (e) { toast(e.message); }
+    };
+    // Scheduled games: stop sharing “On my way” from the pill or the toast.
+    const stopEta = async (button = null) => {
+      const reset = button ? beginButtonAction(button, 'Undoing…') : () => {};
+      if (!reset) return;
+      try {
+        await api(`/games/${gameId}/arrival`, { method: 'DELETE' });
+        if (!modal.isConnected) return;
+        await reopenFresh({ preserve: true });
+        box.querySelector('#gs-joined-state')?.focus({ preventScroll: true });
+      } catch (error) { reset(); toast(error.message); }
     };
     // Arrival is collected in a child sheet. Paint the confirmed local state
     // into the still-mounted game detail before dismissing that child, then
@@ -39868,6 +39891,27 @@ ${scheduleDateTimePickerHtml('eg-when', whenValue, plannerTimeZoneLabel(Intl.Dat
         if (arrival) openChildModal(modal, () => openArrivalDetails(arrival));
         else reopenFresh();
       });
+      box.querySelector('#gs-on-my-way')?.addEventListener('click', async (event) => {
+        const reset = beginButtonAction(event.currentTarget, 'Sharing…');
+        if (!reset) return;
+        try {
+          const shared = await api(`/games/${gameId}/arrival`, { method: 'PUT',
+            body: JSON.stringify({ eta_minutes: 10, client_attempt_id: `arrival-${newGameAttemptId()}` }) });
+          if (modal.isConnected && shared.game) {
+            render(shared.game, { preserve: true });
+            box.querySelector('#gs-joined-state')?.focus({ preventScroll: true });
+          }
+          refreshMe();
+          toast('Players know you’re about 10 min away', { tone: 'success', duration: 6500,
+            action: { label: 'Undo', onClick: () => stopEta() } });
+        } catch (error) {
+          reset();
+          toast(error.code === 'already_at_court' ? 'You’re already checked in at this court.' : error.message);
+          // Presence or the start time changed under the page: show the fresh state.
+          if (error.status === 409) refreshMe().then(() => modal.isConnected && reopenFresh({ preserve: true }));
+        }
+      });
+      box.querySelector('#gs-eta-undo')?.addEventListener('click', (event) => stopEta(event.currentTarget));
       box.querySelector('#gs-join')?.addEventListener('click', async (event) => {
         const button = event.currentTarget;
         const accountId = Number(state.me?.id);

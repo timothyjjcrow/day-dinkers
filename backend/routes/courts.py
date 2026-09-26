@@ -86,16 +86,24 @@ def _court_page_args():
     return limit, offset, None
 
 
-def _lock_open_instant_games_for_user(user_id):
-    """Lock this member's live assembly rows in canonical id order."""
+def _lock_open_instant_games_for_user(user_id, scheduled_game_id=None):
+    """Lock this member's live assembly rows in canonical id order.
+
+    ``scheduled_game_id`` (a scheduled game the member is on the way to) joins
+    the same sorted lock; callers split it back out by ``is_instant``.
+    """
+    live = and_(
+        Game.is_instant.is_(True),
+        Game.status == 'upcoming',
+        Game.assembly_closed_at.is_(None),
+    )
+    if scheduled_game_id:
+        live = or_(live, and_(
+            Game.id == scheduled_game_id, Game.is_instant.is_(False),
+        ))
     games = (
         Game.query.join(GamePlayer)
-        .filter(
-            GamePlayer.user_id == user_id,
-            Game.is_instant.is_(True),
-            Game.status == 'upcoming',
-            Game.assembly_closed_at.is_(None),
-        )
+        .filter(GamePlayer.user_id == user_id, live)
         .order_by(Game.id.asc())
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -2426,7 +2434,13 @@ def check_in(court_id):
         return jsonify({'error': 'authentication_required'}), 401
     g.current_user = user
     now = utcnow()
-    instant_games = _lock_open_instant_games_for_user(g.current_user.id)
+    from backend.routes.games import (
+        _end_game_arrivals, _scheduled_arrival_game_id,
+    )
+    locked_games = _lock_open_instant_games_for_user(
+        g.current_user.id, _scheduled_arrival_game_id(g.current_user.id, court.id),
+    )
+    instant_games = [game for game in locked_games if game.is_instant]
     existing = active_checkin_for(g.current_user.id, for_update=True)
     existing_was_fresh = checkin_is_fresh(existing, now)
     # Only a fresh "wants a game" (not a re-ping of an existing one) pings friends.
@@ -2463,8 +2477,12 @@ def check_in(court_id):
             last_presence_ping_at=now,
             location_verified_at=now if verified_location else None,
         ))
+    # Arriving at a scheduled game's court ends that "On my way" quietly.
+    for game in locked_games:
+        if not game.is_instant and game.court_id == court.id:
+            _end_game_arrivals(game, 'arrived', now, user_id=g.current_user.id)
     # Physical presence supersedes the separate remote "available this hour"
-    # signal. User -> Game -> CheckIn -> pulse is the shared lock order.
+    # signal. User -> Game -> CheckIn -> intent -> pulse is the shared lock order.
     from backend.routes.games import _end_active_play_pulse_for_user
     _end_active_play_pulse_for_user(g.current_user.id, 'checked_in', now)
     if started_looking:

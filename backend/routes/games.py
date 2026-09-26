@@ -419,6 +419,10 @@ RALLY_ARRIVAL_GRACE_MINUTES = 5
 RALLY_ARRIVAL_HARD_MAX_MINUTES = 20
 RALLY_ARRIVAL_CAPABILITY_SECONDS = 5 * 60
 RALLY_ARRIVAL_ANNOUNCEMENT_COOLDOWN_MINUTES = 20
+# Scheduled games: players can share a one-tap ETA from an hour before the
+# start until 30 minutes after it.
+SCHEDULED_ARRIVAL_LEAD_MINUTES = 60
+SCHEDULED_ARRIVAL_LATE_MINUTES = 30
 PLAY_PULSE_MINUTES = 60
 PLAY_PULSE_START_LEAD_MINUTES = 15
 PLAY_PULSE_CAPABILITY_SECONDS = 5 * 60
@@ -2117,7 +2121,13 @@ def _end_arrival_intent(intent, reason, now=None):
     intent.active = False
     intent.ended_at = now
     intent.end_reason = normalized_reason
-    if was_time_active and normalized_reason in RALLY_ARRIVAL_EARLY_END_REASONS:
+    # Only a live pickup game can end under a traveler. A scheduled game's
+    # ETA ends quietly (left, cancelled, moved, finished or checked in).
+    if (
+        was_time_active
+        and normalized_reason in RALLY_ARRIVAL_EARLY_END_REASONS
+        and getattr(intent.game, 'is_instant', True)
+    ):
         notify(
             intent.user_id,
             'rally_arrival_ended',
@@ -2153,13 +2163,16 @@ def _retire_expired_arrival_intents(*, game_id=None, user_id=None, now=None):
     return rows
 
 
-def _end_game_arrivals(game, reason, now=None):
-    """End every active “On my way” status when the live game ends."""
-    if not game or not game.is_instant:
+def _end_game_arrivals(game, reason, now=None, *, user_id=None):
+    """End active “On my way” statuses when the game (or one place) ends."""
+    if not game:
         return 0
     now = now or utcnow()
+    query = GameArrivalIntent.query.filter_by(game_id=game.id, active=True)
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
     rows = (
-        GameArrivalIntent.query.filter_by(game_id=game.id, active=True)
+        query
         .order_by(GameArrivalIntent.id.asc())
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -2172,6 +2185,47 @@ def _end_game_arrivals(game, reason, now=None):
     if changed:
         db.session.flush()
     return changed
+
+
+def _scheduled_arrival_window_open(game, now=None):
+    """Whether players of a scheduled game can share “On my way” now."""
+    now = now or utcnow()
+    return bool(
+        game
+        and not game.is_instant
+        and game.status == 'upcoming'
+        and game.scheduled_at
+        and game.scheduled_at - timedelta(minutes=SCHEDULED_ARRIVAL_LEAD_MINUTES)
+        <= now
+        <= game.scheduled_at + timedelta(minutes=SCHEDULED_ARRIVAL_LATE_MINUTES)
+    )
+
+
+def _arrival_context_active(game, now=None, for_update=False):
+    """Whether an existing ETA's game still wants it.
+
+    A live rally must still be assembling; a scheduled game only has to be
+    upcoming, because its ETA expires on its own within minutes.
+    """
+    if game is not None and not game.is_instant:
+        return game.status == 'upcoming'
+    return _instant_rally_assembly_active(game, now, for_update=for_update)
+
+
+def _scheduled_arrival_game_id(user_id, court_id):
+    """Unlocked probe: the scheduled game at this court the user is heading to."""
+    row = (
+        db.session.query(GameArrivalIntent.game_id)
+        .join(Game, Game.id == GameArrivalIntent.game_id)
+        .filter(
+            GameArrivalIntent.user_id == user_id,
+            GameArrivalIntent.active.is_(True),
+            Game.is_instant.is_(False),
+            Game.court_id == court_id,
+        )
+        .first()
+    )
+    return row[0] if row else None
 
 
 def _raw_active_arrivals(game, now=None, for_update=False,
@@ -2384,6 +2438,28 @@ def _game_payload(game, viewer_id=None, perspective_user_id=None, now=None,
                 data['assembly_state'] = 'score_pending'
             else:
                 data['assembly_state'] = 'closed'
+    elif not slim_players and _scheduled_arrival_window_open(game, now):
+        # Detail views only, and only for players: who is on the way. The
+        # keys' presence tells the page that “On my way” is open right now.
+        member_ids = {player.user_id for player in game.players}
+        if viewer_id in member_ids:
+            arrivals = [
+                intent for intent in GameArrivalIntent.query.filter(
+                    GameArrivalIntent.game_id == game.id,
+                    GameArrivalIntent.active.is_(True),
+                    GameArrivalIntent.ended_at.is_(None),
+                    GameArrivalIntent.expires_at > now,
+                ).order_by(GameArrivalIntent.id.asc())
+                if intent.user_id in member_ids
+            ]
+            data['my_arrival'] = next((
+                intent.to_dict(now) for intent in arrivals
+                if intent.user_id == viewer_id
+            ), None)
+            data['arrivals'] = [
+                {**intent.to_dict(now), 'user_id': intent.user_id}
+                for intent in arrivals
+            ]
     return data
 
 
@@ -3582,7 +3658,7 @@ def _live_locked_arrival(arrivals, user_id, games_by_id, now):
         game = games_by_id.get(intent.game_id)
         if not _arrival_time_active(intent, now):
             changed = _end_arrival_intent(intent, 'expired', now) or changed
-        elif not _instant_rally_assembly_active(game, now):
+        elif not _arrival_context_active(game, now):
             changed = _end_arrival_intent(intent, 'rally_closed', now) or changed
         elif live is None:
             live = intent
@@ -4594,13 +4670,16 @@ def start_instant_rally():
 
 def _arrival_request_authorized(game, user, capability, active_intent=None):
     """Authorize without disclosing why a live rally was or was not found."""
-    if not game or not game.is_instant or not user or user.deleted_at:
+    if not game or not user or user.deleted_at:
         return False
     member_ids = {player.user_id for player in game.players}
     if any(is_blocked_between(user.id, member_id) for member_id in member_ids):
         return False
     if user.id in member_ids:
         return True
+    if not game.is_instant:
+        # A scheduled game's ETA is for its own players only.
+        return False
     if active_intent and _arrival_time_active(active_intent):
         return True
     if GameInvite.query.filter_by(
@@ -4711,7 +4790,7 @@ def _recover_arrival_integrity_race(
             game, user, capability, replay,
         ):
             return jsonify({'error': 'game_not_found'}), 404
-        if not _instant_rally_assembly_active(
+        if not _arrival_context_active(
             game, now, for_update=True,
         ):
             _end_arrival_intent(replay, 'rally_closed', now)
@@ -4916,7 +4995,7 @@ def declare_rally_arrival(game_id):
             game, user, capability, existing_attempt,
         ):
             return jsonify({'error': 'game_not_found'}), 404
-        if not _instant_rally_assembly_active(
+        if not _arrival_context_active(
             game, now, for_update=True,
         ):
             _end_arrival_intent(existing_attempt, 'rally_closed', now)
@@ -4982,13 +5061,18 @@ def declare_rally_arrival(game_id):
         related_game = games_by_id.get(intent.game_id) or intent.game
         if not _arrival_time_active(intent, now):
             _end_arrival_intent(intent, 'expired', now)
-        elif not _instant_rally_assembly_active(
+        elif not _arrival_context_active(
             related_game, now, for_update=True,
         ):
             _end_arrival_intent(intent, 'rally_closed', now)
     db.session.flush()
 
-    if not _instant_rally_assembly_active(game, now, for_update=True):
+    if not game.is_instant:
+        # Players of a scheduled game (checked above) share a one-tap ETA
+        # near its start; it never touches roster capacity.
+        if not _scheduled_arrival_window_open(game, now):
+            return jsonify({'error': 'arrival_window_closed'}), 409
+    elif not _instant_rally_assembly_active(game, now, for_update=True):
         if game.assembly_closed_at is None:
             game.assembly_closed_at = now
         if len(game.players) <= 1:
@@ -4996,7 +5080,7 @@ def declare_rally_arrival(game_id):
         _end_game_arrivals(game, 'rally_closed', now)
         db.session.commit()
         return jsonify({'error': 'rally_no_longer_active'}), 409
-    if any(player.user_id == user.id for player in game.players):
+    elif any(player.user_id == user.id for player in game.players):
         return jsonify({'error': 'already_joined'}), 409
 
     checkin = active_checkin_for(
@@ -5005,7 +5089,8 @@ def declare_rally_arrival(game_id):
     if checkin:
         if checkin.court_id == game.court_id:
             return jsonify({'error': 'already_at_court'}), 409
-        return jsonify({'error': 'active_checkin_elsewhere'}), 409
+        if game.is_instant:
+            return jsonify({'error': 'active_checkin_elsewhere'}), 409
 
     active_for_user = next(
         (intent for intent in active_for_user if _arrival_time_active(intent, now)),
@@ -5033,21 +5118,21 @@ def declare_rally_arrival(game_id):
         if not _arrival_time_active(intent, now):
             _end_arrival_intent(intent, 'expired', now)
     db.session.flush()
-    capacity = _arrival_capacity(game, now, for_update=True)
-    if capacity['spots_left'] <= 0:
-        return jsonify({'error': 'rally_full'}), 409
-
     arrives_at = now + timedelta(minutes=eta_minutes)
-    assembly_ceiling = game.scheduled_at + timedelta(
-        minutes=INSTANT_RALLY_ASSEMBLY_MINUTES,
-    )
-    if arrives_at >= assembly_ceiling:
-        return jsonify({'error': 'rally_no_longer_active'}), 409
     expires_at = min(
         arrives_at + timedelta(minutes=RALLY_ARRIVAL_GRACE_MINUTES),
         now + timedelta(minutes=RALLY_ARRIVAL_HARD_MAX_MINUTES),
-        assembly_ceiling,
     )
+    if game.is_instant:
+        capacity = _arrival_capacity(game, now, for_update=True)
+        if capacity['spots_left'] <= 0:
+            return jsonify({'error': 'rally_full'}), 409
+        assembly_ceiling = game.scheduled_at + timedelta(
+            minutes=INSTANT_RALLY_ASSEMBLY_MINUTES,
+        )
+        if arrives_at >= assembly_ceiling:
+            return jsonify({'error': 'rally_no_longer_active'}), 409
+        expires_at = min(expires_at, assembly_ceiling)
     if expires_at <= now:
         return jsonify({'error': 'rally_no_longer_active'}), 409
     previous_intent = (
@@ -5095,6 +5180,12 @@ def declare_rally_arrival(game_id):
     _end_active_play_pulse_for_user(user.id, 'arrival', now)
 
     announced = False
+    if game.is_instant:
+        title = f'{user.display_name} is on the way'
+        body = f'ETA about {eta_minutes} minutes.'
+    else:
+        title = f'{user.display_name} is {eta_minutes} min away'
+        body = f'Heading to {game.court.name}.' if game.court else ''
     if should_announce:
         for player in game.players:
             if player.user_id == user.id:
@@ -5102,8 +5193,8 @@ def declare_rally_arrival(game_id):
             announcement = notify(
                 player.user_id,
                 'rally_arrival',
-                f'{user.display_name} is on the way',
-                f'ETA about {eta_minutes} minutes.',
+                title,
+                body,
                 related_user_id=user.id,
                 related_game_id=game.id,
                 action_url=f'/#game/{game.id}',
@@ -6091,6 +6182,7 @@ def skip_game_occurrence(game_id):
     preference.set_skipped(_game_occurrence_on(game), True)
     _participation_event(game, actor.id, 'skipped', actor_id=actor.id)
     game.players.remove(player)
+    _end_game_arrivals(game, 'left', user_id=actor.id)
     if not any(invite.user_id == actor.id for invite in game.invites):
         db.session.add(GameInvite(game=game, user_id=actor.id))
     notify(
@@ -7419,6 +7511,7 @@ def leave_game(game_id):
     if player:
         _participation_event(game, g.current_user.id, 'left', actor_id=g.current_user.id)
         game.players.remove(player)
+        _end_game_arrivals(game, 'left', user_id=g.current_user.id)
     if game.recurrence == 'weekly':
         if preference:
             preference_root = _series_root(game)
@@ -7535,6 +7628,7 @@ def remove_player(game_id, user_id):
 
     _participation_event(game, player.user_id, 'removed', actor_id=g.current_user.id)
     game.players.remove(player)
+    _end_game_arrivals(game, 'removed', user_id=user_id)
     if game.recurrence == 'weekly':
         preference = _recurrence_preference(game, user_id, create=False)
         if preference:
@@ -7903,6 +7997,8 @@ def edit_game(game_id):
     commitment_changed = bool(
         {'court_id', 'scheduled_at', 'duration_minutes', 'cost_cents', 'court_access', 'court_count', 'court_number', 'play_style'} & set(changed)
     )
+    if {'court_id', 'scheduled_at'} & set(changed):
+        _end_game_arrivals(game, 'rescheduled', now)
     if commitment_changed:
         for player in sorted(game.players, key=lambda row: row.user_id):
             player.reminded_at = None
@@ -8090,6 +8186,7 @@ def reschedule_game(game_id):
     if conflict:
         return jsonify(conflict), 409
     game.scheduled_at = when
+    _end_game_arrivals(game, 'rescheduled')
     court_name = game.court.name if game.court else 'the court'
     for player in sorted(game.players, key=lambda row: row.user_id):
         player.reminded_at = None      # re-remind for the new time
@@ -8204,10 +8301,9 @@ def _finalize_game(game, actor_id=None, confirmation_kind=None, correction=False
     )
     game.score_confirmed_by_id = actor_id
     _end_game_open_calls(game, 'completed', game.completed_at)
-    if game.is_instant:
-        if game.assembly_closed_at is None:
-            game.assembly_closed_at = game.completed_at
-        _end_game_arrivals(game, 'completed', game.completed_at)
+    if game.is_instant and game.assembly_closed_at is None:
+        game.assembly_closed_at = game.completed_at
+    _end_game_arrivals(game, 'completed', game.completed_at)
     court_name = game.court.name if game.court else 'the court'
     score_text = _game_score_text(game)
 
@@ -8477,12 +8573,11 @@ def submit_score(game_id):
     if game.game_type == 'ranked' and opposing_ids:
         game.status = 'awaiting_confirmation'
         _end_game_open_calls(game, 'score_submitted', game.score_submitted_at)
-        if game.is_instant:
-            if game.assembly_closed_at is None:
-                game.assembly_closed_at = game.score_submitted_at
-            _end_game_arrivals(
-                game, 'score_submitted', game.score_submitted_at,
-            )
+        if game.is_instant and game.assembly_closed_at is None:
+            game.assembly_closed_at = game.score_submitted_at
+        _end_game_arrivals(
+            game, 'score_submitted', game.score_submitted_at,
+        )
         score_text = _game_score_text(game)
         for uid in opposing_ids:
             notify(
@@ -8600,10 +8695,9 @@ def complete_play_session(game_id):
     game.score_confirmed_by_id = None
     game.score_confirmation_reminded_at = None
     _end_game_open_calls(game, 'completed', now)
-    if game.is_instant:
-        if game.assembly_closed_at is None:
-            game.assembly_closed_at = now
-        _end_game_arrivals(game, 'completed', now)
+    if game.is_instant and game.assembly_closed_at is None:
+        game.assembly_closed_at = now
+    _end_game_arrivals(game, 'completed', now)
     for player in game.players:
         player.team = None
         player.rating_delta = None
