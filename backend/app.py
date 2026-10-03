@@ -1348,6 +1348,12 @@ def _upgrade_schema(app):
             # foreign keys. Add them only after Crew has been created.
             _ensure_crew_reference_foreign_keys(app)
 
+        # Directory aliases are independent of play/history references. Create
+        # the additive table even when an operator disables broad create_all.
+        if 'court' in tables:
+            from backend.models import CourtAlias
+            CourtAlias.__table__.create(db.engine, checkfirst=True)
+
         # Arrival reservations retain an idempotency history, so they need a
         # dedicated table (including the partial active-user index) even when an
         # operator intentionally disables broad create_all behavior.

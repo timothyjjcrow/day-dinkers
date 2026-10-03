@@ -1,0 +1,68 @@
+{
+  "review_scope": "Directory duplicate suppression only. Keep all Court IDs, links, play and history. Do not infer closure, access, current court configuration or fees. Requires fresh identity guards and zero dependent rows on both source and target before activation.",
+  "records": [
+    {
+      "alias_court_id": 12628,
+      "canonical_court_id": 1356,
+      "reason": "Both reviewed rows describe Geneva-on-the-Lake Recreation Park at 5536 Lake Road East in Ashtabula County, Ohio, with matching original latitude. Keep the corrected 1356 directory entry; retain 12628 for existing links. Address pin is interpolated and court entrance, current pickleball count/access and closure status remain unverified.",
+      "sources": [
+        {
+          "url": "https://genevaonthelakeoh.gov/parks/recreation-park/",
+          "title": "Village of Geneva-on-the-Lake Recreation Park",
+          "accessed_at": "2026-10-03",
+          "facts": ["Official village names Recreation Park on Lake Road East; confirms park identity without establishing current pickleball court count."]
+        },
+        {
+          "url": "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress?address=5536+Lake+Rd+E%2C+Geneva+on+the+Lake%2C+OH+44041&benchmark=Public_AR_Current&vintage=Current_Current&format=json",
+          "title": "U.S. Census exact address and geography match",
+          "accessed_at": "2026-10-03",
+          "facts": ["5536 Lake Road East matches Geneva-on-the-Lake, Ashtabula County, Ohio; latitude 41.859941140895 and longitude -80.954939323932 are street-address interpolation, not surveyed court coordinates."]
+        },
+        {
+          "url": "https://www.pickleheads.com/courts/us/ohio/geneva/geneva-on-the-lake-recreational-park",
+          "title": "Ohio park venue listing",
+          "accessed_at": "2026-10-03",
+          "facts": ["The matching imported Ohio listing uses the same park name and 5536 Lake Road East address."]
+        }
+      ]
+    },
+    {
+      "alias_court_id": 3724,
+      "canonical_court_id": 3725,
+      "reason": "Reviewed García courts and Garcia Private Courts rows use the same 9745 SW 110th Street private Miami-Dade address. Official county GIS corrects the false Levy location. Preserve 3725 as the directory entry and 3724 links; private access and operator amenities remain unverified.",
+      "sources": [
+        {
+          "url": "https://gisweb.miamidade.gov/arcgis/rest/services/MapCache/MDCBaseMap_WebMercator/MapServer/39/query?where=FOLIO%3D%273050080040030%27&outFields=%2A&returnGeometry=true&outSR=4326&f=pjson",
+          "title": "Miami-Dade official address point for folio 3050080040030",
+          "accessed_at": "2026-10-03",
+          "facts": ["Exact address 9745 SW 110TH ST in unincorporated Miami-Dade, mailing locality Miami, ZIP 33176; coordinates 25.667957145, -80.352044002."]
+        },
+        {
+          "url": "https://www.pickleheads.com/courts/us/florida/miami/garcia-private-courts",
+          "title": "Garcia Private Courts matching venue listing",
+          "accessed_at": "2026-10-03",
+          "facts": ["Matching private venue listing uses the same Miami street address; no additional venue is established by the alternate accented name."]
+        }
+      ]
+    },
+    {
+      "alias_court_id": 3894,
+      "canonical_court_id": 4316,
+      "reason": "The Courts at Lake Kennedy and The Courts Cape Coral describe the same operator-managed complex at 420 SW 2nd Avenue with 32 pickleball courts. The former Lake Kennedy name describes its park setting, not another set of courts. Preserve 4316 as directory entry and 3894 links; do not combine counts or infer a fee reconciliation.",
+      "sources": [
+        {
+          "url": "https://playthecourtscapecoral.com/",
+          "title": "The Courts Cape Coral official operator",
+          "accessed_at": "2026-10-03",
+          "facts": ["Operator identifies the venue at 420 SW 2nd Avenue with 32 pickleball and 12 tennis courts."]
+        },
+        {
+          "url": "https://www.capecoral.gov/news_detail_T4_R759.php",
+          "title": "Cape Coral official announcement for The Courts at Lake Kennedy",
+          "accessed_at": "2026-10-03",
+          "facts": ["City identifies The Courts at Lake Kennedy as the same complex with 32 pickleball courts and 12 tennis courts."]
+        }
+      ]
+    }
+  ]
+}

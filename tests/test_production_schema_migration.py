@@ -17,6 +17,7 @@ from scripts.migrate_production_schema import (
     REQUIRED_FOREIGN_KEYS,
     REQUIRED_INDEXES,
     REQUIRED_PARTIAL_UNIQUE_INDEXES,
+    REQUIRED_PRIMARY_KEYS,
     REQUIRED_UNIQUES,
     _normalize_postgres_url,
     _schema_gaps,
@@ -40,6 +41,7 @@ def test_pending_host_uniqueness_verifies_postgres_text_casts(predicate, valid):
 
 class FakeInspector:
     def __init__(self):
+        self.primary_keys = {table: list(columns) for table, columns in REQUIRED_PRIMARY_KEYS.items()}
         self.columns = {
             table: set(columns) for table, columns in REQUIRED_COLUMNS.items()
         }
@@ -85,7 +87,8 @@ class FakeInspector:
                     'referred_table': shape[1],
                     'referred_columns': list(shape[2]),
                     'referred_schema': 'picklepals',
-                    'options': {'ondelete': 'SET NULL'} if name in {'court_edit_suggestion_reviewed_by_id_fkey', 'business_schedule_item_offering_id_fkey', 'message_reply_to_id_fkey'} else {},
+                    'options': ({'ondelete': 'RESTRICT'} if table == 'court_alias' else
+                                {'ondelete': 'SET NULL'} if name in {'court_edit_suggestion_reviewed_by_id_fkey', 'business_schedule_item_offering_id_fkey', 'message_reply_to_id_fkey'} else {}),
                 }
                 for name, shape in constraints.items()
             }
@@ -94,6 +97,9 @@ class FakeInspector:
 
     def get_table_names(self, schema=None):
         return sorted(self.columns)
+
+    def get_pk_constraint(self, table, schema=None):
+        return {'constrained_columns': self.primary_keys.get(table, [])}
 
     def get_columns(self, table, schema=None):
         return [{'name': name} for name in sorted(self.columns[table])]
@@ -123,6 +129,19 @@ class FakeInspector:
             {'name': name}
             for name in sorted(self.checks.get(table, set()))
         ]
+
+
+def test_alias_schema_verifier_requires_additive_table_and_restrict_foreign_keys():
+    inspector = FakeInspector()
+    assert _schema_gaps(inspector) == []
+    inspector.columns.pop('court_alias')
+    assert 'missing table court_alias' in _schema_gaps(inspector)
+    inspector = FakeInspector()
+    inspector.primary_keys['court_alias'] = ['canonical_court_id']
+    assert "court_alias primary key must be ['alias_court_id']" in _schema_gaps(inspector)
+    inspector = FakeInspector()
+    inspector.foreign_keys['court_alias']['court_alias_alias_court_id_fkey']['options']['ondelete'] = 'CASCADE'
+    assert any('court_alias_alias_court_id_fkey' in gap for gap in _schema_gaps(inspector))
 
 
 def test_crew_schema_verifier_detects_missing_table_column_index_unique_and_fk():

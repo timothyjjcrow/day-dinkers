@@ -23,7 +23,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BASE_TABLES = {
     'user', 'court', 'check_in', 'game', 'message', 'notification',
 }
+REQUIRED_PRIMARY_KEYS = {
+    'court_alias': ('alias_court_id',),
+}
 REQUIRED_COLUMNS = {
+    'court_alias': {
+        'alias_court_id', 'canonical_court_id', 'active', 'reason',
+        'source_urls', 'reviewed_by', 'created_at', 'updated_at',
+    },
     'user': {
         'auth_version', 'operator_role', 'mfa_secret_encrypted',
         'mfa_enabled', 'mfa_enabled_at', 'mfa_recovery_codes',
@@ -306,6 +313,7 @@ REQUIRED_COLUMNS = {
     },
 }
 REQUIRED_INDEXES = {
+    'court_alias': {'ix_court_alias_canonical_court_id'},
     'tournament_waitlist': {'ix_tournament_waitlist_tournament_id', 'ix_tournament_waitlist_user_id'},
     'game_host_handoff': {'ix_game_host_handoff_game_id'},
     'game_session_attendance': {'ix_game_session_attendance_game_id', 'ix_game_session_attendance_user_id'},
@@ -569,6 +577,7 @@ REQUIRED_UNIQUES = {
     'competition_result_event': {'uq_competition_result_event_version'},
 }
 REQUIRED_CHECK_CONSTRAINTS = {
+    'court_alias': {'ck_court_alias_distinct'},
     'community_group': {
         'ck_community_group_kind', 'ck_community_group_privacy',
     },
@@ -619,6 +628,10 @@ REQUIRED_CHECK_CONSTRAINTS = {
     },
 }
 REQUIRED_FOREIGN_KEYS = {
+    'court_alias': {
+        'court_alias_alias_court_id_fkey': (('alias_court_id',), 'court', ('id',)),
+        'court_alias_canonical_court_id_fkey': (('canonical_court_id',), 'court', ('id',)),
+    },
     'tournament_waitlist': {
         'tournament_waitlist_tournament_id_fkey': (('tournament_id',), 'tournament', ('id',)),
         'tournament_waitlist_user_id_fkey': (('user_id',), 'user', ('id',)),
@@ -1017,6 +1030,12 @@ def _schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
         missing = sorted(required - actual)
         if missing:
             gaps.append(f'{table} missing columns {missing}')
+    for table, required in REQUIRED_PRIMARY_KEYS.items():
+        if table not in tables:
+            continue
+        actual = tuple(inspector.get_pk_constraint(table, schema=schema).get('constrained_columns') or ())
+        if actual != required:
+            gaps.append(f'{table} primary key must be {list(required)}')
     for table, required in REQUIRED_INDEXES.items():
         if table not in tables:
             continue
@@ -1140,6 +1159,8 @@ def _schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
                 and found[4] in (None, schema)
                 and (name not in {'court_edit_suggestion_reviewed_by_id_fkey', 'business_schedule_item_offering_id_fkey', 'message_reply_to_id_fkey'}
                      or (found[0] == name and str(found[5].get('ondelete') or 'NO ACTION').upper() == 'SET NULL'))
+                and (table != 'court_alias'
+                     or (found[0] == name and str(found[5].get('ondelete') or 'NO ACTION').upper() == 'RESTRICT'))
                 for found in actual
             ):
                 continue
