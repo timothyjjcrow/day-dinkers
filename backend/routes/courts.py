@@ -1101,6 +1101,10 @@ def court_detail(court_id):
     )
 
     payload = court.to_dict()
+    from backend.services.court_directory import exclusion_context
+    directory_context = exclusion_context(court.id)
+    if directory_context:
+        payload['directory_context'] = directory_context
     payload['business'] = _public_business_detail(court.id, current_user)
     from backend.services.court_hours import project_hours
     payload.update(project_hours(court, payload['business']))

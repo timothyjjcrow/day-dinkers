@@ -1,0 +1,15 @@
+{
+  "validated_at": "2026-10-03T18:19:34.794583+00:00",
+  "court_ids": [
+    15895
+  ],
+  "schema_validate_research": "passed",
+  "semantic_review": "qualified foreign-address candidate; exact facility identity not independently corroborated",
+  "ready_for_guarded_activation": false,
+  "requires_review": "Root review of explicit original-publisher foreign address and residual exact-facility uncertainty; no independent operator source discovered. Do not imply government source verifies this court.",
+  "research_sha256": "9ccfa1385790f88ef66d5575d3d46338e6b463546685d5df5a4522cb436cc504",
+  "research_canonical_sha256": "db93764848bda8b508b993e5bb611719f2177116e146836fe2145a784fb29562",
+  "originals_sha256": "ae38020b41d3d3c205961c578addcbe5ea0c050d7dc4357045268e1fde2b9cc1",
+  "mode": "Pure source validator only. No live DB plan/application, migration, geography or closure edit performed.",
+  "source_http_limitation": "Ordinary publisher HTTP request returned403; source was readable in current web tool results."
+}

@@ -87,7 +87,7 @@ class FakeInspector:
                     'referred_table': shape[1],
                     'referred_columns': list(shape[2]),
                     'referred_schema': 'picklepals',
-                    'options': ({'ondelete': 'RESTRICT'} if table == 'court_alias' else
+                    'options': ({'ondelete': 'RESTRICT'} if table in {'court_alias', 'court_directory_exclusion'} else
                                 {'ondelete': 'SET NULL'} if name in {'court_edit_suggestion_reviewed_by_id_fkey', 'business_schedule_item_offering_id_fkey', 'message_reply_to_id_fkey'} else {}),
                 }
                 for name, shape in constraints.items()
@@ -131,6 +131,13 @@ class FakeInspector:
         ]
 
 
+def test_court_readiness_requires_stored_timezone_column():
+    inspector = FakeInspector()
+    assert _schema_gaps(inspector) == []
+    inspector.columns['court'].remove('timezone')
+    assert any('court' in gap and 'timezone' in gap for gap in _schema_gaps(inspector))
+
+
 def test_alias_schema_verifier_requires_additive_table_and_restrict_foreign_keys():
     inspector = FakeInspector()
     assert _schema_gaps(inspector) == []
@@ -142,6 +149,22 @@ def test_alias_schema_verifier_requires_additive_table_and_restrict_foreign_keys
     inspector = FakeInspector()
     inspector.foreign_keys['court_alias']['court_alias_alias_court_id_fkey']['options']['ondelete'] = 'CASCADE'
     assert any('court_alias_alias_court_id_fkey' in gap for gap in _schema_gaps(inspector))
+
+
+def test_foreign_exclusion_schema_requires_primary_key_reason_guard_and_restrict_fk():
+    inspector = FakeInspector()
+    assert _schema_gaps(inspector) == []
+    inspector.columns.pop('court_directory_exclusion')
+    assert 'missing table court_directory_exclusion' in _schema_gaps(inspector)
+    inspector = FakeInspector()
+    inspector.primary_keys['court_directory_exclusion'] = ['reason_code']
+    assert "court_directory_exclusion primary key must be ['court_id']" in _schema_gaps(inspector)
+    inspector = FakeInspector()
+    inspector.checks['court_directory_exclusion'].clear()
+    assert any('ck_court_directory_exclusion_reason' in gap for gap in _schema_gaps(inspector))
+    inspector = FakeInspector()
+    inspector.foreign_keys['court_directory_exclusion']['court_directory_exclusion_court_id_fkey']['options']['ondelete'] = 'CASCADE'
+    assert any('court_directory_exclusion_court_id_fkey' in gap for gap in _schema_gaps(inspector))
 
 
 def test_crew_schema_verifier_detects_missing_table_column_index_unique_and_fk():

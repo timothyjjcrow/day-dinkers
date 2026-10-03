@@ -292,6 +292,7 @@ class Court(TimestampMixin, db.Model):
     zip_code = db.Column(db.String(12), nullable=False, default='')
     latitude = db.Column(db.Float, index=True)
     longitude = db.Column(db.Float, index=True)
+    timezone = db.Column(db.String(64), nullable=True)
     indoor = db.Column(db.Boolean, nullable=False, default=False)
     lighted = db.Column(db.Boolean, nullable=False, default=False)
     num_courts = db.Column(db.Integer, nullable=False, default=1)
@@ -339,6 +340,10 @@ class Court(TimestampMixin, db.Model):
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def effective_timezone(self):
+        from backend.services.court_timezones import court_timezone
+        return court_timezone(self)
+
     def open_play_schedule_rows_list(self):
         try:
             parsed = json.loads(self.open_play_schedule_rows or '[]')
@@ -375,6 +380,7 @@ class Court(TimestampMixin, db.Model):
             'state': self.state,
             'latitude': self.latitude,
             'longitude': self.longitude,
+            'timezone': self.effective_timezone(),
             'indoor': bool(self.indoor),
             'lighted': bool(self.lighted),
             'has_restrooms': bool(self.has_restrooms),
@@ -413,6 +419,28 @@ class Court(TimestampMixin, db.Model):
             'pending_submission': bool(self.pending_submission),
         })
         return data
+
+
+class CourtDirectoryExclusion(TimestampMixin, db.Model):
+    """Reviewed US-directory scope; original court IDs and history stay intact."""
+    __table_args__ = (
+        db.CheckConstraint(
+            "reason_code IN ('foreign_venue', 'invalid_test_record')",
+            name='ck_court_directory_exclusion_reason',
+        ),
+    )
+
+    court_id = db.Column(
+        db.Integer,
+        db.ForeignKey('court.id', name='court_directory_exclusion_court_id_fkey', ondelete='RESTRICT'),
+        primary_key=True,
+    )
+    active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    reason_code = db.Column(db.String(40), nullable=False)
+    reason = db.Column(db.Text, nullable=False)
+    source_urls = db.Column(db.Text, nullable=False)
+    reviewed_by = db.Column(db.String(120), nullable=False)
+    reviewed_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
 class CourtAlias(TimestampMixin, db.Model):

@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "kind": "court-directory-exclusion-research",
+  "reviewed_at": "2026-10-03T17:55:44.046004+00:00",
+  "records": [
+    {
+      "court_id": 5729,
+      "reason_code": "foreign_venue",
+      "imported_state": "IL",
+      "owner": "01a1026b-6105-7901-ac29-dfae6b97e6cd",
+      "reason": "The club operator places Heaton Tennis & Squash Club at Highgate, Emm Lane, Bradford, England BD9 5PH. The UK registry confirms the same address and the former exact club name. The imported Valley View, Illinois record is a foreign venue wrongly geocoded into this US directory. Withhold discovery reversibly, retaining the original Court ID, fields and history; this is not a permanent closure.",
+      "foreign_location": {
+        "country_code": "GB",
+        "country": "United Kingdom",
+        "locality": "Bradford, England",
+        "address": "Highgate, Emm Lane, Heaton, Bradford, Yorkshire BD9 5PH"
+      },
+      "location_source_urls": [
+        "https://clubspark.lta.org.uk/HeatonTennisSquashClub/Contact",
+        "https://find-and-update.company-information.service.gov.uk/company/06368158"
+      ],
+      "sources": [
+        {
+          "url": "https://clubspark.lta.org.uk/HeatonTennisSquashClub/Contact",
+          "title": "Heaton Tennis & Squash Club official contact",
+          "authority": "operator",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "Club address is Highgate, Emm Lane, Heaton, Bradford, Yorkshire BD9 5PH; contact telephone 01274 541508."
+          ]
+        },
+        {
+          "url": "https://clubspark.lta.org.uk/HeatonTennisSquashClub/Index/7b16b3e6-e1c5-4f95-9775-c10b33a9cda3",
+          "title": "Heaton club operator about page and location",
+          "authority": "operator",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "Operator identifies the same Bradford address and describes pickleball among its offered racket sports. No UK rates or court capacity are transferred into the imported US record."
+          ]
+        },
+        {
+          "url": "https://find-and-update.company-information.service.gov.uk/company/06368158",
+          "title": "UK Companies House, company 06368158 current identity",
+          "authority": "government",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "Active Heaton Tennis and Sports Club Limited is registered at Garth Barn Close Highgate, Emm Lane, Bradford, West Yorkshire, England BD9 5PH. Its previous name was The Heaton Tennis and Squash Club Limited from September 11, 2007 until July 30, 2026, establishing continuity with the imported club name."
+          ]
+        }
+      ],
+      "owner_handoff": "states/IL/2026-10-03/dupage-b-reviewed.json",
+      "earlier_followup_notes": [
+        "This is an active club in Bradford, England, not an Illinois/U.S. venue. The imported Valley View/IL identity, coordinates and county are erroneous. No U.S. product fields or UK prices were applied. Requires publisher geographic exclusion/quarantine; do not describe it as permanently closed."
+      ],
+      "review_status": "source_confirmed_pending_guarded_publication",
+      "preserved_unknowns": [
+        "Original Court ID, imported location fields, closed=false and pending_submission=false are preserved. No unsupported current court capacity, equipment, fees or scheduling facts are changed."
+      ]
+    },
+    {
+      "court_id": 5361,
+      "reason_code": "foreign_venue",
+      "imported_state": "ID",
+      "owner": "01a1026a-a13e-7d01-bf73-589411dd411d",
+      "reason": "The Var basketball governing body identifies Gymnase de Fayence at 851 Route de Fréjus, 83440 Fayence. The imported directory source identifies that exact gym in Fayence, Var, France, associated with Pickleball France Pays de Fayence; the French federation corroborates the regional association in France. The French postal code and phone were incorrectly attached to a Rexburg, Idaho pin. Withhold US discovery while preserving the ID, original fields and history; no closure or relocation is asserted.",
+      "foreign_location": {
+        "country_code": "FR",
+        "country": "France",
+        "locality": "Fayence, Var",
+        "address": "851 Route de Fréjus, 83440 Fayence"
+      },
+      "location_source_urls": [
+        "https://comitevarbasket.fr/salles-et-gymnases/",
+        "https://www.pickleballfrance.org/clubs/pickleball-france-pays-de-fayence"
+      ],
+      "sources": [
+        {
+          "url": "https://comitevarbasket.fr/salles-et-gymnases/",
+          "title": "Comité du Var Basket official gym inventory, Fayence",
+          "authority": "sports_governing_body",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "Regional sports governing body lists Gymnase de Fayence at 851 Route de Fréjus, 83440 Fayence. The exact gym name and French address corroborate the foreign physical venue."
+          ]
+        },
+        {
+          "url": "https://www.pickleballfrance.org/clubs/pickleball-france-pays-de-fayence",
+          "title": "Pickleball France Pays de Fayence official federation profile",
+          "authority": "sports_governing_body",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "Federation lists Pickleball France Pays de Fayence at 83440 Tourrettes, France, and describes its 2025 association membership. This corroborates the French regional association; Tourrettes is not substituted for the gym address or treated as a US venue."
+          ]
+        },
+        {
+          "url": "https://www.playpickleball.com/where-to-play-pickleball-near-me-map/places/france-var-fayence-gymnase-de-fayence/",
+          "title": "Imported Gymnase de Fayence listing, identity cross-check",
+          "authority": "directory",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "Imported source names the indoor association-shared Gymnase de Fayence at 851 Route de Fréjus, Fayence, Var 83440, France. This secondary import cross-check matches the primary governing-body gym inventory; it does not establish current court capacity or use hours."
+          ]
+        }
+      ],
+      "owner_handoff": "states/ID/2026-10-03/003-south-east-research.json",
+      "earlier_followup_notes": [
+        "INVALID-US candidate: French gym name, +33-style phone, and French postal code 83440 likely caused false Rexburg geocoding. Preserve ID/coordinates pending central publisher review; source places venue in Fayence, France, not Idaho. No closure or interstate relocation applied."
+      ],
+      "review_status": "source_confirmed_pending_guarded_publication",
+      "preserved_unknowns": [
+        "Original Court ID, imported location fields, closed=false and pending_submission=false are preserved. No unsupported current court capacity, equipment, fees or scheduling facts are changed."
+      ]
+    },
+    {
+      "court_id": 10651,
+      "reason_code": "foreign_venue",
+      "imported_state": "NJ",
+      "owner": "01a1026d-d0dd-7dc3-8243-176a53869b36",
+      "reason": "Aruba Racquet Club operator gives its location as Rooi Santo 21, Noord, Aruba with +297 telephone numbers. Aruba Tourism independently identifies this club in Noord, Aruba. The imported New Jersey Turnpike address and US pin do not identify this foreign venue. Exclude it reversibly from US discovery while preserving the original Court ID and all direct history; it is not closed.",
+      "foreign_location": {
+        "country_code": "AW",
+        "country": "Aruba",
+        "locality": "Noord",
+        "address": "Rooi Santo 21, Noord, Aruba"
+      },
+      "location_source_urls": [
+        "https://www.arc.aw/equipment-rentals/",
+        "https://www.aruba.com/us/explore/aruba-racquet-club"
+      ],
+      "sources": [
+        {
+          "url": "https://www.arc.aw/equipment-rentals/",
+          "title": "Aruba Racquet Club operator contact location",
+          "authority": "operator",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "Operator footer identifies Rooi Santo 21, Noord, Aruba, and phone numbers +297-586-0215 and +297-5944460."
+          ]
+        },
+        {
+          "url": "https://www.aruba.com/us/explore/aruba-racquet-club",
+          "title": "Aruba Tourism Authority, Aruba Racquet Club",
+          "authority": "government",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "Official tourism authority identifies Aruba Racquet Club at Opal 212, Noord, Aruba, and links to the club operator. This corroborates foreign identity and locality. The differing street label is retained as a question rather than copied onto the US import."
+          ]
+        }
+      ],
+      "owner_handoff": "states/NJ/2026-10-03/nj-012-hudson-research.json",
+      "earlier_followup_notes": [
+        "Central foreign-venue identity review: operator and Aruba Tourism place this club in Noord, Aruba, not New Jersey. No foreign facts copied onto the NJ record. Preserve ID/history pending central suppression or identity decision; existing NJ Turnpike address/pin are unsupported."
+      ],
+      "review_status": "source_confirmed_pending_guarded_publication",
+      "preserved_unknowns": [
+        "Original Court ID, imported location fields, closed=false and pending_submission=false are preserved. No unsupported current court capacity, equipment, fees or scheduling facts are changed."
+      ]
+    },
+    {
+      "court_id": 16442,
+      "reason_code": "invalid_test_record",
+      "imported_state": "UT",
+      "owner": "01a1026a-a13e-7d01-bf73-589411dd411d",
+      "reason": "The source publisher explicitly identifies Suspicious Courts UT as a nonexistent record created for testing, at a gas station, and warns visitors against expecting pickleball there. The current listing headline shows zero courts at 15 S Main St, Junction. Withhold this admitted fixture from discovery without marking it closed or changing its Court ID, fields or history.",
+      "source_publisher_admission": {
+        "kind": "nonexistent_test_fixture",
+        "text": "The publisher states that the court is nonexistent, created only for testing, and actually represents a gas station where visitors must not expect pickleball.",
+        "source_urls": [
+          "https://www.pickleheads.com/courts/us/utah/junction/suspicious-courts-ut"
+        ]
+      },
+      "sources": [
+        {
+          "url": "https://www.pickleheads.com/courts/us/utah/junction/suspicious-courts-ut",
+          "title": "Pickleheads Suspicious Courts UT source-publisher admission",
+          "authority": "source_publisher",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "The source listing explicitly says the court is a nonexistent testing fixture and that the location is a gas station; it warns visitors not to expect to play pickleball. The headline shows zero courts, and the venue address is 15 S Main St, Junction, UT 84740. Only public venue facts are retained; no player details or history from the source page are stored."
+          ]
+        }
+      ],
+      "owner_handoff": "states/UT/2026-10-03/003-southern-research.json",
+      "earlier_followup_notes": [
+        "INVALID venue candidate: exact source explicitly says nonexistent test entry at gas station. Preserve ID/state/pin and imported count pending central retirement/dependency review. No invented relocation or permanent-closure flag applied."
+      ],
+      "review_status": "source_confirmed_pending_guarded_publication",
+      "preserved_unknowns": [
+        "Original Court ID, imported location fields, closed=false and pending_submission=false are preserved. No unsupported current court capacity, equipment, fees or scheduling facts are changed."
+      ]
+    }
+  ],
+  "review_scope": "Only three primary-confirmed foreign imports and one explicitly source-admitted nonexistent test fixture. No generic noncourt, seasonal, program or Ann Morrison exclusion.",
+  "original_snapshots": [
+    "foreign-directory-exclusion-originals-20261003.json",
+    "directory-exclusion-test-fixture-originals-20261003.json"
+  ],
+  "notes": [
+    "Source research only. No exclusion plan, production schema change, DB write or deployment was executed. Generate a fresh guarded plan only after additive schema migration and backend verification.",
+    "Original fields and all Court IDs/history remain intact. Reviewed field provenance is stored in this source artifact and will be bound to immutable plan/intent hashes.",
+    "Heaton and Var governing-body pages were readable in current web search results; ordinary direct HTTP returned403. Current UK registry, French federation, Aruba operator and Aruba Tourism were readable through the web tool. Source access mode is disclosed instead of implying successful fresh raw HTTP for blocked pages."
+  ]
+}

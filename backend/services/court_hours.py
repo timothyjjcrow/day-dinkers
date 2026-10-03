@@ -125,12 +125,14 @@ def hours_status(schedule, *, dawn=False, notes='', closed=False, as_of=None):
 
 
 def project_hours(court, venue=None, *, as_of=None):
+    from backend.services.court_timezones import court_timezone
     venue = venue or {}
     configured = bool(hours_dict(venue.get('structured_hours')) or venue.get('hours_dawn_to_dusk'))
     schedule = hours_dict(venue.get('structured_hours')) if configured else court.structured_hours_dict() if court else {}
     dawn = bool(venue.get('hours_dawn_to_dusk')) if configured else bool(getattr(court, 'hours_dawn_to_dusk', False))
     notes = str(venue.get('hours') or '') if configured else getattr(court, 'hours', '')
     return {'structured_hours':schedule, 'hours_dawn_to_dusk':dawn, 'hours':notes,
+            'timezone':court_timezone(court, venue),
             'hours_source':'venue' if configured else 'community',
             'open_status':hours_status(schedule, dawn=dawn, notes=notes, closed=bool(getattr(court, 'closed', False)), as_of=as_of)}
 
