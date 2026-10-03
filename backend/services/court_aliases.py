@@ -2,13 +2,19 @@
 from sqlalchemy.orm import aliased
 
 from backend.app import db
-from backend.models import Court, CourtAlias
+from backend.models import Court, CourtAlias, CourtDirectoryExclusion
+
+
+def excluded_court_ids():
+    return db.session.query(CourtDirectoryExclusion.court_id).filter(
+        CourtDirectoryExclusion.active.is_(True),
+    )
 
 
 def discoverable_courts(query):
     """Apply before counting, sorting, filters and pagination."""
     aliases = db.session.query(CourtAlias.alias_court_id).filter(CourtAlias.active.is_(True))
-    return query.filter(~Court.id.in_(aliases))
+    return query.filter(~Court.id.in_(aliases), ~Court.id.in_(excluded_court_ids()))
 
 
 def court_search_aliases(canonical_query):
@@ -24,7 +30,8 @@ def court_search_aliases(canonical_query):
             CourtAlias.canonical_court_id, source.name, source.city, source.address,
         )
         .join(source, source.id == CourtAlias.alias_court_id)
-        .filter(CourtAlias.active.is_(True), CourtAlias.canonical_court_id.in_(eligible_ids))
+        .filter(CourtAlias.active.is_(True), CourtAlias.canonical_court_id.in_(eligible_ids),
+                ~source.id.in_(excluded_court_ids()))
         .all()
     )
 

@@ -1,0 +1,19 @@
+{
+  "validated": true,
+  "court_ids": [
+    5729,
+    5361,
+    10651,
+    16442
+  ],
+  "reason_codes": {
+    "5729": "foreign_venue",
+    "5361": "foreign_venue",
+    "10651": "foreign_venue",
+    "16442": "invalid_test_record"
+  },
+  "research_sha256": "4755fb54ef0f253778d595143598314b5ded1c228103180327f17cf5070296df",
+  "file_sha256": "7bc60d9d65efc633914cef3955b44b68e5946a724db261c0af75c08d65758d58",
+  "validator": "scripts/publish_court_directory_exclusions.py::validate_research",
+  "mode": "Pure source-only validation, no DB plan or mutation."
+}

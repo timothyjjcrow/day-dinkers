@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-10-03T18:02:20.662077+00:00",
+  "base_commit": "f65fee174dcae814e4f65563d8bac949ff383806",
+  "research_sha256": "4755fb54ef0f253778d595143598314b5ded1c228103180327f17cf5070296df",
+  "read_only_research": true,
+  "activation_executed": false,
+  "production_migration_executed": false,
+  "deployed": false,
+  "runtime_app_unchanged": true,
+  "frontend_assets_and_pipeline_unchanged": true,
+  "new_schema_creation": "Operator-only scripts.migrate_production_schema._upgrade_directory_exclusion; runtime _upgrade_schema does not create the table.",
+  "source_review_ids": [
+    5729,
+    5361,
+    10651,
+    16442
+  ],
+  "checks": [
+    "Focused API, operator publication, alias coexistence and production schema regressions.",
+    "Python compileall passed.",
+    "git diff --check passed.",
+    "Actual source-only validate_research passed."
+  ],
+  "artifact_sha256": {
+    "directory-exclusion-test-fixture-originals-20261003.json": "243df85a308f35785037e0944900995f19f6b37245f9f8c3ee13e677f0692a1d",
+    "directory-exclusions-research-validation-20261003.json": "54d352b49baf695b5a11d6e734f79bb564a738c49490b200d44453956aaf4800",
+    "directory-exclusions-reviewed-research-20261003.json": "7bc60d9d65efc633914cef3955b44b68e5946a724db261c0af75c08d65758d58",
+    "foreign-directory-exclusion-dependency-audit-20261003.json": "c9ec1abb4a650fdde9af3e09d8e164e2f6ea33674944b0bdacea015e1f5ea67d",
+    "foreign-directory-exclusion-originals-20261003.json": "3eca5dab32468b8211fee30609dcbd69c7a6bab0d05786d267f4ea27f8575190"
+  }
+}

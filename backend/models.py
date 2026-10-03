@@ -415,6 +415,28 @@ class Court(TimestampMixin, db.Model):
         return data
 
 
+class CourtDirectoryExclusion(TimestampMixin, db.Model):
+    """Reviewed US-directory scope; original court IDs and history stay intact."""
+    __table_args__ = (
+        db.CheckConstraint(
+            "reason_code IN ('foreign_venue', 'invalid_test_record')",
+            name='ck_court_directory_exclusion_reason',
+        ),
+    )
+
+    court_id = db.Column(
+        db.Integer,
+        db.ForeignKey('court.id', name='court_directory_exclusion_court_id_fkey', ondelete='RESTRICT'),
+        primary_key=True,
+    )
+    active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    reason_code = db.Column(db.String(40), nullable=False)
+    reason = db.Column(db.Text, nullable=False)
+    source_urls = db.Column(db.Text, nullable=False)
+    reviewed_by = db.Column(db.String(120), nullable=False)
+    reviewed_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
 class CourtAlias(TimestampMixin, db.Model):
     """Reviewed directory aliases; court IDs and their history remain intact."""
     __table_args__ = (

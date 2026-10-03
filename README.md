@@ -384,6 +384,10 @@ Official references: [Vercel Flask](https://vercel.com/kb/guide/ship-a-flask-app
 [Neon pricing](https://neon.com/pricing), and
 [Neon connection pooling](https://neon.com/docs/connect/connection-pooling).
 
+Reviewed foreign imports and explicitly admitted test fixtures can be withheld
+from directory discovery through a reversible audited exclusion. See
+[court directory exclusion operations](docs/court-directory-exclusions.md).
+
 ## Tests
 
 ```bash

@@ -24,9 +24,14 @@ BASE_TABLES = {
     'user', 'court', 'check_in', 'game', 'message', 'notification',
 }
 REQUIRED_PRIMARY_KEYS = {
+    'court_directory_exclusion': ('court_id',),
     'court_alias': ('alias_court_id',),
 }
 REQUIRED_COLUMNS = {
+    'court_directory_exclusion': {
+        'court_id', 'active', 'reason_code', 'reason', 'source_urls', 'reviewed_by',
+        'reviewed_at', 'created_at', 'updated_at',
+    },
     'court_alias': {
         'alias_court_id', 'canonical_court_id', 'active', 'reason',
         'source_urls', 'reviewed_by', 'created_at', 'updated_at',
@@ -578,6 +583,7 @@ REQUIRED_UNIQUES = {
 }
 REQUIRED_CHECK_CONSTRAINTS = {
     'court_alias': {'ck_court_alias_distinct'},
+    'court_directory_exclusion': {'ck_court_directory_exclusion_reason'},
     'community_group': {
         'ck_community_group_kind', 'ck_community_group_privacy',
     },
@@ -628,6 +634,9 @@ REQUIRED_CHECK_CONSTRAINTS = {
     },
 }
 REQUIRED_FOREIGN_KEYS = {
+    'court_directory_exclusion': {
+        'court_directory_exclusion_court_id_fkey': (('court_id',), 'court', ('id',)),
+    },
     'court_alias': {
         'court_alias_alias_court_id_fkey': (('alias_court_id',), 'court', ('id',)),
         'court_alias_canonical_court_id_fkey': (('canonical_court_id',), 'court', ('id',)),
@@ -1159,7 +1168,7 @@ def _schema_gaps(inspector, schema=PG_SCHEMA) -> list[str]:
                 and found[4] in (None, schema)
                 and (name not in {'court_edit_suggestion_reviewed_by_id_fkey', 'business_schedule_item_offering_id_fkey', 'message_reply_to_id_fkey'}
                      or (found[0] == name and str(found[5].get('ondelete') or 'NO ACTION').upper() == 'SET NULL'))
-                and (table != 'court_alias'
+                and (table not in {'court_alias', 'court_directory_exclusion'}
                      or (found[0] == name and str(found[5].get('ondelete') or 'NO ACTION').upper() == 'RESTRICT'))
                 for found in actual
             ):
@@ -1232,6 +1241,19 @@ def _limit_lock_waits() -> None:
         dbapi_connection.commit()
 
 
+def _upgrade_directory_exclusion(engine) -> None:
+    """Operator-only additive DDL; runtime _upgrade_schema never creates this table."""
+    from sqlalchemy import MetaData
+    from backend.models import Court, CourtDirectoryExclusion
+
+    schema = PG_SCHEMA if engine.dialect.name == 'postgresql' else None
+    metadata = MetaData(schema=schema)
+    # Resolve the restrictive foreign key without creating or altering Court.
+    Court.__table__.to_metadata(metadata)
+    exclusion = CourtDirectoryExclusion.__table__.to_metadata(metadata)
+    exclusion.create(engine, checkfirst=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description='Apply verified additive schema upgrades to Third Shot PostgreSQL.',
@@ -1286,6 +1308,7 @@ def main() -> int:
     from backend.app import app, db
 
     with app.app_context():
+        _upgrade_directory_exclusion(db.engine)
         from scripts.migrate_business_integration_foundation import (
             _upgrade_existing_foundation,
         )
