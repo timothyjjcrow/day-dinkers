@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish reversible, reviewed foreign venues and admitted nonexistent test fixtures.
+"""Publish reviewed foreign venues, admitted test fixtures, and explicit operator bans.
 
 Only explicit direct TARGET_DATABASE_URL is used; no runtime import or DDL.
 Planning and execution are read-only unless --apply is supplied. Original Court
@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from urllib.parse import urlsplit
 
@@ -32,6 +33,53 @@ EXCLUSION_FIELDS = (
     'court_id', 'active', 'reason_code', 'reason', 'source_urls', 'reviewed_by',
     'reviewed_at', 'created_at', 'updated_at',
 )
+PROHIBITION_KEYS = {'kind', 'court_id', 'venue_identity', 'text', 'source_urls'}
+
+
+def _explicit_prohibition(statement):
+    """Accept unqualified bans, never absence, eligibility, or temporary limits."""
+    statement = ' '.join(statement.split())
+    return bool(re.fullmatch(
+        r'(?:Please note:\s*)?Pickleball(?: and paddle sports)? (?:is|are) '
+        r'(?:prohibited|not (?:allowed|permitted))(?: on (?:these|the) courts)?\.?'
+        r'|(?:No pickleball(?: is)? (?:allowed|permitted)(?: on (?:these|the) courts)?\.?)'
+        r'|Courts are available for public use\s*[-–—]\s*'
+        r'courts available for tennis only\s*'
+        r'\(no other recreational activities, including pickleball\)\.?'
+        r'|tennis only\s*\(no other recreational activities, including pickleball\)\.?',
+        statement, flags=re.IGNORECASE))
+
+
+def _validate_prohibition(item, sources):
+    evidence = item.get('operator_prohibition')
+    if (not isinstance(evidence, dict) or set(evidence) != PROHIBITION_KEYS
+            or evidence['kind'] != 'current_explicit_pickleball_prohibition'
+            or type(evidence['court_id']) is not int or evidence['court_id'] != item['court_id']):
+        raise ValueError('Prohibition exclusions require an explicit current operator statement tied to this Court ID')
+    identity = evidence['venue_identity']
+    if (not isinstance(identity, dict) or set(identity) != set(IDENTITY_FIELDS)
+            or identity['id'] != item['court_id']):
+        raise ValueError('Prohibition evidence must bind the complete original Court identity')
+    statement = evidence['text']
+    if not isinstance(statement, str) or not _explicit_prohibition(statement):
+        raise ValueError('Only an unqualified explicit pickleball prohibition is supported')
+    citations = evidence['source_urls']
+    operator_urls = {s['url'] for s in sources if s.get('authority') in {'operator', 'government'}}
+    if (not isinstance(citations, list) or not citations
+            or any(not isinstance(url, str) or url not in operator_urls for url in citations)):
+        raise ValueError('Prohibition evidence requires cited primary operator or government sources')
+    website = urlsplit(identity['website'])
+    if (website.scheme not in {'http', 'https'} or not website.hostname
+            or website.username or website.password
+            or not any(urlsplit(url).hostname.removeprefix('www.') ==
+                       website.hostname.removeprefix('www.') for url in citations)):
+        raise ValueError('A cited prohibition source must belong to the exact Court operator website')
+    normalized = ' '.join(statement.split())
+    for url in citations:
+        if not any(source['url'] == url and source.get('authority') in {'operator', 'government'}
+                   and normalized in {' '.join(fact.split()) for fact in source['facts']}
+                   for source in sources):
+            raise ValueError('Each prohibition citation must contain the exact reviewed operator statement')
 
 
 def canonical_json(value):
@@ -63,8 +111,8 @@ def validate_research(research):
         if type(court_id) is not int or court_id <= 0 or court_id in seen:
             raise ValueError('Unique positive integer Court IDs are required')
         seen.add(court_id)
-        if item.get('reason_code') not in {'foreign_venue', 'invalid_test_record'}:
-            raise ValueError('Only foreign venues and admitted nonexistent test fixtures are supported')
+        if item.get('reason_code') not in {'foreign_venue', 'invalid_test_record', 'pickleball_prohibited'}:
+            raise ValueError('Only foreign venues, admitted nonexistent test fixtures, and explicit pickleball prohibitions are supported')
         if not isinstance(item.get('reason'), str) or len(item['reason'].strip()) < 20:
             raise ValueError('A concrete reviewed exclusion reason is required')
         sources = item.get('sources')
@@ -89,6 +137,9 @@ def validate_research(research):
             urls.add(source['url'])
             if source.get('authority') in {'operator', 'government', 'sports_governing_body'}:
                 primary_urls.add(source['url'])
+        if item['reason_code'] == 'pickleball_prohibited':
+            _validate_prohibition(item, sources)
+            continue
         if item['reason_code'] == 'invalid_test_record':
             admission = item.get('source_publisher_admission')
             publisher_urls = {s['url'] for s in sources if s.get('authority') == 'source_publisher'}
@@ -220,6 +271,9 @@ def validate_plan(plan):
         identity = row['identity_before']
         if set(identity) != set(IDENTITY_FIELDS) or identity['id'] != row['court_id']:
             raise ValueError('Exact original court identity guard is required')
+        if (row['reason_code'] == 'pickleball_prohibited'
+                and identity != row['operator_prohibition']['venue_identity']):
+            raise ValueError('Prohibition evidence does not match the exact planned Court identity')
         if not isinstance(row.get('dependencies_before'), dict):
             raise ValueError('Original dependency audit is required')
     return records

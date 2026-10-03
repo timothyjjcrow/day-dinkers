@@ -1,0 +1,33 @@
+{
+  "after": null,
+  "applied": false,
+  "before": {
+    "allowed_reasons": [
+      "foreign_venue",
+      "invalid_test_record"
+    ],
+    "constraint": "ck_court_directory_exclusion_reason",
+    "definition": "CHECK (((reason_code)::text = ANY ((ARRAY['foreign_venue'::character varying, 'invalid_test_record'::character varying])::text[])))",
+    "reason_counts": {
+      "foreign_venue": 6,
+      "invalid_test_record": 4
+    },
+    "row_count": 10,
+    "row_sha256": "2669a7e3e3dac5e13e3b21a0f2c53fbca5dd9c748253194735b06a249f82991b",
+    "validated": true
+  },
+  "completed_at": "2026-10-03T19:59:19.888362+00:00",
+  "constraint": "ck_court_directory_exclusion_reason",
+  "court_or_history_rows_changed": false,
+  "kind": "court-directory-exclusion-policy-migration",
+  "operations": [
+    "ALTER TABLE picklepals.court_directory_exclusion DROP CONSTRAINT ck_court_directory_exclusion_reason",
+    "ALTER TABLE picklepals.court_directory_exclusion ADD CONSTRAINT ck_court_directory_exclusion_reason CHECK (reason_code IN ('foreign_venue', 'invalid_test_record', 'pickleball_prohibited'))"
+  ],
+  "requested_apply": false,
+  "schema": "picklepals",
+  "started_at": "2026-10-03T19:59:19.817575+00:00",
+  "status": "ready",
+  "table": "court_directory_exclusion",
+  "version": 1
+}
