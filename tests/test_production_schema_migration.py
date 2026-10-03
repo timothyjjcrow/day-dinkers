@@ -131,6 +131,13 @@ class FakeInspector:
         ]
 
 
+def test_court_readiness_requires_stored_timezone_column():
+    inspector = FakeInspector()
+    assert _schema_gaps(inspector) == []
+    inspector.columns['court'].remove('timezone')
+    assert any('court' in gap and 'timezone' in gap for gap in _schema_gaps(inspector))
+
+
 def test_alias_schema_verifier_requires_additive_table_and_restrict_foreign_keys():
     inspector = FakeInspector()
     assert _schema_gaps(inspector) == []

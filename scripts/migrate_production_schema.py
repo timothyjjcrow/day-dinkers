@@ -47,7 +47,7 @@ REQUIRED_COLUMNS = {
     },
     'court': {
         'structured_hours', 'hours_dawn_to_dusk', 'reservation_url', 'visitor_info',
-        'fee_type', 'open_play_schedule_rows', 'pending_submission',
+        'fee_type', 'open_play_schedule_rows', 'pending_submission', 'timezone',
     },
     'account_action_token': {
         'id', 'created_at', 'updated_at', 'user_id', 'purpose', 'token_hash',
