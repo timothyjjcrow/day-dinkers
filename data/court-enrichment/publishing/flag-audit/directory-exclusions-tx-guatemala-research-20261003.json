@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "kind": "court-directory-exclusion-research",
+  "reviewed_at": "2026-10-03T18:19:34.553456+00:00",
+  "review_scope": "Source-only qualified review of frozen TX15895. Only public venue identity and geography facts retained. No player accounts, games or family/person details researched.",
+  "original_snapshots": [
+    "directory-exclusions-tx-guatemala-originals-20261003.json"
+  ],
+  "notes": [
+    "Source research only; no exclusion plan, production mutation, deployment, coordinate or permanent-closure change.",
+    "The schema validator verifies artifact structure and declared citations, not the semantic strength of exact facility identity. The government source below independently proves locality geography only. Root should review this qualification before including this record in an activation plan."
+  ],
+  "records": [
+    {
+      "court_id": 15895,
+      "reason_code": "foreign_venue",
+      "imported_state": "TX",
+      "owner_handoff": "data/court-enrichment-texas/2026-10-03/hidalgo-mixed-eight-research.json",
+      "reason": "The original publisher associates the exact imported Fam. España Yaeggy name and 0 Avenida 3-26 street address with Guatemala City, Santa Catarina Pinula, Guatemala, despite a Muniz, Texas URL and generated description. The municipal government independently identifies Santa Catarina Pinula in the Guatemala department. This supports a proposed reversible US-directory exclusion of a foreign-address candidate, pending operator review of the conflicting exact private-court identity. Retain Court ID and all location fields/history; do not describe the court as closed.",
+      "foreign_location": {
+        "country_code": "GT",
+        "country": "Guatemala",
+        "locality": "Santa Catarina Pinula, Guatemala City area",
+        "address": "0 Avenida 3-26, Guatemala City, Santa Catarina Pinula, Guatemala"
+      },
+      "location_source_urls": [
+        "https://www.pickleheads.com/courts/us/texas/muniz/fam-espana-yaeggy",
+        "https://scp.gob.gt/santa-catarina-pinula/"
+      ],
+      "sources": [
+        {
+          "url": "https://www.pickleheads.com/courts/us/texas/muniz/fam-espana-yaeggy",
+          "title": "Pickleheads — Fam. España Yaeggy exact source listing",
+          "authority": "source_publisher",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "The exact source listing bears the imported venue name Fam. España Yaeggy and displays 0 Avenida 3-26, Guatemala City, Santa Catarina Pinula, Guatemala as its address/directions label.",
+            "Its generated introduction calls the same venue Muniz, Texas; this is an unresolved source-internal location contradiction.",
+            "The linked Google Maps directions URL encodes the same Guatemala address as a destination query. This is repetition of publisher-supplied address text, not an independently matched map POI or court coordinate.",
+            "The page exposes no operator website or independent primary facility-identity link."
+          ],
+          "access_mode": "Read through current web tool result on 2026-10-03. Ordinary direct HTTP GET returned403; no successful fresh raw fetch is claimed."
+        },
+        {
+          "url": "https://scp.gob.gt/santa-catarina-pinula/",
+          "title": "Municipalidad de Santa Catarina Pinula — Official Municipality Profile",
+          "authority": "government",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "The municipal government describes Santa Catarina Pinula as one of the17 municipalities comprising the department of Guatemala.",
+            "This corroborates the foreign locality geography appearing in the publisher address. It does not mention Fam. España Yaeggy or independently verify the exact street address/private court identity."
+          ],
+          "access_mode": "Official public page read through web tool on 2026-10-03."
+        }
+      ],
+      "earlier_followup_notes": [
+        "Live production identity matches the immutable snapshot.",
+        "Geographic identity conflict: the exact source address is Guatemala City, Santa Catarina Pinula, Guatemala, while its URL and generated introduction assign Muniz, Texas. The snapshot Texas pin does not resolve this contradiction.",
+        "No verified Texas venue or public-access contact found. Leave all fields unchanged. Root must decide whether to quarantine or exclude this non-US candidate; do not mark permanently closed or assign guessed replacement coordinates."
+      ],
+      "review_status": "qualified_foreign_address_candidate_pending_exact_facility_review",
+      "ready_for_guarded_activation": false,
+      "evidence_qualification": {
+        "confirmed": [
+          "Exact publisher venue name and stored street string match the live Court.",
+          "Publisher address explicitly identifies Guatemala and Santa Catarina Pinula.",
+          "Municipal-government primary source independently identifies the locality in Guatemala."
+        ],
+        "not_independently_confirmed": [
+          "Exact private-court operator identity and full physical street address.",
+          "Actual court coordinates.",
+          "Whether the publisher address or generated Texas template is the erroneous side of the internal contradiction."
+        ],
+        "linked_primary_facility_sources_found": false,
+        "recommendation": "Keep separate from the five previously confirmed exclusion records until root accepts the qualified evidence or obtains exact operator/facility corroboration. Do not rewrite Court geography or closed flag."
+      },
+      "preserved_unknowns": [
+        "Original stored TX city/county/pin and closed=false/pending_submission=false are retained. No count, access, fees, scheduling, phone, history or player data changes are proposed."
+      ]
+    }
+  ]
+}
