@@ -425,7 +425,7 @@ class CourtDirectoryExclusion(TimestampMixin, db.Model):
     """Reviewed US-directory scope; original court IDs and history stay intact."""
     __table_args__ = (
         db.CheckConstraint(
-            "reason_code IN ('foreign_venue', 'invalid_test_record')",
+            "reason_code IN ('foreign_venue', 'invalid_test_record', 'pickleball_prohibited')",
             name='ck_court_directory_exclusion_reason',
         ),
     )

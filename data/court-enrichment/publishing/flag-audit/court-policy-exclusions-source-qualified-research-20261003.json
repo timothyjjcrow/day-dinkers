@@ -1,0 +1,292 @@
+{
+  "completed_at": "2026-10-03T20:07:43.959125+00:00",
+  "database_writes": 0,
+  "historical_policy_context": [
+    "Waterstone public2022 rules and an older board letter permitted limited pickleball. The currently fetched amenities page explicitly prohibits it; historical permissions are not treated as current policy."
+  ],
+  "kind": "court-policy-exclusion-research",
+  "operator_review_required_before_activation": true,
+  "proof_files": [
+    {
+      "path": "data/court-enrichment/publishing/flag-audit/court-policy-exclusions-current-guards-20261003T195919Z.json",
+      "sha256": "3cc05f1996dc7110dc4dcb177a30d89e7117a7db6158c98b3a88c891d8bc9501"
+    },
+    {
+      "path": "data/court-enrichment/publishing/flag-audit/court-policy-exclusions-primary-fetch-20261003T195746Z.json",
+      "sha256": "5ec4ce225b689f2d4980b28b9e38b7fc321143a402a322beb80ed79785d0e4fa"
+    },
+    {
+      "path": "data/court-enrichment/publishing/flag-audit/court-policy-exclusions-public-before-20261003T200743Z.json",
+      "sha256": "f0461cf4132b5ecec9c7ebe41d86ff9e3a50c7896ac0009440cc9cec743c9aaf"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/root-hamilton-d-plan.json",
+      "sha256": "216220d6bbb79a316356219ee23221b9ab7fc6551e173302f759cf0aca599d53"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/root-hamilton-d-applied.json",
+      "sha256": "71d1eabaa279ee8e853b506ce40937bf0cba6802c01d34b67d39bbabdc85033c"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/root-hamilton-d-verification.json",
+      "sha256": "d6bf9731281df8b1a3e48effd9c2edc4f3e695f15a3b1c088bc18c79418ab2ba"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/central-review-handoff-root-d-ne-c.json",
+      "sha256": "9156e6245869158a3e6f94e6c36af451919cda3c290f5af0337ea4bd1095b0c3"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/root-hamilton-d-reviewed-v2.json",
+      "sha256": "8a4274ae612a4dcdb84c28fd614debe5f5164407bc96b3dd5b94d63ec5c34bbe"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/rockwall-smith-ten-plan.json",
+      "sha256": "abb3059ad381e6399f4d649922813c189f259b472fbfac74aa2dbcc04d80a9d0"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/rockwall-smith-ten-applied.json",
+      "sha256": "ac3fe51206c70f51fd2550ee23bb1eec2365e94198e3e672cbbe5e7622fd3ad6"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/rockwall-smith-ten-verification.json",
+      "sha256": "a9d257d39b5ee9d370bc72b99fdef5ffee4b816db91e1f8de2b93661417c7028"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/faulkner-no-pickleball-exclusion-review.json",
+      "sha256": "a232d31f90553fe8e37adab21c2e4612892c88e9b288b6925d703c65adedc322"
+    },
+    {
+      "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/faulkner-tennis-no-pickleball-primary.html",
+      "sha256": "d116a351de369a944034ffbad08432d65f7858d5a75b40a8cd6f26ed08df24db"
+    }
+  ],
+  "records": [
+    {
+      "court_id": 6331,
+      "current_guard_proof": {
+        "dependency_counts": {
+          "business_claim.court_id": 0,
+          "business_profile.court_id": 0,
+          "check_in.court_id": 0,
+          "club.home_court_id": 0,
+          "community_group.home_court_id": 0,
+          "conversation.court_scope_id": 0,
+          "court_chat_read.court_id": 0,
+          "court_chat_subscription.court_id": 0,
+          "court_condition.court_id": 0,
+          "court_edit_suggestion.court_id": 0,
+          "court_photo.court_id": 0,
+          "court_review.court_id": 0,
+          "crew.default_court_id": 0,
+          "crew_date_poll_revision.court_id": 0,
+          "favorite_court.court_id": 0,
+          "game.court_id": 0,
+          "league.court_id": 0,
+          "league_match.scheduled_court_id": 0,
+          "message.court_id": 0,
+          "play_availability_pulse.court_id": 0,
+          "tournament.court_id": 0,
+          "user.home_court_id": 0
+        },
+        "existing_exclusion": null,
+        "path": "data/court-enrichment/publishing/flag-audit/court-policy-exclusions-current-guards-20261003T195919Z.json",
+        "sha256": "3cc05f1996dc7110dc4dcb177a30d89e7117a7db6158c98b3a88c891d8bc9501"
+      },
+      "notes": [
+        "Explicit prohibition is the evidence; absence from inventory, private access, court counts, and temporary closures do not qualify.",
+        "Reversible directory visibility only. No Court metadata reconciliation or identity merge is authorized."
+      ],
+      "operator_prohibition": {
+        "court_id": 6331,
+        "kind": "current_explicit_pickleball_prohibition",
+        "source_urls": [
+          "https://www.waterstoneofcarmel.com/services-5"
+        ],
+        "text": "Pickleball and paddle sports are prohibited.",
+        "venue_identity": {
+          "address": "12046 Pebble Pointe Pass",
+          "city": "Carmel",
+          "closed": false,
+          "county_slug": "hamilton-county",
+          "court_type": "dedicated",
+          "id": 6331,
+          "indoor": false,
+          "latitude": 39.963285,
+          "longitude": -86.08239,
+          "name": "Waterstone Pickleball Court",
+          "num_courts": 4,
+          "pending_submission": false,
+          "phone": "",
+          "state": "IN",
+          "website": "https://www.waterstoneofcarmel.com/services-5",
+          "zip_code": ""
+        }
+      },
+      "owner_freeze": {
+        "final_owner_release_confirmed_by": "Root delegated task2026-10-03; both final source owners explicitly frozen.",
+        "freeze_file_hashes": [
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/root-hamilton-d-plan.json",
+            "sha256": "216220d6bbb79a316356219ee23221b9ab7fc6551e173302f759cf0aca599d53"
+          },
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/root-hamilton-d-applied.json",
+            "sha256": "71d1eabaa279ee8e853b506ce40937bf0cba6802c01d34b67d39bbabdc85033c"
+          },
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/root-hamilton-d-verification.json",
+            "sha256": "d6bf9731281df8b1a3e48effd9c2edc4f3e695f15a3b1c088bc18c79418ab2ba"
+          },
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/central-review-handoff-root-d-ne-c.json",
+            "sha256": "9156e6245869158a3e6f94e6c36af451919cda3c290f5af0337ea4bd1095b0c3"
+          },
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment/states/IN/2026-10-03/root-hamilton-d-reviewed-v2.json",
+            "sha256": "8a4274ae612a4dcdb84c28fd614debe5f5164407bc96b3dd5b94d63ec5c34bbe"
+          }
+        ],
+        "state": "IN"
+      },
+      "preserve": [
+        "Original Court ID and all Court metadata",
+        "closed=false and pending_submission=false",
+        "Original counts, coordinates, hours, fees, and visitor warnings",
+        "All historical/future records referencing the original Court ID"
+      ],
+      "reason": "Current Waterstone HOA amenities policy explicitly prohibits pickleball and paddle sports at the venue’s tennis courts.",
+      "reason_code": "pickleball_prohibited",
+      "sources": [
+        {
+          "accessed_at": "2026-10-03",
+          "authority": "operator",
+          "facts": [
+            "Pickleball and paddle sports are prohibited.",
+            "The current HOA page identifies four tennis courts reserved for residents and guests; the sport ban applies regardless of resident eligibility."
+          ],
+          "retrieval": {
+            "fresh_http_status": 200,
+            "primary_raw_response_sha256": "56234315c40719d9205fa5dee44352c051983b00456850da3102b3b09da43e71"
+          },
+          "title": "Current Waterstone Pickleball Court operator court-use policy",
+          "url": "https://www.waterstoneofcarmel.com/services-5"
+        }
+      ]
+    },
+    {
+      "court_id": 16089,
+      "current_guard_proof": {
+        "dependency_counts": {
+          "business_claim.court_id": 0,
+          "business_profile.court_id": 0,
+          "check_in.court_id": 0,
+          "club.home_court_id": 0,
+          "community_group.home_court_id": 0,
+          "conversation.court_scope_id": 0,
+          "court_chat_read.court_id": 0,
+          "court_chat_subscription.court_id": 0,
+          "court_condition.court_id": 0,
+          "court_edit_suggestion.court_id": 0,
+          "court_photo.court_id": 0,
+          "court_review.court_id": 0,
+          "crew.default_court_id": 0,
+          "crew_date_poll_revision.court_id": 0,
+          "favorite_court.court_id": 0,
+          "game.court_id": 0,
+          "league.court_id": 0,
+          "league_match.scheduled_court_id": 0,
+          "message.court_id": 0,
+          "play_availability_pulse.court_id": 0,
+          "tournament.court_id": 0,
+          "user.home_court_id": 0
+        },
+        "existing_exclusion": null,
+        "path": "data/court-enrichment/publishing/flag-audit/court-policy-exclusions-current-guards-20261003T195919Z.json",
+        "sha256": "3cc05f1996dc7110dc4dcb177a30d89e7117a7db6158c98b3a88c891d8bc9501"
+      },
+      "notes": [
+        "Explicit prohibition is the evidence; absence from inventory, private access, court counts, and temporary closures do not qualify.",
+        "Reversible directory visibility only. No Court metadata reconciliation or identity merge is authorized."
+      ],
+      "operator_prohibition": {
+        "court_id": 16089,
+        "kind": "current_explicit_pickleball_prohibition",
+        "source_urls": [
+          "https://www.tylerparksandrec.com/Facilities/Faulkner-Tennis-Center"
+        ],
+        "text": "tennis only (no other recreational activities, including pickleball)",
+        "venue_identity": {
+          "address": "401 W Cumberland Rd",
+          "city": "Tyler",
+          "closed": false,
+          "county_slug": "smith-county",
+          "court_type": "dedicated",
+          "id": 16089,
+          "indoor": false,
+          "latitude": 32.256507,
+          "longitude": -95.316349,
+          "name": "Faulkner Tennis Center",
+          "num_courts": 4,
+          "pending_submission": false,
+          "phone": "903-830-1397",
+          "state": "TX",
+          "website": "https://www.tylerparksandrec.com/Facilities/Faulkner-Tennis-Center",
+          "zip_code": "75703"
+        }
+      },
+      "owner_freeze": {
+        "final_owner_release_confirmed_by": "Root delegated task2026-10-03; both final source owners explicitly frozen.",
+        "freeze_file_hashes": [
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/rockwall-smith-ten-plan.json",
+            "sha256": "abb3059ad381e6399f4d649922813c189f259b472fbfac74aa2dbcc04d80a9d0"
+          },
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/rockwall-smith-ten-applied.json",
+            "sha256": "ac3fe51206c70f51fd2550ee23bb1eec2365e94198e3e672cbbe5e7622fd3ad6"
+          },
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/rockwall-smith-ten-verification.json",
+            "sha256": "a9d257d39b5ee9d370bc72b99fdef5ffee4b816db91e1f8de2b93661417c7028"
+          },
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/faulkner-no-pickleball-exclusion-review.json",
+            "sha256": "a232d31f90553fe8e37adab21c2e4612892c88e9b288b6925d703c65adedc322"
+          },
+          {
+            "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/faulkner-tennis-no-pickleball-primary.html",
+            "sha256": "d116a351de369a944034ffbad08432d65f7858d5a75b40a8cd6f26ed08df24db"
+          }
+        ],
+        "state": "TX"
+      },
+      "preserve": [
+        "Original Court ID and all Court metadata",
+        "closed=false and pending_submission=false",
+        "Original counts, coordinates, hours, fees, and visitor warnings",
+        "All historical/future records referencing the original Court ID"
+      ],
+      "reason": "Current City of Tyler Faulkner Tennis Center policy restricts these courts to tennis and explicitly disallows pickleball.",
+      "reason_code": "pickleball_prohibited",
+      "sources": [
+        {
+          "accessed_at": "2026-10-03",
+          "authority": "government",
+          "facts": [
+            "tennis only (no other recreational activities, including pickleball)",
+            "The official page identifies Faulkner Tennis Center at 401 West Cumberland Road, Tyler, TX 75703. Tennis hours, prices, and reservations are not evidence of permitted pickleball."
+          ],
+          "retrieval": {
+            "fresh_http_status": 403,
+            "limitation": "Direct request403. Fresh primary web search retrieved the official page text, crawled three days earlier, including the exact ban; parent cached official HTML independently contains it.",
+            "parent_cached_html_sha256": "d116a351de369a944034ffbad08432d65f7858d5a75b40a8cd6f26ed08df24db"
+          },
+          "title": "Current Faulkner Tennis Center operator court-use policy",
+          "url": "https://www.tylerparksandrec.com/Facilities/Faulkner-Tennis-Center"
+        }
+      ]
+    }
+  ],
+  "schema_prerequisite": "Reviewed constraint widening and compatible backend deployment must precede activation.",
+  "version": 1
+}

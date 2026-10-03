@@ -97,13 +97,21 @@ def test_open_now_exclusion_and_database_rollback_take_effect_immediately(client
     assert 'directory_context' not in client.get('/api/courts/2').get_json()
 
 
-def test_original_detail_play_favorites_reviews_and_games_keep_identity(client):
+@pytest.mark.parametrize('reason_code,message', [
+    ('foreign_venue', 'This venue is outside the United States and is not listed in the US court directory.'),
+    ('pickleball_prohibited', 'The venue operator prohibits pickleball at these courts. '
+                             'This listing is not shown in the court directory.'),
+])
+def test_original_detail_play_favorites_reviews_and_games_keep_identity(client, reason_code, message):
+    with client.application.app_context():
+        db.session.get(CourtDirectoryExclusion, 2).reason_code = reason_code
+        db.session.commit()
     detail = client.get('/api/courts/2').get_json()
     assert detail['id'] == 2 and detail['name'] == 'Heaton Tennis Club'
     assert detail['closed'] is False and detail['pending_submission'] is False
     assert detail['directory_context'] == {
         'listed': False,
-        'message': 'This venue is outside the United States and is not listed in the US court directory.',
+        'message': message,
     }
     assert not {'reason', 'source_urls', 'reviewed_by'} & set(detail['directory_context'])
     account = client.post('/api/auth/register', json={
@@ -142,6 +150,24 @@ def test_original_detail_play_favorites_reviews_and_games_keep_identity(client):
     assert client.get(f'/api/games/{game_id}', headers=headers).get_json()['court']['id'] == 2
     assert [r['id'] for r in client.get('/api/courts/favorites', headers=headers).get_json()['items']] == [2]
     assert listing(client, 'sort=rating')['total'] == 2
+
+
+def test_prohibited_canonical_and_its_alias_stay_out_of_search_count_and_pages(client):
+    with client.application.app_context():
+        db.session.get(CourtDirectoryExclusion, 2).reason_code = 'pickleball_prohibited'
+        db.session.get(CourtAlias, 4).canonical_court_id = 2
+        db.session.commit()
+    for query in ('q=Heaton', 'q=Heaton+Tenis+Club', 'q=Overseas+Legacy+Name',
+                  'indoor=1', 'lighted=1', 'water=1'):
+        assert listing(client, query)['total'] == 0
+    assert listing(client, 'limit=1')['total'] == 2
+    detail = client.get('/api/courts/2').get_json()
+    assert detail['id'] == 2 and detail['closed'] is False
+    assert detail['directory_context']['listed'] is False
+    with client.application.app_context():
+        db.session.get(CourtDirectoryExclusion, 2).active = False
+        db.session.commit()
+    assert listing(client, 'q=Heaton')['items'][0]['id'] == 2
 
 
 def test_additive_migration_is_idempotent_and_preserves_court_rows(client):

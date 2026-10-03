@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from backend.app import db
 from backend.models import Court, CourtDirectoryExclusion
 from scripts.publish_court_directory_exclusions import (
-    build_plan, digest, execute_plan, transaction, validate_plan, validate_research,
+    IDENTITY_FIELDS, build_plan, digest, execute_plan, transaction, validate_plan, validate_research,
     write_json_exclusive,
 )
 
@@ -37,7 +37,8 @@ def engine(tmp_path):
         connection.execute(court.insert(), [
             {'id': i, 'name': f'Foreign Court {i}', 'address': 'Wrong US address',
              'city': 'Wrong US city', 'state': 'IL', 'latitude': 41.8,
-             'longitude': -87.9, 'num_courts': 4} for i in (1, 2)
+             'longitude': -87.9, 'num_courts': 4,
+             'website': 'https://example.test/operator'} for i in (1, 2)
         ])
     yield engine
     engine.dispose()
@@ -262,3 +263,96 @@ def test_cli_defaults_to_dry_run_and_keeps_immutable_intent_and_readback(engine,
     assert intent_path.read_bytes() == intent_bytes and state(engine) == before
     with pytest.raises(FileExistsError):
         write_json_exclusive(applied_path, {})
+
+
+def prohibition_research(engine, court_id=1, statement='Pickleball and paddle sports are prohibited.'):
+    identity = next(row for row in state(engine)['court'] if row['id'] == court_id)
+    return {'records': [{
+        'court_id': court_id, 'reason_code': 'pickleball_prohibited',
+        'reason': 'Current venue operator explicitly prohibits pickleball at these exact courts.',
+        'operator_prohibition': {
+            'kind': 'current_explicit_pickleball_prohibition', 'court_id': court_id,
+            'venue_identity': {key: identity[key] for key in IDENTITY_FIELDS},
+            'text': statement, 'source_urls': ['https://example.test/operator'],
+        },
+        'sources': [{'url': 'https://example.test/operator', 'authority': 'operator',
+                     'title': 'Current venue court policy', 'accessed_at': '2026-10-03',
+                     'facts': [statement]}],
+    }]}
+
+
+@pytest.mark.parametrize('statement', [
+    'Pickleball and paddle sports are prohibited.',
+    'Courts are available for public use - courts available for tennis only '
+    '(no other recreational activities, including pickleball).',
+    'tennis only (no other recreational activities, including pickleball)',
+])
+def test_current_explicit_prohibition_preserves_courts_and_fresh_history(engine, statement):
+    value = prohibition_research(engine, statement=statement)
+    with transaction(engine) as connection:
+        plan = build_plan(connection, value, 'Reviewed Operator')
+    with engine.begin() as connection:
+        history = Table('unexpected_court_history', MetaData(), autoload_with=connection)
+        connection.execute(history.insert().values(venue_id=1))
+    before = state(engine)
+    result = execute_plan(engine, plan, apply=True, before_write=lambda _: None)
+    assert result['records'][0]['dependencies']['unexpected_court_history.venue_id'] == 1
+    assert result['records'][0]['after']['reason_code'] == 'pickleball_prohibited'
+    assert state(engine)['court'] == before['court']
+    assert state(engine)['unexpected_court_history'] == before['unexpected_court_history']
+    execute_plan(engine, plan, apply=True, rollback=True, before_write=lambda _: None)
+    assert not state(engine)['court_directory_exclusion'][0]['active']
+    assert state(engine)['court'] == before['court']
+
+
+@pytest.mark.parametrize('statement', [
+    'Pickleball is absent from the current court inventory.',
+    'Courts are for residents and accompanied guests only.',
+    'Pickleball is prohibited during tennis lessons.',
+    'Pickleball is prohibited until the resurfacing is complete.',
+    'Pickleball is not prohibited.',
+    'Tennis only.',
+    'No other recreational activities, including pickleball, during the tournament.',
+])
+def test_ambiguous_absence_private_and_temporary_prohibitions_are_rejected(engine, statement):
+    with pytest.raises(ValueError, match='unqualified explicit'):
+        validate_research(prohibition_research(engine, statement=statement))
+
+
+@pytest.mark.parametrize('mutation', [
+    lambda row: row.pop('operator_prohibition'),
+    lambda row: row['operator_prohibition'].update(kind='temporary_restriction'),
+    lambda row: row['operator_prohibition'].update(court_id=2),
+    lambda row: row['operator_prohibition']['venue_identity'].pop('website'),
+    lambda row: row['operator_prohibition']['venue_identity'].update(website='https://another-venue.test/'),
+    lambda row: row['operator_prohibition'].update(source_urls=[]),
+    lambda row: row['operator_prohibition'].update(source_urls=['https://uncited.test/policy']),
+    lambda row: row['sources'][0].update(authority='directory'),
+    lambda row: row['sources'][0].update(authority='sports_governing_body'),
+    lambda row: row['sources'][0].update(facts=['Four courts exist; access for residents only.']),
+])
+def test_prohibition_requires_exact_identity_and_cited_primary_statement(engine, mutation):
+    value = prohibition_research(engine)
+    mutation(value['records'][0])
+    with pytest.raises(ValueError):
+        validate_research(value)
+
+
+def test_prohibition_plan_scope_and_source_identity_tampering_are_rejected(engine):
+    with transaction(engine) as connection:
+        plan = build_plan(connection, prohibition_research(engine), 'Reviewed Operator')
+    for mutate in (
+        lambda row: row['operator_prohibition']['venue_identity'].update(latitude=0),
+        lambda row: row['operator_prohibition'].update(court_id=2),
+        lambda row: row.update(reason_code='invalid_test_record'),
+        lambda row: row['after'].update(reason_code='foreign_venue'),
+    ):
+        altered = deepcopy(plan)
+        mutate(altered['records'][0])
+        with pytest.raises(ValueError):
+            execute_plan(engine, altered, apply=True, before_write=lambda _: None)
+    assert state(engine)['court_directory_exclusion'] == []
+    value = prohibition_research(engine)
+    value['records'][0]['operator_prohibition']['venue_identity']['address'] = 'Another bank'
+    with transaction(engine) as connection, pytest.raises(ValueError, match='exact planned Court identity'):
+        build_plan(connection, value, 'Reviewed Operator')

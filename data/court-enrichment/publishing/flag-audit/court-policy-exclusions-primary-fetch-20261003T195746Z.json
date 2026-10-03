@@ -1,0 +1,29 @@
+{
+  "kind": "current_primary_policy_fetch_evidence",
+  "sources": [
+    {
+      "venue": "waterstone",
+      "url": "https://www.waterstoneofcarmel.com/services-5",
+      "accessed_at": "2026-10-03T19:57:45.654841+00:00",
+      "statement": "Pickleball and paddle sports are prohibited.",
+      "http_status": 200,
+      "response_sha256": "56234315c40719d9205fa5dee44352c051983b00456850da3102b3b09da43e71",
+      "explicit_statement_present": true
+    },
+    {
+      "venue": "faulkner",
+      "url": "https://www.tylerparksandrec.com/Facilities/Faulkner-Tennis-Center",
+      "accessed_at": "2026-10-03T19:57:46.122379+00:00",
+      "statement": "Courts are available for public use - courts available for tennis only (no other recreational activities, including pickleball).",
+      "http_status": 403,
+      "fresh_fetch_limitation": "Direct primary fetch rejected; current primary web search text and parent cached primary HTML are separately preserved.",
+      "parent_cached_html": {
+        "path": "/Users/timothycrowley/pickleball local /data/court-enrichment-texas/2026-10-03/faulkner-tennis-no-pickleball-primary.html",
+        "sha256": "d116a351de369a944034ffbad08432d65f7858d5a75b40a8cd6f26ed08df24db",
+        "explicit_statement_present": true,
+        "official_venue_title_present": true,
+        "official_street_present": true
+      }
+    }
+  ]
+}
