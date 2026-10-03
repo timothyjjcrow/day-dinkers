@@ -1,0 +1,8 @@
+{
+  "validated": true,
+  "court_ids": [
+    15862
+  ],
+  "research_sha256": "60427b2074e7c51656cc33c63028df7d7175eab893b7c1afeaafac1a88632a71",
+  "mode": "Pure source validation after fresh read-only identity guard; no Court field writes or exclusion plan."
+}

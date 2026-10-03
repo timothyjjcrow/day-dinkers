@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "kind": "court-directory-exclusion-research",
+  "reviewed_at": "2026-10-03T18:05:15.211039+00:00",
+  "records": [
+    {
+      "court_id": 15862,
+      "reason_code": "invalid_test_record",
+      "imported_state": "TX",
+      "reason": "The source publisher explicitly identifies Honey Potter Courts TX as a nonexistent listing created for testing, at an airport, and warns visitors against expecting pickleball there. Its address is Castleberry Ranch Airport, Dalhart, Texas and its current headline shows zero courts. Exclude this admitted fixture reversibly from discovery while retaining the original Court ID, stored pin, fields and history; no permanent closure is asserted.",
+      "source_publisher_admission": {
+        "kind": "nonexistent_test_fixture",
+        "text": "The source publisher says this court is nonexistent and present only for testing, and that the mapped location is actually an airport where visitors must not expect pickleball.",
+        "source_urls": [
+          "https://www.pickleheads.com/courts/us/texas/dalhart/honey-potter-courts-tx"
+        ]
+      },
+      "sources": [
+        {
+          "url": "https://www.pickleheads.com/courts/us/texas/dalhart/honey-potter-courts-tx",
+          "title": "Pickleheads Honey Potter Courts TX source-publisher admission",
+          "authority": "source_publisher",
+          "accessed_at": "2026-10-03",
+          "facts": [
+            "The venue listing explicitly admits it is a nonexistent test fixture at an airport and warns visitors not to expect pickleball. Its current headline shows zero courts. The address is Castleberry Ranch Airport, Dalhart, TX, USA. Only venue facts are saved; no player details or source-page history are retained."
+          ]
+        }
+      ],
+      "earlier_followup_notes": [
+        "Live API identity checked 2026-10-03.",
+        "Confirmed invalid test entry, not a genuine venue later closing. Preserve closed=false and record history; central publication worker owns an invalid_test_record directory-exclusion change. This batch publishes a visitor warning only.",
+        "Court count cannot be set to zero through this enrichment schema, so the original numeric placeholder is retained for central cleanup. No deletion performed."
+      ],
+      "review_status": "Source confirmed; fresh read-only Court identity matches the root-validated TX state and exact stored pin. TX owner visitor-warning publication/final handoff remains independent.",
+      "preserved_fields": [
+        "id",
+        "latitude",
+        "longitude",
+        "closed",
+        "pending_submission",
+        "all Court/history fields"
+      ],
+      "publication_notes": [
+        "Source-only supplement to the frozen four-record feature commit f57cb5a. No code change, DB plan, mutation or deployment.",
+        "Central publisher should use a fresh guarded plan after owner warning/final handoff. It can publish the original four first and this record later with the same deployed code."
+      ]
+    }
+  ],
+  "root_validated_identity": {
+    "id": 15862,
+    "name": "Honey Potter Courts TX",
+    "address": "Castleberry Ranch Airport",
+    "city": "Dalhart",
+    "state": "TX",
+    "latitude": 35.737543,
+    "longitude": -102.917433,
+    "closed": false,
+    "pending_submission": false
+  },
+  "original_snapshot": "directory-exclusions-tx-fixture-originals-20261003.json"
+}
