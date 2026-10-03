@@ -18,7 +18,7 @@ from backend.app import db
 from backend.services.court_photos import preferred_court_photo, refresh_community_cover, remove_court_photo
 from backend.models import (
     COURT_CONDITIONS, BusinessOffering, BusinessProfile, BusinessScheduleItem,
-    CheckIn, Court,
+    CheckIn, Court, CourtAlias,
     CourtChatSubscription, CourtCondition, CourtEditSuggestion,
     CourtPhoto, CourtReview, FavoriteCourt, Friendship, Game, GamePlayer,
     Notification, User, blocked_pair_ids, can_direct_message, iso, notify, utcnow,
@@ -37,6 +37,7 @@ from backend.security import rate_limit
 from backend.services.business_governance import business_access_role
 from backend.services.business_visibility import public_business_query
 from backend.services.court_visiting import normalize_visiting, visiting_dict, project_visiting
+from backend.services.court_aliases import discoverable_courts, court_search_aliases, court_families
 from backend.services.presence_proof import (
     issue_instant_rally_presence_proof,
     validate_court_presence_location,
@@ -387,20 +388,56 @@ def _court_discovery_summary(court):
     return item
 
 
+def _family_rating_subquery():
+    """One current review per player at a canonical venue, without moving rows."""
+    canonical_id = func.coalesce(CourtAlias.canonical_court_id, CourtReview.court_id)
+    latest = db.session.query(
+        canonical_id.label('court_id'), CourtReview.rating.label('rating'),
+        func.row_number().over(
+            partition_by=(canonical_id, CourtReview.user_id),
+            order_by=(CourtReview.updated_at.desc(), CourtReview.id.desc()),
+        ).label('position'),
+    ).outerjoin(CourtAlias, and_(
+        CourtAlias.alias_court_id == CourtReview.court_id, CourtAlias.active.is_(True),
+    )).subquery()
+    return db.session.query(
+        latest.c.court_id, func.avg(latest.c.rating).label('rating_avg'),
+        func.count().label('rating_count'),
+    ).filter(latest.c.position == 1).group_by(latest.c.court_id).subquery()
+
+
+def _court_current_reviews(court_id):
+    family = court_families([court_id])[court_id]
+    query = CourtReview.query.filter(CourtReview.court_id.in_(family))
+    if len(family) > 1:
+        latest = db.session.query(
+            CourtReview.id.label('id'),
+            func.row_number().over(
+                partition_by=CourtReview.user_id,
+                order_by=(CourtReview.updated_at.desc(), CourtReview.id.desc()),
+            ).label('position'),
+        ).filter(CourtReview.court_id.in_(family)).subquery()
+        query = query.filter(CourtReview.id.in_(
+            db.session.query(latest.c.id).filter(latest.c.position == 1),
+        ))
+    return query
+
+
 def _rating_summary_for(court_ids):
-    """Batch {court_id: {avg, count}} for a list of courts."""
+    """Canonical family current reviews; original alias reads stay unchanged."""
     if not court_ids:
         return {}
-    rows = (
-        db.session.query(
-            CourtReview.court_id,
-            func.avg(CourtReview.rating),
-            func.count(CourtReview.id),
-        )
-        .filter(CourtReview.court_id.in_(court_ids))
-        .group_by(CourtReview.court_id)
-        .all()
-    )
+    alias_ids = {row[0] for row in db.session.query(CourtAlias.alias_court_id).filter(
+        CourtAlias.active.is_(True), CourtAlias.alias_court_id.in_(court_ids),
+    ).all()}
+    ratings = _family_rating_subquery()
+    rows = db.session.query(ratings.c.court_id, ratings.c.rating_avg, ratings.c.rating_count).filter(
+        ratings.c.court_id.in_(set(court_ids) - alias_ids),
+    ).all()
+    if alias_ids:
+        rows += db.session.query(CourtReview.court_id, func.avg(CourtReview.rating), func.count(CourtReview.id)).filter(
+            CourtReview.court_id.in_(alias_ids),
+        ).group_by(CourtReview.court_id).all()
     return {
         cid: {'rating_avg': round(float(avg), 1), 'rating_count': int(count)}
         for cid, avg, count in rows
@@ -417,35 +454,46 @@ def _active_counts_for(court_ids, current_user=None, *, presence_summaries=None)
     """
     if not court_ids:
         return {}, {}, {}
+    families = court_families(court_ids)
+    destinations = {}
+    for canonical, family in families.items():
+        for member in family:
+            destinations.setdefault(member, []).append(canonical)
     rows = (
-        db.session.query(CheckIn.court_id, CheckIn.location_verified_at.isnot(None),
-                         func.count(CheckIn.id), func.max(CheckIn.last_presence_ping_at))
+        db.session.query(CheckIn.court_id, CheckIn.user_id, CheckIn.location_verified_at.isnot(None),
+                         CheckIn.last_presence_ping_at, CheckIn.id)
         .join(User, User.id == CheckIn.user_id)
         .filter(
-            CheckIn.court_id.in_(court_ids),
+            CheckIn.court_id.in_(destinations),
             CheckIn.checked_out_at.is_(None),
             CheckIn.checked_in_at >= presence_absolute_cutoff(),
             CheckIn.last_presence_ping_at >= presence_stale_cutoff(),
             User.deleted_at.is_(None),
             ~CheckIn.user_id.in_(blocked_pair_ids(current_user.id) if current_user else set()),
         )
-        .group_by(CheckIn.court_id, CheckIn.location_verified_at.isnot(None))
         .all()
     )
     players = {}
-    for court_id, verified, count, updated in rows:
-        players[court_id] = players.get(court_id, 0) + count
+    latest_presence = {}
+    for source, user_id, verified, updated, checkin_id in rows:
+        for court_id in destinations[source]:
+            key = (court_id, user_id)
+            previous = latest_presence.get(key)
+            if previous is None or (updated, checkin_id) > (previous[1], previous[2]):
+                latest_presence[key] = (verified, updated, checkin_id)
+    for (court_id, _), (verified, updated, _) in latest_presence.items():
+        players[court_id] = players.get(court_id, 0) + 1
         if presence_summaries is not None:
             summary = presence_summaries.setdefault(court_id, {
                 'location_confirmed': 0, 'self_reported': 0, 'updated_at': None,
             })
-            summary['location_confirmed' if verified else 'self_reported'] += count
+            summary['location_confirmed' if verified else 'self_reported'] += 1
             summary['updated_at'] = max(summary['updated_at'] or '', iso(updated) or '') or None
     now = utcnow()
     game_rows = (
         Game.query
         .filter(
-            Game.court_id.in_(court_ids),
+            Game.court_id.in_(destinations),
             Game.status == 'upcoming',
             Game.time_options == '[]',  # like court detail: no time yet
             # Match the discovery/detail window; live rallies scheduled a few
@@ -477,9 +525,10 @@ def _active_counts_for(court_ids, current_user=None, *, presence_summaries=None)
             continue
         if game.is_instant and not _instant_rally_is_actionable(game, now):
             continue
-        games[game.court_id] = games.get(game.court_id, 0) + 1
-        if game.scheduled_at <= active_window_end:
-            active_games[game.court_id] = active_games.get(game.court_id, 0) + 1
+        for court_id in destinations[game.court_id]:
+            games[court_id] = games.get(court_id, 0) + 1
+            if game.scheduled_at <= active_window_end:
+                active_games[court_id] = active_games.get(court_id, 0) + 1
     return players, games, active_games
 
 
@@ -487,7 +536,7 @@ def _active_counts_for(court_ids, current_user=None, *, presence_summaries=None)
 def list_courts():
     """Court search: by map bounds (west,south,east,north) or lat/lng radius, plus text query."""
     current_user = optional_current_user()
-    query = Court.query.filter(
+    query = discoverable_courts(Court.query).filter(
         Court.latitude.isnot(None),
         Court.longitude.isnot(None),
         Court.closed.is_(False),
@@ -546,6 +595,15 @@ def list_courts():
 
     ranked_text_ids = None
     if text:
+        aliases = court_search_aliases(query)
+        # Preserve literal wildcard escaping on old names as well. A literal
+        # alias match can admit its canonical result, but its location and
+        # amenities must still satisfy the already-filtered canonical query.
+        literal_aliases = [row for row in aliases if any(
+            text.casefold() in str(getattr(row, field) or '').casefold()
+            for field in ('name', 'city', 'address')
+        )]
+        alias_ids = {row.canonical_court_id for row in literal_aliases}
         # Escape SQL wildcard characters: `%` and `_` are ordinary search
         # input here, not a way to request the entire court directory.
         escaped_text = (
@@ -556,6 +614,7 @@ def list_courts():
             Court.name.ilike(like, escape='\\'),
             Court.city.ilike(like, escape='\\'),
             Court.address.ilike(like, escape='\\'),
+            Court.id.in_(alias_ids),
         )).with_entities(
             Court.id, Court.name, Court.city, Court.address,
             Court.latitude, Court.longitude, Court.num_courts,
@@ -573,12 +632,18 @@ def list_courts():
             ).order_by(None).all()
 
         ranked_rows = []
+        aliases_by_court = {}
+        for alias in aliases if allow_fuzzy else literal_aliases:
+            aliases_by_court.setdefault(alias.canonical_court_id, []).append(alias)
         for row in candidate_rows:
-            relevance = _court_search_relevance(
-                row, text, allow_fuzzy=allow_fuzzy,
-            )
-            if relevance is None:
+            matches = [
+                _court_search_relevance(candidate, text, allow_fuzzy=allow_fuzzy)
+                for candidate in [row, *aliases_by_court.get(row.id, [])]
+            ]
+            matches = [match for match in matches if match is not None]
+            if not matches:
                 continue
+            relevance = min(matches)
             distance = (
                 haversine_miles(lat, lng, row.latitude, row.longitude)
                 if lat is not None and lng is not None else float('inf')
@@ -609,15 +674,7 @@ def list_courts():
             courts = [selected[court_id] for court_id in page_ids]
     elif sort == 'rating':
         # Order by review average in SQL so the ranking survives the limit cut.
-        rating_sq = (
-            db.session.query(
-                CourtReview.court_id.label('court_id'),
-                func.avg(CourtReview.rating).label('rating_avg'),
-                func.count(CourtReview.id).label('rating_count'),
-            )
-            .group_by(CourtReview.court_id)
-            .subquery()
-        )
+        rating_sq = _family_rating_subquery()
         query = query.outerjoin(rating_sq, Court.id == rating_sq.c.court_id).order_by(
             rating_sq.c.rating_avg.desc().nullslast(),
             rating_sq.c.rating_count.desc().nullslast(),
@@ -909,12 +966,14 @@ def court_detail(court_id):
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
 
+    family = court_families([court.id])[court.id]
+
     current_user = optional_current_user()
     viewer_friends = friend_ids(current_user.id) if current_user else set()
     hidden_ids = blocked_pair_ids(current_user.id) if current_user else set()
     active = (
         CheckIn.query.filter(
-            CheckIn.court_id == court.id,
+            CheckIn.court_id.in_(family),
             CheckIn.checked_out_at.is_(None),
             CheckIn.checked_in_at >= presence_absolute_cutoff(),
             CheckIn.last_presence_ping_at >= presence_stale_cutoff(),
@@ -922,6 +981,13 @@ def court_detail(court_id):
         .order_by(CheckIn.checked_in_at.asc())
         .all()
     )
+    if len(family) > 1:
+        latest = {}
+        for checkin in active:
+            previous = latest.get(checkin.user_id)
+            if previous is None or (checkin.last_presence_ping_at, checkin.id) > (previous.last_presence_ping_at, previous.id):
+                latest[checkin.user_id] = checkin
+        active = sorted(latest.values(), key=lambda row: (row.checked_in_at, row.id))
     viewer_checkin = next(
         (
             checkin for checkin in active
@@ -1012,7 +1078,7 @@ def court_detail(court_id):
 
     upcoming = (
         Game.query.filter(
-            Game.court_id == court.id,
+            Game.court_id.in_(family),
             Game.status == 'upcoming',
             Game.time_options == '[]',
             Game.scheduled_at >= utcnow() - timedelta(hours=2),
@@ -1024,7 +1090,7 @@ def court_detail(court_id):
 
     recent_completed = (
         Game.query.filter(
-            Game.court_id == court.id,
+            Game.court_id.in_(family),
             Game.status == 'completed',
             Game.score_team1.isnot(None),
             Game.score_team2.isnot(None),
@@ -1244,7 +1310,7 @@ def court_detail(court_id):
     payload['rating_avg'] = summary['rating_avg'] if summary else None
     payload['rating_count'] = summary['rating_count'] if summary else 0
     recent_reviews = (
-        CourtReview.query.filter_by(court_id=court.id)
+        _court_current_reviews(court.id)
         .order_by(CourtReview.updated_at.desc())
         .limit(10)
         .all()
@@ -1254,7 +1320,7 @@ def court_detail(court_id):
         for review in recent_reviews if review.user_id not in hidden_ids
     ]
     my_review = (
-        CourtReview.query.filter_by(court_id=court.id, user_id=current_user.id).first()
+        _court_current_reviews(court.id).filter(CourtReview.user_id == current_user.id).first()
         if current_user else None
     )
     payload['my_review'] = my_review.to_dict() if my_review else None
@@ -1594,7 +1660,7 @@ def court_reviews(court_id):
     hidden_ids = blocked_pair_ids(current_user.id) if current_user else set()
     limit = max(5, min(request.args.get('limit', 10, type=int) or 10, 25))
     before_id = request.args.get('before_id', type=int)
-    query = CourtReview.query.filter_by(court_id=court.id)
+    query = _court_current_reviews(court.id)
     if hidden_ids:
         query = query.filter(~CourtReview.user_id.in_(hidden_ids))
     if before_id:
@@ -1603,7 +1669,7 @@ def court_reviews(court_id):
     has_more = len(rows) > limit
     reviews = rows[:limit]
     summary = _rating_summary_for([court.id]).get(court.id)
-    mine = CourtReview.query.filter_by(court_id=court.id, user_id=current_user.id).first() if current_user else None
+    mine = _court_current_reviews(court.id).filter(CourtReview.user_id == current_user.id).first() if current_user else None
     return jsonify({
         'items': [
             (r.to_dict() if current_user else _anonymous_court_review_payload(r))
@@ -1633,7 +1699,8 @@ def upsert_review(court_id):
         return jsonify({'error': 'invalid_rating'}), 400
     comment = str(payload.get('comment') or '').strip()[:500]
 
-    review = CourtReview.query.filter_by(court_id=court.id, user_id=g.current_user.id).first()
+    # Editing from the canonical venue keeps the original review ID/court FK.
+    review = _court_current_reviews(court.id).filter(CourtReview.user_id == g.current_user.id).first()
     if not review:
         review = CourtReview(court_id=court.id, user_id=g.current_user.id)
         db.session.add(review)
@@ -1652,13 +1719,18 @@ def upsert_review(court_id):
 @rate_limit(30, 3600)
 @login_required
 def delete_review(court_id, review_id):
-    """Delete only the signed-in player's own review."""
+    """Delete the player's venue feedback; direct alias actions remain scoped."""
+    family = court_families([court_id])[court_id]
     review = db.session.get(CourtReview, review_id)
-    if not review or review.court_id != court_id:
+    if not review or review.court_id not in family:
         return jsonify({'error': 'review_not_found'}), 404
     if review.user_id != g.current_user.id:
         return jsonify({'error': 'review_not_owned'}), 403
-    db.session.delete(review)
+    # Older copies must not reappear as the player's current venue feedback
+    # after they explicitly delete it from the canonical review reader.
+    CourtReview.query.filter(
+        CourtReview.court_id.in_(family), CourtReview.user_id == g.current_user.id,
+    ).delete(synchronize_session='fetch')
     db.session.commit()
     summary = _rating_summary_for([court_id]).get(court_id)
     return jsonify({

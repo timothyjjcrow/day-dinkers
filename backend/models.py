@@ -415,6 +415,30 @@ class Court(TimestampMixin, db.Model):
         return data
 
 
+class CourtAlias(TimestampMixin, db.Model):
+    """Reviewed directory aliases; court IDs and their history remain intact."""
+    __table_args__ = (
+        db.CheckConstraint(
+            'alias_court_id <> canonical_court_id', name='ck_court_alias_distinct',
+        ),
+    )
+
+    alias_court_id = db.Column(
+        db.Integer,
+        db.ForeignKey('court.id', name='court_alias_alias_court_id_fkey', ondelete='RESTRICT'),
+        primary_key=True,
+    )
+    canonical_court_id = db.Column(
+        db.Integer,
+        db.ForeignKey('court.id', name='court_alias_canonical_court_id_fkey', ondelete='RESTRICT'),
+        nullable=False, index=True,
+    )
+    active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    reason = db.Column(db.Text, nullable=False)
+    source_urls = db.Column(db.Text, nullable=False)
+    reviewed_by = db.Column(db.String(120), nullable=False)
+
+
 BUSINESS_CLAIM_STATUSES = ('pending', 'verified', 'rejected')
 BUSINESS_OFFERING_CATEGORIES = (
     'lesson', 'open_play', 'clinic', 'league', 'tournament', 'membership',
